@@ -53,8 +53,8 @@ const BANNED_PATTERNS: &[(&str, &str)] = &[
         "use core::api typecheck wrappers from orchestration code",
     ),
     (
-        "core::normalize::normalize",
-        "use core::api normalize wrapper from orchestration code",
+        "core::semck::normalize::normalize",
+        "normalize is semcheck-internal; use core::api semcheck wrappers",
     ),
     (
         "core::semck::sem_check_partial",

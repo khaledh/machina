@@ -1,15 +1,14 @@
 use std::collections::HashSet;
 
-use crate::core::context::ParsedContext;
+use crate::core::context::{ParsedContext, TypeCheckedContext};
 use crate::core::lexer::{LexError, Lexer, Token};
-use crate::core::normalize::normalize;
 use crate::core::parse::Parser;
 use crate::core::resolve::resolve;
 use crate::core::semck::{SemCheckError, sem_check_partial};
 use crate::core::tree::NodeId;
 use crate::core::typecheck::type_check;
 
-fn normalized_context(source: &str) -> crate::core::context::NormalizedContext {
+fn typed_context(source: &str) -> TypeCheckedContext {
     let lexer = Lexer::new(source);
     let tokens = lexer
         .tokenize()
@@ -22,8 +21,7 @@ fn normalized_context(source: &str) -> crate::core::context::NormalizedContext {
 
     let ast_context = ParsedContext::new(module, id_gen);
     let resolved_context = resolve(ast_context).expect("Failed to resolve");
-    let type_checked_context = type_check(resolved_context).expect("Failed to type check");
-    normalize(type_checked_context)
+    type_check(resolved_context).expect("Failed to type check")
 }
 
 #[test]
@@ -35,7 +33,7 @@ fn sem_check_partial_skips_when_upstream_is_root_poisoned() {
         }
     "#;
 
-    let ctx = normalized_context(source);
+    let ctx = typed_context(source);
     let upstream_poisoned = HashSet::from([NodeId(0)]);
     let output = sem_check_partial(ctx, &upstream_poisoned);
 
@@ -58,7 +56,7 @@ fn sem_check_partial_reports_errors_without_upstream_poison() {
         }
     "#;
 
-    let ctx = normalized_context(source);
+    let ctx = typed_context(source);
     let output = sem_check_partial(ctx, &HashSet::new());
 
     assert!(!output.errors.is_empty(), "expected semantic errors");

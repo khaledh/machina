@@ -6,6 +6,7 @@ mod liveness_util;
 mod lvalue_overlap;
 mod match_check;
 mod move_check;
+mod normalize;
 mod slice_borrow;
 mod slice_escape;
 mod structural;
@@ -15,14 +16,15 @@ use std::collections::HashSet;
 
 pub use errors::SemCheckError;
 
-use crate::core::context::{SemCheckStageInput, SemCheckStageOutput};
+use crate::core::context::{SemCheckNormalizedContext, SemCheckStageInput, SemCheckStageOutput};
 use crate::core::tree::NodeId;
 
 /// Internal stage entrypoint.
 ///
 /// Prefer `crate::core::api::semcheck_stage` from orchestration code.
 pub fn sem_check(ctx: SemCheckStageInput) -> Result<SemCheckStageOutput, Vec<SemCheckError>> {
-    let output = sem_check_partial(ctx, &HashSet::new());
+    let normalized = normalize::normalize(ctx);
+    let output = sem_check_partial_normalized(normalized, &HashSet::new());
     if output.errors.is_empty() {
         Ok(output.context)
     } else {
@@ -36,6 +38,14 @@ pub fn sem_check(ctx: SemCheckStageInput) -> Result<SemCheckStageOutput, Vec<Sem
 /// skipped and a default semantic context is materialized.
 pub fn sem_check_partial(
     ctx: SemCheckStageInput,
+    upstream_poisoned_nodes: &HashSet<NodeId>,
+) -> SemCheckOutput {
+    let normalized = normalize::normalize(ctx);
+    sem_check_partial_normalized(normalized, upstream_poisoned_nodes)
+}
+
+fn sem_check_partial_normalized(
+    ctx: SemCheckNormalizedContext,
     upstream_poisoned_nodes: &HashSet<NodeId>,
 ) -> SemCheckOutput {
     const ROOT_POISON_NODE: NodeId = NodeId(0);

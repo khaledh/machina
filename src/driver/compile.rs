@@ -2,8 +2,8 @@ use std::collections::HashMap;
 use std::path::PathBuf;
 
 use crate::core::api::{
-    FrontendPolicy, ParseModuleError, ResolveInputs, elaborate_stage, normalize_stage,
-    parse_module_with_id_gen, semcheck_stage, typecheck_stage_with_policy,
+    FrontendPolicy, ParseModuleError, ResolveInputs, elaborate_stage, parse_module_with_id_gen,
+    semcheck_stage, typecheck_stage_with_policy,
 };
 use crate::core::backend;
 use crate::core::backend::regalloc::arm64::Arm64Target;
@@ -200,13 +200,9 @@ pub fn compile_with_path(
         println!("--------------------------------");
     }
 
-    // --- Normalize (typed -> normalized) ---
-
-    let normalized_context = normalize_stage(type_checked_context);
-
     // --- Semantic Check ---
 
-    let semantic_checked_context = semcheck_stage(normalized_context).map_err(|errs| {
+    let semantic_checked_context = semcheck_stage(type_checked_context).map_err(|errs| {
         errs.into_iter()
             .map(|e| e.into())
             .collect::<Vec<CompileError>>()

@@ -9,13 +9,11 @@ use thiserror::Error;
 
 use crate::core::capsule::ModuleId;
 use crate::core::context::{
-    ElaborateStageInput, ElaborateStageOutput, NormalizeStageInput, NormalizeStageOutput,
-    ResolveStageInput, SemCheckStageInput, SemCheckStageOutput, TypecheckStageInput,
-    TypecheckStageOutput,
+    ElaborateStageInput, ElaborateStageOutput, ResolveStageInput, SemCheckStageOutput,
+    TypecheckStageInput, TypecheckStageOutput,
 };
 use crate::core::elaborate;
 use crate::core::lexer::{LexError, Lexer, Token};
-use crate::core::normalize;
 use crate::core::parse::{ParseError, Parser};
 use crate::core::resolve::{
     ImportedFacts, ImportedModule, ImportedSymbol, ResolveError, ResolveOutput, attach_def_owners,
@@ -290,12 +288,8 @@ pub fn typecheck_stage_with_policy(
     }
 }
 
-pub fn normalize_stage(input: NormalizeStageInput) -> NormalizeStageOutput {
-    normalize::normalize(input)
-}
-
 pub fn semcheck_stage(
-    input: SemCheckStageInput,
+    input: TypecheckStageOutput,
 ) -> Result<SemCheckStageOutput, Vec<SemCheckError>> {
     let out = semcheck_stage_with_policy(input, FrontendPolicy::Strict, &HashSet::new());
     if out.errors.is_empty() {
@@ -308,7 +302,7 @@ pub fn semcheck_stage(
 }
 
 pub fn semcheck_stage_partial(
-    input: SemCheckStageInput,
+    input: TypecheckStageOutput,
     upstream_poisoned_nodes: &HashSet<NodeId>,
 ) -> semck::SemCheckOutput {
     let out = semcheck_stage_with_policy(input, FrontendPolicy::Partial, upstream_poisoned_nodes);
@@ -322,7 +316,7 @@ pub fn semcheck_stage_partial(
 }
 
 pub fn semcheck_stage_with_policy(
-    input: SemCheckStageInput,
+    input: TypecheckStageOutput,
     policy: FrontendPolicy,
     upstream_poisoned_nodes: &HashSet<NodeId>,
 ) -> SemcheckStageResult {

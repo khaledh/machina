@@ -224,10 +224,10 @@ pub struct TypeCheckedContext {
     pub payload: TypedTables,
 }
 
-/// Stage contract alias: typecheck output, normalize input.
+/// Stage contract alias: typecheck output, semck input.
 pub type TypecheckStageOutput = TypeCheckedContext;
-/// Stage contract alias: normalize input.
-pub type NormalizeStageInput = TypeCheckedContext;
+/// Stage contract alias: semck input.
+pub type SemCheckStageInput = TypeCheckedContext;
 
 impl Deref for TypeCheckedContext {
     type Target = TypedTables;
@@ -244,15 +244,14 @@ impl DerefMut for TypeCheckedContext {
 }
 
 #[derive(Clone)]
+/// Internal semcheck intermediate after typed->normalized lowering.
 pub struct NormalizedContext {
     pub module: NormalizedModule,
     pub payload: TypedTables,
 }
 
-/// Stage contract alias: normalize output, semck input.
-pub type NormalizeStageOutput = NormalizedContext;
-/// Stage contract alias: semck input.
-pub type SemCheckStageInput = NormalizedContext;
+/// Internal semck context after normalization.
+pub type SemCheckNormalizedContext = NormalizedContext;
 
 impl NormalizedContext {
     pub fn with_sem_results(

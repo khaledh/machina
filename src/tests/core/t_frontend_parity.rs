@@ -9,7 +9,6 @@ use crate::core::context::{
     ResolveStageInput, SemCheckStageOutput, TypecheckStageInput, TypecheckStageOutput,
 };
 use crate::core::diag::Span;
-use crate::core::normalize::normalize;
 use crate::core::tree::NodeIdGen;
 use crate::core::typecheck::type_map::CallSigMap;
 
@@ -168,8 +167,7 @@ fn semcheck_parity_keys(source: &str, policy: FrontendPolicy) -> (BTreeSet<Strin
     let typed_ctx = typed
         .context
         .expect("semcheck parity fixture should typecheck");
-    let normalized = normalize(typed_ctx);
-    let out = semcheck_stage_with_policy(normalized, policy, &HashSet::new());
+    let out = semcheck_stage_with_policy(typed_ctx, policy, &HashSet::new());
     let details = out
         .errors
         .iter()
@@ -391,16 +389,10 @@ fn main() -> u64 {
         "call signatures diverged between strict and partial policies"
     );
 
-    let strict_sem = semcheck_stage_with_policy(
-        normalize(strict_typed_ctx),
-        FrontendPolicy::Strict,
-        &HashSet::new(),
-    );
-    let partial_sem = semcheck_stage_with_policy(
-        normalize(partial_typed_ctx),
-        FrontendPolicy::Partial,
-        &HashSet::new(),
-    );
+    let strict_sem =
+        semcheck_stage_with_policy(strict_typed_ctx, FrontendPolicy::Strict, &HashSet::new());
+    let partial_sem =
+        semcheck_stage_with_policy(partial_typed_ctx, FrontendPolicy::Partial, &HashSet::new());
     assert!(
         strict_sem.errors.is_empty() && partial_sem.errors.is_empty(),
         "fixture should stay clean for semcheck parity"

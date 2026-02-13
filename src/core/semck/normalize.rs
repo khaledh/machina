@@ -1,5 +1,5 @@
 use crate::core::analysis::facts::{SyntheticReason, TypeMapOverlay};
-use crate::core::context::{NormalizeStageInput, NormalizeStageOutput};
+use crate::core::context::{SemCheckNormalizedContext, SemCheckStageInput};
 use crate::core::resolve::DefId;
 use crate::core::resolve::DefKind;
 use crate::core::resolve::def_table::DefTable;
@@ -16,13 +16,10 @@ use crate::core::types::{
 
 /// Normalize a typed tree into a normalized tree.
 ///
-/// Step 1: 1:1 mapping of the typed tree into a normalized tree, plus explicit
-/// array-to-slice coercions on call arguments.
-///
-/// Internal stage entrypoint; prefer `crate::core::api::normalize_stage` from
-/// orchestration code.
-pub fn normalize(ctx: NormalizeStageInput) -> NormalizeStageOutput {
-    let NormalizeStageInput { module, payload } = ctx;
+/// This is a semcheck-internal prepass that performs a 1:1 typed->normalized
+/// mapping and inserts explicit call-argument coercions.
+pub fn normalize(ctx: SemCheckStageInput) -> SemCheckNormalizedContext {
+    let crate::core::context::TypeCheckedContext { module, payload } = ctx;
     let crate::core::context::TypedTables {
         resolved,
         type_map,
@@ -40,7 +37,7 @@ pub fn normalize(ctx: NormalizeStageInput) -> NormalizeStageOutput {
     let mut node_id_gen = node_id_gen;
     let mut normalizer = Normalizer::new(&def_table, &mut type_map, &call_sigs, &mut node_id_gen);
     normalizer.visit_module(&mut module);
-    NormalizeStageOutput {
+    SemCheckNormalizedContext {
         module,
         payload: crate::core::context::TypedTables {
             resolved: crate::core::context::ResolvedTables {

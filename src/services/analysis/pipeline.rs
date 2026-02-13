@@ -9,7 +9,7 @@ use std::hash::{Hash, Hasher};
 use std::sync::Arc;
 
 use crate::core::api::{
-    FrontendPolicy, ParseModuleError, ResolveInputs, normalize_stage, parse_module_with_id_gen,
+    FrontendPolicy, ParseModuleError, ResolveInputs, parse_module_with_id_gen,
     resolve_stage_with_policy, semcheck_stage_with_policy, typecheck_stage_with_policy,
 };
 use crate::core::capsule::ModuleId;
@@ -287,15 +287,15 @@ fn run_module_pipeline_with_inputs(
         typechecked
             .product
             .clone()
-            .map(|typed| (normalize_stage(typed), upstream_poisoned))
+            .map(|typed| (typed, upstream_poisoned))
     } else {
         None
     };
     let semchecked = rt.execute(semcheck_key, move |_rt| {
         let mut state = SemcheckStageOutput::default();
-        if let Some((normalized, upstream_poisoned_nodes)) = semcheck_input {
+        if let Some((typed, upstream_poisoned_nodes)) = semcheck_input {
             let semchecked = semcheck_stage_with_policy(
-                normalized,
+                typed,
                 FrontendPolicy::Partial,
                 &upstream_poisoned_nodes,
             );

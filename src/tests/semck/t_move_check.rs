@@ -1,6 +1,6 @@
+use super::normalize::normalize;
 use crate::core::context::ParsedContext;
 use crate::core::lexer::{LexError, Lexer, Token};
-use crate::core::normalize::normalize;
 use crate::core::parse::Parser;
 use crate::core::resolve::resolve;
 use crate::core::semck::{SemCheckError, move_check};

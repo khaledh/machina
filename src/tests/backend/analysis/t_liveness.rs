@@ -6,7 +6,6 @@ use crate::core::context::{ParsedContext, SemanticContext};
 use crate::core::elaborate::elaborate;
 use crate::core::ir::Terminator;
 use crate::core::lexer::{LexError, Lexer, Token};
-use crate::core::normalize::normalize;
 use crate::core::parse::Parser;
 use crate::core::resolve::resolve;
 use crate::core::semck::sem_check;
@@ -27,8 +26,7 @@ fn analyze(source: &str) -> SemanticContext {
     let ast_context = ParsedContext::new(module, id_gen);
     let resolved_context = resolve(ast_context).expect("Failed to resolve");
     let type_checked_context = type_check(resolved_context).expect("Failed to type check");
-    let normalized_context = normalize(type_checked_context);
-    let sem_checked_context = sem_check(normalized_context).expect("Failed to semantic check");
+    let sem_checked_context = sem_check(type_checked_context).expect("Failed to semantic check");
     elaborate(sem_checked_context)
 }
 
