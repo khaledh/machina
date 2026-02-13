@@ -83,7 +83,10 @@ impl<'a> LinearScan<'a> {
             .map(|(id, iv)| (*id, *iv))
             .collect();
         ordered.sort_by(|a, b| match a.1.start.cmp(&b.1.start) {
-            Ordering::Equal => a.1.end.cmp(&b.1.end),
+            Ordering::Equal => match a.1.end.cmp(&b.1.end) {
+                Ordering::Equal => a.0.0.cmp(&b.0.0),
+                other => other,
+            },
             other => other,
         });
 

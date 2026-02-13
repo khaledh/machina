@@ -292,7 +292,7 @@ impl<'a> TypeLowerer<'a> {
                 let ty_id = self.type_map.type_table().lookup_id(ty).unwrap_or_else(|| {
                     panic!("backend type lowering: missing type id for {:?}", ty)
                 });
-                let name = format!("error_union${}", ty_id.index());
+                let name = format!("error_union$h{:016x}", stable_type_hash(ty));
                 let placeholder = self.ir_type_cache.add_placeholder_named(name);
                 self.by_type.insert(ty.clone(), placeholder);
                 let layout = self.enum_layout(ty_id);
@@ -542,6 +542,17 @@ impl<'a> TypeLowerer<'a> {
             .lookup_nominal_key_for_type_id(type_id)
             .cloned()
     }
+}
+
+fn stable_type_hash(ty: &Type) -> u64 {
+    // Deterministic hash for synthetic dump names so IR/ASM artifacts remain
+    // byte-stable across runs with different hash-map insertion orders.
+    let mut hash: u64 = 0xcbf29ce484222325;
+    for byte in format!("{ty:?}").bytes() {
+        hash ^= u64::from(byte);
+        hash = hash.wrapping_mul(0x100000001b3);
+    }
+    hash
 }
 
 #[derive(Clone)]

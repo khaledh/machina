@@ -9,6 +9,7 @@ use crate::core::capsule::{
 use crate::core::context::CapsuleParsedContext;
 use crate::core::tree::parsed::{Expr, ExprKind, MethodBlock, TypeExpr, TypeExprKind, TypeParam};
 use crate::core::tree::visit::{self, Visitor};
+use crate::driver::compile::{CompileOptions, compile};
 
 struct MockLoader {
     modules: HashMap<String, String>,
@@ -765,4 +766,93 @@ fn flatten_capsule_rejects_private_symbol_import() {
             } if alias == "secret" && *expected_kind == "symbol"
         )
     }));
+}
+
+fn deterministic_compile_opts() -> CompileOptions {
+    CompileOptions {
+        dump: None,
+        emit_ir: true,
+        verify_ir: false,
+        trace_alloc: false,
+        trace_drops: false,
+        inject_prelude: true,
+    }
+}
+
+#[test]
+fn compile_ir_dump_is_deterministic() {
+    let source = r#"
+type IoError = {
+    code: u64,
+}
+
+fn ok(v: u64) -> u64 | IoError {
+    v
+}
+
+fn fail() -> u64 | IoError {
+    IoError { code: 7 }
+}
+
+fn choose(flag: bool, v: u64) -> u64 | IoError {
+    if flag { ok(v) } else { fail() }
+}
+
+fn add_one(flag: bool, v: u64) -> u64 | IoError {
+    let base = choose(flag, v)?;
+    base + 1
+}
+
+fn main() -> () {
+    let _x = add_one(true, 42);
+    ()
+}
+"#;
+
+    let opts = deterministic_compile_opts();
+    let first = compile(source, &opts).expect("first compile should succeed");
+    let first_ir = first.ir.expect("emit_ir should provide IR output");
+    for run in 0..8 {
+        let next = compile(source, &opts).expect("repeat compile should succeed");
+        let next_ir = next.ir.expect("emit_ir should provide IR output");
+        assert_eq!(
+            first_ir, next_ir,
+            "IR dump changed between deterministic runs (run={run})"
+        );
+    }
+}
+
+#[test]
+fn compile_asm_dump_is_deterministic() {
+    let source = r#"
+fn sum10(a0: u64, a1: u64, a2: u64, a3: u64, a4: u64, a5: u64, a6: u64, a7: u64, a8: u64, a9: u64) -> u64 {
+    var acc = 0;
+    acc = acc + a0;
+    acc = acc + a1;
+    acc = acc + a2;
+    acc = acc + a3;
+    acc = acc + a4;
+    acc = acc + a5;
+    acc = acc + a6;
+    acc = acc + a7;
+    acc = acc + a8;
+    acc = acc + a9;
+    acc
+}
+
+fn main() -> u64 {
+    let x = sum10(1, 2, 3, 4, 5, 6, 7, 8, 9, 10);
+    x
+}
+"#;
+
+    let opts = deterministic_compile_opts();
+    let first = compile(source, &opts).expect("first compile should succeed");
+    for run in 0..8 {
+        let next = compile(source, &opts).expect("repeat compile should succeed");
+        assert_eq!(
+            first.asm, next.asm,
+            "ASM dump changed between deterministic runs (run={run})"
+        );
+    }
 }

@@ -2,7 +2,8 @@ use std::collections::{BTreeSet, HashSet};
 
 use crate::core::api::{
     FrontendPolicy, ResolveInputs, parse_module_with_id_gen, resolve_stage_with_policy,
-    resolve_typecheck_pipeline_with_policy, semcheck_stage_with_policy, typecheck_stage_with_policy,
+    resolve_typecheck_pipeline_with_policy, semcheck_stage_with_policy,
+    typecheck_stage_with_policy,
 };
 use crate::core::context::{
     ResolveStageInput, SemCheckStageOutput, TypecheckStageInput, TypecheckStageOutput,
@@ -139,7 +140,13 @@ fn typecheck_parity_keys(source: &str, policy: FrontendPolicy) -> (BTreeSet<Stri
     let keys = out
         .errors
         .iter()
-        .map(|err| format!("{:?}@{}", std::mem::discriminant(err.kind()), span_key(err.span())))
+        .map(|err| {
+            format!(
+                "{:?}@{}",
+                std::mem::discriminant(err.kind()),
+                span_key(err.span())
+            )
+        })
         .collect::<BTreeSet<_>>();
     (keys, details)
 }
@@ -153,8 +160,14 @@ fn semcheck_parity_keys(source: &str, policy: FrontendPolicy) -> (BTreeSet<Strin
     let resolved_ctx: TypecheckStageInput = resolved
         .context
         .expect("semcheck parity fixture should resolve");
-    let typed = typecheck_stage_with_policy(resolved_ctx, resolved.imported_facts, FrontendPolicy::Partial);
-    let typed_ctx = typed.context.expect("semcheck parity fixture should typecheck");
+    let typed = typecheck_stage_with_policy(
+        resolved_ctx,
+        resolved.imported_facts,
+        FrontendPolicy::Partial,
+    );
+    let typed_ctx = typed
+        .context
+        .expect("semcheck parity fixture should typecheck");
     let normalized = normalize(typed_ctx);
     let out = semcheck_stage_with_policy(normalized, policy, &HashSet::new());
     let details = out
@@ -326,10 +339,16 @@ fn main() -> u64 {
 }
 "#;
 
-    let strict_resolve =
-        resolve_stage_with_policy(parsed_context(source), ResolveInputs::default(), FrontendPolicy::Strict);
-    let partial_resolve =
-        resolve_stage_with_policy(parsed_context(source), ResolveInputs::default(), FrontendPolicy::Partial);
+    let strict_resolve = resolve_stage_with_policy(
+        parsed_context(source),
+        ResolveInputs::default(),
+        FrontendPolicy::Strict,
+    );
+    let partial_resolve = resolve_stage_with_policy(
+        parsed_context(source),
+        ResolveInputs::default(),
+        FrontendPolicy::Partial,
+    );
     assert!(
         strict_resolve.errors.is_empty() && partial_resolve.errors.is_empty(),
         "fixture should stay clean for resolve parity"
