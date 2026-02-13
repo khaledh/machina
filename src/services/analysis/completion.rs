@@ -9,6 +9,7 @@ use crate::core::capsule::ModuleId;
 use crate::core::diag::{Position, Span};
 use crate::core::resolve::{DefId, DefKind, UNKNOWN_DEF_ID};
 use crate::core::tree::resolved as res;
+use crate::core::tree::visit::Visitor;
 use crate::core::tree::{BlockItem, NodeId, StmtExprKind};
 use crate::core::types::Type;
 use crate::services::analysis::results::{CompletionItem, CompletionKind};
@@ -20,25 +21,9 @@ pub(crate) fn collect(
     resolved: &crate::core::context::ResolvedContext,
     typed: Option<&crate::core::context::TypeCheckedContext>,
 ) -> Vec<CompletionItem> {
-    let context = completion_context(source, query_span, typed);
-    match context {
-        CompletionContext::Member {
-            prefix,
-            receiver_ty,
-            caller_def_id,
-        } => {
-            let members = member_completions(resolved, &receiver_ty, caller_def_id);
-            members
-                .into_iter()
-                .filter(|item| item.label.starts_with(&prefix))
-                .collect()
-        }
-        CompletionContext::Scope { prefix } => {
-            let mut items = scope_completions(resolved, query_span.start);
-            items.retain(|item| item.label.starts_with(&prefix));
-            items
-        }
-    }
+    let site = classify_completion_site(source, query_span, resolved, typed);
+    let items = dispatch_site_completions(&site, query_span.start, resolved);
+    completion_post_pass(items, site.prefix())
 }
 
 pub(crate) fn synthesize_member_completion_source(
@@ -69,64 +54,311 @@ pub(crate) fn synthesize_member_completion_source(
     Some(synthesized)
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum CompletionSiteKind {
+    Scope,
+    Member,
+    RequiresPath,
+    TypeExpr,
+    Pattern,
+}
+
 #[derive(Debug, Clone)]
-enum CompletionContext {
+enum CompletionSite {
     Scope {
         prefix: String,
+        cursor: Position,
     },
     Member {
         prefix: String,
         receiver_ty: Type,
         caller_def_id: Option<DefId>,
     },
+    RequiresPath {
+        prefix: String,
+    },
+    TypeExpr {
+        prefix: String,
+    },
+    Pattern {
+        prefix: String,
+    },
 }
 
-fn completion_context(
+impl CompletionSite {
+    fn kind(&self) -> CompletionSiteKind {
+        match self {
+            Self::Scope { .. } => CompletionSiteKind::Scope,
+            Self::Member { .. } => CompletionSiteKind::Member,
+            Self::RequiresPath { .. } => CompletionSiteKind::RequiresPath,
+            Self::TypeExpr { .. } => CompletionSiteKind::TypeExpr,
+            Self::Pattern { .. } => CompletionSiteKind::Pattern,
+        }
+    }
+
+    fn prefix(&self) -> &str {
+        match self {
+            Self::Scope { prefix, .. }
+            | Self::Member { prefix, .. }
+            | Self::RequiresPath { prefix }
+            | Self::TypeExpr { prefix }
+            | Self::Pattern { prefix } => prefix,
+        }
+    }
+}
+
+struct CompletionProviders {
+    scope: fn(&CompletionSite, &crate::core::context::ResolvedContext) -> Vec<CompletionItem>,
+    member: fn(&CompletionSite, &crate::core::context::ResolvedContext) -> Vec<CompletionItem>,
+    requires_path:
+        fn(&CompletionSite, &crate::core::context::ResolvedContext) -> Vec<CompletionItem>,
+    type_expr: fn(&CompletionSite, &crate::core::context::ResolvedContext) -> Vec<CompletionItem>,
+    pattern: fn(&CompletionSite, &crate::core::context::ResolvedContext) -> Vec<CompletionItem>,
+}
+
+impl Default for CompletionProviders {
+    fn default() -> Self {
+        Self {
+            scope: provide_scope_completions,
+            member: provide_member_completions,
+            requires_path: provide_requires_path_completions,
+            type_expr: provide_type_expr_completions,
+            pattern: provide_pattern_completions,
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
+struct PrefixProbe {
+    prefix: String,
+    dot_probe: usize,
+}
+
+fn classify_completion_site(
     source: &str,
     query_span: Span,
+    resolved: &crate::core::context::ResolvedContext,
     typed: Option<&crate::core::context::TypeCheckedContext>,
-) -> CompletionContext {
+) -> CompletionSite {
+    let cursor = query_span.start;
     let offset = offset_for_position(source, query_span.start).unwrap_or(source.len());
+    let probe = prefix_probe(source, offset);
+
+    if let Some(site) = classify_member_site(source, query_span, typed, &probe) {
+        return site;
+    }
+    if requires_site_at_cursor(&resolved.module, cursor) {
+        return CompletionSite::RequiresPath {
+            prefix: probe.prefix,
+        };
+    }
+    let pattern_classifier = PatternAndTypeClassifier::classify(&resolved.module, cursor);
+    if pattern_classifier.in_type_expr {
+        return CompletionSite::TypeExpr {
+            prefix: probe.prefix,
+        };
+    }
+    if pattern_classifier.in_pattern {
+        return CompletionSite::Pattern {
+            prefix: probe.prefix,
+        };
+    }
+
+    CompletionSite::Scope {
+        prefix: probe.prefix,
+        cursor,
+    }
+}
+
+fn prefix_probe(source: &str, offset: usize) -> PrefixProbe {
     let bytes = source.as_bytes();
     let mut prefix_start = offset;
     while prefix_start > 0 && is_ident_byte(bytes[prefix_start - 1]) {
         prefix_start -= 1;
     }
-    let prefix = source[prefix_start..offset].to_string();
+    let prefix = source[prefix_start..offset.min(source.len())].to_string();
 
     let mut dot_probe = prefix_start;
     while dot_probe > 0 && bytes[dot_probe - 1].is_ascii_whitespace() {
         dot_probe -= 1;
     }
-    if dot_probe == 0 || bytes[dot_probe - 1] != b'.' {
-        return CompletionContext::Scope { prefix };
+
+    PrefixProbe { prefix, dot_probe }
+}
+
+fn classify_member_site(
+    source: &str,
+    query_span: Span,
+    typed: Option<&crate::core::context::TypeCheckedContext>,
+    probe: &PrefixProbe,
+) -> Option<CompletionSite> {
+    let bytes = source.as_bytes();
+    if probe.dot_probe == 0 || bytes[probe.dot_probe - 1] != b'.' {
+        return None;
     }
     let Some(typed) = typed else {
-        return CompletionContext::Scope { prefix };
+        return None;
     };
 
-    let mut recv_end = dot_probe - 1;
+    let mut recv_end = probe.dot_probe - 1;
     while recv_end > 0 && bytes[recv_end - 1].is_ascii_whitespace() {
         recv_end -= 1;
     }
     if recv_end == 0 {
-        return CompletionContext::Scope { prefix };
+        return None;
     }
     let receiver_char = recv_end - 1;
     let Some(receiver_span) = single_char_span(source, receiver_char) else {
-        return CompletionContext::Scope { prefix };
+        return None;
     };
     let Some(node_id) = node_at_span(&typed.module, receiver_span) else {
-        return CompletionContext::Scope { prefix };
+        return None;
     };
     let Some(receiver_ty) = typed.type_map.lookup_node_type(node_id) else {
-        return CompletionContext::Scope { prefix };
+        return None;
     };
 
-    CompletionContext::Member {
-        prefix,
+    Some(CompletionSite::Member {
+        prefix: probe.prefix.clone(),
         receiver_ty,
         caller_def_id: enclosing_callable_def_id(&typed.module, query_span.start),
+    })
+}
+
+fn requires_site_at_cursor(module: &res::Module, cursor: Position) -> bool {
+    module
+        .requires
+        .iter()
+        .any(|req| span_contains_pos(req.span, cursor))
+}
+
+fn dispatch_site_completions(
+    site: &CompletionSite,
+    fallback_cursor: Position,
+    resolved: &crate::core::context::ResolvedContext,
+) -> Vec<CompletionItem> {
+    let providers = CompletionProviders::default();
+    let items = match site.kind() {
+        CompletionSiteKind::Scope => (providers.scope)(site, resolved),
+        CompletionSiteKind::Member => (providers.member)(site, resolved),
+        CompletionSiteKind::RequiresPath => (providers.requires_path)(site, resolved),
+        CompletionSiteKind::TypeExpr => (providers.type_expr)(site, resolved),
+        CompletionSiteKind::Pattern => (providers.pattern)(site, resolved),
+    };
+    if items.is_empty()
+        && matches!(
+            site.kind(),
+            CompletionSiteKind::RequiresPath
+                | CompletionSiteKind::TypeExpr
+                | CompletionSiteKind::Pattern
+        )
+    {
+        scope_completions(resolved, fallback_cursor)
+    } else {
+        items
+    }
+}
+
+fn completion_post_pass(mut items: Vec<CompletionItem>, prefix: &str) -> Vec<CompletionItem> {
+    items.retain(|item| item.label.starts_with(prefix));
+    let mut seen = HashSet::<String>::new();
+    items.retain(|item| seen.insert(item.label.clone()));
+    items.sort_unstable_by(|a, b| a.label.cmp(&b.label));
+    items
+}
+
+fn provide_scope_completions(
+    site: &CompletionSite,
+    resolved: &crate::core::context::ResolvedContext,
+) -> Vec<CompletionItem> {
+    match site {
+        CompletionSite::Scope { cursor, .. } => scope_completions(resolved, *cursor),
+        _ => Vec::new(),
+    }
+}
+
+fn provide_member_completions(
+    site: &CompletionSite,
+    resolved: &crate::core::context::ResolvedContext,
+) -> Vec<CompletionItem> {
+    match site {
+        CompletionSite::Member {
+            receiver_ty,
+            caller_def_id,
+            ..
+        } => member_completions(resolved, receiver_ty, *caller_def_id),
+        _ => Vec::new(),
+    }
+}
+
+fn provide_requires_path_completions(
+    _site: &CompletionSite,
+    _resolved: &crate::core::context::ResolvedContext,
+) -> Vec<CompletionItem> {
+    Vec::new()
+}
+
+fn provide_type_expr_completions(
+    _site: &CompletionSite,
+    _resolved: &crate::core::context::ResolvedContext,
+) -> Vec<CompletionItem> {
+    Vec::new()
+}
+
+fn provide_pattern_completions(
+    _site: &CompletionSite,
+    _resolved: &crate::core::context::ResolvedContext,
+) -> Vec<CompletionItem> {
+    Vec::new()
+}
+
+struct PatternAndTypeClassifier {
+    cursor: Position,
+    in_type_expr: bool,
+    in_pattern: bool,
+}
+
+impl PatternAndTypeClassifier {
+    fn classify(module: &res::Module, cursor: Position) -> Self {
+        let mut classifier = Self {
+            cursor,
+            in_type_expr: false,
+            in_pattern: false,
+        };
+        classifier.visit_module(module);
+        classifier
+    }
+}
+
+impl Visitor<DefId, ()> for PatternAndTypeClassifier {
+    fn visit_type_expr(&mut self, type_expr: &crate::core::tree::TypeExpr<DefId>) {
+        if span_contains_pos(type_expr.span, self.cursor) {
+            self.in_type_expr = true;
+        }
+        crate::core::tree::visit::walk_type_expr(self, type_expr);
+    }
+
+    fn visit_bind_pattern(&mut self, pattern: &crate::core::tree::BindPattern<DefId>) {
+        if span_contains_pos(pattern.span, self.cursor) {
+            self.in_pattern = true;
+        }
+        crate::core::tree::visit::walk_bind_pattern(self, pattern);
+    }
+
+    fn visit_match_pattern(&mut self, pattern: &crate::core::tree::MatchPattern<DefId>) {
+        let span = match pattern {
+            crate::core::tree::MatchPattern::Wildcard { span }
+            | crate::core::tree::MatchPattern::BoolLit { span, .. }
+            | crate::core::tree::MatchPattern::IntLit { span, .. }
+            | crate::core::tree::MatchPattern::Binding { span, .. }
+            | crate::core::tree::MatchPattern::TypedBinding { span, .. }
+            | crate::core::tree::MatchPattern::Tuple { span, .. }
+            | crate::core::tree::MatchPattern::EnumVariant { span, .. } => *span,
+        };
+        if span_contains_pos(span, self.cursor) {
+            self.in_pattern = true;
+        }
+        crate::core::tree::visit::walk_match_pattern(self, pattern);
     }
 }
 
@@ -845,4 +1077,119 @@ fn should_terminate_member_probe(source: &str, offset: usize) -> bool {
         }
     }
     true
+}
+
+#[cfg(test)]
+mod tests {
+    use std::collections::HashMap;
+
+    use crate::core::api::{
+        parse_module_with_id_gen, resolve_stage_partial, typecheck_stage_partial,
+    };
+    use crate::core::context::ParsedContext;
+    use crate::core::diag::{Position, Span};
+    use crate::core::tree::NodeIdGen;
+
+    use super::{CompletionSite, classify_completion_site, position_for_offset};
+
+    #[test]
+    fn classify_site_detects_member_context() {
+        let source = r#"
+type Point = { x: u64 }
+
+Point :: {
+    fn get_x(self) -> u64 { self.x }
+}
+
+fn main() {
+    let p = Point { x: 1 };
+    p.x
+}
+"#;
+        let (resolved, typed) = resolved_and_typed(source);
+        let cursor = cursor_at_end_of(source, "p.");
+        let site = classify_completion_site(source, cursor, &resolved, Some(&typed));
+        assert!(matches!(site, CompletionSite::Member { .. }));
+    }
+
+    #[test]
+    fn classify_site_detects_requires_path_context() {
+        let source = r#"
+requires {
+    std::io
+}
+
+fn main() {}
+"#;
+        let resolved = resolved_only(source);
+        let cursor = cursor_at_end_of(source, "std::i");
+        let site = classify_completion_site(source, cursor, &resolved, None);
+        assert!(matches!(site, CompletionSite::RequiresPath { .. }));
+    }
+
+    #[test]
+    fn classify_site_detects_type_expression_context() {
+        let source = r#"
+fn main() {
+    let n: u64 = 1;
+}
+"#;
+        let resolved = resolved_only(source);
+        let cursor = cursor_at_end_of(source, "u64");
+        let site = classify_completion_site(source, cursor, &resolved, None);
+        assert!(matches!(site, CompletionSite::TypeExpr { .. }));
+    }
+
+    #[test]
+    fn classify_site_detects_pattern_context() {
+        let source = r#"
+fn f() -> u64 {
+    match 1 {
+        value => value,
+    }
+}
+"#;
+        let resolved = resolved_only(source);
+        let cursor = cursor_at_end_of(source, "valu");
+        let site = classify_completion_site(source, cursor, &resolved, None);
+        assert!(matches!(site, CompletionSite::Pattern { .. }));
+    }
+
+    fn resolved_only(source: &str) -> crate::core::context::ResolvedContext {
+        let (module, id_gen) =
+            parse_module_with_id_gen(source, NodeIdGen::new()).expect("parse should succeed");
+        let parsed = ParsedContext::new(module, id_gen);
+        resolve_stage_partial(parsed, HashMap::new(), HashMap::new()).context
+    }
+
+    fn resolved_and_typed(
+        source: &str,
+    ) -> (
+        crate::core::context::ResolvedContext,
+        crate::core::context::TypeCheckedContext,
+    ) {
+        let (module, id_gen) =
+            parse_module_with_id_gen(source, NodeIdGen::new()).expect("parse should succeed");
+        let parsed = ParsedContext::new(module, id_gen);
+        let resolve_out = resolve_stage_partial(parsed, HashMap::new(), HashMap::new());
+        let resolved = resolve_out.context;
+        let typed = typecheck_stage_partial(resolved.clone(), resolve_out.imported_facts).context;
+        (resolved, typed)
+    }
+
+    fn cursor_at_end_of(source: &str, needle: &str) -> Span {
+        let idx = source
+            .find(needle)
+            .unwrap_or_else(|| panic!("needle not found: {needle}"));
+        let offset = idx + needle.len();
+        let pos = position_for_offset(source, offset).unwrap_or_else(|| Position {
+            offset,
+            line: 1,
+            column: 1,
+        });
+        Span {
+            start: pos,
+            end: pos,
+        }
+    }
 }
