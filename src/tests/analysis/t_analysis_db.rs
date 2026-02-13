@@ -286,6 +286,133 @@ fn run() -> u64 { 1 }
 }
 
 #[test]
+fn def_location_at_program_file_points_to_imported_type_definition() {
+    let run_id = ANALYSIS_TMP_COUNTER.fetch_add(1, Ordering::Relaxed);
+    let temp_dir = std::env::temp_dir().join(format!(
+        "machina_analysis_defloc_imported_type_{}_{}",
+        std::process::id(),
+        run_id
+    ));
+    let app_dir = temp_dir.join("app");
+    fs::create_dir_all(&app_dir).expect("failed to create temp module tree");
+
+    let entry_path = temp_dir.join("main.mc");
+    let dep_path = app_dir.join("dep.mc");
+    let entry_source = r#"
+requires {
+    app::dep::Foo
+}
+
+fn main() -> u64 {
+    let x: Foo = Foo { value: 1 };
+    x.value
+}
+"#;
+    let dep_source = r#"@[public]
+type Foo = { value: u64 }
+"#;
+
+    fs::write(&entry_path, entry_source).expect("failed to write entry source");
+    fs::write(&dep_path, dep_source).expect("failed to write dependency source");
+
+    let mut db = AnalysisDb::new();
+    let entry_id = db.upsert_disk_text(entry_path.clone(), entry_source);
+    db.upsert_disk_text(dep_path.clone(), dep_source);
+
+    let use_start = entry_source
+        .find("x: Foo")
+        .expect("expected imported type usage in entry source")
+        + 3;
+    let use_end = use_start + "Foo".len();
+    let use_span = Span {
+        start: position_at(entry_source, use_start),
+        end: position_at(entry_source, use_end),
+    };
+
+    let location = db
+        .def_location_at_program_file(entry_id, use_span)
+        .expect("program definition location query should succeed")
+        .expect("expected definition location for imported type");
+
+    assert_eq!(location.path.as_deref(), Some(dep_path.as_path()));
+    assert_eq!(location.span.start.line, 2);
+    assert_eq!(location.span.start.column, 1);
+
+    let _ = fs::remove_dir_all(&temp_dir);
+}
+
+#[test]
+fn def_location_at_program_file_points_to_imported_trait_definition() {
+    let run_id = ANALYSIS_TMP_COUNTER.fetch_add(1, Ordering::Relaxed);
+    let temp_dir = std::env::temp_dir().join(format!(
+        "machina_analysis_defloc_imported_trait_{}_{}",
+        std::process::id(),
+        run_id
+    ));
+    let app_dir = temp_dir.join("app");
+    fs::create_dir_all(&app_dir).expect("failed to create temp module tree");
+
+    let entry_path = temp_dir.join("main.mc");
+    let dep_path = app_dir.join("dep.mc");
+    let entry_source = r#"
+requires {
+    app::dep::Runner
+    app::dep::Task
+}
+
+fn execute<T: Runner>(x: T) -> u64 {
+    x.run()
+}
+
+fn main() -> u64 {
+    execute(Task {})
+}
+"#;
+    let dep_source = r#"@[public]
+trait Runner {
+    fn run(self) -> u64;
+}
+
+@[public]
+type Task = {}
+
+Task :: Runner {
+    fn run(self) -> u64 {
+        1
+    }
+}
+"#;
+
+    fs::write(&entry_path, entry_source).expect("failed to write entry source");
+    fs::write(&dep_path, dep_source).expect("failed to write dependency source");
+
+    let mut db = AnalysisDb::new();
+    let entry_id = db.upsert_disk_text(entry_path.clone(), entry_source);
+    db.upsert_disk_text(dep_path.clone(), dep_source);
+
+    let use_start = entry_source
+        .find("T: Runner")
+        .expect("expected imported trait usage in entry source")
+        + 3;
+    let use_end = use_start + "Runner".len();
+    let use_span = Span {
+        start: position_at(entry_source, use_start),
+        end: position_at(entry_source, use_end),
+    };
+
+    let location = db
+        .def_location_at_program_file(entry_id, use_span)
+        .expect("program definition location query should succeed")
+        .expect("expected definition location for imported trait");
+
+    assert_eq!(location.path.as_deref(), Some(dep_path.as_path()));
+    assert_eq!(location.span.start.line, 2);
+    assert_eq!(location.span.start.column, 1);
+
+    let _ = fs::remove_dir_all(&temp_dir);
+}
+
+#[test]
 fn type_at_returns_expression_type() {
     let mut db = AnalysisDb::new();
     let source = r#"

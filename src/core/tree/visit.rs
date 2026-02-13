@@ -440,9 +440,20 @@ pub fn walk_match_arm<V: Visitor<D, T> + ?Sized, D, T>(v: &mut V, arm: &MatchArm
 
 pub fn walk_stmt_expr<V: Visitor<D, T> + ?Sized, D, T>(v: &mut V, stmt: &StmtExpr<D, T>) {
     match &stmt.kind {
-        StmtExprKind::LetBind { pattern, value, .. }
-        | StmtExprKind::VarBind { pattern, value, .. } => {
+        StmtExprKind::LetBind {
+            pattern,
+            decl_ty,
+            value,
+        }
+        | StmtExprKind::VarBind {
+            pattern,
+            decl_ty,
+            value,
+        } => {
             v.visit_bind_pattern(pattern);
+            if let Some(decl_ty) = decl_ty {
+                v.visit_type_expr(decl_ty);
+            }
             v.visit_expr(value);
         }
         StmtExprKind::VarDecl { .. } => {}

@@ -234,6 +234,9 @@ impl<D, T> Visitor<D, T> for NodeSpanCollector {
 
     fn visit_type_param(&mut self, param: &crate::core::tree::TypeParam<D>) {
         self.record(param.id, param.span);
+        if let Some(bound) = &param.bound {
+            self.record(bound.id, bound.span);
+        }
         visit::walk_type_param::<Self, D, T>(self, param);
     }
 

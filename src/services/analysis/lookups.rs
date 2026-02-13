@@ -21,14 +21,13 @@ use crate::services::analysis::syntax_index::{
 
 pub(crate) fn def_at_span(state: &LookupState, query_span: Span) -> Option<DefId> {
     let resolved = state.resolved.as_ref()?;
-    let node_id = node_at_span(&resolved.module, query_span)?;
-    if state.poisoned_nodes.contains(&node_id) {
-        return None;
-    }
-    resolved
-        .def_table
-        .lookup_node_def_id(node_id)
-        .filter(|id| *id != UNKNOWN_DEF_ID)
+    best_def_use_at_span(
+        &resolved.module,
+        &resolved.def_table,
+        &state.poisoned_nodes,
+        query_span,
+    )
+    .map(|(_, def_id)| def_id)
 }
 
 pub(crate) fn def_location_at_span(
@@ -38,14 +37,12 @@ pub(crate) fn def_location_at_span(
     query_span: Span,
 ) -> Option<Location> {
     let resolved = state.resolved.as_ref()?;
-    let use_node_id = node_at_span(&resolved.module, query_span)?;
-    if state.poisoned_nodes.contains(&use_node_id) {
-        return None;
-    }
-    let def_id = resolved.def_table.lookup_node_def_id(use_node_id)?;
-    if def_id == UNKNOWN_DEF_ID {
-        return None;
-    }
+    let (_, def_id) = best_def_use_at_span(
+        &resolved.module,
+        &resolved.def_table,
+        &state.poisoned_nodes,
+        query_span,
+    )?;
     let def_loc = resolved.def_table.lookup_def_location(def_id)?;
 
     Some(Location {
@@ -55,6 +52,49 @@ pub(crate) fn def_location_at_span(
             .or_else(|| snapshot.path(file_id).map(std::path::Path::to_path_buf)),
         span: def_loc.span,
     })
+}
+
+fn best_def_use_at_span<D, T>(
+    module: &crate::core::tree::Module<D, T>,
+    def_table: &crate::core::resolve::DefTable,
+    poisoned_nodes: &std::collections::HashSet<crate::core::tree::NodeId>,
+    query_span: Span,
+) -> Option<(crate::core::tree::NodeId, DefId)> {
+    let spans = node_span_map(module);
+    let mut candidates = Vec::new();
+    for (node_id, span) in spans {
+        if !crate::services::analysis::syntax_index::span_contains_span(span, query_span) {
+            continue;
+        }
+        candidates.push((node_id, span));
+    }
+
+    let min_width = candidates
+        .iter()
+        .map(|(_, span)| span.end.offset.saturating_sub(span.start.offset))
+        .min()?;
+    let max_start = candidates
+        .iter()
+        .filter(|(_, span)| span.end.offset.saturating_sub(span.start.offset) == min_width)
+        .map(|(_, span)| span.start.offset)
+        .max()?;
+
+    for (node_id, span) in candidates {
+        let width = span.end.offset.saturating_sub(span.start.offset);
+        if width != min_width || span.start.offset != max_start {
+            continue;
+        }
+        if poisoned_nodes.contains(&node_id) {
+            continue;
+        }
+        let Some(def_id) = def_table.lookup_node_def_id(node_id) else {
+            continue;
+        };
+        if def_id != UNKNOWN_DEF_ID {
+            return Some((node_id, def_id));
+        }
+    }
+    None
 }
 
 pub(crate) fn type_at_span(state: &LookupState, query_span: Span) -> Option<Type> {
