@@ -3,9 +3,10 @@ use std::fmt;
 
 use crate::core::backend::lower::{LoweredFunction, LoweredModule};
 use crate::core::ir::{
-    Block, BlockId, Callee, Function, InstKind, IrTypeCache, IrTypeId, IrTypeKind, Terminator,
-    ValueDef, ValueId, for_each_inst_use,
+    Block, BlockId, Callee, Function, FunctionSig, InstKind, IrTypeCache, IrTypeId, IrTypeKind,
+    RuntimeFn, Terminator, ValueDef, ValueId, for_each_inst_use,
 };
+use crate::core::resolve::DefId;
 
 #[derive(Debug, Clone)]
 pub struct VerifyIrError {
@@ -29,8 +30,13 @@ impl fmt::Display for VerifyIrError {
 impl std::error::Error for VerifyIrError {}
 
 pub fn verify_module(module: &LoweredModule) -> Result<(), VerifyIrError> {
+    let direct_sigs: HashMap<DefId, FunctionSig> = module
+        .funcs
+        .iter()
+        .map(|func| (func.func.def_id, func.func.sig.clone()))
+        .collect();
     for func in &module.funcs {
-        verify_function(func)?;
+        verify_function(func, &direct_sigs)?;
     }
     Ok(())
 }
@@ -38,7 +44,10 @@ pub fn verify_module(module: &LoweredModule) -> Result<(), VerifyIrError> {
 #[cfg(test)]
 #[path = "../../tests/backend/verify/t_verify.rs"]
 mod tests;
-fn verify_function(lowered: &LoweredFunction) -> Result<(), VerifyIrError> {
+fn verify_function(
+    lowered: &LoweredFunction,
+    direct_sigs: &HashMap<DefId, FunctionSig>,
+) -> Result<(), VerifyIrError> {
     let func = &lowered.func;
     let types = &lowered.types;
 
@@ -100,6 +109,7 @@ fn verify_function(lowered: &LoweredFunction) -> Result<(), VerifyIrError> {
                 &value_types,
                 types,
                 func,
+                direct_sigs,
             )?;
         }
 
@@ -117,6 +127,7 @@ fn verify_inst_types(
     value_types: &HashMap<ValueId, IrTypeId>,
     types: &IrTypeCache,
     func: &Function,
+    direct_sigs: &HashMap<DefId, FunctionSig>,
 ) -> Result<(), VerifyIrError> {
     match kind {
         InstKind::AddrOfLocal { local } => {
@@ -153,10 +164,19 @@ fn verify_inst_types(
         | InstKind::Drop { ptr: base } => {
             require_ptr(func_name, block_id, *base, value_types, types)?;
         }
-        InstKind::Call { callee, .. } => {
-            if let Callee::Value(value) = callee {
-                let _ = value_ty(func_name, block_id, *value, value_types)?;
-            }
+        InstKind::Call { callee, args } => {
+            let result = result
+                .ok_or_else(|| err(func_name, Some(block_id), "call should define a result"))?;
+            verify_call_signature(
+                func_name,
+                block_id,
+                callee,
+                args,
+                result.ty,
+                value_types,
+                types,
+                direct_sigs,
+            )?;
         }
         InstKind::Const { .. }
         | InstKind::BinOp { .. }
@@ -168,6 +188,326 @@ fn verify_inst_types(
     }
 
     Ok(())
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum RuntimeArgKind {
+    AnyReg,
+    Ptr,
+    Int,
+    IntOrBool,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum RuntimeRetKind {
+    Unit,
+    Int,
+    Bool,
+    Ptr,
+}
+
+struct RuntimeCallSpec {
+    args: &'static [RuntimeArgKind],
+    ret: RuntimeRetKind,
+}
+
+fn runtime_call_spec(runtime: &RuntimeFn) -> RuntimeCallSpec {
+    use RuntimeArgKind::{AnyReg, Int, IntOrBool, Ptr};
+    use RuntimeRetKind::{Bool as RetBool, Int as RetInt, Ptr as RetPtr, Unit};
+
+    match runtime {
+        RuntimeFn::Trap => RuntimeCallSpec {
+            args: &[AnyReg, AnyReg, AnyReg, AnyReg],
+            ret: Unit,
+        },
+        RuntimeFn::Print => RuntimeCallSpec {
+            args: &[Ptr, Int, Int],
+            ret: Unit,
+        },
+        RuntimeFn::StringFromBytes => RuntimeCallSpec {
+            args: &[Ptr, Ptr, Int],
+            ret: Unit,
+        },
+        RuntimeFn::FmtInit => RuntimeCallSpec {
+            args: &[Ptr, Ptr, Int],
+            ret: Unit,
+        },
+        RuntimeFn::FmtAppendBytes => RuntimeCallSpec {
+            args: &[Ptr, Ptr, Int],
+            ret: Unit,
+        },
+        RuntimeFn::FmtAppendU64 => RuntimeCallSpec {
+            args: &[Ptr, Int],
+            ret: Unit,
+        },
+        RuntimeFn::FmtAppendI64 => RuntimeCallSpec {
+            args: &[Ptr, Int],
+            ret: Unit,
+        },
+        RuntimeFn::FmtAppendBool => RuntimeCallSpec {
+            args: &[Ptr, IntOrBool],
+            ret: Unit,
+        },
+        RuntimeFn::FmtFinish => RuntimeCallSpec {
+            args: &[Ptr, Ptr],
+            ret: Unit,
+        },
+        RuntimeFn::U64ToDec
+        | RuntimeFn::I64ToDec
+        | RuntimeFn::U64ToBin
+        | RuntimeFn::U64ToOct
+        | RuntimeFn::U64ToHex => RuntimeCallSpec {
+            args: &[Ptr, Int, Int],
+            ret: RetInt,
+        },
+        RuntimeFn::MemSet => RuntimeCallSpec {
+            args: &[Ptr, Int, Int],
+            ret: Unit,
+        },
+        RuntimeFn::MemCopy => RuntimeCallSpec {
+            args: &[Ptr, Ptr, Int],
+            ret: Unit,
+        },
+        RuntimeFn::StringEnsure => RuntimeCallSpec {
+            args: &[Ptr, Int],
+            ret: Unit,
+        },
+        RuntimeFn::StringDrop => RuntimeCallSpec {
+            args: &[Ptr],
+            ret: Unit,
+        },
+        RuntimeFn::StringEq => RuntimeCallSpec {
+            args: &[Ptr, Ptr],
+            ret: RetBool,
+        },
+        RuntimeFn::StringAppendBytes => RuntimeCallSpec {
+            args: &[Ptr, Ptr, Int],
+            ret: Unit,
+        },
+        RuntimeFn::StringAppendBool => RuntimeCallSpec {
+            args: &[Ptr, IntOrBool],
+            ret: Unit,
+        },
+        RuntimeFn::DynArrayEnsure => RuntimeCallSpec {
+            args: &[Ptr, Int, Int, Int],
+            ret: Unit,
+        },
+        RuntimeFn::DynArrayAppendElem => RuntimeCallSpec {
+            args: &[Ptr, Ptr, Int, Int],
+            ret: Unit,
+        },
+        RuntimeFn::SetInsertElem => RuntimeCallSpec {
+            args: &[Ptr, Ptr, Int, Int],
+            ret: RetBool,
+        },
+        RuntimeFn::SetContainsElem | RuntimeFn::SetRemoveElem => RuntimeCallSpec {
+            args: &[Ptr, Ptr, Int],
+            ret: RetBool,
+        },
+        RuntimeFn::SetClear => RuntimeCallSpec {
+            args: &[Ptr],
+            ret: Unit,
+        },
+        RuntimeFn::MapInsertOrAssign => RuntimeCallSpec {
+            args: &[Ptr, Ptr, Ptr, Int, Int],
+            ret: RetBool,
+        },
+        RuntimeFn::MapContainsKey | RuntimeFn::MapRemoveKey => RuntimeCallSpec {
+            args: &[Ptr, Ptr, Int, Int],
+            ret: RetBool,
+        },
+        RuntimeFn::MapGetValue => RuntimeCallSpec {
+            args: &[Ptr, Ptr, Int, Int, Ptr],
+            ret: RetBool,
+        },
+        RuntimeFn::MapClear | RuntimeFn::MapDrop => RuntimeCallSpec {
+            args: &[Ptr],
+            ret: Unit,
+        },
+        RuntimeFn::Alloc => RuntimeCallSpec {
+            args: &[Int, Int],
+            ret: RetPtr,
+        },
+        RuntimeFn::Realloc => RuntimeCallSpec {
+            args: &[Ptr, Int, Int],
+            ret: RetPtr,
+        },
+        RuntimeFn::Free => RuntimeCallSpec {
+            args: &[Ptr],
+            ret: Unit,
+        },
+        RuntimeFn::SetAllocTrace => RuntimeCallSpec {
+            args: &[IntOrBool],
+            ret: Unit,
+        },
+    }
+}
+
+fn verify_call_signature(
+    func_name: &str,
+    block_id: BlockId,
+    callee: &Callee,
+    args: &[ValueId],
+    result_ty: IrTypeId,
+    value_types: &HashMap<ValueId, IrTypeId>,
+    types: &IrTypeCache,
+    direct_sigs: &HashMap<DefId, FunctionSig>,
+) -> Result<(), VerifyIrError> {
+    match callee {
+        Callee::Direct(def_id) => {
+            if let Some(sig) = direct_sigs.get(def_id) {
+                verify_typed_call_signature(
+                    func_name,
+                    block_id,
+                    "direct call",
+                    args,
+                    &sig.params,
+                    sig.ret,
+                    result_ty,
+                    value_types,
+                )?;
+            }
+        }
+        Callee::Value(callee_value) => {
+            let callee_ty = value_ty(func_name, block_id, *callee_value, value_types)?;
+            let IrTypeKind::Fn { params, ret } = types.kind(callee_ty) else {
+                return Err(err(
+                    func_name,
+                    Some(block_id),
+                    format!(
+                        "indirect callee {:?} must be fn type, got {:?}",
+                        callee_value,
+                        types.kind(callee_ty)
+                    ),
+                ));
+            };
+            verify_typed_call_signature(
+                func_name,
+                block_id,
+                "indirect call",
+                args,
+                params,
+                *ret,
+                result_ty,
+                value_types,
+            )?;
+        }
+        Callee::Runtime(runtime) => {
+            let spec = runtime_call_spec(runtime);
+            if args.len() != spec.args.len() {
+                return Err(err(
+                    func_name,
+                    Some(block_id),
+                    format!(
+                        "runtime call {} expects {} args, got {}",
+                        runtime.name(),
+                        spec.args.len(),
+                        args.len()
+                    ),
+                ));
+            }
+            for (idx, (arg, expected_kind)) in args.iter().zip(spec.args.iter()).enumerate() {
+                let arg_ty = value_ty(func_name, block_id, *arg, value_types)?;
+                if !matches_runtime_arg_kind(types, arg_ty, *expected_kind) {
+                    return Err(err(
+                        func_name,
+                        Some(block_id),
+                        format!(
+                            "runtime call {} arg {} expects {:?}, got {:?}",
+                            runtime.name(),
+                            idx,
+                            expected_kind,
+                            types.kind(arg_ty)
+                        ),
+                    ));
+                }
+            }
+            if !matches_runtime_ret_kind(types, result_ty, spec.ret) {
+                return Err(err(
+                    func_name,
+                    Some(block_id),
+                    format!(
+                        "runtime call {} result expects {:?}, got {:?}",
+                        runtime.name(),
+                        spec.ret,
+                        types.kind(result_ty)
+                    ),
+                ));
+            }
+        }
+    }
+    Ok(())
+}
+
+#[allow(clippy::too_many_arguments)]
+fn verify_typed_call_signature(
+    func_name: &str,
+    block_id: BlockId,
+    call_kind: &str,
+    args: &[ValueId],
+    params: &[IrTypeId],
+    ret: IrTypeId,
+    result_ty: IrTypeId,
+    value_types: &HashMap<ValueId, IrTypeId>,
+) -> Result<(), VerifyIrError> {
+    if args.len() != params.len() {
+        return Err(err(
+            func_name,
+            Some(block_id),
+            format!(
+                "{call_kind} expects {} args, got {}",
+                params.len(),
+                args.len()
+            ),
+        ));
+    }
+
+    for (idx, (arg, expected_ty)) in args.iter().zip(params.iter()).enumerate() {
+        let arg_ty = value_ty(func_name, block_id, *arg, value_types)?;
+        if arg_ty != *expected_ty {
+            return Err(err(
+                func_name,
+                Some(block_id),
+                format!(
+                    "{call_kind} arg {} type mismatch: expected {:?}, got {:?}",
+                    idx, expected_ty, arg_ty
+                ),
+            ));
+        }
+    }
+
+    if result_ty != ret {
+        return Err(err(
+            func_name,
+            Some(block_id),
+            format!(
+                "{call_kind} result type mismatch: expected {:?}, got {:?}",
+                ret, result_ty
+            ),
+        ));
+    }
+
+    Ok(())
+}
+
+fn matches_runtime_arg_kind(types: &IrTypeCache, ty: IrTypeId, kind: RuntimeArgKind) -> bool {
+    match kind {
+        RuntimeArgKind::AnyReg => types.is_reg_type(ty),
+        RuntimeArgKind::Ptr => matches!(types.kind(ty), IrTypeKind::Ptr { .. }),
+        RuntimeArgKind::Int => matches!(types.kind(ty), IrTypeKind::Int { .. }),
+        RuntimeArgKind::IntOrBool => {
+            matches!(types.kind(ty), IrTypeKind::Int { .. } | IrTypeKind::Bool)
+        }
+    }
+}
+
+fn matches_runtime_ret_kind(types: &IrTypeCache, ty: IrTypeId, kind: RuntimeRetKind) -> bool {
+    match kind {
+        RuntimeRetKind::Unit => matches!(types.kind(ty), IrTypeKind::Unit),
+        RuntimeRetKind::Int => matches!(types.kind(ty), IrTypeKind::Int { .. }),
+        RuntimeRetKind::Bool => matches!(types.kind(ty), IrTypeKind::Bool),
+        RuntimeRetKind::Ptr => matches!(types.kind(ty), IrTypeKind::Ptr { .. }),
+    }
 }
 
 fn verify_terminator(
