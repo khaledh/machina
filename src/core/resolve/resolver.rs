@@ -1763,7 +1763,8 @@ pub fn resolve_program(
         let parsed_context = ParsedContext::new(
             parsed_module.module.clone(),
             program.next_node_id_gen().clone(),
-        );
+        )
+        .with_source_path(parsed_module.source.file_path.clone());
         match resolve_with_imports_and_symbols(parsed_context, imported_modules, imported_symbols) {
             Ok(resolved_context) => {
                 let module_exports = collect_module_export_facts(

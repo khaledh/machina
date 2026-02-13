@@ -245,13 +245,23 @@ impl AnalysisDb {
             .and_then(|targets| targets.get(&def_id))
             .copied()
             .unwrap_or_else(|| GlobalDefId::new(entry_module_id, def_id));
-        let Some(loc) = program_lookup.global_def_locations.get(&target) else {
+        let Some(target_state) = module_states.get(&target.module_id) else {
             return Ok(None);
         };
-        let target_file_id = snapshot.file_id(&loc.path).unwrap_or(file_id);
+        let Some(target_resolved) = target_state.resolved.as_ref() else {
+            return Ok(None);
+        };
+        let Some(loc) = target_resolved.def_table.lookup_def_location(target.def_id) else {
+            return Ok(None);
+        };
+        let target_file_id = loc
+            .path
+            .as_deref()
+            .and_then(|path| snapshot.file_id(path))
+            .unwrap_or(file_id);
         Ok(Some(Location {
             file_id: target_file_id,
-            path: Some(loc.path.clone()),
+            path: loc.path,
             span: loc.span,
         }))
     }
@@ -702,7 +712,6 @@ impl AnalysisDb {
             let mut exports_by_module = HashMap::<ModuleId, ModuleResolvedExports>::new();
             let mut imported_symbol_targets_by_module =
                 HashMap::<ModuleId, HashMap<DefId, GlobalDefId>>::new();
-            let mut global_def_locations = HashMap::<GlobalDefId, ProgramDefLocation>::new();
 
             for module_id in program_context.dependency_order_from_entry() {
                 let Some(parsed) = program_context.module(module_id) else {
@@ -713,7 +722,8 @@ impl AnalysisDb {
                 let parsed_context = crate::core::context::ParsedContext::new(
                     module_with_implicit_prelude(parsed, prelude_module.as_ref()),
                     program_context.next_node_id_gen().clone(),
-                );
+                )
+                .with_source_path(parsed.source.file_path.clone());
                 let imported_modules =
                     import_facts.imported_modules_for(&program_context, module_id);
                 let imported_symbols =
@@ -739,18 +749,6 @@ impl AnalysisDb {
                         resolved,
                         &exports_by_module,
                     );
-                    let module_path = parsed.source.file_path.clone();
-                    for def in resolved.def_table.defs() {
-                        if let Some(span) = resolved.def_table.lookup_def_span(def.id) {
-                            global_def_locations.insert(
-                                GlobalDefId::new(module_id, def.id),
-                                ProgramDefLocation {
-                                    path: module_path.clone(),
-                                    span,
-                                },
-                            );
-                        }
-                    }
                     exports_by_module.insert(module_id, exports);
                     imported_symbol_targets_by_module.insert(module_id, imported_targets);
                 }
@@ -780,7 +778,6 @@ impl AnalysisDb {
             result.diagnostics = all_diagnostics;
             result.entry_module_id = Some(entry_module_id);
             result.module_states = module_states;
-            result.global_def_locations = global_def_locations;
             result.imported_symbol_targets_by_module = imported_symbol_targets_by_module;
             Ok(result)
         })
@@ -818,14 +815,7 @@ struct ProgramPipelineResult {
     diagnostics: Vec<Diagnostic>,
     entry_module_id: Option<ModuleId>,
     module_states: HashMap<ModuleId, LookupState>,
-    global_def_locations: HashMap<GlobalDefId, ProgramDefLocation>,
     imported_symbol_targets_by_module: HashMap<ModuleId, HashMap<DefId, GlobalDefId>>,
-}
-
-#[derive(Clone)]
-struct ProgramDefLocation {
-    path: PathBuf,
-    span: Span,
 }
 
 #[derive(Clone, Default)]

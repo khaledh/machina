@@ -46,12 +46,14 @@ pub(crate) fn def_location_at_span(
     if def_id == UNKNOWN_DEF_ID {
         return None;
     }
-    let def_span = resolved.def_table.lookup_def_span(def_id)?;
+    let def_loc = resolved.def_table.lookup_def_location(def_id)?;
 
     Some(Location {
         file_id,
-        path: snapshot.path(file_id).map(std::path::Path::to_path_buf),
-        span: def_span,
+        path: def_loc
+            .path
+            .or_else(|| snapshot.path(file_id).map(std::path::Path::to_path_buf)),
+        span: def_loc.span,
     })
 }
 

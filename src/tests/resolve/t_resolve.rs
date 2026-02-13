@@ -92,6 +92,51 @@ fn test_resolve_program_resolves_dependencies() {
 }
 
 #[test]
+fn test_resolve_program_sets_def_table_source_paths() {
+    let entry_src = r#"
+        requires {
+            app::util
+        }
+
+        fn main() -> u64 { 0 }
+    "#;
+    let mut modules = HashMap::new();
+    modules.insert("app.util".to_string(), "fn util() -> u64 { 7 }".to_string());
+    let loader = MockLoader { modules };
+    let entry_path = ModulePath::new(vec!["app".to_string(), "main".to_string()]).unwrap();
+
+    let program = discover_and_parse_capsule_with_loader(
+        entry_src,
+        Path::new("app/main.mc"),
+        entry_path,
+        &loader,
+    )
+    .expect("program should parse");
+
+    let resolved = resolve_program(CapsuleParsedContext::new(program))
+        .expect("program resolve should succeed");
+    let entry_source_path = resolved
+        .entry_module()
+        .def_table
+        .source_path()
+        .expect("entry def table should carry source path");
+    assert_eq!(entry_source_path, Path::new("app/main.mc"));
+
+    let dep_path = ModulePath::new(vec!["app".to_string(), "util".to_string()]).unwrap();
+    let dep_id = *resolved
+        .by_path
+        .get(&dep_path)
+        .expect("dependency module id should exist");
+    let dep_source_path = resolved
+        .module(dep_id)
+        .expect("dependency module should resolve")
+        .def_table
+        .source_path()
+        .expect("dependency def table should carry source path");
+    assert_eq!(dep_source_path, Path::new("app.util.mc"));
+}
+
+#[test]
 fn test_resolve_program_tracks_imported_symbol_origins() {
     let entry_src = r#"
         requires {

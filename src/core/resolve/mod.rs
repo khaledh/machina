@@ -9,7 +9,7 @@ pub use def::{
     Def, DefId, DefIdGen, DefKind, FuncAttrs, GlobalDefId, TraitAttrs, TypeAttrs, UNKNOWN_DEF_ID,
     Visibility,
 };
-pub use def_table::{DefTable, DefTableBuilder, NodeDefLookup};
+pub use def_table::{DefLocation, DefTable, DefTableBuilder, NodeDefLookup};
 pub use errors::ResolveError;
 pub use owners::attach_def_owners;
 pub use resolver::{

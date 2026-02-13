@@ -1,9 +1,16 @@
 use std::collections::HashMap;
 use std::fmt;
+use std::path::{Path, PathBuf};
 
 use crate::core::diag::Span;
 use crate::core::resolve::{Def, DefId, DefKind};
 use crate::core::tree::NodeId;
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DefLocation {
+    pub path: Option<PathBuf>,
+    pub span: Span,
+}
 
 pub struct DefTableBuilder {
     defs: Vec<Def>,
@@ -47,6 +54,7 @@ impl DefTableBuilder {
                 node_def: node_def.clone(),
                 def_node: self.def_node,
                 def_span: self.def_span,
+                source_path: None,
             },
             NodeDefLookup { node_def },
         )
@@ -61,6 +69,7 @@ pub struct DefTable {
     node_def: HashMap<NodeId, DefId>,
     def_node: HashMap<DefId, NodeId>,
     def_span: HashMap<DefId, Span>,
+    source_path: Option<PathBuf>,
 }
 
 impl DefTable {
@@ -70,6 +79,7 @@ impl DefTable {
             node_def: HashMap::new(),
             def_node: HashMap::new(),
             def_span: HashMap::new(),
+            source_path: None,
         }
     }
 
@@ -93,6 +103,22 @@ impl DefTable {
 
     pub fn lookup_def_span(&self, def_id: DefId) -> Option<Span> {
         self.def_span.get(&def_id).copied()
+    }
+
+    pub fn lookup_def_location(&self, def_id: DefId) -> Option<DefLocation> {
+        let span = self.lookup_def_span(def_id)?;
+        Some(DefLocation {
+            path: self.source_path.clone(),
+            span,
+        })
+    }
+
+    pub fn source_path(&self) -> Option<&Path> {
+        self.source_path.as_deref()
+    }
+
+    pub fn set_source_path(&mut self, source_path: Option<PathBuf>) {
+        self.source_path = source_path;
     }
 
     pub fn is_intrinsic(&self, def_id: DefId) -> bool {

@@ -1,4 +1,5 @@
 use std::collections::{HashMap, HashSet};
+use std::path::PathBuf;
 
 use crate::core::capsule::ModuleId;
 use crate::core::resolve::{DefId, DefTable};
@@ -17,6 +18,7 @@ use crate::core::typecheck::type_map::{CallSigMap, GenericInstMap, TypeMap};
 pub struct ParsedContext {
     pub module: ParsedModule,
     pub node_id_gen: NodeIdGen,
+    pub source_path: Option<PathBuf>,
 }
 
 /// Stage contract alias: resolve input.
@@ -27,10 +29,23 @@ impl ParsedContext {
         Self {
             module,
             node_id_gen,
+            source_path: None,
         }
     }
 
-    pub fn with_def_table(self, def_table: DefTable, module: ResolvedModule) -> ResolvedContext {
+    pub fn with_source_path(mut self, source_path: PathBuf) -> Self {
+        self.source_path = Some(source_path);
+        self
+    }
+
+    pub fn with_def_table(
+        self,
+        mut def_table: DefTable,
+        module: ResolvedModule,
+    ) -> ResolvedContext {
+        if def_table.source_path().is_none() {
+            def_table.set_source_path(self.source_path.clone());
+        }
         let symbols = SymbolTable::new(&module, &def_table);
         ResolvedContext {
             module,
