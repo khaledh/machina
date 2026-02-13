@@ -25,7 +25,8 @@ use crate::services::analysis::lookups::{
 };
 use crate::services::analysis::module_graph::ModuleGraph;
 use crate::services::analysis::pipeline::{
-    LookupState, collect_sorted_diagnostics, run_module_pipeline, to_lookup_state,
+    LookupState, collect_sorted_diagnostics, run_module_pipeline,
+    run_module_pipeline_with_query_input, to_lookup_state,
 };
 use crate::services::analysis::program_pipeline::{
     ProgramPipelineResult, resolve_imported_symbol_target_from_import_env,
@@ -599,13 +600,15 @@ impl AnalysisDb {
             return Ok(None);
         }
 
-        let revision = snapshot.revision() ^ stable_source_revision(&source) | (1u64 << 63);
+        let revision = snapshot.revision();
+        let query_input = stable_source_revision(&source).wrapping_add(1);
         let module_id = ModuleId(file_id.0);
-        let pipeline = run_module_pipeline(
+        let pipeline = run_module_pipeline_with_query_input(
             &mut self.runtime,
             module_id,
             revision,
             std::sync::Arc::<str>::from(source),
+            query_input,
         )?;
         Ok(Some(to_lookup_state(&pipeline)))
     }

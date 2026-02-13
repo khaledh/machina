@@ -98,3 +98,36 @@ fn query_runtime_invalidation_removes_dependents() {
     assert_eq!(stats.hits, 0);
     assert_eq!(stats.misses, 3);
 }
+
+#[test]
+fn query_runtime_distinguishes_query_input_keys() {
+    let base = QueryKey::new(QueryKind::LookupState, ModuleId(7), 9);
+    let synthetic = QueryKey::with_input(QueryKind::LookupState, ModuleId(7), 9, 123);
+    let mut runtime = QueryRuntime::new();
+    let mut calls = 0usize;
+
+    let a = runtime
+        .execute(base, |_rt| {
+            calls += 1;
+            Ok::<u64, QueryCancelled>(10)
+        })
+        .expect("base execute should succeed");
+    let b = runtime
+        .execute(synthetic, |_rt| {
+            calls += 1;
+            Ok::<u64, QueryCancelled>(20)
+        })
+        .expect("synthetic execute should succeed");
+    let a_cached = runtime
+        .execute(base, |_rt| Ok::<u64, QueryCancelled>(0))
+        .expect("base should hit cache");
+    let b_cached = runtime
+        .execute(synthetic, |_rt| Ok::<u64, QueryCancelled>(0))
+        .expect("synthetic should hit cache");
+
+    assert_eq!(a, 10);
+    assert_eq!(b, 20);
+    assert_eq!(a_cached, 10);
+    assert_eq!(b_cached, 20);
+    assert_eq!(calls, 2);
+}

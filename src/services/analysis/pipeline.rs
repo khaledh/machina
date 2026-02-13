@@ -79,11 +79,22 @@ pub(crate) fn run_module_pipeline(
     revision: u64,
     source: Arc<str>,
 ) -> QueryResult<ModulePipelineState> {
+    run_module_pipeline_with_query_input(rt, module_id, revision, source, 0)
+}
+
+pub(crate) fn run_module_pipeline_with_query_input(
+    rt: &mut QueryRuntime,
+    module_id: ModuleId,
+    revision: u64,
+    source: Arc<str>,
+    query_input: u64,
+) -> QueryResult<ModulePipelineState> {
     run_module_pipeline_with_inputs(
         rt,
         module_id,
         revision,
         source,
+        query_input,
         ModulePipelineInputs::default(),
     )
 }
@@ -99,13 +110,38 @@ pub(crate) fn run_module_pipeline_with_parsed_and_imports(
     imported_symbols: HashMap<String, ImportedSymbol>,
     skip_typecheck: bool,
 ) -> QueryResult<ModulePipelineState> {
+    run_module_pipeline_with_parsed_and_imports_with_query_input(
+        rt,
+        module_id,
+        revision,
+        source,
+        0,
+        parsed_override,
+        imported_modules,
+        imported_symbols,
+        skip_typecheck,
+    )
+}
+
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn run_module_pipeline_with_parsed_and_imports_with_query_input(
+    rt: &mut QueryRuntime,
+    module_id: ModuleId,
+    revision: u64,
+    source: Arc<str>,
+    query_input: u64,
+    parsed_override: Option<crate::core::context::ParsedContext>,
+    imported_modules: HashMap<String, ImportedModule>,
+    imported_symbols: HashMap<String, ImportedSymbol>,
+    skip_typecheck: bool,
+) -> QueryResult<ModulePipelineState> {
     let inputs = ModulePipelineInputs {
         parsed_override,
         imported_modules,
         imported_symbols,
         skip_typecheck,
     };
-    run_module_pipeline_with_inputs(rt, module_id, revision, source, inputs)
+    run_module_pipeline_with_inputs(rt, module_id, revision, source, query_input, inputs)
 }
 
 fn run_module_pipeline_with_inputs(
@@ -113,6 +149,7 @@ fn run_module_pipeline_with_inputs(
     module_id: ModuleId,
     revision: u64,
     source: Arc<str>,
+    query_input: u64,
     inputs: ModulePipelineInputs,
 ) -> QueryResult<ModulePipelineState> {
     #[derive(Clone, Default)]
@@ -136,7 +173,12 @@ fn run_module_pipeline_with_inputs(
     );
     let query_revision = revision ^ semantic_fingerprint;
 
-    let parse_key = QueryKey::new(QueryKind::ParseModule, module_id, query_revision);
+    let parse_key = QueryKey::with_input(
+        QueryKind::ParseModule,
+        module_id,
+        query_revision,
+        query_input,
+    );
     let source_for_parse = source.clone();
     let parsed_override_for_parse = parsed_override.clone();
     let parsed = rt.execute(parse_key, move |_rt| {
@@ -163,7 +205,12 @@ fn run_module_pipeline_with_inputs(
         Ok(state)
     })?;
 
-    let resolve_key = QueryKey::new(QueryKind::ResolveModule, module_id, query_revision);
+    let resolve_key = QueryKey::with_input(
+        QueryKind::ResolveModule,
+        module_id,
+        query_revision,
+        query_input,
+    );
     let resolve_input = parsed.product.clone();
     let imported_modules_for_resolve = imported_modules.clone();
     let imported_symbols_for_resolve = imported_symbols.clone();
@@ -193,7 +240,12 @@ fn run_module_pipeline_with_inputs(
     let resolved = resolved_eval.state;
     let imported_facts_for_typecheck = resolved_eval.imported_facts;
 
-    let typecheck_key = QueryKey::new(QueryKind::TypecheckModule, module_id, query_revision);
+    let typecheck_key = QueryKey::with_input(
+        QueryKind::TypecheckModule,
+        module_id,
+        query_revision,
+        query_input,
+    );
     // Do not run type checking when resolution emitted errors. This keeps
     // lookup behavior stable (no leaked inference vars on unresolved symbols).
     let typecheck_input = if !skip_typecheck && resolved.diagnostics.is_empty() {
@@ -225,7 +277,12 @@ fn run_module_pipeline_with_inputs(
     upstream_poisoned.extend(resolved.poisoned_nodes.iter().copied());
     upstream_poisoned.extend(typechecked.poisoned_nodes.iter().copied());
 
-    let semcheck_key = QueryKey::new(QueryKind::SemcheckModule, module_id, query_revision);
+    let semcheck_key = QueryKey::with_input(
+        QueryKind::SemcheckModule,
+        module_id,
+        query_revision,
+        query_input,
+    );
     let semcheck_input = if !skip_typecheck && typechecked.diagnostics.is_empty() {
         typechecked
             .product

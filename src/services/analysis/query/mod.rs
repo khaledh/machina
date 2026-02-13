@@ -26,12 +26,14 @@ pub enum QueryKind {
     ProgramPipeline,
 }
 
-/// Query identity keyed by semantic stage, module, and revision snapshot.
+/// Query identity keyed by semantic stage, module, revision snapshot, and
+/// optional query-input discriminator (used by synthetic/overlay lookups).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct QueryKey {
     pub kind: QueryKind,
     pub module: ModuleId,
     pub revision: u64,
+    pub input: u64,
 }
 
 impl QueryKey {
@@ -40,6 +42,16 @@ impl QueryKey {
             kind,
             module,
             revision,
+            input: 0,
+        }
+    }
+
+    pub fn with_input(kind: QueryKind, module: ModuleId, revision: u64, input: u64) -> Self {
+        Self {
+            kind,
+            module,
+            revision,
+            input,
         }
     }
 }
