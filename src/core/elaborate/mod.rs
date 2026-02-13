@@ -88,13 +88,9 @@ pub fn elaborate(ctx: ElaborateStageInput) -> ElaborateStageOutput {
     );
 
     let module = pipeline::run(&mut elaborator, &module);
-    let lowering_plans = build_lowering_plans(
-        &module,
-        &elaborator.call_plans,
-        &elaborator.index_plans,
-        &elaborator.match_plans,
-        &elaborator.slice_plans,
-    );
+    let (call_plans, index_plans, match_plans, slice_plans) = elaborator.lowering_plan_tables();
+    let lowering_plans =
+        build_lowering_plans(&module, call_plans, index_plans, match_plans, slice_plans);
     let drop_plans = build_drop_plans(&module, &def_table, &type_map);
 
     // Generate method names for lifted closures and add them to the symbol table

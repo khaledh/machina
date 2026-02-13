@@ -113,10 +113,10 @@ pub struct Elaborator<'a> {
     pub(super) closure_func_ids: HashSet<DefId>,
 
     // Elaboration-produced lowering side tables (consumed by backend lowering).
-    pub(super) call_plans: sem::CallPlanMap,
-    pub(super) index_plans: sem::IndexPlanMap,
-    pub(super) match_plans: sem::MatchPlanMap,
-    pub(super) slice_plans: sem::SlicePlanMap,
+    call_plans: sem::CallPlanMap,
+    index_plans: sem::IndexPlanMap,
+    match_plans: sem::MatchPlanMap,
+    slice_plans: sem::SlicePlanMap,
 }
 
 impl<'a> Elaborator<'a> {
@@ -256,6 +256,39 @@ impl<'a> Elaborator<'a> {
     pub(super) fn insert_closure_node_type(&mut self, node_id: NodeId, ty: Type) -> TypeId {
         self.type_map
             .insert_node_type(node_id, ty, "elaborate", SyntheticReason::ClosureLowering)
+    }
+
+    pub(super) fn record_call_plan(&mut self, node_id: NodeId, plan: sem::CallPlan) {
+        self.call_plans.insert(node_id, plan);
+    }
+
+    pub(super) fn record_index_plan(&mut self, node_id: NodeId, plan: sem::IndexPlan) {
+        self.index_plans.insert(node_id, plan);
+    }
+
+    pub(super) fn record_match_plan(&mut self, node_id: NodeId, plan: sem::MatchPlan) {
+        self.match_plans.insert(node_id, plan);
+    }
+
+    pub(super) fn record_slice_plan(&mut self, node_id: NodeId, plan: sem::SlicePlan) {
+        self.slice_plans.insert(node_id, plan);
+    }
+
+    /// Borrow all plan side tables as a single bundle.
+    pub(super) fn lowering_plan_tables(
+        &self,
+    ) -> (
+        &sem::CallPlanMap,
+        &sem::IndexPlanMap,
+        &sem::MatchPlanMap,
+        &sem::SlicePlanMap,
+    ) {
+        (
+            &self.call_plans,
+            &self.index_plans,
+            &self.match_plans,
+            &self.slice_plans,
+        )
     }
 
     pub(super) fn insert_closure_def_type(

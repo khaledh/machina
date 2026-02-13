@@ -225,7 +225,7 @@ impl<'a> Elaborator<'a> {
             };
 
             let plan = self.build_call_plan(expr.id, Some("invoke"), &plan_sig);
-            self.call_plans.insert(expr.id, plan);
+            self.record_call_plan(expr.id, plan);
 
             let receiver = sem::MethodReceiver::ValueExpr(Box::new(self.elab_value(callee)));
             let args = info
@@ -242,7 +242,7 @@ impl<'a> Elaborator<'a> {
             }
         } else {
             let plan = self.build_call_plan(expr.id, None, &call_sig);
-            self.call_plans.insert(expr.id, plan);
+            self.record_call_plan(expr.id, plan);
 
             let args = call_sig
                 .params
@@ -289,7 +289,7 @@ impl<'a> Elaborator<'a> {
             .map(|(param, arg)| self.elab_call_arg(param, arg))
             .collect();
         let plan = self.build_call_plan(expr.id, Some(method_name), &call_sig);
-        self.call_plans.insert(expr.id, plan);
+        self.record_call_plan(expr.id, plan);
         sem::ValueExprKind::MethodCall {
             receiver,
             method_name: method_name.to_string(),
@@ -397,7 +397,7 @@ impl<'a> Elaborator<'a> {
                 let target_ty = self.type_map.type_table().get(target_place.ty).clone();
                 let slice_ty = self.type_map.type_table().get(expr.ty).clone();
                 let plan = self.build_slice_plan(&target_ty, &slice_ty);
-                self.slice_plans.insert(expr.id, plan);
+                self.record_slice_plan(expr.id, plan);
 
                 sem::ValueExprKind::Slice {
                     target: Box::new(target_place),
@@ -426,7 +426,7 @@ impl<'a> Elaborator<'a> {
                 // Pre-compute match tests + bindings so lowering only emits the plan.
                 let scrutinee_ty = self.type_map.type_table().get(sem_scrutinee.ty).clone();
                 let plan = self.build_match_plan(expr.id, scrutinee_ty, arms);
-                self.match_plans.insert(expr.id, plan);
+                self.record_match_plan(expr.id, plan);
                 sem::ValueExprKind::Match {
                     scrutinee: Box::new(sem_scrutinee),
                     arms: arms.iter().map(|arm| self.elab_match_arm(arm)).collect(),
@@ -437,7 +437,7 @@ impl<'a> Elaborator<'a> {
                     let target_ty = self.type_map.type_table().get(inner.ty).clone();
                     let slice_ty = self.type_map.type_table().get(expr.ty).clone();
                     let plan = self.build_slice_plan(&target_ty, &slice_ty);
-                    self.slice_plans.insert(expr.id, plan);
+                    self.record_slice_plan(expr.id, plan);
                 }
                 sem::ValueExprKind::Coerce {
                     kind: *kind,
