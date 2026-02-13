@@ -4,8 +4,8 @@ use crate::core::backend::verify::verify_module;
 use crate::core::context::{ParsedContext, SemanticContext};
 use crate::core::elaborate::elaborate;
 use crate::core::ir::{
-    BinOp, Callee, ConstValue, InstKind, Instruction, IrTypeKind, RuntimeFn, Terminator,
-    ValueDef, ValueId,
+    BinOp, Callee, ConstValue, InstKind, Instruction, IrTypeKind, RuntimeFn, Terminator, ValueDef,
+    ValueId,
 };
 use crate::core::lexer::{LexError, Lexer, Token};
 use crate::core::normalize::normalize;
@@ -376,6 +376,9 @@ fn main() -> bool {
         }
     }
 
-    assert!(mutated, "test setup failed to inject non-register runtime arg");
+    assert!(
+        mutated,
+        "test setup failed to inject non-register runtime arg"
+    );
     assert!(verify_module(&module).is_err());
 }

@@ -66,7 +66,13 @@ impl Arm64Emitter {
                     let lhs_ty = locs.value_ty(lhs_id);
                     let rhs_ty = locs.value_ty(rhs_id);
                     let lhs_reg = self.load_value_typed(locs, lhs, lhs_ty, "x9");
-                    let rhs_reg = self.load_value_typed(locs, rhs, rhs_ty, "x10");
+                    // Avoid clobbering a live lhs value when rhs has to be reloaded from stack.
+                    let rhs_scratch = if lhs_reg == "x10" || lhs_reg == "w10" {
+                        "x11"
+                    } else {
+                        "x10"
+                    };
+                    let rhs_reg = self.load_value_typed(locs, rhs, rhs_ty, rhs_scratch);
                     let dst = locs.value(result.id);
                     let dst_ty = locs.value_ty(result.id);
                     let (dst_reg, dst_slot) =
