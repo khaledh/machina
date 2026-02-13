@@ -9,7 +9,6 @@ use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::sync::OnceLock;
 
-use crate::core::capsule::bind::CapsuleBindings;
 use crate::core::capsule::compose::merge_modules;
 use crate::core::capsule::{self, ModuleId, ModulePath};
 use crate::core::diag::Span;
@@ -44,6 +43,7 @@ use crate::services::analysis::results::{
     CodeAction, CompletionItem, DocumentSymbol, HoverInfo, Location, RenamePlan, SemanticToken,
     SignatureHelp,
 };
+use crate::services::analysis::signature_help::synthesize_call_signature_sources;
 use crate::services::analysis::snapshot::{AnalysisSnapshot, FileId, SourceStore};
 
 #[derive(Default)]
@@ -301,6 +301,31 @@ impl AnalysisDb {
         Ok(type_at_span(&state, query_span))
     }
 
+    pub fn type_at_program_path(
+        &mut self,
+        path: &Path,
+        query_span: Span,
+    ) -> QueryResult<Option<Type>> {
+        self.with_file_id(
+            path,
+            || None,
+            |db, file_id| db.type_at_program_file(file_id, query_span),
+        )
+    }
+
+    pub fn type_at_program_file(
+        &mut self,
+        file_id: FileId,
+        query_span: Span,
+    ) -> QueryResult<Option<Type>> {
+        let state = if let Some(state) = self.entry_lookup_state_for_program_file(file_id)? {
+            state
+        } else {
+            self.lookup_state_for_file(file_id)?
+        };
+        Ok(type_at_span(&state, query_span))
+    }
+
     pub fn hover_at_path(
         &mut self,
         path: &Path,
@@ -471,7 +496,38 @@ impl AnalysisDb {
         query_span: Span,
     ) -> QueryResult<Option<SignatureHelp>> {
         let state = self.lookup_state_for_file(file_id)?;
-        Ok(signature_help_at_span(&state, query_span))
+        if let Some(sig) = signature_help_at_span(&state, query_span) {
+            return Ok(Some(sig));
+        }
+        self.signature_help_with_synthetic_fallback(file_id, query_span)
+    }
+
+    pub fn signature_help_at_program_path(
+        &mut self,
+        path: &Path,
+        query_span: Span,
+    ) -> QueryResult<Option<SignatureHelp>> {
+        self.with_file_id(
+            path,
+            || None,
+            |db, file_id| db.signature_help_at_program_file(file_id, query_span),
+        )
+    }
+
+    pub fn signature_help_at_program_file(
+        &mut self,
+        file_id: FileId,
+        query_span: Span,
+    ) -> QueryResult<Option<SignatureHelp>> {
+        let state = if let Some(state) = self.entry_lookup_state_for_program_file(file_id)? {
+            state
+        } else {
+            self.lookup_state_for_file(file_id)?
+        };
+        if let Some(sig) = signature_help_at_span(&state, query_span) {
+            return Ok(Some(sig));
+        }
+        self.signature_help_with_synthetic_fallback(file_id, query_span)
     }
 
     pub fn document_symbols_at_path(&mut self, path: &Path) -> QueryResult<Vec<DocumentSymbol>> {
@@ -586,6 +642,44 @@ impl AnalysisDb {
         Ok(Some(to_lookup_state(&pipeline)))
     }
 
+    fn entry_lookup_state_for_program_file(
+        &mut self,
+        file_id: FileId,
+    ) -> QueryResult<Option<LookupState>> {
+        let program = self.program_pipeline_for_file(file_id)?;
+        Ok(program
+            .entry_module_id
+            .and_then(|entry| program.module_states.get(&entry).cloned()))
+    }
+
+    fn signature_help_with_synthetic_fallback(
+        &mut self,
+        file_id: FileId,
+        query_span: Span,
+    ) -> QueryResult<Option<SignatureHelp>> {
+        let snapshot = self.snapshot();
+        let Some(source) = snapshot.text(file_id).map(|s| s.to_string()) else {
+            return Ok(None);
+        };
+
+        let mut fallback_sig = None;
+        for synthetic_source in synthesize_call_signature_sources(&source, query_span.start) {
+            let Some(synthetic_state) = self.lookup_state_for_source(file_id, synthetic_source)?
+            else {
+                continue;
+            };
+            if let Some(sig) = signature_help_at_span(&synthetic_state, query_span) {
+                if sig.def_id.is_some() {
+                    return Ok(Some(sig));
+                }
+                if fallback_sig.is_none() {
+                    fallback_sig = Some(sig);
+                }
+            }
+        }
+        Ok(fallback_sig)
+    }
+
     fn program_pipeline_for_file(&mut self, file_id: FileId) -> QueryResult<ProgramPipelineResult> {
         let snapshot = self.snapshot();
         let Some(entry_source) = snapshot.text(file_id) else {
@@ -636,7 +730,6 @@ impl AnalysisDb {
             };
             let program_context = crate::core::context::CapsuleParsedContext::new(program);
             let entry_module_id = program_context.entry();
-            let bindings = CapsuleBindings::build(&program_context);
             let mut import_facts = ProgramImportFactsCache::default();
             let prelude_module = parsed_prelude_decl_module(program_context.next_node_id_gen());
             let mut all_diagnostics = Vec::new();
@@ -653,9 +746,9 @@ impl AnalysisDb {
                     program_context.next_node_id_gen().clone(),
                 );
                 let imported_modules =
-                    import_facts.imported_modules_for(&program_context, &bindings, module_id);
+                    import_facts.imported_modules_for(&program_context, module_id);
                 let imported_symbols =
-                    import_facts.imported_symbols_for(&program_context, &bindings, module_id);
+                    import_facts.imported_symbols_for(&program_context, module_id);
                 let skip_typecheck =
                     ProgramImportFactsCache::should_skip_typecheck(&imported_symbols);
                 let state = run_module_pipeline_with_parsed_and_imports(

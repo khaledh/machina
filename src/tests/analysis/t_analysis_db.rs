@@ -854,6 +854,68 @@ fn main() -> u64 { pair(1, 2) }
 }
 
 #[test]
+fn signature_help_survives_incomplete_call_before_next_statement() {
+    let mut db = AnalysisDb::new();
+    let source = r#"
+fn add(a: u64, b: u64) -> u64 { a + b }
+fn main() -> u64 {
+    add(
+    let x = 1;
+    x
+}
+"#;
+    let file_id = db.upsert_disk_text(
+        PathBuf::from("examples/signature_help_incomplete.mc"),
+        source,
+    );
+    let query_span = cursor_after_substring(source, "    add(");
+
+    let sig = db
+        .signature_help_at_file(file_id, query_span)
+        .expect("signature help query should succeed")
+        .expect("expected signature help for incomplete call");
+
+    assert!(
+        sig.label.starts_with("add("),
+        "unexpected label: {}",
+        sig.label
+    );
+    assert_eq!(sig.parameters.len(), 2);
+    assert_eq!(sig.active_parameter, 0);
+}
+
+#[test]
+fn signature_help_survives_cursor_inside_empty_call_before_next_statement() {
+    let mut db = AnalysisDb::new();
+    let source = r#"
+fn add(a: u64, b: u64) -> u64 { a + b }
+fn main() -> u64 {
+    add()
+    let x = 1;
+    x
+}
+"#;
+    let file_id = db.upsert_disk_text(
+        PathBuf::from("examples/signature_help_empty_call_incomplete_stmt.mc"),
+        source,
+    );
+    let query_span = cursor_after_substring(source, "    add(");
+
+    let sig = db
+        .signature_help_at_file(file_id, query_span)
+        .expect("signature help query should succeed")
+        .expect("expected signature help with cursor inside empty call");
+
+    assert!(
+        sig.label.starts_with("add("),
+        "unexpected label: {}",
+        sig.label
+    );
+    assert_eq!(sig.parameters.len(), 2);
+    assert_eq!(sig.active_parameter, 0);
+}
+
+#[test]
 fn references_returns_definition_and_use_sites() {
     let mut db = AnalysisDb::new();
     let source = r#"
@@ -1689,6 +1751,100 @@ fn run() -> u64 { 1 }
 }
 
 #[test]
+fn type_at_program_file_resolves_imported_type_alias() {
+    let run_id = ANALYSIS_TMP_COUNTER.fetch_add(1, Ordering::Relaxed);
+    let temp_dir = std::env::temp_dir().join(format!(
+        "machina_analysis_program_type_symbol_import_{}_{}",
+        std::process::id(),
+        run_id
+    ));
+    let app_dir = temp_dir.join("app");
+    fs::create_dir_all(&app_dir).expect("failed to create temp module tree");
+
+    let entry_path = temp_dir.join("main.mc");
+    let dep_path = app_dir.join("dep.mc");
+    let entry_source = r#"
+requires {
+    app::dep::Num
+}
+
+fn main() -> bool {
+    let x: Num = true;
+    x
+}
+"#;
+    let dep_source = r#"
+@[public]
+type Num = bool
+"#;
+
+    fs::write(&entry_path, entry_source).expect("failed to write entry source");
+    fs::write(&dep_path, dep_source).expect("failed to write dependency source");
+
+    let mut db = AnalysisDb::new();
+    let entry_id = db.upsert_disk_text(entry_path.clone(), entry_source);
+    db.upsert_disk_text(dep_path.clone(), dep_source);
+
+    let query_span = span_for_last_substring(entry_source, "x");
+    let ty = db
+        .type_at_program_file(entry_id, query_span)
+        .expect("program type query should succeed")
+        .expect("expected type info for imported type alias");
+    assert_eq!(ty, Type::Bool);
+
+    let _ = fs::remove_dir_all(&temp_dir);
+}
+
+#[test]
+fn signature_help_at_program_file_uses_imported_callable_signature() {
+    let run_id = ANALYSIS_TMP_COUNTER.fetch_add(1, Ordering::Relaxed);
+    let temp_dir = std::env::temp_dir().join(format!(
+        "machina_analysis_program_signature_symbol_import_{}_{}",
+        std::process::id(),
+        run_id
+    ));
+    let app_dir = temp_dir.join("app");
+    fs::create_dir_all(&app_dir).expect("failed to create temp module tree");
+
+    let entry_path = temp_dir.join("main.mc");
+    let dep_path = app_dir.join("dep.mc");
+    let entry_source = r#"
+requires {
+    app::dep::run
+}
+
+fn main() -> u64 {
+    run(1, true)
+}
+"#;
+    let dep_source = r#"
+@[public]
+fn run(x: u64, y: bool) -> u64 { x }
+"#;
+
+    fs::write(&entry_path, entry_source).expect("failed to write entry source");
+    fs::write(&dep_path, dep_source).expect("failed to write dependency source");
+
+    let mut db = AnalysisDb::new();
+    let entry_id = db.upsert_disk_text(entry_path.clone(), entry_source);
+    db.upsert_disk_text(dep_path.clone(), dep_source);
+
+    let query_span = cursor_after_substring(entry_source, "1,");
+    let sig = db
+        .signature_help_at_program_file(entry_id, query_span)
+        .expect("program signature-help query should succeed")
+        .expect("expected signature help for imported callable");
+    assert!(
+        sig.label.contains("run("),
+        "expected signature label to reference callable name, got: {}",
+        sig.label
+    );
+    assert_eq!(sig.parameters.len(), 2);
+
+    let _ = fs::remove_dir_all(&temp_dir);
+}
+
+#[test]
 fn diagnostics_for_program_file_typechecks_symbol_import_calls() {
     let run_id = ANALYSIS_TMP_COUNTER.fetch_add(1, Ordering::Relaxed);
     let temp_dir = std::env::temp_dir().join(format!(
@@ -1854,6 +2010,70 @@ trait Runnable {
     );
 
     let _ = fs::remove_dir_all(&temp_dir);
+}
+
+#[test]
+fn diagnostics_for_program_file_reports_local_callsite_type_errors() {
+    let mut db = AnalysisDb::new();
+    let source = r#"
+fn foo(n: u64, fact: bool) {
+    // empty
+}
+
+fn main() {
+    foo(42, 'a');
+    foo(42);
+}
+"#;
+    let file_id = db.upsert_disk_text(
+        PathBuf::from("examples/functions_calls/basic_fn.mc"),
+        source,
+    );
+
+    let diagnostics = db
+        .diagnostics_for_program_file(file_id)
+        .expect("program diagnostics query should succeed");
+    let codes: Vec<String> = diagnostics.iter().map(|d| d.code.clone()).collect();
+    assert!(
+        codes
+            .iter()
+            .any(|code| code == "MC-TYPECHECK-ArgTypeMismatch"),
+        "expected arg type mismatch in diagnostics, got: {codes:#?}"
+    );
+    assert!(
+        codes.iter().any(|code| {
+            code == "MC-TYPECHECK-ArgCountMismatch" || code == "MC-TYPECHECK-OverloadNoMatch"
+        }),
+        "expected arity/no-match diagnostic, got: {codes:#?}"
+    );
+}
+
+#[test]
+fn diagnostics_for_program_file_call_stmt_span_excludes_semicolon() {
+    let mut db = AnalysisDb::new();
+    let source = r#"
+fn foo(n: u64, fact: bool) {
+    // empty
+}
+
+fn main() {
+    foo(42, 'a');
+}
+"#;
+    let file_id = db.upsert_disk_text(
+        PathBuf::from("examples/functions_calls/basic_fn_span.mc"),
+        source,
+    );
+
+    let diagnostics = db
+        .diagnostics_for_program_file(file_id)
+        .expect("program diagnostics query should succeed");
+    let mismatch = diagnostics
+        .iter()
+        .find(|d| d.code == "MC-TYPECHECK-ArgTypeMismatch")
+        .expect("expected arg type mismatch diagnostic");
+
+    assert_eq!(mismatch.span, span_for_substring(source, "foo(42, 'a')"));
 }
 
 fn span_for_substring(source: &str, needle: &str) -> Span {

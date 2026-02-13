@@ -13,6 +13,7 @@ use crate::services::analysis::results::DocumentSymbolKind;
 #[derive(Clone, Debug)]
 pub(crate) struct CallSite {
     pub node_id: NodeId,
+    pub callee_node_id: NodeId,
     pub span: Span,
     pub arg_spans: Vec<Span>,
 }
@@ -117,8 +118,14 @@ impl<D, T> Visitor<D, T> for CallSiteCollector {
         match &expr.kind {
             crate::core::tree::ExprKind::Call { args, .. }
             | crate::core::tree::ExprKind::MethodCall { args, .. } => {
+                let callee_node_id = match &expr.kind {
+                    crate::core::tree::ExprKind::Call { callee, .. }
+                    | crate::core::tree::ExprKind::MethodCall { callee, .. } => callee.id,
+                    _ => unreachable!(),
+                };
                 self.calls.push(CallSite {
                     node_id: expr.id,
+                    callee_node_id,
                     span: expr.span,
                     arg_spans: args.iter().map(|arg| arg.span).collect(),
                 });

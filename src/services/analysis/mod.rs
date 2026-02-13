@@ -13,5 +13,6 @@ pub mod program_imports;
 pub mod query;
 pub mod rename;
 pub mod results;
+pub mod signature_help;
 pub mod snapshot;
 pub mod syntax_index;

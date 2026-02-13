@@ -3,6 +3,8 @@
 use serde_json::{Map, Value, json};
 use std::path::Path;
 
+use machina::services::analysis::snapshot::FileId;
+
 use crate::session::{AnalysisSession, SessionError};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -73,7 +75,10 @@ pub fn handle_message(
                         "definitionProvider": true,
                         "referencesProvider": false,
                         "renameProvider": false,
-                        "signatureHelpProvider": Value::Null,
+                        "signatureHelpProvider": {
+                            "triggerCharacters": ["(", ","],
+                            "retriggerCharacters": [","]
+                        },
                         "semanticTokensProvider": Value::Null,
                         "documentSymbolProvider": false,
                         "codeActionProvider": true
@@ -190,6 +195,32 @@ pub fn handle_message(
             };
             let response =
                 completion_response(session, id, &params.uri, params.line0, params.col0, version);
+            (HandlerAction::Continue, Some(response))
+        }
+        Some("textDocument/signatureHelp") => {
+            let Some(params) = params.and_then(parse_read_request_params) else {
+                return (HandlerAction::Continue, invalid_params_response(id));
+            };
+            let Some(id) = id else {
+                return (HandlerAction::Continue, None);
+            };
+            let version = match read_request_version(session, &params) {
+                Ok(version) => version,
+                Err(error) => {
+                    return (
+                        HandlerAction::Continue,
+                        Some(session_error_response(id, &error)),
+                    );
+                }
+            };
+            let response = signature_help_response(
+                session,
+                id,
+                &params.uri,
+                params.line0,
+                params.col0,
+                version,
+            );
             (HandlerAction::Continue, Some(response))
         }
         Some("textDocument/codeAction") => {
@@ -400,6 +431,9 @@ fn hover_response(
         Ok(file_id) => file_id,
         Err(error) => return session_error_response(id, &error),
     };
+    if is_position_in_line_comment(session, file_id, line0, col0) {
+        return json!({"jsonrpc":"2.0","id":id,"result": Value::Null});
+    }
     let span = span_from_lsp_position(line0, col0);
     let result = session.execute_query(|db| db.hover_at_program_file(file_id, span));
     if !matches!(session.is_current_version(uri, version), Ok(true)) {
@@ -411,8 +445,8 @@ fn hover_response(
             "id": id,
             "result": {
                 "contents": {
-                    "kind": "plaintext",
-                    "value": hover.display
+                    "kind": "markdown",
+                    "value": hover_markdown_value(&hover.display)
                 },
                 "range": {
                     "start": {"line": hover.span.start.line.saturating_sub(1), "character": hover.span.start.column.saturating_sub(1)},
@@ -423,6 +457,77 @@ fn hover_response(
         Ok(None) => json!({"jsonrpc":"2.0","id":id,"result": Value::Null}),
         Err(_) => session_error_response(id, &SessionError::Cancelled),
     }
+}
+
+fn hover_markdown_value(display: &str) -> String {
+    let escaped = display.replace("```", "\\`\\`\\`");
+    format!("```machina\n{escaped}\n```")
+}
+
+fn is_position_in_line_comment(
+    session: &AnalysisSession,
+    file_id: FileId,
+    line0: usize,
+    col0: usize,
+) -> bool {
+    let snapshot = session.snapshot();
+    let Some(source) = snapshot.text(file_id) else {
+        return false;
+    };
+    let Some(line) = source.lines().nth(line0) else {
+        return false;
+    };
+    is_column_in_line_comment(line, col0)
+}
+
+fn is_column_in_line_comment(line: &str, col0: usize) -> bool {
+    let chars: Vec<char> = line.chars().collect();
+    let mut i = 0usize;
+    let mut in_string = false;
+    let mut in_char = false;
+    let mut escaped = false;
+
+    while i + 1 < chars.len() {
+        let ch = chars[i];
+        if in_string {
+            if escaped {
+                escaped = false;
+            } else if ch == '\\' {
+                escaped = true;
+            } else if ch == '"' {
+                in_string = false;
+            }
+            i += 1;
+            continue;
+        }
+        if in_char {
+            if escaped {
+                escaped = false;
+            } else if ch == '\\' {
+                escaped = true;
+            } else if ch == '\'' {
+                in_char = false;
+            }
+            i += 1;
+            continue;
+        }
+
+        if ch == '"' {
+            in_string = true;
+            i += 1;
+            continue;
+        }
+        if ch == '\'' {
+            in_char = true;
+            i += 1;
+            continue;
+        }
+        if ch == '/' && chars[i + 1] == '/' {
+            return col0 >= i;
+        }
+        i += 1;
+    }
+    false
 }
 
 fn definition_response(
@@ -531,6 +636,51 @@ fn completion_response(
                 }
             })
         }
+        Err(_) => session_error_response(id, &SessionError::Cancelled),
+    }
+}
+
+fn signature_help_response(
+    session: &mut AnalysisSession,
+    id: Value,
+    uri: &str,
+    line0: usize,
+    col0: usize,
+    version: i32,
+) -> Value {
+    if !matches!(session.is_current_version(uri, version), Ok(true)) {
+        return stale_result_response(id);
+    }
+    let file_id = match session.file_id_for_uri(uri) {
+        Ok(file_id) => file_id,
+        Err(error) => return session_error_response(id, &error),
+    };
+    let span = span_from_lsp_position(line0, col0);
+    let result = session.execute_query(|db| db.signature_help_at_program_file(file_id, span));
+    if !matches!(session.is_current_version(uri, version), Ok(true)) {
+        return stale_result_response(id);
+    }
+    match result {
+        Ok(Some(sig)) => {
+            let parameters: Vec<Value> = sig
+                .parameters
+                .iter()
+                .map(|param| json!({ "label": param }))
+                .collect();
+            json!({
+                "jsonrpc": "2.0",
+                "id": id,
+                "result": {
+                    "signatures": [{
+                        "label": sig.label,
+                        "parameters": parameters
+                    }],
+                    "activeSignature": 0,
+                    "activeParameter": sig.active_parameter
+                }
+            })
+        }
+        Ok(None) => json!({"jsonrpc":"2.0","id":id,"result": Value::Null}),
         Err(_) => session_error_response(id, &SessionError::Cancelled),
     }
 }
@@ -925,6 +1075,11 @@ mod tests {
         );
         let response = response.expect("expected hover response");
         assert_eq!(response["id"], 50);
+        assert_eq!(response["result"]["contents"]["kind"], "markdown");
+        let value = response["result"]["contents"]["value"]
+            .as_str()
+            .expect("hover markdown value should be a string");
+        assert!(value.starts_with("```machina\n"));
     }
 
     #[test]
@@ -955,6 +1110,40 @@ mod tests {
                     "textDocument": { "uri": "file:///tmp/lsp-hover-stale.mc" },
                     "position": { "line": 0, "character": 1 },
                     "mcDocVersion": 9
+                }
+            }),
+        );
+        let response = response.expect("expected hover response");
+        assert_eq!(response["result"], Value::Null);
+    }
+
+    #[test]
+    fn hover_request_returns_null_over_line_comment() {
+        let mut session = AnalysisSession::new();
+        let _ = handle_message(
+            &mut session,
+            json!({
+                "jsonrpc": "2.0",
+                "method": "textDocument/didOpen",
+                "params": {
+                    "textDocument": {
+                        "uri": "file:///tmp/lsp-hover-comment.mc",
+                        "version": 1,
+                        "languageId": "machina",
+                        "text": "fn main() {\n    // comment text\n    let x = 1;\n}\n"
+                    }
+                }
+            }),
+        );
+        let (_action, response) = handle_message(
+            &mut session,
+            json!({
+                "jsonrpc": "2.0",
+                "id": 511,
+                "method": "textDocument/hover",
+                "params": {
+                    "textDocument": { "uri": "file:///tmp/lsp-hover-comment.mc" },
+                    "position": { "line": 1, "character": 8 }
                 }
             }),
         );
@@ -1181,6 +1370,98 @@ fn run() -> u64 { 1 }
         let completion = completion.expect("expected completion response");
         assert_eq!(completion["id"], 72);
         assert!(completion.get("error").is_none());
+
+        let (_signature_action, signature) = handle_message(
+            &mut session,
+            json!({
+                "jsonrpc": "2.0",
+                "id": 73,
+                "method": "textDocument/signatureHelp",
+                "params": {
+                    "textDocument": { "uri": "file:///tmp/lsp-read-no-version.mc" },
+                    "position": { "line": 0, "character": 1 }
+                }
+            }),
+        );
+        let signature = signature.expect("expected signature-help response");
+        assert_eq!(signature["id"], 73);
+        assert!(signature.get("error").is_none());
+    }
+
+    #[test]
+    fn signature_help_request_uses_program_aware_imported_callable_signature() {
+        let run_id = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .expect("system time should be valid")
+            .as_nanos();
+        let temp_dir = std::env::temp_dir().join(format!(
+            "machina_lsp_signature_import_{}_{}",
+            std::process::id(),
+            run_id
+        ));
+        let app_dir = temp_dir.join("app");
+        std::fs::create_dir_all(&app_dir).expect("failed to create temp module tree");
+
+        let entry_path = temp_dir.join("main.mc");
+        let dep_path = app_dir.join("dep.mc");
+        let entry_source = r#"requires {
+    app::dep::run
+}
+
+fn main() -> u64 {
+    run(1, true)
+}"#;
+        let dep_source = r#"@[public]
+fn run(x: u64, y: bool) -> u64 { x }
+"#;
+        std::fs::write(&entry_path, entry_source).expect("failed to write entry source");
+        std::fs::write(&dep_path, dep_source).expect("failed to write dependency source");
+        let entry_uri = format!("file://{}", entry_path.to_string_lossy());
+
+        let mut session = AnalysisSession::new();
+        let _ = handle_message(
+            &mut session,
+            json!({
+                "jsonrpc": "2.0",
+                "method": "textDocument/didOpen",
+                "params": {
+                    "textDocument": {
+                        "uri": entry_uri,
+                        "version": 1,
+                        "languageId": "machina",
+                        "text": entry_source
+                    }
+                }
+            }),
+        );
+
+        let (_action, response) = handle_message(
+            &mut session,
+            json!({
+                "jsonrpc": "2.0",
+                "id": 92,
+                "method": "textDocument/signatureHelp",
+                "params": {
+                    "textDocument": { "uri": entry_uri },
+                    "position": { "line": 5, "character": 11 },
+                    "mcDocVersion": 1
+                }
+            }),
+        );
+
+        let response = response.expect("expected signature-help response");
+        assert_eq!(response["id"], 92);
+        assert!(
+            response["result"]["signatures"][0]["label"]
+                .as_str()
+                .unwrap_or_default()
+                .contains("run("),
+            "expected imported callable signature label, got: {}",
+            response
+        );
+        assert_eq!(response["result"]["activeParameter"], 1);
+
+        let _ = std::fs::remove_dir_all(&temp_dir);
     }
 
     #[test]

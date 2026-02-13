@@ -131,25 +131,64 @@ pub(crate) fn signature_help_at_span(
 ) -> Option<SignatureHelp> {
     let typed = state.typed.as_ref()?;
     let call = call_site_at_span(&typed.module, query_span)?;
-    let sig = typed.call_sigs.get(&call.node_id)?;
-
-    let mut params = Vec::with_capacity(sig.params.len());
-    for param in &sig.params {
-        params.push(format!("{} {}", param_mode_name(&param.mode), param.ty));
+    let mut provisional = None;
+    if let Some(sig) = typed.call_sigs.get(&call.node_id) {
+        let mut params = Vec::with_capacity(sig.params.len());
+        for param in &sig.params {
+            params.push(format!("{} {}", param_mode_name(&param.mode), param.ty));
+        }
+        let active_parameter = active_param_index(&call.arg_spans, query_span.start);
+        let name = sig
+            .def_id
+            .and_then(|id| typed.def_table.lookup_def(id).map(|d| d.name.clone()))
+            .unwrap_or_else(|| "<call>".to_string());
+        let label = format!("{name}({})", params.join(", "));
+        let help = SignatureHelp {
+            label,
+            def_id: sig.def_id,
+            active_parameter,
+            parameters: params,
+        };
+        if help.def_id.is_some() {
+            return Some(help);
+        }
+        provisional = Some(help);
     }
-    let active_parameter = active_param_index(&call.arg_spans, query_span.start);
-    let name = sig
-        .def_id
+
+    // Fallback for incomplete/mismatched calls where call-site resolution did
+    // not produce `call_sigs`: derive the callable signature from the callee
+    // expression type.
+    let callee_ty = typed.type_map.lookup_node_type(call.callee_node_id)?;
+    let crate::core::types::Type::Fn { params, .. } = callee_ty else {
+        return None;
+    };
+    let parameters: Vec<String> = params
+        .iter()
+        .map(|param| format!("{} {}", fn_param_mode_name(&param.mode), param.ty))
+        .collect();
+    let def_id = typed
+        .def_table
+        .lookup_node_def_id(call.callee_node_id)
+        .filter(|id| *id != UNKNOWN_DEF_ID);
+    let name = def_id
         .and_then(|id| typed.def_table.lookup_def(id).map(|d| d.name.clone()))
         .unwrap_or_else(|| "<call>".to_string());
-    let label = format!("{name}({})", params.join(", "));
-
-    Some(SignatureHelp {
+    let label = format!("{name}({})", parameters.join(", "));
+    let active_parameter = active_param_index(&call.arg_spans, query_span.start);
+    if def_id.is_some() {
+        return Some(SignatureHelp {
+            label,
+            def_id,
+            active_parameter,
+            parameters,
+        });
+    }
+    provisional.or(Some(SignatureHelp {
         label,
-        def_id: sig.def_id,
+        def_id,
         active_parameter,
-        parameters: params,
-    })
+        parameters,
+    }))
 }
 
 pub(crate) fn document_symbols(state: &LookupState) -> Vec<DocumentSymbol> {
@@ -282,5 +321,14 @@ fn param_mode_name(mode: &crate::core::tree::ParamMode) -> &'static str {
         crate::core::tree::ParamMode::InOut => "inout",
         crate::core::tree::ParamMode::Out => "out",
         crate::core::tree::ParamMode::Sink => "sink",
+    }
+}
+
+fn fn_param_mode_name(mode: &crate::core::types::FnParamMode) -> &'static str {
+    match mode {
+        crate::core::types::FnParamMode::In => "in",
+        crate::core::types::FnParamMode::InOut => "inout",
+        crate::core::types::FnParamMode::Out => "out",
+        crate::core::types::FnParamMode::Sink => "sink",
     }
 }
