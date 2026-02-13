@@ -69,8 +69,8 @@ fn borrow_mut() {
 fn borrow_after_last_call() {
     // Allowed: base used after the closure's last call.
     var n = 1;
-    let get = || -> u64 n;
-    let v = get();
+    let get_n = || -> u64 n;
+    let v = get_n();
     n = n + 1;
     println(f"v={v}, n={n}");
 }
