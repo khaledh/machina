@@ -98,9 +98,30 @@ pub fn query_parse_resolve_typecheck(
     // parsed AST currently comes from the existing parser entrypoint.
     let parse_key = QueryKey::new(QueryKind::ParseModule, module_id, revision);
     let parsed = db.execute_query(parse_key, move |_rt| Ok(parsed))?;
-
-    let resolved = query_resolve(db, module_id, revision, parsed, top_level_owners)?;
-    let typed = query_typecheck(db, module_id, revision, resolved.clone())?;
+    let pipeline = crate::core::api::resolve_typecheck_pipeline_with_policy(
+        parsed,
+        ResolveInputs::default(),
+        Some(&top_level_owners),
+        FrontendPolicy::Strict,
+    );
+    if !pipeline.resolve_errors.is_empty() {
+        return Err(BatchQueryError::Resolve(pipeline.resolve_errors));
+    }
+    if !pipeline.type_errors.is_empty() {
+        return Err(BatchQueryError::TypeCheck(pipeline.type_errors));
+    }
+    let resolved = ResolvedModuleResult::from_context(
+        module_id,
+        pipeline
+            .resolved_context
+            .expect("strict resolve should produce context on success"),
+    );
+    let typed = TypedModuleResult::from_context(
+        module_id,
+        pipeline
+            .typed_context
+            .expect("strict typecheck should produce context on success"),
+    );
     Ok((resolved, typed))
 }
 

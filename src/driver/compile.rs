@@ -3,8 +3,7 @@ use std::path::PathBuf;
 
 use crate::core::api::{
     FrontendPolicy, ParseModuleError, ResolveInputs, elaborate_stage, normalize_stage,
-    parse_module_with_id_gen, resolve_stage_with_policy, semcheck_stage,
-    typecheck_stage_with_policy,
+    parse_module_with_id_gen, semcheck_stage, typecheck_stage_with_policy,
 };
 use crate::core::backend;
 use crate::core::backend::regalloc::arm64::Arm64Target;
@@ -347,37 +346,31 @@ fn resolve_and_typecheck_strict(
     ),
     Vec<CompileError>,
 > {
-    let resolved = resolve_stage_with_policy(
+    let first_pass = crate::core::api::resolve_typecheck_pipeline_with_policy(
         ast_context,
         ResolveInputs::default(),
+        Some(top_level_owners),
         FrontendPolicy::Strict,
     );
-    if resolved.has_errors() {
-        return Err(resolved
-            .errors
+    if !first_pass.resolve_errors.is_empty() {
+        return Err(first_pass
+            .resolve_errors
             .into_iter()
             .map(CompileError::from)
             .collect());
     }
-    let resolved_context = resolved
-        .context
+    if !first_pass.type_errors.is_empty() {
+        return Err(first_pass
+            .type_errors
+            .into_iter()
+            .map(CompileError::from)
+            .collect());
+    }
+    let resolved_context = first_pass
+        .resolved_context
         .expect("strict resolve should produce context when no errors");
-    let resolved_context = attach_def_owners(resolved_context, top_level_owners);
-
-    let typechecked = typecheck_stage_with_policy(
-        resolved_context.clone(),
-        resolved.imported_facts,
-        FrontendPolicy::Strict,
-    );
-    if typechecked.has_errors() {
-        return Err(typechecked
-            .errors
-            .into_iter()
-            .map(CompileError::from)
-            .collect());
-    }
-    let mut typed_context = typechecked
-        .context
+    let mut typed_context = first_pass
+        .typed_context
         .expect("strict typecheck should produce context when no errors");
 
     if !typed_context.generic_insts.is_empty() {

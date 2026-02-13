@@ -7,6 +7,7 @@ use std::collections::{HashMap, HashSet};
 
 use thiserror::Error;
 
+use crate::core::capsule::ModuleId;
 use crate::core::context::{
     ElaborateStageInput, ElaborateStageOutput, NormalizeStageInput, NormalizeStageOutput,
     ResolveStageInput, SemCheckStageInput, SemCheckStageOutput, TypecheckStageInput,
@@ -17,7 +18,7 @@ use crate::core::lexer::{LexError, Lexer, Token};
 use crate::core::normalize;
 use crate::core::parse::{ParseError, Parser};
 use crate::core::resolve::{
-    ImportedFacts, ImportedModule, ImportedSymbol, ResolveError, ResolveOutput,
+    ImportedFacts, ImportedModule, ImportedSymbol, ResolveError, ResolveOutput, attach_def_owners,
     resolve_with_imports_and_symbols_partial,
 };
 use crate::core::semck::{self, SemCheckError};
@@ -91,6 +92,52 @@ pub struct SemcheckStageResult {
 impl SemcheckStageResult {
     pub fn has_errors(&self) -> bool {
         !self.errors.is_empty()
+    }
+}
+
+/// Unified resolve+typecheck result for strict/partial orchestration.
+#[derive(Clone, Default)]
+pub struct ResolveTypecheckPipelineResult {
+    pub resolved_context: Option<TypecheckStageInput>,
+    pub imported_facts: ImportedFacts,
+    pub resolve_errors: Vec<ResolveError>,
+    pub typed_context: Option<TypecheckStageOutput>,
+    pub type_errors: Vec<TypeCheckError>,
+}
+
+impl ResolveTypecheckPipelineResult {
+    pub fn has_errors(&self) -> bool {
+        !self.resolve_errors.is_empty() || !self.type_errors.is_empty()
+    }
+}
+
+/// Shared frontend orchestrator used by both batch driver and analysis batch
+/// paths. Runs resolve, applies optional owner metadata, then runs typecheck.
+pub fn resolve_typecheck_pipeline_with_policy(
+    input: ResolveStageInput,
+    resolve_inputs: ResolveInputs,
+    top_level_owners: Option<&HashMap<NodeId, ModuleId>>,
+    policy: FrontendPolicy,
+) -> ResolveTypecheckPipelineResult {
+    let resolved = resolve_stage_with_policy(input, resolve_inputs, policy);
+    let resolved_context = if let Some(owners) = top_level_owners {
+        resolved.context.map(|ctx| attach_def_owners(ctx, owners))
+    } else {
+        resolved.context
+    };
+
+    let typechecked = if let Some(ctx) = resolved_context.clone() {
+        typecheck_stage_with_policy(ctx, resolved.imported_facts.clone(), policy)
+    } else {
+        TypecheckStageResult::default()
+    };
+
+    ResolveTypecheckPipelineResult {
+        resolved_context,
+        imported_facts: resolved.imported_facts,
+        resolve_errors: resolved.errors,
+        typed_context: typechecked.context,
+        type_errors: typechecked.errors,
     }
 }
 

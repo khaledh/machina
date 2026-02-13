@@ -1,6 +1,6 @@
 use crate::core::api::{
     FrontendPolicy, ResolveInputs, parse_module_with_id_gen, resolve_stage_with_policy,
-    typecheck_stage_with_policy,
+    resolve_typecheck_pipeline_with_policy, typecheck_stage_with_policy,
 };
 use crate::core::context::ParsedContext;
 use crate::core::tree::NodeIdGen;
@@ -64,4 +64,34 @@ fn main() -> u64 {
     );
     assert!(partial.has_errors());
     assert!(partial.context.is_some());
+}
+
+#[test]
+fn resolve_typecheck_pipeline_policy_strict_vs_partial() {
+    let source = r#"
+fn main() -> u64 {
+    missing()
+}
+"#;
+    let parsed = parsed_context(source);
+
+    let strict = resolve_typecheck_pipeline_with_policy(
+        parsed.clone(),
+        ResolveInputs::default(),
+        None,
+        FrontendPolicy::Strict,
+    );
+    assert!(strict.has_errors());
+    assert!(strict.resolved_context.is_none());
+    assert!(strict.typed_context.is_none());
+
+    let partial = resolve_typecheck_pipeline_with_policy(
+        parsed,
+        ResolveInputs::default(),
+        None,
+        FrontendPolicy::Partial,
+    );
+    assert!(partial.has_errors());
+    assert!(partial.resolved_context.is_some());
+    assert!(partial.typed_context.is_some());
 }
