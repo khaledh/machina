@@ -357,3 +357,7 @@ pub fn elaborate_stage(input: ElaborateStageInput) -> ElaborateStageOutput {
 #[cfg(test)]
 #[path = "../../tests/core/t_api.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "../../tests/core/t_frontend_parity.rs"]
+mod tests_frontend_parity;
