@@ -48,15 +48,7 @@ pub(crate) fn snapshot_text_for_path(snapshot: &AnalysisSnapshot, path: &Path) -
 }
 
 pub(crate) fn infer_project_root(entry_file: &Path) -> PathBuf {
-    for ancestor in entry_file.ancestors() {
-        if ancestor.join("Cargo.toml").exists() {
-            return ancestor.to_path_buf();
-        }
-    }
-    entry_file
-        .parent()
-        .unwrap_or_else(|| Path::new("."))
-        .to_path_buf()
+    capsule::infer_capsule_root(entry_file)
 }
 
 pub(crate) fn stable_source_revision(source: &str) -> u64 {

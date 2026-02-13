@@ -448,8 +448,16 @@ fn parse_module(
 }
 
 fn infer_project_root(entry_file: &Path) -> PathBuf {
+    if let Some(root) = infer_env_capsule_root(entry_file) {
+        return root;
+    }
     for ancestor in entry_file.ancestors() {
-        if ancestor.join("Cargo.toml").exists() {
+        if ancestor.join("machina.toml").exists() {
+            return ancestor.to_path_buf();
+        }
+    }
+    for ancestor in entry_file.ancestors() {
+        if ancestor.join(".git").exists() {
             return ancestor.to_path_buf();
         }
     }
@@ -457,6 +465,28 @@ fn infer_project_root(entry_file: &Path) -> PathBuf {
         .parent()
         .unwrap_or_else(|| Path::new("."))
         .to_path_buf()
+}
+
+fn infer_env_capsule_root(entry_file: &Path) -> Option<PathBuf> {
+    let configured = std::env::var_os("MACHINA_CAPSULE_ROOT")?;
+    let configured = PathBuf::from(configured);
+    let configured = configured.canonicalize().ok().unwrap_or(configured);
+    if !configured.is_dir() {
+        return None;
+    }
+    let entry = entry_file
+        .canonicalize()
+        .ok()
+        .unwrap_or_else(|| entry_file.to_path_buf());
+    if entry.starts_with(&configured) {
+        Some(configured)
+    } else {
+        None
+    }
+}
+
+pub fn infer_capsule_root(entry_file: &Path) -> PathBuf {
+    infer_project_root(entry_file)
 }
 
 fn ensure_acyclic(
@@ -514,6 +544,10 @@ fn ensure_acyclic(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::fs;
+    use std::sync::atomic::{AtomicU64, Ordering};
+
+    static CAPSULE_TMP_COUNTER: AtomicU64 = AtomicU64::new(1);
 
     struct MockLoader {
         modules: HashMap<String, String>,
@@ -701,5 +735,46 @@ mod tests {
             err,
             CapsuleError::SymbolImportAliasUnsupported { .. }
         ));
+    }
+
+    #[test]
+    fn infer_capsule_root_uses_git_workspace_without_cargo() {
+        let run_id = CAPSULE_TMP_COUNTER.fetch_add(1, Ordering::Relaxed);
+        let temp_root = std::env::temp_dir().join(format!(
+            "machina_capsule_root_git_{}_{}",
+            std::process::id(),
+            run_id
+        ));
+        let src_dir = temp_root.join("app").join("src");
+        fs::create_dir_all(&src_dir).expect("failed to create temp source tree");
+        fs::create_dir_all(temp_root.join(".git")).expect("failed to create fake git dir");
+        let entry = src_dir.join("main.mc");
+        fs::write(&entry, "fn main() -> u64 { 0 }").expect("failed to write entry file");
+
+        let inferred = infer_capsule_root(&entry);
+        assert_eq!(inferred, temp_root);
+
+        let _ = fs::remove_dir_all(&temp_root);
+    }
+
+    #[test]
+    fn infer_capsule_root_prefers_machina_toml_anchor() {
+        let run_id = CAPSULE_TMP_COUNTER.fetch_add(1, Ordering::Relaxed);
+        let temp_root = std::env::temp_dir().join(format!(
+            "machina_capsule_root_anchor_{}_{}",
+            std::process::id(),
+            run_id
+        ));
+        let nested = temp_root.join("workspace").join("pkg").join("src");
+        fs::create_dir_all(&nested).expect("failed to create temp source tree");
+        fs::write(temp_root.join("workspace").join("machina.toml"), "")
+            .expect("failed to create capsule root config");
+        let entry = nested.join("main.mc");
+        fs::write(&entry, "fn main() -> u64 { 0 }").expect("failed to write entry file");
+
+        let inferred = infer_capsule_root(&entry);
+        assert_eq!(inferred, temp_root.join("workspace"));
+
+        let _ = fs::remove_dir_all(&temp_root);
     }
 }
