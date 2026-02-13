@@ -15,7 +15,7 @@ use crate::core::context::{
     ImportEnv, ImportedSymbolBinding, ModuleExportFacts, ModuleImportBinding,
 };
 use crate::core::diag::Span;
-use crate::core::resolve::{DefId, DefKind, GlobalDefId};
+use crate::core::resolve::{DefId, DefKind, DefLocation, GlobalDefId};
 use crate::core::tree::NodeId;
 use crate::core::types::Type;
 use crate::core::{api, resolve};
@@ -228,19 +228,6 @@ impl AnalysisDb {
         let Some(entry_resolved) = entry_state.resolved.as_ref() else {
             return Ok(None);
         };
-
-        if let Some(entry_def) = entry_resolved.def_table.lookup_def(def_id)
-            && entry_def.is_runtime()
-            && let Some((prelude_path, prelude_span)) =
-                prelude_decl_runtime_def_location(&entry_def.name)
-        {
-            let target_file_id = snapshot.file_id(&prelude_path).unwrap_or(file_id);
-            return Ok(Some(Location {
-                file_id: target_file_id,
-                path: Some(prelude_path),
-                span: prelude_span,
-            }));
-        }
 
         let target = entry_resolved
             .def_table
@@ -737,7 +724,7 @@ impl AnalysisDb {
                     import_facts.imported_symbols_for(&program_context, module_id);
                 let skip_typecheck =
                     ProgramImportFactsCache::should_skip_typecheck(&imported_symbols);
-                let state = run_module_pipeline_with_parsed_and_imports(
+                let mut state = run_module_pipeline_with_parsed_and_imports(
                     rt,
                     module_id,
                     module_revision,
@@ -747,7 +734,8 @@ impl AnalysisDb {
                     imported_symbols,
                     skip_typecheck,
                 )?;
-                if let Some(resolved) = &state.resolved.product {
+                if let Some(resolved) = &mut state.resolved.product {
+                    apply_prelude_runtime_def_locations(parsed, resolved);
                     import_facts.ingest_resolved(module_id, resolved);
                     let exports = collect_module_export_facts(
                         module_id,
@@ -1012,16 +1000,37 @@ fn prelude_decl_path() -> PathBuf {
         .join("prelude_decl.mc")
 }
 
-fn prelude_decl_runtime_def_location(name: &str) -> Option<(PathBuf, Span)> {
-    static PRELUDE_RUNTIME_SPANS: OnceLock<HashMap<String, Span>> = OnceLock::new();
-    let spans = PRELUDE_RUNTIME_SPANS.get_or_init(build_prelude_runtime_spans);
-    spans
-        .get(name)
-        .copied()
-        .map(|span| (prelude_decl_path(), span))
+fn apply_prelude_runtime_def_locations(
+    parsed: &crate::core::capsule::ParsedModule,
+    resolved: &mut crate::core::context::ResolvedContext,
+) {
+    if is_std_prelude_decl(parsed) {
+        return;
+    }
+    let runtime_locations = prelude_decl_runtime_locations();
+    if runtime_locations.is_empty() {
+        return;
+    }
+    let runtime_defs: Vec<(DefId, String)> = resolved
+        .def_table
+        .defs()
+        .iter()
+        .filter(|def| def.is_runtime())
+        .map(|def| (def.id, def.name.clone()))
+        .collect();
+    for (def_id, name) in runtime_defs {
+        if let Some(loc) = runtime_locations.get(&name) {
+            resolved.def_table.set_def_location(def_id, loc.clone());
+        }
+    }
 }
 
-fn build_prelude_runtime_spans() -> HashMap<String, Span> {
+fn prelude_decl_runtime_locations() -> &'static HashMap<String, DefLocation> {
+    static PRELUDE_RUNTIME_LOCATIONS: OnceLock<HashMap<String, DefLocation>> = OnceLock::new();
+    PRELUDE_RUNTIME_LOCATIONS.get_or_init(build_prelude_runtime_locations)
+}
+
+fn build_prelude_runtime_locations() -> HashMap<String, DefLocation> {
     let prelude_path = prelude_decl_path();
     let Ok(prelude_src) = std::fs::read_to_string(prelude_path) else {
         return HashMap::new();
@@ -1031,19 +1040,20 @@ fn build_prelude_runtime_spans() -> HashMap<String, Span> {
     else {
         return HashMap::new();
     };
-    let parsed = crate::core::context::ParsedContext::new(module, id_gen);
+    let parsed = crate::core::context::ParsedContext::new(module, id_gen)
+        .with_source_path(prelude_decl_path());
     let resolved = api::resolve_stage_partial(parsed, HashMap::new(), HashMap::new());
-    let mut spans = HashMap::new();
+    let mut locations = HashMap::new();
     for def in resolved.context.def_table.defs() {
         if !def.is_runtime() {
             continue;
         }
-        let Some(span) = resolved.context.def_table.lookup_def_span(def.id) else {
+        let Some(loc) = resolved.context.def_table.lookup_def_location(def.id) else {
             continue;
         };
-        spans.insert(def.name.clone(), span);
+        locations.insert(def.name.clone(), loc);
     }
-    spans
+    locations
 }
 
 #[cfg(test)]

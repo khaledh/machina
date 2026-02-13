@@ -137,6 +137,53 @@ fn test_resolve_program_sets_def_table_source_paths() {
 }
 
 #[test]
+fn test_resolve_def_locations_cover_type_trait_and_method_defs() {
+    let source = r#"
+        type Point = { x: u64 }
+
+        trait Runnable {
+            fn run(self);
+        }
+
+        Point :: {
+            fn run(self) {}
+        }
+    "#;
+    let resolved = resolve_source(source).expect("resolve should succeed");
+
+    let type_def = resolved
+        .def_table
+        .defs()
+        .iter()
+        .find(|def| def.name == "Point" && matches!(def.kind, DefKind::TypeDef { .. }))
+        .expect("type def should exist");
+    let trait_def = resolved
+        .def_table
+        .defs()
+        .iter()
+        .find(|def| def.name == "Runnable" && matches!(def.kind, DefKind::TraitDef { .. }))
+        .expect("trait def should exist");
+    let method_def = resolved
+        .def_table
+        .defs()
+        .iter()
+        .find(|def| def.name == "run" && matches!(def.kind, DefKind::FuncDef { .. }))
+        .expect("method def should exist");
+
+    for def in [type_def, trait_def, method_def] {
+        let loc = resolved
+            .def_table
+            .lookup_def_location(def.id)
+            .expect("def location should be available");
+        assert!(
+            loc.span.start.line > 0,
+            "expected non-zero line for {}",
+            def.name
+        );
+    }
+}
+
+#[test]
 fn test_resolve_program_tracks_imported_symbol_origins() {
     let entry_src = r#"
         requires {

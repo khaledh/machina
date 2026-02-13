@@ -17,6 +17,7 @@ pub struct DefTableBuilder {
     node_def: HashMap<NodeId, DefId>,
     def_node: HashMap<DefId, NodeId>,
     def_span: HashMap<DefId, Span>,
+    def_location_overrides: HashMap<DefId, DefLocation>,
 }
 
 impl Default for DefTableBuilder {
@@ -32,6 +33,7 @@ impl DefTableBuilder {
             node_def: HashMap::new(),
             def_node: HashMap::new(),
             def_span: HashMap::new(),
+            def_location_overrides: HashMap::new(),
         }
     }
 
@@ -54,6 +56,7 @@ impl DefTableBuilder {
                 node_def: node_def.clone(),
                 def_node: self.def_node,
                 def_span: self.def_span,
+                def_location_overrides: self.def_location_overrides,
                 source_path: None,
             },
             NodeDefLookup { node_def },
@@ -69,6 +72,7 @@ pub struct DefTable {
     node_def: HashMap<NodeId, DefId>,
     def_node: HashMap<DefId, NodeId>,
     def_span: HashMap<DefId, Span>,
+    def_location_overrides: HashMap<DefId, DefLocation>,
     source_path: Option<PathBuf>,
 }
 
@@ -79,6 +83,7 @@ impl DefTable {
             node_def: HashMap::new(),
             def_node: HashMap::new(),
             def_span: HashMap::new(),
+            def_location_overrides: HashMap::new(),
             source_path: None,
         }
     }
@@ -106,6 +111,9 @@ impl DefTable {
     }
 
     pub fn lookup_def_location(&self, def_id: DefId) -> Option<DefLocation> {
+        if let Some(loc) = self.def_location_overrides.get(&def_id) {
+            return Some(loc.clone());
+        }
         let span = self.lookup_def_span(def_id)?;
         Some(DefLocation {
             path: self.source_path.clone(),
@@ -119,6 +127,10 @@ impl DefTable {
 
     pub fn set_source_path(&mut self, source_path: Option<PathBuf>) {
         self.source_path = source_path;
+    }
+
+    pub fn set_def_location(&mut self, def_id: DefId, location: DefLocation) {
+        self.def_location_overrides.insert(def_id, location);
     }
 
     pub fn is_intrinsic(&self, def_id: DefId) -> bool {
@@ -217,5 +229,60 @@ impl fmt::Display for NodeDefLookup {
             writeln!(f, "Node [{}] -> Def [{}]", node, def)?;
         }
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::path::PathBuf;
+
+    #[test]
+    fn def_location_uses_override_when_present() {
+        let def_id = DefId(0);
+        let mut builder = DefTableBuilder::new();
+        builder.record_def(
+            Def {
+                id: def_id,
+                name: "f".to_string(),
+                kind: DefKind::FuncDef {
+                    attrs: crate::core::resolve::FuncAttrs::default(),
+                },
+            },
+            NodeId(1),
+            Span::default(),
+        );
+        let (mut table, _) = builder.finish();
+        let source_path = PathBuf::from("main.mc");
+        table.set_source_path(Some(source_path.clone()));
+
+        let default_loc = table
+            .lookup_def_location(def_id)
+            .expect("expected default location");
+        assert_eq!(default_loc.path.as_deref(), Some(source_path.as_path()));
+
+        let override_loc = DefLocation {
+            path: Some(PathBuf::from("std/prelude_decl.mc")),
+            span: Span::default(),
+        };
+        table.set_def_location(def_id, override_loc.clone());
+
+        let resolved_loc = table
+            .lookup_def_location(def_id)
+            .expect("expected override location");
+        assert_eq!(resolved_loc, override_loc);
+    }
+
+    #[test]
+    fn synthetic_def_without_span_has_no_location() {
+        let mut table = DefTable::new(Vec::new());
+        let def_id = table.add_def(
+            "__synthetic".to_string(),
+            DefKind::FuncDef {
+                attrs: crate::core::resolve::FuncAttrs::default(),
+            },
+        );
+        table.set_source_path(Some(PathBuf::from("main.mc")));
+        assert!(table.lookup_def_location(def_id).is_none());
     }
 }
