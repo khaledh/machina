@@ -14,35 +14,24 @@ use crate::core::tree::normalized as norm;
 use crate::core::tree::semantic as sem;
 
 use super::elaborator::Elaborator;
+use super::syntax_desugar;
 
 /// Run explicit pass boundaries for elaboration.
 pub(super) fn run(elaborator: &mut Elaborator<'_>, module: &norm::Module) -> sem::Module {
     elaborator.reset_module_state();
 
-    // Pass 1 (combined core): syntax desugaring + place/value lowering + plan capture.
-    // The syntax rewrite surface (e.g. `for` -> `while`) lives in
-    // `syntax_desugar`, but execution is still coupled to value elaboration.
+    // Pass 1: place/value lowering + plan capture.
     // This pass also discovers closure conversions while traversing items.
-    let mut items = run_place_value_planning_pass(elaborator, module);
+    let mut items = elaborator.run_place_value_planning_pass(module);
 
     // Pass 2: materialize closure conversion artifacts into top-level items.
-    run_closure_materialization_pass(elaborator, &mut items);
+    elaborator.append_lifted_closure_items(&mut items);
 
-    sem::Module {
+    // Pass 3: syntax-level desugaring over the semantic tree.
+    let mut module = sem::Module {
         top_level_items: items,
-    }
-}
+    };
+    syntax_desugar::run(elaborator, &mut module);
 
-fn run_place_value_planning_pass(
-    elaborator: &mut Elaborator<'_>,
-    module: &norm::Module,
-) -> Vec<sem::TopLevelItem> {
-    elaborator.run_place_value_planning_pass(module)
-}
-
-fn run_closure_materialization_pass(
-    elaborator: &mut Elaborator<'_>,
-    items: &mut Vec<sem::TopLevelItem>,
-) {
-    elaborator.append_lifted_closure_items(items);
+    module
 }

@@ -34,7 +34,6 @@ use crate::core::diag::Span;
 use crate::core::elaborate::elaborator::Elaborator;
 use crate::core::resolve::{DefId, DefKind};
 use crate::core::tree::BinaryOp;
-use crate::core::tree::normalized as norm;
 use crate::core::tree::semantic as sem;
 use crate::core::types::Type;
 
@@ -46,14 +45,40 @@ struct ForLocal {
     pattern: sem::BindPattern,
 }
 
+pub(super) fn run(elaborator: &mut Elaborator<'_>, module: &mut sem::Module) {
+    elaborator.desugar_module(module);
+}
+
 impl<'a> Elaborator<'a> {
+    fn desugar_module(&mut self, module: &mut sem::Module) {
+        for item in &mut module.top_level_items {
+            self.desugar_top_level_item(item);
+        }
+    }
+
+    fn desugar_top_level_item(&mut self, item: &mut sem::TopLevelItem) {
+        match item {
+            sem::TopLevelItem::FuncDef(def) => self.desugar_value_expr(&mut def.body),
+            sem::TopLevelItem::MethodBlock(block) => {
+                for method_item in &mut block.method_items {
+                    if let sem::MethodItem::Def(def) = method_item {
+                        self.desugar_value_expr(&mut def.body);
+                    }
+                }
+            }
+            sem::TopLevelItem::TraitDef(_)
+            | sem::TopLevelItem::TypeDef(_)
+            | sem::TopLevelItem::FuncDecl(_) => {}
+        }
+    }
+
     /// Desugar a for loop into a while loop with explicit index management.
-    pub(super) fn elab_for_expr(
+    fn desugar_for_stmt(
         &mut self,
-        stmt: &norm::StmtExpr,
-        pattern: &norm::BindPattern,
-        iter: &norm::Expr,
-        body: &norm::Expr,
+        stmt: &sem::StmtExpr,
+        pattern: &sem::BindPattern,
+        iter: &sem::ValueExpr,
+        body: &sem::ValueExpr,
     ) -> sem::ValueExpr {
         let span = stmt.span;
         let u64_ty = Type::uint(64);
@@ -62,9 +87,9 @@ impl<'a> Elaborator<'a> {
         let mut items = Vec::new();
 
         let (iter_place, idx_place, len_value, elem_ty, is_range) = match &iter.kind {
-            norm::ExprKind::Range { start, end } => {
-                let start_expr = self.elab_value(start);
-                let len_expr = self.elab_value(end);
+            sem::ValueExprKind::Range { start, end } => {
+                let start_expr = (**start).clone();
+                let len_expr = (**end).clone();
 
                 let idx_info = self.new_for_local("idx", u64_ty.clone(), true, span);
                 let idx_stmt = self.make_var_bind_stmt(idx_info.pattern.clone(), start_expr, span);
@@ -92,11 +117,12 @@ impl<'a> Elaborator<'a> {
                         .unwrap_or_else(|| panic!("compiler bug: empty array dims")),
                     Type::DynArray { elem_ty } => (**elem_ty).clone(),
                     Type::Slice { elem_ty } => (**elem_ty).clone(),
+                    Type::Range { elem_ty } => (**elem_ty).clone(),
                     _ => panic!("compiler bug: invalid for-iter type"),
                 };
 
                 let iter_info = self.new_for_local("iter", iter_ty.clone(), false, span);
-                let iter_value = self.elab_value(iter);
+                let iter_value = iter.clone();
                 let iter_stmt =
                     self.make_let_bind_stmt(iter_info.pattern.clone(), iter_value, span);
                 items.push(sem::BlockItem::Stmt(iter_stmt));
@@ -116,6 +142,9 @@ impl<'a> Elaborator<'a> {
                     Type::DynArray { .. } => {
                         let iter_place = self.make_var_place(&iter_info, span);
                         self.make_len_expr(iter_place, span)
+                    }
+                    Type::Range { .. } => {
+                        panic!("compiler bug: range iteration should take the range path")
                     }
                     _ => unreachable!("checked above"),
                 };
@@ -173,11 +202,10 @@ impl<'a> Elaborator<'a> {
             self.make_load_expr(index_place, elem_ty.clone(), span)
         };
 
-        let pattern = self.elab_bind_pattern(pattern, &elem_ty);
-        let pattern_stmt = self.make_let_bind_stmt(pattern, elem_expr, span);
+        let pattern_stmt = self.make_let_bind_stmt(pattern.clone(), elem_expr, span);
         loop_items.push(sem::BlockItem::Stmt(pattern_stmt));
 
-        loop_items.push(sem::BlockItem::Expr(self.elab_value(body)));
+        loop_items.push(sem::BlockItem::Expr(body.clone()));
 
         let loop_body = self.make_block_expr(loop_items, span);
         let while_stmt = self.make_stmt(
@@ -190,6 +218,203 @@ impl<'a> Elaborator<'a> {
         items.push(sem::BlockItem::Stmt(while_stmt));
 
         self.make_block_expr(items, span)
+    }
+
+    fn desugar_block_items(&mut self, items: &mut Vec<sem::BlockItem>) {
+        let mut rewritten = Vec::with_capacity(items.len());
+        for item in items.drain(..) {
+            match item {
+                sem::BlockItem::Expr(mut expr) => {
+                    self.desugar_value_expr(&mut expr);
+                    rewritten.push(sem::BlockItem::Expr(expr));
+                }
+                sem::BlockItem::Stmt(mut stmt) => {
+                    self.desugar_stmt_expr(&mut stmt);
+                    match &stmt.kind {
+                        sem::StmtExprKind::For {
+                            pattern,
+                            iter,
+                            body,
+                        } => {
+                            let mut expr = self.desugar_for_stmt(&stmt, pattern, iter, body);
+                            self.desugar_value_expr(&mut expr);
+                            rewritten.push(sem::BlockItem::Expr(expr));
+                        }
+                        _ => rewritten.push(sem::BlockItem::Stmt(stmt)),
+                    }
+                }
+            }
+        }
+        *items = rewritten;
+    }
+
+    fn desugar_stmt_expr(&mut self, stmt: &mut sem::StmtExpr) {
+        match &mut stmt.kind {
+            sem::StmtExprKind::LetBind { value, .. } | sem::StmtExprKind::VarBind { value, .. } => {
+                self.desugar_value_expr(value)
+            }
+            sem::StmtExprKind::Assign {
+                assignee, value, ..
+            } => {
+                self.desugar_place_expr(assignee);
+                self.desugar_value_expr(value);
+            }
+            sem::StmtExprKind::While { cond, body } => {
+                self.desugar_value_expr(cond);
+                self.desugar_value_expr(body);
+            }
+            sem::StmtExprKind::For { iter, body, .. } => {
+                self.desugar_value_expr(iter);
+                self.desugar_value_expr(body);
+            }
+            sem::StmtExprKind::Return { value } => {
+                if let Some(value) = value {
+                    self.desugar_value_expr(value);
+                }
+            }
+            sem::StmtExprKind::VarDecl { .. }
+            | sem::StmtExprKind::Break
+            | sem::StmtExprKind::Continue => {}
+        }
+    }
+
+    fn desugar_place_expr(&mut self, place: &mut sem::PlaceExpr) {
+        match &mut place.kind {
+            sem::PlaceExprKind::Var { .. } => {}
+            sem::PlaceExprKind::Deref { value } => self.desugar_value_expr(value),
+            sem::PlaceExprKind::ArrayIndex { target, indices } => {
+                self.desugar_place_expr(target);
+                for index in indices {
+                    self.desugar_value_expr(index);
+                }
+            }
+            sem::PlaceExprKind::TupleField { target, .. }
+            | sem::PlaceExprKind::StructField { target, .. } => self.desugar_place_expr(target),
+        }
+    }
+
+    fn desugar_call_arg(&mut self, arg: &mut sem::CallArg) {
+        match arg {
+            sem::CallArg::In { expr, .. } | sem::CallArg::Sink { expr, .. } => {
+                self.desugar_value_expr(expr)
+            }
+            sem::CallArg::InOut { place, .. } | sem::CallArg::Out { place, .. } => {
+                self.desugar_place_expr(place)
+            }
+        }
+    }
+
+    fn desugar_value_expr(&mut self, expr: &mut sem::ValueExpr) {
+        match &mut expr.kind {
+            sem::ValueExprKind::Block { items, tail } => {
+                self.desugar_block_items(items);
+                if let Some(tail) = tail {
+                    self.desugar_value_expr(tail);
+                }
+            }
+            sem::ValueExprKind::ArrayLit { init, .. } => match init {
+                sem::ArrayLitInit::Elems(elems) => {
+                    for elem in elems {
+                        self.desugar_value_expr(elem);
+                    }
+                }
+                sem::ArrayLitInit::Repeat(value, ..) => self.desugar_value_expr(value),
+            },
+            sem::ValueExprKind::SetLit { elems, .. } => {
+                for elem in elems {
+                    self.desugar_value_expr(elem);
+                }
+            }
+            sem::ValueExprKind::MapLit { entries, .. } => {
+                for entry in entries {
+                    self.desugar_value_expr(&mut entry.key);
+                    self.desugar_value_expr(&mut entry.value);
+                }
+            }
+            sem::ValueExprKind::TupleLit(items)
+            | sem::ValueExprKind::EnumVariant { payload: items, .. } => {
+                for item in items {
+                    self.desugar_value_expr(item);
+                }
+            }
+            sem::ValueExprKind::StructLit { fields, .. } => {
+                for field in fields {
+                    self.desugar_value_expr(&mut field.value);
+                }
+            }
+            sem::ValueExprKind::StructUpdate { target, fields } => {
+                self.desugar_value_expr(target);
+                for field in fields {
+                    self.desugar_value_expr(&mut field.value);
+                }
+            }
+            sem::ValueExprKind::BinOp { left, right, .. } => {
+                self.desugar_value_expr(left);
+                self.desugar_value_expr(right);
+            }
+            sem::ValueExprKind::UnaryOp { expr, .. }
+            | sem::ValueExprKind::HeapAlloc { expr }
+            | sem::ValueExprKind::Coerce { expr, .. } => self.desugar_value_expr(expr),
+            sem::ValueExprKind::Move { place }
+            | sem::ValueExprKind::ImplicitMove { place }
+            | sem::ValueExprKind::AddrOf { place }
+            | sem::ValueExprKind::Load { place }
+            | sem::ValueExprKind::Len { place } => self.desugar_place_expr(place),
+            sem::ValueExprKind::If {
+                cond,
+                then_body,
+                else_body,
+            } => {
+                self.desugar_value_expr(cond);
+                self.desugar_value_expr(then_body);
+                self.desugar_value_expr(else_body);
+            }
+            sem::ValueExprKind::Range { start, end } => {
+                self.desugar_value_expr(start);
+                self.desugar_value_expr(end);
+            }
+            sem::ValueExprKind::Slice { target, start, end } => {
+                self.desugar_place_expr(target);
+                if let Some(start) = start {
+                    self.desugar_value_expr(start);
+                }
+                if let Some(end) = end {
+                    self.desugar_value_expr(end);
+                }
+            }
+            sem::ValueExprKind::MapGet { target, key } => {
+                self.desugar_value_expr(target);
+                self.desugar_value_expr(key);
+            }
+            sem::ValueExprKind::Match { scrutinee, arms } => {
+                self.desugar_value_expr(scrutinee);
+                for arm in arms {
+                    self.desugar_value_expr(&mut arm.body);
+                }
+            }
+            sem::ValueExprKind::Call { callee, args } => {
+                self.desugar_value_expr(callee);
+                for arg in args {
+                    self.desugar_call_arg(arg);
+                }
+            }
+            sem::ValueExprKind::MethodCall { receiver, args, .. } => {
+                match receiver {
+                    sem::MethodReceiver::ValueExpr(value) => self.desugar_value_expr(value),
+                    sem::MethodReceiver::PlaceExpr(place) => self.desugar_place_expr(place),
+                }
+                for arg in args {
+                    self.desugar_call_arg(arg);
+                }
+            }
+            sem::ValueExprKind::UnitLit
+            | sem::ValueExprKind::IntLit(_)
+            | sem::ValueExprKind::BoolLit(_)
+            | sem::ValueExprKind::CharLit(_)
+            | sem::ValueExprKind::StringLit { .. }
+            | sem::ValueExprKind::StringFmt { .. }
+            | sem::ValueExprKind::ClosureRef { .. } => {}
+        }
     }
 
     fn new_for_local(&mut self, suffix: &str, ty: Type, is_mutable: bool, span: Span) -> ForLocal {

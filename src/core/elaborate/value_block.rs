@@ -1,37 +1,25 @@
 //! Block item and statement elaboration.
 //!
 //! Handles the contents of block expressions: statements and trailing
-//! expressions. Special cases include:
+//! expressions.
 //!
-//! - `for` loops are desugared into `while` loops (delegated to `syntax_desugar`)
-//! - Closure bindings record the mapping for later reference resolution
-//! - Assignments carry initialization info from semck
+//! This stage preserves `for` statements as semantic `StmtExprKind::For`.
+//! The dedicated `syntax_desugar` pass rewrites them into lower-level `while`
+//! form later in the elaborate pipeline.
 
 use crate::core::elaborate::elaborator::Elaborator;
 use crate::core::tree::normalized as norm;
 use crate::core::tree::semantic as sem;
+use crate::core::types::Type;
 
 impl<'a> Elaborator<'a> {
     /// Elaborate a single block item (statement or expression).
-    ///
-    /// For loops receive special handling: they're desugared into while
-    /// loops and returned as expressions rather than statements.
     pub(in crate::core::elaborate::value) fn elab_block_item(
         &mut self,
         item: &norm::BlockItem,
     ) -> sem::BlockItem {
         match item {
-            norm::BlockItem::Stmt(stmt) => match &stmt.kind {
-                norm::StmtExprKind::For {
-                    pattern,
-                    iter,
-                    body,
-                } => {
-                    let expr = self.elab_for_expr(stmt, pattern, iter, body);
-                    sem::BlockItem::Expr(expr)
-                }
-                _ => sem::BlockItem::Stmt(self.elab_stmt_expr(stmt)),
-            },
+            norm::BlockItem::Stmt(stmt) => sem::BlockItem::Stmt(self.elab_stmt_expr(stmt)),
             norm::BlockItem::Expr(expr) => sem::BlockItem::Expr(self.elab_value(expr)),
         }
     }
@@ -89,8 +77,19 @@ impl<'a> Elaborator<'a> {
                 cond: Box::new(self.elab_value(cond)),
                 body: Box::new(self.elab_value(body)),
             },
-            norm::StmtExprKind::For { .. } => {
-                unreachable!("for loops should be desugared before statement elaboration")
+            norm::StmtExprKind::For {
+                pattern,
+                iter,
+                body,
+            } => {
+                let iter_value = self.elab_value(iter);
+                let elem_ty = self.for_iter_elem_type(iter);
+                let pattern = self.elab_bind_pattern(pattern, &elem_ty);
+                sem::StmtExprKind::For {
+                    pattern,
+                    iter: Box::new(iter_value),
+                    body: Box::new(self.elab_value(body)),
+                }
             }
             norm::StmtExprKind::Break => sem::StmtExprKind::Break,
             norm::StmtExprKind::Continue => sem::StmtExprKind::Continue,
@@ -103,6 +102,19 @@ impl<'a> Elaborator<'a> {
             id: stmt.id,
             kind,
             span: stmt.span,
+        }
+    }
+
+    fn for_iter_elem_type(&self, iter: &norm::Expr) -> Type {
+        let iter_ty = self.type_map.type_table().get(iter.ty).clone();
+        match iter_ty {
+            Type::Array { .. } => iter_ty
+                .array_item_type()
+                .unwrap_or_else(|| panic!("compiler bug: empty array dims")),
+            Type::DynArray { elem_ty } => (*elem_ty).clone(),
+            Type::Slice { elem_ty } => (*elem_ty).clone(),
+            Type::Range { elem_ty } => (*elem_ty).clone(),
+            _ => panic!("compiler bug: invalid for-iter type"),
         }
     }
 
