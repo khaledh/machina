@@ -3,6 +3,15 @@
 This page presents curated examples with explanations. For more examples, see
 the [`examples/`](../../examples/) directory.
 
+> Note: snippets that call `print`/`println` assume:
+>
+> ```mc
+> requires {
+>     std::io::print
+>     std::io::println
+> }
+> ```
+
 ## Hello World
 
 The simplest Machina program:

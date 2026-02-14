@@ -1,326 +1,171 @@
 # Language Tour
 
-This tour gives you a quick overview of Machina's features. Each section links
-to a more detailed guide.
+This tour gives a quick pass over Machina's core syntax and features.
 
 ## Hello World
 
-```
+```mc
+requires {
+    std::io::println
+}
+
 fn main() {
     println("Hello, Machina!");
 }
 ```
 
-Every program needs a `main` function. `println` outputs text followed by a
-newline.
+Programs import symbols with a top-level `requires` block.
 
-## Variables
+## Variables and Types
 
-Use `let` for immutable bindings and `var` for mutable ones:
+Use `let` for immutable bindings and `var` for mutable ones.
 
-```
-let x = 42;        // immutable
-var y = 10;        // mutable
-y = y + 1;         // ok
-// x = 0;          // error: x is immutable
+```mc
+let x = 42;
+var y = 10;
+y = y + 1;
 ```
 
-Type annotations are optional when the type can be inferred:
+Common types:
 
-```
-let a: u64 = 100;
-let b = 100;       // inferred as u64
-```
-
-See [Variables](guide/variables.md) for destructuring and scope rules.
-
-## Types
-
-### Scalar Types
-
-```
-let i: i64 = -42;       // signed integers: i8, i16, i32, i64
-let u: u64 = 42;        // unsigned integers: u8, u16, u32, u64
-let b: bool = true;     // boolean
-let c: char = 'a';      // character
-```
-
-### Numeric Literals
-
-```
-let dec = 1_000_000;    // decimal with digit grouping
-let bin = 0b1010_0110;  // binary
-let oct = 0o52;         // octal
-let hex = 0x2a;         // hexadecimal
-```
-
-### Arrays
-
-```
-let arr = [1, 2, 3];           // array of 3 elements
-let zeros = [0; 10];           // 10 zeros
-let matrix = [[1, 2], [3, 4]]; // 2D array
-let first = arr[0];            // indexing (bounds-checked)
-```
-
-### Tuples
-
-```
-let pair = (42, true);
-let x = pair.0;        // 42
-let y = pair.1;        // true
-```
-
-### Strings
-
-```
-let s = "hello";
-let name = "world";
-let msg = f"hello, {name}!";   // formatted string
-var greeting = "hi";
-greeting.append("!");
-```
-
-See [Types](guide/types.md) for the complete type system.
+- Integers: `u8/u16/u32/u64`, `i8/i16/i32/i64`
+- `bool`, `char`, `string`, `()`
+- Arrays: `u64[4]`
+- Slices: `u64[]`
+- Dynamic arrays: `u64[*]`
+- Heap-owned values: `Point^`
+- Sets/maps: `set<u64>`, `map<string, u64>`
 
 ## Control Flow
 
-### Conditionals
+`if` and `match` are expressions.
 
-`if` is an expression that returns a value:
-
-```
+```mc
 let max = if a > b { a } else { b };
-```
 
-Bodies are always blocks. The `else` branch is optional; if omitted, the `if`
-expression has type `()`.
-
-### Loops
-
-```
-// while loop
-var i = 0;
-while i < 10 {
-    i = i + 1;
-}
-
-// for loop over range (half-open: includes 0, excludes 10)
-for i in 0..10 {
-    println(i);
-}
-
-// for loop over array
-let items = [10, 20, 30];
-for x in items {
-    println(x);
-}
-```
-
-### Pattern Matching
-
-```
-let x = 2;
-let result = match x {
-    0 => "zero",
-    1 => "one",
-    _ => "other",
+let label = match code {
+    0 => "ok",
+    _ => "error",
 };
 ```
 
-See [Control Flow](guide/control-flow.md) for more patterns.
+Loops:
 
-## Functions
-
-```
-fn add(a: u64, b: u64) -> u64 {
-    a + b    // implicit return (last expression)
+```mc
+for i in 0..10 {
+    // ...
 }
 
-fn greet(name: string) {
-    println(f"Hello, {name}!");
+while cond {
+    // ...
 }
 ```
 
-Use `return` for early exits or explicit returns:
+## Functions and Parameter Modes
 
-```
-fn clamp(n: i64) -> i64 {
-    if n < 0 {
-        return 0;
-    } else {
-        n
-    }
-}
-```
-
-### Parameter Modes
-
-Machina uses explicit parameter modes to control how arguments are passed:
-
-| Mode | Meaning | Call site |
-|------|---------|-----------|
-| (default) | Read-only borrow | `f(x)` |
-| `inout` | Mutable borrow | `f(inout x)` |
-| `out` | Uninitialized output | `f(out x)` |
-| `sink` | Ownership transfer | `f(move x)` |
-
-```
+```mc
 type Counter = { value: u64 }
 
 fn double(inout c: Counter) {
     c.value = c.value * 2;
 }
 
-fn main() {
-    var c = Counter { value: 5 };
-    double(inout c);   // c.value is now 10
+fn consume(sink c: Counter^) {
+    // takes ownership
 }
 ```
 
-See [Functions](guide/functions.md) for overloading and more details.
+Call-site modifiers mirror the parameter mode:
 
-## User-Defined Types
+- default: `f(x)`
+- `inout`: `f(inout x)`
+- `out`: `f(out x)`
+- `sink`: `f(move x)`
 
-### Type Aliases
+## Structs, Enums, and Methods
 
-```
-type Size = u64
-```
-
-### Structs
-
-```
+```mc
 type Point = { x: u64, y: u64 }
-
-let p = Point { x: 10, y: 20 };
-let q = { p | x: 30 };           // struct update (new value)
-```
-
-### Enums
-
-```
-type Color = Red | Green | Blue
-
 type Shape = Circle(u64) | Rect(u64, u64)
 
-let c = Color::Red;
-let s = Shape::Circle(10);
-```
-
-### Pattern Matching on Enums
-
-```
-fn area(s: Shape) -> u64 {
-    match s {
-        Shape::Circle(r) => r * r * 3,
-        Shape::Rect(w, h) => w * h,
+Point :: {
+    fn translate(inout self, dx: u64, dy: u64) {
+        self.x = self.x + dx;
+        self.y = self.y + dy;
     }
 }
 ```
 
-See [Structs and Enums](guide/structs-enums.md) for destructuring and more.
+## Traits
 
-## Methods
-
-Methods are defined in a block associated with a type:
-
-```
-type Counter = { value: u64 }
-
-Counter :: {
-    fn increment(inout self) {
-        self.value = self.value + 1;
-    }
-
-    fn get(self) -> u64 {
-        self.value
-    }
+```mc
+trait Runnable {
+    fn run(self);
 }
 
-fn main() {
-    var c = Counter { value: 0 };
-    c.increment();
-    println(c.get());   // 1
+type Job = { id: u64 }
+
+Job :: Runnable {
+    fn run(self) {
+        // ...
+    }
 }
 ```
 
-See [Methods](guide/methods.md) for more details.
+Traits can also declare properties.
 
-## Closures
+## Error Unions and `?`
 
-Closures are anonymous functions that can capture variables from their
-environment:
+Machina supports ergonomic error unions in return types:
 
-```
-let add = |a: u64, b: u64| -> u64 { a + b };
-let sum = add(2, 3);   // 5
-```
+```mc
+type IoError = { message: string }
 
-### Capture Modes
+fn read_config(path: string) -> string | IoError {
+    // ...
+}
 
-By default, closures borrow variables. Use `[move var]` to move ownership:
-
-```
-var counter = 0;
-let bump = || -> u64 {
-    counter = counter + 1;   // borrows counter mutably
-    counter
-};
-
-let base = 10;
-let add = [move base] |x: u64| -> u64 {
-    base + x   // base is moved into the closure
-};
+fn load(path: string) -> string | IoError {
+    let text = read_config(path)?;
+    text
+}
 ```
 
-See [Closures](guide/closures.md) for capture rules and restrictions.
+`?` propagates non-success union variants to the caller.
 
-## Heap Allocation
+## Collections
 
-The `^` prefix allocates on the heap and denotes ownership:
+```mc
+var xs: u64[*] = [1, 2, 3];
+xs.append(4);
 
-```
-type Point = { x: u64, y: u64 }
+var s = {1, 2, 3};
+s.insert(4);
 
-let p = ^Point { x: 1, y: 2 };   // heap-allocated Point
-println(p.x);                     // implicit dereference
-```
-
-Heap values are automatically dropped when they go out of scope.
-
-### Ownership Transfer
-
-Heap values must be moved when transferring ownership:
-
-```
-let p = ^Point { x: 1, y: 2 };
-let q = move p;    // ownership moves to q
-// use(p);         // error: use after move
+var m = map<u64, string>{1: "one"};
+let v = m.get(1);
 ```
 
-See [Memory Safety](guide/mem-safety.md) for ownership rules, borrowing, and
-slices.
+## Modules and Imports
 
-## Slices
-
-Slices are non-owning views into arrays:
-
-```
-let arr = [10, 20, 30, 40, 50];
-let mid = arr[1..4];    // [20, 30, 40]
-let head = arr[..2];    // [10, 20]
-let tail = arr[3..];    // [40, 50]
-let all = arr[..];      // entire array
+```mc
+requires {
+    std::io::println
+    app::config::Config
+    app::config::load as load_config
+}
 ```
 
-Slices cannot escape their scope and cannot outlive their source.
+Imported symbols are used directly (`println`, `Config`, `load_config`).
 
-See [Arrays and Slices](guide/arrays-slices.md) for indexing and bounds
-checking.
+## Typestate (Experimental)
 
-## What's Next?
+Machina includes an experimental typestate model for lifecycle-safe APIs.
+Enable it through the compiler/LSP experimental feature settings.
+See [Typestate](guide/typestate.md) for details.
 
-- [Guide](guide/) — In-depth coverage of each topic
-- [Reference](reference/) — Operators, keywords, grammar
-- [Examples](examples/annotated-examples.md) — Annotated code samples
+## Next
+
+- [Guide](guide/) for topic-focused docs
+- [Reference](reference/) for grammar/operators/keywords
+- [Annotated examples](examples/annotated-examples.md) for runnable samples

@@ -45,7 +45,7 @@ use.
 Type annotations are optional when the type can be inferred:
 
 ```
-let x = 42;               // inferred as u64
+let x = 42;               // inferred as i32
 let y: u64 = 42;          // explicit annotation
 var z: i32;               // required when uninitialized
 ```

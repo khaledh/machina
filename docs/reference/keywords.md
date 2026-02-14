@@ -1,91 +1,41 @@
 # Keywords
 
-Keywords are reserved words that have special meaning in Machina. They cannot
-be used as identifiers.
+Keywords are reserved words with special meaning in Machina. They cannot be
+used as identifiers.
 
-## List of Keywords
+## Reserved Words
 
-| Keyword | Description |
-|---------|-------------|
-| `else` | Alternative branch in conditional |
-| `false` | Boolean false literal |
-| `fn` | Function definition |
-| `for` | For loop |
-| `if` | Conditional expression |
-| `in` | Iterator binding in for loops |
-| `inout` | Mutable borrow parameter mode |
-| `let` | Immutable variable binding |
-| `match` | Pattern matching expression |
-| `move` | Ownership transfer |
-| `out` | Output parameter mode |
-| `range` | Bounded integer type |
-| `return` | Return from a function |
-| `self` | Method receiver |
-| `sink` | Ownership transfer parameter mode |
-| `true` | Boolean true literal |
-| `type` | Type definition |
-| `var` | Mutable variable binding |
-| `while` | While loop |
-| `break` | Exit loop early |
-| `continue` | Skip to next loop iteration |
+| Keyword | Category | Meaning |
+|---------|----------|---------|
+| `fn` | Declarations | Function definition |
+| `type` | Declarations | Type definition |
+| `trait` | Declarations | Trait definition |
+| `typestate` | Declarations | Typestate definition |
+| `requires` | Modules | Module/symbol imports |
+| `let` | Bindings | Immutable binding |
+| `var` | Bindings | Mutable binding/declaration |
+| `if` | Control flow | Conditional expression |
+| `else` | Control flow | Alternative branch |
+| `match` | Control flow | Pattern matching expression |
+| `while` | Control flow | While loop |
+| `for` | Control flow | For loop |
+| `in` | Control flow | Iterator binding in `for` |
+| `break` | Control flow | Exit loop early |
+| `continue` | Control flow | Skip to next loop iteration |
+| `return` | Control flow | Return from a function |
+| `inout` | Parameter mode | Mutable borrow parameter |
+| `out` | Parameter mode | Output parameter |
+| `sink` | Parameter mode | Ownership-transfer parameter |
+| `move` | Ownership | Explicit ownership transfer |
+| `self` | Methods | Method receiver |
+| `prop` | Properties | Property declaration in method blocks |
+| `get` | Properties | Property getter accessor |
+| `set` | Properties/Types | Property setter accessor and builtin `set<T>` type name |
+| `map` | Types | Builtin `map<K, V>` type name |
+| `range` | Types | Bounded integer type constructor |
+| `bounds` | Refinements | Range refinement constructor |
+| `nonzero` | Refinements | Non-zero refinement constructor |
 
-## Keywords by Category
+## Reserved Literals
 
-### Declarations
-
-- `fn` — Define a function
-- `type` — Define a type (alias, struct, or enum)
-- `let` — Bind an immutable variable
-- `var` — Bind or declare a mutable variable
-
-### Control Flow
-
-- `if` — Conditional expression
-- `else` — Alternative branch
-- `match` — Pattern matching
-- `while` — While loop
-- `for` — For loop
-- `in` — Used with `for` to iterate
-- `break` — Exit a loop
-- `continue` — Skip to next iteration
-- `return` — Return from a function
-
-### Parameter Modes
-
-- `inout` — Mutable borrow (read and write)
-- `out` — Uninitialized output (write only)
-- `sink` — Ownership transfer
-
-### Ownership
-
-- `move` — Transfer ownership of a value
-
-### Types
-
-- `range` — Bounded integer type constructor
-
-### Methods
-
-- `self` — The receiver in method definitions
-
-### Literals
-
-- `true` — Boolean true
-- `false` — Boolean false
-
-## Reserved for Future Use
-
-The following words are not currently keywords but may be reserved:
-
-- `pub`
-- `mod`
-- `use`
-- `impl`
-- `trait`
-- `where`
-- `async`
-- `await`
-- `const`
-- `static`
-- `mut`
-- `ref`
+`true` and `false` are boolean literals and are also reserved.

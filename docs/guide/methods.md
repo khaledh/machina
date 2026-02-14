@@ -3,6 +3,14 @@
 Methods are functions associated with a type. They provide a way to define
 behavior for your custom types.
 
+> Note: snippets that call `println` assume:
+>
+> ```mc
+> requires {
+>     std::io::println
+> }
+> ```
+
 ## Defining Methods
 
 Methods are defined in a block associated with a type using the `::` syntax:

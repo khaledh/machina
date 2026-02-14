@@ -1,258 +1,92 @@
 # Arrays and Slices
 
-Arrays are fixed-size sequences. Slices are non-owning views into arrays.
+Arrays are fixed-size values. Slices are borrowed views. Machina also supports
+owned growable arrays (`T[*]`).
 
-## Arrays
+## Fixed Arrays (`T[N]`)
 
-### Creating Arrays
+```mc
+let nums = [1, 2, 3, 4];
+let zeros = [0; 8];
+let bytes = u8[1, 2, 3];
 
-Array literals list elements in brackets:
-
-```
-let numbers = [1, 2, 3, 4, 5];
-let bools = [true, false, true];
-```
-
-Repeat syntax creates arrays with the same value:
-
-```
-let zeros = [0; 10];           // [0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
-let flags = [false; 8];        // 8 false values
+let first = nums[0];
 ```
 
-Typed literals specify the element type:
+Indexing is bounds-checked at runtime.
 
-```
-let bytes = u8[1, 2, 3];       // u8[3]
-let small = u8[0; 32];         // 32 u8 zeros
-```
+Multi-dimensional arrays use multiple dimensions:
 
-### Array Types
-
-The type is written as `T[N]` where `T` is the element type and `N` is the
-length:
-
-```
-let arr: u64[5] = [1, 2, 3, 4, 5];
+```mc
+let grid: i32[2, 3] = [[1, 2, 3], [4, 5, 6]];
+let x = grid[1, 2];
 ```
 
-### Indexing
+## Slices (`T[]`)
 
-Access elements by index (0-based):
+Slices are non-owning views into arrays and dynamic arrays.
 
-```
-let arr = [10, 20, 30];
-let first = arr[0];     // 10
-let second = arr[1];    // 20
-```
-
-For mutable arrays, elements can be assigned:
-
-```
-var arr = [1, 2, 3];
-arr[0] = 100;
-```
-
-### Bounds Checking
-
-Array indices are checked at runtime. Out-of-bounds access causes an error:
-
-```
-let arr = [1, 2, 3];
-// let x = arr[10];    // runtime error: index out of bounds
-```
-
-All bounds checks are runtime today, even for constant indices.
-
-## Multi-Dimensional Arrays
-
-### Creating Multi-Dimensional Arrays
-
-Nest array literals for multiple dimensions:
-
-```
-let matrix = [[1, 2, 3], [4, 5, 6]];    // 2 rows, 3 columns
-```
-
-The type is `T[R, C]` for a 2D array with R rows and C columns:
-
-```
-let grid: u64[2, 3] = [[1, 2, 3], [4, 5, 6]];
-```
-
-### Multi-Dimensional Indexing
-
-Access elements with multiple indices:
-
-```
-let matrix = [[1, 2, 3], [4, 5, 6]];
-let elem = matrix[1, 2];    // 6 (row 1, column 2)
-```
-
-Assign to elements in mutable arrays:
-
-```
-var matrix = [[1, 2], [3, 4]];
-matrix[0, 1] = 10;
-```
-
-## Slices
-
-Slices are non-owning views into arrays. They have type `T[]`.
-
-### Creating Slices
-
-Use range syntax to create slices:
-
-```
-let arr = [10, 20, 30, 40, 50];
-let mid = arr[1..4];      // [20, 30, 40]
-```
-
-Ranges are half-open (include start, exclude end).
-
-### Slice Syntax Variations
-
-```
-let arr = [10, 20, 30, 40, 50];
-
-let full = arr[..];       // entire array
-let head = arr[..3];      // [10, 20, 30]
-let tail = arr[2..];      // [30, 40, 50]
-let mid = arr[1..4];      // [20, 30, 40]
-```
-
-### Slice Type
-
-Slices have type `T[]` without a length:
-
-```
-fn sum(xs: u64[]) -> u64 {
-    var total = 0;
+```mc
+fn sum(xs: i32[]) -> i32 {
+    var acc = 0;
     for x in xs {
-        total = total + x;
+        acc = acc + x;
     }
-    total
+    acc
 }
 
-let arr = [1, 2, 3, 4, 5];
-let s = sum(arr[..]);     // pass entire array as slice
-let t = sum(arr[1..4]);   // pass partial slice
-```
-
-### Slice Indexing
-
-Access slice elements by index:
-
-```
 let arr = [10, 20, 30, 40, 50];
-let s = arr[1..4];
-let x = s[0];    // 20
-let y = s[2];    // 40
+let mid = arr[1..4];
+let head = arr[..2];
+let tail = arr[3..];
+let all = arr[..];
 ```
 
-### Subslicing
+Ranges are half-open (`start` inclusive, `end` exclusive).
 
-Slices can be sliced again:
+## Growable Arrays (`T[*]`)
 
-```
-let arr = [1, 2, 3, 4, 5];
-let s1 = arr[0..4];       // [1, 2, 3, 4]
-let s2 = s1[1..3];        // [2, 3]
-```
+`T[*]` values are owned and mutable containers.
 
-## Slice Rules
+```mc
+var xs: i32[*] = [1, 2, 3];
+xs.append(4);
 
-Slices have restrictions to ensure safety:
-
-### Rule 1: Targets Must Be Lvalues
-
-You can only slice variables, not temporaries:
-
-```
-let arr = [1, 2, 3];
-let s = arr[0..2];           // ok: arr is a variable
-
-// let s = [1, 2, 3][0..2];  // error: slicing a temporary
+let n = xs.len;
+let cap = xs.capacity;
+let empty = xs.is_empty;
 ```
 
-### Rule 2: No Escape
+You can pass a growable array where a slice is expected:
 
-Slices cannot be returned or stored in aggregates:
-
-```
-fn bad(arr: u64[3]) -> u64[] {
-    arr[0..2]    // error: slice cannot be returned
-}
-
-fn also_bad() {
-    let arr = [1, 2, 3];
-    let s = arr[..];
-    // let pair = (s, s);    // error: slice cannot be stored
-}
+```mc
+let total = sum(xs);
 ```
 
-### Rule 3: No Mutation While Live
+## Borrow Rules with Slices
 
-The source cannot be mutated while a slice is live:
+A live slice borrow prevents mutation of the base array/dyn-array.
 
-```
-var arr = [1, 2, 3];
-let s = arr[..];
-// arr[0] = 10;    // error: arr is borrowed by s
-use(s);
-```
+```mc
+var xs: i32[*] = [1, 2, 3, 4];
+let s = xs[1..3];
 
-Mutation is allowed after the slice's last use:
-
-```
-var arr = [1, 2, 3];
-let s = arr[..];
-let x = s[0];      // last use of s
-arr[0] = 10;       // ok: s is no longer live
+// xs.append(5);   // error: base mutated while slice borrow is live
+let a = s[0];      // last use of s
+xs.append(5);      // ok after last use
 ```
 
-## Iterating Over Arrays
+Slices cannot escape their safe region:
 
-### For Loop
-
-```
-let items = [10, 20, 30];
-for x in items {
-    println(x);
+```mc
+fn bad(arr: i32[4]) -> i32[] {
+    arr[0..2]   // error
 }
 ```
 
-### With Index
+## Set/Map Contrast
 
-Use a range to iterate with indices:
+Arrays and dynamic arrays are ordered/indexed.
 
-```
-let items = [10, 20, 30];
-for i in 0..3 {
-    println(f"items[{i}] = {items[i]}");
-}
-```
-
-## Two-Dimensional Slice Example
-
-```
-let arr2d = [[1, 2, 3], [4, 5, 6]];
-let rows = arr2d[0..2];       // slice of rows: u64[3][]
-let row = rows[0];            // first row: u64[3]
-let elems = row[0..3];        // slice of elements: u64[]
-let elem = elems[0];          // 1
-```
-
-## Passing Arrays to Functions
-
-Arrays are borrowed by default when passed to functions. Use slices when you
-want a flexible-length view:
-
-```
-// Read-only borrow of a fixed-size array
-fn process_array(arr: u64[100]) { ... }
-
-// Read-only borrow of a slice view
-fn process_slice(arr: u64[]) { ... }
-```
+- Use `set<T>` when you need uniqueness.
+- Use `map<K, V>` for key/value lookup.

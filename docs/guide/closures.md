@@ -3,6 +3,14 @@
 Closures are anonymous functions that can capture variables from their
 surrounding scope.
 
+> Note: snippets that call `println` assume:
+>
+> ```mc
+> requires {
+>     std::io::println
+> }
+> ```
+
 ## Basic Syntax
 
 A closure is written with parameters in `||` and a body in `{}`:

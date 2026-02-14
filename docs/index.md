@@ -11,22 +11,25 @@ memory behavior without hidden aliasing.
 
 ## Learning Machina
 
-- [Language Tour](tour.md) — A quick overview of all language features
-- [Guide](guide/) — In-depth coverage of individual topics:
-  - [Types](guide/types.md) — Primitives, arrays, tuples, type aliases
+- [Language Tour](tour.md) — A quick walkthrough of core features
+- [Guide](guide/) — Topic-focused guides:
+  - [Types](guide/types.md) — Primitive, composite, heap, union, and collection types
   - [Variables](guide/variables.md) — Bindings, mutability, destructuring
   - [Control Flow](guide/control-flow.md) — Conditionals, loops, pattern matching
-  - [Functions](guide/functions.md) — Definitions, parameter modes, overloading
-  - [Structs and Enums](guide/structs-enums.md) — User-defined types
-  - [Methods](guide/methods.md) — Method blocks and the self parameter
-  - [Closures](guide/closures.md) — Anonymous functions and capture modes
-  - [Arrays and Slices](guide/arrays-slices.md) — Indexing, slicing, bounds
-  - [Strings](guide/strings.md) — String literals and formatting
-  - [Memory Safety](guide/mem-safety.md) — Ownership, moves, borrows
+  - [Functions](guide/functions.md) — Signatures, parameter modes, overloading
+  - [Structs and Enums](guide/structs-enums.md) — User-defined data types
+  - [Methods](guide/methods.md) — Method blocks, `self`, and properties
+  - [Typestate](guide/typestate.md) — State-aware APIs encoded in types
+  - [Closures](guide/closures.md) — Anonymous functions and captures
+  - [Arrays and Slices](guide/arrays-slices.md) — Fixed arrays, slices, and dynamic arrays
+  - [Strings](guide/strings.md) — String literals, formatting, mutation
+  - [Modules and Imports](guide/modules.md) — `requires`, symbols, aliases, visibility
+  - [Error Handling](guide/error-handling.md) — Union returns and `?`
+  - [Memory Safety](guide/mem-safety.md) — Ownership, moves, borrows, initialization
 
 ## Reference
 
-- [Operators](reference/operators.md) — Complete operator table with precedence
+- [Operators](reference/operators.md) — Operator forms and precedence
 - [Keywords](reference/keywords.md) — Reserved words
 - [Grammar](reference/grammar.md) — Formal syntax
 

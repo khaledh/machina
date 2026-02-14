@@ -2,6 +2,15 @@
 
 Machina provides string literals and formatted strings (f-strings).
 
+> Note: snippets that call `print`/`println` assume:
+>
+> ```mc
+> requires {
+>     std::io::print
+>     std::io::println
+> }
+> ```
+
 ## String Literals
 
 String literals are enclosed in double quotes:
@@ -67,7 +76,7 @@ let code = f"Use {{braces}} for formatting";
 
 ### Expressions in f-strings
 
-Expressions inside `{}` must evaluate to `string` or an integer type:
+Expressions inside `{}` currently support `string`, integer types, and `bool`:
 
 ```
 let arr = [1, 2, 3];

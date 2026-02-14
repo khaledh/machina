@@ -3,6 +3,15 @@
 Machina provides standard control flow constructs. Most are expressions that
 return values.
 
+> Note: snippets that call `print`/`println` assume:
+>
+> ```mc
+> requires {
+>     std::io::print
+>     std::io::println
+> }
+> ```
+
 ## Conditionals
 
 ### if/else

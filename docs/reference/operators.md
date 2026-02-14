@@ -1,166 +1,97 @@
 # Operators
 
-This reference lists all operators in Machina, organized by category and
-precedence.
+This reference lists Machina operators and postfix forms.
 
-## Operator Precedence
+## Precedence
 
-Operators are listed from lowest to highest precedence. Operators with higher
-precedence bind more tightly.
+From lowest to highest precedence:
 
-| Precedence | Operators | Associativity | Description |
-|------------|-----------|---------------|-------------|
-| 1 (lowest) | `\|\|` | Left | Logical OR |
-| 2 | `&&` | Left | Logical AND |
-| 3 | `\|` | Left | Bitwise OR |
-| 4 | `^` | Left | Bitwise XOR |
-| 5 | `&` | Left | Bitwise AND |
-| 6 | `==` `!=` `<` `<=` `>` `>=` | Left | Comparison |
-| 7 | `<<` `>>` | Left | Bit shift |
-| 8 | `+` `-` | Left | Addition, subtraction |
-| 9 | `*` `/` `%` | Left | Multiplication, division, remainder |
-| 10 | `-` `!` `~` `move` | Right (unary) | Negation, logical NOT, bitwise NOT, move |
-| 11 (highest) | `[]` `.` `()` | Left | Index, field access, function call |
+| Precedence   | Operators                    | Associativity | Description                                                |
+|--------------|------------------------------|---------------|------------------------------------------------------------|
+| 1            | `\|\|`                       | Left          | Logical OR                                                 |
+| 2            | `&&`                         | Left          | Logical AND                                                |
+| 3            | `\|`                         | Left          | Bitwise OR / type unions (in type position)                |
+| 4            | `^`                          | Left          | Bitwise XOR                                                |
+| 5            | `&`                          | Left          | Bitwise AND                                                |
+| 6            | `==` `!=` `<` `<=` `>` `>=`  | Left          | Comparisons                                                |
+| 7            | `<<` `>>`                    | Left          | Bit shifts                                                 |
+| 8            | `+` `-`                      | Left          | Addition/subtraction                                       |
+| 9            | `*` `/` `%`                  | Left          | Multiplication/division/remainder                          |
+| 10           | unary `-` `!` `~` `^` `move` | Right         | Unary ops                                                  |
+| 11 (highest) | `[]` `.` `()` `?`            | Left          | Index/slice, field/method access, calls, error propagation |
 
-## Arithmetic Operators
+## Arithmetic
 
-| Operator | Description | Example |
-|----------|-------------|---------|
-| `+` | Addition | `a + b` |
-| `-` | Subtraction | `a - b` |
-| `*` | Multiplication | `a * b` |
-| `/` | Integer division | `a / b` |
-| `%` | Remainder (modulo) | `a % b` |
-| `-` (unary) | Negation | `-x` |
+| Operator  | Meaning          | Example |
+|-----------|------------------|---------|
+| `+`       | Addition         | `a + b` |
+| `-`       | Subtraction      | `a - b` |
+| `*`       | Multiplication   | `a * b` |
+| `/`       | Integer division | `a / b` |
+| `%`       | Remainder        | `a % b` |
+| unary `-` | Negation         | `-x`    |
 
-```
-let sum = 10 + 5;      // 15
-let diff = 10 - 5;     // 5
-let prod = 10 * 5;     // 50
-let quot = 10 / 3;     // 3 (integer division)
-let rem = 10 % 3;      // 1
-let neg = -42;         // -42
-```
+Division by zero is a runtime error.
 
-Division by zero causes a runtime error.
+## Comparison
 
-## Comparison Operators
+| Operator          | Meaning               |
+|-------------------|-----------------------|
+| `==` `!=`         | Equality / inequality |
+| `<` `<=` `>` `>=` | Ordering              |
 
-| Operator | Description | Example |
-|----------|-------------|---------|
-| `==` | Equal | `a == b` |
-| `!=` | Not equal | `a != b` |
-| `<` | Less than | `a < b` |
-| `<=` | Less than or equal | `a <= b` |
-| `>` | Greater than | `a > b` |
-| `>=` | Greater than or equal | `a >= b` |
+## Logical
 
-```
-let eq = 5 == 5;       // true
-let ne = 5 != 3;       // true
-let lt = 3 < 5;        // true
-let le = 5 <= 5;       // true
-let gt = 5 > 3;        // true
-let ge = 5 >= 5;       // true
-```
+| Operator | Meaning                     |
+|----------|-----------------------------|
+| `&&`     | Logical AND (short-circuit) |
+| `\|\|`   | Logical OR (short-circuit)  |
+| `!`      | Logical NOT                 |
 
-## Logical Operators
+## Bitwise
 
-| Operator | Description | Example |
-|----------|-------------|---------|
-| `&&` | Logical AND (short-circuit) | `a && b` |
-| `\|\|` | Logical OR (short-circuit) | `a \|\| b` |
-| `!` | Logical NOT | `!a` |
+| Operator  | Meaning          |
+|-----------|------------------|
+| `&`       | Bitwise AND      |
+| `\|`      | Bitwise OR       |
+| `^`       | Bitwise XOR      |
+| `~`       | Bitwise NOT      |
+| `<<` `>>` | Left/right shift |
 
-```
-let both = true && false;   // false
-let either = true || false; // true
-let not = !true;            // false
-```
+## Assignment
 
-Short-circuit evaluation: `&&` and `||` only evaluate the right operand if
-needed.
+| Operator | Meaning    |
+|----------|------------|
+| `=`      | Assignment |
 
-```
-// b() is only called if a() returns true
-if a() && b() { ... } else { }
+Compound assignment (`+=`, `-=`, etc.) is not supported.
 
-// b() is only called if a() returns false
-if a() || b() { ... } else { }
-```
+## Access and Postfix
 
-## Bitwise Operators
+| Form              | Meaning                 | Example                   |
+|-------------------|-------------------------|---------------------------|
+| `obj.field`       | Field/property access   | `p.x`, `cfg.port`         |
+| `obj.method(...)` | Method call             | `arr.append(4)`           |
+| `arr[i]`          | Indexing                | `arr[0]`                  |
+| `arr[a..b]`       | Slicing                 | `arr[1..3]`, `arr[..]`    |
+| `f(x)`            | Function call           | `add(1, 2)`               |
+| `expr?`           | Error-union propagation | `let text = read(path)?;` |
 
-| Operator | Description | Example |
-|----------|-------------|---------|
-| `&` | Bitwise AND | `a & b` |
-| `\|` | Bitwise OR | `a \| b` |
-| `^` | Bitwise XOR | `a ^ b` |
-| `~` | Bitwise NOT (complement) | `~a` |
-| `<<` | Left shift | `a << n` |
-| `>>` | Right shift | `a >> n` |
+Notes:
+- Properties are accessed as fields (`obj.len`), not as method calls.
+- `expr?` requires the operand to be an error union and propagates non-success
+  variants to the caller.
 
-```
-let and = 0b1100 & 0b1010;   // 0b1000 (8)
-let or = 0b1100 | 0b1010;    // 0b1110 (14)
-let xor = 0b1100 ^ 0b1010;   // 0b0110 (6)
-let not = ~0b1100;           // inverts all bits
-let lsh = 1 << 4;            // 16
-let rsh = 16 >> 2;           // 4
-```
+## Other Syntax Operators
 
-## Assignment Operator
-
-| Operator | Description | Example |
-|----------|-------------|---------|
-| `=` | Assignment | `x = value` |
-
-```
-var x = 10;
-x = 20;
-```
-
-Machina does not have compound assignment operators (`+=`, `-=`, etc.).
-
-## Access Operators
-
-| Operator | Description | Example |
-|----------|-------------|---------|
-| `.` | Field/method access | `point.x`, `obj.method()` |
-| `[]` | Array index | `arr[i]` |
-| `[..]` | Slice | `arr[1..4]` |
-
-```
-let p = Point { x: 10, y: 20 };
-let x = p.x;              // field access
-
-let arr = [1, 2, 3];
-let first = arr[0];       // index
-let slice = arr[1..3];    // slice
-
-counter.increment();      // method call
-```
-
-## Other Operators
-
-| Operator | Description | Example |
-|----------|-------------|---------|
-| `^` (prefix) | Heap allocation | `^Point { x: 0, y: 0 }` |
-| `move` | Ownership transfer | `move value` |
-| `..` | Range (for `for` loops) | `0..10` |
-| `::` | Scope resolution | `Color::Red` |
-
-```
-let heap = ^Point { x: 1, y: 2 };   // allocate on heap
-let owned = move heap;              // transfer ownership
-for i in 0..10 { }                  // range
-let c = Color::Red;                 // enum variant
-```
-
-Range syntax is only valid in `for` loops and currently requires literal
-bounds.
+| Operator/Form               | Meaning                     | Example                          |
+|-----------------------------|-----------------------------|----------------------------------|
+| prefix `^`                  | Heap allocation expression  | `^Point { x: 1, y: 2 }`          |
+| postfix `^` (type position) | Heap-owned type             | `Point^`, `u8[]^`                |
+| `move`                      | Explicit ownership transfer | `consume(move v)`                |
+| `..`                        | Range (in loops/slices)     | `0..10`, `arr[1..]`              |
+| `::`                        | Scope/path resolution       | `Color::Red`, `std::io::println` |
 
 ## Operator Overloading
 
-Machina does not support operator overloading. Operators work only on built-in
-types.
+Machina does not support user-defined operator overloading.

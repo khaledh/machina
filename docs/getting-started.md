@@ -22,16 +22,22 @@ The compiler binary is `mcc`, located in `target/release/`.
 
 Create a file called `hello.mc`:
 
-```
+```mc
+requires {
+    std::io::println
+}
+
 fn main() {
     println("Hello, Machina!");
 }
 ```
 
+`requires` imports modules or symbols into the current file.
+
 ## Compile and Run
 
 _Note: the `mcc` command is an alias for `cargo run --bin mcc --`. It is defined
-in the `.cargo/config.toml` file._
+in `.cargo/config.toml`._
 
 ```sh
 cargo mcc build -o hello hello.mc
@@ -44,7 +50,7 @@ cargo mcc run hello.mc
 
 You should see:
 
-```
+```text
 Hello, Machina!
 ```
 
@@ -53,12 +59,13 @@ Hello, Machina!
 The compiler:
 
 1. Parsed your source file
-2. Type-checked and validated memory safety rules
-3. Generated ARM64 assembly
-4. Assembled and linked an executable
+2. Resolved imports and names
+3. Type-checked and validated memory safety rules
+4. Generated ARM64 assembly
+5. Assembled and linked an executable
 
 ## Next Steps
 
-- Read the [Language Tour](tour.md) for a quick overview of all features
-- Explore the [Guide](guide/) for in-depth coverage of specific topics
-- Check out the [examples/](../examples/) directory for more code samples
+- Read the [Language Tour](tour.md) for a quick overview of core features
+- Explore the [Guide](guide/) for focused topics
+- Check out `/examples` for runnable language samples

@@ -1,233 +1,177 @@
 # Types
 
-Machina has a static type system with type inference. Types are checked at
-compile time, and many type annotations can be omitted when they can be
-inferred.
+Machina is statically typed with local inference. You can omit many annotations,
+but function signatures should stay explicit.
 
 ## Scalar Types
 
 ### Integers
 
-Machina provides signed and unsigned integers in various sizes:
+| Type                   | Size              |
+|------------------------|-------------------|
+| `u8` `u16` `u32` `u64` | Unsigned integers |
+| `i8` `i16` `i32` `i64` | Signed integers   |
 
-| Type | Size | Range |
-|------|------|-------|
-| `u8` | 8 bits | 0 to 255 |
-| `u16` | 16 bits | 0 to 65,535 |
-| `u32` | 32 bits | 0 to 4,294,967,295 |
-| `u64` | 64 bits | 0 to 18,446,744,073,709,551,615 |
-| `i8` | 8 bits | -128 to 127 |
-| `i16` | 16 bits | -32,768 to 32,767 |
-| `i32` | 32 bits | -2,147,483,648 to 2,147,483,647 |
-| `i64` | 64 bits | -9,223,372,036,854,775,808 to 9,223,372,036,854,775,807 |
-
-```
+```mc
 let small: u8 = 255;
+let signed: i32 = -42;
 let big: u64 = 1_000_000;
-let negative: i32 = -42;
+```
+
+Unresolved integer literals default to `i32`.
+
+```mc
+let x = 42;      // inferred as i32
 ```
 
 ### Numeric Literals
 
-Integer literals can be written in multiple bases:
-
-```
+```mc
 let decimal = 42;
-let grouped = 1_000_000;     // underscores for readability
-let binary = 0b1010_0110;    // binary (base 2)
-let octal = 0o52;            // octal (base 8)
-let hex = 0x2a;              // hexadecimal (base 16)
+let grouped = 1_000_000;
+let binary = 0b1010_0110;
+let octal = 0o52;
+let hex = 0x2a;
 ```
 
-### Booleans
+### Booleans, Characters, Unit
 
-The `bool` type has two values: `true` and `false`.
+```mc
+let ok: bool = true;
+let ch: char = 'a';
 
-```
-let yes: bool = true;
-let no = false;
-```
-
-### Characters
-
-The `char` type represents a single character:
-
-```
-let letter: char = 'a';
-let digit = '7';
-```
-
-### Unit
-
-The unit type `()` represents the absence of a value. Functions that don't
-return anything implicitly return `()`.
-
-```
-fn do_nothing() {
+fn log_done() {
     // returns ()
 }
 ```
 
-You can also write `return;` to return `()` explicitly.
-
-## Compound Types
+## Product and Sum Types
 
 ### Arrays
 
-Arrays are fixed-size sequences of elements of the same type. The type is
-written as `T[N]` where `T` is the element type and `N` is the length.
+`T[N]` is a fixed-size array.
 
-```
-let arr: u64[3] = [1, 2, 3];
-let inferred = [10, 20, 30];      // type inferred as u64[3]
-```
-
-Repeat syntax creates an array with the same value:
-
-```
-let zeros = [0; 10];              // [0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
-let typed = u8[0; 32];            // 32 zeros of type u8
+```mc
+let xs: i32[3] = [1, 2, 3];
+let zeros = [0; 8];
+let bytes = u8[1, 2, 3];
 ```
 
-Multi-dimensional arrays:
+### Slices
 
-```
-let matrix: u64[2, 3] = [[1, 2, 3], [4, 5, 6]];
-let elem = matrix[1, 2];          // 6
+`T[]` is a borrowed view.
+
+```mc
+fn sum(xs: i32[]) -> i32 {
+    var acc = 0;
+    for x in xs { acc = acc + x; }
+    acc
+}
 ```
 
-See [Arrays and Slices](arrays-slices.md) for indexing, slicing, and bounds
-checking.
+### Dynamic Arrays
+
+`T[*]` is an owned growable array.
+
+```mc
+var xs: i32[*] = [1, 2, 3];
+xs.append(4);
+```
 
 ### Tuples
 
-Tuples group values of potentially different types:
-
-```
-let pair: (u64, bool) = (42, true);
-let triple = (1, "hello", false);
-```
-
-Access tuple elements by index:
-
-```
-let x = pair.0;    // 42
-let y = pair.1;    // true
+```mc
+let pair: (i32, bool) = (42, true);
+let a = pair.0;
+let b = pair.1;
 ```
 
 ### Strings
 
-String literals have the `string` type:
-
-```
-let greeting: string = "hello";
-let name = "world";
+```mc
+let s: string = "hello";
+let msg = f"value={42}";
 ```
 
-See [Strings](strings.md) for formatted strings and string operations.
+### Structs and Enums
 
-## User-Defined Types
-
-### Type Aliases
-
-Create a new name for an existing type:
-
-```
-type Size = u64
-type Coordinate = i64
+```mc
+type Point = { x: i32, y: i32 }
+type OptionI32 = Some(i32) | None
 ```
 
-### Structs
+## Builtin Collection Types
 
-Structs group named fields:
+### Sets
 
-```
-type Point = { x: u64, y: u64 }
-type Person = { name: string, age: u64 }
-```
+`set<T>` stores unique values.
 
-### Enums
-
-Enums define a type with multiple variants:
-
-```
-type Color = Red | Green | Blue
-type Option = Some(u64) | None
-type Shape = Circle(u64) | Rect(u64, u64)
+```mc
+var s = {1, 2, 3};            // inferred set<i32>
+var empty = set<i32>{};
 ```
 
-See [Structs and Enums](structs-enums.md) for struct literals, destructuring,
-and pattern matching.
+### Maps
 
-## Heap Types
+`map<K, V>` stores key/value pairs.
 
-The `T^` type represents an owned heap allocation of type `T`:
-
+```mc
+var m = map<string, i32>{"one": 1, "two": 2};
 ```
-type Point = { x: u64, y: u64 }
+
+## Heap-Owned Types
+
+Postfix `^` in a type means heap-owned.
+
+```mc
+type Point = { x: i32, y: i32 }
 
 let p: Point^ = ^Point { x: 1, y: 2 };
+let a: i32[]^ = ^[1, 2, 3];
 ```
 
-Heap values are automatically dropped when they go out of scope. See
-[Memory Safety](mem-safety.md) for ownership and move semantics.
-
-## Slice Types
-
-The `T[]` type represents a slice (non-owning view) into an array:
-
-```
-fn sum(xs: u64[]) -> u64 {
-    var total = 0;
-    for x in xs {
-        total = total + x;
-    }
-    total
-}
-```
-
-See [Arrays and Slices](arrays-slices.md) for slice creation and rules.
+`A^` and `A` are different types.
 
 ## Function Types
 
-Function types describe the signature of a function:
-
+```mc
+type BinOp = fn(i32, i32) -> i32
 ```
-type BinaryOp = fn(u64, u64) -> u64
 
-fn apply(f: BinaryOp, a: u64, b: u64) -> u64 {
-    f(a, b)
+## Union Types
+
+Machina supports unions in type position.
+
+```mc
+type ParseError = { message: string }
+
+fn parse(input: string) -> i32 | ParseError {
+    // ...
 }
 ```
 
-## Range Types
+Unions are used heavily for error handling.
 
-Range types represent bounded integers:
+## Refinement Types
 
-```
-type Index = range(10)        // 0 to 9
-type Small = range(2, 8)      // 2 to 7 (half-open)
-```
-
-Range bounds are non-negative. Assignments are checked at runtime, while
-out-of-range literals are rejected at compile time:
-
-```
-let i: range(10) = 5;    // ok
-let j: range(10) = 15;   // error: out of range
+```mc
+type Index = range(10)      // 0..9
+type Small = range(2, 8)    // 2..7
 ```
 
-## Type Inference
-
-Machina infers types when possible:
-
-```
-let x = 42;                // inferred as u64
-let arr = [1, 2, 3];       // inferred as u64[3]
-let p = Point { x: 0, y: 0 };  // inferred as Point
+```mc
+let i: range(10) = 5;      // ok
+// let bad: range(10) = 20; // compile-time error for literal
 ```
 
-Type annotations are required for:
-- Function parameters and return types (unless returning `()`)
-- Closure parameters and return types (unless returning `()`)
-- Ambiguous expressions
+## Inference
+
+Type inference is local and constraint-based.
+
+```mc
+let x = 42;                        // i32
+let arr = [1, 2, 3];               // i32[3]
+let p = Point { x: 0, y: 0 };      // Point
+```
+
+Add annotations where intent is unclear or API boundaries need explicit types.
