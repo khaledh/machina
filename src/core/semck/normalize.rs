@@ -5,7 +5,6 @@ use crate::core::resolve::DefKind;
 use crate::core::resolve::def_table::DefTable;
 use crate::core::tree::NodeIdGen;
 use crate::core::tree::normalized as norm;
-use crate::core::tree::normalized::build_module;
 use crate::core::tree::visit_mut;
 use crate::core::tree::visit_mut::VisitorMut;
 use crate::core::typecheck::type_map::{CallParam, CallSigMap};
@@ -32,7 +31,10 @@ pub fn normalize(ctx: SemCheckStageInput) -> SemCheckNormalizedContext {
         symbols,
         node_id_gen,
     } = resolved;
-    let mut module = build_module(&module);
+    // `typed::Module` and `normalized::Module` currently share the same
+    // underlying representation (`tree::model::Module<DefId, TypeId>`), so
+    // normalization can mutate the owned module in place.
+    let mut module: norm::Module = module;
     let mut type_map = TypeMapOverlay::new(type_map);
     let mut node_id_gen = node_id_gen;
     let mut normalizer = Normalizer::new(&def_table, &mut type_map, &call_sigs, &mut node_id_gen);
