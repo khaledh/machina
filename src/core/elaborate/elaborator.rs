@@ -255,6 +255,39 @@ impl<'a> Elaborator<'a> {
         self.insert_node_type_for(node_id, ty, SyntheticReason::ElaborateSyntheticNode)
     }
 
+    pub(super) fn def_or_panic(&self, def_id: DefId, context: &str) -> crate::core::resolve::Def {
+        self.def_table
+            .lookup_def(def_id)
+            .unwrap_or_else(|| panic!("compiler bug: missing def for {context}: {def_id}"))
+            .clone()
+    }
+
+    pub(super) fn node_type_or_panic(&self, node_id: NodeId, context: &str) -> Type {
+        self.type_map
+            .lookup_node_type(node_id)
+            .unwrap_or_else(|| panic!("compiler bug: missing type for {context}: {node_id:?}"))
+    }
+
+    pub(super) fn def_type_or_panic(&self, def: &crate::core::resolve::Def, context: &str) -> Type {
+        self.type_map
+            .lookup_def_type(def)
+            .unwrap_or_else(|| panic!("compiler bug: missing def type for {context}: {}", def.id))
+    }
+
+    pub(super) fn def_type_id_or_panic(
+        &self,
+        def: &crate::core::resolve::Def,
+        context: &str,
+    ) -> TypeId {
+        self.type_map
+            .lookup_def_type_id(def)
+            .unwrap_or_else(|| panic!("compiler bug: missing def type id for {context}: {}", def.id))
+    }
+
+    pub(super) fn has_def_type(&self, def: &crate::core::resolve::Def) -> bool {
+        self.type_map.lookup_def_type_id(def).is_some()
+    }
+
     pub(super) fn insert_node_type_for(
         &mut self,
         node_id: NodeId,

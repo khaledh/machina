@@ -115,20 +115,10 @@ impl<'a> Elaborator<'a> {
         let mut fields = Vec::with_capacity(captures.len());
         for capture in captures {
             let def_id = capture.def_id;
-            let def = self
-                .def_table
-                .lookup_def(def_id)
-                .unwrap_or_else(|| panic!("compiler bug: missing def for capture {def_id}"))
-                .clone();
+            let def = self.def_or_panic(def_id, "closure capture");
             let name = def.name.clone();
-            let base_ty = self
-                .type_map
-                .lookup_def_type(&def)
-                .unwrap_or_else(|| panic!("compiler bug: missing type for capture {def_id}"));
-            let base_ty_id = self
-                .type_map
-                .lookup_def_type_id(&def)
-                .unwrap_or_else(|| panic!("compiler bug: missing type id for capture {def_id}"));
+            let base_ty = self.def_type_or_panic(&def, "closure capture");
+            let base_ty_id = self.def_type_id_or_panic(&def, "closure capture");
             // Move captures store the value itself; borrow captures store refs.
             let (field_ty, field_ty_id, field_ty_expr) = match capture.mode {
                 CaptureMode::Move => (
@@ -188,10 +178,7 @@ impl<'a> Elaborator<'a> {
         }
 
         // The closure expression already typechecks as a function type.
-        let fn_ty = self
-            .type_map
-            .lookup_node_type(expr_id)
-            .unwrap_or_else(|| panic!("compiler bug: missing closure type for {:?}", expr_id));
+        let fn_ty = self.node_type_or_panic(expr_id, "captureless closure expression");
         let return_ty_val = match &fn_ty {
             Type::Fn { ret_ty, .. } => *ret_ty.clone(),
             other => panic!(
@@ -200,14 +187,10 @@ impl<'a> Elaborator<'a> {
             ),
         };
 
-        let def = self
-            .def_table
-            .lookup_def(def_id)
-            .unwrap_or_else(|| panic!("compiler bug: missing def for closure {:?}", def_id))
-            .clone();
+        let def = self.def_or_panic(def_id, "captureless closure");
 
         // The resolver registers a def_id for closures but doesn't assign a def type.
-        if self.type_map.lookup_def_type_id(&def).is_none() {
+        if !self.has_def_type(&def) {
             self.insert_def_type_for(def, fn_ty.clone(), SyntheticReason::ClosureLowering);
         }
 
@@ -326,15 +309,14 @@ impl<'a> Elaborator<'a> {
             self.make_closure_type(ident, span, &captures);
         let param_modes = params.iter().map(|param| param.mode.clone()).collect();
 
-        let return_ty_val = match self.type_map.lookup_node_type(expr_id) {
-            Some(Type::Fn { ret_ty, .. }) => *ret_ty,
-            Some(other) => {
+        let return_ty_val = match self.node_type_or_panic(expr_id, "closure expression") {
+            Type::Fn { ret_ty, .. } => *ret_ty,
+            other => {
                 panic!(
                     "compiler bug: closure expr {:?} has non-fn type {:?}",
                     expr_id, other
                 )
             }
-            None => panic!("compiler bug: missing type for closure expr {:?}", expr_id),
         };
 
         let info = ClosureInfo {
