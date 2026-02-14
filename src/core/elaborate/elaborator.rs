@@ -252,17 +252,17 @@ impl<'a> Elaborator<'a> {
     }
 
     pub(super) fn insert_synth_node_type(&mut self, node_id: NodeId, ty: Type) -> TypeId {
-        self.type_map.insert_node_type(
-            node_id,
-            ty,
-            "elaborate",
-            SyntheticReason::ElaborateSyntheticNode,
-        )
+        self.insert_node_type_for(node_id, ty, SyntheticReason::ElaborateSyntheticNode)
     }
 
-    pub(super) fn insert_closure_node_type(&mut self, node_id: NodeId, ty: Type) -> TypeId {
+    pub(super) fn insert_node_type_for(
+        &mut self,
+        node_id: NodeId,
+        ty: Type,
+        reason: SyntheticReason,
+    ) -> TypeId {
         self.type_map
-            .insert_node_type(node_id, ty, "elaborate", SyntheticReason::ClosureLowering)
+            .insert_node_type(node_id, ty, "elaborate", reason)
     }
 
     pub(super) fn record_call_plan(&mut self, node_id: NodeId, plan: sem::CallPlan) {
@@ -298,13 +298,13 @@ impl<'a> Elaborator<'a> {
         )
     }
 
-    pub(super) fn insert_closure_def_type(
+    pub(super) fn insert_def_type_for(
         &mut self,
         def: crate::core::resolve::Def,
         ty: Type,
+        reason: SyntheticReason,
     ) -> TypeId {
-        self.type_map
-            .insert_def_type(def, ty, "elaborate", SyntheticReason::ClosureLowering)
+        self.type_map.insert_def_type(def, ty, "elaborate", reason)
     }
 
     pub(super) fn add_synthetic_def(
@@ -329,18 +329,14 @@ impl<'a> Elaborator<'a> {
     ) -> DefId {
         let def_id = self.add_synthetic_def(name, kind, reason.clone());
         if let Some(def) = self.def_table.lookup_def(def_id) {
-            let _ = self
-                .type_map
-                .insert_def_type(def.clone(), ty, "elaborate", reason);
+            let _ = self.insert_def_type_for(def.clone(), ty, reason);
         }
         def_id
     }
 
     pub(super) fn insert_def_id_type(&mut self, def_id: DefId, ty: Type, reason: SyntheticReason) {
         if let Some(def) = self.def_table.lookup_def(def_id) {
-            let _ = self
-                .type_map
-                .insert_def_type(def.clone(), ty, "elaborate", reason);
+            let _ = self.insert_def_type_for(def.clone(), ty, reason);
         }
     }
 
