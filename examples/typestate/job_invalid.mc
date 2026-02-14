@@ -1,0 +1,3 @@
+typestate Job {
+    state Created {}
+}

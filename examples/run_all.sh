@@ -88,8 +88,14 @@ exec 3>"$progress_fifo"
   example="$6"
   log="$tmp_dir/${idx}.log"
   rc="$tmp_dir/${idx}.rc"
+  source_path="$repo_root/$example"
 
-  if (cd "$repo_root" && "$mcc_bin" run "$example" >"$log" 2>&1); then
+  extra_args=()
+  if grep -Eq "^[[:space:]]*typestate[[:space:]]" "$source_path"; then
+    extra_args=(--experimental typestate)
+  fi
+
+  if (cd "$repo_root" && "$mcc_bin" run "${extra_args[@]}" "$example" >"$log" 2>&1); then
     echo 0 >"$rc"
   else
     echo 1 >"$rc"
