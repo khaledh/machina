@@ -7,6 +7,7 @@ use crate::core::context::ParsedContext;
 use crate::core::resolve::ResolveError;
 use crate::core::tree::NodeIdGen;
 use crate::core::tree::semantic as sem;
+use crate::core::typecheck::TypeCheckErrorKind;
 
 fn parsed_context(source: &str) -> ParsedContext {
     let id_gen = NodeIdGen::new();
@@ -199,6 +200,148 @@ fn main() -> u64 {
                 if state == "Disconnected"
         )
     }));
+}
+
+#[test]
+fn typestate_protocol_shape_missing_handler_reports_type_error() {
+    let source = r#"
+type AuthReq = {}
+type AuthOk = {}
+
+protocol Auth {
+    role Client;
+    role Server;
+    flow Server -> Client: AuthOk;
+    flow Client -> Server: AuthReq;
+}
+
+typestate Gateway : Auth::Client {
+    fn new() -> Idle {
+        Idle {}
+    }
+
+    state Idle {
+        fn request() -> Idle {
+            emit Send(to: 0, AuthReq {});
+            Idle {}
+        }
+    }
+}
+"#;
+    let parsed = parsed_context_typestate(source);
+    let out = resolve_typecheck_pipeline_with_policy(
+        parsed,
+        ResolveInputs::default(),
+        None,
+        FrontendPolicy::Strict,
+    );
+    assert!(
+        out.type_errors.iter().any(|e| {
+            matches!(
+                e.kind(),
+                TypeCheckErrorKind::ProtocolFlowHandlerMissing(ts, role, _, _)
+                    if ts == "Gateway" && role == "Auth::Client"
+            )
+        }),
+        "expected missing handler protocol conformance error, got {:?}",
+        out.type_errors
+    );
+}
+
+#[test]
+fn typestate_protocol_shape_outgoing_payload_violation_reports_type_error() {
+    let source = r#"
+type AuthReq = {}
+type AuthOk = {}
+type Other = {}
+
+protocol Auth {
+    role Client;
+    role Server;
+    flow Server -> Client: AuthOk;
+    flow Client -> Server: AuthReq;
+}
+
+typestate Gateway : Auth::Client {
+    fn new() -> Idle {
+        Idle {}
+    }
+
+    state Idle {
+        on AuthOk() -> Idle {
+            Idle {}
+        }
+
+        fn request() -> Idle {
+            emit Send(to: 0, Other {});
+            Idle {}
+        }
+    }
+}
+"#;
+    let parsed = parsed_context_typestate(source);
+    let out = resolve_typecheck_pipeline_with_policy(
+        parsed,
+        ResolveInputs::default(),
+        None,
+        FrontendPolicy::Strict,
+    );
+    assert!(
+        out.type_errors.iter().any(|e| {
+            matches!(
+                e.kind(),
+                TypeCheckErrorKind::ProtocolOutgoingPayloadNotAllowed(ts, role, _, _)
+                    if ts == "Gateway" && role == "Auth::Client"
+            )
+        }),
+        "expected outgoing payload protocol conformance error, got {:?}",
+        out.type_errors
+    );
+}
+
+#[test]
+fn typestate_protocol_shape_accepts_valid_handler_and_outgoing_payload() {
+    let source = r#"
+type AuthReq = {}
+type AuthOk = {}
+
+protocol Auth {
+    role Client;
+    role Server;
+    flow Server -> Client: AuthOk;
+    flow Client -> Server: AuthReq;
+}
+
+typestate Gateway : Auth::Client {
+    fn new() -> Idle {
+        Idle {}
+    }
+
+    state Idle {
+        on AuthOk() -> Idle {
+            Idle {}
+        }
+
+        fn request() -> Idle {
+            emit Send(to: 0, AuthReq {});
+            Idle {}
+        }
+    }
+}
+"#;
+    let parsed = parsed_context_typestate(source);
+    let out = resolve_typecheck_pipeline_with_policy(
+        parsed,
+        ResolveInputs::default(),
+        None,
+        FrontendPolicy::Strict,
+    );
+    assert!(
+        !out.has_errors(),
+        "expected valid protocol shape conformance, got resolve={:?} type={:?}",
+        out.resolve_errors,
+        out.type_errors
+    );
 }
 
 #[test]

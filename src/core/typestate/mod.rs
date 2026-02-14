@@ -16,7 +16,8 @@ use crate::core::tree::parsed::{
     self, BindPattern, BindPatternKind, CallArg, Expr, ExprKind, FuncDecl, FuncDef, MatchPattern,
     MethodBlock, MethodDef, MethodItem, MethodSig, Module, SelfParam, StmtExpr, StmtExprKind,
     StructDefField, StructLitField, TopLevelItem, TypeDef, TypeDefKind, TypeExpr, TypeExprKind,
-    TypestateDef, TypestateFields, TypestateItem, TypestateState, TypestateStateItem,
+    TypestateDef, TypestateFields, TypestateItem, TypestateOnHandler, TypestateState,
+    TypestateStateItem,
 };
 use crate::core::tree::visit::{self, Visitor};
 use crate::core::tree::visit_mut::{self, VisitorMut};
@@ -102,6 +103,7 @@ fn desugar_typestate(
         .collect();
     let shared_fields = analysis.shared_fields;
     let states = analysis.states;
+    let typestate_handlers = analysis.handlers;
     let state_name_map = build_state_name_map(&ts_name, &states);
     let generated_state_names: HashSet<String> = state_name_map.values().cloned().collect();
     // Local fields are used by shorthand transition rewriting (`State`) to know
@@ -143,17 +145,47 @@ fn desugar_typestate(
         // Generated inherent methods for this state. We inject implicit `sink self`
         // and apply transition-literal rewrites before state-name mangling.
         let mut method_items = Vec::new();
+        let mut handler_index = 0usize;
+        for handler in &typestate_handlers {
+            let method_source =
+                lower_handler_to_method_source(handler, &mut handler_index, node_id_gen);
+            method_items.push(MethodItem::Def(lower_state_method(
+                method_source,
+                node_id_gen,
+                &source_state_names,
+                &local_fields_by_state,
+                &carried_field_names,
+                &state_name_map,
+                state.span,
+            )));
+        }
         for item in state.items {
-            if let TypestateStateItem::Method(method) = item {
-                method_items.push(MethodItem::Def(lower_state_method(
-                    method,
-                    node_id_gen,
-                    &source_state_names,
-                    &local_fields_by_state,
-                    &carried_field_names,
-                    &state_name_map,
-                    state.span,
-                )));
+            match item {
+                TypestateStateItem::Method(method) => {
+                    method_items.push(MethodItem::Def(lower_state_method(
+                        method,
+                        node_id_gen,
+                        &source_state_names,
+                        &local_fields_by_state,
+                        &carried_field_names,
+                        &state_name_map,
+                        state.span,
+                    )));
+                }
+                TypestateStateItem::Handler(handler) => {
+                    let method_source =
+                        lower_handler_to_method_source(&handler, &mut handler_index, node_id_gen);
+                    method_items.push(MethodItem::Def(lower_state_method(
+                        method_source,
+                        node_id_gen,
+                        &source_state_names,
+                        &local_fields_by_state,
+                        &carried_field_names,
+                        &state_name_map,
+                        state.span,
+                    )));
+                }
+                TypestateStateItem::Fields(_) => {}
             }
         }
         if !method_items.is_empty() {
@@ -237,6 +269,8 @@ struct TypestateAnalysis {
     shared_fields: Vec<StructDefField>,
     // Unique states only (duplicates are reported as diagnostics).
     states: Vec<TypestateState>,
+    // Typestate-level handlers copied onto each lowered state.
+    handlers: Vec<TypestateOnHandler>,
     // The selected `new` constructor (first one if multiple are present).
     constructor: Option<FuncDef>,
     // All validation diagnostics for this typestate block.
@@ -275,17 +309,22 @@ fn analyze_typestate(typestate: &TypestateDef) -> TypestateAnalysis {
     // Keep first state occurrence and report duplicates.
     let mut unique_state_names = HashSet::new();
     let mut states = Vec::new();
+    let mut handlers = Vec::new();
     for item in &typestate.items {
-        if let TypestateItem::State(state) = item {
-            if unique_state_names.insert(state.name.clone()) {
-                states.push(state.clone());
-            } else {
-                errors.push(ResolveError::TypestateDuplicateState(
-                    ts_name.clone(),
-                    state.name.clone(),
-                    state.span,
-                ));
+        match item {
+            TypestateItem::State(state) => {
+                if unique_state_names.insert(state.name.clone()) {
+                    states.push(state.clone());
+                } else {
+                    errors.push(ResolveError::TypestateDuplicateState(
+                        ts_name.clone(),
+                        state.name.clone(),
+                        state.span,
+                    ));
+                }
             }
+            TypestateItem::Handler(handler) => handlers.push(handler.clone()),
+            TypestateItem::Fields(_) | TypestateItem::Constructor(_) => {}
         }
     }
 
@@ -367,6 +406,7 @@ fn analyze_typestate(typestate: &TypestateDef) -> TypestateAnalysis {
     TypestateAnalysis {
         shared_fields,
         states,
+        handlers,
         constructor,
         errors,
     }
@@ -525,6 +565,38 @@ fn lower_state_method(
 
 // Parsed typestate methods are represented as function defs before lowering.
 type MethodDefSource = FuncDef;
+
+fn lower_handler_to_method_source(
+    handler: &TypestateOnHandler,
+    next_index: &mut usize,
+    node_id_gen: &mut NodeIdGen,
+) -> MethodDefSource {
+    let name = format!("__ts_on_{}", *next_index);
+    *next_index += 1;
+    let mut params = vec![parsed::Param {
+        id: node_id_gen.new_id(),
+        ident: "__event".to_string(),
+        def_id: (),
+        typ: handler.selector_ty.clone(),
+        mode: ParamMode::In,
+        span: handler.selector_ty.span,
+    }];
+    params.extend(handler.params.clone());
+    MethodDefSource {
+        id: handler.id,
+        def_id: (),
+        attrs: Vec::new(),
+        sig: parsed::FunctionSig {
+            name,
+            type_params: Vec::new(),
+            params,
+            ret_ty_expr: handler.ret_ty_expr.clone(),
+            span: handler.span,
+        },
+        body: handler.body.clone(),
+        span: handler.span,
+    }
+}
 
 fn rewrite_transition_literals_in_method(
     method: &mut FuncDef,

@@ -336,6 +336,14 @@ pub enum TypeCheckErrorKind {
 
     #[error("Cannot destructure opaque type {0} outside its defining module")]
     OpaquePatternDestructure(String, Span),
+
+    #[error("Typestate {0} implementing role {1} is missing a handler for incoming payload {2}")]
+    ProtocolFlowHandlerMissing(String, String, Type, Span),
+
+    #[error(
+        "Typestate {0} implementing role {1} emits payload {2} which is not allowed by protocol flows"
+    )]
+    ProtocolOutgoingPayloadNotAllowed(String, String, Type, Span),
 }
 
 impl TypeCheckError {
@@ -453,6 +461,8 @@ impl TypeCheckError {
             TypeCheckErrorKind::StringFmtExprUnsupportedType(_, span) => *span,
             TypeCheckErrorKind::LenTargetNotLvalue(span) => *span,
             TypeCheckErrorKind::OpaquePatternDestructure(_, span) => *span,
+            TypeCheckErrorKind::ProtocolFlowHandlerMissing(_, _, _, span) => *span,
+            TypeCheckErrorKind::ProtocolOutgoingPayloadNotAllowed(_, _, _, span) => *span,
         }
     }
 }
