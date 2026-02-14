@@ -26,6 +26,45 @@ The following are adopted as baseline constraints for this design:
 5. Typed handles are preferred over raw machine ids at source level.
 6. Typestate-level default handlers are supported to control error explosion.
 
+## Semantic Freeze (V1 Source of Truth)
+
+This section is the normative contract for implementation work. If later
+sections conflict with this one, this section wins.
+
+### Frozen Invariants
+
+1. **Managed-mode exclusivity**
+   - registering a machine in managed mode consumes direct ownership.
+   - direct typestate transition calls on that managed instance are illegal.
+2. **Dispatch model**
+   - handlers are synchronous, run-to-completion, one-at-a-time per machine.
+   - runtime dispatch is mailbox-driven only in managed mode.
+3. **Transactional semantics**
+   - commit unit is `(next state, outbox effects, subscription updates)`.
+   - if handler fails before successful completion, commit does not occur.
+4. **Default handler precedence**
+   - state-local handler first.
+   - typestate-level handler only as fallback when state-local is absent.
+5. **Handle/capability surface**
+   - source-level addressing uses typed `Handle<P, R>`.
+   - source-level request/reply correlation uses only `Pending<RespSet>` and
+     `ReplyCap<RespSet>`.
+   - source code must not manually construct correlation ids.
+6. **Reply linearity baseline**
+   - request handlers that receive `ReplyCap<RespSet>` must consume it exactly
+     once on all successful paths.
+   - v1 has no no-reply escape hatch (`@[no_reply]` is out of scope).
+7. **Protocol conformance scope**
+   - v1 enforces shape only.
+   - stronger protocol refinement/projection checks are explicitly deferred.
+
+### Explicit Deferrals (Not Blocking V1)
+
+1. Sequential/projection protocol checking beyond shape.
+2. Typed channels as a first-class alternative to capability reply tokens.
+3. Cross-process/distributed transport guarantees.
+4. No-reply annotations and policy customization.
+
 ## Problem
 
 Current typestate is great for direct local transitions (`c.connect()`), but we
@@ -148,7 +187,7 @@ capabilities:
 
 - responder receives a linear `ReplyCap<RespSet>` with the request handler.
 - `reply(cap, x)` requires `type(x)` in `RespSet`.
-- cap must be consumed exactly once unless handler is explicitly marked no-reply.
+- cap must be consumed exactly once on all successful paths.
 - source-level code does not manually construct/compare correlation ids.
 
 This is the v1 pragmatic alternative to full typed channels.
@@ -354,12 +393,13 @@ architecture summary:
 - managed machine used via direct call path
 - mailbox full / delivery failure surfaced at call site
 
-## Open Questions
+## Deferred Questions (Post-V1)
 
-1. Should no-reply paths require explicit annotation (for example `@[no_reply]`)?
-2. Do we expose `Pending<T>` directly in user states in v1, or keep it lowered and implicit?
-3. Are typed handles mandatory at source level in v1, or do we allow a temporary internal-only raw-id escape hatch?
-4. Should minimal sequential flow syntax be added in v1.1 to prepare for stronger (non-shape) protocol checks?
+The following are intentionally deferred and non-blocking for v1:
+
+1. Should `Pending<T>` be user-visible in states, or lowered/implicit?
+2. Should minimal sequential flow syntax be introduced in v1.1?
+3. What is the exact migration path from capabilities to typed channels?
 
 ## Future Direction: Typed Channels
 
@@ -373,6 +413,9 @@ This plan assumes we implement a local-process, single-scheduler runtime first.
 
 ### Milestone 0: Semantic Freeze (Must Complete First)
 
+Output of this milestone is the **Semantic Freeze (V1 Source of Truth)** section
+above. All later milestones must conform to it.
+
 1. Lock source surface included in v1:
    - `protocol`, `role`, `flow`
    - typestate `on` handlers
@@ -384,6 +427,7 @@ This plan assumes we implement a local-process, single-scheduler runtime first.
 3. Lock handler transaction semantics (commit/rollback/fault transitions).
 4. Lock managed-mode exclusivity rule (no direct calls on managed machine).
 5. Lock default handler precedence (state-local before typestate-level default).
+6. Lock no-reply baseline (v1 requires exactly-one reply on successful paths).
 
 ### Milestone 1: Frontend + Static Rules (No Runtime Yet)
 
