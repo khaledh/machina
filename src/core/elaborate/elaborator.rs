@@ -279,9 +279,12 @@ impl<'a> Elaborator<'a> {
         def: &crate::core::resolve::Def,
         context: &str,
     ) -> TypeId {
-        self.type_map
-            .lookup_def_type_id(def)
-            .unwrap_or_else(|| panic!("compiler bug: missing def type id for {context}: {}", def.id))
+        self.type_map.lookup_def_type_id(def).unwrap_or_else(|| {
+            panic!(
+                "compiler bug: missing def type id for {context}: {}",
+                def.id
+            )
+        })
     }
 
     pub(super) fn has_def_type(&self, def: &crate::core::resolve::Def) -> bool {

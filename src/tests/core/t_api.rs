@@ -4,8 +4,8 @@ use crate::core::api::{
     typecheck_stage_with_policy,
 };
 use crate::core::context::ParsedContext;
-use crate::core::tree::semantic as sem;
 use crate::core::tree::NodeIdGen;
+use crate::core::tree::semantic as sem;
 
 fn parsed_context(source: &str) -> ParsedContext {
     let id_gen = NodeIdGen::new();
@@ -195,7 +195,9 @@ fn value_has_for(value: &sem::ValueExpr) -> bool {
         sem::ValueExprKind::UnaryOp { expr, .. }
         | sem::ValueExprKind::HeapAlloc { expr }
         | sem::ValueExprKind::Coerce { expr, .. } => value_has_for(expr),
-        sem::ValueExprKind::BinOp { left, right, .. } => value_has_for(left) || value_has_for(right),
+        sem::ValueExprKind::BinOp { left, right, .. } => {
+            value_has_for(left) || value_has_for(right)
+        }
         sem::ValueExprKind::Range { start, end } => value_has_for(start) || value_has_for(end),
         sem::ValueExprKind::Slice { start, end, .. } => {
             start.as_ref().is_some_and(|start| value_has_for(start))
@@ -232,7 +234,9 @@ fn stmt_has_for(stmt: &sem::StmtExpr) -> bool {
         }
         sem::StmtExprKind::Assign { value, .. } => value_has_for(value),
         sem::StmtExprKind::While { cond, body } => value_has_for(cond) || value_has_for(body),
-        sem::StmtExprKind::Return { value } => value.as_ref().is_some_and(|value| value_has_for(value)),
+        sem::StmtExprKind::Return { value } => {
+            value.as_ref().is_some_and(|value| value_has_for(value))
+        }
         sem::StmtExprKind::VarDecl { .. }
         | sem::StmtExprKind::Break
         | sem::StmtExprKind::Continue => false,

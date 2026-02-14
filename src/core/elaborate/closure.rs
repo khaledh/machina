@@ -45,8 +45,8 @@
 use crate::core::analysis::facts::SyntheticReason;
 use crate::core::diag::Span;
 use crate::core::resolve::{DefId, DefKind, TypeAttrs};
-use crate::core::symtab::SymbolTable;
 use crate::core::semck::closure::capture::CaptureMode;
+use crate::core::symtab::SymbolTable;
 use crate::core::tree::normalized as norm;
 use crate::core::tree::semantic as sem;
 use crate::core::tree::{NodeId, ParamMode};
@@ -132,12 +132,11 @@ impl<'a> Elaborator<'a> {
                         elem_ty: Box::new(base_ty.clone()),
                     };
                     let field_ty_node = self.node_id_gen.new_id();
-                    let field_ty_id =
-                        self.insert_node_type_for(
-                            field_ty_node,
-                            field_ty.clone(),
-                            SyntheticReason::ClosureLowering,
-                        );
+                    let field_ty_id = self.insert_node_type_for(
+                        field_ty_node,
+                        field_ty.clone(),
+                        SyntheticReason::ClosureLowering,
+                    );
                     let field_ty_expr = self.type_expr_from_type(&field_ty, span);
                     (field_ty, field_ty_id, field_ty_expr)
                 }
@@ -196,7 +195,11 @@ impl<'a> Elaborator<'a> {
 
         // The generated function gets a fresh node id but reuses the closure def id.
         let func_id = self.node_id_gen.new_id();
-        self.insert_node_type_for(func_id, return_ty_val.clone(), SyntheticReason::ClosureLowering);
+        self.insert_node_type_for(
+            func_id,
+            return_ty_val.clone(),
+            SyntheticReason::ClosureLowering,
+        );
 
         let func_def = sem::FuncDef {
             id: func_id,

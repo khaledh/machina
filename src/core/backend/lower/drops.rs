@@ -285,7 +285,10 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
     }
 
     /// Emit all remaining drops and terminate with return.
-    pub(super) fn emit_root_return(&mut self, value: Option<ValueId>) -> Result<(), LowerToIrError> {
+    pub(super) fn emit_root_return(
+        &mut self,
+        value: Option<ValueId>,
+    ) -> Result<(), LowerToIrError> {
         self.emit_drops_to_depth(0)?;
         self.builder.terminate(Terminator::Return { value });
         Ok(())

@@ -43,10 +43,10 @@ mod syntax_desugar;
 mod types;
 mod value;
 
+use crate::core::elaborate::closure::register_lifted_method_symbols;
 use crate::core::elaborate::drop_plan::build_drop_plans;
 use crate::core::elaborate::elaborator::Elaborator;
 use crate::core::elaborate::lowering_plan::build_lowering_plans;
-use crate::core::elaborate::closure::register_lifted_method_symbols;
 
 /// Transform a normalized tree into a semantic tree using the results from
 /// semantic analysis.
