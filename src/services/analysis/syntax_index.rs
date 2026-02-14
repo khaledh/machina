@@ -34,7 +34,7 @@ pub(crate) fn node_at_span<D, T>(
             let width = span_width(span);
             let best_width = span_width(*best_span);
             width < best_width
-                || (width == best_width && span.start.offset >= best_span.start.offset)
+                || (width == best_width && span.start.offset > best_span.start.offset)
         });
         if replace {
             best = Some((node_id, span));

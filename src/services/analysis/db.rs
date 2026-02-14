@@ -20,17 +20,16 @@ use crate::services::analysis::completion::{
 use crate::services::analysis::diagnostics::Diagnostic;
 use crate::services::analysis::frontend_support::stable_source_revision;
 use crate::services::analysis::lookups::{
-    code_actions_for_range, def_at_span, def_location_at_span, document_symbols, hover_at_span,
-    semantic_tokens, signature_help_at_span, type_at_span,
+    code_actions_for_range, def_at_span, def_location_at_span, document_symbols,
+    hover_at_span_in_file, semantic_tokens, signature_help_at_span, type_at_span,
 };
 use crate::services::analysis::module_graph::ModuleGraph;
 use crate::services::analysis::pipeline::{
-    LookupState, collect_sorted_diagnostics, run_module_pipeline,
-    run_module_pipeline_with_query_input, to_lookup_state,
+    LookupState, collect_sorted_diagnostics, run_module_pipeline_with_query_input, to_lookup_state,
 };
 use crate::services::analysis::program_pipeline::{
     ProgramPipelineResult, resolve_imported_symbol_target_from_import_env,
-    run_program_pipeline_for_file,
+    run_program_pipeline_for_file_with_options,
 };
 use crate::services::analysis::query::{
     CacheStats, CancellationToken, QueryKey, QueryResult, QueryRuntime,
@@ -50,6 +49,7 @@ pub struct AnalysisDb {
     runtime: QueryRuntime,
     sources: SourceStore,
     module_graph: ModuleGraph,
+    experimental_typestate: bool,
 }
 
 impl AnalysisDb {
@@ -78,6 +78,14 @@ impl AnalysisDb {
 
     pub fn module_graph(&self) -> &ModuleGraph {
         &self.module_graph
+    }
+
+    pub fn set_experimental_typestate(&mut self, enabled: bool) {
+        self.experimental_typestate = enabled;
+    }
+
+    pub fn experimental_typestate(&self) -> bool {
+        self.experimental_typestate
     }
 
     pub fn upsert_disk_text<S>(&mut self, path: PathBuf, text: S) -> FileId
@@ -127,15 +135,25 @@ impl AnalysisDb {
         };
         let revision = snapshot.revision();
         let module_id = ModuleId(file_id.0);
+        let experimental_typestate = self.experimental_typestate;
+        let query_input = if experimental_typestate { 1 } else { 0 };
 
-        let diagnostics_key = QueryKey::new(
+        let diagnostics_key = QueryKey::with_input(
             crate::services::analysis::query::QueryKind::Diagnostics,
             module_id,
             revision,
+            query_input,
         );
         let source_for_pipeline = source.clone();
         self.execute_query(diagnostics_key, move |rt| {
-            let state = run_module_pipeline(rt, module_id, revision, source_for_pipeline)?;
+            let state = run_module_pipeline_with_query_input(
+                rt,
+                module_id,
+                revision,
+                source_for_pipeline,
+                query_input,
+                experimental_typestate,
+            )?;
             Ok(collect_sorted_diagnostics(&state))
         })
     }
@@ -313,7 +331,14 @@ impl AnalysisDb {
         query_span: Span,
     ) -> QueryResult<Option<HoverInfo>> {
         let state = self.lookup_state_for_file(file_id)?;
-        Ok(hover_at_span(&state, query_span))
+        let snapshot = self.snapshot();
+        let source = snapshot.text(file_id);
+        Ok(hover_at_span_in_file(
+            &state,
+            query_span,
+            snapshot.path(file_id),
+            source.as_deref(),
+        ))
     }
 
     pub fn hover_at_program_path(
@@ -342,7 +367,14 @@ impl AnalysisDb {
         } else {
             self.lookup_state_for_file(file_id)?
         };
-        Ok(hover_at_span(&state, query_span))
+        let snapshot = self.snapshot();
+        let source = snapshot.text(file_id);
+        Ok(hover_at_span_in_file(
+            &state,
+            query_span,
+            snapshot.path(file_id),
+            source.as_deref(),
+        ))
     }
 
     pub fn completions_at_path(
@@ -578,14 +610,24 @@ impl AnalysisDb {
         };
         let revision = snapshot.revision();
         let module_id = ModuleId(file_id.0);
+        let experimental_typestate = self.experimental_typestate;
+        let query_input = if experimental_typestate { 1 } else { 0 };
 
-        let lookup_key = QueryKey::new(
+        let lookup_key = QueryKey::with_input(
             crate::services::analysis::query::QueryKind::LookupState,
             module_id,
             revision,
+            query_input,
         );
         self.execute_query(lookup_key, move |rt| {
-            let state = run_module_pipeline(rt, module_id, revision, source)?;
+            let state = run_module_pipeline_with_query_input(
+                rt,
+                module_id,
+                revision,
+                source,
+                query_input,
+                experimental_typestate,
+            )?;
             Ok(to_lookup_state(&state))
         })
     }
@@ -602,6 +644,7 @@ impl AnalysisDb {
 
         let revision = snapshot.revision();
         let query_input = stable_source_revision(&source).wrapping_add(1);
+        let query_input = query_input.wrapping_add(if self.experimental_typestate { 1 } else { 0 });
         let module_id = ModuleId(file_id.0);
         let pipeline = run_module_pipeline_with_query_input(
             &mut self.runtime,
@@ -609,6 +652,7 @@ impl AnalysisDb {
             revision,
             std::sync::Arc::<str>::from(source),
             query_input,
+            self.experimental_typestate,
         )?;
         Ok(Some(to_lookup_state(&pipeline)))
     }
@@ -653,7 +697,12 @@ impl AnalysisDb {
 
     fn program_pipeline_for_file(&mut self, file_id: FileId) -> QueryResult<ProgramPipelineResult> {
         let snapshot = self.snapshot();
-        run_program_pipeline_for_file(&mut self.runtime, snapshot, file_id)
+        run_program_pipeline_for_file_with_options(
+            &mut self.runtime,
+            snapshot,
+            file_id,
+            self.experimental_typestate,
+        )
     }
 
     pub fn execute_query<T, F>(&mut self, key: QueryKey, compute: F) -> QueryResult<T>

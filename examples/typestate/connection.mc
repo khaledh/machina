@@ -8,7 +8,7 @@ typestate Connection {
     }
 
     state Disconnected {
-        fn connect() -> Connected {
+        fn connect(addr: string) -> Connected {
             Connected { fd: 7 }
         }
     }
@@ -26,7 +26,7 @@ typestate Connection {
 
 fn main() -> u64 {
     let c0 = Connection::new();
-    let c1 = c0.connect();
+    let c1 = c0.connect("localhost");
     let c2 = c1.disconnect();
     c2.retries
 }

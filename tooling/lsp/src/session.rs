@@ -78,6 +78,14 @@ impl AnalysisSession {
         self.db.set_module_graph(graph);
     }
 
+    pub fn set_experimental_typestate(&mut self, enabled: bool) {
+        self.db.set_experimental_typestate(enabled);
+    }
+
+    pub fn experimental_typestate(&self) -> bool {
+        self.db.experimental_typestate()
+    }
+
     pub fn invalidate_changed_modules(&mut self, changed: &HashSet<ModuleId>) {
         self.db.invalidate_changed_modules(changed);
     }

@@ -2261,6 +2261,335 @@ fn main() {
     assert_eq!(mismatch.span, span_for_substring(source, "foo(42, 'a')"));
 }
 
+#[test]
+fn diagnostics_for_file_typestate_is_feature_gated_by_default() {
+    let mut db = AnalysisDb::new();
+    let source = r#"
+typestate Connection {
+    fn new() -> Disconnected {
+        Disconnected
+    }
+
+    state Disconnected {}
+}
+"#;
+    let file_id = db.upsert_disk_text(PathBuf::from("examples/analysis_typestate.mc"), source);
+
+    let diagnostics = db
+        .diagnostics_for_file(file_id)
+        .expect("diagnostics query should succeed");
+    assert!(
+        diagnostics
+            .iter()
+            .any(|d| d.code == "MC-PARSE-FEATURE-DISABLED"),
+        "expected feature-disabled diagnostic when typestate flag is off, got: {diagnostics:#?}"
+    );
+}
+
+#[test]
+fn diagnostics_for_file_typestate_respects_experimental_option_toggle() {
+    let mut db = AnalysisDb::new();
+    let source = r#"
+typestate Connection {
+    fn new() -> Disconnected {
+        Disconnected
+    }
+
+    state Disconnected {}
+}
+"#;
+    let file_id = db.upsert_disk_text(
+        PathBuf::from("examples/analysis_typestate_toggle.mc"),
+        source,
+    );
+
+    let disabled = db
+        .diagnostics_for_file(file_id)
+        .expect("diagnostics query should succeed");
+    assert!(
+        disabled
+            .iter()
+            .any(|d| d.code == "MC-PARSE-FEATURE-DISABLED"),
+        "expected feature-disabled diagnostic when typestate flag is off, got: {disabled:#?}"
+    );
+
+    db.set_experimental_typestate(true);
+    let enabled = db
+        .diagnostics_for_file(file_id)
+        .expect("diagnostics query should succeed after enabling typestate");
+    assert!(
+        enabled
+            .iter()
+            .all(|d| d.code != "MC-PARSE-FEATURE-DISABLED"),
+        "did not expect feature-disabled diagnostic when typestate flag is on, got: {enabled:#?}"
+    );
+}
+
+#[test]
+fn diagnostics_for_program_file_typestate_respects_experimental_option_toggle() {
+    let mut db = AnalysisDb::new();
+    let source = r#"
+typestate Connection {
+    fn new() -> Disconnected {
+        Disconnected
+    }
+
+    state Disconnected {}
+}
+
+fn main() -> u64 {
+    0
+}
+"#;
+    let file_id = db.upsert_disk_text(
+        PathBuf::from("examples/analysis_program_typestate_toggle.mc"),
+        source,
+    );
+
+    let disabled = db
+        .diagnostics_for_program_file(file_id)
+        .expect("program diagnostics query should succeed");
+    assert!(
+        disabled
+            .iter()
+            .any(|d| d.code == "MC-PARSE-FEATURE-DISABLED"),
+        "expected feature-disabled diagnostic when typestate flag is off, got: {disabled:#?}"
+    );
+
+    db.set_experimental_typestate(true);
+    let enabled = db
+        .diagnostics_for_program_file(file_id)
+        .expect("program diagnostics query should succeed after enabling typestate");
+    assert!(
+        enabled
+            .iter()
+            .all(|d| d.code != "MC-PARSE-FEATURE-DISABLED"),
+        "did not expect feature-disabled diagnostic when typestate flag is on, got: {enabled:#?}"
+    );
+}
+
+#[test]
+fn diagnostics_for_program_file_typestate_connection_example_is_clean_when_enabled() {
+    let mut db = AnalysisDb::new();
+    db.set_experimental_typestate(true);
+
+    let path = PathBuf::from("examples/typestate/connection.mc");
+    let source = std::fs::read_to_string(&path).expect("failed to read typestate example");
+    let file_id = db.upsert_disk_text(path, source);
+
+    let diagnostics = db
+        .diagnostics_for_program_file(file_id)
+        .expect("program diagnostics query should succeed");
+    assert!(
+        diagnostics.is_empty(),
+        "expected no diagnostics for typestate example in program mode, got: {diagnostics:#?}"
+    );
+}
+
+#[test]
+fn hover_for_program_typestate_example_uses_source_facing_names() {
+    let mut db = AnalysisDb::new();
+    db.set_experimental_typestate(true);
+
+    let path = PathBuf::from("examples/typestate/connection.mc");
+    let source = std::fs::read_to_string(&path).expect("failed to read typestate example");
+    let file_id = db.upsert_disk_text(path, source.clone());
+
+    let ctor_span = span_for_last_substring(&source, "new");
+    let ctor_hover = db
+        .hover_at_program_file(file_id, ctor_span)
+        .expect("program hover query should succeed")
+        .expect("expected hover info for typestate constructor call");
+    assert!(
+        ctor_hover.display.contains("Connection::new"),
+        "expected source-facing constructor name in hover, got: {}",
+        ctor_hover.display
+    );
+    assert!(
+        !ctor_hover.display.contains("__ts_"),
+        "hover should not expose synthetic typestate names, got: {}",
+        ctor_hover.display
+    );
+
+    let lit_span = span_for_substring(&source, "Connected { fd: 7 }");
+    let lit_hover = db
+        .hover_at_program_file(file_id, lit_span)
+        .expect("program hover query should succeed")
+        .expect("expected hover info for typestate state literal");
+    assert!(
+        !lit_hover.display.starts_with("self:"),
+        "state literal hover should not bind to synthetic self field node, got: {}",
+        lit_hover.display
+    );
+    assert!(
+        lit_hover.display.contains("Connected"),
+        "expected source-facing state name in hover, got: {}",
+        lit_hover.display
+    );
+    assert!(
+        !lit_hover.display.contains("__ts_"),
+        "hover should not expose synthetic typestate names, got: {}",
+        lit_hover.display
+    );
+
+    let retries_span = span_for_substring(&source, "retries");
+    let retries_hover = db
+        .hover_at_program_file(file_id, retries_span)
+        .expect("program hover query should succeed")
+        .expect("expected hover info for typestate carried field");
+    assert!(
+        retries_hover.display.contains("retries"),
+        "expected hover over typestate field to mention field name, got: {}",
+        retries_hover.display
+    );
+    assert!(
+        !retries_hover.display.contains("__rt_print"),
+        "hover over typestate field should not bind runtime intrinsic, got: {}",
+        retries_hover.display
+    );
+}
+
+#[test]
+fn hover_for_typestate_field_with_zero_offset_span_returns_info() {
+    let mut db = AnalysisDb::new();
+    db.set_experimental_typestate(true);
+
+    let path = PathBuf::from("examples/typestate/connection.mc");
+    let source = std::fs::read_to_string(&path).expect("failed to read typestate example");
+    let file_id = db.upsert_disk_text(path, source);
+
+    let span = Span {
+        start: Position {
+            offset: 0,
+            line: 3,
+            column: 12,
+        },
+        end: Position {
+            offset: 0,
+            line: 3,
+            column: 12,
+        },
+    };
+    let hover = db
+        .hover_at_program_file(file_id, span)
+        .expect("program hover query should succeed")
+        .expect("expected hover info for typestate field with lsp-like span");
+    assert!(
+        hover.display.contains("retries"),
+        "expected typestate field hover to mention retries, got: {}",
+        hover.display
+    );
+}
+
+#[test]
+fn hover_for_typestate_method_calls_prefers_method_over_enclosing_fn() {
+    let mut db = AnalysisDb::new();
+    db.set_experimental_typestate(true);
+
+    let path = PathBuf::from("examples/typestate/connection.mc");
+    let source = std::fs::read_to_string(&path).expect("failed to read typestate example");
+    let file_id = db.upsert_disk_text(path, source.clone());
+
+    let connect_span = span_for_last_substring(&source, "connect");
+    let connect_hover = db
+        .hover_at_program_file(file_id, connect_span)
+        .expect("program hover query should succeed")
+        .expect("expected hover for connect call");
+    assert!(
+        connect_hover.display.contains("connect"),
+        "expected method hover to mention connect, got: {}",
+        connect_hover.display
+    );
+    assert!(
+        !connect_hover.display.starts_with("main:"),
+        "method hover should not resolve to enclosing main fn, got: {}",
+        connect_hover.display
+    );
+
+    let disconnect_span = span_for_last_substring(&source, "disconnect");
+    let disconnect_hover = db
+        .hover_at_program_file(file_id, disconnect_span)
+        .expect("program hover query should succeed")
+        .expect("expected hover for disconnect call");
+    assert!(
+        disconnect_hover.display.contains("disconnect"),
+        "expected method hover to mention disconnect, got: {}",
+        disconnect_hover.display
+    );
+    assert!(
+        !disconnect_hover.display.starts_with("main:"),
+        "method hover should not resolve to enclosing main fn, got: {}",
+        disconnect_hover.display
+    );
+
+    let ctor_owner_span = span_for_last_substring(&source, "Connection");
+    let ctor_owner_hover = db
+        .hover_at_program_file(file_id, ctor_owner_span)
+        .expect("program hover query should succeed")
+        .expect("expected hover for typestate constructor owner");
+    assert!(
+        ctor_owner_hover.display.contains("Connection::new"),
+        "expected constructor hover when hovering Connection::new owner, got: {}",
+        ctor_owner_hover.display
+    );
+    assert!(
+        !ctor_owner_hover.display.starts_with("Disconnected"),
+        "constructor owner hover should not collapse to return type, got: {}",
+        ctor_owner_hover.display
+    );
+
+    let c0_span = span_for_substring(&source, "c0");
+    let c0_hover = db
+        .hover_at_program_file(file_id, c0_span)
+        .expect("program hover query should succeed")
+        .expect("expected hover for state variable c0");
+    assert!(
+        c0_hover.display.contains("Connection::Disconnected"),
+        "expected qualified typestate state name for c0 hover, got: {}",
+        c0_hover.display
+    );
+
+    let retries_span = span_for_last_substring(&source, "retries");
+    let retries_hover = db
+        .hover_at_program_file(file_id, retries_span)
+        .expect("program hover query should succeed")
+        .expect("expected hover for state field access");
+    assert!(
+        !retries_hover.display.is_empty(),
+        "expected non-empty field hover, got: {}",
+        retries_hover.display
+    );
+    assert!(
+        !retries_hover.display.starts_with("main:"),
+        "field hover should not resolve to enclosing main fn, got: {}",
+        retries_hover.display
+    );
+}
+
+#[test]
+fn hover_ignores_keywords_and_punctuation() {
+    let mut db = AnalysisDb::new();
+    let source = r#"
+fn main() -> u64 {
+    let x = 1;
+    x
+}
+"#;
+    let file_id = db.upsert_disk_text(PathBuf::from("examples/hover_tokens.mc"), source);
+
+    let let_span = span_for_substring(source, "let");
+    let let_hover = db
+        .hover_at_program_file(file_id, let_span)
+        .expect("program hover query should succeed");
+    assert_eq!(let_hover, None, "keyword hover should be empty");
+
+    let eq_span = span_for_substring(source, "=");
+    let eq_hover = db
+        .hover_at_program_file(file_id, eq_span)
+        .expect("program hover query should succeed");
+    assert_eq!(eq_hover, None, "punctuation hover should be empty");
+}
+
 fn span_for_substring(source: &str, needle: &str) -> Span {
     let start = source
         .find(needle)

@@ -65,6 +65,14 @@
           "type": "boolean",
           "default": false,
           "description": "Enable verbose extension-side LSP request/response logging in the Machina output channel."
+        },
+        "machina.languageServer.experimentalFeatures": {
+          "type": "array",
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "description": "Experimental Machina language features to enable in the language server (for example: [\"typestate\"])."
         }
       }
     }

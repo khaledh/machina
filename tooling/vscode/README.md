@@ -20,3 +20,4 @@ The extension activates on `.mc` files and exposes:
 
 - `machina.languageServer.path`: path to `machina-lsp` (optional)
 - `machina.languageServer.args`: extra arguments for `machina-lsp`
+- `machina.languageServer.experimentalFeatures`: list of experimental features to enable in LSP (for example `["typestate"]`)

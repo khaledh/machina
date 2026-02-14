@@ -40,10 +40,17 @@ pub(crate) struct ProgramPipelineResult {
     pub(crate) import_env_by_module: HashMap<ModuleId, ImportEnv>,
 }
 
-pub(crate) fn run_program_pipeline_for_file(
+#[derive(Clone)]
+struct ParsedPrelude {
+    module: crate::core::tree::parsed::Module,
+    next_node_id_gen: NodeIdGen,
+}
+
+pub(crate) fn run_program_pipeline_for_file_with_options(
     rt: &mut QueryRuntime,
     snapshot: AnalysisSnapshot,
     file_id: FileId,
+    experimental_typestate: bool,
 ) -> QueryResult<ProgramPipelineResult> {
     let Some(entry_source) = snapshot.text(file_id) else {
         return Ok(ProgramPipelineResult::default());
@@ -51,10 +58,11 @@ pub(crate) fn run_program_pipeline_for_file(
     let Some(entry_path) = snapshot.path(file_id).map(Path::to_path_buf) else {
         return Ok(ProgramPipelineResult::default());
     };
-    let key = QueryKey::new(
+    let key = QueryKey::with_input(
         crate::services::analysis::query::QueryKind::ProgramPipeline,
         ModuleId(file_id.0),
         snapshot.revision(),
+        if experimental_typestate { 1 } else { 0 },
     );
     rt.execute(key, move |rt| {
         let mut result = ProgramPipelineResult::default();
@@ -79,11 +87,14 @@ pub(crate) fn run_program_pipeline_for_file(
             }
         };
         let loader = SnapshotOverlayLoader::new(snapshot.clone(), project_root);
-        let program = match capsule::discover_and_parse_capsule_with_loader(
+        let program = match capsule::discover_and_parse_capsule_with_loader_and_options(
             &entry_source,
             &entry_path,
             entry_module_path,
             &loader,
+            capsule::CapsuleParseOptions {
+                experimental_typestate,
+            },
         ) {
             Ok(program) => program,
             Err(err) => {
@@ -94,7 +105,8 @@ pub(crate) fn run_program_pipeline_for_file(
         let program_context = crate::core::context::CapsuleParsedContext::new(program);
         let entry_module_id = program_context.entry();
         let mut import_facts = ProgramImportFactsCache::default();
-        let prelude_module = parsed_prelude_decl_module(program_context.next_node_id_gen());
+        let parsed_prelude =
+            parsed_prelude_decl_module(program_context.next_node_id_gen(), experimental_typestate);
         let mut all_diagnostics = Vec::new();
         let mut module_states = HashMap::<ModuleId, LookupState>::new();
         let mut exports_by_module = HashMap::<ModuleId, ModuleExportFacts>::new();
@@ -106,11 +118,15 @@ pub(crate) fn run_program_pipeline_for_file(
             };
             let source = std::sync::Arc::<str>::from(parsed.source.source.as_str());
             let module_revision = stable_source_revision(&parsed.source.source);
-            let parsed_context = crate::core::context::ParsedContext::new(
-                module_with_implicit_prelude(parsed, prelude_module.as_ref()),
-                program_context.next_node_id_gen().clone(),
-            )
-            .with_source_path(parsed.source.file_path.clone());
+            let parsed_module =
+                module_with_implicit_prelude(parsed, parsed_prelude.as_ref().map(|p| &p.module));
+            let node_id_gen = parsed_prelude
+                .as_ref()
+                .map(|p| p.next_node_id_gen.clone())
+                .unwrap_or_else(|| program_context.next_node_id_gen().clone());
+            let parsed_context =
+                crate::core::context::ParsedContext::new(parsed_module, node_id_gen)
+                    .with_source_path(parsed.source.file_path.clone());
             let imported_modules = import_facts.imported_modules_for(&program_context, module_id);
             let imported_symbols = import_facts.imported_symbols_for(&program_context, module_id);
             let skip_typecheck = ProgramImportFactsCache::should_skip_typecheck(&imported_symbols);
@@ -123,6 +139,7 @@ pub(crate) fn run_program_pipeline_for_file(
                 imported_modules,
                 imported_symbols,
                 skip_typecheck,
+                experimental_typestate,
             )?;
             if let Some(resolved) = &mut state.resolved.product {
                 apply_prelude_runtime_def_locations(parsed, resolved);
@@ -233,11 +250,24 @@ fn is_std_prelude_decl(parsed: &crate::core::capsule::ParsedModule) -> bool {
     )
 }
 
-fn parsed_prelude_decl_module(id_gen: &NodeIdGen) -> Option<crate::core::tree::parsed::Module> {
+fn parsed_prelude_decl_module(
+    id_gen: &NodeIdGen,
+    experimental_typestate: bool,
+) -> Option<ParsedPrelude> {
     let prelude_path = prelude_decl_path();
     let prelude_src = std::fs::read_to_string(prelude_path).ok()?;
-    let (module, _) = api::parse_module_with_id_gen(&prelude_src, id_gen.clone()).ok()?;
-    Some(module)
+    let (module, next_node_id_gen) = api::parse_module_with_id_gen_and_options(
+        &prelude_src,
+        id_gen.clone(),
+        api::ParseModuleOptions {
+            experimental_typestate,
+        },
+    )
+    .ok()?;
+    Some(ParsedPrelude {
+        module,
+        next_node_id_gen,
+    })
 }
 
 fn prelude_decl_path() -> PathBuf {

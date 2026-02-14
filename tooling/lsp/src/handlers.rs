@@ -58,6 +58,7 @@ pub fn handle_message(
 
     match method {
         Some("initialize") => {
+            session.set_experimental_typestate(parse_initialize_typestate_flag(params));
             let response = json!({
                 "jsonrpc": "2.0",
                 "id": id,
@@ -288,6 +289,31 @@ pub fn handle_message(
             (HandlerAction::Continue, response)
         }
     }
+}
+
+fn parse_initialize_typestate_flag(params: Option<&Value>) -> bool {
+    let Some(init_opts) = params.and_then(|value| value.get("initializationOptions")) else {
+        return false;
+    };
+    // Preferred shape: initializationOptions.experimentalFeatures = ["typestate", ...]
+    let list_enabled = init_opts
+        .get("experimentalFeatures")
+        .and_then(Value::as_array)
+        .map(|features| {
+            features
+                .iter()
+                .filter_map(Value::as_str)
+                .any(|feature| feature == "typestate")
+        })
+        .unwrap_or(false);
+    if list_enabled {
+        return true;
+    }
+    // Backward-compat: initializationOptions.experimentalTypestate = true
+    init_opts
+        .get("experimentalTypestate")
+        .and_then(Value::as_bool)
+        .unwrap_or(false)
 }
 
 fn parse_did_open_params(params: &Value) -> Option<DidOpenParams> {
@@ -870,6 +896,185 @@ mod tests {
     }
 
     #[test]
+    fn initialize_enables_typestate_when_requested() {
+        let mut session = AnalysisSession::new();
+        let (action, response) = handle_message(
+            &mut session,
+            json!({
+                "jsonrpc": "2.0",
+                "id": 11,
+                "method": "initialize",
+                "params": {
+                    "initializationOptions": {
+                        "experimentalTypestate": true
+                    }
+                }
+            }),
+        );
+        assert_eq!(action, HandlerAction::Continue);
+        assert!(response.is_some(), "expected initialize response");
+        assert!(
+            session.experimental_typestate(),
+            "initialize option should enable typestate in analysis session"
+        );
+    }
+
+    #[test]
+    fn initialize_enables_typestate_from_experimental_features_list() {
+        let mut session = AnalysisSession::new();
+        let (action, response) = handle_message(
+            &mut session,
+            json!({
+                "jsonrpc": "2.0",
+                "id": 13,
+                "method": "initialize",
+                "params": {
+                    "initializationOptions": {
+                        "experimentalFeatures": ["typestate"]
+                    }
+                }
+            }),
+        );
+        assert_eq!(action, HandlerAction::Continue);
+        assert!(response.is_some(), "expected initialize response");
+        assert!(
+            session.experimental_typestate(),
+            "experimentalFeatures should enable typestate in analysis session"
+        );
+    }
+
+    #[test]
+    fn did_open_typestate_reports_feature_disabled_by_default() {
+        let mut session = AnalysisSession::new();
+        let (_action, response) = handle_message(
+            &mut session,
+            json!({
+                "jsonrpc": "2.0",
+                "method": "textDocument/didOpen",
+                "params": {
+                    "textDocument": {
+                        "uri": "file:///tmp/lsp-typestate-disabled.mc",
+                        "version": 1,
+                        "languageId": "machina",
+                        "text": "typestate Connection { fn new() -> Disconnected { Disconnected } state Disconnected {} }"
+                    }
+                }
+            }),
+        );
+        let response = response.expect("expected diagnostics notification");
+        let diagnostics = response["params"]["diagnostics"]
+            .as_array()
+            .expect("diagnostics should be an array");
+        assert!(
+            diagnostics.iter().any(|diag| diag.get("code")
+                == Some(&Value::String("MC-PARSE-FEATURE-DISABLED".to_string()))),
+            "expected feature-disabled diagnostic, got: {diagnostics:#?}"
+        );
+    }
+
+    #[test]
+    fn did_open_typestate_parses_when_initialize_enables_feature() {
+        let mut session = AnalysisSession::new();
+        let _ = handle_message(
+            &mut session,
+            json!({
+                "jsonrpc": "2.0",
+                "id": 12,
+                "method": "initialize",
+                "params": {
+                    "initializationOptions": {
+                        "experimentalFeatures": ["typestate"]
+                    }
+                }
+            }),
+        );
+
+        let (_action, response) = handle_message(
+            &mut session,
+            json!({
+                "jsonrpc": "2.0",
+                "method": "textDocument/didOpen",
+                "params": {
+                    "textDocument": {
+                        "uri": "file:///tmp/lsp-typestate-enabled.mc",
+                        "version": 1,
+                        "languageId": "machina",
+                        "text": "typestate Connection { fn new() -> Disconnected { Disconnected } state Disconnected {} }"
+                    }
+                }
+            }),
+        );
+        let response = response.expect("expected diagnostics notification");
+        let diagnostics = response["params"]["diagnostics"]
+            .as_array()
+            .expect("diagnostics should be an array");
+        assert!(
+            diagnostics.iter().all(|diag| diag.get("code")
+                != Some(&Value::String("MC-PARSE-FEATURE-DISABLED".to_string()))),
+            "did not expect feature-disabled diagnostic after enabling typestate, got: {diagnostics:#?}"
+        );
+    }
+
+    #[test]
+    fn hover_over_typestate_fields_block_returns_field_hover() {
+        let mut session = AnalysisSession::new();
+        let _ = handle_message(
+            &mut session,
+            json!({
+                "jsonrpc": "2.0",
+                "id": 13,
+                "method": "initialize",
+                "params": {
+                    "initializationOptions": {
+                        "experimentalFeatures": ["typestate"]
+                    }
+                }
+            }),
+        );
+        let _ = handle_message(
+            &mut session,
+            json!({
+                "jsonrpc": "2.0",
+                "method": "textDocument/didOpen",
+                "params": {
+                    "textDocument": {
+                        "uri": "file:///tmp/lsp-typestate-hover-field.mc",
+                        "version": 1,
+                        "languageId": "machina",
+                        "text": "typestate Connection {\n    fields {\n        retries: u64,\n    }\n\n    fn new() -> Disconnected {\n        Disconnected { retries: 0 }\n    }\n\n    state Disconnected {}\n}\n"
+                    }
+                }
+            }),
+        );
+
+        let (_action, response) = handle_message(
+            &mut session,
+            json!({
+                "jsonrpc": "2.0",
+                "id": 14,
+                "method": "textDocument/hover",
+                "params": {
+                    "textDocument": { "uri": "file:///tmp/lsp-typestate-hover-field.mc" },
+                    "position": { "line": 2, "character": 11 },
+                    "mcDocVersion": 1
+                }
+            }),
+        );
+        let response = response.expect("expected hover response");
+        let value = response["result"]["contents"]["value"]
+            .as_str()
+            .expect("hover markdown value should be a string");
+        assert!(
+            value.contains("retries"),
+            "expected typestate field hover, got: {value}"
+        );
+        assert!(
+            !value.contains("__rt_print"),
+            "typestate field hover should not bind runtime intrinsics, got: {value}"
+        );
+    }
+
+    #[test]
     fn unknown_method_returns_method_not_found() {
         let mut session = AnalysisSession::new();
         let (action, response) = handle_message(
@@ -1075,7 +1280,7 @@ mod tests {
                 "method": "textDocument/hover",
                 "params": {
                     "textDocument": { "uri": "file:///tmp/lsp-hover.mc" },
-                    "position": { "line": 0, "character": 1 }
+                    "position": { "line": 0, "character": 4 }
                 }
             }),
         );
