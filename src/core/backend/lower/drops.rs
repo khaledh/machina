@@ -2,20 +2,26 @@
 
 use crate::core::backend::lower::LowerToIrError;
 use crate::core::backend::lower::locals::LocalStorage;
-use crate::core::backend::lower::lowerer::FuncLowerer;
+use crate::core::backend::lower::lowerer::{CallInputValue, FuncLowerer};
 use crate::core::ir::{Callee, ConstValue, RuntimeFn, SwitchCase, Terminator, ValueId};
 use crate::core::resolve::DefId;
 use crate::core::tree::NodeId;
 use crate::core::tree::semantic as sem;
+use crate::core::tree::{InitInfo, ParamMode};
 use crate::core::types::Type;
 use crate::core::types::{EnumVariant, StructField, TypeId};
 use std::collections::HashMap;
+
+enum OutProj<'a> {
+    Struct(&'a str),
+    Tuple(usize),
+}
 
 /// Tracks drop-scope state and per-def liveness flags during lowering.
 ///
 /// This struct only manages bookkeeping (scope stack + liveness flags). The
 /// caller is responsible for turning popped scopes into IR-level drop calls.
-pub(super) struct DropTracker<'a> {
+pub(super) struct DropManager<'a> {
     plans: Option<&'a sem::DropPlanMap>,
     scopes: Vec<NodeId>,
     flags: HashMap<DefId, ValueId>,
@@ -28,7 +34,7 @@ pub(super) struct DropSnapshot {
     known_live: HashMap<DefId, bool>,
 }
 
-impl<'a> DropTracker<'a> {
+impl<'a> DropManager<'a> {
     pub(super) fn new() -> Self {
         Self {
             plans: None,
@@ -221,30 +227,30 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
     }
 
     pub(super) fn set_drop_plans(&mut self, drop_plans: &'a sem::DropPlanMap) {
-        self.drop_tracker.set_plans(drop_plans);
+        self.drop_manager.set_plans(drop_plans);
     }
 
     /// Captures the active drop scope stack for branch-local lowering.
     pub(super) fn drop_scopes_snapshot(&self) -> DropSnapshot {
-        self.drop_tracker.snapshot()
+        self.drop_manager.snapshot()
     }
 
     /// Restores a previously captured drop scope stack snapshot.
     pub(super) fn restore_drop_scopes(&mut self, snapshot: &DropSnapshot) {
-        self.drop_tracker.restore(snapshot);
+        self.drop_manager.restore(snapshot);
     }
 
     pub(super) fn invalidate_drop_liveness(&mut self) {
-        self.drop_tracker.invalidate_known_live();
+        self.drop_manager.invalidate_known_live();
     }
 
     pub(super) fn enter_drop_scope(&mut self, id: NodeId) {
-        self.drop_tracker.enter_scope(id);
+        self.drop_manager.enter_scope(id);
     }
 
     /// Pops and emits a scope if it is active, used by the RAII guard.
     fn exit_drop_scope_if_active(&mut self, id: NodeId) {
-        if let Some(scope_id) = self.drop_tracker.exit_scope_if_active(id)
+        if let Some(scope_id) = self.drop_manager.exit_scope_if_active(id)
             && let Err(err) = self.emit_drop_scope(scope_id)
         {
             panic!("backend drop scope exit failed: {err:?}");
@@ -253,7 +259,7 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
 
     /// Emits drops until the drop scope stack is at the requested depth.
     pub(super) fn emit_drops_to_depth(&mut self, depth: usize) -> Result<(), LowerToIrError> {
-        let scopes = self.drop_tracker.pop_to_depth(depth);
+        let scopes = self.drop_manager.pop_to_depth(depth);
         for scope_id in scopes {
             self.emit_drop_scope(scope_id)?;
         }
@@ -262,10 +268,27 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
 
     /// Emits drops corresponding to a semantic statement's drop depth.
     pub(super) fn emit_drops_for_stmt(&mut self, stmt_id: NodeId) -> Result<(), LowerToIrError> {
-        let Some(depth) = self.drop_tracker.depth_for_stmt(stmt_id) else {
+        let Some(depth) = self.drop_manager.depth_for_stmt(stmt_id) else {
             return Ok(());
         };
         self.emit_drops_to_depth(depth)
+    }
+
+    /// Apply all call-site drop side effects in one place:
+    /// - drop temporaries selected by the call plan drop mask
+    /// - clear sink source flags (ownership transferred to callee)
+    /// - mark out/inout destinations as initialized when applicable
+    pub(super) fn apply_call_drop_effects(
+        &mut self,
+        call_plan: &sem::CallPlan,
+        args: &[sem::CallArg],
+        receiver_value: Option<&CallInputValue>,
+        arg_values: &[CallInputValue],
+    ) -> Result<(), LowerToIrError> {
+        self.emit_call_input_drops(call_plan, receiver_value, arg_values)?;
+        self.clear_sink_input_drop_flags(call_plan, receiver_value, arg_values);
+        self.mark_call_out_init_flags(args, arg_values);
+        Ok(())
     }
 
     pub(super) fn emit_drop_for_def_if_live(
@@ -273,7 +296,7 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
         def_id: DefId,
         ty_id: TypeId,
     ) -> Result<(), LowerToIrError> {
-        if !self.drop_tracker.is_active() {
+        if !self.drop_manager.is_active() {
             return Ok(());
         }
 
@@ -283,7 +306,7 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
         }
 
         let flag_addr = self
-            .drop_tracker
+            .drop_manager
             .flag(def_id)
             .unwrap_or_else(|| panic!("backend drop missing flag for {:?}", def_id));
         self.emit_drop_if_flag(flag_addr, |lowerer| {
@@ -298,7 +321,7 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
     }
 
     pub(super) fn set_drop_flag_for_def(&mut self, def_id: DefId, value: bool) {
-        if !self.drop_tracker.is_active() {
+        if !self.drop_manager.is_active() {
             return;
         }
 
@@ -307,22 +330,157 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
             return;
         }
 
-        let flag_addr = match self.drop_tracker.flag(def_id) {
+        let flag_addr = match self.drop_manager.flag(def_id) {
             Some(addr) => addr,
             None => {
                 let addr = self.create_drop_flag(def_id);
-                self.drop_tracker.insert_flag(def_id, addr);
+                self.drop_manager.insert_flag(def_id, addr);
                 addr
             }
         };
         self.trace_drop(format!("drop-flag {} = {}", self.def(def_id).name, value));
-        self.drop_tracker.set_known_live(def_id, value);
+        self.drop_manager.set_known_live(def_id, value);
         self.store_drop_flag(flag_addr, value);
+    }
+
+    fn emit_call_input_drops(
+        &mut self,
+        call_plan: &sem::CallPlan,
+        receiver_value: Option<&CallInputValue>,
+        arg_values: &[CallInputValue],
+    ) -> Result<(), LowerToIrError> {
+        let expected = (call_plan.has_receiver as usize) + arg_values.len();
+        if call_plan.drop_mask.len() != expected {
+            panic!(
+                "backend call drop mask length mismatch: expected {}, got {}",
+                expected,
+                call_plan.drop_mask.len()
+            );
+        }
+
+        let mut input_index = 0;
+        if call_plan.has_receiver {
+            let receiver = receiver_value.unwrap_or_else(|| {
+                panic!("backend call drop mask missing receiver value for call plan");
+            });
+            if call_plan.drop_mask[input_index] && receiver.drop_def.is_none() {
+                self.emit_drop_for_value(receiver.value, &receiver.ty, receiver.is_addr)?;
+            }
+            input_index += 1;
+        }
+
+        for arg in arg_values {
+            if call_plan.drop_mask[input_index] && arg.drop_def.is_none() {
+                self.emit_drop_for_value(arg.value, &arg.ty, arg.is_addr)?;
+            }
+            input_index += 1;
+        }
+
+        Ok(())
+    }
+
+    fn clear_sink_input_drop_flags(
+        &mut self,
+        call_plan: &sem::CallPlan,
+        receiver_value: Option<&CallInputValue>,
+        arg_values: &[CallInputValue],
+    ) {
+        let expected = (call_plan.has_receiver as usize) + arg_values.len();
+        if call_plan.input_modes.len() != expected {
+            panic!(
+                "backend call input modes length mismatch: expected {}, got {}",
+                expected,
+                call_plan.input_modes.len()
+            );
+        }
+
+        let mut input_index = 0;
+        if call_plan.has_receiver {
+            let receiver = receiver_value.unwrap_or_else(|| {
+                panic!("backend call input modes missing receiver value for call plan");
+            });
+            if call_plan.input_modes[input_index] == ParamMode::Sink {
+                self.clear_sink_flag_for_input(receiver);
+            }
+            input_index += 1;
+        }
+
+        for arg in arg_values {
+            if call_plan.input_modes[input_index] == ParamMode::Sink {
+                self.clear_sink_flag_for_input(arg);
+            }
+            input_index += 1;
+        }
+    }
+
+    fn clear_sink_flag_for_input(&mut self, input: &CallInputValue) {
+        let Some(def_id) = input.drop_def else {
+            return;
+        };
+        if input.ty.needs_drop() {
+            self.set_drop_flag_for_def(def_id, false);
+        }
+    }
+
+    fn mark_call_out_init_flags(&mut self, args: &[sem::CallArg], arg_values: &[CallInputValue]) {
+        for (arg, input) in args.iter().zip(arg_values.iter()) {
+            match arg {
+                sem::CallArg::Out { place, init, .. } => {
+                    let Some(def_id) = input.drop_def else {
+                        continue;
+                    };
+                    let should_set = match place.kind {
+                        sem::PlaceExprKind::Var { .. } => init.is_init || init.promotes_full,
+                        _ => init.promotes_full || self.out_place_promotes_full(place, init),
+                    };
+                    if should_set {
+                        self.set_drop_flag_for_def(def_id, true);
+                    }
+                }
+                sem::CallArg::InOut { .. } => {
+                    if let Some(def_id) = input.drop_def {
+                        self.set_drop_flag_for_def(def_id, true);
+                    }
+                }
+                _ => {}
+            }
+        }
+    }
+
+    fn out_place_promotes_full(&self, place: &sem::PlaceExpr, init: &InitInfo) -> bool {
+        if init.promotes_full || !init.is_init {
+            return false;
+        }
+
+        let (base_def, proj) = match &place.kind {
+            sem::PlaceExprKind::StructField { target, field } => match &target.kind {
+                sem::PlaceExprKind::Var { def_id, .. } => {
+                    (*def_id, OutProj::Struct(field.as_str()))
+                }
+                _ => return false,
+            },
+            sem::PlaceExprKind::TupleField { target, index } => match &target.kind {
+                sem::PlaceExprKind::Var { def_id, .. } => (*def_id, OutProj::Tuple(*index)),
+                _ => return false,
+            },
+            _ => return false,
+        };
+
+        let base_ty = self.def_type(base_def);
+        match (proj, base_ty) {
+            (OutProj::Struct(field), Type::Struct { fields, .. }) => {
+                fields.len() == 1 && fields[0].name == *field
+            }
+            (OutProj::Tuple(index), Type::Tuple { field_tys }) => {
+                field_tys.len() == 1 && index == 0
+            }
+            _ => false,
+        }
     }
 
     fn emit_drop_scope(&mut self, id: NodeId) -> Result<(), LowerToIrError> {
         let drop_plans = self
-            .drop_tracker
+            .drop_manager
             .plans()
             .unwrap_or_else(|| panic!("backend drop scope missing drop plans"));
         let scope = drop_plans
@@ -337,13 +495,13 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
     }
 
     fn emit_drop_item(&mut self, item: &sem::DropItem) -> Result<(), LowerToIrError> {
-        if self.drop_tracker.known_live(item.def_id) == Some(false) {
+        if self.drop_manager.known_live(item.def_id) == Some(false) {
             return Ok(());
         }
 
         match item.guard {
             sem::DropGuard::Always => {
-                if let Some(flag_addr) = self.drop_tracker.flag(item.def_id) {
+                if let Some(flag_addr) = self.drop_manager.flag(item.def_id) {
                     self.emit_drop_if_flag(flag_addr, |lowerer| {
                         lowerer.emit_drop_for_def(item.def_id, item.ty)
                     })?;
@@ -353,11 +511,11 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
                 Ok(())
             }
             sem::DropGuard::IfInitialized => {
-                let flag_addr = match self.drop_tracker.flag(item.def_id) {
+                let flag_addr = match self.drop_manager.flag(item.def_id) {
                     Some(addr) => addr,
                     None => {
                         let addr = self.create_drop_flag(item.def_id);
-                        self.drop_tracker.insert_flag(item.def_id, addr);
+                        self.drop_manager.insert_flag(item.def_id, addr);
                         self.store_drop_flag(addr, false);
                         addr
                     }

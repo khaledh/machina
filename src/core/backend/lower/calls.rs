@@ -1,25 +1,13 @@
 //! Call lowering.
 
 use crate::core::backend::lower::LowerToIrError;
-use crate::core::backend::lower::lowerer::{FuncLowerer, LinearValue};
+use crate::core::backend::lower::lowerer::{CallInputValue, FuncLowerer, LinearValue};
 use crate::core::diag::Span;
 use crate::core::ir::{Callee, RuntimeFn, ValueId};
 use crate::core::resolve::DefId;
-use crate::core::tree::{InitInfo, ParamMode};
+use crate::core::tree::ParamMode;
 use crate::core::tree::{NodeId, semantic as sem};
 use crate::core::types::Type;
-
-enum OutProj<'a> {
-    Struct(&'a str),
-    Tuple(usize),
-}
-
-struct CallInputValue {
-    value: ValueId,
-    ty: Type,
-    is_addr: bool,
-    drop_def: Option<DefId>,
-}
 
 fn drop_def_for_value_expr(expr: &sem::ValueExpr) -> Option<DefId> {
     match &expr.kind {
@@ -165,62 +153,6 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
         }
     }
 
-    fn mark_out_init_flags(&mut self, args: &[sem::CallArg], arg_values: &[CallInputValue]) {
-        for (arg, input) in args.iter().zip(arg_values.iter()) {
-            match arg {
-                sem::CallArg::Out { place, init, .. } => {
-                    let Some(def_id) = input.drop_def else {
-                        continue;
-                    };
-                    let should_set = match place.kind {
-                        sem::PlaceExprKind::Var { .. } => init.is_init || init.promotes_full,
-                        _ => init.promotes_full || self.out_place_promotes_full(place, init),
-                    };
-                    if should_set {
-                        self.set_drop_flag_for_def(def_id, true);
-                    }
-                }
-                sem::CallArg::InOut { .. } => {
-                    if let Some(def_id) = input.drop_def {
-                        self.set_drop_flag_for_def(def_id, true);
-                    }
-                }
-                _ => {}
-            }
-        }
-    }
-
-    fn out_place_promotes_full(&self, place: &sem::PlaceExpr, init: &InitInfo) -> bool {
-        if init.promotes_full || !init.is_init {
-            return false;
-        }
-
-        let (base_def, proj) = match &place.kind {
-            sem::PlaceExprKind::StructField { target, field } => match &target.kind {
-                sem::PlaceExprKind::Var { def_id, .. } => {
-                    (*def_id, OutProj::Struct(field.as_str()))
-                }
-                _ => return false,
-            },
-            sem::PlaceExprKind::TupleField { target, index } => match &target.kind {
-                sem::PlaceExprKind::Var { def_id, .. } => (*def_id, OutProj::Tuple(*index)),
-                _ => return false,
-            },
-            _ => return false,
-        };
-
-        let base_ty = self.def_type(base_def);
-        match (proj, base_ty) {
-            (OutProj::Struct(field), Type::Struct { fields, .. }) => {
-                fields.len() == 1 && fields[0].name == *field
-            }
-            (OutProj::Tuple(index), Type::Tuple { field_tys }) => {
-                field_tys.len() == 1 && index == 0
-            }
-            _ => false,
-        }
-    }
-
     /// Lowers a call expression, returning `None` if a subexpression returns.
     pub(super) fn lower_call_expr(
         &mut self,
@@ -283,9 +215,7 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
             self.lower_call_args_from_plan(expr.id, expr.span, &call_plan, None, &mut arg_values)?;
         let ty = self.type_lowerer.lower_type_id(expr.ty);
         let result = self.builder.call(callee, call_args, ty);
-        self.emit_call_drops(&call_plan, None, &arg_values)?;
-        self.clear_sink_drop_flags(&call_plan, None, &arg_values);
-        self.mark_out_init_flags(args, &arg_values);
+        self.apply_call_drop_effects(&call_plan, args, None, &arg_values)?;
         Ok(Some(result))
     }
 
@@ -369,9 +299,7 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
         )?;
         let ty = self.type_lowerer.lower_type_id(expr.ty);
         let result = self.builder.call(callee, call_args, ty);
-        self.emit_call_drops(&call_plan, Some(&receiver_value), &arg_values)?;
-        self.clear_sink_drop_flags(&call_plan, Some(&receiver_value), &arg_values);
-        self.mark_out_init_flags(args, &arg_values);
+        self.apply_call_drop_effects(&call_plan, args, Some(&receiver_value), &arg_values)?;
         Ok(Some(result))
     }
 
@@ -432,9 +360,7 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
                     ret_ty,
                 );
 
-                self.emit_call_drops(call_plan, Some(receiver_value), &arg_values)?;
-                self.clear_sink_drop_flags(call_plan, Some(receiver_value), &arg_values);
-                self.mark_out_init_flags(args, &arg_values);
+                self.apply_call_drop_effects(call_plan, args, Some(receiver_value), &arg_values)?;
                 Ok(Some(result))
             }
             sem::IntrinsicCall::SetInsert => {
@@ -475,9 +401,7 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
                     vec![set_addr, elem_addr, size_val, align_val],
                     ret_ty,
                 );
-                self.emit_call_drops(call_plan, Some(receiver_value), &arg_values)?;
-                self.clear_sink_drop_flags(call_plan, Some(receiver_value), &arg_values);
-                self.mark_out_init_flags(args, &arg_values);
+                self.apply_call_drop_effects(call_plan, args, Some(receiver_value), &arg_values)?;
                 Ok(Some(result))
             }
             sem::IntrinsicCall::SetContains | sem::IntrinsicCall::SetRemove => {
@@ -520,9 +444,7 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
                     vec![set_addr, elem_addr, size_val],
                     ret_ty,
                 );
-                self.emit_call_drops(call_plan, Some(receiver_value), &arg_values)?;
-                self.clear_sink_drop_flags(call_plan, Some(receiver_value), &arg_values);
-                self.mark_out_init_flags(args, &arg_values);
+                self.apply_call_drop_effects(call_plan, args, Some(receiver_value), &arg_values)?;
                 Ok(Some(result))
             }
             sem::IntrinsicCall::SetClear => {
@@ -540,9 +462,7 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
                 let result =
                     self.builder
                         .call(Callee::Runtime(RuntimeFn::SetClear), vec![set_addr], ret_ty);
-                self.emit_call_drops(call_plan, Some(receiver_value), &arg_values)?;
-                self.clear_sink_drop_flags(call_plan, Some(receiver_value), &arg_values);
-                self.mark_out_init_flags(args, &arg_values);
+                self.apply_call_drop_effects(call_plan, args, Some(receiver_value), &arg_values)?;
                 Ok(Some(result))
             }
             sem::IntrinsicCall::MapInsert => {
@@ -597,9 +517,7 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
                     vec![map_addr, key_addr, value_addr, key_size, value_size],
                     ret_ty,
                 );
-                self.emit_call_drops(call_plan, Some(receiver_value), &arg_values)?;
-                self.clear_sink_drop_flags(call_plan, Some(receiver_value), &arg_values);
-                self.mark_out_init_flags(args, &arg_values);
+                self.apply_call_drop_effects(call_plan, args, Some(receiver_value), &arg_values)?;
                 Ok(Some(result))
             }
             sem::IntrinsicCall::MapContainsKey | sem::IntrinsicCall::MapRemove => {
@@ -647,9 +565,7 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
                     vec![map_addr, key_addr, key_size, value_size],
                     ret_ty,
                 );
-                self.emit_call_drops(call_plan, Some(receiver_value), &arg_values)?;
-                self.clear_sink_drop_flags(call_plan, Some(receiver_value), &arg_values);
-                self.mark_out_init_flags(args, &arg_values);
+                self.apply_call_drop_effects(call_plan, args, Some(receiver_value), &arg_values)?;
                 Ok(Some(result))
             }
             sem::IntrinsicCall::MapGet => {
@@ -728,9 +644,7 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
                 self.store_into_blob(blob_ptr, payload_offset, payload, payload_ty);
 
                 let result = self.load_slot(&union_slot);
-                self.emit_call_drops(call_plan, Some(receiver_value), &arg_values)?;
-                self.clear_sink_drop_flags(call_plan, Some(receiver_value), &arg_values);
-                self.mark_out_init_flags(args, &arg_values);
+                self.apply_call_drop_effects(call_plan, args, Some(receiver_value), &arg_values)?;
                 Ok(Some(result))
             }
             sem::IntrinsicCall::MapClear => {
@@ -748,9 +662,7 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
                 let result =
                     self.builder
                         .call(Callee::Runtime(RuntimeFn::MapClear), vec![map_addr], ret_ty);
-                self.emit_call_drops(call_plan, Some(receiver_value), &arg_values)?;
-                self.clear_sink_drop_flags(call_plan, Some(receiver_value), &arg_values);
-                self.mark_out_init_flags(args, &arg_values);
+                self.apply_call_drop_effects(call_plan, args, Some(receiver_value), &arg_values)?;
                 Ok(Some(result))
             }
         }
@@ -877,85 +789,6 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
         }
 
         (addr, ty)
-    }
-
-    fn emit_call_drops(
-        &mut self,
-        call_plan: &sem::CallPlan,
-        receiver_value: Option<&CallInputValue>,
-        arg_values: &[CallInputValue],
-    ) -> Result<(), LowerToIrError> {
-        let expected = (call_plan.has_receiver as usize) + arg_values.len();
-        if call_plan.drop_mask.len() != expected {
-            panic!(
-                "backend call drop mask length mismatch: expected {}, got {}",
-                expected,
-                call_plan.drop_mask.len()
-            );
-        }
-
-        let mut input_index = 0;
-        if call_plan.has_receiver {
-            let receiver = receiver_value.unwrap_or_else(|| {
-                panic!("backend call drop mask missing receiver value for call plan");
-            });
-            if call_plan.drop_mask[input_index] && receiver.drop_def.is_none() {
-                self.emit_drop_for_value(receiver.value, &receiver.ty, receiver.is_addr)?;
-            }
-            input_index += 1;
-        }
-
-        for arg in arg_values {
-            if call_plan.drop_mask[input_index] && arg.drop_def.is_none() {
-                self.emit_drop_for_value(arg.value, &arg.ty, arg.is_addr)?;
-            }
-            input_index += 1;
-        }
-
-        Ok(())
-    }
-
-    fn clear_sink_drop_flags(
-        &mut self,
-        call_plan: &sem::CallPlan,
-        receiver_value: Option<&CallInputValue>,
-        arg_values: &[CallInputValue],
-    ) {
-        let expected = (call_plan.has_receiver as usize) + arg_values.len();
-        if call_plan.input_modes.len() != expected {
-            panic!(
-                "backend call input modes length mismatch: expected {}, got {}",
-                expected,
-                call_plan.input_modes.len()
-            );
-        }
-
-        let mut input_index = 0;
-        if call_plan.has_receiver {
-            let receiver = receiver_value.unwrap_or_else(|| {
-                panic!("backend call input modes missing receiver value for call plan");
-            });
-            if call_plan.input_modes[input_index] == ParamMode::Sink {
-                self.clear_sink_flag_for_input(receiver);
-            }
-            input_index += 1;
-        }
-
-        for arg in arg_values {
-            if call_plan.input_modes[input_index] == ParamMode::Sink {
-                self.clear_sink_flag_for_input(arg);
-            }
-            input_index += 1;
-        }
-    }
-
-    fn clear_sink_flag_for_input(&mut self, input: &CallInputValue) {
-        let Some(def_id) = input.drop_def else {
-            return;
-        };
-        if input.ty.needs_drop() {
-            self.set_drop_flag_for_def(def_id, false);
-        }
     }
 
     fn lower_call_args_from_plan(

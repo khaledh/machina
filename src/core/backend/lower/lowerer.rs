@@ -2,7 +2,7 @@
 
 use crate::core::backend::lower::LowerToIrError;
 use crate::core::backend::lower::drop_glue::DropGlueRegistry;
-use crate::core::backend::lower::drops::DropTracker;
+use crate::core::backend::lower::drops::DropManager;
 use crate::core::backend::lower::globals::GlobalArena;
 use crate::core::backend::lower::locals::{LocalMap, LocalValue};
 use crate::core::backend::lower::types::TypeLowerer;
@@ -74,7 +74,7 @@ pub(super) struct FuncLowerer<'a, 'g> {
     pub(super) param_tys: Vec<IrTypeId>,
     pub(super) param_modes: Vec<ParamMode>,
     pub(super) loop_stack: Vec<LoopContext>,
-    pub(super) drop_tracker: DropTracker<'a>,
+    pub(super) drop_manager: DropManager<'a>,
     pub(super) drop_glue: &'g mut DropGlueRegistry,
     pub(super) globals: &'g mut GlobalArena,
     pub(super) trace_drops: bool,
@@ -90,6 +90,14 @@ pub(super) struct BaseView {
 pub(super) struct ValueSlot {
     pub(super) addr: ValueId,
     pub(super) ty: IrTypeId,
+}
+
+/// Lowered argument/receiver input used while materializing a call.
+pub(super) struct CallInputValue {
+    pub(super) value: ValueId,
+    pub(super) ty: Type,
+    pub(super) is_addr: bool,
+    pub(super) drop_def: Option<DefId>,
 }
 
 impl<'a, 'g> FuncLowerer<'a, 'g> {
@@ -219,7 +227,7 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
             param_tys,
             param_modes,
             loop_stack: Vec::new(),
-            drop_tracker: DropTracker::new(),
+            drop_manager: DropManager::new(),
             drop_glue,
             globals,
             trace_drops,
@@ -336,7 +344,7 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
             param_tys,
             param_modes,
             loop_stack: Vec::new(),
-            drop_tracker: DropTracker::new(),
+            drop_manager: DropManager::new(),
             drop_glue,
             globals,
             trace_drops,
@@ -377,7 +385,7 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
             param_tys: vec![param_ptr],
             param_modes: vec![ParamMode::In],
             loop_stack: Vec::new(),
-            drop_tracker: DropTracker::new(),
+            drop_manager: DropManager::new(),
             drop_glue,
             globals,
             trace_drops,
