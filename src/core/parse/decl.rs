@@ -375,7 +375,7 @@ impl<'a> Parser<'a> {
         // Pattern-form sugar:
         //   on Response(pending, AuthApproved) -> ...
         // Desugars to canonical params:
-        //   (pending: _, __response: AuthApproved)
+        //   (pending: Pending<AuthApproved>, __response: AuthApproved)
         if matches!(self.curr_token.kind, TK::Ident(_))
             && self.peek().map(|t| &t.kind) == Some(&TK::Comma)
         {
@@ -393,7 +393,11 @@ impl<'a> Parser<'a> {
                     def_id: (),
                     typ: TypeExpr {
                         id: self.id_gen.new_id(),
-                        kind: TypeExprKind::Infer,
+                        kind: TypeExprKind::Named {
+                            ident: "Pending".to_string(),
+                            def_id: (),
+                            type_args: vec![response_ty.clone()],
+                        },
                         span: pending_span,
                     },
                     mode: ParamMode::In,

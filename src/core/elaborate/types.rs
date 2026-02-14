@@ -94,6 +94,26 @@ impl<'a> Elaborator<'a> {
             Type::DynArray { elem_ty } => sem::TypeExprKind::DynArray {
                 elem_ty_expr: Box::new(self.type_expr_from_type(elem_ty, span)),
             },
+            Type::Pending { response_tys } => sem::TypeExprKind::Named {
+                ident: "Pending".to_string(),
+                def_id: self
+                    .def_table
+                    .lookup_type_def_id("Pending")
+                    .unwrap_or_else(|| {
+                        panic!("compiler bug: missing def id for type Pending at {}", span)
+                    }),
+                type_args: vec![self.response_set_type_arg_expr(response_tys, span)],
+            },
+            Type::ReplyCap { response_tys } => sem::TypeExprKind::Named {
+                ident: "ReplyCap".to_string(),
+                def_id: self
+                    .def_table
+                    .lookup_type_def_id("ReplyCap")
+                    .unwrap_or_else(|| {
+                        panic!("compiler bug: missing def id for type ReplyCap at {}", span)
+                    }),
+                type_args: vec![self.response_set_type_arg_expr(response_tys, span)],
+            },
             Type::Set { elem_ty } => sem::TypeExprKind::Named {
                 ident: "set".to_string(),
                 def_id: self.def_table.lookup_type_def_id("set").unwrap_or_else(|| {
@@ -158,6 +178,27 @@ impl<'a> Elaborator<'a> {
             ident: name.to_string(),
             def_id,
             type_args: Vec::new(),
+        }
+    }
+
+    fn response_set_type_arg_expr(&mut self, response_tys: &[Type], span: Span) -> sem::TypeExpr {
+        if response_tys.len() <= 1 {
+            return self.type_expr_from_type(
+                response_tys
+                    .first()
+                    .expect("response set type arg requires at least one variant"),
+                span,
+            );
+        }
+        sem::TypeExpr {
+            id: self.node_id_gen.new_id(),
+            kind: sem::TypeExprKind::Union {
+                variants: response_tys
+                    .iter()
+                    .map(|ty| self.type_expr_from_type(ty, span))
+                    .collect(),
+            },
+            span,
         }
     }
 }

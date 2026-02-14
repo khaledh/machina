@@ -345,6 +345,221 @@ typestate Gateway : Auth::Client {
 }
 
 #[test]
+fn typestate_reply_cap_rejects_double_consume() {
+    let source = r#"
+type AuthReq = {}
+type AuthOk = {}
+
+protocol Auth {
+    role Client;
+    role Server;
+    flow Client -> Server: AuthReq;
+}
+
+typestate Gateway : Auth::Server {
+    fn new() -> Ready {
+        Ready {}
+    }
+
+    state Ready {
+        on AuthReq(req: AuthReq, cap: ReplyCap<AuthOk>) -> Ready {
+            reply(cap, AuthOk {});
+            reply(cap, AuthOk {});
+            Ready {}
+        }
+    }
+}
+"#;
+    let parsed = parsed_context_typestate(source);
+    let out = resolve_typecheck_pipeline_with_policy(
+        parsed,
+        ResolveInputs::default(),
+        None,
+        FrontendPolicy::Strict,
+    );
+    assert!(
+        out.type_errors.iter().any(|e| {
+            matches!(
+                e.kind(),
+                TypeCheckErrorKind::ReplyCapConsumedMultipleTimes(name, _) if name == "cap"
+            )
+        }),
+        "expected double-consume reply cap error, got {:?}",
+        out.type_errors
+    );
+}
+
+#[test]
+fn typestate_reply_cap_requires_consumption_on_all_paths() {
+    let source = r#"
+type AuthReq = { allow: bool }
+type AuthOk = {}
+
+protocol Auth {
+    role Client;
+    role Server;
+    flow Client -> Server: AuthReq;
+}
+
+typestate Gateway : Auth::Server {
+    fn new() -> Ready {
+        Ready {}
+    }
+
+    state Ready {
+        on AuthReq(req: AuthReq, cap: ReplyCap<AuthOk>) -> Ready {
+            if req.allow {
+                reply(cap, AuthOk {});
+            } else {
+                // missing reply
+            };
+            Ready {}
+        }
+    }
+}
+"#;
+    let parsed = parsed_context_typestate(source);
+    let out = resolve_typecheck_pipeline_with_policy(
+        parsed,
+        ResolveInputs::default(),
+        None,
+        FrontendPolicy::Strict,
+    );
+    assert!(
+        out.type_errors.iter().any(|e| {
+            matches!(
+                e.kind(),
+                TypeCheckErrorKind::ReplyCapMustBeConsumed(name, _) if name == "cap"
+            )
+        }),
+        "expected missing-consume reply cap error, got {:?}",
+        out.type_errors
+    );
+}
+
+#[test]
+fn typestate_reply_cap_rejects_payload_outside_response_set() {
+    let source = r#"
+type AuthReq = {}
+type AuthOk = {}
+type AuthErr = {}
+
+protocol Auth {
+    role Client;
+    role Server;
+    flow Client -> Server: AuthReq;
+}
+
+typestate Gateway : Auth::Server {
+    fn new() -> Ready {
+        Ready {}
+    }
+
+    state Ready {
+        on AuthReq(req: AuthReq, cap: ReplyCap<AuthOk>) -> Ready {
+            reply(cap, AuthErr {});
+            Ready {}
+        }
+    }
+}
+"#;
+    let parsed = parsed_context_typestate(source);
+    let out = resolve_typecheck_pipeline_with_policy(
+        parsed,
+        ResolveInputs::default(),
+        None,
+        FrontendPolicy::Strict,
+    );
+    assert!(
+        out.type_errors.iter().any(|e| matches!(
+            e.kind(),
+            TypeCheckErrorKind::ReplyPayloadNotAllowed(_, _, _)
+        )),
+        "expected invalid reply payload error, got {:?}",
+        out.type_errors
+    );
+}
+
+#[test]
+fn typestate_reply_outside_handler_is_rejected() {
+    let source = r#"
+type AuthOk = {}
+
+typestate Gateway {
+    fn new() -> Ready {
+        Ready {}
+    }
+
+    state Ready {
+        fn bad() -> Ready {
+            reply(0, AuthOk {});
+            Ready {}
+        }
+    }
+}
+"#;
+    let parsed = parsed_context_typestate(source);
+    let out = resolve_typecheck_pipeline_with_policy(
+        parsed,
+        ResolveInputs::default(),
+        None,
+        FrontendPolicy::Strict,
+    );
+    assert!(
+        out.type_errors
+            .iter()
+            .any(|e| matches!(e.kind(), TypeCheckErrorKind::ReplyOutsideHandler(_))),
+        "expected reply outside handler error, got {:?}",
+        out.type_errors
+    );
+}
+
+#[test]
+fn typestate_reply_cap_all_paths_consumed_is_accepted() {
+    let source = r#"
+type AuthReq = { allow: bool }
+type AuthOk = {}
+type AuthErr = {}
+
+protocol Auth {
+    role Client;
+    role Server;
+    flow Client -> Server: AuthReq;
+}
+
+typestate Gateway : Auth::Server {
+    fn new() -> Ready {
+        Ready {}
+    }
+
+    state Ready {
+        on AuthReq(req: AuthReq, cap: ReplyCap<AuthOk | AuthErr>) -> Ready {
+            if req.allow {
+                reply(cap, AuthOk {});
+            } else {
+                reply(cap, AuthErr {});
+            };
+            Ready {}
+        }
+    }
+}
+"#;
+    let parsed = parsed_context_typestate(source);
+    let out = resolve_typecheck_pipeline_with_policy(
+        parsed,
+        ResolveInputs::default(),
+        None,
+        FrontendPolicy::Strict,
+    );
+    assert!(
+        !out.has_errors(),
+        "expected valid reply cap usage, got resolve={:?} type={:?}",
+        out.resolve_errors,
+        out.type_errors
+    );
+}
+
+#[test]
 fn typecheck_policy_strict_vs_partial() {
     let source = r#"
 fn main() -> u64 {

@@ -831,6 +831,32 @@ impl SymbolResolver {
                     span: Span::default(),
                 },
             });
+            let _ =
+                resolver.add_built_in_symbol("Pending", false, |def_id| SymbolKind::TypeAlias {
+                    def_id,
+                    ty_expr: TypeExpr {
+                        id: NodeId(0),
+                        kind: TypeExprKind::Named {
+                            ident: "Pending".to_string(),
+                            def_id: (),
+                            type_args: Vec::new(),
+                        },
+                        span: Span::default(),
+                    },
+                });
+            let _ =
+                resolver.add_built_in_symbol("ReplyCap", false, |def_id| SymbolKind::TypeAlias {
+                    def_id,
+                    ty_expr: TypeExpr {
+                        id: NodeId(0),
+                        kind: TypeExprKind::Named {
+                            ident: "ReplyCap".to_string(),
+                            def_id: (),
+                            type_args: Vec::new(),
+                        },
+                        span: Span::default(),
+                    },
+                });
 
             resolver.check_requires(module);
             resolver.populate_decls(module);

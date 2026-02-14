@@ -46,6 +46,12 @@ pub enum Type {
     DynArray {
         elem_ty: Box<Type>,
     },
+    Pending {
+        response_tys: Vec<Type>,
+    },
+    ReplyCap {
+        response_tys: Vec<Type>,
+    },
     Set {
         elem_ty: Box<Type>,
     },
@@ -178,6 +184,8 @@ impl PartialEq for Type {
                 },
             ) => e1 == e2 && d1 == d2,
             (Type::DynArray { elem_ty: e1 }, Type::DynArray { elem_ty: e2 }) => e1 == e2,
+            (Type::Pending { response_tys: r1 }, Type::Pending { response_tys: r2 }) => r1 == r2,
+            (Type::ReplyCap { response_tys: r1 }, Type::ReplyCap { response_tys: r2 }) => r1 == r2,
             (Type::Set { elem_ty: e1 }, Type::Set { elem_ty: e2 }) => e1 == e2,
             (
                 Type::Map {
@@ -262,6 +270,14 @@ impl Hash for Type {
             Type::DynArray { elem_ty } => {
                 18u8.hash(state);
                 elem_ty.hash(state);
+            }
+            Type::Pending { response_tys } => {
+                21u8.hash(state);
+                response_tys.hash(state);
+            }
+            Type::ReplyCap { response_tys } => {
+                22u8.hash(state);
+                response_tys.hash(state);
             }
             Type::Set { elem_ty } => {
                 19u8.hash(state);
@@ -427,6 +443,8 @@ impl Type {
                 total_elems * elem_ty.size_of()
             }
             Type::DynArray { .. } => 16,
+            Type::Pending { .. } => 8,
+            Type::ReplyCap { .. } => 8,
             Type::Set { .. } => 16,
             Type::Map { .. } => 16,
             Type::Tuple { field_tys } => {
@@ -464,6 +482,8 @@ impl Type {
             Type::String => 8,
             Type::Array { elem_ty, .. } => elem_ty.align_of(),
             Type::DynArray { .. } => 8,
+            Type::Pending { .. } => 8,
+            Type::ReplyCap { .. } => 8,
             Type::Set { .. } => 8,
             Type::Map { .. } => 8,
             Type::Tuple { field_tys } => field_tys.iter().map(|t| t.align_of()).max().unwrap_or(1),
@@ -492,6 +512,8 @@ impl Type {
             self,
             Type::Array { .. }
                 | Type::DynArray { .. }
+                | Type::Pending { .. }
+                | Type::ReplyCap { .. }
                 | Type::Set { .. }
                 | Type::Map { .. }
                 | Type::Tuple { .. }
@@ -543,6 +565,8 @@ impl Type {
             Type::String => true,
             Type::Array { elem_ty, .. } => elem_ty.needs_drop(),
             Type::DynArray { .. } => true,
+            Type::Pending { .. } => false,
+            Type::ReplyCap { .. } => false,
             Type::Set { .. } => true,
             Type::Map { .. } => true,
             Type::Tuple { field_tys } => field_tys.iter().any(Type::needs_drop),

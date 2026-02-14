@@ -1422,6 +1422,30 @@ fn type_expr_from_type(
         Type::DynArray { elem_ty } => res::TypeExprKind::DynArray {
             elem_ty_expr: Box::new(type_expr_from_type(elem_ty, def_table, node_id_gen, span)?),
         },
+        Type::Pending { response_tys } => res::TypeExprKind::Named {
+            ident: "Pending".to_string(),
+            def_id: def_table
+                .lookup_type_def_id("Pending")
+                .ok_or(MonomorphizeError::UnsupportedType { span })?,
+            type_args: vec![response_set_type_arg_expr(
+                response_tys,
+                def_table,
+                node_id_gen,
+                span,
+            )?],
+        },
+        Type::ReplyCap { response_tys } => res::TypeExprKind::Named {
+            ident: "ReplyCap".to_string(),
+            def_id: def_table
+                .lookup_type_def_id("ReplyCap")
+                .ok_or(MonomorphizeError::UnsupportedType { span })?,
+            type_args: vec![response_set_type_arg_expr(
+                response_tys,
+                def_table,
+                node_id_gen,
+                span,
+            )?],
+        },
         Type::Set { elem_ty } => res::TypeExprKind::Named {
             ident: "set".to_string(),
             def_id: def_table
@@ -1490,6 +1514,34 @@ fn type_expr_from_type(
     };
 
     Ok(res::TypeExpr { id, kind, span })
+}
+
+fn response_set_type_arg_expr(
+    response_tys: &[Type],
+    def_table: &DefTable,
+    node_id_gen: &mut NodeIdGen,
+    span: Span,
+) -> Result<res::TypeExpr, MonomorphizeError> {
+    if response_tys.len() <= 1 {
+        return type_expr_from_type(
+            response_tys
+                .first()
+                .ok_or(MonomorphizeError::UnsupportedType { span })?,
+            def_table,
+            node_id_gen,
+            span,
+        );
+    }
+    Ok(res::TypeExpr {
+        id: node_id_gen.new_id(),
+        kind: res::TypeExprKind::Union {
+            variants: response_tys
+                .iter()
+                .map(|ty| type_expr_from_type(ty, def_table, node_id_gen, span))
+                .collect::<Result<Vec<_>, _>>()?,
+        },
+        span,
+    })
 }
 
 fn named_type_expr(

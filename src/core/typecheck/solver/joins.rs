@@ -41,6 +41,8 @@ fn join_variant_rank(ty: &Type) -> u8 {
         Type::Tuple { .. }
         | Type::Array { .. }
         | Type::DynArray { .. }
+        | Type::Pending { .. }
+        | Type::ReplyCap { .. }
         | Type::Set { .. }
         | Type::Map { .. } => 2,
         Type::Struct { .. } | Type::Enum { .. } => 3,

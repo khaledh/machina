@@ -838,7 +838,13 @@ macro_rules! with_typecheck_variants {
             LenTargetNotLvalue,
             OpaquePatternDestructure,
             ProtocolFlowHandlerMissing,
-            ProtocolOutgoingPayloadNotAllowed
+            ProtocolOutgoingPayloadNotAllowed,
+            ReplyOutsideHandler,
+            ReplyCapExpected,
+            ReplyPayloadNotAllowed,
+            ReplyCapMustBeConsumed,
+            ReplyCapConsumedMultipleTimes,
+            ReplyCapParamRequired
         )
     };
 }

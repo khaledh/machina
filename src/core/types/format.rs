@@ -61,6 +61,22 @@ impl fmt::Display for Type {
             Type::DynArray { elem_ty } => {
                 write!(f, "{}[*]", elem_ty)
             }
+            Type::Pending { response_tys } => {
+                let variants = response_tys
+                    .iter()
+                    .map(|ty| ty.to_string())
+                    .collect::<Vec<_>>()
+                    .join(" | ");
+                write!(f, "Pending<{}>", variants)
+            }
+            Type::ReplyCap { response_tys } => {
+                let variants = response_tys
+                    .iter()
+                    .map(|ty| ty.to_string())
+                    .collect::<Vec<_>>()
+                    .join(" | ");
+                write!(f, "ReplyCap<{}>", variants)
+            }
             Type::Set { elem_ty } => {
                 write!(f, "set<{}>", elem_ty)
             }

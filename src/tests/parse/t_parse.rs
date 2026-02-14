@@ -2526,7 +2526,11 @@ fn test_parse_typestate_pattern_on_handler_desugars_to_canonical_params() {
 
     assert_eq!(handler.params.len(), 2);
     assert_eq!(handler.params[0].ident, "pending");
-    assert!(matches!(handler.params[0].typ.kind, TypeExprKind::Infer));
+    assert!(matches!(
+        handler.params[0].typ.kind,
+        TypeExprKind::Named { ref ident, ref type_args, .. }
+            if ident == "Pending" && type_args.len() == 1
+    ));
     assert_eq!(handler.params[1].ident, "__response");
     assert!(matches!(
         handler.params[1].typ.kind,

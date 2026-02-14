@@ -572,6 +572,35 @@ fn resolve_named_type(
             value_ty: Box::new(value_ty),
         });
     }
+    if def.name == "Pending" || def.name == "ReplyCap" {
+        if type_arg_exprs.len() != 1 {
+            return Err(TypeCheckErrorKind::TypeArgCountMismatch(
+                def.name.clone(),
+                1,
+                type_arg_exprs.len(),
+                type_expr.span,
+            )
+            .into());
+        }
+        let response_set_ty = resolve_type_expr_impl(
+            def_table,
+            module,
+            &type_arg_exprs[0],
+            type_params,
+            type_args,
+            in_progress,
+            true,
+        )?;
+        let response_tys = match response_set_ty {
+            Type::ErrorUnion { ok_ty, err_tys } => std::iter::once(*ok_ty).chain(err_tys).collect(),
+            other => vec![other],
+        };
+        return if def.name == "Pending" {
+            Ok(Type::Pending { response_tys })
+        } else {
+            Ok(Type::ReplyCap { response_tys })
+        };
+    }
 
     if let Some(ty) = builtin_type(&def.name) {
         if !type_arg_exprs.is_empty() {

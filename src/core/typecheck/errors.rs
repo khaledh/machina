@@ -344,6 +344,24 @@ pub enum TypeCheckErrorKind {
         "Typestate {0} implementing role {1} emits payload {2} which is not allowed by protocol flows"
     )]
     ProtocolOutgoingPayloadNotAllowed(String, String, Type, Span),
+
+    #[error("`reply` can only be used inside typestate `on` handlers")]
+    ReplyOutsideHandler(Span),
+
+    #[error("`reply` expects a ReplyCap as its first argument, found {0}")]
+    ReplyCapExpected(Type, Span),
+
+    #[error("`reply` payload type {0} is not in reply capability response set {1:?}")]
+    ReplyPayloadNotAllowed(Type, Vec<Type>, Span),
+
+    #[error("reply capability must be consumed exactly once on all paths: {0}")]
+    ReplyCapMustBeConsumed(String, Span),
+
+    #[error("reply capability consumed multiple times: {0}")]
+    ReplyCapConsumedMultipleTimes(String, Span),
+
+    #[error("`reply` capability argument must be a handler ReplyCap parameter")]
+    ReplyCapParamRequired(Span),
 }
 
 impl TypeCheckError {
@@ -463,6 +481,12 @@ impl TypeCheckError {
             TypeCheckErrorKind::OpaquePatternDestructure(_, span) => *span,
             TypeCheckErrorKind::ProtocolFlowHandlerMissing(_, _, _, span) => *span,
             TypeCheckErrorKind::ProtocolOutgoingPayloadNotAllowed(_, _, _, span) => *span,
+            TypeCheckErrorKind::ReplyOutsideHandler(span) => *span,
+            TypeCheckErrorKind::ReplyCapExpected(_, span) => *span,
+            TypeCheckErrorKind::ReplyPayloadNotAllowed(_, _, span) => *span,
+            TypeCheckErrorKind::ReplyCapMustBeConsumed(_, span) => *span,
+            TypeCheckErrorKind::ReplyCapConsumedMultipleTimes(_, span) => *span,
+            TypeCheckErrorKind::ReplyCapParamRequired(span) => *span,
         }
     }
 }

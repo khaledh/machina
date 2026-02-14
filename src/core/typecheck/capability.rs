@@ -101,6 +101,8 @@ fn check_capability_at_path(
         | Type::ErrorUnion { .. }
         | Type::String
         | Type::DynArray { .. }
+        | Type::Pending { .. }
+        | Type::ReplyCap { .. }
         | Type::Set { .. }
         | Type::Map { .. }
         | Type::Slice { .. }
