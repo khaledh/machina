@@ -28,7 +28,7 @@ use crate::core::backend::lower::drop_glue::DropGlueRegistry;
 use crate::core::backend::lower::globals::GlobalArena;
 use crate::core::backend::lower::lowerer::BranchResult;
 use crate::core::ir::IrTypeCache;
-use crate::core::ir::{Function, GlobalData, Terminator};
+use crate::core::ir::{Function, GlobalData};
 use crate::core::resolve::DefTable;
 use crate::core::tree::semantic as sem;
 use crate::core::typecheck::type_map::TypeMap;
@@ -220,8 +220,7 @@ fn lower_func_with_globals(
         globals,
         trace_drops,
     );
-    lowerer.set_drop_plans(drop_plans);
-    lowerer.enter_drop_scope(func.id);
+    lowerer.init_root_drop_scope(drop_plans, func.id);
 
     // Add function parameters as block parameters to the entry block,
     // then establish the initial locals mapping from parameters.
@@ -246,10 +245,7 @@ fn lower_func_with_globals(
     if let BranchResult::Value(value) = result {
         let body_ty = type_map.type_table().get(func.body.ty).clone();
         let value = lowerer.coerce_return_value(value, &body_ty);
-        lowerer.emit_drops_to_depth(0)?;
-        lowerer.builder.terminate(Terminator::Return {
-            value: if ret_is_unit { None } else { Some(value) },
-        });
+        lowerer.emit_root_return(if ret_is_unit { None } else { Some(value) })?;
     }
 
     let (func, types) = lowerer.finish();
@@ -298,8 +294,7 @@ fn lower_method_def_with_globals(
         globals,
         trace_drops,
     );
-    lowerer.set_drop_plans(drop_plans);
-    lowerer.enter_drop_scope(method_def.id);
+    lowerer.init_root_drop_scope(drop_plans, method_def.id);
 
     // Add method parameters (including `self`) as block parameters to the entry block,
     // then establish the initial locals mapping from parameters.
@@ -320,10 +315,7 @@ fn lower_method_def_with_globals(
     if let BranchResult::Value(value) = result {
         let body_ty = type_map.type_table().get(method_def.body.ty).clone();
         let value = lowerer.coerce_return_value(value, &body_ty);
-        lowerer.emit_drops_to_depth(0)?;
-        lowerer.builder.terminate(Terminator::Return {
-            value: if ret_is_unit { None } else { Some(value) },
-        });
+        lowerer.emit_root_return(if ret_is_unit { None } else { Some(value) })?;
     }
 
     let (func, types) = lowerer.finish();

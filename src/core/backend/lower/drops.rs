@@ -215,6 +215,16 @@ fn has_nontrivial_drop(ty: &Type) -> bool {
 }
 
 impl<'a, 'g> FuncLowerer<'a, 'g> {
+    /// Initialize drop tracking for a function/method body root scope.
+    pub(super) fn init_root_drop_scope(
+        &mut self,
+        drop_plans: &'a sem::DropPlanMap,
+        root_scope: NodeId,
+    ) {
+        self.set_drop_plans(drop_plans);
+        self.enter_drop_scope(root_scope);
+    }
+
     pub(super) fn with_drop_scope<R>(
         &mut self,
         id: NodeId,
@@ -272,6 +282,13 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
             return Ok(());
         };
         self.emit_drops_to_depth(depth)
+    }
+
+    /// Emit all remaining drops and terminate with return.
+    pub(super) fn emit_root_return(&mut self, value: Option<ValueId>) -> Result<(), LowerToIrError> {
+        self.emit_drops_to_depth(0)?;
+        self.builder.terminate(Terminator::Return { value });
+        Ok(())
     }
 
     /// Apply all call-site drop side effects in one place:

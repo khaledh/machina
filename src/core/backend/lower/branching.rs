@@ -284,10 +284,7 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
         join.restore_locals(self);
         self.builder.select_block(err_dispatch_bb);
         if return_union_matches_operand {
-            self.emit_drops_to_depth(0)?;
-            self.builder.terminate(Terminator::Return {
-                value: Some(union_value),
-            });
+            self.emit_root_return(Some(union_value))?;
         } else {
             self.lower_try_error_return_cases(
                 union_slot.addr,
@@ -343,10 +340,7 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
             let payload_value =
                 self.load_union_payload(union_addr, blob_ty, *payload_ty, *payload_offset);
             let coerced = self.coerce_return_value(payload_value, err_ty);
-            self.emit_drops_to_depth(0)?;
-            self.builder.terminate(Terminator::Return {
-                value: Some(coerced),
-            });
+            self.emit_root_return(Some(coerced))?;
         }
 
         self.builder.select_block(default_bb);
