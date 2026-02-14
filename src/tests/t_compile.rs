@@ -987,3 +987,45 @@ fn main() -> u64 {
 
     compile(source, &typestate_compile_opts()).expect("typestate compile should succeed");
 }
+
+#[test]
+fn compile_typestate_transition_auto_carries_shared_fields() {
+    let source = r#"
+typestate Connection {
+    fields {
+        addr: string,
+        retries: u64,
+    }
+
+    fn new(addr: string) -> Disconnected {
+        Disconnected { addr: addr, retries: 0 }
+    }
+
+    state Disconnected {
+        fn connect() -> Connected {
+            Connected { fd: 7 }
+        }
+    }
+
+    state Connected {
+        fields {
+            fd: u64,
+        }
+
+        fn close() -> Disconnected {
+            Disconnected
+        }
+    }
+}
+
+fn main() -> u64 {
+    let c0 = Connection::new("localhost");
+    let c1 = c0.connect();
+    let c2 = c1.close();
+    c2.retries
+}
+"#;
+
+    compile(source, &typestate_compile_opts())
+        .expect("typestate carried-field shorthand compile should succeed");
+}

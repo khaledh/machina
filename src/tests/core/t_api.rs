@@ -172,6 +172,36 @@ typestate Connection {
 }
 
 #[test]
+fn typestate_external_state_literal_reports_targeted_error() {
+    let source = r#"
+typestate Connection {
+    fields { retries: u64 }
+
+    fn new() -> Disconnected {
+        Disconnected { retries: 0 }
+    }
+
+    state Disconnected {}
+}
+
+fn main() -> u64 {
+    let bad = Disconnected { retries: 1 };
+    bad.retries
+}
+"#;
+    let parsed = parsed_context_typestate(source);
+    let out = resolve_stage_with_policy(parsed, ResolveInputs::default(), FrontendPolicy::Strict);
+    assert!(out.context.is_none());
+    assert!(out.errors.iter().any(|err| {
+        matches!(
+            err,
+            ResolveError::TypestateStateLiteralOutsideTypestate(state, _)
+                if state == "Disconnected"
+        )
+    }));
+}
+
+#[test]
 fn typecheck_policy_strict_vs_partial() {
     let source = r#"
 fn main() -> u64 {

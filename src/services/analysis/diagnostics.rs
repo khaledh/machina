@@ -394,6 +394,10 @@ impl Diagnostic {
                 );
                 "MC-TYPESTATE-DUPLICATE-TRANSITION"
             }
+            ResolveError::TypestateStateLiteralOutsideTypestate(state, _) => {
+                metadata.insert("state".to_string(), DiagnosticValue::String(state.clone()));
+                "MC-TYPESTATE-STATE-LITERAL-OUTSIDE-TYPESTATE"
+            }
         };
         Self {
             phase: DiagnosticPhase::Resolve,

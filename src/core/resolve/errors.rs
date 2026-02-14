@@ -111,6 +111,9 @@ pub enum ResolveError {
 
     #[error("State `{0}.{1}` has duplicate transition `{2}`")]
     TypestateDuplicateTransition(String, String, String, Span),
+
+    #[error("State literal `{0}` is only allowed inside typestate constructor/transition methods")]
+    TypestateStateLiteralOutsideTypestate(String, Span),
 }
 
 impl ResolveError {
@@ -150,6 +153,7 @@ impl ResolveError {
             ResolveError::TypestateExplicitSelfNotAllowed(_, _, _, span) => *span,
             ResolveError::TypestateInvalidTransitionReturn(_, _, _, span) => *span,
             ResolveError::TypestateDuplicateTransition(_, _, _, span) => *span,
+            ResolveError::TypestateStateLiteralOutsideTypestate(_, span) => *span,
         }
     }
 }
