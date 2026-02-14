@@ -449,6 +449,8 @@ impl<'a> Elaborator<'a> {
             },
             norm::ExprKind::Call { .. }
             | norm::ExprKind::MethodCall { .. }
+            | norm::ExprKind::Emit { .. }
+            | norm::ExprKind::Reply { .. }
             | norm::ExprKind::Closure { .. }
             | norm::ExprKind::Move { .. }
             | norm::ExprKind::ImplicitMove { .. }

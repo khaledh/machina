@@ -30,6 +30,7 @@ impl fmt::Display for Module {
 
         for (i, item) in self.top_level_items.iter().enumerate() {
             match item {
+                TopLevelItem::ProtocolDef(protocol_def) => protocol_def.fmt_with_indent(f, 0)?,
                 TopLevelItem::TraitDef(trait_def) => trait_def.fmt_with_indent(f, 0)?,
                 TopLevelItem::TypeDef(type_def) => type_def.fmt_with_indent(f, 0)?,
                 TopLevelItem::TypestateDef(typestate_def) => typestate_def.fmt_with_indent(f, 0)?,
@@ -94,11 +95,62 @@ impl TraitProperty {
     }
 }
 
+impl ProtocolDef {
+    fn fmt_with_indent(&self, f: &mut fmt::Formatter<'_>, level: usize) -> fmt::Result {
+        let pad = indent(level);
+        writeln!(f, "{}ProtocolDef [{}]", pad, self.id)?;
+        let pad1 = indent(level + 1);
+        writeln!(f, "{}Name: {}", pad1, self.name)?;
+        writeln!(f, "{}Roles:", pad1)?;
+        for role in &self.roles {
+            role.fmt_with_indent(f, level + 2)?;
+        }
+        writeln!(f, "{}Flows:", pad1)?;
+        for flow in &self.flows {
+            flow.fmt_with_indent(f, level + 2)?;
+        }
+        Ok(())
+    }
+}
+
+impl ProtocolRole {
+    fn fmt_with_indent(&self, f: &mut fmt::Formatter<'_>, level: usize) -> fmt::Result {
+        writeln!(f, "{}Role {} [{}]", indent(level), self.name, self.id)
+    }
+}
+
+impl ProtocolFlow {
+    fn fmt_with_indent(&self, f: &mut fmt::Formatter<'_>, level: usize) -> fmt::Result {
+        let pad = indent(level);
+        writeln!(
+            f,
+            "{}Flow {} -> {} [{}]",
+            pad, self.from_role, self.to_role, self.id
+        )?;
+        writeln!(f, "{}Payload: {}", indent(level + 1), self.payload_ty)?;
+        if self.response_tys.is_empty() {
+            writeln!(f, "{}Responses: <none>", indent(level + 1))
+        } else {
+            writeln!(f, "{}Responses:", indent(level + 1))?;
+            for ty in &self.response_tys {
+                writeln!(f, "{}{}", indent(level + 2), ty)?;
+            }
+            Ok(())
+        }
+    }
+}
+
 impl TypestateDef {
     fn fmt_with_indent(&self, f: &mut fmt::Formatter<'_>, level: usize) -> fmt::Result {
         let pad = indent(level);
         writeln!(f, "{}TypestateDef [{}]", pad, self.id)?;
         writeln!(f, "{}Name: {}", indent(level + 1), self.name)?;
+        if !self.role_impls.is_empty() {
+            writeln!(f, "{}RoleImpls:", indent(level + 1))?;
+            for role_impl in &self.role_impls {
+                role_impl.fmt_with_indent(f, level + 2)?;
+            }
+        }
         writeln!(f, "{}Items:", indent(level + 1))?;
         for item in &self.items {
             item.fmt_with_indent(f, level + 2)?;
@@ -115,8 +167,21 @@ impl TypestateItem {
                 writeln!(f, "{}Constructor:", indent(level))?;
                 constructor.fmt_with_indent(f, level + 1)
             }
+            TypestateItem::Handler(handler) => handler.fmt_with_indent(f, level),
             TypestateItem::State(state) => state.fmt_with_indent(f, level),
         }
+    }
+}
+
+impl TypestateRoleImpl {
+    fn fmt_with_indent(&self, f: &mut fmt::Formatter<'_>, level: usize) -> fmt::Result {
+        writeln!(
+            f,
+            "{}RoleImpl [{}]: {}",
+            indent(level),
+            self.id,
+            self.path.join("::")
+        )
     }
 }
 
@@ -145,7 +210,27 @@ impl TypestateStateItem {
         match self {
             TypestateStateItem::Fields(fields) => fields.fmt_with_indent(f, level),
             TypestateStateItem::Method(method) => method.fmt_with_indent(f, level),
+            TypestateStateItem::Handler(handler) => handler.fmt_with_indent(f, level),
         }
+    }
+}
+
+impl TypestateOnHandler {
+    fn fmt_with_indent(&self, f: &mut fmt::Formatter<'_>, level: usize) -> fmt::Result {
+        let pad = indent(level);
+        writeln!(f, "{}OnHandler [{}]", pad, self.id)?;
+        writeln!(f, "{}Selector: {}", indent(level + 1), self.selector_ty)?;
+        if self.params.is_empty() {
+            writeln!(f, "{}Params: <none>", indent(level + 1))?;
+        } else {
+            writeln!(f, "{}Params:", indent(level + 1))?;
+            for param in &self.params {
+                writeln!(f, "{}{}", indent(level + 2), param)?;
+            }
+        }
+        writeln!(f, "{}Return: {}", indent(level + 1), self.ret_ty_expr)?;
+        writeln!(f, "{}Body:", indent(level + 1))?;
+        self.body.fmt_with_indent(f, level + 2)
     }
 }
 
@@ -847,6 +932,32 @@ impl Expr {
                 writeln!(f, "{}Method Name: {}", pad1, method_name)?;
                 writeln!(f, "{}Args:", pad1)?;
                 self.fmt_call_args(f, level + 2, args)?;
+            }
+            ExprKind::Emit { kind } => match kind {
+                EmitKind::Send { to, payload } => {
+                    let pad1 = indent(level + 1);
+                    writeln!(f, "{}EmitSend [{}]", pad, self.id)?;
+                    writeln!(f, "{}To:", pad1)?;
+                    to.fmt_with_indent(f, level + 2)?;
+                    writeln!(f, "{}Payload:", pad1)?;
+                    payload.fmt_with_indent(f, level + 2)?;
+                }
+                EmitKind::Request { to, payload } => {
+                    let pad1 = indent(level + 1);
+                    writeln!(f, "{}EmitRequest [{}]", pad, self.id)?;
+                    writeln!(f, "{}To:", pad1)?;
+                    to.fmt_with_indent(f, level + 2)?;
+                    writeln!(f, "{}Payload:", pad1)?;
+                    payload.fmt_with_indent(f, level + 2)?;
+                }
+            },
+            ExprKind::Reply { cap, value } => {
+                let pad1 = indent(level + 1);
+                writeln!(f, "{}Reply [{}]", pad, self.id)?;
+                writeln!(f, "{}Cap:", pad1)?;
+                cap.fmt_with_indent(f, level + 2)?;
+                writeln!(f, "{}Value:", pad1)?;
+                value.fmt_with_indent(f, level + 2)?;
             }
             ExprKind::Closure {
                 ident,

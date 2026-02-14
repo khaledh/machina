@@ -30,6 +30,9 @@ pub fn attach_def_owners(
         };
         let mut collector = DefOwnerCollector::new(*owner, &mut def_owners);
         match item {
+            crate::core::tree::resolved::TopLevelItem::ProtocolDef(protocol_def) => {
+                collector.visit_protocol_def(protocol_def)
+            }
             crate::core::tree::resolved::TopLevelItem::TraitDef(trait_def) => {
                 collector.visit_trait_def(trait_def)
             }
@@ -59,6 +62,7 @@ pub fn attach_def_owners(
 
 fn top_level_item_id(item: &crate::core::tree::resolved::TopLevelItem) -> NodeId {
     match item {
+        crate::core::tree::resolved::TopLevelItem::ProtocolDef(protocol_def) => protocol_def.id,
         crate::core::tree::resolved::TopLevelItem::TraitDef(trait_def) => trait_def.id,
         crate::core::tree::resolved::TopLevelItem::TypeDef(type_def) => type_def.id,
         crate::core::tree::resolved::TopLevelItem::TypestateDef(typestate_def) => typestate_def.id,
@@ -85,6 +89,15 @@ impl<'a> DefOwnerCollector<'a> {
 }
 
 impl Visitor<DefId> for DefOwnerCollector<'_> {
+    fn visit_protocol_def(&mut self, protocol_def: &crate::core::tree::resolved::ProtocolDef) {
+        self.record(protocol_def.def_id);
+        visit::walk_protocol_def(self, protocol_def);
+    }
+
+    fn visit_protocol_role(&mut self, role: &crate::core::tree::resolved::ProtocolRole) {
+        self.record(role.def_id);
+    }
+
     fn visit_trait_def(&mut self, trait_def: &crate::core::tree::resolved::TraitDef) {
         self.record(trait_def.def_id);
         visit::walk_trait_def(self, trait_def);

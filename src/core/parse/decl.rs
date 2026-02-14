@@ -6,6 +6,19 @@ impl<'a> Parser<'a> {
         match &self.curr_token.kind {
             TK::KwType => self.parse_type_def(attrs).map(TopLevelItem::TypeDef),
             TK::KwTrait => self.parse_trait_def(attrs).map(TopLevelItem::TraitDef),
+            TK::KwProtocol => {
+                if !self.options.experimental_typestate {
+                    return Err(ParseError::FeatureDisabled {
+                        feature: "typestate",
+                        span: self.curr_token.span,
+                    });
+                }
+                if attrs.is_empty() {
+                    self.parse_protocol_def().map(TopLevelItem::ProtocolDef)
+                } else {
+                    Err(ParseError::AttributeNotAllowed(attrs[0].span))
+                }
+            }
             TK::KwTypestate => {
                 if !self.options.experimental_typestate {
                     return Err(ParseError::FeatureDisabled {
@@ -29,6 +42,79 @@ impl<'a> Parser<'a> {
             }
             _ => Err(ParseError::ExpectedDecl(self.curr_token.clone())),
         }
+    }
+
+    fn parse_protocol_def(&mut self) -> Result<ProtocolDef, ParseError> {
+        let marker = self.mark();
+        self.consume_keyword(TK::KwProtocol)?;
+        let name = self.parse_ident()?;
+        self.consume(&TK::LBrace)?;
+
+        let mut roles = Vec::new();
+        let mut flows = Vec::new();
+
+        while self.curr_token.kind != TK::RBrace {
+            match self.curr_token.kind {
+                TK::KwRole => {
+                    let role_marker = self.mark();
+                    self.consume_keyword(TK::KwRole)?;
+                    let role_name = self.parse_ident()?;
+                    self.consume(&TK::Semicolon)?;
+                    roles.push(ProtocolRole {
+                        id: self.id_gen.new_id(),
+                        def_id: (),
+                        name: role_name,
+                        span: self.close(role_marker),
+                    });
+                }
+                TK::KwFlow => {
+                    let flow_marker = self.mark();
+                    self.consume_keyword(TK::KwFlow)?;
+                    let from_role = self.parse_ident()?;
+                    self.consume(&TK::Arrow)?;
+                    let to_role = self.parse_ident()?;
+                    self.consume(&TK::Colon)?;
+                    let payload_ty = self.parse_type_expr()?;
+
+                    let response_tys = if self.curr_token.kind == TK::Arrow {
+                        self.consume(&TK::Arrow)?;
+                        let response_union = self.parse_type_expr()?;
+                        match response_union.kind {
+                            TypeExprKind::Union { variants } => variants,
+                            _ => vec![response_union],
+                        }
+                    } else {
+                        Vec::new()
+                    };
+
+                    self.consume(&TK::Semicolon)?;
+                    flows.push(ProtocolFlow {
+                        id: self.id_gen.new_id(),
+                        from_role,
+                        to_role,
+                        payload_ty,
+                        response_tys,
+                        span: self.close(flow_marker),
+                    });
+                }
+                _ => {
+                    return Err(ParseError::ExpectedToken(
+                        TK::RBrace,
+                        self.curr_token.clone(),
+                    ));
+                }
+            }
+        }
+
+        self.consume(&TK::RBrace)?;
+        Ok(ProtocolDef {
+            id: self.id_gen.new_id(),
+            def_id: (),
+            name,
+            roles,
+            flows,
+            span: self.close(marker),
+        })
     }
 
     fn parse_type_def(&mut self, attrs: Vec<Attribute>) -> Result<TypeDef, ParseError> {
@@ -156,6 +242,12 @@ impl<'a> Parser<'a> {
         let marker = self.mark();
         self.consume_keyword(TK::KwTypestate)?;
         let name = self.parse_ident()?;
+        let role_impls = if self.curr_token.kind == TK::Colon {
+            self.consume(&TK::Colon)?;
+            self.parse_typestate_role_impls()?
+        } else {
+            Vec::new()
+        };
         self.consume(&TK::LBrace)?;
 
         let mut items = Vec::new();
@@ -167,6 +259,10 @@ impl<'a> Parser<'a> {
             if self.curr_token.kind == TK::KwFn {
                 let func = self.parse_typestate_func_def(format!("{name}$new"))?;
                 items.push(TypestateItem::Constructor(func));
+                continue;
+            }
+            if self.curr_token.kind == TK::KwOn {
+                items.push(TypestateItem::Handler(self.parse_typestate_on_handler()?));
                 continue;
             }
             if self.is_contextual_keyword("state") {
@@ -184,8 +280,26 @@ impl<'a> Parser<'a> {
             id: self.id_gen.new_id(),
             def_id: (),
             name,
+            role_impls,
             items,
             span: self.close(marker),
+        })
+    }
+
+    fn parse_typestate_role_impls(&mut self) -> Result<Vec<TypestateRoleImpl>, ParseError> {
+        self.parse_list(TK::Comma, TK::LBrace, |parser| {
+            let marker = parser.mark();
+            let mut path = vec![parser.parse_ident()?];
+            while parser.curr_token.kind == TK::DoubleColon {
+                parser.consume(&TK::DoubleColon)?;
+                path.push(parser.parse_ident()?);
+            }
+            Ok(TypestateRoleImpl {
+                id: parser.id_gen.new_id(),
+                def_id: (),
+                path,
+                span: parser.close(marker),
+            })
         })
     }
 
@@ -212,6 +326,12 @@ impl<'a> Parser<'a> {
                 items.push(TypestateStateItem::Method(method));
                 continue;
             }
+            if self.curr_token.kind == TK::KwOn {
+                items.push(TypestateStateItem::Handler(
+                    self.parse_typestate_on_handler()?,
+                ));
+                continue;
+            }
             return Err(ParseError::ExpectedToken(
                 TK::RBrace,
                 self.curr_token.clone(),
@@ -225,6 +345,72 @@ impl<'a> Parser<'a> {
             items,
             span: self.close(marker),
         })
+    }
+
+    fn parse_typestate_on_handler(&mut self) -> Result<TypestateOnHandler, ParseError> {
+        let marker = self.mark();
+        self.consume_keyword(TK::KwOn)?;
+        let selector_ty = self.parse_type_expr()?;
+        self.consume(&TK::LParen)?;
+        let params = self.parse_typestate_on_handler_params()?;
+        self.consume(&TK::RParen)?;
+        self.consume(&TK::Arrow)?;
+        let ret_ty_expr = self.parse_type_expr()?;
+        let body = self.parse_block()?;
+        Ok(TypestateOnHandler {
+            id: self.id_gen.new_id(),
+            selector_ty,
+            params,
+            ret_ty_expr,
+            body,
+            span: self.close(marker),
+        })
+    }
+
+    fn parse_typestate_on_handler_params(&mut self) -> Result<Vec<Param>, ParseError> {
+        if self.curr_token.kind == TK::RParen {
+            return Ok(Vec::new());
+        }
+
+        // Pattern-form sugar:
+        //   on Response(pending, AuthApproved) -> ...
+        // Desugars to canonical params:
+        //   (pending: _, __response: AuthApproved)
+        if matches!(self.curr_token.kind, TK::Ident(_))
+            && self.peek().map(|t| &t.kind) == Some(&TK::Comma)
+        {
+            let pending_marker = self.mark();
+            let pending_ident = self.parse_ident()?;
+            let pending_span = self.close(pending_marker);
+            self.consume(&TK::Comma)?;
+            let response_ty = self.parse_type_expr()?;
+            let response_span = response_ty.span;
+
+            return Ok(vec![
+                Param {
+                    id: self.id_gen.new_id(),
+                    ident: pending_ident,
+                    def_id: (),
+                    typ: TypeExpr {
+                        id: self.id_gen.new_id(),
+                        kind: TypeExprKind::Infer,
+                        span: pending_span,
+                    },
+                    mode: ParamMode::In,
+                    span: pending_span,
+                },
+                Param {
+                    id: self.id_gen.new_id(),
+                    ident: "__response".to_string(),
+                    def_id: (),
+                    typ: response_ty,
+                    mode: ParamMode::In,
+                    span: response_span,
+                },
+            ]);
+        }
+
+        self.parse_list(TK::Comma, TK::RParen, |parser| parser.parse_param())
     }
 
     fn parse_typestate_fields_block(&mut self) -> Result<TypestateFields, ParseError> {

@@ -57,6 +57,10 @@ sections conflict with this one, this section wins.
 7. **Protocol conformance scope**
    - v1 enforces shape only.
    - stronger protocol refinement/projection checks are explicitly deferred.
+8. **Pattern handler determinism**
+   - multiple handlers for the same event selector are allowed only when their
+     response patterns are non-overlapping.
+   - pattern-form handlers are syntax sugar over one canonical handler body.
 
 ### Explicit Deferrals (Not Blocking V1)
 
@@ -150,6 +154,39 @@ state Connected {
     }
 }
 ```
+
+### Pattern-form handlers (response destructuring)
+
+For response events, v1 allows a pattern form to avoid duplicating response
+union types in both parameter and branch logic:
+
+```machina
+state AwaitAuth {
+    fields { pending: Pending<AuthApproved | AuthDenied> }
+
+    on Response(pending, AuthApproved) -> Connected {
+        Connected
+    }
+
+    on Response(pending, AuthDenied) -> Closing {
+        Closing
+    }
+}
+```
+
+Canonical meaning (conceptual desugar):
+
+```machina
+on Response(pending: Pending<AuthApproved | AuthDenied>, resp: AuthApproved | AuthDenied) -> Connected | Closing {
+    match resp {
+        AuthApproved => Connected,
+        AuthDenied => Closing,
+    }
+}
+```
+
+`pending` remains required for correlation/linearity even when not otherwise
+used in user code.
 
 ### Typestate-level default handlers
 
@@ -295,11 +332,12 @@ typestate Connection : Auth::Client {
     state AwaitAuth {
         fields { pending: Pending<AuthApproved | AuthDenied> }
 
-        on Response(pending: Pending<AuthApproved | AuthDenied>, resp: AuthApproved | AuthDenied) -> Connected | Closing {
-            match resp {
-                AuthApproved => Connected,
-                AuthDenied => Closing,
-            }
+        on Response(pending, AuthApproved) -> Connected {
+            Connected
+        }
+
+        on Response(pending, AuthDenied) -> Closing {
+            Closing
         }
     }
 
@@ -385,6 +423,7 @@ architecture summary:
 ## Diagnostics (Planned)
 
 - duplicate `on` for same `(state, payload)`
+- overlapping pattern-form `on` handlers for same selector
 - missing required flow handler for role conformance
 - invalid `Send/Request` target role or payload type
 - invalid `reply(...)` payload for flow response set
@@ -434,6 +473,7 @@ above. All later milestones must conform to it.
 1. Parser/AST:
    - add protocol/role/flow nodes
    - add `on` handler nodes
+   - add pattern-form `on` response handlers and desugar to canonical handler form
    - add `Send/Request/reply` expression/statement nodes
 2. Resolver:
    - resolve role paths (`Auth::Client`)

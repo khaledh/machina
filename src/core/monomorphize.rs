@@ -538,7 +538,8 @@ fn rewrite_calls_in_item(item: &mut res::TopLevelItem, call_inst_map: &HashMap<N
         res::TopLevelItem::FuncDecl(func_decl) => rewriter.visit_func_decl(func_decl),
         res::TopLevelItem::MethodBlock(method_block) => rewriter.visit_method_block(method_block),
         res::TopLevelItem::ClosureDef(closure_def) => rewriter.visit_closure_def(closure_def),
-        res::TopLevelItem::TypeDef(_)
+        res::TopLevelItem::ProtocolDef(_)
+        | res::TopLevelItem::TypeDef(_)
         | res::TopLevelItem::TraitDef(_)
         | res::TopLevelItem::TypestateDef(_) => {}
     }
@@ -652,7 +653,8 @@ fn remap_local_defs_in_item(
                 collector.visit_method_block(method_block)
             }
             res::TopLevelItem::ClosureDef(closure_def) => collector.visit_closure_def(closure_def),
-            res::TopLevelItem::TypeDef(_)
+            res::TopLevelItem::ProtocolDef(_)
+            | res::TopLevelItem::TypeDef(_)
             | res::TopLevelItem::TraitDef(_)
             | res::TopLevelItem::TypestateDef(_) => {}
         }
@@ -678,6 +680,10 @@ fn remap_local_defs_in_method_item(
 
 fn reseed_ids_in_item(item: &mut res::TopLevelItem, node_id_gen: &mut NodeIdGen) {
     match item {
+        res::TopLevelItem::ProtocolDef(protocol_def) => {
+            protocol_def.id = node_id_gen.new_id();
+            reseed_protocol_def(protocol_def, node_id_gen);
+        }
         res::TopLevelItem::FuncDef(func_def) => reseed_func_def(func_def, node_id_gen),
         res::TopLevelItem::FuncDecl(func_decl) => reseed_func_decl(func_decl, node_id_gen),
         res::TopLevelItem::MethodBlock(method_block) => {
@@ -696,6 +702,19 @@ fn reseed_ids_in_item(item: &mut res::TopLevelItem, node_id_gen: &mut NodeIdGen)
     }
 }
 
+fn reseed_protocol_def(protocol_def: &mut res::ProtocolDef, node_id_gen: &mut NodeIdGen) {
+    for role in &mut protocol_def.roles {
+        role.id = node_id_gen.new_id();
+    }
+    for flow in &mut protocol_def.flows {
+        flow.id = node_id_gen.new_id();
+        reseed_type_expr(&mut flow.payload_ty, node_id_gen);
+        for response_ty in &mut flow.response_tys {
+            reseed_type_expr(response_ty, node_id_gen);
+        }
+    }
+}
+
 fn reseed_trait_def(trait_def: &mut res::TraitDef, node_id_gen: &mut NodeIdGen) {
     trait_def.id = node_id_gen.new_id();
     for method in &mut trait_def.methods {
@@ -709,11 +728,17 @@ fn reseed_trait_def(trait_def: &mut res::TraitDef, node_id_gen: &mut NodeIdGen) 
 }
 
 fn reseed_typestate_def(typestate_def: &mut res::TypestateDef, node_id_gen: &mut NodeIdGen) {
+    for role_impl in &mut typestate_def.role_impls {
+        role_impl.id = node_id_gen.new_id();
+    }
     for item in &mut typestate_def.items {
         match item {
             res::TypestateItem::Fields(fields) => reseed_typestate_fields(fields, node_id_gen),
             res::TypestateItem::Constructor(constructor) => {
                 reseed_func_def(constructor, node_id_gen);
+            }
+            res::TypestateItem::Handler(handler) => {
+                reseed_typestate_on_handler(handler, node_id_gen);
             }
             res::TypestateItem::State(state) => reseed_typestate_state(state, node_id_gen),
         }
@@ -726,8 +751,21 @@ fn reseed_typestate_state(state: &mut res::TypestateState, node_id_gen: &mut Nod
         match item {
             res::TypestateStateItem::Fields(fields) => reseed_typestate_fields(fields, node_id_gen),
             res::TypestateStateItem::Method(method) => reseed_func_def(method, node_id_gen),
+            res::TypestateStateItem::Handler(handler) => {
+                reseed_typestate_on_handler(handler, node_id_gen);
+            }
         }
     }
+}
+
+fn reseed_typestate_on_handler(handler: &mut res::TypestateOnHandler, node_id_gen: &mut NodeIdGen) {
+    handler.id = node_id_gen.new_id();
+    reseed_type_expr(&mut handler.selector_ty, node_id_gen);
+    for param in &mut handler.params {
+        reseed_param(param, node_id_gen);
+    }
+    reseed_type_expr(&mut handler.ret_ty_expr, node_id_gen);
+    reseed_expr(&mut handler.body, node_id_gen);
 }
 
 fn reseed_typestate_fields(fields: &mut res::TypestateFields, node_id_gen: &mut NodeIdGen) {
@@ -1153,6 +1191,16 @@ fn reseed_expr(expr: &mut res::Expr, node_id_gen: &mut NodeIdGen) {
             for arg in args {
                 reseed_expr(&mut arg.expr, node_id_gen);
             }
+        }
+        res::ExprKind::Emit { kind } => match kind {
+            res::EmitKind::Send { to, payload } | res::EmitKind::Request { to, payload } => {
+                reseed_expr(to, node_id_gen);
+                reseed_expr(payload, node_id_gen);
+            }
+        },
+        res::ExprKind::Reply { cap, value } => {
+            reseed_expr(cap, node_id_gen);
+            reseed_expr(value, node_id_gen);
         }
         res::ExprKind::Closure {
             params,

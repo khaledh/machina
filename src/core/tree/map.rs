@@ -41,6 +41,30 @@ pub trait TreeMapper {
         walk_top_level_item(self, item, ctx)
     }
 
+    fn map_protocol_def(
+        &mut self,
+        protocol_def: &ProtocolDef<Self::InD>,
+        ctx: &mut Self::Context,
+    ) -> ProtocolDef<Self::OutD> {
+        walk_protocol_def(self, protocol_def, ctx)
+    }
+
+    fn map_protocol_role(
+        &mut self,
+        role: &ProtocolRole<Self::InD>,
+        ctx: &mut Self::Context,
+    ) -> ProtocolRole<Self::OutD> {
+        walk_protocol_role(self, role, ctx)
+    }
+
+    fn map_protocol_flow(
+        &mut self,
+        flow: &ProtocolFlow<Self::InD>,
+        ctx: &mut Self::Context,
+    ) -> ProtocolFlow<Self::OutD> {
+        walk_protocol_flow(self, flow, ctx)
+    }
+
     fn map_typestate_def(
         &mut self,
         typestate_def: &TypestateDef<Self::InD, Self::InT>,
@@ -55,6 +79,14 @@ pub trait TreeMapper {
         ctx: &mut Self::Context,
     ) -> TypestateItem<Self::OutD, Self::OutT> {
         walk_typestate_item(self, item, ctx)
+    }
+
+    fn map_typestate_role_impl(
+        &mut self,
+        role_impl: &TypestateRoleImpl<Self::InD>,
+        ctx: &mut Self::Context,
+    ) -> TypestateRoleImpl<Self::OutD> {
+        walk_typestate_role_impl(self, role_impl, ctx)
     }
 
     fn map_typestate_fields(
@@ -79,6 +111,14 @@ pub trait TreeMapper {
         ctx: &mut Self::Context,
     ) -> TypestateStateItem<Self::OutD, Self::OutT> {
         walk_typestate_state_item(self, item, ctx)
+    }
+
+    fn map_typestate_on_handler(
+        &mut self,
+        handler: &TypestateOnHandler<Self::InD, Self::InT>,
+        ctx: &mut Self::Context,
+    ) -> TypestateOnHandler<Self::OutD, Self::OutT> {
+        walk_typestate_on_handler(self, handler, ctx)
     }
 
     fn map_type_def(
@@ -392,6 +432,9 @@ pub fn walk_top_level_item<M: TreeMapper + ?Sized>(
     ctx: &mut M::Context,
 ) -> TopLevelItem<M::OutD, M::OutT> {
     match item {
+        TopLevelItem::ProtocolDef(protocol_def) => {
+            TopLevelItem::ProtocolDef(mapper.map_protocol_def(protocol_def, ctx))
+        }
         TopLevelItem::TraitDef(trait_def) => {
             TopLevelItem::TraitDef(mapper.map_trait_def(trait_def, ctx))
         }
@@ -416,6 +459,61 @@ pub fn walk_top_level_item<M: TreeMapper + ?Sized>(
     }
 }
 
+pub fn walk_protocol_def<M: TreeMapper + ?Sized>(
+    mapper: &mut M,
+    protocol_def: &ProtocolDef<M::InD>,
+    ctx: &mut M::Context,
+) -> ProtocolDef<M::OutD> {
+    ProtocolDef {
+        id: protocol_def.id,
+        def_id: mapper.map_def_id(protocol_def.id, &protocol_def.def_id, ctx),
+        name: protocol_def.name.clone(),
+        roles: protocol_def
+            .roles
+            .iter()
+            .map(|role| mapper.map_protocol_role(role, ctx))
+            .collect(),
+        flows: protocol_def
+            .flows
+            .iter()
+            .map(|flow| mapper.map_protocol_flow(flow, ctx))
+            .collect(),
+        span: protocol_def.span,
+    }
+}
+
+pub fn walk_protocol_role<M: TreeMapper + ?Sized>(
+    mapper: &mut M,
+    role: &ProtocolRole<M::InD>,
+    ctx: &mut M::Context,
+) -> ProtocolRole<M::OutD> {
+    ProtocolRole {
+        id: role.id,
+        def_id: mapper.map_def_id(role.id, &role.def_id, ctx),
+        name: role.name.clone(),
+        span: role.span,
+    }
+}
+
+pub fn walk_protocol_flow<M: TreeMapper + ?Sized>(
+    mapper: &mut M,
+    flow: &ProtocolFlow<M::InD>,
+    ctx: &mut M::Context,
+) -> ProtocolFlow<M::OutD> {
+    ProtocolFlow {
+        id: flow.id,
+        from_role: flow.from_role.clone(),
+        to_role: flow.to_role.clone(),
+        payload_ty: mapper.map_type_expr(&flow.payload_ty, ctx),
+        response_tys: flow
+            .response_tys
+            .iter()
+            .map(|ty| mapper.map_type_expr(ty, ctx))
+            .collect(),
+        span: flow.span,
+    }
+}
+
 pub fn walk_typestate_def<M: TreeMapper + ?Sized>(
     mapper: &mut M,
     typestate_def: &TypestateDef<M::InD, M::InT>,
@@ -425,12 +523,30 @@ pub fn walk_typestate_def<M: TreeMapper + ?Sized>(
         id: typestate_def.id,
         def_id: mapper.map_def_id(typestate_def.id, &typestate_def.def_id, ctx),
         name: typestate_def.name.clone(),
+        role_impls: typestate_def
+            .role_impls
+            .iter()
+            .map(|role_impl| mapper.map_typestate_role_impl(role_impl, ctx))
+            .collect(),
         items: typestate_def
             .items
             .iter()
             .map(|item| mapper.map_typestate_item(item, ctx))
             .collect(),
         span: typestate_def.span,
+    }
+}
+
+pub fn walk_typestate_role_impl<M: TreeMapper + ?Sized>(
+    mapper: &mut M,
+    role_impl: &TypestateRoleImpl<M::InD>,
+    ctx: &mut M::Context,
+) -> TypestateRoleImpl<M::OutD> {
+    TypestateRoleImpl {
+        id: role_impl.id,
+        def_id: mapper.map_def_id(role_impl.id, &role_impl.def_id, ctx),
+        path: role_impl.path.clone(),
+        span: role_impl.span,
     }
 }
 
@@ -445,6 +561,9 @@ pub fn walk_typestate_item<M: TreeMapper + ?Sized>(
         }
         TypestateItem::Constructor(constructor) => {
             TypestateItem::Constructor(mapper.map_func_def(constructor, ctx))
+        }
+        TypestateItem::Handler(handler) => {
+            TypestateItem::Handler(mapper.map_typestate_on_handler(handler, ctx))
         }
         TypestateItem::State(state) => TypestateItem::State(mapper.map_typestate_state(state, ctx)),
     }
@@ -495,6 +614,28 @@ pub fn walk_typestate_state_item<M: TreeMapper + ?Sized>(
         TypestateStateItem::Method(method) => {
             TypestateStateItem::Method(mapper.map_func_def(method, ctx))
         }
+        TypestateStateItem::Handler(handler) => {
+            TypestateStateItem::Handler(mapper.map_typestate_on_handler(handler, ctx))
+        }
+    }
+}
+
+pub fn walk_typestate_on_handler<M: TreeMapper + ?Sized>(
+    mapper: &mut M,
+    handler: &TypestateOnHandler<M::InD, M::InT>,
+    ctx: &mut M::Context,
+) -> TypestateOnHandler<M::OutD, M::OutT> {
+    TypestateOnHandler {
+        id: handler.id,
+        selector_ty: mapper.map_type_expr(&handler.selector_ty, ctx),
+        params: handler
+            .params
+            .iter()
+            .map(|param| mapper.map_param(param, ctx))
+            .collect(),
+        ret_ty_expr: mapper.map_type_expr(&handler.ret_ty_expr, ctx),
+        body: mapper.map_expr(&handler.body, ctx),
+        span: handler.span,
     }
 }
 
@@ -1361,6 +1502,22 @@ pub fn walk_expr_kind<M: TreeMapper + ?Sized>(
                 .iter()
                 .map(|arg| mapper.map_call_arg(arg, ctx))
                 .collect(),
+        },
+        ExprKind::Emit { kind } => ExprKind::Emit {
+            kind: match kind {
+                EmitKind::Send { to, payload } => EmitKind::Send {
+                    to: Box::new(mapper.map_expr(to, ctx)),
+                    payload: Box::new(mapper.map_expr(payload, ctx)),
+                },
+                EmitKind::Request { to, payload } => EmitKind::Request {
+                    to: Box::new(mapper.map_expr(to, ctx)),
+                    payload: Box::new(mapper.map_expr(payload, ctx)),
+                },
+            },
+        },
+        ExprKind::Reply { cap, value } => ExprKind::Reply {
+            cap: Box::new(mapper.map_expr(cap, ctx)),
+            value: Box::new(mapper.map_expr(value, ctx)),
         },
         ExprKind::Closure {
             ident,

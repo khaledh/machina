@@ -1804,6 +1804,7 @@ pub fn resolve_program(
 
 fn top_level_item_id(item: &TopLevelItem) -> crate::core::tree::NodeId {
     match item {
+        TopLevelItem::ProtocolDef(protocol_def) => protocol_def.id,
         TopLevelItem::TraitDef(trait_def) => trait_def.id,
         TopLevelItem::TypeDef(type_def) => type_def.id,
         TopLevelItem::TypestateDef(typestate_def) => typestate_def.id,
@@ -1818,6 +1819,9 @@ fn module_exported_members(module: &Module) -> HashSet<String> {
     let mut members = HashSet::new();
     for item in &module.top_level_items {
         match item {
+            TopLevelItem::ProtocolDef(protocol_def) => {
+                members.insert(protocol_def.name.clone());
+            }
             TopLevelItem::TraitDef(trait_def) => {
                 members.insert(trait_def.name.clone());
             }

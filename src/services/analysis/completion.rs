@@ -579,6 +579,9 @@ fn global_scope(
     let mut allowed_nodes = HashSet::new();
     for item in &resolved.module.top_level_items {
         match item {
+            res::TopLevelItem::ProtocolDef(protocol_def) => {
+                allowed_nodes.insert(protocol_def.id);
+            }
             res::TopLevelItem::TraitDef(trait_def) => {
                 allowed_nodes.insert(trait_def.id);
             }

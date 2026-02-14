@@ -230,6 +230,8 @@ impl<'a> Parser<'a> {
             TK::KwIf => self.parse_if(),
 
             TK::KwMatch => self.parse_match_expr(),
+            TK::KwEmit => self.parse_emit_expr(),
+            TK::KwReply => self.parse_reply_expr(),
 
             TK::Ident(name) => {
                 let marker = self.mark();
@@ -340,6 +342,64 @@ impl<'a> Parser<'a> {
 
             _ => Err(ParseError::ExpectedPrimary(self.curr_token.clone())),
         }
+    }
+
+    fn parse_emit_expr(&mut self) -> Result<Expr, ParseError> {
+        let marker = self.mark();
+        self.consume_keyword(TK::KwEmit)?;
+        let kind_name = self.parse_ident()?;
+        self.consume(&TK::LParen)?;
+        let to_label = self.parse_ident()?;
+        if to_label != "to" {
+            return Err(ParseError::ExpectedToken(
+                TK::Colon,
+                self.curr_token.clone(),
+            ));
+        }
+        self.consume(&TK::Colon)?;
+        let to = self.parse_expr(0)?;
+        self.consume(&TK::Comma)?;
+        let payload = self.parse_expr(0)?;
+        self.consume(&TK::RParen)?;
+
+        let kind = match kind_name.as_str() {
+            "Send" => EmitKind::Send {
+                to: Box::new(to),
+                payload: Box::new(payload),
+            },
+            "Request" => EmitKind::Request {
+                to: Box::new(to),
+                payload: Box::new(payload),
+            },
+            _ => return Err(ParseError::ExpectedPrimary(self.curr_token.clone())),
+        };
+
+        Ok(Expr {
+            id: self.id_gen.new_id(),
+            kind: ExprKind::Emit { kind },
+            ty: (),
+            span: self.close(marker),
+        })
+    }
+
+    fn parse_reply_expr(&mut self) -> Result<Expr, ParseError> {
+        let marker = self.mark();
+        self.consume_keyword(TK::KwReply)?;
+        self.consume(&TK::LParen)?;
+        let cap = self.parse_expr(0)?;
+        self.consume(&TK::Comma)?;
+        let value = self.parse_expr(0)?;
+        self.consume(&TK::RParen)?;
+
+        Ok(Expr {
+            id: self.id_gen.new_id(),
+            kind: ExprKind::Reply {
+                cap: Box::new(cap),
+                value: Box::new(value),
+            },
+            ty: (),
+            span: self.close(marker),
+        })
     }
 
     fn parse_call_postfix(&mut self, expr: Expr, marker: Marker) -> Result<Expr, ParseError> {

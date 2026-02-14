@@ -17,8 +17,9 @@ use crate::core::tree::cfg::{
     AstBlockId, TreeCfgBuilder, TreeCfgItem, TreeCfgNode, TreeCfgTerminator,
 };
 use crate::core::tree::normalized::{
-    ArrayLitInit, BindPattern, BindPatternKind, BlockItem, CallArgMode, Expr, ExprKind, FuncDef,
-    MatchPattern, MatchPatternBinding, NodeId, ParamMode, StmtExpr, StmtExprKind, StringFmtSegment,
+    ArrayLitInit, BindPattern, BindPatternKind, BlockItem, CallArgMode, EmitKind, Expr, ExprKind,
+    FuncDef, MatchPattern, MatchPatternBinding, NodeId, ParamMode, StmtExpr, StmtExprKind,
+    StringFmtSegment,
 };
 use crate::core::tree::visit::{Visitor, walk_expr};
 use crate::core::types::{Type, TypeId};
@@ -1052,6 +1053,16 @@ impl<'a> DefInitChecker<'a> {
                         self.check_expr(&arg.expr);
                     }
                 }
+            }
+            ExprKind::Emit { kind } => match kind {
+                EmitKind::Send { to, payload } | EmitKind::Request { to, payload } => {
+                    self.check_expr(to);
+                    self.check_expr(payload);
+                }
+            },
+            ExprKind::Reply { cap, value } => {
+                self.check_expr(cap);
+                self.check_expr(value);
             }
             ExprKind::StructLit { fields, .. } => {
                 for field in fields {

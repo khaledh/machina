@@ -187,6 +187,9 @@ impl<'a> Elaborator<'a> {
 
     fn elab_top_level_item(&mut self, item: &norm::TopLevelItem) -> sem::TopLevelItem {
         match item {
+            norm::TopLevelItem::ProtocolDef(_) => {
+                panic!("compiler bug: protocol defs should be rejected before elaborate")
+            }
             norm::TopLevelItem::TraitDef(def) => sem::TopLevelItem::TraitDef(def.clone()),
             norm::TopLevelItem::TypeDef(def) => sem::TopLevelItem::TypeDef(def.clone()),
             norm::TopLevelItem::TypestateDef(_) => {

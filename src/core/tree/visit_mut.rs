@@ -17,6 +17,18 @@ pub trait VisitorMut<D = String, T = ()> {
         walk_type_def(self, type_def)
     }
 
+    fn visit_protocol_def(&mut self, protocol_def: &mut ProtocolDef<D>) {
+        walk_protocol_def(self, protocol_def)
+    }
+
+    fn visit_protocol_role(&mut self, role: &mut ProtocolRole<D>) {
+        walk_protocol_role(self, role)
+    }
+
+    fn visit_protocol_flow(&mut self, flow: &mut ProtocolFlow<D>) {
+        walk_protocol_flow(self, flow)
+    }
+
     fn visit_trait_def(&mut self, trait_def: &mut TraitDef<D>) {
         walk_trait_def(self, trait_def)
     }
@@ -37,6 +49,10 @@ pub trait VisitorMut<D = String, T = ()> {
         walk_typestate_item(self, item)
     }
 
+    fn visit_typestate_role_impl(&mut self, role_impl: &mut TypestateRoleImpl<D>) {
+        walk_typestate_role_impl(self, role_impl)
+    }
+
     fn visit_typestate_fields(&mut self, fields: &mut TypestateFields<D>) {
         walk_typestate_fields(self, fields)
     }
@@ -47,6 +63,10 @@ pub trait VisitorMut<D = String, T = ()> {
 
     fn visit_typestate_state_item(&mut self, item: &mut TypestateStateItem<D, T>) {
         walk_typestate_state_item(self, item)
+    }
+
+    fn visit_typestate_on_handler(&mut self, handler: &mut TypestateOnHandler<D, T>) {
+        walk_typestate_on_handler(self, handler)
     }
 
     fn visit_struct_def_fields(&mut self, fields: &mut [StructDefField<D>]) {
@@ -173,6 +193,7 @@ pub trait VisitorMut<D = String, T = ()> {
 pub fn walk_module<V: VisitorMut<D, T> + ?Sized, D, T>(v: &mut V, module: &mut Module<D, T>) {
     for item in &mut module.top_level_items {
         match item {
+            TopLevelItem::ProtocolDef(protocol_def) => v.visit_protocol_def(protocol_def),
             TopLevelItem::TraitDef(trait_def) => v.visit_trait_def(trait_def),
             TopLevelItem::TypeDef(type_def) => v.visit_type_def(type_def),
             TopLevelItem::TypestateDef(typestate_def) => v.visit_typestate_def(typestate_def),
@@ -185,6 +206,34 @@ pub fn walk_module<V: VisitorMut<D, T> + ?Sized, D, T>(v: &mut V, module: &mut M
 }
 
 // --- Type Definitions ---
+
+pub fn walk_protocol_def<V: VisitorMut<D, T> + ?Sized, D, T>(
+    v: &mut V,
+    protocol_def: &mut ProtocolDef<D>,
+) {
+    for role in &mut protocol_def.roles {
+        v.visit_protocol_role(role);
+    }
+    for flow in &mut protocol_def.flows {
+        v.visit_protocol_flow(flow);
+    }
+}
+
+pub fn walk_protocol_role<V: VisitorMut<D, T> + ?Sized, D, T>(
+    _v: &mut V,
+    _role: &mut ProtocolRole<D>,
+) {
+}
+
+pub fn walk_protocol_flow<V: VisitorMut<D, T> + ?Sized, D, T>(
+    v: &mut V,
+    flow: &mut ProtocolFlow<D>,
+) {
+    v.visit_type_expr(&mut flow.payload_ty);
+    for response_ty in &mut flow.response_tys {
+        v.visit_type_expr(response_ty);
+    }
+}
 
 pub fn walk_trait_def<V: VisitorMut<D, T> + ?Sized, D, T>(v: &mut V, trait_def: &mut TraitDef<D>) {
     for method in &mut trait_def.methods {
@@ -213,9 +262,18 @@ pub fn walk_typestate_def<V: VisitorMut<D, T> + ?Sized, D, T>(
     v: &mut V,
     typestate_def: &mut TypestateDef<D, T>,
 ) {
+    for role_impl in &mut typestate_def.role_impls {
+        v.visit_typestate_role_impl(role_impl);
+    }
     for item in &mut typestate_def.items {
         v.visit_typestate_item(item);
     }
+}
+
+pub fn walk_typestate_role_impl<V: VisitorMut<D, T> + ?Sized, D, T>(
+    _v: &mut V,
+    _role_impl: &mut TypestateRoleImpl<D>,
+) {
 }
 
 pub fn walk_typestate_item<V: VisitorMut<D, T> + ?Sized, D, T>(
@@ -225,6 +283,7 @@ pub fn walk_typestate_item<V: VisitorMut<D, T> + ?Sized, D, T>(
     match item {
         TypestateItem::Fields(fields) => v.visit_typestate_fields(fields),
         TypestateItem::Constructor(constructor) => v.visit_func_def(constructor),
+        TypestateItem::Handler(handler) => v.visit_typestate_on_handler(handler),
         TypestateItem::State(state) => v.visit_typestate_state(state),
     }
 }
@@ -254,7 +313,20 @@ pub fn walk_typestate_state_item<V: VisitorMut<D, T> + ?Sized, D, T>(
     match item {
         TypestateStateItem::Fields(fields) => v.visit_typestate_fields(fields),
         TypestateStateItem::Method(method) => v.visit_func_def(method),
+        TypestateStateItem::Handler(handler) => v.visit_typestate_on_handler(handler),
     }
+}
+
+pub fn walk_typestate_on_handler<V: VisitorMut<D, T> + ?Sized, D, T>(
+    v: &mut V,
+    handler: &mut TypestateOnHandler<D, T>,
+) {
+    v.visit_type_expr(&mut handler.selector_ty);
+    for param in &mut handler.params {
+        v.visit_param(param);
+    }
+    v.visit_type_expr(&mut handler.ret_ty_expr);
+    v.visit_expr(&mut handler.body);
 }
 
 pub fn walk_type_def<V: VisitorMut<D, T> + ?Sized, D, T>(v: &mut V, type_def: &mut TypeDef<D>) {
@@ -686,6 +758,16 @@ pub fn walk_expr<V: VisitorMut<D, T> + ?Sized, D, T>(v: &mut V, expr: &mut Expr<
             for arg in args {
                 v.visit_expr(&mut arg.expr);
             }
+        }
+        ExprKind::Emit { kind } => match kind {
+            EmitKind::Send { to, payload } | EmitKind::Request { to, payload } => {
+                v.visit_expr(to);
+                v.visit_expr(payload);
+            }
+        },
+        ExprKind::Reply { cap, value } => {
+            v.visit_expr(cap);
+            v.visit_expr(value);
         }
 
         ExprKind::Closure {

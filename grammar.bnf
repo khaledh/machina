@@ -1,9 +1,17 @@
 # Machina programming language grammar
 
 # Top-level
-Module             ::= TopLevelItem*
 
-TopLevelItem       ::= (AttributeList (TypeDef | TraitDef | FuncDecl | FuncDef)) | MethodBlock | TypestateDef
+Module             ::= RequiresBlock? TopLevelItem*
+
+TopLevelItem       ::= (AttributeList (TypeDef | TraitDef | FuncDecl | FuncDef))
+                     | MethodBlock
+                     | TypestateDef
+                     | ProtocolDef
+
+RequiresBlock      ::= "requires" "{" RequireItem* "}"
+RequireItem        ::= RequirePath ("as" Identifier)? ("," | ";")?
+RequirePath        ::= Identifier ("::" Identifier)*
 
 # Attributes
 AttributeList      ::= ("@[" AttributeItem ("," AttributeItem)* ","? "]")?
@@ -25,16 +33,28 @@ EnumDef            ::= EnumVariantDef ("|" EnumVariantDef)* ";"?
 EnumVariantDef     ::= Identifier ( "(" TypeExprList ")" )?
 
 # Traits
-TraitDef           ::= "trait" Identifier "{" TraitMethodDecl* "}"
+TraitDef           ::= "trait" Identifier "{" TraitMember* "}"
+TraitMember        ::= TraitMethodDecl | TraitPropertyDecl
 TraitMethodDecl    ::= MethodSig ";"
+TraitPropertyDecl  ::= "prop" Identifier ":" TypeExpr "{" TraitPropertyAccessor+ "}"
+TraitPropertyAccessor ::= "get" ";" | "set" ";"
+
+# Protocols
+ProtocolDef        ::= "protocol" Identifier "{" ProtocolItem* "}"
+ProtocolItem       ::= ProtocolRoleDecl | ProtocolFlowDecl
+ProtocolRoleDecl   ::= "role" Identifier ";"
+ProtocolFlowDecl   ::= "flow" Identifier "->" Identifier ":" TypeExpr ( "->" TypeExpr )? ";"
 
 # Typestates
-TypestateDef       ::= "typestate" Identifier "{" TypestateItem* "}"
-TypestateItem      ::= TypestateFields | TypestateNew | TypestateState
+TypestateDef       ::= "typestate" Identifier TypestateRoleImplList? "{" TypestateItem* "}"
+TypestateRoleImplList ::= ":" TypestateRolePath ("," TypestateRolePath)*
+TypestateRolePath  ::= Identifier ("::" Identifier)+
+TypestateItem      ::= TypestateFields | TypestateNew | TypestateOnHandler | TypestateState
 TypestateFields    ::= "fields" "{" StructFieldList? "}"
 TypestateNew       ::= "fn" "new" TypeParamList? "(" ParamList? ")" ( "->" TypeExpr )? Block
+TypestateOnHandler ::= "on" TypeExpr "(" ParamList? ")" "->" TypeExpr Block
 TypestateState     ::= "state" Identifier "{" TypestateStateItem* "}"
-TypestateStateItem ::= TypestateStateFields | TypestateStateMethod
+TypestateStateItem ::= TypestateStateFields | TypestateStateMethod | TypestateOnHandler
 TypestateStateFields ::= "fields" "{" StructFieldList? "}"
 TypestateStateMethod ::= Func
 
@@ -197,9 +217,14 @@ Primary            ::= Literal
                      | Identifier
                      | EnumVariant
                      | StructUpdate
+                     | EmitExpr
+                     | ReplyExpr
                      | "(" Expr ")"
                      | Block
                      | ClosureExpr
+
+EmitExpr           ::= "emit" ("Send" | "Request") "(" "to" ":" Expr "," Expr ")"
+ReplyExpr          ::= "reply" "(" Expr "," Expr ")"
 
 ClosureExpr        ::= ClosureCaptureList? ClosureSig Expr
 

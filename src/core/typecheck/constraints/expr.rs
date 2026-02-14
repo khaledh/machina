@@ -574,6 +574,21 @@ impl<'a> ConstraintCollector<'a> {
                     ret_ty: expr_ty.clone(),
                 });
             }
+            ExprKind::Emit { kind } => match kind {
+                EmitKind::Send { to, payload } | EmitKind::Request { to, payload } => {
+                    self.collect_expr(to, None);
+                    self.collect_expr(payload, None);
+                }
+            },
+            ExprKind::Reply { cap, value } => {
+                self.collect_expr(cap, None);
+                self.collect_expr(value, None);
+                self.push_eq(
+                    expr_ty.clone(),
+                    Type::Unit,
+                    ConstraintReason::Expr(expr.id, expr.span),
+                );
+            }
             ExprKind::BinOp { left, right, .. } => {
                 let left_ty = self.collect_expr(left, None);
                 let right_ty = self.collect_expr(right, None);

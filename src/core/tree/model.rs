@@ -142,7 +142,8 @@ impl<D, T> Module<D, T> {
                 TopLevelItem::ClosureDef(closure_decl) => {
                     vec![CallableRef::ClosureDef(closure_decl)]
                 }
-                TopLevelItem::TypeDef(_)
+                TopLevelItem::ProtocolDef(_)
+                | TopLevelItem::TypeDef(_)
                 | TopLevelItem::TraitDef(_)
                 | TopLevelItem::TypestateDef(_) => vec![],
             })
@@ -154,6 +155,7 @@ impl<D, T> Module<D, T> {
 
 #[derive(Clone, Debug)]
 pub enum TopLevelItem<D, T = ()> {
+    ProtocolDef(ProtocolDef<D>),
     TraitDef(TraitDef<D>),
     TypeDef(TypeDef<D>),
     TypestateDef(TypestateDef<D, T>),
@@ -168,6 +170,7 @@ pub struct TypestateDef<D, T = ()> {
     pub id: NodeId,
     pub def_id: D,
     pub name: String,
+    pub role_impls: Vec<TypestateRoleImpl<D>>,
     pub items: Vec<TypestateItem<D, T>>,
     pub span: Span,
 }
@@ -176,6 +179,7 @@ pub struct TypestateDef<D, T = ()> {
 pub enum TypestateItem<D, T = ()> {
     Fields(TypestateFields<D>),
     Constructor(FuncDef<D, T>),
+    Handler(TypestateOnHandler<D, T>),
     State(TypestateState<D, T>),
 }
 
@@ -198,6 +202,53 @@ pub struct TypestateState<D, T = ()> {
 pub enum TypestateStateItem<D, T = ()> {
     Fields(TypestateFields<D>),
     Method(FuncDef<D, T>),
+    Handler(TypestateOnHandler<D, T>),
+}
+
+#[derive(Clone, Debug)]
+pub struct TypestateRoleImpl<D> {
+    pub id: NodeId,
+    pub def_id: D,
+    pub path: Vec<String>,
+    pub span: Span,
+}
+
+#[derive(Clone, Debug)]
+pub struct TypestateOnHandler<D, T = ()> {
+    pub id: NodeId,
+    pub selector_ty: TypeExpr<D>,
+    pub params: Vec<Param<D>>,
+    pub ret_ty_expr: TypeExpr<D>,
+    pub body: Expr<D, T>,
+    pub span: Span,
+}
+
+#[derive(Clone, Debug)]
+pub struct ProtocolDef<D> {
+    pub id: NodeId,
+    pub def_id: D,
+    pub name: String,
+    pub roles: Vec<ProtocolRole<D>>,
+    pub flows: Vec<ProtocolFlow<D>>,
+    pub span: Span,
+}
+
+#[derive(Clone, Debug)]
+pub struct ProtocolRole<D> {
+    pub id: NodeId,
+    pub def_id: D,
+    pub name: String,
+    pub span: Span,
+}
+
+#[derive(Clone, Debug)]
+pub struct ProtocolFlow<D> {
+    pub id: NodeId,
+    pub from_role: String,
+    pub to_role: String,
+    pub payload_ty: TypeExpr<D>,
+    pub response_tys: Vec<TypeExpr<D>>,
+    pub span: Span,
 }
 
 #[derive(Clone, Debug)]
@@ -863,6 +914,13 @@ pub enum ExprKind<D, T = ()> {
         method_name: String,
         args: Vec<CallArg<D, T>>,
     },
+    Emit {
+        kind: EmitKind<D, T>,
+    },
+    Reply {
+        cap: Box<Expr<D, T>>,
+        value: Box<Expr<D, T>>,
+    },
 
     Closure {
         ident: String,
@@ -887,6 +945,18 @@ pub enum ExprKind<D, T = ()> {
     },
     Deref {
         expr: Box<Expr<D, T>>,
+    },
+}
+
+#[derive(Clone, Debug)]
+pub enum EmitKind<D, T = ()> {
+    Send {
+        to: Box<Expr<D, T>>,
+        payload: Box<Expr<D, T>>,
+    },
+    Request {
+        to: Box<Expr<D, T>>,
+        payload: Box<Expr<D, T>>,
     },
 }
 

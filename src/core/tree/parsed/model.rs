@@ -24,11 +24,16 @@ pub type EnumDefVariant = model::EnumDefVariant<()>;
 pub type TraitDef = model::TraitDef<()>;
 pub type TraitMethod = model::TraitMethod<()>;
 pub type TraitProperty = model::TraitProperty<()>;
+pub type ProtocolDef = model::ProtocolDef<()>;
+pub type ProtocolRole = model::ProtocolRole<()>;
+pub type ProtocolFlow = model::ProtocolFlow<()>;
 pub type TypestateDef = model::TypestateDef<()>;
+pub type TypestateRoleImpl = model::TypestateRoleImpl<()>;
 pub type TypestateItem = model::TypestateItem<()>;
 pub type TypestateFields = model::TypestateFields<()>;
 pub type TypestateState = model::TypestateState<()>;
 pub type TypestateStateItem = model::TypestateStateItem<()>;
+pub type TypestateOnHandler = model::TypestateOnHandler<()>;
 
 pub type FuncDecl = model::FuncDecl<()>;
 pub type FuncDef = model::FuncDef<()>;
@@ -55,6 +60,7 @@ pub type StmtExpr = model::StmtExpr<()>;
 pub type StmtExprKind = model::StmtExprKind<()>;
 pub type Expr = model::Expr<()>;
 pub type ExprKind = model::ExprKind<()>;
+pub type EmitKind = model::EmitKind<()>;
 
 pub type BindPattern = model::BindPattern<()>;
 pub type BindPatternKind = model::BindPatternKind<()>;

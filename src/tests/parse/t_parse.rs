@@ -2329,3 +2329,207 @@ fn test_parse_typestate_with_experimental_flag() {
     assert_eq!(typestate.name, "Connection");
     assert_eq!(typestate.items.len(), 3);
 }
+
+#[test]
+fn test_parse_protocol_roles_and_flows_with_experimental_flag() {
+    let source = r#"
+        protocol Auth {
+            role Client;
+            role Server;
+
+            flow Client -> Server: AuthorizeReq -> AuthApproved | AuthDenied;
+            flow Server -> Client: SessionRevoked;
+        }
+    "#;
+
+    let module = parse_module_with_options(
+        source,
+        ParserOptions {
+            experimental_typestate: true,
+        },
+    )
+    .expect("protocol should parse when experimental flag is enabled");
+
+    assert_eq!(module.top_level_items.len(), 1);
+    let protocol = match &module.top_level_items[0] {
+        TopLevelItem::ProtocolDef(def) => def,
+        _ => panic!("expected protocol top-level item"),
+    };
+
+    assert_eq!(protocol.name, "Auth");
+    assert_eq!(protocol.roles.len(), 2);
+    assert_eq!(protocol.roles[0].name, "Client");
+    assert_eq!(protocol.roles[1].name, "Server");
+    assert_eq!(protocol.flows.len(), 2);
+    assert_eq!(protocol.flows[0].from_role, "Client");
+    assert_eq!(protocol.flows[0].to_role, "Server");
+    assert_eq!(protocol.flows[0].response_tys.len(), 2);
+    assert_eq!(protocol.flows[1].response_tys.len(), 0);
+}
+
+#[test]
+fn test_parse_typestate_role_impl_and_on_handlers() {
+    let source = r#"
+        typestate Gateway : Auth::Client {
+            fn new() -> Ready {
+                Ready
+            }
+
+            on Tick(t: Tick) -> Ready {
+                Ready
+            }
+
+            state Ready {
+                on Incoming(msg: Incoming, cap: ReplyCap<Ack | Nack>) -> Ready {
+                    let pending = emit Request(to: self.peer, Outgoing {});
+                    emit Send(to: self.peer, Outgoing {});
+                    reply(cap, Ack {});
+                    Ready
+                }
+            }
+        }
+    "#;
+
+    let module = parse_module_with_options(
+        source,
+        ParserOptions {
+            experimental_typestate: true,
+        },
+    )
+    .expect("typestate with role impl/on handlers should parse");
+
+    let typestate = match &module.top_level_items[0] {
+        TopLevelItem::TypestateDef(def) => def,
+        _ => panic!("expected typestate top-level item"),
+    };
+
+    assert_eq!(typestate.role_impls.len(), 1);
+    assert_eq!(typestate.role_impls[0].path, vec!["Auth", "Client"]);
+
+    let top_handler = typestate
+        .items
+        .iter()
+        .find_map(|item| match item {
+            TypestateItem::Handler(handler) => Some(handler),
+            _ => None,
+        })
+        .expect("expected typestate-level on handler");
+
+    let state = typestate
+        .items
+        .iter()
+        .find_map(|item| match item {
+            TypestateItem::State(state) => Some(state),
+            _ => None,
+        })
+        .expect("expected state item");
+
+    let state_handler = state
+        .items
+        .iter()
+        .find_map(|item| match item {
+            TypestateStateItem::Handler(handler) => Some(handler),
+            _ => None,
+        })
+        .expect("expected state on handler");
+
+    assert!(matches!(
+        top_handler.selector_ty.kind,
+        TypeExprKind::Named { ref ident, .. } if ident == "Tick"
+    ));
+    assert_eq!(state_handler.params.len(), 2);
+
+    let ExprKind::Block { items, .. } = &state_handler.body.kind else {
+        panic!("expected block body for state handler");
+    };
+
+    assert!(
+        items.iter().any(|item| match item {
+            BlockItem::Stmt(StmtExpr {
+                kind: StmtExprKind::LetBind { value, .. },
+                ..
+            }) => matches!(
+                value.kind,
+                ExprKind::Emit {
+                    kind: EmitKind::Request { .. }
+                }
+            ),
+            _ => false,
+        }),
+        "expected emit request in let-binding value"
+    );
+    assert!(
+        items.iter().any(|item| match item {
+            BlockItem::Expr(expr) => matches!(
+                expr.kind,
+                ExprKind::Emit {
+                    kind: EmitKind::Send { .. }
+                }
+            ),
+            _ => false,
+        }),
+        "expected emit send expression statement in state handler body"
+    );
+    assert!(
+        items.iter().any(|item| match item {
+            BlockItem::Expr(expr) => matches!(expr.kind, ExprKind::Reply { .. }),
+            _ => false,
+        }),
+        "expected reply expression statement in state handler body"
+    );
+}
+
+#[test]
+fn test_parse_typestate_pattern_on_handler_desugars_to_canonical_params() {
+    let source = r#"
+        typestate Gateway {
+            fn new() -> AwaitAuth { AwaitAuth }
+
+            state AwaitAuth {
+                on Response(pending, AuthApproved) -> Connected {
+                    Connected
+                }
+            }
+
+            state Connected {}
+        }
+    "#;
+
+    let module = parse_module_with_options(
+        source,
+        ParserOptions {
+            experimental_typestate: true,
+        },
+    )
+    .expect("typestate pattern on-handler should parse");
+
+    let typestate = match &module.top_level_items[0] {
+        TopLevelItem::TypestateDef(def) => def,
+        _ => panic!("expected typestate top-level item"),
+    };
+    let state = typestate
+        .items
+        .iter()
+        .find_map(|item| match item {
+            TypestateItem::State(state) if state.name == "AwaitAuth" => Some(state),
+            _ => None,
+        })
+        .expect("expected AwaitAuth state");
+    let handler = state
+        .items
+        .iter()
+        .find_map(|item| match item {
+            TypestateStateItem::Handler(handler) => Some(handler),
+            _ => None,
+        })
+        .expect("expected pattern-form on-handler");
+
+    assert_eq!(handler.params.len(), 2);
+    assert_eq!(handler.params[0].ident, "pending");
+    assert!(matches!(handler.params[0].typ.kind, TypeExprKind::Infer));
+    assert_eq!(handler.params[1].ident, "__response");
+    assert!(matches!(
+        handler.params[1].typ.kind,
+        TypeExprKind::Named { ref ident, .. } if ident == "AuthApproved"
+    ));
+}

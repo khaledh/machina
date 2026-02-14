@@ -15,9 +15,9 @@ use crate::core::diag::Span;
 use crate::core::resolve::{DefId, DefKind};
 use crate::core::tree::NodeId;
 use crate::core::tree::resolved::{
-    BinaryOp, BindPattern, BindPatternKind, BlockItem, CallArg, Expr, ExprKind, FuncDef, MatchArm,
-    MatchPattern, MethodSig, StmtExpr, StmtExprKind, StringFmtSegment, StructFieldBindPattern,
-    TypeExpr, TypeParam, UnaryOp,
+    BinaryOp, BindPattern, BindPatternKind, BlockItem, CallArg, EmitKind, Expr, ExprKind, FuncDef,
+    MatchArm, MatchPattern, MethodSig, StmtExpr, StmtExprKind, StringFmtSegment,
+    StructFieldBindPattern, TypeExpr, TypeParam, UnaryOp,
 };
 use crate::core::typecheck::engine::TypecheckEngine;
 use crate::core::typecheck::errors::TypeCheckError;

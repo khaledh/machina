@@ -31,11 +31,16 @@ pub type EnumDefVariant = model::EnumDefVariant<DefId>;
 pub type TraitDef = model::TraitDef<DefId>;
 pub type TraitMethod = model::TraitMethod<DefId>;
 pub type TraitProperty = model::TraitProperty<DefId>;
+pub type ProtocolDef = model::ProtocolDef<DefId>;
+pub type ProtocolRole = model::ProtocolRole<DefId>;
+pub type ProtocolFlow = model::ProtocolFlow<DefId>;
 pub type TypestateDef = model::TypestateDef<DefId, TypeId>;
+pub type TypestateRoleImpl = model::TypestateRoleImpl<DefId>;
 pub type TypestateItem = model::TypestateItem<DefId, TypeId>;
 pub type TypestateFields = model::TypestateFields<DefId>;
 pub type TypestateState = model::TypestateState<DefId, TypeId>;
 pub type TypestateStateItem = model::TypestateStateItem<DefId, TypeId>;
+pub type TypestateOnHandler = model::TypestateOnHandler<DefId, TypeId>;
 
 pub type FuncDecl = model::FuncDecl<DefId>;
 pub type FuncDef = model::FuncDef<DefId, TypeId>;
@@ -68,6 +73,7 @@ pub type StmtExpr = model::StmtExpr<DefId, TypeId>;
 pub type StmtExprKind = model::StmtExprKind<DefId, TypeId>;
 pub type Expr = model::Expr<DefId, TypeId>;
 pub type ExprKind = model::ExprKind<DefId, TypeId>;
+pub type EmitKind = model::EmitKind<DefId, TypeId>;
 
 pub type ArrayLitInit = model::ArrayLitInit<DefId, TypeId>;
 pub type StructLitField = model::StructLitField<DefId, TypeId>;

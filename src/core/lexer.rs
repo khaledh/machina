@@ -41,6 +41,8 @@ pub enum TokenKind {
     KwType,
     #[display("trait")]
     KwTrait,
+    #[display("protocol")]
+    KwProtocol,
     #[display("typestate")]
     KwTypestate,
     #[display("range")]
@@ -91,6 +93,16 @@ pub enum TokenKind {
     KwMap,
     #[display("requires")]
     KwRequires,
+    #[display("role")]
+    KwRole,
+    #[display("flow")]
+    KwFlow,
+    #[display("on")]
+    KwOn,
+    #[display("emit")]
+    KwEmit,
+    #[display("reply")]
+    KwReply,
 
     // Brackets
     #[display("[")]
@@ -538,6 +550,7 @@ impl<'a> Lexer<'a> {
                         "fn" => TokenKind::KwFn,
                         "type" => TokenKind::KwType,
                         "trait" => TokenKind::KwTrait,
+                        "protocol" => TokenKind::KwProtocol,
                         "typestate" => TokenKind::KwTypestate,
                         "range" => TokenKind::KwRange,
                         "bounds" => TokenKind::KwBounds,
@@ -563,6 +576,11 @@ impl<'a> Lexer<'a> {
                         "set" => TokenKind::KwSet,
                         "map" => TokenKind::KwMap,
                         "requires" => TokenKind::KwRequires,
+                        "role" => TokenKind::KwRole,
+                        "flow" => TokenKind::KwFlow,
+                        "on" => TokenKind::KwOn,
+                        "emit" => TokenKind::KwEmit,
+                        "reply" => TokenKind::KwReply,
                         "true" => TokenKind::BoolLit(true),
                         "false" => TokenKind::BoolLit(false),
                         _ => TokenKind::Ident(ident),
