@@ -3,8 +3,9 @@
 //! V1 strategy: lower parsed `typestate` declarations into ordinary type
 //! definitions + method blocks + constructor functions before resolve.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
+use crate::core::resolve::ResolveError;
 use crate::core::tree::NodeIdGen;
 use crate::core::tree::parsed::{
     self, BindPattern, BindPatternKind, CallArg, Expr, ExprKind, FuncDecl, FuncDef, MatchPattern,
@@ -15,15 +16,18 @@ use crate::core::tree::parsed::{
 use crate::core::tree::visit_mut::{self, VisitorMut};
 use crate::core::tree::{CallArgMode, InitInfo, ParamMode};
 
-pub fn desugar_module(module: &mut Module, node_id_gen: &mut NodeIdGen) {
+pub fn desugar_module(module: &mut Module, node_id_gen: &mut NodeIdGen) -> Vec<ResolveError> {
     let mut out = Vec::with_capacity(module.top_level_items.len());
     let mut ctor_by_typestate = HashMap::<String, String>::new();
+    let mut errors = Vec::new();
 
     for item in module.top_level_items.drain(..) {
         match item {
             TopLevelItem::TypestateDef(typestate) => {
-                let lowered = desugar_typestate(typestate, node_id_gen, &mut ctor_by_typestate);
+                let (lowered, typestate_errors) =
+                    desugar_typestate(typestate, node_id_gen, &mut ctor_by_typestate);
                 out.extend(lowered);
+                errors.extend(typestate_errors);
             }
             other => out.push(other),
         }
@@ -32,19 +36,21 @@ pub fn desugar_module(module: &mut Module, node_id_gen: &mut NodeIdGen) {
     module.top_level_items = out;
     // Rewrite `Typestate::new(...)` enum-variant syntax into constructor calls.
     rewrite_constructor_invocations(module, &ctor_by_typestate, node_id_gen);
+    errors
 }
 
 fn desugar_typestate(
     typestate: TypestateDef,
     node_id_gen: &mut NodeIdGen,
     ctor_by_typestate: &mut HashMap<String, String>,
-) -> Vec<TopLevelItem> {
+) -> (Vec<TopLevelItem>, Vec<ResolveError>) {
     let ts_name = typestate.name.clone();
     let ctor_name = format!("__ts_ctor_{}", ts_name);
     ctor_by_typestate.insert(ts_name.clone(), ctor_name.clone());
 
-    let shared_fields = collect_first_fields_block(&typestate.items);
-    let states = collect_states(&typestate.items);
+    let analysis = analyze_typestate(&typestate);
+    let shared_fields = analysis.shared_fields;
+    let states = analysis.states;
     let state_name_map = build_state_name_map(&ts_name, &states);
 
     let mut lowered = Vec::new();
@@ -91,7 +97,7 @@ fn desugar_typestate(
         }
     }
 
-    if let Some(mut ctor) = collect_constructor(&typestate.items) {
+    if let Some(mut ctor) = analysis.constructor {
         ctor.sig.name = ctor_name;
         rewrite_state_refs_in_func(&mut ctor, &state_name_map);
         lowered.push(TopLevelItem::FuncDef(ctor));
@@ -117,7 +123,7 @@ fn desugar_typestate(
         }));
     }
 
-    lowered
+    (lowered, analysis.errors)
 }
 
 fn build_state_name_map(ts_name: &str, states: &[TypestateState]) -> HashMap<String, String> {
@@ -132,31 +138,212 @@ fn build_state_name_map(ts_name: &str, states: &[TypestateState]) -> HashMap<Str
         .collect()
 }
 
-fn collect_first_fields_block(items: &[TypestateItem]) -> Vec<StructDefField> {
-    items
-        .iter()
-        .find_map(|item| match item {
-            TypestateItem::Fields(TypestateFields { fields, .. }) => Some(fields.clone()),
-            _ => None,
-        })
-        .unwrap_or_default()
+struct TypestateAnalysis {
+    shared_fields: Vec<StructDefField>,
+    states: Vec<TypestateState>,
+    constructor: Option<FuncDef>,
+    errors: Vec<ResolveError>,
 }
 
-fn collect_states(items: &[TypestateItem]) -> Vec<TypestateState> {
-    items
+fn analyze_typestate(typestate: &TypestateDef) -> TypestateAnalysis {
+    let ts_name = typestate.name.clone();
+    let mut errors = Vec::new();
+
+    let fields_blocks: Vec<&TypestateFields> = typestate
+        .items
         .iter()
         .filter_map(|item| match item {
-            TypestateItem::State(state) => Some(state.clone()),
+            TypestateItem::Fields(fields) => Some(fields),
             _ => None,
         })
-        .collect()
+        .collect();
+
+    let shared_fields = fields_blocks
+        .first()
+        .map(|fields| fields.fields.clone())
+        .unwrap_or_default();
+
+    for extra in fields_blocks.iter().skip(1) {
+        errors.push(ResolveError::TypestateDuplicateFieldsBlock(
+            ts_name.clone(),
+            extra.span,
+        ));
+    }
+
+    let mut unique_state_names = HashSet::new();
+    let mut states = Vec::new();
+    for item in &typestate.items {
+        if let TypestateItem::State(state) = item {
+            if unique_state_names.insert(state.name.clone()) {
+                states.push(state.clone());
+            } else {
+                errors.push(ResolveError::TypestateDuplicateState(
+                    ts_name.clone(),
+                    state.name.clone(),
+                    state.span,
+                ));
+            }
+        }
+    }
+
+    if states.is_empty() {
+        errors.push(ResolveError::TypestateMissingState(
+            ts_name.clone(),
+            typestate.span,
+        ));
+    }
+
+    let state_names: HashSet<String> = states.iter().map(|state| state.name.clone()).collect();
+    let shared_field_names: HashSet<String> = shared_fields
+        .iter()
+        .map(|field| field.name.clone())
+        .collect();
+
+    for state in &states {
+        validate_state_items(
+            &ts_name,
+            state,
+            &state_names,
+            &shared_field_names,
+            &mut errors,
+        );
+    }
+
+    let new_ctors: Vec<&FuncDef> = typestate
+        .items
+        .iter()
+        .filter_map(|item| match item {
+            TypestateItem::Constructor(func) if func.sig.name == "new" => Some(func),
+            _ => None,
+        })
+        .collect();
+    let constructor = if let Some(first_new) = new_ctors.first() {
+        Some((*first_new).clone())
+    } else {
+        None
+    };
+
+    match new_ctors.as_slice() {
+        [] => errors.push(ResolveError::TypestateMissingNew(
+            ts_name.clone(),
+            typestate.span,
+        )),
+        [single] => {
+            if !is_valid_state_return(&single.sig.ret_ty_expr, &state_names) {
+                errors.push(ResolveError::TypestateInvalidNewReturn(
+                    ts_name.clone(),
+                    single.sig.ret_ty_expr.span,
+                ));
+            }
+        }
+        [_, rest @ ..] => {
+            for duplicate in rest {
+                errors.push(ResolveError::TypestateDuplicateNew(
+                    ts_name.clone(),
+                    duplicate.sig.span,
+                ));
+            }
+            if !is_valid_state_return(&new_ctors[0].sig.ret_ty_expr, &state_names) {
+                errors.push(ResolveError::TypestateInvalidNewReturn(
+                    ts_name.clone(),
+                    new_ctors[0].sig.ret_ty_expr.span,
+                ));
+            }
+        }
+    }
+
+    TypestateAnalysis {
+        shared_fields,
+        states,
+        constructor,
+        errors,
+    }
 }
 
-fn collect_constructor(items: &[TypestateItem]) -> Option<FuncDef> {
-    items.iter().find_map(|item| match item {
-        TypestateItem::Constructor(func) => Some(func.clone()),
-        _ => None,
-    })
+fn validate_state_items(
+    ts_name: &str,
+    state: &TypestateState,
+    state_names: &HashSet<String>,
+    shared_field_names: &HashSet<String>,
+    errors: &mut Vec<ResolveError>,
+) {
+    let fields_blocks: Vec<&TypestateFields> = state
+        .items
+        .iter()
+        .filter_map(|item| match item {
+            TypestateStateItem::Fields(fields) => Some(fields),
+            _ => None,
+        })
+        .collect();
+    for extra in fields_blocks.iter().skip(1) {
+        errors.push(ResolveError::TypestateDuplicateStateFieldsBlock(
+            ts_name.to_string(),
+            state.name.clone(),
+            extra.span,
+        ));
+    }
+    if let Some(local_fields) = fields_blocks.first() {
+        for field in &local_fields.fields {
+            if shared_field_names.contains(&field.name) {
+                errors.push(ResolveError::TypestateStateFieldShadowsCarriedField(
+                    ts_name.to_string(),
+                    state.name.clone(),
+                    field.name.clone(),
+                    field.span,
+                ));
+            }
+        }
+    }
+
+    let mut seen_methods = HashSet::new();
+    for item in &state.items {
+        let TypestateStateItem::Method(method) = item else {
+            continue;
+        };
+
+        if !seen_methods.insert(method.sig.name.clone()) {
+            errors.push(ResolveError::TypestateDuplicateTransition(
+                ts_name.to_string(),
+                state.name.clone(),
+                method.sig.name.clone(),
+                method.sig.span,
+            ));
+        }
+
+        if let Some(self_param) = method.sig.params.iter().find(|param| param.ident == "self") {
+            errors.push(ResolveError::TypestateExplicitSelfNotAllowed(
+                ts_name.to_string(),
+                state.name.clone(),
+                method.sig.name.clone(),
+                self_param.span,
+            ));
+        }
+
+        if !is_valid_state_return(&method.sig.ret_ty_expr, state_names) {
+            errors.push(ResolveError::TypestateInvalidTransitionReturn(
+                ts_name.to_string(),
+                state.name.clone(),
+                method.sig.name.clone(),
+                method.sig.ret_ty_expr.span,
+            ));
+        }
+    }
+}
+
+fn is_valid_state_return(ret_ty: &TypeExpr, state_names: &HashSet<String>) -> bool {
+    match &ret_ty.kind {
+        TypeExprKind::Named { ident, .. } => state_names.contains(ident),
+        TypeExprKind::Union { variants } => {
+            let Some(first) = variants.first() else {
+                return false;
+            };
+            matches!(
+                &first.kind,
+                TypeExprKind::Named { ident, .. } if state_names.contains(ident)
+            )
+        }
+        _ => false,
+    }
 }
 
 fn collect_first_state_fields_block(items: &[TypestateStateItem]) -> Vec<StructDefField> {

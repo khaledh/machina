@@ -298,6 +298,102 @@ impl Diagnostic {
                 );
                 "MC-RESOLVE-MODULE-MEMBER-UNDEFINED"
             }
+            ResolveError::TypestateMissingState(name, _) => {
+                metadata.insert(
+                    "typestate".to_string(),
+                    DiagnosticValue::String(name.clone()),
+                );
+                "MC-TYPESTATE-MISSING-STATE"
+            }
+            ResolveError::TypestateDuplicateState(name, state, _) => {
+                metadata.insert(
+                    "typestate".to_string(),
+                    DiagnosticValue::String(name.clone()),
+                );
+                metadata.insert("state".to_string(), DiagnosticValue::String(state.clone()));
+                "MC-TYPESTATE-DUPLICATE-STATE"
+            }
+            ResolveError::TypestateDuplicateFieldsBlock(name, _) => {
+                metadata.insert(
+                    "typestate".to_string(),
+                    DiagnosticValue::String(name.clone()),
+                );
+                "MC-TYPESTATE-DUPLICATE-FIELDS-BLOCK"
+            }
+            ResolveError::TypestateDuplicateStateFieldsBlock(name, state, _) => {
+                metadata.insert(
+                    "typestate".to_string(),
+                    DiagnosticValue::String(name.clone()),
+                );
+                metadata.insert("state".to_string(), DiagnosticValue::String(state.clone()));
+                "MC-TYPESTATE-DUPLICATE-STATE-FIELDS-BLOCK"
+            }
+            ResolveError::TypestateStateFieldShadowsCarriedField(name, state, field, _) => {
+                metadata.insert(
+                    "typestate".to_string(),
+                    DiagnosticValue::String(name.clone()),
+                );
+                metadata.insert("state".to_string(), DiagnosticValue::String(state.clone()));
+                metadata.insert("field".to_string(), DiagnosticValue::String(field.clone()));
+                "MC-TYPESTATE-STATE-FIELD-SHADOWS-CARRIED-FIELD"
+            }
+            ResolveError::TypestateMissingNew(name, _) => {
+                metadata.insert(
+                    "typestate".to_string(),
+                    DiagnosticValue::String(name.clone()),
+                );
+                "MC-TYPESTATE-MISSING-NEW"
+            }
+            ResolveError::TypestateDuplicateNew(name, _) => {
+                metadata.insert(
+                    "typestate".to_string(),
+                    DiagnosticValue::String(name.clone()),
+                );
+                "MC-TYPESTATE-DUPLICATE-NEW"
+            }
+            ResolveError::TypestateInvalidNewReturn(name, _) => {
+                metadata.insert(
+                    "typestate".to_string(),
+                    DiagnosticValue::String(name.clone()),
+                );
+                "MC-TYPESTATE-INVALID-NEW-RETURN"
+            }
+            ResolveError::TypestateExplicitSelfNotAllowed(name, state, method, _) => {
+                metadata.insert(
+                    "typestate".to_string(),
+                    DiagnosticValue::String(name.clone()),
+                );
+                metadata.insert("state".to_string(), DiagnosticValue::String(state.clone()));
+                metadata.insert(
+                    "method".to_string(),
+                    DiagnosticValue::String(method.clone()),
+                );
+                "MC-TYPESTATE-EXPLICIT-SELF-NOT-ALLOWED"
+            }
+            ResolveError::TypestateInvalidTransitionReturn(name, state, method, _) => {
+                metadata.insert(
+                    "typestate".to_string(),
+                    DiagnosticValue::String(name.clone()),
+                );
+                metadata.insert("state".to_string(), DiagnosticValue::String(state.clone()));
+                metadata.insert(
+                    "method".to_string(),
+                    DiagnosticValue::String(method.clone()),
+                );
+                "MC-TYPESTATE-TRANSITION-RETURN"
+            }
+            ResolveError::TypestateDuplicateTransition(name, state, method, _) => {
+                metadata.insert(
+                    "typestate".to_string(),
+                    DiagnosticValue::String(name.clone()),
+                );
+                metadata.insert("state".to_string(), DiagnosticValue::String(state.clone()));
+                metadata.insert(
+                    "method".to_string(),
+                    DiagnosticValue::String(method.clone()),
+                );
+                "MC-TYPESTATE-DUPLICATE-TRANSITION"
+            }
         };
         Self {
             phase: DiagnosticPhase::Resolve,

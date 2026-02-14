@@ -1,9 +1,10 @@
 use crate::core::api::{
-    FrontendPolicy, ResolveInputs, elaborate_stage, parse_module_with_id_gen,
-    resolve_stage_with_policy, resolve_typecheck_pipeline_with_policy, semcheck_stage,
-    typecheck_stage_with_policy,
+    FrontendPolicy, ParseModuleOptions, ResolveInputs, elaborate_stage, parse_module_with_id_gen,
+    parse_module_with_id_gen_and_options, resolve_stage_with_policy,
+    resolve_typecheck_pipeline_with_policy, semcheck_stage, typecheck_stage_with_policy,
 };
 use crate::core::context::ParsedContext;
+use crate::core::resolve::ResolveError;
 use crate::core::tree::NodeIdGen;
 use crate::core::tree::semantic as sem;
 
@@ -11,6 +12,19 @@ fn parsed_context(source: &str) -> ParsedContext {
     let id_gen = NodeIdGen::new();
     let (module, id_gen) =
         parse_module_with_id_gen(source, id_gen).expect("parse should succeed for test source");
+    ParsedContext::new(module, id_gen)
+}
+
+fn parsed_context_typestate(source: &str) -> ParsedContext {
+    let id_gen = NodeIdGen::new();
+    let (module, id_gen) = parse_module_with_id_gen_and_options(
+        source,
+        id_gen,
+        ParseModuleOptions {
+            experimental_typestate: true,
+        },
+    )
+    .expect("parse should succeed for typestate test source");
     ParsedContext::new(module, id_gen)
 }
 
@@ -35,6 +49,126 @@ fn main() -> u64 {
         resolve_stage_with_policy(parsed, ResolveInputs::default(), FrontendPolicy::Partial);
     assert!(partial.has_errors());
     assert!(partial.context.is_some());
+}
+
+#[test]
+fn typestate_missing_new_reports_targeted_error() {
+    let source = r#"
+typestate Connection {
+    state Disconnected {}
+}
+"#;
+    let parsed = parsed_context_typestate(source);
+    let out = resolve_stage_with_policy(parsed, ResolveInputs::default(), FrontendPolicy::Strict);
+    assert!(out.context.is_none());
+    assert!(out.errors.iter().any(
+        |err| matches!(err, ResolveError::TypestateMissingNew(name, _) if name == "Connection")
+    ));
+}
+
+#[test]
+fn typestate_duplicate_state_and_invalid_transition_return_report_errors() {
+    let source = r#"
+typestate Connection {
+    fn new() -> Disconnected {
+        Disconnected {}
+    }
+
+    state Disconnected {
+        fn connect() -> UnknownState {
+            UnknownState {}
+        }
+    }
+
+    state Disconnected {}
+}
+"#;
+    let parsed = parsed_context_typestate(source);
+    let out = resolve_stage_with_policy(parsed, ResolveInputs::default(), FrontendPolicy::Strict);
+    assert!(out.context.is_none());
+    assert!(out.errors.iter().any(
+        |err| matches!(err, ResolveError::TypestateDuplicateState(ts, state, _) if ts == "Connection" && state == "Disconnected")
+    ));
+    assert!(out.errors.iter().any(|err| {
+        matches!(
+            err,
+            ResolveError::TypestateInvalidTransitionReturn(ts, state, method, _)
+                if ts == "Connection" && state == "Disconnected" && method == "connect"
+        )
+    }));
+}
+
+#[test]
+fn typestate_field_constraints_report_errors() {
+    let source = r#"
+typestate Connection {
+    fields { id: u64 }
+    fields { retries: u64 }
+
+    fn new() -> Disconnected {
+        Disconnected { id: 0, retries: 0 }
+    }
+
+    state Disconnected {
+        fields { id: u64 }
+        fields { fd: u64 }
+    }
+}
+"#;
+    let parsed = parsed_context_typestate(source);
+    let out = resolve_stage_with_policy(parsed, ResolveInputs::default(), FrontendPolicy::Strict);
+    assert!(out.context.is_none());
+    assert!(out.errors.iter().any(
+        |err| matches!(err, ResolveError::TypestateDuplicateFieldsBlock(name, _) if name == "Connection")
+    ));
+    assert!(out.errors.iter().any(|err| {
+        matches!(
+            err,
+            ResolveError::TypestateDuplicateStateFieldsBlock(ts, state, _)
+                if ts == "Connection" && state == "Disconnected"
+        )
+    }));
+    assert!(out.errors.iter().any(|err| {
+        matches!(
+            err,
+            ResolveError::TypestateStateFieldShadowsCarriedField(ts, state, field, _)
+                if ts == "Connection" && state == "Disconnected" && field == "id"
+        )
+    }));
+}
+
+#[test]
+fn typestate_duplicate_transition_and_invalid_new_return_report_errors() {
+    let source = r#"
+typestate Connection {
+    fn new() -> UnknownState {
+        UnknownState {}
+    }
+
+    state Disconnected {
+        fn connect(x: u64) -> Disconnected {
+            Disconnected {}
+        }
+
+        fn connect() -> Disconnected {
+            Disconnected {}
+        }
+    }
+}
+"#;
+    let parsed = parsed_context_typestate(source);
+    let out = resolve_stage_with_policy(parsed, ResolveInputs::default(), FrontendPolicy::Strict);
+    assert!(out.context.is_none());
+    assert!(out.errors.iter().any(
+        |err| matches!(err, ResolveError::TypestateInvalidNewReturn(name, _) if name == "Connection")
+    ));
+    assert!(out.errors.iter().any(|err| {
+        matches!(
+            err,
+            ResolveError::TypestateDuplicateTransition(ts, state, method, _)
+                if ts == "Connection" && state == "Disconnected" && method == "connect"
+        )
+    }));
 }
 
 #[test]

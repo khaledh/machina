@@ -236,22 +236,31 @@ pub fn resolve_stage_with_policy(
     inputs: ResolveInputs,
     policy: FrontendPolicy,
 ) -> ResolveStageResult {
-    typestate::desugar_module(&mut input.module, &mut input.node_id_gen);
+    let mut typestate_errors = typestate::desugar_module(&mut input.module, &mut input.node_id_gen);
+    if policy == FrontendPolicy::Strict && !typestate_errors.is_empty() {
+        return ResolveStageResult {
+            context: None,
+            imported_facts: ImportedFacts::default(),
+            errors: typestate_errors,
+        };
+    }
     let output = resolve_with_imports_and_symbols_partial(
         input,
         inputs.imported_modules,
         inputs.imported_symbols,
     );
+    typestate_errors.extend(output.errors);
+    let errors = typestate_errors;
     match policy {
-        FrontendPolicy::Strict if !output.errors.is_empty() => ResolveStageResult {
+        FrontendPolicy::Strict if !errors.is_empty() => ResolveStageResult {
             context: None,
             imported_facts: ImportedFacts::default(),
-            errors: output.errors,
+            errors,
         },
         FrontendPolicy::Strict | FrontendPolicy::Partial => ResolveStageResult {
             context: Some(output.context),
             imported_facts: output.imported_facts,
-            errors: output.errors,
+            errors,
         },
     }
 }

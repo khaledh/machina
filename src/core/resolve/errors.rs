@@ -74,6 +74,43 @@ pub enum ResolveError {
 
     #[error("Module `{0}` has no member `{1}`")]
     ModuleMemberUndefined(String, String, Span),
+
+    #[error("Typestate `{0}` must declare at least one state")]
+    TypestateMissingState(String, Span),
+
+    #[error("Typestate `{0}` has duplicate state `{1}`")]
+    TypestateDuplicateState(String, String, Span),
+
+    #[error("Typestate `{0}` has multiple `fields` blocks")]
+    TypestateDuplicateFieldsBlock(String, Span),
+
+    #[error("State `{0}.{1}` has multiple `fields` blocks")]
+    TypestateDuplicateStateFieldsBlock(String, String, Span),
+
+    #[error("State field `{2}` in `{0}.{1}` shadows a typestate field")]
+    TypestateStateFieldShadowsCarriedField(String, String, String, Span),
+
+    #[error("Typestate `{0}` is missing required `fn new(...)` constructor")]
+    TypestateMissingNew(String, Span),
+
+    #[error("Typestate `{0}` has duplicate `new` constructors")]
+    TypestateDuplicateNew(String, Span),
+
+    #[error(
+        "Typestate `{0}` constructor return type must be a declared state (or `State | Error...`)"
+    )]
+    TypestateInvalidNewReturn(String, Span),
+
+    #[error("Transition `{0}.{1}::{2}` must not declare explicit `self` parameter")]
+    TypestateExplicitSelfNotAllowed(String, String, String, Span),
+
+    #[error(
+        "Transition `{0}.{1}::{2}` return type must be a declared state (or `State | Error...`)"
+    )]
+    TypestateInvalidTransitionReturn(String, String, String, Span),
+
+    #[error("State `{0}.{1}` has duplicate transition `{2}`")]
+    TypestateDuplicateTransition(String, String, String, Span),
 }
 
 impl ResolveError {
@@ -102,6 +139,17 @@ impl ResolveError {
             ResolveError::DuplicateRequireAlias(_, span) => *span,
             ResolveError::ModuleQualifiedAccessUnsupported(_, _, span) => *span,
             ResolveError::ModuleMemberUndefined(_, _, span) => *span,
+            ResolveError::TypestateMissingState(_, span) => *span,
+            ResolveError::TypestateDuplicateState(_, _, span) => *span,
+            ResolveError::TypestateDuplicateFieldsBlock(_, span) => *span,
+            ResolveError::TypestateDuplicateStateFieldsBlock(_, _, span) => *span,
+            ResolveError::TypestateStateFieldShadowsCarriedField(_, _, _, span) => *span,
+            ResolveError::TypestateMissingNew(_, span) => *span,
+            ResolveError::TypestateDuplicateNew(_, span) => *span,
+            ResolveError::TypestateInvalidNewReturn(_, span) => *span,
+            ResolveError::TypestateExplicitSelfNotAllowed(_, _, _, span) => *span,
+            ResolveError::TypestateInvalidTransitionReturn(_, _, _, span) => *span,
+            ResolveError::TypestateDuplicateTransition(_, _, _, span) => *span,
         }
     }
 }
