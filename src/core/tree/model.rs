@@ -34,6 +34,16 @@ pub struct Require {
 }
 
 impl<D, T> Module<D, T> {
+    pub fn protocol_defs(&self) -> Vec<&ProtocolDef<D>> {
+        self.top_level_items
+            .iter()
+            .filter_map(|item| match item {
+                TopLevelItem::ProtocolDef(protocol_def) => Some(protocol_def),
+                _ => None,
+            })
+            .collect()
+    }
+
     pub fn typestate_defs(&self) -> Vec<&TypestateDef<D, T>> {
         self.top_level_items
             .iter()

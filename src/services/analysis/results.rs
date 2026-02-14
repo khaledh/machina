@@ -44,6 +44,7 @@ pub struct ResolvedModuleResult {
     pub def_owners: HashMap<DefId, ModuleId>,
     pub symbols: SymbolTable,
     pub node_id_gen: NodeIdGen,
+    pub typestate_role_impls: Vec<crate::core::context::TypestateRoleImplBinding>,
 }
 
 impl ResolvedModuleResult {
@@ -57,6 +58,7 @@ impl ResolvedModuleResult {
             def_owners,
             symbols,
             node_id_gen,
+            typestate_role_impls,
         } = tables;
         Self {
             module_id,
@@ -65,6 +67,7 @@ impl ResolvedModuleResult {
             def_owners,
             symbols,
             node_id_gen,
+            typestate_role_impls,
         }
     }
 
@@ -76,6 +79,7 @@ impl ResolvedModuleResult {
                 def_owners: self.def_owners,
                 symbols: self.symbols,
                 node_id_gen: self.node_id_gen,
+                typestate_role_impls: self.typestate_role_impls,
             },
         }
     }
@@ -92,6 +96,7 @@ pub struct TypedModuleResult {
     pub generic_insts: GenericInstMap,
     pub symbols: SymbolTable,
     pub node_id_gen: NodeIdGen,
+    pub typestate_role_impls: Vec<crate::core::context::TypestateRoleImplBinding>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -239,6 +244,7 @@ impl TypedModuleResult {
             def_owners,
             symbols,
             node_id_gen,
+            typestate_role_impls,
         } = resolved;
         Self {
             module_id,
@@ -250,6 +256,7 @@ impl TypedModuleResult {
             generic_insts,
             symbols,
             node_id_gen,
+            typestate_role_impls,
         }
     }
 
@@ -262,6 +269,7 @@ impl TypedModuleResult {
                     def_owners: self.def_owners,
                     symbols: self.symbols,
                     node_id_gen: self.node_id_gen,
+                    typestate_role_impls: self.typestate_role_impls,
                 },
                 type_map: self.type_map,
                 call_sigs: self.call_sigs,

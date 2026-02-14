@@ -17,7 +17,7 @@ use crate::core::lexer::{LexError, Lexer, Token};
 use crate::core::parse::{ParseError, Parser, ParserOptions};
 use crate::core::resolve::{
     ImportedFacts, ImportedModule, ImportedSymbol, ResolveError, ResolveOutput, attach_def_owners,
-    resolve_with_imports_and_symbols_partial,
+    resolve_with_imports_and_symbols_and_typestate_roles_partial,
 };
 use crate::core::semck::{self, SemCheckError};
 use crate::core::tree::NodeId;
@@ -27,7 +27,7 @@ use crate::core::typecheck::{
     TypeCheckError, TypecheckOutput, type_check_partial_with_imported_facts,
     type_check_with_imported_facts,
 };
-use crate::core::typestate;
+use crate::core::typestate::{self, TypestateRoleImplRef};
 
 #[derive(Debug, Error)]
 pub enum ParseModuleError {
@@ -236,6 +236,7 @@ pub fn resolve_stage_with_policy(
     inputs: ResolveInputs,
     policy: FrontendPolicy,
 ) -> ResolveStageResult {
+    let typestate_role_impls = typestate::collect_role_impl_refs(&input.module);
     let mut typestate_errors = typestate::desugar_module(&mut input.module, &mut input.node_id_gen);
     if policy == FrontendPolicy::Strict && !typestate_errors.is_empty() {
         return ResolveStageResult {
@@ -244,11 +245,15 @@ pub fn resolve_stage_with_policy(
             errors: typestate_errors,
         };
     }
-    let output = resolve_with_imports_and_symbols_partial(
+    let output = resolve_with_imports_and_symbols_and_typestate_roles_partial(
         input,
         inputs.imported_modules,
         inputs.imported_symbols,
+        typestate_role_impls.clone(),
     );
+    let mut context = output.context;
+    context.payload.typestate_role_impls =
+        build_typestate_role_impl_bindings(&context, &typestate_role_impls);
     typestate_errors.extend(output.errors);
     let errors = typestate_errors;
     match policy {
@@ -258,11 +263,26 @@ pub fn resolve_stage_with_policy(
             errors,
         },
         FrontendPolicy::Strict | FrontendPolicy::Partial => ResolveStageResult {
-            context: Some(output.context),
+            context: Some(context),
             imported_facts: output.imported_facts,
             errors,
         },
     }
+}
+
+fn build_typestate_role_impl_bindings(
+    resolved: &TypecheckStageInput,
+    refs: &[TypestateRoleImplRef],
+) -> Vec<crate::core::context::TypestateRoleImplBinding> {
+    refs.iter()
+        .map(|role_impl| crate::core::context::TypestateRoleImplBinding {
+            node_id: role_impl.id,
+            typestate_name: role_impl.typestate_name.clone(),
+            path: role_impl.path.clone(),
+            role_def_id: resolved.def_table.lookup_node_def_id(role_impl.id),
+            span: role_impl.span,
+        })
+        .collect()
 }
 
 pub fn typecheck_stage(

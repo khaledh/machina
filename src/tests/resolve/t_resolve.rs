@@ -2,13 +2,15 @@ use super::*;
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
+use crate::core::api::{FrontendPolicy, ResolveInputs, resolve_stage_with_policy};
 use crate::core::capsule::{
     CapsuleError, ModuleLoader, ModulePath, discover_and_parse_capsule_with_loader,
 };
 use crate::core::context::{CapsuleParsedContext, ParsedContext, ResolvedContext};
 use crate::core::lexer::{LexError, Lexer, Token};
-use crate::core::parse::Parser;
+use crate::core::parse::{Parser, ParserOptions};
 use crate::core::resolve::{DefKind, Visibility, resolve, resolve_partial, resolve_program};
+use crate::core::tree::NodeIdGen;
 
 struct MockLoader {
     modules: HashMap<String, String>,
@@ -53,6 +55,17 @@ fn resolve_source_partial(source: &str) -> ResolveOutput {
 
     let ast_context = ParsedContext::new(module, id_gen);
     resolve_partial(ast_context)
+}
+
+fn parse_source_with_options(source: &str, options: ParserOptions) -> ParsedContext {
+    let lexer = Lexer::new(source);
+    let tokens = lexer
+        .tokenize()
+        .collect::<Result<Vec<Token>, LexError>>()
+        .expect("Failed to tokenize");
+    let mut parser = Parser::new_with_id_gen_and_options(&tokens, NodeIdGen::new(), options);
+    let module = parser.parse().expect("Failed to parse");
+    ParsedContext::new(module, parser.into_id_gen())
 }
 
 #[test]
@@ -349,6 +362,155 @@ fn test_resolve_program_builds_import_env_from_export_facts() {
     assert!(
         !symbol_binding.callables.is_empty(),
         "symbol binding should include callable target IDs"
+    );
+}
+
+#[test]
+fn test_resolve_protocol_flow_reports_undefined_roles() {
+    let source = r#"
+        type Ping = {}
+
+        protocol Net {
+            role Client;
+            role Server;
+            flow Missing -> Server: Ping;
+        }
+    "#;
+
+    let parsed = parse_source_with_options(
+        source,
+        ParserOptions {
+            experimental_typestate: true,
+        },
+    );
+    let result =
+        resolve_stage_with_policy(parsed, ResolveInputs::default(), FrontendPolicy::Strict);
+    assert!(result.context.is_none(), "strict resolve should fail");
+    assert!(
+        result.errors.iter().any(
+            |e| matches!(e, ResolveError::ProtocolFlowRoleUndefined(protocol, role, _) if protocol == "Net" && role == "Missing")
+        ),
+        "expected undefined protocol flow role error, got {:?}",
+        result.errors
+    );
+}
+
+#[test]
+fn test_resolve_typestate_role_impl_binds_protocol_role() {
+    let source = r#"
+        type AuthReq = {}
+        type AuthOk = {}
+
+        protocol Auth {
+            role Client;
+            role Server;
+            flow Client -> Server: AuthReq -> AuthOk;
+        }
+
+        typestate Gateway : Auth::Client {
+            fn new() -> Disconnected {
+                Disconnected {}
+            }
+
+            state Disconnected {
+                fn connect() -> Disconnected {
+                    Disconnected {}
+                }
+            }
+        }
+    "#;
+
+    let parsed = parse_source_with_options(
+        source,
+        ParserOptions {
+            experimental_typestate: true,
+        },
+    );
+
+    let role_impl_node_id = parsed
+        .module
+        .typestate_defs()
+        .first()
+        .expect("expected typestate")
+        .role_impls
+        .first()
+        .expect("expected role impl")
+        .id;
+
+    let result =
+        resolve_stage_with_policy(parsed, ResolveInputs::default(), FrontendPolicy::Strict);
+    assert!(
+        result.errors.is_empty(),
+        "expected clean resolve, got {:?}",
+        result.errors
+    );
+    let resolved = result
+        .context
+        .expect("strict resolve should return context on success");
+    let role_def_id = resolved
+        .def_table
+        .lookup_node_def_id(role_impl_node_id)
+        .expect("role impl should resolve to protocol role def");
+    let role_def = resolved
+        .def_table
+        .lookup_def(role_def_id)
+        .expect("resolved role def should exist");
+    assert_eq!(role_def.name, "Auth::Client");
+    assert!(matches!(role_def.kind, DefKind::ProtocolRole));
+    assert_eq!(resolved.typestate_role_impls.len(), 1);
+    assert_eq!(resolved.typestate_role_impls[0].typestate_name, "Gateway");
+    assert_eq!(
+        resolved.typestate_role_impls[0].path.join("::"),
+        "Auth::Client"
+    );
+    assert_eq!(
+        resolved.typestate_role_impls[0].role_def_id,
+        Some(role_def_id)
+    );
+}
+
+#[test]
+fn test_resolve_typestate_role_impl_reports_unknown_role() {
+    let source = r#"
+        type AuthReq = {}
+        type AuthOk = {}
+
+        protocol Auth {
+            role Client;
+            role Server;
+            flow Client -> Server: AuthReq -> AuthOk;
+        }
+
+        typestate Gateway : Auth::Unknown {
+            fn new() -> Disconnected {
+                Disconnected {}
+            }
+
+            state Disconnected {
+                fn connect() -> Disconnected {
+                    Disconnected {}
+                }
+            }
+        }
+    "#;
+
+    let parsed = parse_source_with_options(
+        source,
+        ParserOptions {
+            experimental_typestate: true,
+        },
+    );
+    let result =
+        resolve_stage_with_policy(parsed, ResolveInputs::default(), FrontendPolicy::Strict);
+    assert!(result.context.is_none(), "strict resolve should fail");
+    assert!(
+        result.errors.iter().any(|e| matches!(
+            e,
+            ResolveError::TypestateRoleImplRoleUndefined(typestate, path, _)
+                if typestate == "Gateway" && path == "Auth::Unknown"
+        )),
+        "expected unknown role impl error, got {:?}",
+        result.errors
     );
 }
 

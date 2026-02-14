@@ -9,6 +9,7 @@
 
 use std::collections::{HashMap, HashSet};
 
+use crate::core::diag::Span;
 use crate::core::resolve::ResolveError;
 use crate::core::tree::NodeIdGen;
 use crate::core::tree::parsed::{
@@ -20,6 +21,29 @@ use crate::core::tree::parsed::{
 use crate::core::tree::visit::{self, Visitor};
 use crate::core::tree::visit_mut::{self, VisitorMut};
 use crate::core::tree::{CallArgMode, InitInfo, ParamMode};
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct TypestateRoleImplRef {
+    pub id: crate::core::tree::NodeId,
+    pub typestate_name: String,
+    pub path: Vec<String>,
+    pub span: Span,
+}
+
+pub fn collect_role_impl_refs(module: &Module) -> Vec<TypestateRoleImplRef> {
+    let mut out = Vec::new();
+    for typestate in module.typestate_defs() {
+        for role_impl in &typestate.role_impls {
+            out.push(TypestateRoleImplRef {
+                id: role_impl.id,
+                typestate_name: typestate.name.clone(),
+                path: role_impl.path.clone(),
+                span: role_impl.span,
+            });
+        }
+    }
+    out
+}
 
 pub fn desugar_module(module: &mut Module, node_id_gen: &mut NodeIdGen) -> Vec<ResolveError> {
     let mut out = Vec::with_capacity(module.top_level_items.len());

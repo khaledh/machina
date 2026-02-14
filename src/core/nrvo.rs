@@ -37,6 +37,7 @@ impl NrvoAnalyzer {
             def_owners,
             symbols,
             node_id_gen,
+            typestate_role_impls,
         } = resolved;
 
         let mut def_table = def_table;
@@ -54,6 +55,7 @@ impl NrvoAnalyzer {
                         def_owners,
                         symbols,
                         node_id_gen,
+                        typestate_role_impls,
                     },
                     type_map,
                     call_sigs,

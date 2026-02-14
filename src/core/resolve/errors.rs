@@ -75,6 +75,24 @@ pub enum ResolveError {
     #[error("Module `{0}` has no member `{1}`")]
     ModuleMemberUndefined(String, String, Span),
 
+    #[error("Undefined protocol role: {0}")]
+    ProtocolRoleUndefined(String, Span),
+
+    #[error("Expected '{0}' to be a protocol role, found {1}")]
+    ExpectedProtocolRole(String, SymbolKind, Span),
+
+    #[error("Protocol `{0}` flow references undefined role `{1}`")]
+    ProtocolFlowRoleUndefined(String, String, Span),
+
+    #[error("Typestate `{0}` role implementation path must be `<Protocol>::<Role>`, found `{1}`")]
+    TypestateRoleImplMalformedPath(String, String, Span),
+
+    #[error("Typestate `{0}` references undefined protocol role `{1}`")]
+    TypestateRoleImplRoleUndefined(String, String, Span),
+
+    #[error("Typestate `{0}` expected `{1}` to resolve to a protocol role, found {2}")]
+    TypestateRoleImplExpectedRole(String, String, SymbolKind, Span),
+
     #[error("Typestate `{0}` must declare at least one state")]
     TypestateMissingState(String, Span),
 
@@ -142,6 +160,12 @@ impl ResolveError {
             ResolveError::DuplicateRequireAlias(_, span) => *span,
             ResolveError::ModuleQualifiedAccessUnsupported(_, _, span) => *span,
             ResolveError::ModuleMemberUndefined(_, _, span) => *span,
+            ResolveError::ProtocolRoleUndefined(_, span) => *span,
+            ResolveError::ExpectedProtocolRole(_, _, span) => *span,
+            ResolveError::ProtocolFlowRoleUndefined(_, _, span) => *span,
+            ResolveError::TypestateRoleImplMalformedPath(_, _, span) => *span,
+            ResolveError::TypestateRoleImplRoleUndefined(_, _, span) => *span,
+            ResolveError::TypestateRoleImplExpectedRole(_, _, _, span) => *span,
             ResolveError::TypestateMissingState(_, span) => *span,
             ResolveError::TypestateDuplicateState(_, _, span) => *span,
             ResolveError::TypestateDuplicateFieldsBlock(_, span) => *span,

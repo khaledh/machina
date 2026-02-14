@@ -18,6 +18,7 @@ use crate::core::tree::parsed::*;
 use crate::core::tree::resolved::builder::build_module;
 use crate::core::tree::visit::*;
 use crate::core::types::{BUILTIN_TYPES, Type};
+use crate::core::typestate::TypestateRoleImplRef;
 
 #[derive(Clone, Debug)]
 pub struct ImportedModule {
@@ -93,6 +94,7 @@ pub struct SymbolResolver {
     imported_callable_sigs: HashMap<DefId, Vec<ImportedCallableSig>>,
     imported_type_defs: HashMap<DefId, Type>,
     imported_trait_defs: HashMap<DefId, ImportedTraitSig>,
+    typestate_role_impls: Vec<TypestateRoleImplRef>,
 }
 
 #[derive(Clone)]
@@ -127,7 +129,12 @@ impl SymbolResolver {
             imported_callable_sigs: HashMap::new(),
             imported_type_defs: HashMap::new(),
             imported_trait_defs: HashMap::new(),
+            typestate_role_impls: Vec::new(),
         }
+    }
+
+    fn set_typestate_role_impls(&mut self, role_impls: Vec<TypestateRoleImplRef>) {
+        self.typestate_role_impls = role_impls;
     }
 
     fn is_enum_variant_name(&self, name: &str) -> bool {
@@ -249,6 +256,8 @@ impl SymbolResolver {
 
     fn map_symbol_kind_to_def_kind(kind: &SymbolKind) -> DefKind {
         match kind {
+            SymbolKind::ProtocolDef { .. } => DefKind::ProtocolDef,
+            SymbolKind::ProtocolRole { .. } => DefKind::ProtocolRole,
             SymbolKind::TraitDef { .. } => DefKind::TraitDef {
                 attrs: TraitAttrs::default(),
             },
@@ -521,6 +530,9 @@ impl SymbolResolver {
     }
 
     fn populate_decls(&mut self, module: &Module) {
+        // Populate protocol definitions and role symbols.
+        self.populate_protocol_defs(&module.protocol_defs());
+
         // Populate trait definitions
         self.populate_trait_defs(&module.trait_defs());
 
@@ -533,6 +545,51 @@ impl SymbolResolver {
         // Populate imported symbol aliases so resolve can bind unqualified uses
         // (e.g. `requires { std::io::println }` then `println(...)`).
         self.populate_imported_symbol_aliases();
+    }
+
+    fn populate_protocol_defs(&mut self, protocol_defs: &[&ProtocolDef]) {
+        for &protocol_def in protocol_defs {
+            let protocol_def_id = self.def_id_gen.new_id();
+            let protocol = Def {
+                id: protocol_def_id,
+                name: protocol_def.name.clone(),
+                kind: DefKind::ProtocolDef,
+            };
+            self.def_table_builder
+                .record_def(protocol, protocol_def.id, protocol_def.span);
+            self.insert_symbol(
+                &protocol_def.name,
+                Symbol {
+                    name: protocol_def.name.clone(),
+                    kind: SymbolKind::ProtocolDef {
+                        def_id: protocol_def_id,
+                    },
+                },
+                protocol_def.span,
+            );
+
+            for role in &protocol_def.roles {
+                let role_def_id = self.def_id_gen.new_id();
+                let qualified_role_name = format!("{}::{}", protocol_def.name, role.name);
+                let role_def = Def {
+                    id: role_def_id,
+                    name: qualified_role_name.clone(),
+                    kind: DefKind::ProtocolRole,
+                };
+                self.def_table_builder
+                    .record_def(role_def, role.id, role.span);
+                self.insert_symbol(
+                    &qualified_role_name,
+                    Symbol {
+                        name: qualified_role_name.clone(),
+                        kind: SymbolKind::ProtocolRole {
+                            def_id: role_def_id,
+                        },
+                    },
+                    role.span,
+                );
+            }
+        }
     }
 
     fn populate_imported_symbol_aliases(&mut self) {
@@ -779,11 +836,51 @@ impl SymbolResolver {
             resolver.populate_decls(module);
 
             resolver.visit_module(module);
+            resolver.bind_typestate_role_impls();
         });
 
         let (def_table, node_def_lookup) = std::mem::take(&mut self.def_table_builder).finish();
         let errors = std::mem::take(&mut self.errors);
         (def_table, node_def_lookup, errors)
+    }
+
+    fn bind_typestate_role_impls(&mut self) {
+        for role_impl in &self.typestate_role_impls {
+            let joined_path = role_impl.path.join("::");
+            if role_impl.path.len() < 2 {
+                self.errors
+                    .push(ResolveError::TypestateRoleImplMalformedPath(
+                        role_impl.typestate_name.clone(),
+                        joined_path,
+                        role_impl.span,
+                    ));
+                continue;
+            }
+
+            match self.lookup_symbol(&joined_path) {
+                Some(symbol) => match &symbol.kind {
+                    SymbolKind::ProtocolRole { .. } => {
+                        self.def_table_builder
+                            .record_use(role_impl.id, symbol.def_id());
+                    }
+                    other => self
+                        .errors
+                        .push(ResolveError::TypestateRoleImplExpectedRole(
+                            role_impl.typestate_name.clone(),
+                            joined_path,
+                            other.clone(),
+                            role_impl.span,
+                        )),
+                },
+                None => self
+                    .errors
+                    .push(ResolveError::TypestateRoleImplRoleUndefined(
+                        role_impl.typestate_name.clone(),
+                        joined_path,
+                        role_impl.span,
+                    )),
+            }
+        }
     }
 
     pub fn resolve(
@@ -1115,6 +1212,35 @@ impl SymbolResolver {
 }
 
 impl Visitor<()> for SymbolResolver {
+    fn visit_protocol_def(&mut self, protocol_def: &ProtocolDef) {
+        let mut local_roles = HashSet::new();
+        for role in &protocol_def.roles {
+            local_roles.insert(role.name.as_str());
+        }
+
+        for flow in &protocol_def.flows {
+            if !local_roles.contains(flow.from_role.as_str()) {
+                self.errors.push(ResolveError::ProtocolFlowRoleUndefined(
+                    protocol_def.name.clone(),
+                    flow.from_role.clone(),
+                    flow.span,
+                ));
+            }
+            if !local_roles.contains(flow.to_role.as_str()) {
+                self.errors.push(ResolveError::ProtocolFlowRoleUndefined(
+                    protocol_def.name.clone(),
+                    flow.to_role.clone(),
+                    flow.span,
+                ));
+            }
+
+            self.visit_type_expr(&flow.payload_ty);
+            for response_ty in &flow.response_tys {
+                self.visit_type_expr(response_ty);
+            }
+        }
+    }
+
     fn visit_type_def(&mut self, type_def: &TypeDef) {
         self.with_scope(|resolver| {
             for type_param in &type_def.type_params {
@@ -1655,8 +1781,12 @@ pub fn resolve_with_imports_and_symbols(
     imported_modules: HashMap<String, ImportedModule>,
     imported_symbols: HashMap<String, ImportedSymbol>,
 ) -> Result<ResolveStageOutput, Vec<ResolveError>> {
-    let output =
-        resolve_with_imports_and_symbols_partial(ast_context, imported_modules, imported_symbols);
+    let output = resolve_with_imports_and_symbols_and_typestate_roles_partial(
+        ast_context,
+        imported_modules,
+        imported_symbols,
+        Vec::new(),
+    );
     if output.errors.is_empty() {
         Ok(output.context)
     } else {
@@ -1676,9 +1806,24 @@ pub fn resolve_with_imports_and_symbols_partial(
     imported_modules: HashMap<String, ImportedModule>,
     imported_symbols: HashMap<String, ImportedSymbol>,
 ) -> ResolveOutput {
+    resolve_with_imports_and_symbols_and_typestate_roles_partial(
+        ast_context,
+        imported_modules,
+        imported_symbols,
+        Vec::new(),
+    )
+}
+
+pub fn resolve_with_imports_and_symbols_and_typestate_roles_partial(
+    ast_context: ResolveStageInput,
+    imported_modules: HashMap<String, ImportedModule>,
+    imported_symbols: HashMap<String, ImportedSymbol>,
+    typestate_role_impls: Vec<TypestateRoleImplRef>,
+) -> ResolveOutput {
     let mut resolver = SymbolResolver::new();
     resolver.imported_modules = imported_modules;
     resolver.imported_symbols = imported_symbols;
+    resolver.set_typestate_role_impls(typestate_role_impls);
     let (def_table, node_def_lookup, errors) = resolver.resolve_partial(&ast_context.module);
 
     // Build resolved tree from parsed tree + NodeDefLookup

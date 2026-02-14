@@ -5,6 +5,12 @@ use crate::core::tree::{EnumDefVariant, StructDefField, TypeExpr};
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum SymbolKind {
+    ProtocolDef {
+        def_id: DefId,
+    },
+    ProtocolRole {
+        def_id: DefId,
+    },
     Var {
         def_id: DefId,
         is_mutable: bool,
@@ -35,6 +41,8 @@ pub enum SymbolKind {
 impl std::fmt::Display for SymbolKind {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
+            SymbolKind::ProtocolDef { .. } => write!(f, "protocol_def"),
+            SymbolKind::ProtocolRole { .. } => write!(f, "protocol_role"),
             SymbolKind::Var { .. } => write!(f, "var"),
             SymbolKind::TypeParam { .. } => write!(f, "type_param"),
             SymbolKind::Func { overloads } => write!(f, "func[{} overloads]", overloads.len()),
@@ -67,6 +75,8 @@ pub struct Symbol {
 impl Symbol {
     pub fn def_id(&self) -> DefId {
         match &self.kind {
+            SymbolKind::ProtocolDef { def_id } => *def_id,
+            SymbolKind::ProtocolRole { def_id } => *def_id,
             SymbolKind::Var { def_id, .. } => *def_id,
             SymbolKind::TypeParam { def_id } => *def_id,
             SymbolKind::Func { overloads } => overloads

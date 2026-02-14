@@ -298,6 +298,54 @@ impl Diagnostic {
                 );
                 "MC-RESOLVE-MODULE-MEMBER-UNDEFINED"
             }
+            ResolveError::ProtocolRoleUndefined(path, _) => {
+                metadata.insert("path".to_string(), DiagnosticValue::String(path.clone()));
+                "MC-RESOLVE-PROTOCOL-ROLE-UNDEFINED"
+            }
+            ResolveError::ExpectedProtocolRole(path, found, _) => {
+                metadata.insert("path".to_string(), DiagnosticValue::String(path.clone()));
+                metadata.insert(
+                    "found_kind".to_string(),
+                    DiagnosticValue::String(found.to_string()),
+                );
+                "MC-RESOLVE-EXPECTED-PROTOCOL-ROLE"
+            }
+            ResolveError::ProtocolFlowRoleUndefined(protocol, role, _) => {
+                metadata.insert(
+                    "protocol".to_string(),
+                    DiagnosticValue::String(protocol.clone()),
+                );
+                metadata.insert("role".to_string(), DiagnosticValue::String(role.clone()));
+                "MC-RESOLVE-PROTOCOL-FLOW-ROLE-UNDEFINED"
+            }
+            ResolveError::TypestateRoleImplMalformedPath(typestate, path, _) => {
+                metadata.insert(
+                    "typestate".to_string(),
+                    DiagnosticValue::String(typestate.clone()),
+                );
+                metadata.insert("path".to_string(), DiagnosticValue::String(path.clone()));
+                "MC-TYPESTATE-ROLE-IMPL-MALFORMED-PATH"
+            }
+            ResolveError::TypestateRoleImplRoleUndefined(typestate, path, _) => {
+                metadata.insert(
+                    "typestate".to_string(),
+                    DiagnosticValue::String(typestate.clone()),
+                );
+                metadata.insert("path".to_string(), DiagnosticValue::String(path.clone()));
+                "MC-TYPESTATE-ROLE-IMPL-UNDEFINED"
+            }
+            ResolveError::TypestateRoleImplExpectedRole(typestate, path, found, _) => {
+                metadata.insert(
+                    "typestate".to_string(),
+                    DiagnosticValue::String(typestate.clone()),
+                );
+                metadata.insert("path".to_string(), DiagnosticValue::String(path.clone()));
+                metadata.insert(
+                    "found_kind".to_string(),
+                    DiagnosticValue::String(found.to_string()),
+                );
+                "MC-TYPESTATE-ROLE-IMPL-EXPECTED-ROLE"
+            }
             ResolveError::TypestateMissingState(name, _) => {
                 metadata.insert(
                     "typestate".to_string(),

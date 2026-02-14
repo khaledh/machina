@@ -73,6 +73,7 @@ pub fn elaborate(ctx: ElaborateStageInput) -> ElaborateStageOutput {
         def_owners,
         symbols,
         node_id_gen,
+        typestate_role_impls,
     } = resolved;
     let mut node_id_gen = node_id_gen;
     let mut def_table = DefTableOverlay::new(def_table);
@@ -106,6 +107,7 @@ pub fn elaborate(ctx: ElaborateStageInput) -> ElaborateStageOutput {
                     def_owners,
                     symbols,
                     node_id_gen,
+                    typestate_role_impls,
                 },
                 type_map: type_map.into_inner(),
                 call_sigs,

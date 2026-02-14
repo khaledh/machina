@@ -3,6 +3,7 @@ use std::ops::{Deref, DerefMut};
 use std::path::PathBuf;
 
 use crate::core::capsule::ModuleId;
+use crate::core::diag::Span;
 use crate::core::resolve::{DefId, DefTable};
 use crate::core::semck::closure::capture::ClosureCapture;
 use crate::core::symtab::SymbolTable;
@@ -21,6 +22,16 @@ pub struct ResolvedTables {
     pub def_owners: HashMap<DefId, ModuleId>,
     pub symbols: SymbolTable,
     pub node_id_gen: NodeIdGen,
+    pub typestate_role_impls: Vec<TypestateRoleImplBinding>,
+}
+
+#[derive(Debug, Clone)]
+pub struct TypestateRoleImplBinding {
+    pub node_id: NodeId,
+    pub typestate_name: String,
+    pub path: Vec<String>,
+    pub role_def_id: Option<DefId>,
+    pub span: Span,
 }
 
 #[derive(Debug, Clone)]
@@ -163,6 +174,7 @@ impl ParsedContext {
                 def_owners: HashMap::new(),
                 symbols,
                 node_id_gen: self.node_id_gen,
+                typestate_role_impls: Vec::new(),
             },
         }
     }

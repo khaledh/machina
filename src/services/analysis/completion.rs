@@ -979,6 +979,8 @@ fn enclosing_callable_def_id(
 
 fn completion_kind_for_def(kind: &DefKind) -> Option<CompletionKind> {
     match kind {
+        DefKind::ProtocolDef => Some(CompletionKind::Type),
+        DefKind::ProtocolRole => Some(CompletionKind::EnumVariant),
         DefKind::FuncDef { .. } | DefKind::FuncDecl { .. } => Some(CompletionKind::Function),
         DefKind::TypeDef { .. } => Some(CompletionKind::Type),
         DefKind::TraitDef { .. } => Some(CompletionKind::Trait),

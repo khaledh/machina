@@ -61,6 +61,8 @@ impl DefIdGen {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum DefKind {
+    ProtocolDef,
+    ProtocolRole,
     TraitDef {
         attrs: TraitAttrs,
     },
@@ -115,6 +117,8 @@ pub struct FuncAttrs {
 impl fmt::Display for DefKind {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
+            DefKind::ProtocolDef => write!(f, "ProtocolDef"),
+            DefKind::ProtocolRole => write!(f, "ProtocolRole"),
             DefKind::TraitDef { .. } => write!(f, "TraitDef"),
             DefKind::TypeDef { .. } => write!(f, "TypeDef"),
             DefKind::TypeParam => write!(f, "TypeParam"),
