@@ -19,8 +19,10 @@ use super::elaborator::Elaborator;
 pub(super) fn run(elaborator: &mut Elaborator<'_>, module: &norm::Module) -> sem::Module {
     elaborator.reset_module_state();
 
-    // Pass 1 (current combined core): syntax desugaring + place/value lowering.
-    // This currently also discovers closure conversions while traversing items.
+    // Pass 1 (combined core): syntax desugaring + place/value lowering + plan capture.
+    // The syntax rewrite surface (e.g. `for` -> `while`) lives in
+    // `syntax_desugar`, but execution is still coupled to value elaboration.
+    // This pass also discovers closure conversions while traversing items.
     let mut items = run_place_value_planning_pass(elaborator, module);
 
     // Pass 2: materialize closure conversion artifacts into top-level items.

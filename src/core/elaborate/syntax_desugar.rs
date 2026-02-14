@@ -48,7 +48,7 @@ struct ForLocal {
 
 impl<'a> Elaborator<'a> {
     /// Desugar a for loop into a while loop with explicit index management.
-    pub(in crate::core::elaborate::value) fn elab_for_expr(
+    pub(super) fn elab_for_expr(
         &mut self,
         stmt: &norm::StmtExpr,
         pattern: &norm::BindPattern,

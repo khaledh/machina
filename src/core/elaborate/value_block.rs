@@ -3,7 +3,7 @@
 //! Handles the contents of block expressions: statements and trailing
 //! expressions. Special cases include:
 //!
-//! - `for` loops are desugared into `while` loops (delegated to `for_loop`)
+//! - `for` loops are desugared into `while` loops (delegated to `syntax_desugar`)
 //! - Closure bindings record the mapping for later reference resolution
 //! - Assignments carry initialization info from semck
 

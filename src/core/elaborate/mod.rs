@@ -40,6 +40,7 @@ mod lowering_plan;
 mod match_plan;
 mod pipeline;
 mod place;
+mod syntax_desugar;
 mod types;
 mod value;
 
