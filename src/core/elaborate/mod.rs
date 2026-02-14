@@ -29,7 +29,6 @@
 
 use crate::core::analysis::facts::{DefTableOverlay, TypeMapOverlay};
 use crate::core::context::{ElaborateStageInput, ElaborateStageOutput};
-use crate::core::tree::semantic as sem;
 mod bind_pattern;
 mod calls;
 mod closure;
@@ -47,6 +46,7 @@ mod value;
 use crate::core::elaborate::drop_plan::build_drop_plans;
 use crate::core::elaborate::elaborator::Elaborator;
 use crate::core::elaborate::lowering_plan::build_lowering_plans;
+use crate::core::elaborate::closure::register_lifted_method_symbols;
 
 /// Transform a normalized tree into a semantic tree using the results from
 /// semantic analysis.
@@ -94,30 +94,8 @@ pub fn elaborate(ctx: ElaborateStageInput) -> ElaborateStageOutput {
         build_lowering_plans(&module, call_plans, index_plans, match_plans, slice_plans);
     let drop_plans = build_drop_plans(&module, &def_table, &type_map);
 
-    // Generate method names for lifted closures and add them to the symbol table
     let mut symbols = symbols;
-    let mut used_names: std::collections::HashSet<String> =
-        symbols.def_names.values().cloned().collect();
-    for method_block in module.method_blocks() {
-        let type_name = method_block.type_name.as_str();
-        for method_item in &method_block.method_items {
-            let method_def = match method_item {
-                sem::MethodItem::Def(method_def) => method_def,
-                sem::MethodItem::Decl(_) => continue,
-            };
-            if symbols.def_names.contains_key(&method_def.def_id) {
-                continue;
-            }
-            let base_name = format!("{type_name}${}", method_def.sig.name);
-            let name = if used_names.contains(&base_name) {
-                format!("{base_name}${}", method_def.def_id.0)
-            } else {
-                base_name
-            };
-            used_names.insert(name.clone());
-            symbols.register_generated_def(method_def.def_id, name);
-        }
-    }
+    register_lifted_method_symbols(&module, &mut symbols);
 
     ElaborateStageOutput {
         module,

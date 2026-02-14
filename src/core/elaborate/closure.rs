@@ -45,6 +45,7 @@
 use crate::core::analysis::facts::SyntheticReason;
 use crate::core::diag::Span;
 use crate::core::resolve::{DefId, DefKind, TypeAttrs};
+use crate::core::symtab::SymbolTable;
 use crate::core::semck::closure::capture::CaptureMode;
 use crate::core::tree::normalized as norm;
 use crate::core::tree::semantic as sem;
@@ -52,6 +53,36 @@ use crate::core::tree::{NodeId, ParamMode};
 use crate::core::types::{StructField, Type, TypeId};
 
 use super::elaborator::{CaptureField, ClosureContext, ClosureInfo, Elaborator};
+
+/// Register generated symbol names for lifted closure methods.
+///
+/// Closure conversion synthesizes method defs that do not exist in the initial
+/// resolved symbol table. Add stable backend names so downstream IR/codegen
+/// formatting can print and reference them.
+pub(super) fn register_lifted_method_symbols(module: &sem::Module, symbols: &mut SymbolTable) {
+    let mut used_names: std::collections::HashSet<String> =
+        symbols.def_names.values().cloned().collect();
+    for method_block in module.method_blocks() {
+        let type_name = method_block.type_name.as_str();
+        for method_item in &method_block.method_items {
+            let method_def = match method_item {
+                sem::MethodItem::Def(method_def) => method_def,
+                sem::MethodItem::Decl(_) => continue,
+            };
+            if symbols.def_names.contains_key(&method_def.def_id) {
+                continue;
+            }
+            let base_name = format!("{type_name}${}", method_def.sig.name);
+            let name = if used_names.contains(&base_name) {
+                format!("{base_name}${}", method_def.def_id.0)
+            } else {
+                base_name
+            };
+            used_names.insert(name.clone());
+            symbols.register_generated_def(method_def.def_id, name);
+        }
+    }
+}
 
 impl<'a> Elaborator<'a> {
     /// Append lifted closure artifacts (types/methods/functions) to module
