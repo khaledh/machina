@@ -41,6 +41,10 @@ typestate Connection {
             fd: u64,
         }
 
+        fn send(payload: string) -> u64 {
+            payload.len
+        }
+
         fn disconnect() -> Disconnected {
             Disconnected
         }
@@ -51,11 +55,12 @@ typestate Connection {
 And usage:
 
 ```mc
-fn main() -> u64 {
+fn main() {
     let c0 = Connection::new();
+    // c0.send("ping"); // compile error: send only exists in Connected
     let c1 = c0.connect("localhost");
+    let sent = c1.send("ping");
     let c2 = c1.disconnect();
-    c2.retries
 }
 ```
 

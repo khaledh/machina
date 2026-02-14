@@ -1,340 +1,135 @@
-# Machina Programming Language
+# Machina
 
-Machina is a modern systems programming language that is still in early
-development. The compiler currently targets only ARM64 assembly.
+Machina is an early-stage systems programming language focused on a specific
+question:
 
-## Vision
+**Can the language make large stateful systems easier to design and safer to evolve, without becoming heavyweight?**
 
-Machina is exploring how to make **state machines** and **typestate**
-first-class concepts in a systems language. The end goal: describe a system as a
-composition of state machines with well-defined transitions, and have the
-compiler verify that your code respects those constraints.
+It combines explicit ownership and value semantics with a roadmap toward
+first-class state-machine and typestate modeling.
 
-### What this might look like
+## Why Machina
 
-*Envisioned future syntax — not yet implemented*
+Most systems languages force a tradeoff:
 
-```
-protocol ConnectionOps {
-    state Disconnected;
-    state Connecting;
-    state Connected;
+- low-level control but weak design guidance, or
+- strong safety but high conceptual overhead
 
-    // Commands (caller-initiated)
-    fn open(sink self: Disconnected, addr: Address) -> Connecting;
-    fn send(inout self: Connected, data: u8[]) -> Connected;
-    fn close(sink self: Connected) -> Disconnected;
+Machina aims for a middle path:
 
-    // Events (environment-initiated)
-    on Established(self: Connecting, sock: Socket) -> Connected;
-    on Received(inout self: Connected, data: u8[]) -> Connected;
-    on Lost(sink self: Connected) -> Disconnected;
-}
+- **Explicit by default**: ownership transfer and mutation are visible in code
+- **Composable abstractions**: traits, methods, properties, algebraic data types
+- **Design-level safety direction**: typestate and state-machine-oriented features
 
-machine TcpClient<Net: Net>: ConnectionOps {
-    // Common fields shared by all states
-    net: Net;
+## Current Status
 
-    state Disconnected { }
-    state Connecting { addr: Address }
-    state Connected { socket: Socket }
+Machina is being actively developed and not stable yet.
 
-    fn new(net: Net) -> Disconnected {
-        Disconnected { net }
-    }
+- Compiler pipeline + ARM64 codegen
+- Module/capsule model with `requires { ... }`
+- Traits, properties, generics, unions for error handling, collections
+- IDE/LSP support in progress
 
-    fn open(sink self: Disconnected, addr: Address) -> Connecting {
-        self.net.connect(addr);
-        Connecting { net: self.net, addr }
-    }
-
-    fn send(inout self: Connected, data: u8[]) {
-        self.net.send(self.socket, data);
-    }
-
-    fn close(sink self: Connected) -> Disconnected {
-        self.net.close(self.socket);
-        Disconnected { net: self.net }
-    }
-
-    on Established(self: Connecting, sock: Socket) -> Connected {
-        Connected { net: self.net, socket: sock }
-    }
-
-    on Received(inout self: Connected, data: u8[]) {
-        self.net.on_data(self.socket, data);
-    }
-
-    on Lost(sink self: Connected) -> Disconnected {
-        Disconnected { net: self.net }
-    }
-}
-```
-
-The protocol defines the state machine contract: states, commands (`fn`), and
-events (`on`). The type implements it with concrete data per state. The compiler
-verifies that transitions only happen from valid states, and that all events are
-handled.
-
-## Today
-
-The vision above is the destination. Today, Machina is a working compiler with
-foundational features: expression-oriented syntax, algebraic data types, pattern
-matching, and mutable value semantics—building blocks for the stateful
-abstractions to come.
+Current compiler target: **ARM64**.
 
 ## Example
 
-```
-type Counter = { total: u64, last: u64 }
-type Event = Add(u64) | Reset
-
-Counter :: {
-    fn add(inout self, value: u64) {
-        self.total = self.total + value;
-        self.last = value;
-    }
-
-    fn reset(inout self) {
-        self.total = 0;
-        self.last = 0;
-    }
-
-    fn snapshot(self) -> (u64, u64) {
-        (self.total, self.last)
-    }
+```mc
+requires {
+    std::io::println
 }
 
-fn main() -> u64 {
-    let events = [Event::Add(2), Event::Add(3), Event::Reset, Event::Add(5)];
-    var counter = Counter { total: 0, last: 0 };
+typestate Connection {
+    fields {
+        retries: u64,
+    }
 
-    for ev in events {
-        match ev {
-            Event::Add(n) => counter.add(n),
-            Event::Reset => counter.reset(),
+    fn new() -> Disconnected {
+        Disconnected { retries: 0 }
+    }
+
+    state Disconnected {
+        fn connect(addr: string) -> Connected {
+            Connected { fd: 7 }
         }
     }
 
-    let (total, last) = counter.snapshot();
-    println(f"total={total}, last={last}");
-    total
+    state Connected {
+        fields {
+            fd: u64,
+        }
+
+        fn send(payload: string) -> u64 {
+            payload.len
+        }
+
+        fn disconnect() -> Disconnected {
+            Disconnected
+        }
+    }
+}
+
+fn main() {
+    let c0 = Connection::new();
+    // c0.send("ping"); // compile error: send only exists in Connected
+
+    let c1 = c0.connect("localhost");
+    let sent = c1.send("ping");
+    let c2 = c1.disconnect();
+
+    println(f"sent={sent}, retries={c2.retries}");
 }
 ```
 
-### Features
+Try it:
 
-- Mutable value semantics
-- Owned heap values (`T^`) with automatic drops
-- Explicit ownership transfer (`move`)
-- Parameter modes (`inout`, `out`, `sink`)
-- Borrow rules for slices and `inout` args
-- Function overloading
-- Method blocks and method calls
-- Closures
-- Pattern matching
-
-### Types
-
-**Basic types**
-- Integers: `u8`/`u16`/`u32`/`u64`, `i8`/`i16`/`i32`/`i64`
-- Integer literals: decimal, `0b` (binary), `0o` (octal), `0x` (hex); `_` is allowed for grouping
-- Booleans: `bool`
-- Characters: `char`
-- Unit: `()`
-
-**Strings**
-- `string` values (literals + variables)
-- Formatted strings: `f"..."` with `{expr}` (integers and string literals for now; string variables are not yet supported)
-- Escape braces in f-strings with `{{` and `}}`
-
-**Arrays**
-- Single-dimensional: `u64[N]`, `let a = [1, 2, 3]`
-- Multi-dimensional: `u64[M, N]`, `let a = [[1, 2], [3, 4]]`
-- Array destructuring: `let [a, b, c] = [1, 2, 3]`
-- Array slicing: `let s: u64[] = a[1..3]`, `a[..]` (produces a slice)
-- Typed array literals: `let a = u8[1, 2, 3]` (only for primitive types)
-- Array repeat literals: `let a = [0; 32]`, `let a = u8[0; 32]`
-- Array indexing is bounds-checked at runtime (compile time for constant
-  indices)
-
-**Tuples** (fixed-size, homogeneous)
-- Tuples: `(u64, bool)`, `let t = (10, true)`
-- Tuple destructuring: `let (x, y) = (1, true)`
-
-**Structs**
-- `type Point = { x: u64, y: u64 }`, `let p = Point { x: 10, y: 20 }`
-- Struct destructuring: `let Point { x, y } = p`
-- Struct update: `{ base | x: 10 }`
-
-**Enums**
-- `type Color = Red | Green | Blue`, `let c = Color::Green`
-- Payloads: `type Shape = Circle(u64) | Rect(u64, u64)`, `let s = Shape::Circle(10)`
-- Pattern matching: `match color { Color::Green(val) => val, _ => 0 }`
-
-**Type aliases**
-- `type Size = u64`, `let s: Size = 10`
-
-**Range types**
-- `range(max)` and `range(min, max)` (half-open, `[min, max)`)
-- Range expressions are bounds-checked at runtime (compile time for constant
-  ranges)
-
-**Ownership**
-- `T^` is an owning heap type; `^expr` allocates a value and returns that handle
-- The owner must move (`move`) when transferring ownership
-- Owned values are dropped automatically when they go out of scope
-- Access fields/indexes directly (`p.x`, `arr[i]`); deref is implicit
-
-### Control flow
-
-- `if`/`else`
-- `while`
-- `for <pattern> in <start>..<end> { ... }` (range)
-- `for <pattern> in <expr> { ... }` where `<expr>` is an array
-
-### Operators
-
-- Arithmetic operators (`+`, `-`, `*`, `/`, `%`)
-- Comparison operators ( `==`, `!=`, `>`, `>=`, `<`, `<=`)
-- Bitwise operators (`&`, `|`, `^`, `~`, `<<`, `>>`)
-- Logical operators (`&&`, `||`, `!`)
-
-### Pattern Matching
-
-- Enum patterns: `match color { Color::Green(val) => val, _ => 0 }`
-- Tuple patterns: `match t { (0, Flag::On, true) => 10, (x, _, _) => x }`
-- Literal matches: `match n { 0 => 10, 1 => 20, _ => 99 }`, `match b { true => 1, false => 0 }`
-
-### Functions
-
-- Function definitions: `fn foo(arg: arg_type, ...) -> ret_type { body }`
-- External declarations: `fn foo(arg: arg_type, ...) -> ret_type;`
-- Methods via method blocks: `Type :: { fn name(self, ...) { ... } }`
-- Overloading and recursion
-- Pass/return by value (optimized where possible)
-- Function types: `fn(u64, u64) -> u64`
-- Closures: `let add = |a: u64, b: u64| -> u64 { a + b }`
-
-**Parameter modes**
-- default (no keyword): immutable borrow of the argument
-- `inout`: mutable borrow (arg must be a mutable lvalue)
-- `out`: write-only parameter; callee must fully initialize it
-- `sink`: ownership transfer to the callee (caller must use `move`)
-
-### Code generation
-
-- Code generation to ARM64 assembly
-
-### Runtime checks
-
-- Division by zero
-- Index out of bounds
-- Value out of range
-
-### Optimizations
-
-- RVO/NRVO (copy elision for return values)
-- Last-use copy elision for aggregates
-- Rvalue simplification
-- Constant branch elimination
-- Self-copy removal
-- Stack slot reuse for non-overlapping lifetimes
-
-## Compiling and running
-
-During development, run the compiler via cargo (prefix `cargo mcc` or
-`cargo run --`):
-```
-cargo mcc run examples/control_flow/for_array.mc
+```sh
+cargo mcc run --experimental typestate examples/typestate/connection.mc
 ```
 
-The compiler supports three modes:
-```
-cargo mcc compile input.mc          # produces input.o
-cargo mcc build input.mc            # produces input (executable)
-cargo mcc run input.mc              # builds + runs input
-```
+Typestate is where Machina is heading: APIs that encode lifecycle/state
+constraints directly in types.
 
-You can override outputs with `-o`:
-```
-cargo mcc compile -o output.o input.mc
-cargo mcc build -o output input.mc
-```
+## Also Nice Today
 
-Use `--emit` to keep intermediate artifacts (otherwise `.s` is a temp file):
-```
-cargo mcc build --emit asm,ir input.mc
-```
+- **Error unions + `?`** for explicit, low-ceremony error handling
+- **Traits + trait properties** for abstraction and dispatch
+- **Growable arrays / sets / maps** as built-in collection types
+- **Module imports with `requires`**
+- **LSP/editor tooling** support
 
-## Testing
+## Quickstart
 
-Unit tests only:
-```
-cargo test --lib
+```sh
+git clone https://github.com/khaledh/machina.git
+cd machina
+cargo mcc run examples/quickstart/hello.mc
 ```
 
-Integration tests only:
-```
-cargo test --test '*'
-```
+## Documentation
 
-## Compiler Design
+- [Getting started](docs/getting-started.md)
+- [Language tour](docs/tour.md)
+- [Guide](docs/guide/)
+- [Language reference](docs/reference/)
+- [Examples](examples/)
 
-The compiler is a multi-stage pipeline written in Rust:
+## Project Structure
 
-```
-┌───────────────────────────────────────────────────────────────────────┐
-│ Frontend                                                              │
-│   Lex → Parse → Resolve → Type Check → Normalize                      │
-│       → Semantic Check → Elaborate → NRVO Analysis                    │
-└───────────────────────────────────────┬───────────────────────────────┘
-┌────────────────────────────────────▼──────────────────────────────────┐
-│ Middle End                                                            │
-│   MCIR Lowering → CFG-Free Opt → Liveness → Dataflow Opt → Liveness   │
-└────────────────────────────────────┬──────────────────────────────────┘
-┌────────────────────────────────────▼──────────────────────────────────┐
-│ Backend                                                               │
-│   Register Allocation → Code Generation → ARM64                       │
-└───────────────────────────────────────────────────────────────────────┘
-```
+- `src/core/` — compiler core stages and IR
+- `src/driver/` — batch compiler driver (`mcc`)
+- `src/services/` — analysis/query services for IDE features
+- `tooling/lsp/` — `machina-lsp` language server
+- `tooling/vscode/` — VS Code/Cursor extension
+- `runtime/` — runtime support
+- `std/` — Machina standard library modules
 
-**Frontend** produces progressively richer context:
+## Direction
 
-- **Lex/Parse**: Hand-written lexer and recursive descent parser with Pratt
-  parsing for operator precedence. Produces a parsed tree.
-- **Resolve**: Uses lexical scope to record definitions and uses. Produces a
-  resolved tree.
-- **Type Check**: Infers and validates types across expressions, resolves
-  function overloading. Produces a typed tree.
-- **Normalize**: Inserts explicit coercions (e.g., array-to-slice at call
-  sites). Produces a normalized tree.
-- **Semantic Check**: Enforces value rules, structural rules, move restrictions,
-  borrow restrictions, definition-before-use (including partial init), slice
-  escape/borrow-scope rules, call-argument overlap checks.
-- **Elaborate**: Makes implicit operations explicit (e.g., implicit moves,
-  place/value split). Produces a semantic tree.
-- **NRVO Analysis**: Marks safe copy-elision for aggregate returns.
-
-**Middle End** operates on MCIR (Machina IR), a typed, place-based
-representation:
-
-- Scalars as SSA-like temporaries, aggregates as addressable places.
-- Explicit control flow graphs with basic blocks and terminators.
-- **CFG-free optimization**: Constant folding, identity simplification, constant
-  branch elimination, self-copy removal.
-- **Dataflow optimization**: Last-use copy elision for aggregates
-- **Liveness**: Computes live-in/live-out sets per basic block (used for
-  optimization + register allocation).
-
-**Backend** allocates registers and emits machine code:
-
-- **Register Allocation**: Linear scan with AAPCS calling convention.
-- **Code Generation**: ARM64 assembly with prologue/epilogue handling.
-
-Use `--dump` flags to inspect any stage: `tokens`, `ast`, `deftab`, `typemap`,
-`nrvo`, `ir`, `liveness`, `intervals`, `regalloc`, `asm`.
+Machina is being built as a long-horizon language project. The near-term goal is
+solid core ergonomics and tooling; the long-term differentiator is first-class
+support for modeling and verifying stateful protocols in code.
 
 ## License
 
-This project is licensed under the MIT License. See the [LICENSE](LICENSE) file for details.
+Machina is licensed under the [MIT License](LICENSE).
