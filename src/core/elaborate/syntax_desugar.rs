@@ -111,15 +111,8 @@ impl<'a> Elaborator<'a> {
             }
             _ => {
                 let iter_ty = self.type_map.type_table().get(iter.ty).clone();
-                let elem_ty = match &iter_ty {
-                    Type::Array { .. } => iter_ty
-                        .array_item_type()
-                        .unwrap_or_else(|| panic!("compiler bug: empty array dims")),
-                    Type::DynArray { elem_ty } => (**elem_ty).clone(),
-                    Type::Slice { elem_ty } => (**elem_ty).clone(),
-                    Type::Range { elem_ty } => (**elem_ty).clone(),
-                    _ => panic!("compiler bug: invalid for-iter type"),
-                };
+                let elem_ty =
+                    self.iter_elem_type_or_panic(&iter_ty, "for desugaring iterable path");
 
                 let iter_info = self.new_for_local("iter", iter_ty.clone(), false, span);
                 let iter_value = iter.clone();

@@ -107,15 +107,7 @@ impl<'a> Elaborator<'a> {
 
     fn for_iter_elem_type(&self, iter: &norm::Expr) -> Type {
         let iter_ty = self.type_map.type_table().get(iter.ty).clone();
-        match iter_ty {
-            Type::Array { .. } => iter_ty
-                .array_item_type()
-                .unwrap_or_else(|| panic!("compiler bug: empty array dims")),
-            Type::DynArray { elem_ty } => (*elem_ty).clone(),
-            Type::Slice { elem_ty } => (*elem_ty).clone(),
-            Type::Range { elem_ty } => (*elem_ty).clone(),
-            _ => panic!("compiler bug: invalid for-iter type"),
-        }
+        self.iter_elem_type_or_panic(&iter_ty, "semantic for statement elaboration")
     }
 
     /// Elaborate the value in a let/var binding, with special handling for closures.

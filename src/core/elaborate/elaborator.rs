@@ -288,6 +288,18 @@ impl<'a> Elaborator<'a> {
         self.type_map.lookup_def_type_id(def).is_some()
     }
 
+    pub(super) fn iter_elem_type_or_panic(&self, iter_ty: &Type, context: &str) -> Type {
+        match iter_ty {
+            Type::Array { .. } => iter_ty
+                .array_item_type()
+                .unwrap_or_else(|| panic!("compiler bug: empty array dims in {context}")),
+            Type::DynArray { elem_ty } => (**elem_ty).clone(),
+            Type::Slice { elem_ty } => (**elem_ty).clone(),
+            Type::Range { elem_ty } => (**elem_ty).clone(),
+            _ => panic!("compiler bug: invalid for-iter type in {context}: {iter_ty:?}"),
+        }
+    }
+
     pub(super) fn insert_node_type_for(
         &mut self,
         node_id: NodeId,
