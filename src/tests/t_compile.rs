@@ -786,6 +786,18 @@ fn deterministic_compile_opts() -> CompileOptions {
     }
 }
 
+fn typestate_compile_opts() -> CompileOptions {
+    CompileOptions {
+        dump: None,
+        emit_ir: false,
+        verify_ir: false,
+        trace_alloc: false,
+        trace_drops: false,
+        inject_prelude: false,
+        experimental_typestate: true,
+    }
+}
+
 #[test]
 fn compile_ir_dump_is_deterministic() {
     let source = r#"
@@ -933,4 +945,45 @@ fn untouched() -> u64 {
         saw_untouched_decl,
         "unchanged function body should be downgraded to decl and skipped by second pass"
     );
+}
+
+#[test]
+fn compile_typestate_desugars_before_resolve() {
+    let source = r#"
+typestate Connection {
+    fields {
+        addr: string,
+        retries: u64,
+    }
+
+    fn new(addr: string) -> Disconnected {
+        Disconnected { addr: addr, retries: 0 }
+    }
+
+    state Disconnected {
+        fn connect(fd: u64) -> Connected {
+            Connected { addr: self.addr, retries: self.retries, fd: fd }
+        }
+    }
+
+    state Connected {
+        fields {
+            fd: u64,
+        }
+
+        fn close() -> Disconnected {
+            Disconnected { addr: self.addr, retries: self.retries }
+        }
+    }
+}
+
+fn main() -> u64 {
+    let c0 = Connection::new("localhost");
+    let c1 = c0.connect(7);
+    let c2 = c1.close();
+    c2.retries
+}
+"#;
+
+    compile(source, &typestate_compile_opts()).expect("typestate compile should succeed");
 }

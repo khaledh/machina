@@ -27,6 +27,7 @@ use crate::core::typecheck::{
     TypeCheckError, TypecheckOutput, type_check_partial_with_imported_facts,
     type_check_with_imported_facts,
 };
+use crate::core::typestate;
 
 #[derive(Debug, Error)]
 pub enum ParseModuleError {
@@ -231,10 +232,11 @@ pub fn resolve_stage_partial(
 }
 
 pub fn resolve_stage_with_policy(
-    input: ResolveStageInput,
+    mut input: ResolveStageInput,
     inputs: ResolveInputs,
     policy: FrontendPolicy,
 ) -> ResolveStageResult {
+    typestate::desugar_module(&mut input.module, &mut input.node_id_gen);
     let output = resolve_with_imports_and_symbols_partial(
         input,
         inputs.imported_modules,
