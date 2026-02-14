@@ -60,6 +60,9 @@ pub enum ParseError {
     #[error("Attribute not allowed here")]
     AttributeNotAllowed(Span),
 
+    #[error("Feature `{feature}` is not enabled; pass `--experimental {feature}`")]
+    FeatureDisabled { feature: &'static str, span: Span },
+
     #[error("Unmatched format brace at {0}")]
     UnmatchedFormatBrace(Span),
 
@@ -94,6 +97,7 @@ impl ParseError {
             ParseError::ExpectedRefinement(token) => token.span,
             ParseError::UnknownAttribute(_, span) => *span,
             ParseError::AttributeNotAllowed(span) => *span,
+            ParseError::FeatureDisabled { span, .. } => *span,
             ParseError::UnmatchedFormatBrace(span) => *span,
             ParseError::InvalidFormatExpr(span) => *span,
             ParseError::EmptyFormatExpr(span) => *span,

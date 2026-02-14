@@ -36,6 +36,9 @@ pub fn attach_def_owners(
             crate::core::tree::resolved::TopLevelItem::TypeDef(type_def) => {
                 collector.visit_type_def(type_def)
             }
+            crate::core::tree::resolved::TopLevelItem::TypestateDef(typestate_def) => {
+                collector.visit_typestate_def(typestate_def)
+            }
             crate::core::tree::resolved::TopLevelItem::FuncDecl(func_decl) => {
                 collector.visit_func_decl(func_decl)
             }
@@ -58,6 +61,7 @@ fn top_level_item_id(item: &crate::core::tree::resolved::TopLevelItem) -> NodeId
     match item {
         crate::core::tree::resolved::TopLevelItem::TraitDef(trait_def) => trait_def.id,
         crate::core::tree::resolved::TopLevelItem::TypeDef(type_def) => type_def.id,
+        crate::core::tree::resolved::TopLevelItem::TypestateDef(typestate_def) => typestate_def.id,
         crate::core::tree::resolved::TopLevelItem::FuncDecl(func_decl) => func_decl.id,
         crate::core::tree::resolved::TopLevelItem::FuncDef(func_def) => func_def.id,
         crate::core::tree::resolved::TopLevelItem::MethodBlock(method_block) => method_block.id,
@@ -89,6 +93,11 @@ impl Visitor<DefId> for DefOwnerCollector<'_> {
     fn visit_type_def(&mut self, type_def: &crate::core::tree::resolved::TypeDef) {
         self.record(type_def.def_id);
         visit::walk_type_def(self, type_def);
+    }
+
+    fn visit_typestate_def(&mut self, typestate_def: &crate::core::tree::resolved::TypestateDef) {
+        self.record(typestate_def.def_id);
+        visit::walk_typestate_def(self, typestate_def);
     }
 
     fn visit_func_decl(&mut self, func_decl: &crate::core::tree::resolved::FuncDecl) {

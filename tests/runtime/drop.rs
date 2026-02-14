@@ -13,6 +13,7 @@ fn trace_opts() -> CompileOptions {
         trace_alloc: true,
         trace_drops: false,
         inject_prelude: true,
+        experimental_typestate: false,
     }
 }
 

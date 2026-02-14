@@ -40,7 +40,7 @@ impl<'a> Parser<'a> {
         }
     }
 
-    fn parse_func_sig(&mut self) -> Result<FunctionSig, ParseError> {
+    pub(super) fn parse_func_sig(&mut self) -> Result<FunctionSig, ParseError> {
         let marker = self.mark();
 
         self.consume_keyword(TK::KwFn)?;

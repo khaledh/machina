@@ -15,7 +15,7 @@ use thiserror::Error;
 
 use crate::core::diag::Span;
 use crate::core::lexer::{LexError, Lexer, Token};
-use crate::core::parse::{ParseError, Parser};
+use crate::core::parse::{ParseError, Parser, ParserOptions};
 use crate::core::tree::NodeIdGen;
 use crate::core::tree::parsed::{Module, Require};
 
@@ -92,6 +92,11 @@ pub struct ParsedModule {
     pub source: ModuleSource,
     pub module: Module,
     pub requires: Vec<RequireSpec>,
+}
+
+#[derive(Debug, Clone, Copy, Default)]
+pub struct CapsuleParseOptions {
+    pub experimental_typestate: bool,
 }
 
 #[derive(Debug, Clone)]
@@ -255,10 +260,28 @@ pub fn discover_and_parse_capsule(
     entry_source: &str,
     entry_file: &Path,
 ) -> Result<CapsuleParsed, CapsuleError> {
+    discover_and_parse_capsule_with_options(
+        entry_source,
+        entry_file,
+        CapsuleParseOptions::default(),
+    )
+}
+
+pub fn discover_and_parse_capsule_with_options(
+    entry_source: &str,
+    entry_file: &Path,
+    options: CapsuleParseOptions,
+) -> Result<CapsuleParsed, CapsuleError> {
     let project_root = infer_project_root(entry_file);
     let entry_path = ModulePath::from_file(entry_file, &project_root)?;
     let loader = FsModuleLoader::new(project_root);
-    discover_and_parse_capsule_with_loader(entry_source, entry_file, entry_path, &loader)
+    discover_and_parse_capsule_with_loader_and_options(
+        entry_source,
+        entry_file,
+        entry_path,
+        &loader,
+        options,
+    )
 }
 
 pub fn discover_and_parse_capsule_with_loader(
@@ -267,10 +290,26 @@ pub fn discover_and_parse_capsule_with_loader(
     entry_path: ModulePath,
     loader: &impl ModuleLoader,
 ) -> Result<CapsuleParsed, CapsuleError> {
+    discover_and_parse_capsule_with_loader_and_options(
+        entry_source,
+        entry_file,
+        entry_path,
+        loader,
+        CapsuleParseOptions::default(),
+    )
+}
+
+pub fn discover_and_parse_capsule_with_loader_and_options(
+    entry_source: &str,
+    entry_file: &Path,
+    entry_path: ModulePath,
+    loader: &impl ModuleLoader,
+    options: CapsuleParseOptions,
+) -> Result<CapsuleParsed, CapsuleError> {
     let mut id_gen = NodeIdGen::new();
     let mut next_module_id = 0u32;
 
-    let entry_module = parse_module(entry_source, entry_file, id_gen)?;
+    let entry_module = parse_module(entry_source, entry_file, id_gen, options)?;
     id_gen = entry_module.1;
     let entry_requires = collect_requires(&entry_path, &entry_module.0)?;
 
@@ -314,7 +353,8 @@ pub fn discover_and_parse_capsule_with_loader(
                 *existing
             } else {
                 let (dep_file, dep_source) = loader.load(&req.module_path)?;
-                let (dep_module, next_id_gen) = parse_module(&dep_source, &dep_file, id_gen)?;
+                let (dep_module, next_id_gen) =
+                    parse_module(&dep_source, &dep_file, id_gen, options)?;
                 id_gen = next_id_gen;
                 let dep_requires = collect_requires(&req.module_path, &dep_module)?;
                 let dep_id = ModuleId(next_module_id);
@@ -429,6 +469,7 @@ fn parse_module(
     source: &str,
     path: &Path,
     id_gen: NodeIdGen,
+    options: CapsuleParseOptions,
 ) -> Result<(Module, NodeIdGen), CapsuleError> {
     let lexer = Lexer::new(source);
     let tokens = lexer
@@ -439,7 +480,13 @@ fn parse_module(
             error,
         })?;
 
-    let mut parser = Parser::new_with_id_gen(&tokens, id_gen);
+    let mut parser = Parser::new_with_id_gen_and_options(
+        &tokens,
+        id_gen,
+        ParserOptions {
+            experimental_typestate: options.experimental_typestate,
+        },
+    );
     let module = parser.parse().map_err(|error| CapsuleError::Parse {
         path: path.to_path_buf(),
         error,

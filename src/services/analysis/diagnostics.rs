@@ -137,6 +137,13 @@ impl Diagnostic {
                 "MC-PARSE-UNKNOWN-ATTRIBUTE"
             }
             ParseError::AttributeNotAllowed(_) => "MC-PARSE-ATTRIBUTE-NOT-ALLOWED",
+            ParseError::FeatureDisabled { feature, .. } => {
+                metadata.insert(
+                    "feature".to_string(),
+                    DiagnosticValue::String((*feature).to_string()),
+                );
+                "MC-PARSE-FEATURE-DISABLED"
+            }
             ParseError::UnmatchedFormatBrace(_) => "MC-PARSE-UNMATCHED-FORMAT-BRACE",
             ParseError::InvalidFormatExpr(_) => "MC-PARSE-INVALID-FORMAT-EXPR",
             ParseError::EmptyFormatExpr(_) => "MC-PARSE-EMPTY-FORMAT-EXPR",

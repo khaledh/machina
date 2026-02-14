@@ -1806,6 +1806,7 @@ fn top_level_item_id(item: &TopLevelItem) -> crate::core::tree::NodeId {
     match item {
         TopLevelItem::TraitDef(trait_def) => trait_def.id,
         TopLevelItem::TypeDef(type_def) => type_def.id,
+        TopLevelItem::TypestateDef(typestate_def) => typestate_def.id,
         TopLevelItem::FuncDecl(func_decl) => func_decl.id,
         TopLevelItem::FuncDef(func_def) => func_def.id,
         TopLevelItem::MethodBlock(method_block) => method_block.id,
@@ -1822,6 +1823,9 @@ fn module_exported_members(module: &Module) -> HashSet<String> {
             }
             TopLevelItem::TypeDef(type_def) => {
                 members.insert(type_def.name.clone());
+            }
+            TopLevelItem::TypestateDef(typestate_def) => {
+                members.insert(typestate_def.name.clone());
             }
             TopLevelItem::FuncDecl(func_decl) => {
                 members.insert(func_decl.sig.name.clone());

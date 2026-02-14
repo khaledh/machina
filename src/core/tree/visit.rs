@@ -43,6 +43,26 @@ pub trait Visitor<D = String, T = ()> {
         walk_trait_property(self, property)
     }
 
+    fn visit_typestate_def(&mut self, typestate_def: &TypestateDef<D, T>) {
+        walk_typestate_def(self, typestate_def)
+    }
+
+    fn visit_typestate_item(&mut self, item: &TypestateItem<D, T>) {
+        walk_typestate_item(self, item)
+    }
+
+    fn visit_typestate_fields(&mut self, fields: &TypestateFields<D>) {
+        walk_typestate_fields(self, fields)
+    }
+
+    fn visit_typestate_state(&mut self, state: &TypestateState<D, T>) {
+        walk_typestate_state(self, state)
+    }
+
+    fn visit_typestate_state_item(&mut self, item: &TypestateStateItem<D, T>) {
+        walk_typestate_state_item(self, item)
+    }
+
     fn visit_struct_def_fields(&mut self, fields: &[StructDefField<D>]) {
         walk_struct_def_fields(self, fields)
     }
@@ -169,6 +189,7 @@ pub fn walk_module<V: Visitor<D, T> + ?Sized, D, T>(v: &mut V, module: &Module<D
         match item {
             TopLevelItem::TraitDef(trait_def) => v.visit_trait_def(trait_def),
             TopLevelItem::TypeDef(type_def) => v.visit_type_def(type_def),
+            TopLevelItem::TypestateDef(typestate_def) => v.visit_typestate_def(typestate_def),
             TopLevelItem::FuncDecl(func_decl) => v.visit_func_decl(func_decl),
             TopLevelItem::FuncDef(func_def) => v.visit_func_def(func_def),
             TopLevelItem::MethodBlock(method_block) => v.visit_method_block(method_block),
@@ -197,6 +218,51 @@ pub fn walk_trait_property<V: Visitor<D, T> + ?Sized, D, T>(
     property: &TraitProperty<D>,
 ) {
     v.visit_type_expr(&property.ty);
+}
+
+pub fn walk_typestate_def<V: Visitor<D, T> + ?Sized, D, T>(
+    v: &mut V,
+    typestate_def: &TypestateDef<D, T>,
+) {
+    for item in &typestate_def.items {
+        v.visit_typestate_item(item);
+    }
+}
+
+pub fn walk_typestate_item<V: Visitor<D, T> + ?Sized, D, T>(v: &mut V, item: &TypestateItem<D, T>) {
+    match item {
+        TypestateItem::Fields(fields) => v.visit_typestate_fields(fields),
+        TypestateItem::Constructor(constructor) => v.visit_func_def(constructor),
+        TypestateItem::State(state) => v.visit_typestate_state(state),
+    }
+}
+
+pub fn walk_typestate_fields<V: Visitor<D, T> + ?Sized, D, T>(
+    v: &mut V,
+    fields: &TypestateFields<D>,
+) {
+    for field in &fields.fields {
+        v.visit_struct_def_field(field);
+    }
+}
+
+pub fn walk_typestate_state<V: Visitor<D, T> + ?Sized, D, T>(
+    v: &mut V,
+    state: &TypestateState<D, T>,
+) {
+    for item in &state.items {
+        v.visit_typestate_state_item(item);
+    }
+}
+
+pub fn walk_typestate_state_item<V: Visitor<D, T> + ?Sized, D, T>(
+    v: &mut V,
+    item: &TypestateStateItem<D, T>,
+) {
+    match item {
+        TypestateStateItem::Fields(fields) => v.visit_typestate_fields(fields),
+        TypestateStateItem::Method(method) => v.visit_func_def(method),
+    }
 }
 
 pub fn walk_type_def<V: Visitor<D, T> + ?Sized, D, T>(v: &mut V, type_def: &TypeDef<D>) {

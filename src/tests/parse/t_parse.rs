@@ -1,15 +1,20 @@
 use super::*;
 use crate::core::lexer::{LexError, Lexer, Token};
+use crate::core::parse::ParserOptions;
 use crate::core::tree::RefinementKind;
 
 fn parse_module(source: &str) -> Result<Module, ParseError> {
+    parse_module_with_options(source, ParserOptions::default())
+}
+
+fn parse_module_with_options(source: &str, options: ParserOptions) -> Result<Module, ParseError> {
     let lexer = Lexer::new(source);
     let tokens = lexer
         .tokenize()
         .collect::<Result<Vec<Token>, LexError>>()
         .expect("Failed to tokenize");
 
-    let mut parser = Parser::new(&tokens);
+    let mut parser = Parser::new_with_id_gen_and_options(&tokens, NodeIdGen::new(), options);
     parser.parse()
 }
 
@@ -2249,4 +2254,78 @@ fn test_parse_named_type_rejects_dot_separator() {
     "#;
 
     assert!(parse_source(source).is_err());
+}
+
+#[test]
+fn test_parse_typestate_disabled_by_default() {
+    let source = r#"
+        typestate Connection {
+            fields {
+                addr: string,
+            }
+
+            fn new(addr: string) -> Disconnected {
+                Disconnected { addr: addr }
+            }
+
+            state Disconnected {
+                fn connect(fd: u64) -> Connected {
+                    Connected { fd: fd }
+                }
+            }
+
+            state Connected {
+                fields {
+                    fd: u64,
+                }
+            }
+        }
+    "#;
+
+    let err = parse_module(source).expect_err("typestate should require experimental flag");
+    assert!(matches!(
+        err,
+        ParseError::FeatureDisabled {
+            feature: "typestate",
+            ..
+        }
+    ));
+}
+
+#[test]
+fn test_parse_typestate_with_experimental_flag() {
+    let source = r#"
+        typestate Connection {
+            fields {
+                addr: string,
+            }
+
+            fn new(addr: string) -> Disconnected {
+                Disconnected { addr: addr }
+            }
+
+            state Disconnected {
+                fn connect(fd: u64) -> Connected {
+                    Connected { fd: fd }
+                }
+            }
+        }
+    "#;
+
+    let module = parse_module_with_options(
+        source,
+        ParserOptions {
+            experimental_typestate: true,
+        },
+    )
+    .expect("typestate should parse when experimental flag is enabled");
+
+    assert_eq!(module.top_level_items.len(), 1);
+    let typestate = match &module.top_level_items[0] {
+        TopLevelItem::TypestateDef(def) => def,
+        _ => panic!("expected typestate top-level item"),
+    };
+
+    assert_eq!(typestate.name, "Connection");
+    assert_eq!(typestate.items.len(), 3);
 }

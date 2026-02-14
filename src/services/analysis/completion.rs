@@ -590,6 +590,9 @@ fn global_scope(
                     }
                 }
             }
+            res::TopLevelItem::TypestateDef(typestate_def) => {
+                allowed_nodes.insert(typestate_def.id);
+            }
             res::TopLevelItem::FuncDecl(func_decl) => {
                 allowed_nodes.insert(func_decl.id);
             }

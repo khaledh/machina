@@ -189,6 +189,9 @@ impl<'a> Elaborator<'a> {
         match item {
             norm::TopLevelItem::TraitDef(def) => sem::TopLevelItem::TraitDef(def.clone()),
             norm::TopLevelItem::TypeDef(def) => sem::TopLevelItem::TypeDef(def.clone()),
+            norm::TopLevelItem::TypestateDef(_) => {
+                panic!("compiler bug: typestate defs should be desugared before elaborate")
+            }
             norm::TopLevelItem::FuncDecl(decl) => sem::TopLevelItem::FuncDecl(sem::FuncDecl {
                 id: decl.id,
                 def_id: decl.def_id,

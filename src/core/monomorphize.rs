@@ -538,7 +538,9 @@ fn rewrite_calls_in_item(item: &mut res::TopLevelItem, call_inst_map: &HashMap<N
         res::TopLevelItem::FuncDecl(func_decl) => rewriter.visit_func_decl(func_decl),
         res::TopLevelItem::MethodBlock(method_block) => rewriter.visit_method_block(method_block),
         res::TopLevelItem::ClosureDef(closure_def) => rewriter.visit_closure_def(closure_def),
-        res::TopLevelItem::TypeDef(_) | res::TopLevelItem::TraitDef(_) => {}
+        res::TopLevelItem::TypeDef(_)
+        | res::TopLevelItem::TraitDef(_)
+        | res::TopLevelItem::TypestateDef(_) => {}
     }
 }
 
@@ -650,7 +652,9 @@ fn remap_local_defs_in_item(
                 collector.visit_method_block(method_block)
             }
             res::TopLevelItem::ClosureDef(closure_def) => collector.visit_closure_def(closure_def),
-            res::TopLevelItem::TypeDef(_) | res::TopLevelItem::TraitDef(_) => {}
+            res::TopLevelItem::TypeDef(_)
+            | res::TopLevelItem::TraitDef(_)
+            | res::TopLevelItem::TypestateDef(_) => {}
         }
     }
     let mut remapper = LocalDefRemapper::new(def_table, closure_defs);
@@ -681,6 +685,10 @@ fn reseed_ids_in_item(item: &mut res::TopLevelItem, node_id_gen: &mut NodeIdGen)
         }
         res::TopLevelItem::ClosureDef(closure_def) => reseed_closure_def(closure_def, node_id_gen),
         res::TopLevelItem::TraitDef(trait_def) => reseed_trait_def(trait_def, node_id_gen),
+        res::TopLevelItem::TypestateDef(typestate_def) => {
+            typestate_def.id = node_id_gen.new_id();
+            reseed_typestate_def(typestate_def, node_id_gen);
+        }
         res::TopLevelItem::TypeDef(type_def) => {
             type_def.id = node_id_gen.new_id();
             reseed_type_def(type_def, node_id_gen);
@@ -697,6 +705,36 @@ fn reseed_trait_def(trait_def: &mut res::TraitDef, node_id_gen: &mut NodeIdGen) 
     for property in &mut trait_def.properties {
         property.id = node_id_gen.new_id();
         reseed_type_expr(&mut property.ty, node_id_gen);
+    }
+}
+
+fn reseed_typestate_def(typestate_def: &mut res::TypestateDef, node_id_gen: &mut NodeIdGen) {
+    for item in &mut typestate_def.items {
+        match item {
+            res::TypestateItem::Fields(fields) => reseed_typestate_fields(fields, node_id_gen),
+            res::TypestateItem::Constructor(constructor) => {
+                reseed_func_def(constructor, node_id_gen);
+            }
+            res::TypestateItem::State(state) => reseed_typestate_state(state, node_id_gen),
+        }
+    }
+}
+
+fn reseed_typestate_state(state: &mut res::TypestateState, node_id_gen: &mut NodeIdGen) {
+    state.id = node_id_gen.new_id();
+    for item in &mut state.items {
+        match item {
+            res::TypestateStateItem::Fields(fields) => reseed_typestate_fields(fields, node_id_gen),
+            res::TypestateStateItem::Method(method) => reseed_func_def(method, node_id_gen),
+        }
+    }
+}
+
+fn reseed_typestate_fields(fields: &mut res::TypestateFields, node_id_gen: &mut NodeIdGen) {
+    fields.id = node_id_gen.new_id();
+    for field in &mut fields.fields {
+        field.id = node_id_gen.new_id();
+        reseed_type_expr(&mut field.ty, node_id_gen);
     }
 }
 

@@ -3,7 +3,7 @@
 # Top-level
 Module             ::= TopLevelItem*
 
-TopLevelItem       ::= (AttributeList (TypeDef | TraitDef | FuncDecl | FuncDef)) | MethodBlock
+TopLevelItem       ::= (AttributeList (TypeDef | TraitDef | FuncDecl | FuncDef)) | MethodBlock | TypestateDef
 
 # Attributes
 AttributeList      ::= ("@[" AttributeItem ("," AttributeItem)* ","? "]")?
@@ -27,6 +27,16 @@ EnumVariantDef     ::= Identifier ( "(" TypeExprList ")" )?
 # Traits
 TraitDef           ::= "trait" Identifier "{" TraitMethodDecl* "}"
 TraitMethodDecl    ::= MethodSig ";"
+
+# Typestates
+TypestateDef       ::= "typestate" Identifier "{" TypestateItem* "}"
+TypestateItem      ::= TypestateFields | TypestateNew | TypestateState
+TypestateFields    ::= "fields" "{" StructFieldList? "}"
+TypestateNew       ::= "fn" "new" TypeParamList? "(" ParamList? ")" ( "->" TypeExpr )? Block
+TypestateState     ::= "state" Identifier "{" TypestateStateItem* "}"
+TypestateStateItem ::= TypestateStateFields | TypestateStateMethod
+TypestateStateFields ::= "fields" "{" StructFieldList? "}"
+TypestateStateMethod ::= Func
 
 # Type Expressions
 TypeExpr           ::= TypeExprTerm ( "|" TypeExprTerm )*

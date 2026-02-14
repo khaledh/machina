@@ -2,8 +2,8 @@ use std::collections::HashMap;
 use std::path::PathBuf;
 
 use crate::core::api::{
-    FrontendPolicy, ParseModuleError, ResolveInputs, elaborate_stage, parse_module_with_id_gen,
-    semcheck_stage,
+    FrontendPolicy, ParseModuleError, ParseModuleOptions, ResolveInputs, elaborate_stage,
+    parse_module_with_id_gen_and_options, semcheck_stage,
 };
 use crate::core::backend;
 use crate::core::backend::regalloc::arm64::Arm64Target;
@@ -28,6 +28,7 @@ pub struct CompileOptions {
     pub trace_alloc: bool,
     pub trace_drops: bool,
     pub inject_prelude: bool,
+    pub experimental_typestate: bool,
 }
 
 pub struct CompileOutput {
@@ -40,9 +41,16 @@ pub fn check_with_path(
     source: &str,
     source_path: &std::path::Path,
     inject_prelude: bool,
+    experimental_typestate: bool,
 ) -> Result<(), Vec<CompileError>> {
-    let program =
-        capsule::discover_and_parse_capsule(source, source_path).map_err(|e| vec![e.into()])?;
+    let program = capsule::discover_and_parse_capsule_with_options(
+        source,
+        source_path,
+        capsule::CapsuleParseOptions {
+            experimental_typestate,
+        },
+    )
+    .map_err(|e| vec![e.into()])?;
     let program_context = CapsuleParsedContext::new(program);
 
     let flattened = flatten_capsule(&program_context).map_err(|errs| {
@@ -60,7 +68,8 @@ pub fn check_with_path(
             .join("prelude_decl.mc");
         let prelude_src = std::fs::read_to_string(&prelude_path)
             .map_err(|e| vec![CompileError::Io(prelude_path.clone(), e)])?;
-        let (prelude_module, id_gen_after_prelude) = parse_with_id_gen(&prelude_src, id_gen)?;
+        let (prelude_module, id_gen_after_prelude) =
+            parse_with_id_gen(&prelude_src, id_gen, experimental_typestate)?;
         (
             merge_modules(&prelude_module, &user_module),
             id_gen_after_prelude,
@@ -85,8 +94,14 @@ pub fn compile_with_path(
     opts: &CompileOptions,
 ) -> Result<CompileOutput, Vec<CompileError>> {
     let program_context = if let Some(path) = source_path {
-        let program =
-            capsule::discover_and_parse_capsule(source, path).map_err(|e| vec![e.into()])?;
+        let program = capsule::discover_and_parse_capsule_with_options(
+            source,
+            path,
+            capsule::CapsuleParseOptions {
+                experimental_typestate: opts.experimental_typestate,
+            },
+        )
+        .map_err(|e| vec![e.into()])?;
         Some(CapsuleParsedContext::new(program))
     } else {
         None
@@ -151,7 +166,7 @@ pub fn compile_with_path(
         )
     } else {
         let id_gen = NodeIdGen::new();
-        let (module, id_gen) = parse_with_id_gen(source, id_gen)?;
+        let (module, id_gen) = parse_with_id_gen(source, id_gen, opts.experimental_typestate)?;
         (module, id_gen, HashMap::new())
     };
 
@@ -163,7 +178,8 @@ pub fn compile_with_path(
         let prelude_src = std::fs::read_to_string(&prelude_path)
             .map_err(|e| vec![CompileError::Io(prelude_path.clone(), e)])?;
 
-        let (prelude_module, id_gen) = parse_with_id_gen(&prelude_src, id_gen)?;
+        let (prelude_module, id_gen) =
+            parse_with_id_gen(&prelude_src, id_gen, opts.experimental_typestate)?;
         (merge_modules(&prelude_module, &user_module), id_gen)
     } else {
         (user_module, id_gen)
@@ -323,8 +339,16 @@ pub fn compile_with_path(
 fn parse_with_id_gen(
     source: &str,
     id_gen: NodeIdGen,
+    experimental_typestate: bool,
 ) -> Result<(ParsedModule, NodeIdGen), Vec<CompileError>> {
-    parse_module_with_id_gen(source, id_gen).map_err(|e| match e {
+    parse_module_with_id_gen_and_options(
+        source,
+        id_gen,
+        ParseModuleOptions {
+            experimental_typestate,
+        },
+    )
+    .map_err(|e| match e {
         ParseModuleError::Lex(e) => vec![e.into()],
         ParseModuleError::Parse(e) => vec![e.into()],
     })

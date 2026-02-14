@@ -263,6 +263,7 @@ fn top_level_item_id(item: &parsed::TopLevelItem) -> NodeId {
     match item {
         parsed::TopLevelItem::TraitDef(trait_def) => trait_def.id,
         parsed::TopLevelItem::TypeDef(type_def) => type_def.id,
+        parsed::TopLevelItem::TypestateDef(typestate_def) => typestate_def.id,
         parsed::TopLevelItem::FuncDecl(func_decl) => func_decl.id,
         parsed::TopLevelItem::FuncDef(func_def) => func_def.id,
         parsed::TopLevelItem::MethodBlock(method_block) => method_block.id,

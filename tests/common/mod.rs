@@ -17,6 +17,7 @@ pub(crate) fn run_program(name: &str, source: &str) -> Output {
             trace_alloc: false,
             trace_drops: false,
             inject_prelude: true,
+            experimental_typestate: false,
         },
     )
 }
@@ -104,6 +105,7 @@ fn compile_prelude_impl(repo_root: &Path, temp_dir: &Path) -> PathBuf {
         trace_alloc: false,
         trace_drops: false,
         inject_prelude: true,
+        experimental_typestate: false,
     };
     let prelude = compile_with_path(&source, Some(&prelude_path), &opts).expect("compile failed");
 

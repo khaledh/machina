@@ -34,6 +34,16 @@ pub struct Require {
 }
 
 impl<D, T> Module<D, T> {
+    pub fn typestate_defs(&self) -> Vec<&TypestateDef<D, T>> {
+        self.top_level_items
+            .iter()
+            .filter_map(|item| match item {
+                TopLevelItem::TypestateDef(typestate_def) => Some(typestate_def),
+                _ => None,
+            })
+            .collect()
+    }
+
     pub fn trait_defs(&self) -> Vec<&TraitDef<D>> {
         self.top_level_items
             .iter()
@@ -132,7 +142,9 @@ impl<D, T> Module<D, T> {
                 TopLevelItem::ClosureDef(closure_decl) => {
                     vec![CallableRef::ClosureDef(closure_decl)]
                 }
-                TopLevelItem::TypeDef(_) | TopLevelItem::TraitDef(_) => vec![],
+                TopLevelItem::TypeDef(_)
+                | TopLevelItem::TraitDef(_)
+                | TopLevelItem::TypestateDef(_) => vec![],
             })
             .collect()
     }
@@ -144,10 +156,48 @@ impl<D, T> Module<D, T> {
 pub enum TopLevelItem<D, T = ()> {
     TraitDef(TraitDef<D>),
     TypeDef(TypeDef<D>),
+    TypestateDef(TypestateDef<D, T>),
     FuncDecl(FuncDecl<D>),          // function declaration
     FuncDef(FuncDef<D, T>),         // function definition
     MethodBlock(MethodBlock<D, T>), // method declarations/definitions
     ClosureDef(ClosureDef<D, T>),   // closure definition (generated)
+}
+
+#[derive(Clone, Debug)]
+pub struct TypestateDef<D, T = ()> {
+    pub id: NodeId,
+    pub def_id: D,
+    pub name: String,
+    pub items: Vec<TypestateItem<D, T>>,
+    pub span: Span,
+}
+
+#[derive(Clone, Debug)]
+pub enum TypestateItem<D, T = ()> {
+    Fields(TypestateFields<D>),
+    Constructor(FuncDef<D, T>),
+    State(TypestateState<D, T>),
+}
+
+#[derive(Clone, Debug)]
+pub struct TypestateFields<D> {
+    pub id: NodeId,
+    pub fields: Vec<StructDefField<D>>,
+    pub span: Span,
+}
+
+#[derive(Clone, Debug)]
+pub struct TypestateState<D, T = ()> {
+    pub id: NodeId,
+    pub name: String,
+    pub items: Vec<TypestateStateItem<D, T>>,
+    pub span: Span,
+}
+
+#[derive(Clone, Debug)]
+pub enum TypestateStateItem<D, T = ()> {
+    Fields(TypestateFields<D>),
+    Method(FuncDef<D, T>),
 }
 
 #[derive(Clone, Debug)]

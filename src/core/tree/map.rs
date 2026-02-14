@@ -41,6 +41,46 @@ pub trait TreeMapper {
         walk_top_level_item(self, item, ctx)
     }
 
+    fn map_typestate_def(
+        &mut self,
+        typestate_def: &TypestateDef<Self::InD, Self::InT>,
+        ctx: &mut Self::Context,
+    ) -> TypestateDef<Self::OutD, Self::OutT> {
+        walk_typestate_def(self, typestate_def, ctx)
+    }
+
+    fn map_typestate_item(
+        &mut self,
+        item: &TypestateItem<Self::InD, Self::InT>,
+        ctx: &mut Self::Context,
+    ) -> TypestateItem<Self::OutD, Self::OutT> {
+        walk_typestate_item(self, item, ctx)
+    }
+
+    fn map_typestate_fields(
+        &mut self,
+        fields: &TypestateFields<Self::InD>,
+        ctx: &mut Self::Context,
+    ) -> TypestateFields<Self::OutD> {
+        walk_typestate_fields(self, fields, ctx)
+    }
+
+    fn map_typestate_state(
+        &mut self,
+        state: &TypestateState<Self::InD, Self::InT>,
+        ctx: &mut Self::Context,
+    ) -> TypestateState<Self::OutD, Self::OutT> {
+        walk_typestate_state(self, state, ctx)
+    }
+
+    fn map_typestate_state_item(
+        &mut self,
+        item: &TypestateStateItem<Self::InD, Self::InT>,
+        ctx: &mut Self::Context,
+    ) -> TypestateStateItem<Self::OutD, Self::OutT> {
+        walk_typestate_state_item(self, item, ctx)
+    }
+
     fn map_type_def(
         &mut self,
         type_def: &TypeDef<Self::InD>,
@@ -358,6 +398,9 @@ pub fn walk_top_level_item<M: TreeMapper + ?Sized>(
         TopLevelItem::TypeDef(type_def) => {
             TopLevelItem::TypeDef(mapper.map_type_def(type_def, ctx))
         }
+        TopLevelItem::TypestateDef(typestate_def) => {
+            TopLevelItem::TypestateDef(mapper.map_typestate_def(typestate_def, ctx))
+        }
         TopLevelItem::FuncDecl(func_decl) => {
             TopLevelItem::FuncDecl(mapper.map_func_decl(func_decl, ctx))
         }
@@ -369,6 +412,88 @@ pub fn walk_top_level_item<M: TreeMapper + ?Sized>(
         }
         TopLevelItem::ClosureDef(closure_def) => {
             TopLevelItem::ClosureDef(mapper.map_closure_def(closure_def, ctx))
+        }
+    }
+}
+
+pub fn walk_typestate_def<M: TreeMapper + ?Sized>(
+    mapper: &mut M,
+    typestate_def: &TypestateDef<M::InD, M::InT>,
+    ctx: &mut M::Context,
+) -> TypestateDef<M::OutD, M::OutT> {
+    TypestateDef {
+        id: typestate_def.id,
+        def_id: mapper.map_def_id(typestate_def.id, &typestate_def.def_id, ctx),
+        name: typestate_def.name.clone(),
+        items: typestate_def
+            .items
+            .iter()
+            .map(|item| mapper.map_typestate_item(item, ctx))
+            .collect(),
+        span: typestate_def.span,
+    }
+}
+
+pub fn walk_typestate_item<M: TreeMapper + ?Sized>(
+    mapper: &mut M,
+    item: &TypestateItem<M::InD, M::InT>,
+    ctx: &mut M::Context,
+) -> TypestateItem<M::OutD, M::OutT> {
+    match item {
+        TypestateItem::Fields(fields) => {
+            TypestateItem::Fields(mapper.map_typestate_fields(fields, ctx))
+        }
+        TypestateItem::Constructor(constructor) => {
+            TypestateItem::Constructor(mapper.map_func_def(constructor, ctx))
+        }
+        TypestateItem::State(state) => TypestateItem::State(mapper.map_typestate_state(state, ctx)),
+    }
+}
+
+pub fn walk_typestate_fields<M: TreeMapper + ?Sized>(
+    mapper: &mut M,
+    fields: &TypestateFields<M::InD>,
+    ctx: &mut M::Context,
+) -> TypestateFields<M::OutD> {
+    TypestateFields {
+        id: fields.id,
+        fields: fields
+            .fields
+            .iter()
+            .map(|field| mapper.map_struct_def_field(field, ctx))
+            .collect(),
+        span: fields.span,
+    }
+}
+
+pub fn walk_typestate_state<M: TreeMapper + ?Sized>(
+    mapper: &mut M,
+    state: &TypestateState<M::InD, M::InT>,
+    ctx: &mut M::Context,
+) -> TypestateState<M::OutD, M::OutT> {
+    TypestateState {
+        id: state.id,
+        name: state.name.clone(),
+        items: state
+            .items
+            .iter()
+            .map(|item| mapper.map_typestate_state_item(item, ctx))
+            .collect(),
+        span: state.span,
+    }
+}
+
+pub fn walk_typestate_state_item<M: TreeMapper + ?Sized>(
+    mapper: &mut M,
+    item: &TypestateStateItem<M::InD, M::InT>,
+    ctx: &mut M::Context,
+) -> TypestateStateItem<M::OutD, M::OutT> {
+    match item {
+        TypestateStateItem::Fields(fields) => {
+            TypestateStateItem::Fields(mapper.map_typestate_fields(fields, ctx))
+        }
+        TypestateStateItem::Method(method) => {
+            TypestateStateItem::Method(mapper.map_func_def(method, ctx))
         }
     }
 }

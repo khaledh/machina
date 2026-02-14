@@ -48,6 +48,10 @@ struct Args {
     /// Verify SSA IR invariants after SSA lowering/optimization.
     #[clap(long = "verify-ir", global = true)]
     verify_ir: bool,
+
+    /// Enable experimental language features (comma-separated).
+    #[clap(long, value_delimiter = ',', global = true)]
+    experimental: Vec<ExperimentalFeature>,
 }
 
 #[derive(clap::Subcommand)]
@@ -119,6 +123,11 @@ enum QueryLookupKind {
     CodeActions,
 }
 
+#[derive(clap::ValueEnum, Clone, Copy, PartialEq, Eq)]
+enum ExperimentalFeature {
+    Typestate,
+}
+
 #[derive(Copy, Clone)]
 enum DriverKind {
     Compile,
@@ -146,7 +155,9 @@ fn main() {
         trace_alloc,
         trace_drops,
         verify_ir,
+        experimental,
     } = Args::parse();
+    let experimental_typestate = experimental.contains(&ExperimentalFeature::Typestate);
     let invocation = match cmd {
         Command::Compile { input, output } => DriverInvocation {
             input_path: PathBuf::from(input),
@@ -165,7 +176,7 @@ fn main() {
         },
         Command::Check { input } => {
             let input_path = PathBuf::from(input);
-            match run_check(&input_path) {
+            match run_check(&input_path, experimental_typestate) {
                 Ok(0) => {}
                 Ok(_) => std::process::exit(1),
                 Err(message) => {
@@ -210,6 +221,7 @@ fn main() {
         trace_alloc,
         trace_drops,
         inject_prelude: true,
+        experimental_typestate,
     };
     let output = compile_with_path(&source, Some(input_path), &opts);
 
@@ -358,10 +370,10 @@ fn main() {
     }
 }
 
-fn run_check(input_path: &Path) -> Result<usize, String> {
+fn run_check(input_path: &Path, experimental_typestate: bool) -> Result<usize, String> {
     let source = std::fs::read_to_string(input_path)
         .map_err(|e| format!("failed to read {}: {e}", input_path.display()))?;
-    match check_with_path(&source, input_path, true) {
+    match check_with_path(&source, input_path, true, experimental_typestate) {
         Ok(()) => {
             println!("[OK] no diagnostics");
             Ok(0)
@@ -810,6 +822,7 @@ fn compile_prelude_impl_object(
         trace_alloc: opts.trace_alloc,
         trace_drops: opts.trace_drops,
         inject_prelude: true,
+        experimental_typestate: opts.experimental_typestate,
     };
 
     let output =

@@ -22,6 +22,11 @@ struct Marker {
     token_index: usize,
 }
 
+#[derive(Debug, Clone, Copy, Default)]
+pub struct ParserOptions {
+    pub experimental_typestate: bool,
+}
+
 pub struct Parser<'a> {
     tokens: &'a [Token],
     pos: usize,
@@ -33,6 +38,7 @@ pub struct Parser<'a> {
     closure_base: Option<String>,
     closure_index: u32,
     require_aliases: HashSet<String>,
+    options: ParserOptions,
 }
 
 impl<'a> Parser<'a> {
@@ -47,10 +53,19 @@ impl<'a> Parser<'a> {
             closure_base: None,
             closure_index: 0,
             require_aliases: HashSet::new(),
+            options: ParserOptions::default(),
         }
     }
 
     pub fn new_with_id_gen(tokens: &'a [Token], id_gen: NodeIdGen) -> Self {
+        Self::new_with_id_gen_and_options(tokens, id_gen, ParserOptions::default())
+    }
+
+    pub fn new_with_id_gen_and_options(
+        tokens: &'a [Token],
+        id_gen: NodeIdGen,
+        options: ParserOptions,
+    ) -> Self {
         Parser {
             tokens,
             pos: 0,
@@ -61,6 +76,7 @@ impl<'a> Parser<'a> {
             closure_base: None,
             closure_index: 0,
             require_aliases: HashSet::new(),
+            options,
         }
     }
 
@@ -170,6 +186,22 @@ impl<'a> Parser<'a> {
             Ok(name.clone())
         } else {
             Err(ParseError::ExpectedIdent(self.curr_token.clone()))
+        }
+    }
+
+    fn is_contextual_keyword(&self, keyword: &str) -> bool {
+        matches!(&self.curr_token.kind, TK::Ident(name) if name == keyword)
+    }
+
+    fn consume_contextual_keyword(&mut self, keyword: &str) -> Result<(), ParseError> {
+        if self.is_contextual_keyword(keyword) {
+            self.advance();
+            Ok(())
+        } else {
+            Err(ParseError::ExpectedToken(
+                TK::Ident(keyword.to_string()),
+                self.curr_token.clone(),
+            ))
         }
     }
 

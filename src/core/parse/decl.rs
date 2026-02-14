@@ -6,6 +6,19 @@ impl<'a> Parser<'a> {
         match &self.curr_token.kind {
             TK::KwType => self.parse_type_def(attrs).map(TopLevelItem::TypeDef),
             TK::KwTrait => self.parse_trait_def(attrs).map(TopLevelItem::TraitDef),
+            TK::KwTypestate => {
+                if !self.options.experimental_typestate {
+                    return Err(ParseError::FeatureDisabled {
+                        feature: "typestate",
+                        span: self.curr_token.span,
+                    });
+                }
+                if attrs.is_empty() {
+                    self.parse_typestate_def().map(TopLevelItem::TypestateDef)
+                } else {
+                    Err(ParseError::AttributeNotAllowed(attrs[0].span))
+                }
+            }
             TK::KwFn => self.parse_func(attrs),
             TK::Ident(_) if self.peek().map(|t| &t.kind) == Some(&TK::DoubleColon) => {
                 if attrs.is_empty() {
@@ -139,25 +152,146 @@ impl<'a> Parser<'a> {
         })
     }
 
+    fn parse_typestate_def(&mut self) -> Result<TypestateDef, ParseError> {
+        let marker = self.mark();
+        self.consume_keyword(TK::KwTypestate)?;
+        let name = self.parse_ident()?;
+        self.consume(&TK::LBrace)?;
+
+        let mut items = Vec::new();
+        while self.curr_token.kind != TK::RBrace {
+            if self.is_contextual_keyword("fields") {
+                items.push(TypestateItem::Fields(self.parse_typestate_fields_block()?));
+                continue;
+            }
+            if self.curr_token.kind == TK::KwFn {
+                let func = self.parse_typestate_func_def(format!("{name}$new"))?;
+                items.push(TypestateItem::Constructor(func));
+                continue;
+            }
+            if self.is_contextual_keyword("state") {
+                items.push(TypestateItem::State(self.parse_typestate_state(&name)?));
+                continue;
+            }
+            return Err(ParseError::ExpectedToken(
+                TK::RBrace,
+                self.curr_token.clone(),
+            ));
+        }
+
+        self.consume(&TK::RBrace)?;
+        Ok(TypestateDef {
+            id: self.id_gen.new_id(),
+            def_id: (),
+            name,
+            items,
+            span: self.close(marker),
+        })
+    }
+
+    fn parse_typestate_state(
+        &mut self,
+        typestate_name: &str,
+    ) -> Result<TypestateState, ParseError> {
+        let marker = self.mark();
+        self.consume_contextual_keyword("state")?;
+        let name = self.parse_ident()?;
+        self.consume(&TK::LBrace)?;
+
+        let mut items = Vec::new();
+        while self.curr_token.kind != TK::RBrace {
+            if self.is_contextual_keyword("fields") {
+                items.push(TypestateStateItem::Fields(
+                    self.parse_typestate_fields_block()?,
+                ));
+                continue;
+            }
+            if self.curr_token.kind == TK::KwFn {
+                let base = format!("{typestate_name}${name}");
+                let method = self.parse_typestate_func_def(base)?;
+                items.push(TypestateStateItem::Method(method));
+                continue;
+            }
+            return Err(ParseError::ExpectedToken(
+                TK::RBrace,
+                self.curr_token.clone(),
+            ));
+        }
+
+        self.consume(&TK::RBrace)?;
+        Ok(TypestateState {
+            id: self.id_gen.new_id(),
+            name,
+            items,
+            span: self.close(marker),
+        })
+    }
+
+    fn parse_typestate_fields_block(&mut self) -> Result<TypestateFields, ParseError> {
+        let marker = self.mark();
+        self.consume_contextual_keyword("fields")?;
+        self.consume(&TK::LBrace)?;
+        let fields = self.parse_list(TK::Comma, TK::RBrace, |parser| {
+            parser.parse_struct_def_field()
+        })?;
+        self.consume(&TK::RBrace)?;
+        Ok(TypestateFields {
+            id: self.id_gen.new_id(),
+            fields,
+            span: self.close(marker),
+        })
+    }
+
+    fn parse_typestate_func_def(&mut self, closure_base: String) -> Result<FuncDef, ParseError> {
+        let marker = self.mark();
+        let sig = self.parse_func_sig()?;
+        if self.curr_token.kind == TK::Semicolon {
+            return Err(ParseError::ExpectedToken(
+                TK::LBrace,
+                self.curr_token.clone(),
+            ));
+        }
+
+        let prev_base = self.closure_base.clone();
+        let prev_index = self.closure_index;
+        self.closure_base = Some(format!("{closure_base}${}", sig.name));
+        self.closure_index = 0;
+        let body = self.parse_block()?;
+        self.closure_base = prev_base;
+        self.closure_index = prev_index;
+
+        Ok(FuncDef {
+            id: self.id_gen.new_id(),
+            def_id: (),
+            attrs: Vec::new(),
+            sig,
+            body,
+            span: self.close(marker),
+        })
+    }
+
     fn parse_struct_def(&mut self) -> Result<TypeDefKind, ParseError> {
         self.consume(&TK::LBrace)?;
 
         let fields = self.parse_list(TK::Comma, TK::RBrace, |parser| {
-            let marker = parser.mark();
-            let name = parser.parse_ident()?;
-            parser.consume(&TK::Colon)?;
-            let ty = parser.parse_type_expr()?;
-
-            Ok(StructDefField {
-                id: parser.id_gen.new_id(),
-                name,
-                ty,
-                span: parser.close(marker),
-            })
+            parser.parse_struct_def_field()
         })?;
 
         self.consume(&TK::RBrace)?;
         Ok(TypeDefKind::Struct { fields })
+    }
+
+    fn parse_struct_def_field(&mut self) -> Result<StructDefField, ParseError> {
+        let marker = self.mark();
+        let name = self.parse_ident()?;
+        self.consume(&TK::Colon)?;
+        let ty = self.parse_type_expr()?;
+        Ok(StructDefField {
+            id: self.id_gen.new_id(),
+            name,
+            ty,
+            span: self.close(marker),
+        })
     }
 
     fn parse_enum_def(&mut self) -> Result<TypeDefKind, ParseError> {

@@ -28,6 +28,11 @@ pub type EnumDefVariant = model::EnumDefVariant<DefId>;
 pub type TraitDef = model::TraitDef<DefId>;
 pub type TraitMethod = model::TraitMethod<DefId>;
 pub type TraitProperty = model::TraitProperty<DefId>;
+pub type TypestateDef = model::TypestateDef<DefId>;
+pub type TypestateItem = model::TypestateItem<DefId>;
+pub type TypestateFields = model::TypestateFields<DefId>;
+pub type TypestateState = model::TypestateState<DefId>;
+pub type TypestateStateItem = model::TypestateStateItem<DefId>;
 
 pub type FuncDecl = model::FuncDecl<DefId>;
 pub type FuncDef = model::FuncDef<DefId>;
