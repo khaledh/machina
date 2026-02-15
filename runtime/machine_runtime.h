@@ -460,4 +460,37 @@ uint8_t __mc_machine_runtime_pending_contains(
     uint64_t cap_id
 );
 
+// Opaque-handle runtime bridge for Machina std wrappers.
+//
+// These helpers expose machine runtime capabilities through plain integer
+// handles so user code does not need to model `mc_machine_runtime_t` layout.
+// Handle value `0` is always invalid.
+uint64_t __mc_machine_runtime_new(void);
+void __mc_machine_runtime_free(uint64_t runtime);
+uint64_t __mc_machine_runtime_spawn_u64(uint64_t runtime, uint64_t mailbox_cap);
+uint64_t __mc_machine_runtime_start_u64(uint64_t runtime, uint64_t machine_id);
+uint64_t __mc_machine_runtime_send_u64(
+    uint64_t runtime,
+    uint64_t dst,
+    uint64_t kind,
+    uint64_t payload0,
+    uint64_t payload1
+);
+uint64_t __mc_machine_runtime_request_u64(
+    uint64_t runtime,
+    uint64_t src,
+    uint64_t dst,
+    uint64_t kind,
+    uint64_t payload0,
+    uint64_t payload1
+);
+uint64_t __mc_machine_runtime_reply_u64(
+    uint64_t runtime,
+    uint64_t src,
+    uint64_t reply_cap_id,
+    uint64_t kind,
+    uint64_t payload0,
+    uint64_t payload1
+);
+
 #endif

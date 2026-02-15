@@ -3,8 +3,8 @@ use super::{
     lower_module_with_machine_plans_with_opts,
 };
 use crate::core::ir::IrTypeKind;
-use crate::core::types::Type;
 use crate::core::tree::semantic as sem;
+use crate::core::types::Type;
 use std::collections::HashMap;
 
 #[test]
@@ -195,7 +195,8 @@ fn test_lower_module_typestate_machine_plans_materialize_artifacts() {
     );
     let thunk_text = format_func(&thunk.func, &thunk.types);
     assert!(
-        thunk_text.contains("fn(ptr<__ts_M_Ready>, ptr<Ping>, ptr<Ping>) -> __ts_M_Ready = const @")
+        thunk_text
+            .contains("fn(ptr<__ts_M_Ready>, ptr<Ping>, ptr<Ping>) -> __ts_M_Ready = const @")
             && thunk_text.contains("call %v20("),
         "expected dispatch thunk to call a concrete typestate handler, got: {thunk_text}"
     );
@@ -204,10 +205,7 @@ fn test_lower_module_typestate_machine_plans_materialize_artifacts() {
         "expected dispatch thunk to allocate next-state token, got: {thunk_text}"
     );
 
-    let has_descriptor_magic = lowered
-        .globals
-        .iter()
-        .any(|g| g.bytes.starts_with(b"MCHD"));
+    let has_descriptor_magic = lowered.globals.iter().any(|g| g.bytes.starts_with(b"MCHD"));
     assert!(
         has_descriptor_magic,
         "expected serialized machine descriptor blob in lowered globals"
@@ -218,7 +216,9 @@ fn contains_unresolved_type(ty: &Type) -> bool {
     match ty {
         Type::Unknown | Type::Var(_) => true,
         Type::Fn { params, ret_ty } => {
-            params.iter().any(|param| contains_unresolved_type(&param.ty))
+            params
+                .iter()
+                .any(|param| contains_unresolved_type(&param.ty))
                 || contains_unresolved_type(ret_ty.as_ref())
         }
         Type::Tuple { field_tys } => field_tys.iter().any(contains_unresolved_type),
@@ -241,8 +241,7 @@ fn contains_unresolved_type(ty: &Type) -> bool {
             response_tys.iter().any(contains_unresolved_type)
         }
         Type::ErrorUnion { ok_ty, err_tys } => {
-            contains_unresolved_type(ok_ty.as_ref())
-                || err_tys.iter().any(contains_unresolved_type)
+            contains_unresolved_type(ok_ty.as_ref()) || err_tys.iter().any(contains_unresolved_type)
         }
         Type::Range { elem_ty } => contains_unresolved_type(elem_ty.as_ref()),
         Type::Int { .. } | Type::Bool | Type::Char | Type::String | Type::Unit => false,

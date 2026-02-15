@@ -135,12 +135,14 @@ fn build_dispatch_thunk(
     let u8_ptr_ty = lowerer.ptr_to(u8_ty);
     let u64_ptr_ty = lowerer.ptr_to(u64_ty);
 
-    let handler_def = def_table.lookup_def(plan.handler_def_id).unwrap_or_else(|| {
-        panic!(
-            "backend machine thunk missing handler def for {:?}",
-            plan.handler_def_id
-        )
-    });
+    let handler_def = def_table
+        .lookup_def(plan.handler_def_id)
+        .unwrap_or_else(|| {
+            panic!(
+                "backend machine thunk missing handler def for {:?}",
+                plan.handler_def_id
+            )
+        });
     let handler_ty = type_map.lookup_def_type(handler_def).unwrap_or_else(|| {
         panic!(
             "backend machine thunk missing handler type for {:?}",
@@ -267,7 +269,8 @@ fn build_dispatch_thunk(
     });
 
     builder.select_block(bb_ok);
-    let typed_next_state_ptr = builder.cast(CastKind::PtrToPtr, next_state_ptr_u8, handler_state_ptr_ty);
+    let typed_next_state_ptr =
+        builder.cast(CastKind::PtrToPtr, next_state_ptr_u8, handler_state_ptr_ty);
     builder.store(typed_next_state_ptr, next_state_value);
 
     // Stage txn next-state fields.
@@ -366,7 +369,10 @@ fn add_machine_env_type(types: &mut IrTypeCache, u64_ty: IrTypeId) -> IrTypeId {
             ty: u64_ty,
         },
     ];
-    types.add_named(IrTypeKind::Struct { fields }, "__mc_machine_env".to_string())
+    types.add_named(
+        IrTypeKind::Struct { fields },
+        "__mc_machine_env".to_string(),
+    )
 }
 
 fn add_txn_prefix_type(types: &mut IrTypeCache, u8_ty: IrTypeId, u64_ty: IrTypeId) -> IrTypeId {
@@ -401,19 +407,18 @@ fn contains_unresolved_type(ty: &Type) -> bool {
     match ty {
         Type::Unknown | Type::Var(_) => true,
         Type::Fn { params, ret_ty } => {
-            params.iter().any(|param| contains_unresolved_type(&param.ty))
+            params
+                .iter()
+                .any(|param| contains_unresolved_type(&param.ty))
                 || contains_unresolved_type(ret_ty.as_ref())
         }
         Type::Tuple { field_tys } => field_tys.iter().any(contains_unresolved_type),
         Type::Struct { fields, .. } => fields
             .iter()
             .any(|field| contains_unresolved_type(&field.ty)),
-        Type::Enum { variants, .. } => variants.iter().any(|variant| {
-            variant
-                .payload
-                .iter()
-                .any(contains_unresolved_type)
-        }),
+        Type::Enum { variants, .. } => variants
+            .iter()
+            .any(|variant| variant.payload.iter().any(contains_unresolved_type)),
         Type::Array { elem_ty, .. } | Type::Slice { elem_ty } | Type::Heap { elem_ty } => {
             contains_unresolved_type(elem_ty.as_ref())
         }
@@ -427,8 +432,7 @@ fn contains_unresolved_type(ty: &Type) -> bool {
             response_tys.iter().any(contains_unresolved_type)
         }
         Type::ErrorUnion { ok_ty, err_tys } => {
-            contains_unresolved_type(ok_ty.as_ref())
-                || err_tys.iter().any(contains_unresolved_type)
+            contains_unresolved_type(ok_ty.as_ref()) || err_tys.iter().any(contains_unresolved_type)
         }
         Type::Range { elem_ty } => contains_unresolved_type(elem_ty.as_ref()),
         Type::Int { .. } | Type::Bool | Type::Char | Type::String | Type::Unit => false,
@@ -452,7 +456,10 @@ fn append_descriptor_globals(
     out
 }
 
-fn serialize_descriptor(desc: &sem::MachineDescriptorPlan, thunk_ids: &HashMap<DefId, DefId>) -> Vec<u8> {
+fn serialize_descriptor(
+    desc: &sem::MachineDescriptorPlan,
+    thunk_ids: &HashMap<DefId, DefId>,
+) -> Vec<u8> {
     let mut bytes = Vec::new();
 
     // Magic + schema version for forward compatibility.
@@ -520,7 +527,10 @@ fn serialize_descriptor(desc: &sem::MachineDescriptorPlan, thunk_ids: &HashMap<D
     role_impls.sort_by(|a, b| a.path.join("::").cmp(&b.path.join("::")));
     for role in &role_impls {
         push_string(&mut bytes, &role.path.join("::"));
-        push_u64(&mut bytes, role.role_def_id.map(|id| id.0 as u64).unwrap_or(0));
+        push_u64(
+            &mut bytes,
+            role.role_def_id.map(|id| id.0 as u64).unwrap_or(0),
+        );
     }
 
     bytes

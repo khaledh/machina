@@ -197,12 +197,15 @@ fn resolve_state_layout_type_id(
         name: type_def.name.clone(),
         fields: struct_fields,
     };
-    type_map.type_table().lookup_id(&state_ty).unwrap_or_else(|| {
-        panic!(
-            "compiler bug: missing interned generated state type id for {}",
-            type_def.name
-        )
-    })
+    type_map
+        .type_table()
+        .lookup_id(&state_ty)
+        .unwrap_or_else(|| {
+            panic!(
+                "compiler bug: missing interned generated state type id for {}",
+                type_def.name
+            )
+        })
 }
 
 fn resolve_handler_event_key(
@@ -284,7 +287,9 @@ fn contains_unresolved_type(ty: &Type) -> bool {
     match ty {
         Type::Unknown | Type::Var(_) => true,
         Type::Fn { params, ret_ty } => {
-            params.iter().any(|param| contains_unresolved_type(&param.ty))
+            params
+                .iter()
+                .any(|param| contains_unresolved_type(&param.ty))
                 || contains_unresolved_type(ret_ty.as_ref())
         }
         Type::Tuple { field_tys } => field_tys.iter().any(contains_unresolved_type),
@@ -307,8 +312,7 @@ fn contains_unresolved_type(ty: &Type) -> bool {
             response_tys.iter().any(contains_unresolved_type)
         }
         Type::ErrorUnion { ok_ty, err_tys } => {
-            contains_unresolved_type(ok_ty.as_ref())
-                || err_tys.iter().any(contains_unresolved_type)
+            contains_unresolved_type(ok_ty.as_ref()) || err_tys.iter().any(contains_unresolved_type)
         }
         Type::Range { elem_ty } => contains_unresolved_type(elem_ty.as_ref()),
         Type::Int { .. } | Type::Bool | Type::Char | Type::String | Type::Unit => false,

@@ -266,8 +266,12 @@ pub fn compile_with_path(
     };
 
     let mut optimized_funcs = Vec::with_capacity(lowered.funcs.len());
-    let machine_handler_defs: std::collections::HashSet<_> =
-        analyzed_context.machine_plans.thunks.keys().copied().collect();
+    let machine_handler_defs: std::collections::HashSet<_> = analyzed_context
+        .machine_plans
+        .thunks
+        .keys()
+        .copied()
+        .collect();
     for (func, lowered_func) in funcs.into_iter().zip(lowered.funcs.iter()) {
         let reachable_keep = reachable
             .as_ref()

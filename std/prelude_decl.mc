@@ -11,6 +11,48 @@ fn __rt_memset(inout buf: u8[], value: u8);
 @[runtime]
 fn __rt_string_from_bytes(out dst: string, bytes: u8[]);
 
+// Managed machine runtime bridge helpers.
+@[runtime]
+fn __mc_machine_runtime_new() -> u64;
+
+@[runtime]
+fn __mc_machine_runtime_free(runtime: u64);
+
+@[runtime]
+fn __mc_machine_runtime_spawn_u64(runtime: u64, mailbox_cap: u64) -> u64;
+
+@[runtime]
+fn __mc_machine_runtime_start_u64(runtime: u64, machine_id: u64) -> u64;
+
+@[runtime]
+fn __mc_machine_runtime_send_u64(
+  runtime: u64,
+  dst: u64,
+  kind: u64,
+  payload0: u64,
+  payload1: u64,
+) -> u64;
+
+@[runtime]
+fn __mc_machine_runtime_request_u64(
+  runtime: u64,
+  src: u64,
+  dst: u64,
+  kind: u64,
+  payload0: u64,
+  payload1: u64,
+) -> u64;
+
+@[runtime]
+fn __mc_machine_runtime_reply_u64(
+  runtime: u64,
+  src: u64,
+  reply_cap_id: u64,
+  kind: u64,
+  payload0: u64,
+  payload1: u64,
+) -> u64;
+
 type KeyNotFound = {}
 
 string :: {

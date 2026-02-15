@@ -1563,3 +1563,131 @@ uint8_t __mc_machine_runtime_pending_contains(
     }
     return mc_pending_contains_active(&rt->pending, cap_id);
 }
+
+// Opaque-handle runtime bridge ------------------------------------------------
+
+static mc_machine_runtime_t *mc_runtime_from_handle(uint64_t runtime) {
+    if (runtime == 0) {
+        return NULL;
+    }
+    return (mc_machine_runtime_t *)(uintptr_t)runtime;
+}
+
+uint64_t __mc_machine_runtime_new(void) {
+    mc_machine_runtime_t *rt = (mc_machine_runtime_t *)__mc_alloc(
+        sizeof(mc_machine_runtime_t),
+        _Alignof(mc_machine_runtime_t)
+    );
+    if (!rt) {
+        return 0;
+    }
+    __mc_machine_runtime_init(rt);
+    return (uint64_t)(uintptr_t)rt;
+}
+
+void __mc_machine_runtime_free(uint64_t runtime) {
+    mc_machine_runtime_t *rt = mc_runtime_from_handle(runtime);
+    if (!rt) {
+        return;
+    }
+    __mc_machine_runtime_drop(rt);
+    __mc_free(rt);
+}
+
+uint64_t __mc_machine_runtime_spawn_u64(uint64_t runtime, uint64_t mailbox_cap) {
+    mc_machine_runtime_t *rt = mc_runtime_from_handle(runtime);
+    if (!rt || mailbox_cap > UINT32_MAX) {
+        return 0;
+    }
+    mc_machine_id_t id = 0;
+    if (!__mc_machine_runtime_spawn(rt, (uint32_t)mailbox_cap, &id)) {
+        return 0;
+    }
+    return (uint64_t)id;
+}
+
+uint64_t __mc_machine_runtime_start_u64(uint64_t runtime, uint64_t machine_id) {
+    mc_machine_runtime_t *rt = mc_runtime_from_handle(runtime);
+    if (!rt || machine_id > UINT32_MAX) {
+        return 0;
+    }
+    return __mc_machine_runtime_start(rt, (mc_machine_id_t)machine_id) ? 1 : 0;
+}
+
+uint64_t __mc_machine_runtime_send_u64(
+    uint64_t runtime,
+    uint64_t dst,
+    uint64_t kind,
+    uint64_t payload0,
+    uint64_t payload1
+) {
+    mc_machine_runtime_t *rt = mc_runtime_from_handle(runtime);
+    if (!rt || dst > UINT32_MAX) {
+        return (uint64_t)MC_MAILBOX_ENQUEUE_MACHINE_UNKNOWN;
+    }
+    mc_machine_envelope_t env = {
+        .kind = kind,
+        .src = 0,
+        .reply_cap_id = 0,
+        .pending_id = 0,
+        .payload0 = payload0,
+        .payload1 = payload1,
+    };
+    return (uint64_t)__mc_machine_runtime_enqueue(rt, (mc_machine_id_t)dst, &env);
+}
+
+uint64_t __mc_machine_runtime_request_u64(
+    uint64_t runtime,
+    uint64_t src,
+    uint64_t dst,
+    uint64_t kind,
+    uint64_t payload0,
+    uint64_t payload1
+) {
+    mc_machine_runtime_t *rt = mc_runtime_from_handle(runtime);
+    if (!rt || src > UINT32_MAX || dst > UINT32_MAX) {
+        return 0;
+    }
+    mc_machine_envelope_t env = {
+        .kind = kind,
+        .src = 0,
+        .reply_cap_id = 0,
+        .pending_id = 0,
+        .payload0 = payload0,
+        .payload1 = payload1,
+    };
+    uint64_t pending_id = 0;
+    if (__mc_machine_runtime_request(
+            rt,
+            (mc_machine_id_t)src,
+            (mc_machine_id_t)dst,
+            &env,
+            &pending_id
+        ) != MC_MAILBOX_ENQUEUE_OK) {
+        return 0;
+    }
+    return pending_id;
+}
+
+uint64_t __mc_machine_runtime_reply_u64(
+    uint64_t runtime,
+    uint64_t src,
+    uint64_t reply_cap_id,
+    uint64_t kind,
+    uint64_t payload0,
+    uint64_t payload1
+) {
+    mc_machine_runtime_t *rt = mc_runtime_from_handle(runtime);
+    if (!rt || src > UINT32_MAX) {
+        return (uint64_t)MC_REPLY_CAP_UNKNOWN;
+    }
+    mc_machine_envelope_t env = {
+        .kind = kind,
+        .src = 0,
+        .reply_cap_id = 0,
+        .pending_id = 0,
+        .payload0 = payload0,
+        .payload1 = payload1,
+    };
+    return (uint64_t)__mc_machine_runtime_reply(rt, (mc_machine_id_t)src, reply_cap_id, &env);
+}

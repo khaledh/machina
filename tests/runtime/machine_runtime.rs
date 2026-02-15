@@ -1,6 +1,6 @@
 use std::path::PathBuf;
 
-use crate::common::run_c_program;
+use crate::common::{run_c_program, run_program};
 
 #[test]
 fn test_machine_runtime_core() {
@@ -59,5 +59,45 @@ fn test_machine_runtime_emit_shims_stage_transactional_effects() {
         .join("machine_runtime_emit_staging.c");
 
     let run = run_c_program("machine_runtime_emit_staging", &source_path);
+    assert_eq!(run.status.code(), Some(0));
+}
+
+#[test]
+fn test_machine_runtime_handle_bridge_helpers() {
+    let repo_root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    let source_path = repo_root
+        .join("runtime")
+        .join("tests")
+        .join("machine_runtime_handle_bridge.c");
+
+    let run = run_c_program("machine_runtime_handle_bridge", &source_path);
+    assert_eq!(run.status.code(), Some(0));
+}
+
+#[test]
+fn test_std_machine_module_bridge_compiles_and_runs() {
+    let source = r#"
+requires {
+    std::machine::new_runtime
+    std::machine::close_runtime
+    std::machine::spawn
+    std::machine::start
+    std::machine::send
+}
+
+fn main() -> u64 {
+    var rt = new_runtime();
+    let id = spawn(rt, 4);
+    if !start(rt, id) {
+        close_runtime(inout rt);
+        return 1;
+    };
+    send(rt, id, 1, 0, 0);
+    close_runtime(inout rt);
+    0
+}
+"#;
+
+    let run = run_program("std_machine_bridge", source);
     assert_eq!(run.status.code(), Some(0));
 }
