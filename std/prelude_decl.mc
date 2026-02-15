@@ -62,6 +62,17 @@ fn __mc_machine_runtime_bind_dispatch_u64(
 ) -> u64;
 
 @[runtime]
+fn __mc_machine_runtime_register_thunk_u64(thunk_id: u64, dispatch_fn: u64);
+
+@[runtime]
+fn __mc_machine_runtime_bind_dispatch_thunk_u64(
+  runtime: u64,
+  machine_id: u64,
+  thunk_id: u64,
+  dispatch_ctx: u64,
+) -> u64;
+
+@[runtime]
 fn __mc_machine_runtime_step_u64(runtime: u64) -> u64;
 
 type KeyNotFound = {}

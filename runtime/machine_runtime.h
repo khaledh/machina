@@ -361,6 +361,22 @@ void __mc_machine_runtime_bind_dispatch(
     void *dispatch_ctx
 );
 
+// Register and resolve dispatch thunk ids used by machine descriptors.
+void __mc_machine_runtime_register_thunk(
+    uint64_t thunk_id,
+    mc_machine_dispatch_txn_fn dispatch
+);
+mc_machine_dispatch_txn_fn __mc_machine_runtime_lookup_thunk(uint64_t thunk_id);
+
+// Resolve a previously-registered thunk id and bind it to a machine slot.
+// Returns 1 on success, 0 on unknown machine id or missing thunk id.
+uint8_t __mc_machine_runtime_bind_dispatch_thunk(
+    mc_machine_runtime_t *rt,
+    mc_machine_id_t machine_id,
+    uint64_t thunk_id,
+    void *dispatch_ctx
+);
+
 // Set/get opaque machine-local state word.
 void __mc_machine_runtime_set_state(
     mc_machine_runtime_t *rt,
@@ -524,6 +540,15 @@ uint64_t __mc_machine_runtime_bind_dispatch_u64(
     uint64_t runtime,
     uint64_t machine_id,
     uint64_t dispatch_fn,
+    uint64_t dispatch_ctx
+);
+// Register thunk id -> dispatch function pointer in process-global registry.
+void __mc_machine_runtime_register_thunk_u64(uint64_t thunk_id, uint64_t dispatch_fn);
+// Resolve thunk id through runtime global thunk registry and bind to machine.
+uint64_t __mc_machine_runtime_bind_dispatch_thunk_u64(
+    uint64_t runtime,
+    uint64_t machine_id,
+    uint64_t thunk_id,
     uint64_t dispatch_ctx
 );
 // Runs one dispatch step through the managed runtime bridge.

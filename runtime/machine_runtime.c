@@ -48,6 +48,51 @@ typedef struct mc_emit_staging_ctx {
 // Single active context pointer (acts like a tiny dispatch-local stack).
 static mc_emit_staging_ctx_t *g_emit_staging_ctx = NULL;
 
+// Process-global thunk registry used by bootstrap to map descriptor thunk ids
+// to concrete dispatch callback pointers.
+typedef struct mc_thunk_registry_entry {
+    uint64_t thunk_id;
+    mc_machine_dispatch_txn_fn dispatch;
+} mc_thunk_registry_entry_t;
+
+static mc_thunk_registry_entry_t *g_thunk_registry = NULL;
+static uint32_t g_thunk_registry_len = 0;
+static uint32_t g_thunk_registry_cap = 0;
+
+static uint8_t mc_thunk_registry_ensure_cap(uint32_t min_cap) {
+    if (g_thunk_registry_cap >= min_cap) {
+        return 1;
+    }
+    uint32_t new_cap = g_thunk_registry_cap == 0 ? 16u : g_thunk_registry_cap;
+    while (new_cap < min_cap) {
+        uint32_t grown = new_cap * 2u;
+        if (grown < new_cap) {
+            return 0;
+        }
+        new_cap = grown;
+    }
+    mc_thunk_registry_entry_t *new_entries = (mc_thunk_registry_entry_t *)__mc_realloc(
+        g_thunk_registry,
+        (size_t)new_cap * sizeof(mc_thunk_registry_entry_t),
+        _Alignof(mc_thunk_registry_entry_t)
+    );
+    if (!new_entries) {
+        return 0;
+    }
+    g_thunk_registry = new_entries;
+    g_thunk_registry_cap = new_cap;
+    return 1;
+}
+
+static int32_t mc_thunk_registry_find(uint64_t thunk_id) {
+    for (uint32_t i = 0; i < g_thunk_registry_len; i++) {
+        if (g_thunk_registry[i].thunk_id == thunk_id) {
+            return (int32_t)i;
+        }
+    }
+    return -1;
+}
+
 static void mc_emit_staging_begin(
     mc_emit_staging_ctx_t *ctx,
     mc_machine_runtime_t *rt,
@@ -1182,6 +1227,50 @@ void __mc_machine_runtime_bind_dispatch(
     slot->dispatch_ctx = dispatch_ctx;
 }
 
+void __mc_machine_runtime_register_thunk(
+    uint64_t thunk_id,
+    mc_machine_dispatch_txn_fn dispatch
+) {
+    if (thunk_id == 0) {
+        return;
+    }
+    int32_t idx = mc_thunk_registry_find(thunk_id);
+    if (idx >= 0) {
+        g_thunk_registry[(uint32_t)idx].dispatch = dispatch;
+        return;
+    }
+    if (!mc_thunk_registry_ensure_cap(g_thunk_registry_len + 1)) {
+        return;
+    }
+    g_thunk_registry[g_thunk_registry_len].thunk_id = thunk_id;
+    g_thunk_registry[g_thunk_registry_len].dispatch = dispatch;
+    g_thunk_registry_len += 1;
+}
+
+mc_machine_dispatch_txn_fn __mc_machine_runtime_lookup_thunk(uint64_t thunk_id) {
+    int32_t idx = mc_thunk_registry_find(thunk_id);
+    if (idx < 0) {
+        return NULL;
+    }
+    return g_thunk_registry[(uint32_t)idx].dispatch;
+}
+
+uint8_t __mc_machine_runtime_bind_dispatch_thunk(
+    mc_machine_runtime_t *rt,
+    mc_machine_id_t machine_id,
+    uint64_t thunk_id,
+    void *dispatch_ctx
+) {
+    mc_machine_dispatch_txn_fn dispatch = __mc_machine_runtime_lookup_thunk(thunk_id);
+    mc_machine_slot_t *slot = mc_get_slot(rt, machine_id);
+    if (!slot || !dispatch) {
+        return 0;
+    }
+    slot->dispatch = dispatch;
+    slot->dispatch_ctx = dispatch_ctx;
+    return 1;
+}
+
 void __mc_machine_runtime_set_state(
     mc_machine_runtime_t *rt,
     mc_machine_id_t machine_id,
@@ -1780,6 +1869,33 @@ uint64_t __mc_machine_runtime_bind_dispatch_u64(
         (void *)(uintptr_t)dispatch_ctx
     );
     return 1;
+}
+
+void __mc_machine_runtime_register_thunk_u64(uint64_t thunk_id, uint64_t dispatch_fn) {
+    __mc_machine_runtime_register_thunk(
+        thunk_id,
+        (mc_machine_dispatch_txn_fn)(uintptr_t)dispatch_fn
+    );
+}
+
+uint64_t __mc_machine_runtime_bind_dispatch_thunk_u64(
+    uint64_t runtime,
+    uint64_t machine_id,
+    uint64_t thunk_id,
+    uint64_t dispatch_ctx
+) {
+    mc_machine_runtime_t *rt = mc_runtime_from_handle(runtime);
+    if (!rt || machine_id == 0 || machine_id > UINT32_MAX) {
+        return 0;
+    }
+    return __mc_machine_runtime_bind_dispatch_thunk(
+               rt,
+               (mc_machine_id_t)machine_id,
+               thunk_id,
+               (void *)(uintptr_t)dispatch_ctx
+           )
+        ? 1
+        : 0;
 }
 
 uint64_t __mc_machine_runtime_step_u64(uint64_t runtime) {

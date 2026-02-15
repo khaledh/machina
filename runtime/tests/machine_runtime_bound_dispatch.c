@@ -31,12 +31,8 @@ int main(void) {
         return 1;
     }
 
-    if (__mc_machine_runtime_bind_dispatch_u64(
-            (uint64_t)(uintptr_t)&rt,
-            m,
-            (uint64_t)(uintptr_t)test_dispatch,
-            0
-        ) == 0) {
+    __mc_machine_runtime_register_thunk_u64(42, (uint64_t)(uintptr_t)test_dispatch);
+    if (__mc_machine_runtime_bind_dispatch_thunk_u64((uint64_t)(uintptr_t)&rt, m, 42, 0) == 0) {
         return 1;
     }
     __mc_machine_runtime_set_state(&rt, m, 10);

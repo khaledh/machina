@@ -155,6 +155,28 @@ fn bind_dispatch(
   }
 }
 
+// Registers a thunk id -> function pointer mapping in runtime global registry.
+// Intended for compiler-generated bootstrap glue.
+@[public]
+fn register_thunk(thunk_id: u64, dispatch_fn: u64) {
+  __mc_machine_runtime_register_thunk_u64(thunk_id, dispatch_fn);
+}
+
+// Binds a machine slot to a previously-registered thunk id.
+@[public]
+fn bind_dispatch_thunk(
+  rt: Runtime,
+  machine_id: u64,
+  thunk_id: u64,
+  dispatch_ctx: u64,
+) -> () | BindDispatchFailed {
+  if __mc_machine_runtime_bind_dispatch_thunk_u64(rt._raw, machine_id, thunk_id, dispatch_ctx) == 0 {
+    BindDispatchFailed {}
+  } else {
+    ()
+  }
+}
+
 @[public]
 fn step(rt: Runtime) -> StepStatus {
   let status = __mc_machine_runtime_step_u64(rt._raw);
