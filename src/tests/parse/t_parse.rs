@@ -2537,3 +2537,78 @@ fn test_parse_typestate_pattern_on_handler_desugars_to_canonical_params() {
         TypeExprKind::Named { ref ident, .. } if ident == "AuthApproved"
     ));
 }
+
+#[test]
+fn test_parse_typestate_handler_shorthand_and_stay_forms() {
+    let source = r#"
+        type Ping = {}
+        type Pong = {}
+
+        typestate Gateway {
+            fn new() -> Ready { Ready {} }
+
+            state Ready {
+                on Ping(p) -> stay {
+                    send(0, Ping {});
+                    request(0, Ping {});
+                }
+
+                on Pong {
+                }
+            }
+        }
+    "#;
+
+    let module = parse_module_with_options(
+        source,
+        ParserOptions {
+            experimental_typestate: true,
+        },
+    )
+    .expect("typestate shorthand forms should parse");
+
+    let typestate = match &module.top_level_items[2] {
+        TopLevelItem::TypestateDef(def) => def,
+        _ => panic!("expected typestate top-level item"),
+    };
+    let state = typestate
+        .items
+        .iter()
+        .find_map(|item| match item {
+            TypestateItem::State(state) if state.name == "Ready" => Some(state),
+            _ => None,
+        })
+        .expect("expected Ready state");
+    let mut handlers = state.items.iter().filter_map(|item| match item {
+        TypestateStateItem::Handler(handler) => Some(handler),
+        _ => None,
+    });
+    let ping_handler = handlers.next().expect("expected Ping handler");
+    let pong_handler = handlers.next().expect("expected Pong handler");
+    assert!(handlers.next().is_none(), "expected exactly two handlers");
+
+    assert!(matches!(
+        ping_handler.selector_ty.kind,
+        TypeExprKind::Named { ref ident, .. } if ident == "Ping"
+    ));
+    assert_eq!(ping_handler.params.len(), 1);
+    assert_eq!(ping_handler.params[0].ident, "p");
+    assert!(matches!(
+        ping_handler.params[0].typ.kind,
+        TypeExprKind::Named { ref ident, .. } if ident == "Ping"
+    ));
+    assert!(matches!(
+        ping_handler.ret_ty_expr.kind,
+        TypeExprKind::Named { ref ident, .. } if ident == "stay"
+    ));
+
+    assert!(matches!(
+        pong_handler.selector_ty.kind,
+        TypeExprKind::Named { ref ident, .. } if ident == "Pong"
+    ));
+    assert!(pong_handler.params.is_empty());
+    assert!(matches!(
+        pong_handler.ret_ty_expr.kind,
+        TypeExprKind::Named { ref ident, .. } if ident == "stay"
+    ));
+}

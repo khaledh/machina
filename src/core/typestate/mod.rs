@@ -147,8 +147,12 @@ fn desugar_typestate(
         let mut method_items = Vec::new();
         let mut handler_index = 0usize;
         for handler in &typestate_handlers {
-            let method_source =
-                lower_handler_to_method_source(handler, &mut handler_index, node_id_gen);
+            let method_source = lower_handler_to_method_source(
+                handler,
+                &state.name,
+                &mut handler_index,
+                node_id_gen,
+            );
             method_items.push(MethodItem::Def(lower_state_method(
                 method_source,
                 node_id_gen,
@@ -173,8 +177,12 @@ fn desugar_typestate(
                     )));
                 }
                 TypestateStateItem::Handler(handler) => {
-                    let method_source =
-                        lower_handler_to_method_source(&handler, &mut handler_index, node_id_gen);
+                    let method_source = lower_handler_to_method_source(
+                        &handler,
+                        &state.name,
+                        &mut handler_index,
+                        node_id_gen,
+                    );
                     method_items.push(MethodItem::Def(lower_state_method(
                         method_source,
                         node_id_gen,
@@ -568,6 +576,7 @@ type MethodDefSource = FuncDef;
 
 fn lower_handler_to_method_source(
     handler: &TypestateOnHandler,
+    state_name: &str,
     next_index: &mut usize,
     node_id_gen: &mut NodeIdGen,
 ) -> MethodDefSource {
@@ -582,6 +591,13 @@ fn lower_handler_to_method_source(
         span: handler.selector_ty.span,
     }];
     params.extend(handler.params.clone());
+    let mut body = handler.body.clone();
+    rewrite_handler_command_sugar(&mut body);
+    let mut ret_ty_expr =
+        rewrite_handler_return_type(&handler.ret_ty_expr, state_name, node_id_gen);
+    if type_expr_is_stay(&handler.ret_ty_expr) {
+        inject_self_tail_for_stay(&mut body, node_id_gen);
+    }
     MethodDefSource {
         id: handler.id,
         def_id: (),
@@ -590,11 +606,111 @@ fn lower_handler_to_method_source(
             name,
             type_params: Vec::new(),
             params,
-            ret_ty_expr: handler.ret_ty_expr.clone(),
+            ret_ty_expr: {
+                // Keep node IDs unique after rewriting `stay` -> concrete state.
+                ret_ty_expr.id = node_id_gen.new_id();
+                ret_ty_expr
+            },
             span: handler.span,
         },
-        body: handler.body.clone(),
+        body,
         span: handler.span,
+    }
+}
+
+fn type_expr_is_stay(ty: &TypeExpr) -> bool {
+    matches!(
+        &ty.kind,
+        TypeExprKind::Named {
+            ident,
+            type_args,
+            ..
+        } if ident == "stay" && type_args.is_empty()
+    )
+}
+
+fn rewrite_handler_return_type(
+    ret_ty_expr: &TypeExpr,
+    state_name: &str,
+    node_id_gen: &mut NodeIdGen,
+) -> TypeExpr {
+    if type_expr_is_stay(ret_ty_expr) {
+        TypeExpr {
+            id: node_id_gen.new_id(),
+            kind: TypeExprKind::Named {
+                ident: state_name.to_string(),
+                def_id: (),
+                type_args: Vec::new(),
+            },
+            span: ret_ty_expr.span,
+        }
+    } else {
+        ret_ty_expr.clone()
+    }
+}
+
+fn inject_self_tail_for_stay(body: &mut Expr, node_id_gen: &mut NodeIdGen) {
+    let ExprKind::Block { tail, .. } = &mut body.kind else {
+        return;
+    };
+    if tail.is_none() {
+        *tail = Some(Box::new(Expr {
+            id: node_id_gen.new_id(),
+            kind: ExprKind::Var {
+                ident: "self".to_string(),
+                def_id: (),
+            },
+            ty: (),
+            span: body.span,
+        }));
+    }
+}
+
+fn rewrite_handler_command_sugar(body: &mut Expr) {
+    let mut rewriter = HandlerCommandSugarRewriter;
+    rewriter.visit_expr(body);
+}
+
+struct HandlerCommandSugarRewriter;
+
+impl VisitorMut<()> for HandlerCommandSugarRewriter {
+    fn visit_expr(&mut self, expr: &mut Expr) {
+        visit_mut::walk_expr(self, expr);
+
+        let ExprKind::Call { callee, args } = &mut expr.kind else {
+            return;
+        };
+        let ExprKind::Var { ident, .. } = &callee.kind else {
+            return;
+        };
+        if ident != "send" && ident != "request" {
+            return;
+        }
+        if args.len() != 2 || !args.iter().all(|arg| arg.mode == CallArgMode::Default) {
+            return;
+        }
+
+        let mut call_args = std::mem::take(args);
+        let payload = call_args
+            .pop()
+            .expect("call arg shape checked by typestate handler sugar rewrite")
+            .expr;
+        let to = call_args
+            .pop()
+            .expect("call arg shape checked by typestate handler sugar rewrite")
+            .expr;
+        let kind = if ident == "send" {
+            parsed::EmitKind::Send {
+                to: Box::new(to),
+                payload: Box::new(payload),
+            }
+        } else {
+            parsed::EmitKind::Request {
+                to: Box::new(to),
+                payload: Box::new(payload),
+            }
+        };
+        expr.kind = ExprKind::Emit { kind };
     }
 }
 

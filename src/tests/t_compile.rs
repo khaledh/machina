@@ -1085,3 +1085,30 @@ fn main() -> u64 { 0 }
         "expected managed machine descriptor registration call in emitted IR: {ir}"
     );
 }
+
+#[test]
+fn compile_typestate_handler_surface_sugar_forms() {
+    let source = r#"
+type Ping = {}
+type Pong = {}
+
+typestate M {
+    fn new() -> S { S {} }
+
+    state S {
+        on Ping(p) -> stay {
+            p;
+            send(0, Ping {});
+        }
+
+        on Pong {
+        }
+    }
+}
+
+fn main() {}
+"#;
+
+    compile(source, &typestate_compile_opts())
+        .expect("typestate handler sugar forms should compile");
+}

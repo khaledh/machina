@@ -6,7 +6,9 @@ use crate::core::api::{
 use crate::core::context::ParsedContext;
 use crate::core::resolve::ResolveError;
 use crate::core::tree::NodeIdGen;
+use crate::core::tree::resolved as res;
 use crate::core::tree::semantic as sem;
+use crate::core::tree::visit::{self, Visitor};
 use crate::core::typecheck::TypeCheckErrorKind;
 use crate::core::types::Type;
 
@@ -639,6 +641,113 @@ typestate Connection {
         out.resolve_errors,
         out.type_errors
     );
+}
+
+#[test]
+fn typestate_handler_surface_sugar_normalizes_before_resolve() {
+    let source = r#"
+type Ping = {}
+type Pong = {}
+
+typestate M {
+    fn new() -> S { S {} }
+
+    state S {
+        on Ping(p) -> stay {
+            p;
+            send(0, Ping {});
+            request(0, Ping {});
+        }
+
+        on Pong {
+        }
+    }
+}
+"#;
+
+    let parsed = parsed_context_typestate(source);
+    let out = resolve_stage_with_policy(parsed, ResolveInputs::default(), FrontendPolicy::Strict);
+    assert!(
+        out.errors.is_empty(),
+        "expected typestate sugar to resolve cleanly, got {:?}",
+        out.errors
+    );
+    let resolved = out
+        .context
+        .expect("resolve should succeed for typestate sugar normalization test");
+
+    let mut found_handler = false;
+    let mut aggregate = HandlerCommandNormalizationFinder::default();
+    for item in &resolved.module.top_level_items {
+        let res::TopLevelItem::MethodBlock(block) = item else {
+            continue;
+        };
+        if !block.type_name.starts_with("__ts_") {
+            continue;
+        }
+        for method_item in &block.method_items {
+            let res::MethodItem::Def(method) = method_item else {
+                continue;
+            };
+            if !method.sig.name.starts_with("__ts_on_") {
+                continue;
+            }
+            found_handler = true;
+            assert!(matches!(
+                method.sig.ret_ty_expr.kind,
+                res::TypeExprKind::Named { ref ident, .. } if ident != "stay"
+            ));
+
+            aggregate.visit_expr(&method.body);
+        }
+    }
+
+    assert!(
+        found_handler,
+        "expected lowered typestate handler method in resolved module"
+    );
+    assert!(
+        aggregate.emit_send_seen,
+        "expected send(...) shorthand to normalize into emit send"
+    );
+    assert!(
+        aggregate.emit_request_seen,
+        "expected request(...) shorthand to normalize into emit request"
+    );
+    assert!(
+        !aggregate.sugar_send_call_seen && !aggregate.sugar_request_call_seen,
+        "expected no raw send/request call sugar after typestate normalization"
+    );
+}
+
+#[derive(Default)]
+struct HandlerCommandNormalizationFinder {
+    sugar_send_call_seen: bool,
+    sugar_request_call_seen: bool,
+    emit_send_seen: bool,
+    emit_request_seen: bool,
+}
+
+impl Visitor<crate::core::resolve::DefId> for HandlerCommandNormalizationFinder {
+    fn visit_expr(&mut self, expr: &res::Expr) {
+        match &expr.kind {
+            res::ExprKind::Call { callee, .. } => {
+                if let res::ExprKind::Var { ident, .. } = &callee.kind {
+                    if ident == "send" {
+                        self.sugar_send_call_seen = true;
+                    } else if ident == "request" {
+                        self.sugar_request_call_seen = true;
+                    }
+                }
+            }
+            res::ExprKind::Emit { kind } => match kind {
+                res::EmitKind::Send { .. } => self.emit_send_seen = true,
+                res::EmitKind::Request { .. } => self.emit_request_seen = true,
+            },
+            _ => {}
+        }
+        visit::walk_expr(self, expr);
+    }
 }
 
 #[test]

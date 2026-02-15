@@ -351,11 +351,21 @@ impl<'a> Parser<'a> {
         let marker = self.mark();
         self.consume_keyword(TK::KwOn)?;
         let selector_ty = self.parse_type_expr()?;
-        self.consume(&TK::LParen)?;
-        let params = self.parse_typestate_on_handler_params()?;
-        self.consume(&TK::RParen)?;
-        self.consume(&TK::Arrow)?;
-        let ret_ty_expr = self.parse_type_expr()?;
+        let params = if self.curr_token.kind == TK::LParen {
+            self.consume(&TK::LParen)?;
+            let params = self.parse_typestate_on_handler_params(&selector_ty)?;
+            self.consume(&TK::RParen)?;
+            params
+        } else {
+            Vec::new()
+        };
+        let ret_ty_expr = if self.curr_token.kind == TK::Arrow {
+            self.consume(&TK::Arrow)?;
+            self.parse_type_expr()?
+        } else {
+            // Handler shorthand without `->` defaults to same-state (`stay`).
+            self.typestate_stay_type_expr(selector_ty.span)
+        };
         let body = self.parse_block()?;
         Ok(TypestateOnHandler {
             id: self.id_gen.new_id(),
@@ -367,7 +377,10 @@ impl<'a> Parser<'a> {
         })
     }
 
-    fn parse_typestate_on_handler_params(&mut self) -> Result<Vec<Param>, ParseError> {
+    fn parse_typestate_on_handler_params(
+        &mut self,
+        selector_ty: &TypeExpr,
+    ) -> Result<Vec<Param>, ParseError> {
         if self.curr_token.kind == TK::RParen {
             return Ok(Vec::new());
         }
@@ -414,7 +427,45 @@ impl<'a> Parser<'a> {
             ]);
         }
 
-        self.parse_list(TK::Comma, TK::RParen, |parser| parser.parse_param())
+        self.parse_list(TK::Comma, TK::RParen, |parser| {
+            parser.parse_typestate_handler_param(selector_ty)
+        })
+    }
+
+    fn parse_typestate_handler_param(
+        &mut self,
+        selector_ty: &TypeExpr,
+    ) -> Result<Param, ParseError> {
+        let marker = self.mark();
+        if matches!(self.curr_token.kind, TK::Ident(_))
+            && self.peek().map(|t| &t.kind) != Some(&TK::Colon)
+        {
+            let ident = self.parse_ident()?;
+            let span = self.close(marker);
+            return Ok(Param {
+                id: self.id_gen.new_id(),
+                ident,
+                def_id: (),
+                // `on Ping(p)` shorthand: payload type defaults to selector type.
+                typ: self.clone_type_expr_with_new_ids(selector_ty),
+                mode: ParamMode::In,
+                span,
+            });
+        }
+        self.parse_param()
+    }
+
+    fn typestate_stay_type_expr(&mut self, span: Span) -> TypeExpr {
+        TypeExpr {
+            id: self.id_gen.new_id(),
+            kind: TypeExprKind::Named {
+                // Internal marker consumed by typestate desugaring.
+                ident: "stay".to_string(),
+                def_id: (),
+                type_args: Vec::new(),
+            },
+            span,
+        }
     }
 
     fn parse_typestate_fields_block(&mut self) -> Result<TypestateFields, ParseError> {

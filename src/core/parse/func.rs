@@ -463,7 +463,7 @@ impl<'a> Parser<'a> {
     /// Property accessors synthesize new method signatures that reuse the
     /// declared property type. Reusing the original `TypeExpr` IDs would
     /// violate the parser's uniqueness invariant, so we clone with new IDs.
-    fn clone_type_expr_with_new_ids(&mut self, ty: &TypeExpr) -> TypeExpr {
+    pub(super) fn clone_type_expr_with_new_ids(&mut self, ty: &TypeExpr) -> TypeExpr {
         let kind = match &ty.kind {
             TypeExprKind::Infer => TypeExprKind::Infer,
             TypeExprKind::Union { variants } => TypeExprKind::Union {
