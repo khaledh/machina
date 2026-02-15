@@ -58,6 +58,7 @@ pub(crate) fn synthesize_member_completion_source(
 enum CompletionSiteKind {
     Scope,
     Member,
+    QualifiedPath,
     RequiresPath,
     TypeExpr,
     Pattern,
@@ -73,6 +74,10 @@ enum CompletionSite {
         prefix: String,
         receiver_ty: Type,
         caller_def_id: Option<DefId>,
+    },
+    QualifiedPath {
+        prefix: String,
+        path_segments: Vec<String>,
     },
     RequiresPath {
         prefix: String,
@@ -90,6 +95,7 @@ impl CompletionSite {
         match self {
             Self::Scope { .. } => CompletionSiteKind::Scope,
             Self::Member { .. } => CompletionSiteKind::Member,
+            Self::QualifiedPath { .. } => CompletionSiteKind::QualifiedPath,
             Self::RequiresPath { .. } => CompletionSiteKind::RequiresPath,
             Self::TypeExpr { .. } => CompletionSiteKind::TypeExpr,
             Self::Pattern { .. } => CompletionSiteKind::Pattern,
@@ -100,6 +106,7 @@ impl CompletionSite {
         match self {
             Self::Scope { prefix, .. }
             | Self::Member { prefix, .. }
+            | Self::QualifiedPath { prefix, .. }
             | Self::RequiresPath { prefix }
             | Self::TypeExpr { prefix }
             | Self::Pattern { prefix } => prefix,
@@ -110,6 +117,8 @@ impl CompletionSite {
 struct CompletionProviders {
     scope: fn(&CompletionSite, &crate::core::context::ResolvedContext) -> Vec<CompletionItem>,
     member: fn(&CompletionSite, &crate::core::context::ResolvedContext) -> Vec<CompletionItem>,
+    qualified_path:
+        fn(&CompletionSite, &crate::core::context::ResolvedContext) -> Vec<CompletionItem>,
     requires_path:
         fn(&CompletionSite, &crate::core::context::ResolvedContext) -> Vec<CompletionItem>,
     type_expr: fn(&CompletionSite, &crate::core::context::ResolvedContext) -> Vec<CompletionItem>,
@@ -121,6 +130,7 @@ impl Default for CompletionProviders {
         Self {
             scope: provide_scope_completions,
             member: provide_member_completions,
+            qualified_path: provide_qualified_path_completions,
             requires_path: provide_requires_path_completions,
             type_expr: provide_type_expr_completions,
             pattern: provide_pattern_completions,
@@ -131,6 +141,7 @@ impl Default for CompletionProviders {
 #[derive(Debug, Clone)]
 struct PrefixProbe {
     prefix: String,
+    prefix_start: usize,
     dot_probe: usize,
 }
 
@@ -151,6 +162,9 @@ fn classify_completion_site(
         return CompletionSite::RequiresPath {
             prefix: probe.prefix,
         };
+    }
+    if let Some(site) = classify_qualified_path_site(source, offset, &probe) {
+        return site;
     }
     let pattern_classifier = PatternAndTypeClassifier::classify(&resolved.module, cursor);
     if pattern_classifier.in_type_expr {
@@ -183,7 +197,11 @@ fn prefix_probe(source: &str, offset: usize) -> PrefixProbe {
         dot_probe -= 1;
     }
 
-    PrefixProbe { prefix, dot_probe }
+    PrefixProbe {
+        prefix,
+        prefix_start,
+        dot_probe,
+    }
 }
 
 fn classify_member_site(
@@ -225,6 +243,52 @@ fn classify_member_site(
     })
 }
 
+fn classify_qualified_path_site(
+    source: &str,
+    offset: usize,
+    probe: &PrefixProbe,
+) -> Option<CompletionSite> {
+    let path_segments = qualified_path_segments(source, offset, probe.prefix_start)?;
+    Some(CompletionSite::QualifiedPath {
+        prefix: probe.prefix.clone(),
+        path_segments,
+    })
+}
+
+fn qualified_path_segments(source: &str, offset: usize, prefix_start: usize) -> Option<Vec<String>> {
+    let bytes = source.as_bytes();
+    let mut cursor = prefix_start.min(offset);
+    let mut segments = Vec::<String>::new();
+
+    loop {
+        while cursor > 0 && bytes[cursor - 1].is_ascii_whitespace() {
+            cursor -= 1;
+        }
+        if cursor < 2 || bytes[cursor - 1] != b':' || bytes[cursor - 2] != b':' {
+            break;
+        }
+        cursor -= 2;
+
+        while cursor > 0 && bytes[cursor - 1].is_ascii_whitespace() {
+            cursor -= 1;
+        }
+        let seg_end = cursor;
+        while cursor > 0 && is_ident_byte(bytes[cursor - 1]) {
+            cursor -= 1;
+        }
+        if seg_end == cursor {
+            return None;
+        }
+        segments.push(source[cursor..seg_end].to_string());
+    }
+
+    if segments.is_empty() {
+        return None;
+    }
+    segments.reverse();
+    Some(segments)
+}
+
 fn requires_site_at_cursor(module: &res::Module, cursor: Position) -> bool {
     module
         .requires
@@ -241,6 +305,7 @@ fn dispatch_site_completions(
     let items = match site.kind() {
         CompletionSiteKind::Scope => (providers.scope)(site, resolved),
         CompletionSiteKind::Member => (providers.member)(site, resolved),
+        CompletionSiteKind::QualifiedPath => (providers.qualified_path)(site, resolved),
         CompletionSiteKind::RequiresPath => (providers.requires_path)(site, resolved),
         CompletionSiteKind::TypeExpr => (providers.type_expr)(site, resolved),
         CompletionSiteKind::Pattern => (providers.pattern)(site, resolved),
@@ -296,6 +361,18 @@ fn provide_requires_path_completions(
     _resolved: &crate::core::context::ResolvedContext,
 ) -> Vec<CompletionItem> {
     Vec::new()
+}
+
+fn provide_qualified_path_completions(
+    site: &CompletionSite,
+    resolved: &crate::core::context::ResolvedContext,
+) -> Vec<CompletionItem> {
+    match site {
+        CompletionSite::QualifiedPath { path_segments, .. } => {
+            qualified_path_completions(resolved, path_segments)
+        }
+        _ => Vec::new(),
+    }
 }
 
 fn provide_type_expr_completions(
@@ -636,6 +713,56 @@ fn global_scope(
         );
     }
     out
+}
+
+fn qualified_path_completions(
+    resolved: &crate::core::context::ResolvedContext,
+    path_segments: &[String],
+) -> Vec<CompletionItem> {
+    // V1 scope: resolve first-segment nominal paths (`Protocol::Role`,
+    // `Enum::Variant`) that appear in typestate/protocol surface syntax.
+    if path_segments.len() != 1 {
+        return Vec::new();
+    }
+    let Some(owner_name) = path_segments.first() else {
+        return Vec::new();
+    };
+
+    for item in &resolved.module.top_level_items {
+        match item {
+            res::TopLevelItem::ProtocolDef(protocol_def) if protocol_def.name == *owner_name => {
+                return protocol_def
+                    .roles
+                    .iter()
+                    .map(|role| CompletionItem {
+                        label: role.name.clone(),
+                        kind: CompletionKind::EnumVariant,
+                        def_id: role.def_id,
+                        detail: Some("protocol role".to_string()),
+                    })
+                    .collect();
+            }
+            res::TopLevelItem::TypeDef(type_def) if type_def.name == *owner_name => {
+                if let res::TypeDefKind::Enum { variants } = &type_def.kind {
+                    return variants
+                        .iter()
+                        .map(|variant| CompletionItem {
+                            label: variant.name.clone(),
+                            kind: CompletionKind::EnumVariant,
+                            def_id: resolved
+                                .def_table
+                                .lookup_node_def_id(variant.id)
+                                .unwrap_or(UNKNOWN_DEF_ID),
+                            detail: Some("enum variant".to_string()),
+                        })
+                        .collect();
+                }
+                return Vec::new();
+            }
+            _ => {}
+        }
+    }
+    Vec::new()
 }
 
 enum CallableAtCursor<'a> {
@@ -1161,6 +1288,22 @@ fn f() -> u64 {
         let cursor = cursor_at_end_of(source, "valu");
         let site = classify_completion_site(source, cursor, &resolved, None);
         assert!(matches!(site, CompletionSite::Pattern { .. }));
+    }
+
+    #[test]
+    fn classify_site_detects_qualified_path_context() {
+        let source = r#"
+type Flag = On | Off
+
+fn main() -> u64 {
+    let x = Flag::Of;
+    0
+}
+"#;
+        let resolved = resolved_only(source);
+        let cursor = cursor_at_end_of(source, "Flag::Of");
+        let site = classify_completion_site(source, cursor, &resolved, None);
+        assert!(matches!(site, CompletionSite::QualifiedPath { .. }));
     }
 
     fn resolved_only(source: &str) -> crate::core::context::ResolvedContext {

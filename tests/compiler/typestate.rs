@@ -3,7 +3,7 @@ use machina::core::capsule::CapsuleError;
 use machina::core::diag::CompileError;
 use machina::core::parse::ParseError;
 use machina::core::resolve::ResolveError;
-use machina::driver::compile::{CompileOptions, compile_with_path};
+use machina::driver::compile::{CompileOptions, check_with_path, compile_with_path};
 use std::path::{Path, PathBuf};
 
 fn repo_root() -> PathBuf {
@@ -27,6 +27,11 @@ fn compile_example(path: &Path, experimental_typestate: bool) -> Result<(), Vec<
     compile_with_path(&source, Some(path), &typestate_opts(experimental_typestate)).map(|_| ())
 }
 
+fn check_example(path: &Path, experimental_typestate: bool) -> Result<(), Vec<CompileError>> {
+    let source = std::fs::read_to_string(path).expect("failed to read example source");
+    check_with_path(&source, path, true, experimental_typestate)
+}
+
 fn valid_examples() -> Vec<PathBuf> {
     let root = repo_root();
     vec![
@@ -35,6 +40,14 @@ fn valid_examples() -> Vec<PathBuf> {
         root.join("examples/typestate/job.mc"),
         root.join("examples/typestate/request_builder.mc"),
         root.join("examples/typestate/service_lifecycle.mc"),
+    ]
+}
+
+fn managed_check_examples() -> Vec<PathBuf> {
+    let root = repo_root();
+    vec![
+        root.join("examples/typestate/machine_events_check.mc"),
+        root.join("examples/typestate/inter_machine_req_reply_check.mc"),
     ]
 }
 
@@ -112,4 +125,33 @@ fn typestate_example_runs_in_experimental_mode() {
     let source = std::fs::read_to_string(&path).expect("failed to read typestate runtime fixture");
     let run = run_program_with_opts("typestate_connection", &source, typestate_opts(true));
     assert_eq!(run.status.code(), Some(0));
+}
+
+#[test]
+fn typestate_managed_examples_typecheck_with_experimental_flag() {
+    for path in managed_check_examples() {
+        check_example(&path, true)
+            .unwrap_or_else(|errs| panic!("expected success for {}: {errs:?}", path.display()));
+    }
+}
+
+#[test]
+fn typestate_managed_examples_are_rejected_without_experimental_flag() {
+    for path in managed_check_examples() {
+        let errors = check_example(&path, false)
+            .expect_err("typestate managed examples should fail without experimental flag");
+        assert!(errors.iter().any(|err| {
+            matches!(
+                err,
+                CompileError::Parse(ParseError::FeatureDisabled { feature, .. })
+                    if *feature == "typestate"
+            ) || matches!(
+                err,
+                CompileError::Capsule(CapsuleError::Parse {
+                    error: ParseError::FeatureDisabled { feature, .. },
+                    ..
+                }) if *feature == "typestate"
+            )
+        }));
+    }
 }

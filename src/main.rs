@@ -869,6 +869,7 @@ const RUNTIME_SOURCE_FILES: &[&str] = &[
     "dyn_array.c",
     "hash_table.c",
     "map_table.c",
+    "machine_runtime.c",
     "mem.c",
     "print.c",
     "set.c",

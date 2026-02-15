@@ -1963,6 +1963,46 @@ typestate Gateway : Auth::Client {
 }
 
 #[test]
+fn completions_at_file_include_protocol_roles_for_typestate_binding_paths() {
+    let mut db = AnalysisDb::new();
+    db.set_experimental_typestate(true);
+
+    let source = r#"
+protocol Auth {
+    role Client;
+    role Server;
+    flow Client -> Server: u64;
+}
+
+typestate Gateway : Auth::Cl {
+    fn new() -> Ready {
+        Ready {}
+    }
+
+    state Ready {}
+}
+"#;
+    let file_id = db.upsert_disk_text(
+        PathBuf::from("examples/analysis_protocol_role_completion.mc"),
+        source,
+    );
+
+    let mut query_span = span_for_substring(source, "Auth::Cl");
+    query_span.start = query_span.end;
+    let completions = db
+        .completions_at_file(file_id, query_span)
+        .expect("completion query should succeed");
+    assert!(
+        completions.iter().any(|item| item.label == "Client"),
+        "expected protocol role completion for `Client`, got: {completions:#?}"
+    );
+    assert!(
+        !completions.iter().any(|item| item.label == "Server"),
+        "expected prefix filter to keep only `Cl*` candidates, got: {completions:#?}"
+    );
+}
+
+#[test]
 fn completions_at_program_file_include_imported_symbols() {
     let run_id = ANALYSIS_TMP_COUNTER.fetch_add(1, Ordering::Relaxed);
     let temp_dir = std::env::temp_dir().join(format!(
