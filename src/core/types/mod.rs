@@ -512,8 +512,6 @@ impl Type {
             self,
             Type::Array { .. }
                 | Type::DynArray { .. }
-                | Type::Pending { .. }
-                | Type::ReplyCap { .. }
                 | Type::Set { .. }
                 | Type::Map { .. }
                 | Type::Tuple { .. }

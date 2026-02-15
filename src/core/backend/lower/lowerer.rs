@@ -65,6 +65,7 @@ pub(super) struct FuncLowerer<'a, 'g> {
     pub(crate) def_table: &'a DefTable,
     pub(super) type_lowerer: TypeLowerer<'a>,
     pub(crate) type_map: &'a TypeMap,
+    pub(super) machine_plans: Option<&'a sem::MachinePlanMap>,
     pub(super) ret_ty: Type,
     pub(super) builder: FunctionBuilder,
     /// Maps definition IDs to their current SSA values (mutable during lowering).
@@ -160,6 +161,7 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
         module: Option<&'a sem::Module>,
         type_map: &'a TypeMap,
         lowering_plans: &'a sem::LoweringPlanMap,
+        machine_plans: Option<&'a sem::MachinePlanMap>,
         drop_glue: &'g mut DropGlueRegistry,
         globals: &'g mut GlobalArena,
         trace_drops: bool,
@@ -218,6 +220,7 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
         Self {
             def_table,
             type_map,
+            machine_plans,
             type_lowerer,
             ret_ty: (*ret_ty).clone(),
             builder,
@@ -246,6 +249,7 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
         module: &'a sem::Module,
         type_map: &'a TypeMap,
         lowering_plans: &'a sem::LoweringPlanMap,
+        machine_plans: Option<&'a sem::MachinePlanMap>,
         drop_glue: &'g mut DropGlueRegistry,
         globals: &'g mut GlobalArena,
         trace_drops: bool,
@@ -335,6 +339,7 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
         Self {
             def_table,
             type_map,
+            machine_plans,
             type_lowerer,
             ret_ty: ret_ty.clone(),
             builder,
@@ -376,6 +381,7 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
         Self {
             def_table,
             type_map,
+            machine_plans: None,
             type_lowerer,
             ret_ty: Type::Unit,
             builder,
@@ -390,6 +396,57 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
             globals,
             trace_drops,
         }
+    }
+
+    /// Resolves an event kind for payload-based send/request emits.
+    ///
+    /// This is a best-effort bridge for managed runtime execution. The lookup
+    /// is considered ambiguous if the same payload type maps to different kinds
+    /// across descriptors.
+    pub(super) fn machine_payload_event_kind(&self, payload_ty: &Type) -> Option<u64> {
+        let plans = self.machine_plans?;
+        let mut selected = None;
+        for descriptor in plans.descriptors.values() {
+            for event in &descriptor.event_kinds {
+                if let sem::MachineEventKeyPlan::Payload { payload_ty: ty } = &event.key
+                    && ty == payload_ty
+                {
+                    match selected {
+                        None => selected = Some(event.kind),
+                        Some(existing) if existing == event.kind => {}
+                        Some(_) => return None,
+                    }
+                }
+            }
+        }
+        selected
+    }
+
+    /// Resolves an event kind for response reply emits.
+    ///
+    /// Response emits only carry the concrete response payload, so this lookup
+    /// matches all `Response(selector, response)` keys by response payload type.
+    /// Ambiguous mappings across descriptors are rejected.
+    pub(super) fn machine_response_event_kind(&self, response_ty: &Type) -> Option<u64> {
+        let plans = self.machine_plans?;
+        let mut selected = None;
+        for descriptor in plans.descriptors.values() {
+            for event in &descriptor.event_kinds {
+                if let sem::MachineEventKeyPlan::Response {
+                    selector_ty: _,
+                    response_ty: ty,
+                } = &event.key
+                    && ty == response_ty
+                {
+                    match selected {
+                        None => selected = Some(event.kind),
+                        Some(existing) if existing == event.kind => {}
+                        Some(_) => return None,
+                    }
+                }
+            }
+        }
+        selected
     }
 
     /// Initializes locals for parameters using their declared modes.

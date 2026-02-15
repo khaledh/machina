@@ -420,6 +420,10 @@ fn build_fault_only_dispatch_thunk(
 }
 
 fn lower_handler_param_abi_ty(param: &FnParam, lowerer: &mut TypeLowerer<'_>) -> IrTypeId {
+    if matches!(param.ty, Type::Pending { .. } | Type::ReplyCap { .. }) {
+        return lowerer.lower_type(&Type::uint(64));
+    }
+
     let ty = lowerer.lower_type(&param.ty);
     match param.mode {
         crate::core::types::FnParamMode::In | crate::core::types::FnParamMode::Sink => {

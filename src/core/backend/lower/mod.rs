@@ -87,12 +87,14 @@ pub fn lower_func_with_opts(
 ) -> Result<LoweredFunction, LowerToIrError> {
     let mut globals = GlobalArena::new();
     let mut drop_glue = DropGlueRegistry::new(def_table);
+    let empty_machine_plans = sem::MachinePlanMap::default();
     lower_func_with_globals(
         func,
         def_table,
         None,
         type_map,
         lowering_plans,
+        &empty_machine_plans,
         drop_plans,
         trace_alloc,
         trace_drops,
@@ -164,6 +166,7 @@ pub fn lower_module_with_machine_plans_with_opts(
             Some(module),
             type_map,
             lowering_plans,
+            machine_plans,
             drop_plans,
             trace_alloc,
             trace_drops,
@@ -185,6 +188,7 @@ pub fn lower_module_with_machine_plans_with_opts(
                 def_table,
                 type_map,
                 lowering_plans,
+                machine_plans,
                 drop_plans,
                 trace_alloc,
                 trace_drops,
@@ -222,6 +226,7 @@ fn lower_func_with_globals(
     module: Option<&sem::Module>,
     type_map: &TypeMap,
     lowering_plans: &sem::LoweringPlanMap,
+    machine_plans: &sem::MachinePlanMap,
     drop_plans: &sem::DropPlanMap,
     trace_alloc: bool,
     trace_drops: bool,
@@ -251,6 +256,7 @@ fn lower_func_with_globals(
         module,
         type_map,
         lowering_plans,
+        Some(machine_plans),
         drop_glue,
         globals,
         trace_drops,
@@ -301,6 +307,7 @@ fn lower_method_def_with_globals(
     def_table: &DefTable,
     type_map: &TypeMap,
     lowering_plans: &sem::LoweringPlanMap,
+    machine_plans: &sem::MachinePlanMap,
     drop_plans: &sem::DropPlanMap,
     trace_alloc: bool,
     trace_drops: bool,
@@ -325,6 +332,7 @@ fn lower_method_def_with_globals(
         module,
         type_map,
         lowering_plans,
+        Some(machine_plans),
         drop_glue,
         globals,
         trace_drops,

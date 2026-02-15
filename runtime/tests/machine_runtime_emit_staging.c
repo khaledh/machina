@@ -72,7 +72,7 @@ static mc_dispatch_result_t emit_dispatch(
     txn->replies_len = 0;
 
     if (machine_id == state->src_send && env->kind == 1) {
-        if (!__mc_machine_emit_send(state->dst_send, 11, 22)) {
+        if (!__mc_machine_emit_send(state->dst_send, 10, 11, 22)) {
             *fault_code = 10;
             return MC_DISPATCH_FAULT;
         }
@@ -82,7 +82,7 @@ static mc_dispatch_result_t emit_dispatch(
     }
 
     if (machine_id == state->src_fail && env->kind == 2) {
-        if (!__mc_machine_emit_send(state->dst_send, 33, 44)) {
+        if (!__mc_machine_emit_send(state->dst_send, 20, 33, 44)) {
             *fault_code = 20;
             return MC_DISPATCH_FAULT;
         }
@@ -92,7 +92,7 @@ static mc_dispatch_result_t emit_dispatch(
     }
 
     if (machine_id == state->src_req && env->kind == 3) {
-        uint64_t pending = __mc_machine_emit_request(state->dst_server, 55, 66);
+        uint64_t pending = __mc_machine_emit_request(state->dst_server, 30, 55, 66);
         if (pending == 0) {
             *fault_code = 30;
             return MC_DISPATCH_FAULT;
@@ -117,7 +117,7 @@ static mc_dispatch_result_t emit_dispatch(
         state->req_payload0 = env->payload0;
         state->req_payload1 = env->payload1;
         state->req_reply_cap = env->reply_cap_id;
-        if (!__mc_machine_emit_reply(env->reply_cap_id, 77, 88)) {
+        if (!__mc_machine_emit_reply(env->reply_cap_id, 40, 77, 88)) {
             *fault_code = 40;
             return MC_DISPATCH_FAULT;
         }
@@ -138,13 +138,13 @@ static mc_dispatch_result_t emit_dispatch(
 
 int main(void) {
     // ABI guardrail: emit shims must fail when no dispatch context is active.
-    if (__mc_machine_emit_send(1, 0, 0) != 0) {
+    if (__mc_machine_emit_send(1, 0, 0, 0) != 0) {
         return 1;
     }
-    if (__mc_machine_emit_request(1, 0, 0) != 0) {
+    if (__mc_machine_emit_request(1, 0, 0, 0) != 0) {
         return 1;
     }
-    if (__mc_machine_emit_reply(1, 0, 0) != 0) {
+    if (__mc_machine_emit_reply(1, 0, 0, 0) != 0) {
         return 1;
     }
 

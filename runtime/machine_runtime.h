@@ -475,7 +475,8 @@ mc_machine_reply_result_t __mc_machine_runtime_reply(
 // `__mc_machine_runtime_dispatch_one_txn`. Calls outside dispatch return
 // failure/zero and stage nothing.
 //
-// The payload ABI is an opaque pair:
+// ABI payload layout:
+// - `kind`: event kind used for descriptor dispatch row selection.
 // - `payload0`: payload pointer/int payload word.
 // - `payload1`: payload layout identifier.
 //
@@ -486,16 +487,19 @@ mc_machine_reply_result_t __mc_machine_runtime_reply(
 // Success means "staged into the active transaction", not "already delivered".
 uint8_t __mc_machine_emit_send(
     uint64_t dst,
+    uint64_t kind,
     uint64_t payload0,
     uint64_t payload1
 );
 uint64_t __mc_machine_emit_request(
     uint64_t dst,
+    uint64_t kind,
     uint64_t payload0,
     uint64_t payload1
 );
 uint8_t __mc_machine_emit_reply(
     uint64_t cap,
+    uint64_t kind,
     uint64_t payload0,
     uint64_t payload1
 );

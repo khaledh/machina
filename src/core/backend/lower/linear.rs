@@ -979,11 +979,14 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
                     BranchResult::Return => return Ok(BranchResult::Return),
                 };
                 let u64_ty = self.type_lowerer.lower_type(&Type::uint(64));
+                let payload_ty = self.type_map.type_table().get(payload.ty).clone();
+                let event_kind = self.machine_payload_event_kind(&payload_ty).unwrap_or(0);
+                let kind = self.builder.const_int(event_kind as i128, false, 64, u64_ty);
                 let zero = self.builder.const_int(0, false, 64, u64_ty);
                 let bool_ty = self.type_lowerer.lower_type(&Type::Bool);
                 let _status = self.builder.call(
                     Callee::Runtime(RuntimeFn::MachineEmitSend),
-                    vec![dst, zero, zero],
+                    vec![dst, kind, zero, zero],
                     bool_ty,
                 );
                 let unit_ty = self.type_lowerer.lower_type_id(expr.ty);
@@ -1001,11 +1004,14 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
                     BranchResult::Return => return Ok(BranchResult::Return),
                 };
                 let u64_ty = self.type_lowerer.lower_type(&Type::uint(64));
+                let payload_ty = self.type_map.type_table().get(payload.ty).clone();
+                let event_kind = self.machine_payload_event_kind(&payload_ty).unwrap_or(0);
+                let kind = self.builder.const_int(event_kind as i128, false, 64, u64_ty);
                 let zero = self.builder.const_int(0, false, 64, u64_ty);
                 let pending_ty = self.type_lowerer.lower_type_id(expr.ty);
                 let pending = self.builder.call(
                     Callee::Runtime(RuntimeFn::MachineEmitRequest),
-                    vec![dst, zero, zero],
+                    vec![dst, kind, zero, zero],
                     pending_ty,
                 );
                 Ok(pending.into())
@@ -1020,11 +1026,16 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
                     BranchResult::Return => return Ok(BranchResult::Return),
                 };
                 let u64_ty = self.type_lowerer.lower_type(&Type::uint(64));
+                let response_ty = self.type_map.type_table().get(value.ty).clone();
+                let event_kind = self
+                    .machine_response_event_kind(&response_ty)
+                    .unwrap_or(0);
+                let kind = self.builder.const_int(event_kind as i128, false, 64, u64_ty);
                 let zero = self.builder.const_int(0, false, 64, u64_ty);
                 let bool_ty = self.type_lowerer.lower_type(&Type::Bool);
                 let _status = self.builder.call(
                     Callee::Runtime(RuntimeFn::MachineEmitReply),
-                    vec![cap_value, zero, zero],
+                    vec![cap_value, kind, zero, zero],
                     bool_ty,
                 );
                 let unit_ty = self.type_lowerer.lower_type_id(expr.ty);

@@ -1795,6 +1795,7 @@ mc_machine_reply_result_t __mc_machine_runtime_reply(
 // `__mc_machine_runtime_dispatch_one_txn`.
 uint8_t __mc_machine_emit_send(
     uint64_t dst,
+    uint64_t kind,
     uint64_t payload0,
     uint64_t payload1
 ) {
@@ -1807,7 +1808,7 @@ uint8_t __mc_machine_emit_send(
     mc_machine_outbox_effect_t effect = {
         .dst = (mc_machine_id_t)dst,
         .env = {
-            .kind = 0,
+            .kind = kind,
             .src = ctx->machine_id,
             .reply_cap_id = 0,
             .pending_id = 0,
@@ -1820,6 +1821,7 @@ uint8_t __mc_machine_emit_send(
 
 uint64_t __mc_machine_emit_request(
     uint64_t dst,
+    uint64_t kind,
     uint64_t payload0,
     uint64_t payload1
 ) {
@@ -1838,7 +1840,7 @@ uint64_t __mc_machine_emit_request(
         .dst = (mc_machine_id_t)dst,
         .pending_id = pending_id,
         .env = {
-            .kind = 0,
+            .kind = kind,
             .src = ctx->machine_id,
             .reply_cap_id = 0,
             .pending_id = 0,
@@ -1854,6 +1856,7 @@ uint64_t __mc_machine_emit_request(
 
 uint8_t __mc_machine_emit_reply(
     uint64_t cap,
+    uint64_t kind,
     uint64_t payload0,
     uint64_t payload1
 ) {
@@ -1866,7 +1869,7 @@ uint8_t __mc_machine_emit_reply(
     mc_machine_reply_effect_t effect = {
         .reply_cap_id = cap,
         .env = {
-            .kind = 0,
+            .kind = kind,
             .src = ctx->machine_id,
             .reply_cap_id = 0,
             .pending_id = 0,

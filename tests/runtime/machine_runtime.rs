@@ -265,3 +265,242 @@ fn main() -> u64 {
         "expected handler output in runtime execution, got stdout: {stdout}"
     );
 }
+
+#[test]
+fn test_typestate_machine_runtime_two_machine_request_reply_approved_and_denied() {
+    let source = r#"
+requires {
+    std::io::println
+    std::machine::new_runtime
+    std::machine::close_runtime
+    std::machine::spawn
+    std::machine::start
+    std::machine::send
+    std::machine::bind_descriptor
+    std::machine::step
+    std::machine::StepStatus
+}
+
+type KickApprove = {}
+type KickDeny = {}
+type ReqApprove = {}
+type ReqDeny = {}
+type Response = {}
+type AuthApproved = {}
+type AuthDenied = {}
+
+typestate AuthClient {
+    fn new() -> Idle {
+        Idle {}
+    }
+
+    state Idle {
+        on KickApprove(e: KickApprove) -> AwaitAuth {
+            e;
+            let pending: Pending<AuthApproved | AuthDenied> =
+                emit Request(to: 1, ReqApprove {});
+            AwaitAuth { pending: pending }
+        }
+
+        on KickDeny(e: KickDeny) -> AwaitAuth {
+            e;
+            let pending: Pending<AuthApproved | AuthDenied> =
+                emit Request(to: 1, ReqDeny {});
+            AwaitAuth { pending: pending }
+        }
+    }
+
+    state AwaitAuth {
+        fields {
+            pending: Pending<AuthApproved | AuthDenied>,
+        }
+
+        on Response(pending, AuthApproved) -> Idle {
+            println("approved");
+            Idle {}
+        }
+
+        on Response(pending, AuthDenied) -> Idle {
+            println("denied");
+            Idle {}
+        }
+    }
+}
+
+typestate AuthServer {
+    fn new() -> Ready {
+        Ready {}
+    }
+
+    state Ready {
+        on ReqApprove(req: ReqApprove, cap: ReplyCap<AuthApproved | AuthDenied>) -> Ready {
+            req;
+            reply(cap, AuthApproved {});
+            Ready {}
+        }
+
+        on ReqDeny(req: ReqDeny, cap: ReplyCap<AuthApproved | AuthDenied>) -> Ready {
+            req;
+            reply(cap, AuthDenied {});
+            Ready {}
+        }
+    }
+}
+
+fn main() -> u64 {
+    var rt = new_runtime();
+
+    // Spawn server first so its machine id is 1 (used by client Request `to:`).
+    var server_id = 0;
+    match spawn(rt, 8) {
+        id: u64 => {
+            server_id = id;
+        }
+        _ => {
+            close_runtime(inout rt);
+            return 1;
+        }
+    };
+    var client_id = 0;
+    match spawn(rt, 8) {
+        id: u64 => {
+            client_id = id;
+        }
+        _ => {
+            close_runtime(inout rt);
+            return 1;
+        }
+    };
+
+    // Descriptor ids are deterministic by typestate name sort:
+    //   AuthClient -> 1, AuthServer -> 2.
+    // State tags are deterministic by state name sort:
+    //   AuthClient: AwaitAuth -> 1, Idle -> 2.
+    //   AuthServer: Ready -> 1.
+    match bind_descriptor(rt, server_id, 2, 1) {
+        ok: () => {
+            ok;
+        }
+        _ => {
+            close_runtime(inout rt);
+            return 1;
+        }
+    };
+    match bind_descriptor(rt, client_id, 1, 2) {
+        ok: () => {
+            ok;
+        }
+        _ => {
+            close_runtime(inout rt);
+            return 1;
+        }
+    };
+
+    match start(rt, server_id) {
+        ok: () => {
+            ok;
+        }
+        _ => {
+            close_runtime(inout rt);
+            return 1;
+        }
+    };
+    match start(rt, client_id) {
+        ok: () => {
+            ok;
+        }
+        _ => {
+            close_runtime(inout rt);
+            return 1;
+        }
+    };
+
+    // Kick approve flow (3 dispatches): client -> server -> client(response).
+    match send(rt, client_id, 1, 0, 0) {
+        ok: () => {
+            ok;
+        }
+        _ => {
+            close_runtime(inout rt);
+            return 1;
+        }
+    };
+    match step(rt) {
+        StepStatus::DidWork => {}
+        _ => {
+            close_runtime(inout rt);
+            return 1;
+        }
+    };
+    match step(rt) {
+        StepStatus::DidWork => {}
+        _ => {
+            close_runtime(inout rt);
+            return 1;
+        }
+    };
+    match step(rt) {
+        StepStatus::DidWork => {}
+        _ => {
+            close_runtime(inout rt);
+            return 1;
+        }
+    };
+
+    // Kick deny flow (same 3-dispatch pattern).
+    match send(rt, client_id, 2, 0, 0) {
+        ok: () => {
+            ok;
+        }
+        _ => {
+            close_runtime(inout rt);
+            return 1;
+        }
+    };
+    match step(rt) {
+        StepStatus::DidWork => {}
+        _ => {
+            close_runtime(inout rt);
+            return 1;
+        }
+    };
+    match step(rt) {
+        StepStatus::DidWork => {}
+        _ => {
+            close_runtime(inout rt);
+            return 1;
+        }
+    };
+    match step(rt) {
+        StepStatus::DidWork => {}
+        _ => {
+            close_runtime(inout rt);
+            return 1;
+        }
+    };
+
+    close_runtime(inout rt);
+    0
+}
+"#;
+
+    let run = run_program_with_opts(
+        "typestate_machine_runtime_reqreply",
+        source,
+        CompileOptions {
+            dump: None,
+            emit_ir: false,
+            verify_ir: false,
+            trace_alloc: false,
+            trace_drops: false,
+            inject_prelude: true,
+            experimental_typestate: true,
+        },
+    );
+    assert_eq!(run.status.code(), Some(0));
+    let stdout = String::from_utf8_lossy(&run.stdout);
+    assert!(
+        stdout.contains("approved") && stdout.contains("denied"),
+        "expected both request/reply outcomes in stdout, got: {stdout}"
+    );
+}
