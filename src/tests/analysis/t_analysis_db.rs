@@ -1909,7 +1909,10 @@ typestate Gateway : Auth::Client {
     state Ready {}
 }
 "#;
-    let file_id = db.upsert_disk_text(PathBuf::from("examples/analysis_protocol_role_defloc.mc"), source);
+    let file_id = db.upsert_disk_text(
+        PathBuf::from("examples/analysis_protocol_role_defloc.mc"),
+        source,
+    );
 
     let role_decl = span_for_substring(source, "role Client");
     let role_use = span_for_substring(source, "Auth::Client");
@@ -1948,7 +1951,10 @@ typestate Gateway : Auth::Client {
     state Ready {}
 }
 "#;
-    let file_id = db.upsert_disk_text(PathBuf::from("examples/analysis_protocol_role_hover.mc"), source);
+    let file_id = db.upsert_disk_text(
+        PathBuf::from("examples/analysis_protocol_role_hover.mc"),
+        source,
+    );
     let role_use = span_for_substring(source, "Auth::Client");
     let mut query_span = role_use;
     query_span.start = position_at(source, role_use.start.offset + "Auth::".len());

@@ -255,7 +255,11 @@ fn classify_qualified_path_site(
     })
 }
 
-fn qualified_path_segments(source: &str, offset: usize, prefix_start: usize) -> Option<Vec<String>> {
+fn qualified_path_segments(
+    source: &str,
+    offset: usize,
+    prefix_start: usize,
+) -> Option<Vec<String>> {
     let bytes = source.as_bytes();
     let mut cursor = prefix_start.min(offset);
     let mut segments = Vec::<String>::new();

@@ -173,11 +173,8 @@ fn check_typestate_handler_overlap(engine: &TypecheckEngine) -> Vec<TypeCheckErr
             continue;
         };
 
-        let patterns = collect_handler_response_patterns(
-            &resolved.def_table,
-            &resolved.module,
-            method_block,
-        );
+        let patterns =
+            collect_handler_response_patterns(&resolved.def_table, &resolved.module, method_block);
         for i in 0..patterns.len() {
             for j in (i + 1)..patterns.len() {
                 let left = &patterns[i];

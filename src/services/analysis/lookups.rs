@@ -139,9 +139,9 @@ fn typestate_role_def_at_span(
             .offset
             .saturating_sub(role_impl.span.start.offset);
         let start = role_impl.span.start.offset;
-        let replace = best
-            .as_ref()
-            .is_none_or(|(best_width, best_start, _)| width < *best_width || (width == *best_width && start > *best_start));
+        let replace = best.as_ref().is_none_or(|(best_width, best_start, _)| {
+            width < *best_width || (width == *best_width && start > *best_start)
+        });
         if replace {
             best = Some((width, start, def_id));
         }
@@ -303,13 +303,15 @@ pub(crate) fn hover_at_span_in_file(
         if let Some((_, _, _, info)) = best {
             return Some(info);
         }
-        if let Some(def_id) = typestate_role_def_at_span(
-            &typed.typestate_role_impls,
-            &typed.def_table,
-            query_span,
-        ) {
-            let def_name = typed.def_table.lookup_def(def_id).map(|def| def.name.clone());
-            if let (Some(def_name), Some(query_ident)) = (def_name.as_deref(), query_ident.as_deref())
+        if let Some(def_id) =
+            typestate_role_def_at_span(&typed.typestate_role_impls, &typed.def_table, query_span)
+        {
+            let def_name = typed
+                .def_table
+                .lookup_def(def_id)
+                .map(|def| def.name.clone());
+            if let (Some(def_name), Some(query_ident)) =
+                (def_name.as_deref(), query_ident.as_deref())
                 && !def_name_matches_query(def_name, query_ident, &demangler)
             {
                 return None;
