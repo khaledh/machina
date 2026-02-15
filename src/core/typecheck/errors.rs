@@ -345,6 +345,11 @@ pub enum TypeCheckErrorKind {
     )]
     ProtocolOutgoingPayloadNotAllowed(String, String, Type, Span),
 
+    #[error(
+        "Typestate {0} state {1} has overlapping `on` handlers for selector {2} on response variants {3:?}"
+    )]
+    TypestateOverlappingOnHandlers(String, String, Type, Vec<Type>, Span),
+
     #[error("`reply` can only be used inside typestate `on` handlers")]
     ReplyOutsideHandler(Span),
 
@@ -481,6 +486,7 @@ impl TypeCheckError {
             TypeCheckErrorKind::OpaquePatternDestructure(_, span) => *span,
             TypeCheckErrorKind::ProtocolFlowHandlerMissing(_, _, _, span) => *span,
             TypeCheckErrorKind::ProtocolOutgoingPayloadNotAllowed(_, _, _, span) => *span,
+            TypeCheckErrorKind::TypestateOverlappingOnHandlers(_, _, _, _, span) => *span,
             TypeCheckErrorKind::ReplyOutsideHandler(span) => *span,
             TypeCheckErrorKind::ReplyCapExpected(_, span) => *span,
             TypeCheckErrorKind::ReplyPayloadNotAllowed(_, _, span) => *span,

@@ -560,6 +560,87 @@ typestate Gateway : Auth::Server {
 }
 
 #[test]
+fn typestate_pattern_on_handlers_overlap_is_rejected() {
+    let source = r#"
+type Response = {}
+type AuthApproved = {}
+type AuthDenied = {}
+
+typestate Connection {
+    fn new() -> AwaitAuth {
+        AwaitAuth {}
+    }
+
+    state AwaitAuth {
+        on Response(pending, AuthApproved) -> AwaitAuth {
+            AwaitAuth {}
+        }
+
+        on Response(pending, AuthApproved) -> AwaitAuth {
+            AwaitAuth {}
+        }
+    }
+}
+"#;
+    let parsed = parsed_context_typestate(source);
+    let out = resolve_typecheck_pipeline_with_policy(
+        parsed,
+        ResolveInputs::default(),
+        None,
+        FrontendPolicy::Strict,
+    );
+    assert!(
+        out.type_errors.iter().any(|e| {
+            matches!(
+                e.kind(),
+                TypeCheckErrorKind::TypestateOverlappingOnHandlers(ts, state, _, _, _)
+                    if ts == "Connection" && state == "AwaitAuth"
+            )
+        }),
+        "expected overlapping typestate on-handler error, got {:?}",
+        out.type_errors
+    );
+}
+
+#[test]
+fn typestate_pattern_on_handlers_disjoint_are_accepted() {
+    let source = r#"
+type Response = {}
+type AuthApproved = {}
+type AuthDenied = {}
+
+typestate Connection {
+    fn new() -> AwaitAuth {
+        AwaitAuth {}
+    }
+
+    state AwaitAuth {
+        on Response(pending, AuthApproved) -> AwaitAuth {
+            AwaitAuth {}
+        }
+
+        on Response(pending, AuthDenied) -> AwaitAuth {
+            AwaitAuth {}
+        }
+    }
+}
+"#;
+    let parsed = parsed_context_typestate(source);
+    let out = resolve_typecheck_pipeline_with_policy(
+        parsed,
+        ResolveInputs::default(),
+        None,
+        FrontendPolicy::Strict,
+    );
+    assert!(
+        !out.has_errors(),
+        "expected disjoint typestate response handlers to be accepted, got resolve={:?} type={:?}",
+        out.resolve_errors,
+        out.type_errors
+    );
+}
+
+#[test]
 fn typecheck_policy_strict_vs_partial() {
     let source = r#"
 fn main() -> u64 {

@@ -839,6 +839,7 @@ macro_rules! with_typecheck_variants {
             OpaquePatternDestructure,
             ProtocolFlowHandlerMissing,
             ProtocolOutgoingPayloadNotAllowed,
+            TypestateOverlappingOnHandlers,
             ReplyOutsideHandler,
             ReplyCapExpected,
             ReplyPayloadNotAllowed,

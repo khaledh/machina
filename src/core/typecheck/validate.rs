@@ -56,6 +56,7 @@ pub(crate) fn run(engine: &mut TypecheckEngine) -> Result<(), Vec<TypeCheckError
         }
     }
     errors.extend(check_protocol_shape_conformance(engine));
+    errors.extend(check_typestate_handler_overlap(engine));
     errors.extend(check_reply_cap_usage(engine));
 
     if errors.is_empty() {
@@ -152,6 +153,109 @@ fn check_protocol_shape_conformance(engine: &TypecheckEngine) -> Vec<TypeCheckEr
     }
 
     errors
+}
+
+#[derive(Clone, Debug)]
+struct HandlerResponsePattern {
+    selector_ty: Type,
+    response_tys: Vec<Type>,
+    span: crate::core::diag::Span,
+}
+
+fn check_typestate_handler_overlap(engine: &TypecheckEngine) -> Vec<TypeCheckError> {
+    let resolved = engine.context();
+    let mut errors = Vec::new();
+
+    for method_block in resolved.module.method_blocks() {
+        let Some((typestate_name, state_name)) =
+            parse_typestate_and_state_from_generated_state(&method_block.type_name)
+        else {
+            continue;
+        };
+
+        let patterns = collect_handler_response_patterns(
+            &resolved.def_table,
+            &resolved.module,
+            method_block,
+        );
+        for i in 0..patterns.len() {
+            for j in (i + 1)..patterns.len() {
+                let left = &patterns[i];
+                let right = &patterns[j];
+                if left.selector_ty != right.selector_ty {
+                    continue;
+                }
+
+                let mut overlap = Vec::new();
+                for ty in &left.response_tys {
+                    if right.response_tys.contains(ty) && !overlap.contains(ty) {
+                        overlap.push(ty.clone());
+                    }
+                }
+                if overlap.is_empty() {
+                    continue;
+                }
+
+                errors.push(
+                    TypeCheckErrorKind::TypestateOverlappingOnHandlers(
+                        typestate_name.clone(),
+                        state_name.clone(),
+                        left.selector_ty.clone(),
+                        overlap,
+                        right.span,
+                    )
+                    .into(),
+                );
+            }
+        }
+    }
+
+    errors
+}
+
+fn collect_handler_response_patterns(
+    def_table: &crate::core::resolve::DefTable,
+    module: &crate::core::tree::resolved::Module,
+    method_block: &crate::core::tree::resolved::MethodBlock,
+) -> Vec<HandlerResponsePattern> {
+    let mut out = Vec::new();
+    for method_item in &method_block.method_items {
+        let MethodItem::Def(method_def) = method_item else {
+            continue;
+        };
+        if !method_def.sig.name.starts_with("__ts_on_") {
+            continue;
+        }
+
+        // Pattern-form `on Response(pending, Variant)` lowers to:
+        //   (__event, pending: Pending<...>, __response: ...)
+        // We only consider these handlers for overlap checks.
+        if method_def.sig.params.len() < 3 {
+            continue;
+        }
+        let event_param = &method_def.sig.params[0];
+        let pending_param = &method_def.sig.params[1];
+
+        let Ok(selector_ty) = resolve_type_expr(def_table, module, &event_param.typ) else {
+            continue;
+        };
+        let Ok(pending_ty) = resolve_type_expr(def_table, module, &pending_param.typ) else {
+            continue;
+        };
+        let Type::Pending { response_tys } = pending_ty else {
+            continue;
+        };
+        if response_tys.is_empty() {
+            continue;
+        }
+
+        out.push(HandlerResponsePattern {
+            selector_ty,
+            response_tys,
+            span: method_def.sig.span,
+        });
+    }
+    out
 }
 
 fn collect_typestate_handler_payloads(
@@ -625,6 +729,12 @@ fn parse_typestate_from_generated_state(
             }
         })
         .max_by_key(|ts_name| ts_name.len())
+}
+
+fn parse_typestate_and_state_from_generated_state(type_name: &str) -> Option<(String, String)> {
+    let rest = type_name.strip_prefix("__ts_")?;
+    let (typestate_name, state_name) = rest.rsplit_once('_')?;
+    Some((typestate_name.to_string(), state_name.to_string()))
 }
 
 #[cfg(test)]
