@@ -1032,6 +1032,50 @@ mc_machine_reply_result_t __mc_machine_runtime_reply(
     return MC_REPLY_FULL;
 }
 
+// Managed typestate effect ABI shims.
+//
+// These symbols are intentionally thin for now: they provide stable call
+// targets for compiler-lowered `emit` / `reply` while full machine descriptor
+// and dispatch-thunk runtime wiring lands.
+//
+// The current implementation is conservative:
+// - send/reply report failure (0),
+// - request returns 0 pending id.
+// This preserves deterministic behavior until contextual dispatch binding is
+// introduced by subsequent machine-runtime integration work.
+uint8_t __mc_machine_emit_send(
+    uint64_t dst,
+    uint64_t payload0,
+    uint64_t payload1
+) {
+    (void)dst;
+    (void)payload0;
+    (void)payload1;
+    return 0;
+}
+
+uint64_t __mc_machine_emit_request(
+    uint64_t dst,
+    uint64_t payload0,
+    uint64_t payload1
+) {
+    (void)dst;
+    (void)payload0;
+    (void)payload1;
+    return 0;
+}
+
+uint8_t __mc_machine_emit_reply(
+    uint64_t cap,
+    uint64_t payload0,
+    uint64_t payload1
+) {
+    (void)cap;
+    (void)payload0;
+    (void)payload1;
+    return 0;
+}
+
 // Public API: execute at most one dispatch using transactional callback.
 //
 // Commit semantics:

@@ -524,6 +524,20 @@ pub enum ValueExprKind {
         args: Vec<CallArg>,
     },
 
+    // Managed typestate effects (kept explicit for backend/runtime lowering).
+    EmitSend {
+        to: Box<ValueExpr>,
+        payload: Box<ValueExpr>,
+    },
+    EmitRequest {
+        to: Box<ValueExpr>,
+        payload: Box<ValueExpr>,
+    },
+    Reply {
+        cap: Box<ValueExpr>,
+        value: Box<ValueExpr>,
+    },
+
     // Closure reference (lifted to a top-level definition).
     ClosureRef {
         def_id: DefId,

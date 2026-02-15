@@ -324,6 +324,14 @@ fn runtime_call_spec(runtime: &RuntimeFn) -> RuntimeCallSpec {
             args: &[Ptr],
             ret: Unit,
         },
+        RuntimeFn::MachineEmitSend | RuntimeFn::MachineEmitReply => RuntimeCallSpec {
+            args: &[Int, Int, Int],
+            ret: RetBool,
+        },
+        RuntimeFn::MachineEmitRequest => RuntimeCallSpec {
+            args: &[Int, Int, Int],
+            ret: RetInt,
+        },
         RuntimeFn::Alloc => RuntimeCallSpec {
             args: &[Int, Int],
             ret: RetPtr,

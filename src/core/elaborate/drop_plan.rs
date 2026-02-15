@@ -400,6 +400,15 @@ impl<'a> DropPlanBuilder<'a> {
                     }
                 }
             }
+            sem::ValueExprKind::EmitSend { to, payload }
+            | sem::ValueExprKind::EmitRequest { to, payload } => {
+                self.visit_value_expr(to);
+                self.visit_value_expr(payload);
+            }
+            sem::ValueExprKind::Reply { cap, value } => {
+                self.visit_value_expr(cap);
+                self.visit_value_expr(value);
+            }
         }
     }
 }

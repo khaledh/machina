@@ -390,6 +390,32 @@ mc_machine_reply_result_t __mc_machine_runtime_reply(
     const mc_machine_envelope_t *env
 );
 
+// Managed typestate effect ABI shims used by compiler-lowered `emit`/`reply`.
+//
+// V1: backend lowers these calls from typestate handler bodies while full
+// descriptor/thunk wiring is still evolving. The payload ABI is an opaque pair:
+// - `payload0`: payload pointer/int payload word.
+// - `payload1`: payload layout identifier.
+//
+// Return values:
+// - send/reply: non-zero on success, zero on failure.
+// - request: minted pending id on success, zero on failure.
+uint8_t __mc_machine_emit_send(
+    uint64_t dst,
+    uint64_t payload0,
+    uint64_t payload1
+);
+uint64_t __mc_machine_emit_request(
+    uint64_t dst,
+    uint64_t payload0,
+    uint64_t payload1
+);
+uint8_t __mc_machine_emit_reply(
+    uint64_t cap,
+    uint64_t payload0,
+    uint64_t payload1
+);
+
 // Executes at most one envelope dispatch using transactional callback.
 //
 // Transaction model:

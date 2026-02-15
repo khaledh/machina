@@ -400,6 +400,15 @@ impl<'a> Elaborator<'a> {
                     self.desugar_call_arg(arg);
                 }
             }
+            sem::ValueExprKind::EmitSend { to, payload }
+            | sem::ValueExprKind::EmitRequest { to, payload } => {
+                self.desugar_value_expr(to);
+                self.desugar_value_expr(payload);
+            }
+            sem::ValueExprKind::Reply { cap, value } => {
+                self.desugar_value_expr(cap);
+                self.desugar_value_expr(value);
+            }
             sem::ValueExprKind::UnitLit
             | sem::ValueExprKind::IntLit(_)
             | sem::ValueExprKind::BoolLit(_)

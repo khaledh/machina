@@ -293,6 +293,21 @@ pub fn format_semantic_value_expr_compact(expr: &sem::ValueExpr) -> String {
                 .join(", ");
             format!("{recv}.{method_name}({args})")
         }
+        sem::ValueExprKind::EmitSend { to, payload } => format!(
+            "emit Send(to: {}, payload: {})",
+            format_semantic_value_expr_compact(to),
+            format_semantic_value_expr_compact(payload)
+        ),
+        sem::ValueExprKind::EmitRequest { to, payload } => format!(
+            "emit Request(to: {}, payload: {})",
+            format_semantic_value_expr_compact(to),
+            format_semantic_value_expr_compact(payload)
+        ),
+        sem::ValueExprKind::Reply { cap, value } => format!(
+            "reply({}, {})",
+            format_semantic_value_expr_compact(cap),
+            format_semantic_value_expr_compact(value)
+        ),
         sem::ValueExprKind::ClosureRef { def_id } => format!("closure#{def_id}"),
     }
 }

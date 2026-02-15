@@ -444,13 +444,25 @@ impl<'a> Elaborator<'a> {
                     expr: Box::new(self.elab_value(inner)),
                 }
             }
+            norm::ExprKind::Emit { kind } => match kind {
+                norm::EmitKind::Send { to, payload } => sem::ValueExprKind::EmitSend {
+                    to: Box::new(self.elab_value(to)),
+                    payload: Box::new(self.elab_value(payload)),
+                },
+                norm::EmitKind::Request { to, payload } => sem::ValueExprKind::EmitRequest {
+                    to: Box::new(self.elab_value(to)),
+                    payload: Box::new(self.elab_value(payload)),
+                },
+            },
+            norm::ExprKind::Reply { cap, value } => sem::ValueExprKind::Reply {
+                cap: Box::new(self.elab_value(cap)),
+                value: Box::new(self.elab_value(value)),
+            },
             norm::ExprKind::AddrOf { expr } => sem::ValueExprKind::AddrOf {
                 place: Box::new(self.elab_place(expr)),
             },
             norm::ExprKind::Call { .. }
             | norm::ExprKind::MethodCall { .. }
-            | norm::ExprKind::Emit { .. }
-            | norm::ExprKind::Reply { .. }
             | norm::ExprKind::Closure { .. }
             | norm::ExprKind::Move { .. }
             | norm::ExprKind::ImplicitMove { .. }

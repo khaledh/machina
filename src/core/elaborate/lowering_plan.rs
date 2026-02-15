@@ -174,6 +174,15 @@ impl<'a> LoweringPlanBuilder<'a> {
                     self.visit_call_arg(arg);
                 }
             }
+            sem::ValueExprKind::EmitSend { to, payload }
+            | sem::ValueExprKind::EmitRequest { to, payload } => {
+                self.visit_value_expr(to);
+                self.visit_value_expr(payload);
+            }
+            sem::ValueExprKind::Reply { cap, value } => {
+                self.visit_value_expr(cap);
+                self.visit_value_expr(value);
+            }
 
             sem::ValueExprKind::StringFmt { plan } => self.visit_string_fmt_plan(plan),
 
@@ -371,6 +380,13 @@ impl<'a> LoweringPlanBuilder<'a> {
                 self.is_linear_method_receiver(receiver)
                     && args.iter().all(|arg| self.is_linear_call_arg(arg))
                     && self.is_linear_call_plan(expr.id, true)
+            }
+            sem::ValueExprKind::EmitSend { to, payload }
+            | sem::ValueExprKind::EmitRequest { to, payload } => {
+                self.is_linear_value_expr(to) && self.is_linear_value_expr(payload)
+            }
+            sem::ValueExprKind::Reply { cap, value } => {
+                self.is_linear_value_expr(cap) && self.is_linear_value_expr(value)
             }
 
             sem::ValueExprKind::ClosureRef { .. } => true,

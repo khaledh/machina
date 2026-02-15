@@ -575,7 +575,16 @@ impl<'a> ConstraintCollector<'a> {
                 });
             }
             ExprKind::Emit { kind } => match kind {
-                EmitKind::Send { to, payload } | EmitKind::Request { to, payload } => {
+                EmitKind::Send { to, payload } => {
+                    self.collect_expr(to, None);
+                    self.collect_expr(payload, None);
+                    self.push_eq(
+                        expr_ty.clone(),
+                        Type::Unit,
+                        ConstraintReason::Expr(expr.id, expr.span),
+                    );
+                }
+                EmitKind::Request { to, payload } => {
                     self.collect_expr(to, None);
                     self.collect_expr(payload, None);
                 }

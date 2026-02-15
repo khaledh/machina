@@ -1,9 +1,14 @@
+use crate::core::api::{
+    FrontendPolicy, ParseModuleOptions, ResolveInputs, parse_module_with_id_gen_and_options,
+    resolve_stage_with_policy, typecheck_stage_with_policy,
+};
 use crate::core::context::{ParsedContext, SemanticContext};
 use crate::core::elaborate::elaborate;
 use crate::core::lexer::{LexError, Lexer, Token};
 use crate::core::parse::Parser;
 use crate::core::resolve::resolve;
 use crate::core::semck::sem_check;
+use crate::core::tree::NodeIdGen;
 use crate::core::typecheck::type_check;
 
 pub(super) fn analyze(source: &str) -> SemanticContext {
@@ -20,6 +25,33 @@ pub(super) fn analyze(source: &str) -> SemanticContext {
     let ast_context = ParsedContext::new(module, id_gen);
     let resolved_context = resolve(ast_context).expect("Failed to resolve");
     let type_checked_context = type_check(resolved_context).expect("Failed to type check");
+    let sem_checked_context = sem_check(type_checked_context).expect("Failed to semantic check");
+    elaborate(sem_checked_context)
+}
+
+pub(super) fn analyze_typestate(source: &str) -> SemanticContext {
+    let id_gen = NodeIdGen::new();
+    let (module, id_gen) = parse_module_with_id_gen_and_options(
+        source,
+        id_gen,
+        ParseModuleOptions {
+            experimental_typestate: true,
+        },
+    )
+    .expect("failed to parse typestate source");
+    let ast_context = ParsedContext::new(module, id_gen);
+    let resolved_output = resolve_stage_with_policy(
+        ast_context,
+        ResolveInputs::default(),
+        FrontendPolicy::Strict,
+    );
+    let resolved_context = resolved_output.context.expect("Failed to resolve");
+    let type_checked_output = typecheck_stage_with_policy(
+        resolved_context,
+        resolved_output.imported_facts,
+        FrontendPolicy::Strict,
+    );
+    let type_checked_context = type_checked_output.context.expect("Failed to type check");
     let sem_checked_context = sem_check(type_checked_context).expect("Failed to semantic check");
     elaborate(sem_checked_context)
 }

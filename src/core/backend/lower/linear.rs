@@ -967,6 +967,69 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
                 };
                 Ok(value.into())
             }
+            sem::ValueExprKind::EmitSend { to, payload } => {
+                let dst = match self.lower_value_expr_value(to)? {
+                    BranchResult::Value(value) => value,
+                    BranchResult::Return => return Ok(BranchResult::Return),
+                };
+                // Keep payload evaluation for side effects; managed machine
+                // descriptor/thunk wiring will replace placeholder payload ABI.
+                let _payload_value = match self.lower_value_expr_value(payload)? {
+                    BranchResult::Value(value) => value,
+                    BranchResult::Return => return Ok(BranchResult::Return),
+                };
+                let u64_ty = self.type_lowerer.lower_type(&Type::uint(64));
+                let zero = self.builder.const_int(0, false, 64, u64_ty);
+                let bool_ty = self.type_lowerer.lower_type(&Type::Bool);
+                let _status = self.builder.call(
+                    Callee::Runtime(RuntimeFn::MachineEmitSend),
+                    vec![dst, zero, zero],
+                    bool_ty,
+                );
+                let unit_ty = self.type_lowerer.lower_type_id(expr.ty);
+                Ok(self.builder.const_int(0, false, 8, unit_ty).into())
+            }
+            sem::ValueExprKind::EmitRequest { to, payload } => {
+                let dst = match self.lower_value_expr_value(to)? {
+                    BranchResult::Value(value) => value,
+                    BranchResult::Return => return Ok(BranchResult::Return),
+                };
+                // Keep payload evaluation for side effects; managed machine
+                // descriptor/thunk wiring will replace placeholder payload ABI.
+                let _payload_value = match self.lower_value_expr_value(payload)? {
+                    BranchResult::Value(value) => value,
+                    BranchResult::Return => return Ok(BranchResult::Return),
+                };
+                let u64_ty = self.type_lowerer.lower_type(&Type::uint(64));
+                let zero = self.builder.const_int(0, false, 64, u64_ty);
+                let pending_ty = self.type_lowerer.lower_type_id(expr.ty);
+                let pending = self.builder.call(
+                    Callee::Runtime(RuntimeFn::MachineEmitRequest),
+                    vec![dst, zero, zero],
+                    pending_ty,
+                );
+                Ok(pending.into())
+            }
+            sem::ValueExprKind::Reply { cap, value } => {
+                let cap_value = match self.lower_value_expr_value(cap)? {
+                    BranchResult::Value(value) => value,
+                    BranchResult::Return => return Ok(BranchResult::Return),
+                };
+                let _reply_value = match self.lower_value_expr_value(value)? {
+                    BranchResult::Value(value) => value,
+                    BranchResult::Return => return Ok(BranchResult::Return),
+                };
+                let u64_ty = self.type_lowerer.lower_type(&Type::uint(64));
+                let zero = self.builder.const_int(0, false, 64, u64_ty);
+                let bool_ty = self.type_lowerer.lower_type(&Type::Bool);
+                let _status = self.builder.call(
+                    Callee::Runtime(RuntimeFn::MachineEmitReply),
+                    vec![cap_value, zero, zero],
+                    bool_ty,
+                );
+                let unit_ty = self.type_lowerer.lower_type_id(expr.ty);
+                Ok(self.builder.const_int(0, false, 8, unit_ty).into())
+            }
 
             sem::ValueExprKind::ClosureRef { def_id } => {
                 let ty = self.type_lowerer.lower_type_id(expr.ty);

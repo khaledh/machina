@@ -1,4 +1,6 @@
-use super::{analyze, assert_ir_eq, format_func, indoc, lower_func};
+use super::{
+    analyze, analyze_typestate, assert_ir_eq, format_func, indoc, lower_func, lower_module,
+};
 
 #[test]
 fn test_lower_const() {
@@ -26,6 +28,92 @@ fn test_lower_const() {
         }
     "};
     assert_ir_eq(&text, expected);
+}
+
+#[test]
+fn test_lower_emit_send_and_request_runtime_calls() {
+    let ctx = analyze(indoc! {"
+        fn main() -> u64 {
+            emit Send(to: 0, 1);
+            let p: Pending<u64> = emit Request(to: 0, 2);
+            p;
+            7
+        }
+    "});
+    let func_def = ctx.module.func_defs()[0];
+    let lowered = lower_func(
+        func_def,
+        &ctx.def_table,
+        &ctx.type_map,
+        &ctx.lowering_plans,
+        &ctx.drop_plans,
+    )
+    .expect("failed to lower emit/send request test");
+    let text = format_func(&lowered.func, &lowered.types);
+    assert!(
+        text.contains("__mc_machine_emit_send"),
+        "expected send runtime ABI call in lowered IR: {text}"
+    );
+    assert!(
+        text.contains("__mc_machine_emit_request"),
+        "expected request runtime ABI call in lowered IR: {text}"
+    );
+}
+
+#[test]
+fn test_lower_typestate_handler_reply_runtime_call() {
+    let ctx = analyze_typestate(indoc! {"
+        type Req = {}
+        type Ok = {}
+
+        typestate T {
+            fn new() -> Ready { Ready {} }
+
+            state Ready {
+                on Req(req: Req, cap: ReplyCap<Ok>) -> Ready {
+                    emit Send(to: 0, Req {});
+                    let p: Pending<Ok> = emit Request(to: 0, Req {});
+                    reply(cap, Ok {});
+                    Ready {}
+                }
+            }
+        }
+    "});
+
+    let lowered = lower_module(
+        &ctx.module,
+        &ctx.def_table,
+        &ctx.type_map,
+        &ctx.lowering_plans,
+        &ctx.drop_plans,
+    )
+    .expect("failed to lower typestate module");
+
+    let handler = lowered
+        .funcs
+        .iter()
+        .find_map(|func| {
+            let def = ctx.def_table.lookup_def(func.func.def_id)?;
+            if def.name.starts_with("__ts_on_") {
+                Some(format_func(&func.func, &func.types))
+            } else {
+                None
+            }
+        })
+        .expect("expected lowered typestate on-handler function");
+
+    assert!(
+        handler.contains("__mc_machine_emit_send"),
+        "expected send runtime ABI call in typestate handler IR: {handler}"
+    );
+    assert!(
+        handler.contains("__mc_machine_emit_request"),
+        "expected request runtime ABI call in typestate handler IR: {handler}"
+    );
+    assert!(
+        handler.contains("__mc_machine_emit_reply"),
+        "expected reply runtime ABI call in typestate handler IR: {handler}"
+    );
 }
 
 #[test]
