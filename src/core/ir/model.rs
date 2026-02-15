@@ -174,7 +174,7 @@ pub enum RuntimeFn {
     MachineEmitSend,
     MachineEmitRequest,
     MachineEmitReply,
-    MachineRegisterThunk,
+    MachineRegisterThunkWithTag,
     MachineRegisterDescriptor,
     Alloc,
     Realloc,
@@ -221,7 +221,9 @@ impl RuntimeFn {
             RuntimeFn::MachineEmitSend => "__mc_machine_emit_send",
             RuntimeFn::MachineEmitRequest => "__mc_machine_emit_request",
             RuntimeFn::MachineEmitReply => "__mc_machine_emit_reply",
-            RuntimeFn::MachineRegisterThunk => "__mc_machine_runtime_register_thunk_u64",
+            RuntimeFn::MachineRegisterThunkWithTag => {
+                "__mc_machine_runtime_register_thunk_meta_u64"
+            }
             RuntimeFn::MachineRegisterDescriptor => "__mc_machine_runtime_register_descriptor_u64",
             RuntimeFn::Alloc => "__rt_alloc",
             RuntimeFn::Realloc => "__rt_realloc",

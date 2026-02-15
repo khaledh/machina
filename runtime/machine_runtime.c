@@ -65,6 +65,7 @@ static mc_emit_staging_ctx_t *g_emit_staging_ctx = NULL;
 typedef struct mc_thunk_registry_entry {
     uint64_t thunk_id;
     mc_machine_dispatch_txn_fn dispatch;
+    uint64_t next_state_tag;
 } mc_thunk_registry_entry_t;
 
 static mc_thunk_registry_entry_t *g_thunk_registry = NULL;
@@ -1367,12 +1368,21 @@ void __mc_machine_runtime_register_thunk(
     uint64_t thunk_id,
     mc_machine_dispatch_txn_fn dispatch
 ) {
+    __mc_machine_runtime_register_thunk_meta(thunk_id, dispatch, 0);
+}
+
+void __mc_machine_runtime_register_thunk_meta(
+    uint64_t thunk_id,
+    mc_machine_dispatch_txn_fn dispatch,
+    uint64_t next_state_tag
+) {
     if (thunk_id == 0) {
         return;
     }
     int32_t idx = mc_thunk_registry_find(thunk_id);
     if (idx >= 0) {
         g_thunk_registry[(uint32_t)idx].dispatch = dispatch;
+        g_thunk_registry[(uint32_t)idx].next_state_tag = next_state_tag;
         return;
     }
     if (!mc_thunk_registry_ensure_cap(g_thunk_registry_len + 1)) {
@@ -1380,15 +1390,21 @@ void __mc_machine_runtime_register_thunk(
     }
     g_thunk_registry[g_thunk_registry_len].thunk_id = thunk_id;
     g_thunk_registry[g_thunk_registry_len].dispatch = dispatch;
+    g_thunk_registry[g_thunk_registry_len].next_state_tag = next_state_tag;
     g_thunk_registry_len += 1;
 }
 
-mc_machine_dispatch_txn_fn __mc_machine_runtime_lookup_thunk(uint64_t thunk_id) {
+static const mc_thunk_registry_entry_t *mc_lookup_thunk_entry(uint64_t thunk_id) {
     int32_t idx = mc_thunk_registry_find(thunk_id);
     if (idx < 0) {
         return NULL;
     }
-    return g_thunk_registry[(uint32_t)idx].dispatch;
+    return &g_thunk_registry[(uint32_t)idx];
+}
+
+mc_machine_dispatch_txn_fn __mc_machine_runtime_lookup_thunk(uint64_t thunk_id) {
+    const mc_thunk_registry_entry_t *entry = mc_lookup_thunk_entry(thunk_id);
+    return entry ? entry->dispatch : NULL;
 }
 
 uint8_t __mc_machine_runtime_bind_dispatch_thunk(
@@ -1453,15 +1469,27 @@ static mc_dispatch_result_t mc_descriptor_dispatch(
     uint64_t thunk_id = row->state_local_thunk_id != 0
         ? row->state_local_thunk_id
         : row->typestate_fallback_thunk_id;
-    mc_machine_dispatch_txn_fn dispatch = __mc_machine_runtime_lookup_thunk(thunk_id);
-    if (!dispatch) {
+    const mc_thunk_registry_entry_t *entry = mc_lookup_thunk_entry(thunk_id);
+    if (!entry || !entry->dispatch) {
         if (fault_code) {
             *fault_code = MC_FAULT_CODE_DESCRIPTOR_THUNK_MISSING;
         }
         return MC_DISPATCH_FAULT;
     }
 
-    return dispatch(slot->dispatch_ctx, machine_id, current_state, env, txn, fault_code);
+    mc_dispatch_result_t result = entry->dispatch(
+        slot->dispatch_ctx,
+        machine_id,
+        current_state,
+        env,
+        txn,
+        fault_code
+    );
+    if (result == MC_DISPATCH_OK && txn && txn->has_next_state && txn->next_state_tag == 0
+        && entry->next_state_tag != 0) {
+        txn->next_state_tag = entry->next_state_tag;
+    }
+    return result;
 }
 
 uint64_t __mc_machine_runtime_register_descriptor(
@@ -1891,6 +1919,7 @@ static uint8_t mc_machine_runtime_dispatch_one_txn_impl(
         mc_machine_dispatch_txn_t txn = {
             .has_next_state = 0,
             .next_state = 0,
+            .next_state_tag = 0,
             .outbox = NULL,
             .outbox_len = 0,
             .subscriptions = NULL,
@@ -1955,6 +1984,9 @@ static uint8_t mc_machine_runtime_dispatch_one_txn_impl(
                 result = MC_DISPATCH_FAULT;
             } else if (txn.has_next_state) {
                 slot->state_word = txn.next_state;
+                if (txn.next_state_tag != 0) {
+                    slot->state_tag = txn.next_state_tag;
+                }
             }
         }
 
@@ -2211,9 +2243,22 @@ uint64_t __mc_machine_runtime_bind_dispatch_u64(
 }
 
 void __mc_machine_runtime_register_thunk_u64(uint64_t thunk_id, uint64_t dispatch_fn) {
-    __mc_machine_runtime_register_thunk(
+    __mc_machine_runtime_register_thunk_meta(
         thunk_id,
-        (mc_machine_dispatch_txn_fn)(uintptr_t)dispatch_fn
+        (mc_machine_dispatch_txn_fn)(uintptr_t)dispatch_fn,
+        0
+    );
+}
+
+void __mc_machine_runtime_register_thunk_meta_u64(
+    uint64_t thunk_id,
+    uint64_t dispatch_fn,
+    uint64_t next_state_tag
+) {
+    __mc_machine_runtime_register_thunk_meta(
+        thunk_id,
+        (mc_machine_dispatch_txn_fn)(uintptr_t)dispatch_fn,
+        next_state_tag
     );
 }
 

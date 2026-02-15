@@ -236,7 +236,6 @@ fn main() -> u64 {
             return 1;
         }
     };
-
     let status = step(rt);
     close_runtime(inout rt);
     match status {

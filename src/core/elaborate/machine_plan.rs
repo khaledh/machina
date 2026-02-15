@@ -345,9 +345,11 @@ fn materialize_machine_plans(builders: BTreeMap<String, TypestatePlanSeed>) -> s
         let state_rows: Vec<&StatePlanSeed> = typestate_seed.states.values().collect();
         let mut state_tags = Vec::with_capacity(state_rows.len());
         let mut state_tag_by_name = HashMap::<String, u64>::new();
+        let mut state_tag_by_layout = HashMap::<TypeId, u64>::new();
         for (idx, state) in state_rows.iter().enumerate() {
             let tag = (idx + 1) as u64;
             state_tag_by_name.insert(state.state_name.clone(), tag);
+            state_tag_by_layout.insert(state.state_layout_ty, tag);
             state_tags.push(sem::MachineStateTagPlan {
                 state_name: state.state_name.clone(),
                 state_type_def_id: state.state_type_def_id,
@@ -380,6 +382,12 @@ fn materialize_machine_plans(builders: BTreeMap<String, TypestatePlanSeed>) -> s
                         typestate_name: typestate_name.clone(),
                         state_name: handler.state_name.clone(),
                         event_key: handler.event_key.clone(),
+                        next_state_tag: *state_tag_by_layout.get(&handler.next_state_layout_ty).unwrap_or_else(|| {
+                            panic!(
+                                "compiler bug: missing state tag for typestate {} handler {} next-state layout {:?}",
+                                typestate_name, handler.def_id.0, handler.next_state_layout_ty
+                            )
+                        }),
                         state_layout_ty: handler.state_layout_ty,
                         payload_layout_ty: handler.payload_layout_ty,
                         next_state_layout_ty: handler.next_state_layout_ty,
@@ -416,12 +424,19 @@ fn shared_fallback_prefix_len(states: &[&StatePlanSeed]) -> usize {
         let Some(first) = states.first().and_then(|state| state.handlers.get(idx)) else {
             return idx;
         };
+        // Only treat a prefix as typestate-level fallback when both the event
+        // key and the concrete handler identity are identical across states.
+        // Matching on key alone can incorrectly route state-specific handlers
+        // through one state's implementation.
         let key = first.stable_event_key();
-        if states
-            .iter()
-            .skip(1)
-            .any(|state| state.handlers.get(idx).map(|h| h.stable_event_key()) != Some(key.clone()))
-        {
+        let def_id = first.def_id;
+        if states.iter().skip(1).any(|state| {
+            state
+                .handlers
+                .get(idx)
+                .map(|h| (h.stable_event_key(), h.def_id))
+                != Some((key.clone(), def_id))
+        }) {
             return idx;
         }
     }
@@ -656,5 +671,42 @@ mod tests {
             .expect("expected B/Pong row");
         assert!(b_pong.state_local_thunk.is_none());
         assert!(b_pong.typestate_fallback_thunk.is_none());
+    }
+
+    #[test]
+    fn fallback_prefix_len_requires_shared_handler_identity() {
+        let event_key = sem::MachineEventKeyPlan::Payload {
+            payload_ty: named_payload("Ping"),
+        };
+        let state_a = StatePlanSeed {
+            state_name: "A".to_string(),
+            state_type_def_id: DefId(1),
+            state_layout_ty: dummy_type_id(),
+            handlers: vec![HandlerPlanSeed {
+                def_id: DefId(100),
+                ordinal: 0,
+                state_name: "A".to_string(),
+                state_layout_ty: dummy_type_id(),
+                event_key: event_key.clone(),
+                payload_layout_ty: dummy_type_id(),
+                next_state_layout_ty: dummy_type_id(),
+            }],
+        };
+        let state_b = StatePlanSeed {
+            state_name: "B".to_string(),
+            state_type_def_id: DefId(2),
+            state_layout_ty: dummy_type_id(),
+            handlers: vec![HandlerPlanSeed {
+                def_id: DefId(200),
+                ordinal: 0,
+                state_name: "B".to_string(),
+                state_layout_ty: dummy_type_id(),
+                event_key,
+                payload_layout_ty: dummy_type_id(),
+                next_state_layout_ty: dummy_type_id(),
+            }],
+        };
+
+        assert_eq!(shared_fallback_prefix_len(&[&state_a, &state_b]), 0);
     }
 }

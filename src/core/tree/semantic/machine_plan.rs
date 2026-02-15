@@ -96,6 +96,7 @@ pub struct MachineDispatchThunkPlan {
     pub typestate_name: String,
     pub state_name: String,
     pub event_key: MachineEventKeyPlan,
+    pub next_state_tag: u64,
     /// Layout ids required by runtime bridge.
     pub state_layout_ty: TypeId,
     pub payload_layout_ty: TypeId,

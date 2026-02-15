@@ -170,9 +170,11 @@ typedef struct mc_subscription_update {
 // Runtime commits this as one unit only when callback returns `MC_DISPATCH_OK`.
 typedef struct mc_machine_dispatch_txn {
     // Whether the transition updates machine state.
-    uint8_t has_next_state;
+    uint64_t has_next_state;
     // Next machine-local state value.
     uint64_t next_state;
+    // Next descriptor state tag (0 => keep current tag).
+    uint64_t next_state_tag;
 
     // Outbox effects to commit atomically with state/subscriptions/req-reply.
     const mc_machine_outbox_effect_t *outbox;
@@ -379,6 +381,13 @@ void __mc_machine_runtime_register_thunk(
     uint64_t thunk_id,
     mc_machine_dispatch_txn_fn dispatch
 );
+// Register thunk metadata for descriptor-driven transitions.
+// `next_state_tag` is applied when callback leaves txn.next_state_tag unset.
+void __mc_machine_runtime_register_thunk_meta(
+    uint64_t thunk_id,
+    mc_machine_dispatch_txn_fn dispatch,
+    uint64_t next_state_tag
+);
 mc_machine_dispatch_txn_fn __mc_machine_runtime_lookup_thunk(uint64_t thunk_id);
 
 // Resolve a previously-registered thunk id and bind it to a machine slot.
@@ -578,6 +587,12 @@ uint64_t __mc_machine_runtime_bind_dispatch_u64(
 );
 // Register thunk id -> dispatch function pointer in process-global registry.
 void __mc_machine_runtime_register_thunk_u64(uint64_t thunk_id, uint64_t dispatch_fn);
+// Register thunk metadata through opaque-handle bridge.
+void __mc_machine_runtime_register_thunk_meta_u64(
+    uint64_t thunk_id,
+    uint64_t dispatch_fn,
+    uint64_t next_state_tag
+);
 // Resolve thunk id through runtime global thunk registry and bind to machine.
 uint64_t __mc_machine_runtime_bind_dispatch_thunk_u64(
     uint64_t runtime,

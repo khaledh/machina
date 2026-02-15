@@ -56,9 +56,12 @@ static mc_dispatch_result_t local_dispatch(
     (void)machine_id;
     (void)current_state;
     (void)env;
-    (void)txn;
     (void)fault_code;
     g_local_calls += 1;
+    // Transition from state tag 1 ("S0") to state tag 2 ("S1").
+    txn->has_next_state = 1;
+    txn->next_state = current_state;
+    txn->next_state_tag = 2;
     return MC_DISPATCH_OK;
 }
 
@@ -91,17 +94,21 @@ static void build_test_descriptor(byte_buf_t *b) {
     // typestate name
     buf_str(b, "M");
 
-    // counts: states=1, events=2, rows=2, roles=0.
-    buf_u32(b, 1);
+    // counts: states=2, events=2, rows=2, roles=0.
+    buf_u32(b, 2);
     buf_u32(b, 2);
     buf_u32(b, 2);
     buf_u32(b, 0);
 
-    // state tag row.
+    // state tag rows.
     buf_u64(b, 1);   // tag
     buf_u64(b, 0);   // state_type_def_id
     buf_u64(b, 0);   // state_layout_ty
-    buf_str(b, "S");
+    buf_str(b, "S0");
+    buf_u64(b, 2);   // tag
+    buf_u64(b, 0);   // state_type_def_id
+    buf_u64(b, 0);   // state_layout_ty
+    buf_str(b, "S1");
 
     // event kind 10 payload key.
     buf_u64(b, 10);  // kind
@@ -121,8 +128,8 @@ static void build_test_descriptor(byte_buf_t *b) {
     buf_u64(b, 101);
     buf_u64(b, 202);
 
-    // dispatch row: state 1 + kind 20 => fallback thunk 202.
-    buf_u64(b, 1);
+    // dispatch row: state 2 + kind 20 => fallback thunk 202.
+    buf_u64(b, 2);
     buf_u64(b, 20);
     buf_u64(b, 0);
     buf_u64(b, 202);
@@ -169,6 +176,8 @@ int main(void) {
         return 1;
     }
 
+    // If txn.next_state_tag was not committed, this dispatch would fault
+    // because there is no (state 1, kind 20) row.
     if (__mc_machine_runtime_send_u64(rt, m, 20, 0, 0) != MC_MAILBOX_ENQUEUE_OK) {
         return 1;
     }

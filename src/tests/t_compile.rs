@@ -1077,8 +1077,8 @@ fn main() -> u64 { 0 }
         "expected managed machine bootstrap function in emitted IR: {ir}"
     );
     assert!(
-        ir.contains("__mc_machine_runtime_register_thunk_u64"),
-        "expected managed machine thunk registration call in emitted IR: {ir}"
+        ir.contains("__mc_machine_runtime_register_thunk_meta_u64"),
+        "expected managed machine thunk metadata registration call in emitted IR: {ir}"
     );
     assert!(
         ir.contains("__mc_machine_runtime_register_descriptor_u64"),

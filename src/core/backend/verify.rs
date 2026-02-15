@@ -332,8 +332,8 @@ fn runtime_call_spec(runtime: &RuntimeFn) -> RuntimeCallSpec {
             args: &[Int, Int, Int],
             ret: RetInt,
         },
-        RuntimeFn::MachineRegisterThunk => RuntimeCallSpec {
-            args: &[Int, Int],
+        RuntimeFn::MachineRegisterThunkWithTag => RuntimeCallSpec {
+            args: &[Int, Int, Int],
             ret: Unit,
         },
         RuntimeFn::MachineRegisterDescriptor => RuntimeCallSpec {

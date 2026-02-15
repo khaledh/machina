@@ -45,6 +45,7 @@ pub(super) fn append_machine_runtime_artifacts(
         funcs,
     );
     append_bootstrap_registration_fn(
+        machine_plans,
         type_map,
         def_table.next_def_id(),
         &thunk_ids,
@@ -106,6 +107,7 @@ fn append_dispatch_thunks(
 }
 
 fn append_bootstrap_registration_fn(
+    machine_plans: &sem::MachinePlanMap,
     type_map: &TypeMap,
     first_def_id: DefId,
     thunk_ids: &HashMap<DefId, DefId>,
@@ -138,15 +140,24 @@ fn append_bootstrap_registration_fn(
         params: vec![u64_ty; 6],
         ret: u8_ty,
     });
-    let mut rows: Vec<_> = thunk_ids.values().copied().collect();
-    rows.sort_by_key(|id| id.0);
-    for thunk_def_id in rows {
+    let mut rows = Vec::with_capacity(thunk_ids.len());
+    for (handler_def_id, thunk_def_id) in thunk_ids {
+        let next_state_tag = machine_plans
+            .thunks
+            .get(handler_def_id)
+            .map(|plan| plan.next_state_tag)
+            .unwrap_or(0);
+        rows.push((*thunk_def_id, next_state_tag));
+    }
+    rows.sort_by_key(|(id, _)| id.0);
+    for (thunk_def_id, next_state_tag) in rows {
         let thunk_id_word = builder.const_int(thunk_def_id.0 as i128, false, 64, u64_ty);
         let thunk_addr = builder.const_func_addr(thunk_def_id, thunk_fn_ty);
         let thunk_addr_word = builder.cast(CastKind::PtrToInt, thunk_addr, u64_ty);
+        let next_state_tag_word = builder.const_int(next_state_tag as i128, false, 64, u64_ty);
         builder.call(
-            Callee::Runtime(RuntimeFn::MachineRegisterThunk),
-            vec![thunk_id_word, thunk_addr_word],
+            Callee::Runtime(RuntimeFn::MachineRegisterThunkWithTag),
+            vec![thunk_id_word, thunk_addr_word, next_state_tag_word],
             unit_ty,
         );
     }
@@ -206,9 +217,10 @@ fn build_dispatch_thunk(
     let handler_payload_ty = lowerer.lower_type_id(plan.payload_layout_ty);
     let handler_payload_ptr_ty = lowerer.ptr_to(handler_payload_ty);
     let handler_state_ptr_ty = lowerer.ptr_to(handler_state_ty);
+    let handler_next_state_ptr_ty = lowerer.ptr_to(handler_ret_ty);
     let env_ty = add_machine_env_type(&mut lowerer.ir_type_cache, u64_ty);
     let env_ptr_ty = lowerer.ptr_to(env_ty);
-    let txn_prefix_ty = add_txn_prefix_type(&mut lowerer.ir_type_cache, u8_ty, u64_ty);
+    let txn_prefix_ty = add_txn_prefix_type(&mut lowerer.ir_type_cache, u64_ty);
     let txn_prefix_ptr_ty = lowerer.ptr_to(txn_prefix_ty);
     let u8_ptr_ty = lowerer.ptr_to(u8_ty);
     let u64_ptr_ty = lowerer.ptr_to(u64_ty);
@@ -347,14 +359,17 @@ fn build_dispatch_thunk(
     });
 
     builder.select_block(bb_ok);
-    let typed_next_state_ptr =
-        builder.cast(CastKind::PtrToPtr, next_state_ptr_u8, handler_state_ptr_ty);
+    let typed_next_state_ptr = builder.cast(
+        CastKind::PtrToPtr,
+        next_state_ptr_u8,
+        handler_next_state_ptr_ty,
+    );
     builder.store(typed_next_state_ptr, next_state_value);
 
     // Stage txn next-state fields.
-    let has_next_ptr = builder.field_addr(txn_ptr, 0, u8_ptr_ty);
-    let one_u8 = builder.const_int(1, false, 8, u8_ty);
-    builder.store(has_next_ptr, one_u8);
+    let has_next_ptr = builder.field_addr(txn_ptr, 0, u64_ptr_ty);
+    let one_u64 = builder.const_int(1, false, 64, u64_ty);
+    builder.store(has_next_ptr, one_u64);
     let next_state_field_ptr = builder.field_addr(txn_ptr, 1, u64_ptr_ty);
     builder.store(next_state_field_ptr, next_state_word);
 
@@ -453,14 +468,18 @@ fn add_machine_env_type(types: &mut IrTypeCache, u64_ty: IrTypeId) -> IrTypeId {
     )
 }
 
-fn add_txn_prefix_type(types: &mut IrTypeCache, u8_ty: IrTypeId, u64_ty: IrTypeId) -> IrTypeId {
+fn add_txn_prefix_type(types: &mut IrTypeCache, u64_ty: IrTypeId) -> IrTypeId {
     let fields = vec![
         IrStructField {
             name: "has_next_state".to_string(),
-            ty: u8_ty,
+            ty: u64_ty,
         },
         IrStructField {
             name: "next_state".to_string(),
+            ty: u64_ty,
+        },
+        IrStructField {
+            name: "next_state_tag".to_string(),
             ty: u64_ty,
         },
     ];
