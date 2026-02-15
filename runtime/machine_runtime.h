@@ -145,6 +145,14 @@ typedef struct mc_machine_reply_effect {
     mc_machine_envelope_t env;
 } mc_machine_reply_effect_t;
 
+// One descriptor dispatch row keyed by (state tag, event kind).
+typedef struct mc_machine_dispatch_row {
+    uint64_t state_tag;
+    mc_machine_event_kind_t event_kind;
+    uint64_t state_local_thunk_id;
+    uint64_t typestate_fallback_thunk_id;
+} mc_machine_dispatch_row_t;
+
 typedef enum mc_subscription_op {
     MC_SUBSCRIPTION_ADD = 0,
     MC_SUBSCRIPTION_REMOVE = 1,
@@ -225,11 +233,16 @@ typedef struct mc_machine_mailbox {
 } mc_machine_mailbox_t;
 
 // One machine table slot.
+typedef struct mc_machine_descriptor mc_machine_descriptor_t;
 typedef struct mc_machine_slot {
     // Dispatchability state.
     mc_machine_lifecycle_t lifecycle;
     // Machine-local runtime state token (opaque to scheduler).
     mc_machine_state_token_t state_word;
+    // Current descriptor state tag (0 when descriptor dispatch is not bound).
+    uint64_t state_tag;
+    // Optional descriptor metadata used by descriptor-driven dispatch.
+    const mc_machine_descriptor_t *descriptor;
     // Optional per-machine dispatch callback used when dispatcher entrypoint
     // does not supply an explicit callback.
     mc_machine_dispatch_txn_fn dispatch;
@@ -375,6 +388,23 @@ uint8_t __mc_machine_runtime_bind_dispatch_thunk(
     mc_machine_id_t machine_id,
     uint64_t thunk_id,
     void *dispatch_ctx
+);
+
+// Parse and register one machine descriptor blob.
+// Returns descriptor id (>0) on success, 0 on parse/alloc failure.
+uint64_t __mc_machine_runtime_register_descriptor(
+    const uint8_t *descriptor_bytes,
+    uint64_t descriptor_len
+);
+
+// Bind descriptor-driven dispatch to a machine slot.
+// Sets machine state tag used for dispatch-row selection.
+// Returns 1 on success, 0 on unknown machine/descriptor id.
+uint8_t __mc_machine_runtime_bind_descriptor(
+    mc_machine_runtime_t *rt,
+    mc_machine_id_t machine_id,
+    uint64_t descriptor_id,
+    uint64_t initial_state_tag
 );
 
 // Set/get opaque machine-local state word.
@@ -554,6 +584,17 @@ uint64_t __mc_machine_runtime_bind_dispatch_thunk_u64(
     uint64_t machine_id,
     uint64_t thunk_id,
     uint64_t dispatch_ctx
+);
+// Bridge wrappers for descriptor registration/binding.
+uint64_t __mc_machine_runtime_register_descriptor_u64(
+    uint64_t descriptor_ptr,
+    uint64_t descriptor_len
+);
+uint64_t __mc_machine_runtime_bind_descriptor_u64(
+    uint64_t runtime,
+    uint64_t machine_id,
+    uint64_t descriptor_id,
+    uint64_t initial_state_tag
 );
 // Runs one dispatch step through the managed runtime bridge.
 // Returns `mc_machine_step_status_t` value.
