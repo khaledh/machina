@@ -46,13 +46,16 @@ sections conflict with this one, this section wins.
    - state-local handler first.
    - typestate-level handler only as fallback when state-local is absent.
 5. **Handle/capability surface**
-   - source-level addressing uses typed `Handle<P, R>`.
-   - source-level request/reply correlation uses only `Pending<RespSet>` and
-     `ReplyCap<RespSet>`.
+   - source-level addressing uses typed machine handles (`Machine<T>`).
+   - correlation is implicit by default; no raw correlation ids in source.
+   - `Pending<RespSet>`/`ReplyCap<RespSet>` remain available as explicit
+     advanced control forms.
    - source code must not manually construct correlation ids.
 6. **Reply linearity baseline**
-   - request handlers that receive `ReplyCap<RespSet>` must consume it exactly
-     once on all successful paths.
+   - request handlers expose an implicit reply capability by default.
+   - on successful paths, exactly one reply must be produced.
+   - explicit `ReplyCap<RespSet>` binding (when used) remains linear and
+     exactly-once on successful paths.
    - v1 has no no-reply escape hatch (`@[no_reply]` is out of scope).
 7. **Protocol conformance scope**
    - v1 enforces shape only.
@@ -61,6 +64,8 @@ sections conflict with this one, this section wins.
    - multiple handlers for the same event selector are allowed only when their
      response patterns are non-overlapping.
    - pattern-form handlers are syntax sugar over one canonical handler body.
+   - when response provenance is ambiguous, `for RequestType(binding)` is
+     required for deterministic dispatch.
 
 ### Explicit Deferrals (Not Blocking V1)
 
@@ -149,26 +154,38 @@ Not in v1:
 
 ```machina
 state Connected {
-    on IncomingRequest(req: IncomingRequest) -> Connected | Closing | ProtocolError {
+    on IncomingRequest(req) {
         ...
     }
 }
 ```
 
-### Pattern-form handlers (response destructuring)
+### Implicit same-state transition
 
-For response events, v1 allows a pattern form to avoid duplicating response
-union types in both parameter and branch logic:
+Inside `state S`, omitting `-> ...` means the handler remains in `S`.
+
+This is shorthand for the common case and avoids repetitive explicit
+same-state transition returns.
+
+### Same-type payload shorthand
+
+For handlers where selector and payload type are the same:
+
+- `on Ping(p: Ping) { ... }` can be written as `on Ping(p) { ... }`.
+- `on Ping { ... }` is allowed when payload is unused.
+
+### Response provenance with `for`
+
+For response events, handlers can bind the originating request payload using
+`for RequestType(binding)`:
 
 ```machina
 state AwaitAuth {
-    fields { pending: Pending<AuthApproved | AuthDenied> }
-
-    on Response(pending, AuthApproved) -> Connected {
+    on AuthApproved(ok) for AuthorizeReq(req) -> Connected {
         Connected
     }
 
-    on Response(pending, AuthDenied) -> Closing {
+    on AuthDenied(err) for AuthorizeReq(req) -> Closing {
         Closing
     }
 }
@@ -177,16 +194,16 @@ state AwaitAuth {
 Canonical meaning (conceptual desugar):
 
 ```machina
-on Response(pending: Pending<AuthApproved | AuthDenied>, resp: AuthApproved | AuthDenied) -> Connected | Closing {
-    match resp {
-        AuthApproved => Connected,
-        AuthDenied => Closing,
+on Response(resp: AuthApproved | AuthDenied, origin: AuthorizeReq) -> Connected | Closing {
+    match (resp, origin) {
+        (AuthApproved(ok), AuthorizeReq(req)) => Connected,
+        (AuthDenied(err), AuthorizeReq(req)) => Closing,
     }
 }
 ```
 
-`pending` remains required for correlation/linearity even when not otherwise
-used in user code.
+In the common case where origin details are not needed, `for ...` is optional
+and correlation remains implicit.
 
 ### Typestate-level default handlers
 
@@ -213,18 +230,22 @@ For the same incoming payload kind:
 
 Proposed primitives:
 
-- `emit Send(to: Handle<P, R>, Payload { ... })`
-- `emit Request(to: Handle<P, R>, Req { ... }) -> Pending<RespSet>`
-- `reply(cap, Resp { ... })`
+- `send(to: Machine<T>, Payload { ... })`
+- `request(to: Machine<T>, Req { ... })`
+- `reply(Resp { ... })`
+
+Canonical lower-level forms (`emit Send(...)`, `emit Request(...)`,
+`reply(cap, ...)`) remain available for advanced/internal usage.
 
 ### Typed request/reply safety
 
 To avoid raw `corr: u64` bugs, request/reply uses compiler/runtime-managed
-capabilities:
+correlation and capabilities:
 
-- responder receives a linear `ReplyCap<RespSet>` with the request handler.
-- `reply(cap, x)` requires `type(x)` in `RespSet`.
-- cap must be consumed exactly once on all successful paths.
+- responders get an implicit reply capability in request handlers.
+- `reply(x)` requires `type(x)` in the allowed response set for that flow.
+- when explicit `ReplyCap<RespSet>` is bound, `reply(cap, x)` is also valid.
+- reply capability must be consumed exactly once on all successful paths.
 - source-level code does not manually construct/compare correlation ids.
 
 This is the v1 pragmatic alternative to full typed channels.
@@ -257,7 +278,7 @@ Per process:
 Source-level APIs should use typed handles:
 
 ```text
-Handle<Protocol, Role>
+Machine<Typestate>
 ```
 
 Raw `MachineId` remains runtime/internal plumbing.
@@ -327,27 +348,26 @@ protocol Auth {
 }
 
 typestate Connection : Auth::Client {
-    fields { auth: Handle<Auth, Server> }
+    fields { auth: Machine<AuthService> }
 
-    fn new(auth: Handle<Auth, Server>) -> Connected {
-        Connected { auth: auth }
+    fn new(auth: Machine<AuthService>) -> Running {
+        Running { auth: auth }
     }
 
-    state Connected {
-        on IncomingRequest(req: IncomingRequest) -> AwaitAuth {
-            let pending = emit Request(to: self.auth, AuthorizeReq { user: req.user });
-            AwaitAuth { pending: pending }
-        }
-    }
-
-    state AwaitAuth {
-        fields { pending: Pending<AuthApproved | AuthDenied> }
-
-        on Response(pending, AuthApproved) -> Connected {
-            Connected
+    state Running {
+        on IncomingRequest(req) {
+            request(self.auth, AuthorizeReq { user: req.user });
         }
 
-        on Response(pending, AuthDenied) -> Closing {
+        on AuthApproved(ok) for AuthorizeReq(origin) {
+            ok;
+            origin;
+            Running
+        }
+
+        on AuthDenied(err) for AuthorizeReq(origin) -> Closing {
+            err;
+            origin;
             Closing
         }
     }
@@ -359,13 +379,12 @@ typestate AuthService : Auth::Server {
     fn new() -> Ready { Ready }
 
     state Ready {
-        on AuthorizeReq(req: AuthorizeReq, cap: ReplyCap<AuthApproved | AuthDenied>) -> Ready {
+        on AuthorizeReq(req) {
             if req.user == "alice" {
-                reply(cap, AuthApproved);
+                reply(AuthApproved);
             } else {
-                reply(cap, AuthDenied);
+                reply(AuthDenied);
             }
-            Ready
         }
     }
 }
@@ -373,7 +392,9 @@ typestate AuthService : Auth::Server {
 
 Notes:
 - Syntax above is proposal-level.
-- `Pending<...>` and `ReplyCap<...>` are linear capability-like values.
+- Correlation is implicit by default; `for` exposes origin payload when needed.
+- `Pending<...>` and explicit `ReplyCap<...>` remain linear capability-like
+  advanced forms.
 
 ## Runtime Sequence (Inter-Machine)
 
@@ -394,17 +415,17 @@ sequenceDiagram
 
     RT->>MQC: dequeue
     RT->>C: dispatch IncomingRequest
-    C-->>RT: next=AwaitAuth, outbox=[Request(AuthorizeReq)], pending=P42
+    C-->>RT: next=Running, outbox=[Request(AuthorizeReq)], corr=P42
 
     RT->>MQA: enqueue AuthorizeReq + reply_cap(R42)
     RT->>MQA: dequeue
     RT->>A: dispatch AuthorizeReq
     A-->>RT: next=Ready, outbox=[Reply(R42, AuthApproved)]
 
-    RT->>MQC: enqueue Response(P42, AuthApproved)
+    RT->>MQC: enqueue AuthApproved(correlated-to P42)
     RT->>MQC: dequeue
-    RT->>C: dispatch Response(P42, AuthApproved)
-    C-->>RT: next=Connected, outbox=[]
+    RT->>C: dispatch AuthApproved (origin matched to AuthorizeReq)
+    C-->>RT: next=Running, outbox=[]
 ```
 
 ## Failure and Fault Policy (V1 Draft)
@@ -435,6 +456,7 @@ architecture summary:
 
 - duplicate `on` for same `(state, payload)`
 - overlapping pattern-form `on` handlers for same selector
+- ambiguous response provenance requiring explicit `for RequestType(binding)`
 - missing required flow handler for role conformance
 - invalid `Send/Request` target role or payload type
 - invalid `reply(...)` payload for flow response set
@@ -447,7 +469,8 @@ architecture summary:
 
 The following are intentionally deferred and non-blocking for v1:
 
-1. Should `Pending<T>` be user-visible in states, or lowered/implicit?
+1. Should optional request-site labels be added when multiple same-type inflight
+   requests become difficult to disambiguate with `for` alone?
 2. Should minimal sequential flow syntax be introduced in v1.1?
 3. What is the exact migration path from capabilities to typed channels?
 
@@ -469,11 +492,14 @@ above. All later milestones must conform to it.
 1. Lock source surface included in v1:
    - `protocol`, `role`, `flow`
    - typestate `on` handlers
-   - `emit Send(...)`, `emit Request(...)`, `reply(...)`
+   - handler shorthand (`on Ping(p)`, `on Ping`)
+   - implicit same-state handlers (omitted `-> ...`)
+   - `for RequestType(binding)` response provenance form
+   - ergonomic `send/request/reply` forms
 2. Lock capability types and linearity rules:
-   - `Handle<P, R>`
-   - `Pending<RespSet>`
-   - `ReplyCap<RespSet>`
+   - `Machine<T>` handles
+   - implicit runtime correlation model
+   - `Pending<RespSet>` and `ReplyCap<RespSet>` as advanced explicit forms
 3. Lock handler transaction semantics (commit/rollback/fault transitions).
 4. Lock managed-mode exclusivity rule (no direct calls on managed machine).
 5. Lock default handler precedence (state-local before typestate-level default).
@@ -495,6 +521,7 @@ above. All later milestones must conform to it.
    - `Send/Request` payload legality checks by role flow
    - `reply` payload type-in-response-set checks
    - linear capability checks (`ReplyCap` single-consume, all paths)
+   - provenance disambiguation checks for `for` response handlers
 4. Diagnostics:
    - add dedicated error codes for flow mismatch, reply misuse, linearity errors.
 5. Tests:
@@ -563,6 +590,8 @@ above. All later milestones must conform to it.
 1. Compiler accepts valid role/flow/handler/reply programs and rejects invalid ones with specific diagnostics.
 2. Managed machines run with deterministic per-mailbox FIFO dispatch and bounded queues.
 3. Request/reply correlation is enforced structurally via capabilities, not user-managed ids.
+   - default source model is implicit correlation with optional explicit `for`
+     provenance binding.
 4. Direct typestate mode remains unchanged for non-managed code paths.
 5. Example suite demonstrates:
    - single-machine async event handling,

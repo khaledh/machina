@@ -20,22 +20,26 @@ This document is intentionally separate from
 ## Problem
 
 Current repository status is split:
-- frontend supports protocol/flow/on/emit/reply semantics (experimental),
+- frontend supports protocol/flow/on/send/request/reply semantics (experimental),
 - runtime has managed scheduler primitives (`runtime/machine_runtime.*`),
 - backend/elaboration do not yet bridge typestate handlers/effects into runtime
   execution.
 
-As a result, managed/event typestate examples are currently check-only.
+As a result, managed execution works but source-level usage is still low-level:
+explicit runtime setup, manual stepping, and plumbing-heavy examples.
 
 ## Goal
 
 Enable this to run end-to-end:
 
 1. compile typestate+protocol code,
-2. create/start machines,
+2. spawn/start machines with generated descriptors,
 3. enqueue/send/request/reply through runtime,
 4. dispatch handlers transactionally,
 5. observe state transitions and outputs at runtime.
+
+And expose this behind an ergonomic source surface where typical app code does
+not manually construct runtime drivers.
 
 ## Non-Goals (V1 execution slice)
 
@@ -114,7 +118,7 @@ Compiler must guarantee at generated ABI boundaries:
 1. state tag ↔ state payload coherence,
 2. event kind ↔ payload layout coherence,
 3. dispatch table completeness for reachable `(state, kind)` pairs,
-4. reply envelope kind/tag correctness for `reply(cap, value)`,
+4. reply envelope kind/tag correctness for `reply(value)` and `reply(cap, value)`,
 5. no side effects outside staged txn outputs in managed handlers.
 
 ## Runtime Transaction Model (Execution Requirements)
@@ -165,12 +169,13 @@ mc_dispatch_result_t handler_fn(
 )
 ```
 
-### 3. Emit/Reply Lowering
+### 3. Send/Request/Reply Lowering
 
 Inside handler lowering:
-- `emit Send(...)` => staged outbox effect,
-- `emit Request(...)` => staged request effect + staged pending token binding,
-- `reply(cap, payload)` => staged reply effect consuming reply capability.
+- `send(...)` => staged outbox effect,
+- `request(...)` => staged request effect + staged correlation binding,
+- `reply(payload)` => staged reply effect using implicit reply capability,
+- `reply(cap, payload)` => staged reply effect consuming explicit capability.
 
 Important: no immediate runtime delivery from handler body.
 
@@ -182,18 +187,23 @@ Runtime commit behavior:
 
 ### 5. Managed Entry API (Language/Std Bridge)
 
-Need source-callable API (std wrappers over intrinsics) for:
-- create runtime,
-- spawn machine with descriptor + initial state,
-- start machine,
-- enqueue external events,
-- run one/loop dispatch steps.
+Need two source-callable API layers (std wrappers over intrinsics):
+
+1. ergonomic default API:
+   - implicit process runtime bootstrap/shutdown,
+   - `Typestate::spawn(...)` and typed handle operations (`send/request`),
+   - no user-managed step loop in common app code.
+
+2. explicit control API (advanced/tests):
+   - create runtime,
+   - spawn/start/step/send against a runtime handle,
+   - deterministic control for runtime tests and embedding.
 
 Direct mode APIs remain unchanged.
 
 ## Managed API Semantics (V1)
 
-### `Handle<P, R>`
+### `Machine<T>`
 
 `spawn` returns typed handle, not direct typestate value. This enforces managed
 exclusivity via existing move semantics.
@@ -202,7 +212,8 @@ exclusivity via existing move semantics.
 
 Managed send/request APIs are fallible:
 - `send(...) -> SendResult`
-- `request(...) -> RequestResult<Pending<T>>`
+- `request(...) -> RequestResult<()>` in default implicit-correlation form
+- explicit advanced forms may expose `Pending<T>` where source code opts in
 
 No silent drop at source API boundary.
 
@@ -213,7 +224,8 @@ No silent drop at source API boundary.
 - `DidWork`
 - `Faulted(machine_id, code)`
 
-This keeps loop control and observability explicit.
+This keeps loop control and observability explicit for advanced/runtime-test
+paths while default app code uses implicit runtime dispatch.
 
 ## Compiler Pipeline Changes
 
@@ -229,7 +241,7 @@ Keep these in elaboration side tables/plans, not type tables.
 
 ### B. Backend Lowering
 
-Implement lowering for semantic `Emit` / `Reply` nodes and handler thunks:
+Implement lowering for semantic send/request/reply operations and handler thunks:
 - generate staging calls/records,
 - materialize descriptors and thunk tables,
 - lower `Pending` and `ReplyCap` runtime representation consistently.
@@ -238,44 +250,39 @@ Implement lowering for semantic `Emit` / `Reply` nodes and handler thunks:
 
 For binaries using managed machines:
 - include machine runtime object (`machine_runtime.c`) in runtime link set,
-- initialize runtime,
+- initialize implicit runtime context,
 - register descriptors,
-- execute user-driven stepping loop.
+- run dispatcher without requiring user-managed step loops,
+- shut down runtime context on process exit.
 
-## Source-Level API Sketch (V1)
+## Source-Level API Sketch (Ergonomic Target)
+
+```mc
+fn main() {
+    let auth = AuthService::spawn();
+    let gate = GatewayClient::spawn(auth);
+
+    gate.send(AuthorizeReq { user: "alice" });
+}
+```
+
+This keeps asynchrony at machine boundaries without infecting function types or
+forcing explicit runtime wiring in app code.
+
+### Explicit Runtime API Sketch (Advanced/Test Path)
 
 ```mc
 requires {
     std::machine::Runtime
 }
 
-fn main() -> u64 {
+fn main() {
     let mut rt = Runtime::new();
-
     let auth = rt.spawn(AuthService::new());
-    let gate = rt.spawn(GatewayClient::new(auth));
     rt.start(auth);
-    rt.start(gate);
-
-    // external stimulus
-    let _ = rt.send(gate, AuthorizeReq { user: "alice" });
-
-    loop {
-        match rt.step() {
-            StepStatus::DidWork => {}
-            StepStatus::Idle => break,
-            StepStatus::Faulted(id, code) => {
-                // V1: application-defined fault policy handling
-                break;
-            }
-        }
-    }
-
-    0
+    rt.step();
 }
 ```
-
-This keeps asynchrony at machine boundaries without infecting function types.
 
 ## Diagnostics
 
@@ -303,21 +310,29 @@ Add execution-path diagnostics (compiler + runtime):
 
 ### 3. Examples
 
-Promote check-only fixtures to runnable fixtures once lowering lands:
+Keep runnable fixtures current as lowering/runtime evolves:
 - `examples/typestate/machine_events_check.mc`
 - `examples/typestate/inter_machine_req_reply_check.mc`
+
+These fixtures should have two coverage forms:
+- ergonomic API tests (implicit runtime),
+- explicit runtime API tests (deterministic stepping).
 
 ## Implementation Plan (Execution Milestone)
 
 1. **Freeze ABI**: payload/state representation, tag assignment, invariants.
 2. **Extend runtime txn model**: stage request/reply and payload/state drop paths.
 3. **Generate descriptors+thunks in elaborate**: include tag/layout metadata.
-4. **Lower emit/reply/handlers in backend**: wire transactional staging.
+4. **Lower send/request/reply/handlers in backend**: wire transactional staging.
 5. **Add std/runtime bridge + driver/link wiring**: expose managed API.
-6. **Add end-to-end tests + runnable examples**: replace check-only fixtures.
+   - include implicit runtime bootstrap/shutdown for binaries.
+   - keep explicit runtime API for tests/embedding.
+6. **Add end-to-end tests + runnable examples**: keep ergonomic and explicit
+   runtime flows covered.
 
 ## Open Questions
 
-1. Should v1 also provide `run_until_idle()` wrapper over repeated `step()`?
+1. Should implicit runtime bootstrap be always-on for binaries, or lazy-on-first
+   `spawn`?
 2. Should dead-letter/fault hooks be enabled by default in debug builds?
 3. Do we add explicit `stop(handle)` in v1 or defer to post-v1?
