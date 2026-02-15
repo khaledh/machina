@@ -11,7 +11,7 @@ use crate::core::tree::normalized::Module as NormalizedModule;
 use crate::core::tree::parsed::Module as ParsedModule;
 use crate::core::tree::resolved::Module as ResolvedModule;
 use crate::core::tree::semantic::Module as SemanticModule;
-use crate::core::tree::semantic::{DropPlanMap, LoweringPlanMap};
+use crate::core::tree::semantic::{DropPlanMap, LoweringPlanMap, MachinePlanMap};
 use crate::core::tree::typed::Module as TypedModule;
 use crate::core::tree::{NodeId, NodeIdGen};
 use crate::core::typecheck::type_map::{CallSigMap, GenericInstMap, TypeMap};
@@ -102,6 +102,7 @@ impl DerefMut for SemCheckedPayload {
 pub struct SemanticPlans {
     pub lowering_plans: LoweringPlanMap,
     pub drop_plans: DropPlanMap,
+    pub machine_plans: MachinePlanMap,
 }
 
 #[derive(Debug, Clone)]
@@ -109,6 +110,7 @@ pub struct SemanticPayload {
     pub typed: TypedTables,
     pub lowering_plans: LoweringPlanMap,
     pub drop_plans: DropPlanMap,
+    pub machine_plans: MachinePlanMap,
 }
 
 impl SemanticPayload {
@@ -116,6 +118,7 @@ impl SemanticPayload {
         SemanticPlans {
             lowering_plans: self.lowering_plans.clone(),
             drop_plans: self.drop_plans.clone(),
+            machine_plans: self.machine_plans.clone(),
         }
     }
 }

@@ -8,6 +8,7 @@ use crate::core::resolve::ResolveError;
 use crate::core::tree::NodeIdGen;
 use crate::core::tree::semantic as sem;
 use crate::core::typecheck::TypeCheckErrorKind;
+use crate::core::types::Type;
 
 fn parsed_context(source: &str) -> ParsedContext {
     let id_gen = NodeIdGen::new();
@@ -731,6 +732,171 @@ fn main() -> u64 {
         !semantic_module_has_for(&semantic.module),
         "semantic module should not contain StmtExprKind::For after elaborate pipeline"
     );
+}
+
+#[test]
+fn typestate_elaborate_builds_machine_descriptor_with_fallback_rows() {
+    let source = r#"
+type Ping = {}
+type Pong = {}
+
+typestate Connection {
+    fn new() -> Disconnected { Disconnected {} }
+
+    state Disconnected {
+        on Ping() -> Disconnected {
+            Disconnected {}
+        }
+        on Pong() -> Connected {
+            Connected {}
+        }
+    }
+
+    state Connected {
+        on Ping() -> Connected {
+            Connected {}
+        }
+    }
+}
+"#;
+    let semantic = elaborate_typestate_semantic(source);
+    let descriptor = semantic
+        .machine_plans
+        .descriptors
+        .get("Connection")
+        .expect("expected Connection machine descriptor plan");
+
+    assert_eq!(descriptor.state_tags.len(), 2);
+    assert_eq!(descriptor.event_kinds.len(), 2);
+    assert_eq!(
+        descriptor.dispatch_table.len(),
+        descriptor.state_tags.len() * descriptor.event_kinds.len(),
+        "descriptor should materialize full (state,event) dispatch grid"
+    );
+
+    // Deterministic state-tag assignment is lexical by state name.
+    assert_eq!(descriptor.state_tags[0].state_name, "Connected");
+    assert_eq!(descriptor.state_tags[0].tag, 1);
+    assert_eq!(descriptor.state_tags[1].state_name, "Disconnected");
+    assert_eq!(descriptor.state_tags[1].tag, 2);
+
+    let ping_kind = descriptor
+        .event_kinds
+        .iter()
+        .find(|event| {
+            matches!(
+                &event.key,
+                sem::MachineEventKeyPlan::Payload {
+                    payload_ty: Type::Struct { name, .. }
+                } if name == "Ping"
+            )
+        })
+        .map(|event| event.kind)
+        .expect("expected Ping event kind");
+    let pong_kind = descriptor
+        .event_kinds
+        .iter()
+        .find(|event| {
+            matches!(
+                &event.key,
+                sem::MachineEventKeyPlan::Payload {
+                    payload_ty: Type::Struct { name, .. }
+                } if name == "Pong"
+            )
+        })
+        .map(|event| event.kind)
+        .expect("expected Pong event kind");
+
+    // Connected + Ping -> typestate fallback only.
+    let connected_ping = descriptor
+        .dispatch_table
+        .iter()
+        .find(|row| row.state_tag == 1 && row.event_kind == ping_kind)
+        .expect("expected dispatch row for Connected/Ping");
+    assert!(connected_ping.state_local_thunk.is_none());
+    assert!(
+        connected_ping.typestate_fallback_thunk.is_some(),
+        "expected typestate-level fallback handler for Ping"
+    );
+
+    // Disconnected + Pong -> state-local handler only.
+    let disconnected_pong = descriptor
+        .dispatch_table
+        .iter()
+        .find(|row| row.state_tag == 2 && row.event_kind == pong_kind)
+        .expect("expected dispatch row for Disconnected/Pong");
+    assert!(
+        disconnected_pong.state_local_thunk.is_some(),
+        "expected state-local handler for Pong"
+    );
+    assert!(disconnected_pong.typestate_fallback_thunk.is_none());
+
+    // Connected + Pong -> unresolved (no local and no fallback).
+    let connected_pong = descriptor
+        .dispatch_table
+        .iter()
+        .find(|row| row.state_tag == 1 && row.event_kind == pong_kind)
+        .expect("expected dispatch row for Connected/Pong");
+    assert!(connected_pong.state_local_thunk.is_none());
+    assert!(connected_pong.typestate_fallback_thunk.is_none());
+}
+
+#[test]
+fn typestate_machine_tag_mapping_is_deterministic_across_runs() {
+    let source = r#"
+type Ping = {}
+
+typestate Connection {
+    fn new() -> Disconnected { Disconnected {} }
+
+    state Disconnected {
+        on Ping() -> Connected { Connected {} }
+    }
+
+    state Connected {
+        on Ping() -> Connected { Connected {} }
+    }
+}
+"#;
+    let first = elaborate_typestate_semantic(source);
+    let second = elaborate_typestate_semantic(source);
+    let first_plan = first
+        .machine_plans
+        .descriptors
+        .get("Connection")
+        .expect("expected Connection descriptor in first run");
+    let second_plan = second
+        .machine_plans
+        .descriptors
+        .get("Connection")
+        .expect("expected Connection descriptor in second run");
+
+    assert_eq!(
+        first_plan.state_tags, second_plan.state_tags,
+        "state tags must be deterministic"
+    );
+    assert_eq!(
+        first_plan.event_kinds, second_plan.event_kinds,
+        "event kinds must be deterministic"
+    );
+}
+
+fn elaborate_typestate_semantic(source: &str) -> crate::core::context::SemanticContext {
+    let parsed = parsed_context_typestate(source);
+    let resolved =
+        resolve_stage_with_policy(parsed, ResolveInputs::default(), FrontendPolicy::Strict);
+    let resolved_ctx = resolved
+        .context
+        .expect("resolve should succeed for typestate elaborate test");
+    let typed = typecheck_stage_with_policy(
+        resolved_ctx,
+        resolved.imported_facts,
+        FrontendPolicy::Strict,
+    )
+    .context
+    .expect("typecheck should succeed for typestate elaborate test");
+    let sem_checked = semcheck_stage(typed).expect("semcheck should succeed for typestate test");
+    elaborate_stage(sem_checked)
 }
 
 fn semantic_module_has_for(module: &sem::Module) -> bool {
