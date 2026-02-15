@@ -111,6 +111,16 @@ typedef enum mc_machine_reply_result {
     MC_REPLY_FULL = 4,
 } mc_machine_reply_result_t;
 
+// One-step execution status for managed runtime bridge helpers.
+typedef enum mc_machine_step_status {
+    // No runnable machine was available.
+    MC_STEP_IDLE = 0,
+    // Exactly one envelope dispatch was executed.
+    MC_STEP_DID_WORK = 1,
+    // Dispatch executed and transitioned a machine via fault policy.
+    MC_STEP_FAULTED = 2,
+} mc_machine_step_status_t;
+
 // One staged outbox delivery emitted by a successful transition.
 typedef struct mc_machine_outbox_effect {
     mc_machine_id_t dst;
@@ -492,5 +502,8 @@ uint64_t __mc_machine_runtime_reply_u64(
     uint64_t payload0,
     uint64_t payload1
 );
+// Runs one dispatch step through the managed runtime bridge.
+// Returns `mc_machine_step_status_t` value.
+uint64_t __mc_machine_runtime_step_u64(uint64_t runtime);
 
 #endif

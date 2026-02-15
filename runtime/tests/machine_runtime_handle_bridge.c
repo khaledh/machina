@@ -35,6 +35,24 @@ int main(void) {
         return 1;
     }
 
+    // Step executes one queued envelope at a time (idle/work status).
+    uint64_t step1 = __mc_machine_runtime_step_u64(rt);
+    if (step1 != MC_STEP_DID_WORK) {
+        return 1;
+    }
+    uint64_t step2 = __mc_machine_runtime_step_u64(rt);
+    if (step2 != MC_STEP_DID_WORK) {
+        return 1;
+    }
+    uint64_t step3 = __mc_machine_runtime_step_u64(rt);
+    if (step3 != MC_STEP_DID_WORK) {
+        return 1;
+    }
+    uint64_t step4 = __mc_machine_runtime_step_u64(rt);
+    if (step4 != MC_STEP_IDLE) {
+        return 1;
+    }
+
     __mc_machine_runtime_free(rt);
     return 0;
 }

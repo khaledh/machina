@@ -53,6 +53,9 @@ fn __mc_machine_runtime_reply_u64(
   payload1: u64,
 ) -> u64;
 
+@[runtime]
+fn __mc_machine_runtime_step_u64(runtime: u64) -> u64;
+
 type KeyNotFound = {}
 
 string :: {

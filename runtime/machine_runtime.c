@@ -1407,17 +1407,26 @@ uint8_t __mc_machine_emit_reply(
     return mc_emit_stage_reply(ctx, &effect);
 }
 
-// Public API: execute at most one dispatch using transactional callback.
-//
-// Commit semantics:
-// - staged effects (outbox/subscriptions/request/reply) are committed only on
-//   MC_DISPATCH_OK and successful preflight.
-// - on faults/stops, staged effects are discarded.
-uint8_t __mc_machine_runtime_dispatch_one_txn(
+// Internal implementation used by both core dispatch API and opaque-handle
+// bridge helpers that need per-step fault metadata.
+static uint8_t mc_machine_runtime_dispatch_one_txn_impl(
     mc_machine_runtime_t *rt,
     mc_machine_dispatch_txn_fn dispatch,
-    void *dispatch_ctx
+    void *dispatch_ctx,
+    uint8_t *out_faulted,
+    mc_machine_id_t *out_fault_machine,
+    uint64_t *out_fault_code
 ) {
+    if (out_faulted) {
+        *out_faulted = 0;
+    }
+    if (out_fault_machine) {
+        *out_fault_machine = 0;
+    }
+    if (out_fault_code) {
+        *out_fault_code = 0;
+    }
+
     mc_machine_id_t machine_id = 0;
     while (mc_ready_pop(&rt->ready, &machine_id)) {
         mc_machine_slot_t *slot = mc_get_slot(rt, machine_id);
@@ -1497,6 +1506,15 @@ uint8_t __mc_machine_runtime_dispatch_one_txn(
 
         if (result == MC_DISPATCH_FAULT) {
             mc_apply_fault_policy(rt, slot, machine_id, fault_code);
+            if (out_faulted) {
+                *out_faulted = 1;
+            }
+            if (out_fault_machine) {
+                *out_fault_machine = machine_id;
+            }
+            if (out_fault_code) {
+                *out_fault_code = fault_code;
+            }
         } else if (result == MC_DISPATCH_STOP) {
             slot->lifecycle = MC_MACHINE_STOPPED;
         }
@@ -1515,6 +1533,20 @@ uint8_t __mc_machine_runtime_dispatch_one_txn(
     }
 
     return 0;
+}
+
+// Public API: execute at most one dispatch using transactional callback.
+//
+// Commit semantics:
+// - staged effects (outbox/subscriptions/request/reply) are committed only on
+//   MC_DISPATCH_OK and successful preflight.
+// - on faults/stops, staged effects are discarded.
+uint8_t __mc_machine_runtime_dispatch_one_txn(
+    mc_machine_runtime_t *rt,
+    mc_machine_dispatch_txn_fn dispatch,
+    void *dispatch_ctx
+) {
+    return mc_machine_runtime_dispatch_one_txn_impl(rt, dispatch, dispatch_ctx, NULL, NULL, NULL);
 }
 
 // Public API: ready queue length (test/debug helper).
@@ -1690,4 +1722,32 @@ uint64_t __mc_machine_runtime_reply_u64(
         .payload1 = payload1,
     };
     return (uint64_t)__mc_machine_runtime_reply(rt, (mc_machine_id_t)src, reply_cap_id, &env);
+}
+
+uint64_t __mc_machine_runtime_step_u64(uint64_t runtime) {
+    mc_machine_runtime_t *rt = mc_runtime_from_handle(runtime);
+    if (!rt) {
+        return (uint64_t)MC_STEP_IDLE;
+    }
+
+    uint8_t faulted = 0;
+    mc_machine_id_t machine_id = 0;
+    uint64_t fault_code = 0;
+    uint8_t did_work = mc_machine_runtime_dispatch_one_txn_impl(
+        rt,
+        NULL,
+        NULL,
+        &faulted,
+        &machine_id,
+        &fault_code
+    );
+    if (!did_work) {
+        return (uint64_t)MC_STEP_IDLE;
+    }
+    if (faulted) {
+        (void)machine_id;
+        (void)fault_code;
+        return (uint64_t)MC_STEP_FAULTED;
+    }
+    return (uint64_t)MC_STEP_DID_WORK;
 }

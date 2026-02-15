@@ -83,18 +83,42 @@ requires {
     std::machine::spawn
     std::machine::start
     std::machine::send
+    std::machine::step
+    std::machine::StepStatus
 }
 
 fn main() -> u64 {
     var rt = new_runtime();
-    let id = spawn(rt, 4);
-    if !start(rt, id) {
-        close_runtime(inout rt);
-        return 1;
+    var id = 0;
+    match spawn(rt, 4) {
+        machine_id: u64 => {
+            id = machine_id;
+        }
+        _ => {
+            close_runtime(inout rt);
+            return 1;
+        }
     };
-    send(rt, id, 1, 0, 0);
+    match start(rt, id) {
+        _ok: () => {}
+        _ => {
+            close_runtime(inout rt);
+            return 1;
+        }
+    };
+    match send(rt, id, 1, 0, 0) {
+        _ok: () => {}
+        _ => {
+            close_runtime(inout rt);
+            return 1;
+        }
+    };
+    let stepped = match step(rt) {
+        StepStatus::DidWork => true,
+        _ => false,
+    };
     close_runtime(inout rt);
-    0
+    if stepped { 0 } else { 1 }
 }
 "#;
 
