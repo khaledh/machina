@@ -99,6 +99,17 @@
 - Signature: `void __rt_set_alloc_trace(uint8_t enabled)`
 - Purpose: enables (`enabled != 0`) or disables allocation tracing to stderr.
 
+### Managed machine runtime core (experimental)
+
+- Header: `machine_runtime.h`
+- Purpose: foundational scheduler substrate for managed typestate machines.
+- Includes:
+  - machine table with lifecycle (`Running | Faulted | Stopped`)
+  - bounded per-machine FIFO mailboxes
+  - global ready queue
+  - single-envelope deterministic dispatch entrypoint
+  - dead-letter and fault hook callbacks
+
 ## Types
 - `mc_string_t` matches Machina's `string` layout:
   ```

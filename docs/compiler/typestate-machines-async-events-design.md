@@ -247,7 +247,7 @@ This prevents bypassing ordering and protocol semantics.
 ## Runtime Architecture (Managed Mode)
 
 Per process:
-- machine table (`MachineId -> state payload`)
+- machine table (`MachineId -> state payload + lifecycle`)
 - subscription registry (`event kind + routing key -> machine id`)
 - per-machine bounded FIFO mailbox
 - ready queue (machine ids)
@@ -261,6 +261,17 @@ Handle<Protocol, Role>
 ```
 
 Raw `MachineId` remains runtime/internal plumbing.
+
+Lifecycle model (V1):
+- `Created`: machine exists and may buffer mailbox messages, but is not dispatchable.
+- `Running`: dispatchable.
+- `Faulted`: quarantined after handler fault.
+- `Stopped`: explicitly halted.
+
+Start semantics (V1):
+- `spawn` creates in `Created`.
+- `start` transitions `Created -> Running`.
+- if messages were buffered while `Created`, `start` schedules machine on ready queue.
 
 ## Envelope Model
 
@@ -494,7 +505,7 @@ above. All later milestones must conform to it.
 ### Milestone 2: Managed Runtime Core
 
 1. Runtime data model:
-   - machine table + lifecycle (`Running | Faulted | Stopped`)
+   - machine table + lifecycle (`Created | Running | Faulted | Stopped`)
    - bounded per-machine mailbox
    - ready queue
    - dead-letter/fault hooks
@@ -502,7 +513,7 @@ above. All later milestones must conform to it.
    - dequeue + run-to-completion dispatch
    - transactional commit of state + outbox + subscription updates
 3. Driver wiring:
-   - runtime APIs for spawn/send/poll
+   - runtime APIs for spawn/start/send/poll
    - compile-time lowering target for managed-machine operations
 4. Tests:
    - deterministic single-machine dispatch ordering

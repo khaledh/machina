@@ -1,6 +1,7 @@
 mod alloc;
 mod calls;
 mod drop;
+mod machine_runtime;
 mod map;
 mod map_table;
 mod print;
