@@ -57,6 +57,7 @@ pub(crate) fn run(engine: &mut TypecheckEngine) -> Result<(), Vec<TypeCheckError
     }
     errors.extend(check_protocol_shape_conformance(engine));
     errors.extend(check_typestate_handler_overlap(engine));
+    errors.extend(check_typestate_request_response_shape(engine));
     errors.extend(check_reply_cap_usage(engine));
 
     if errors.is_empty() {
@@ -275,6 +276,225 @@ fn collect_handler_response_patterns(
                 .map(ToString::to_string),
             span: method_def.sig.span,
         });
+    }
+    out
+}
+
+#[derive(Clone, Debug)]
+struct RequestSiteShape {
+    typestate_name: String,
+    request_ty: Type,
+    response_tys: Vec<Type>,
+    request_site_label: Option<String>,
+    span: crate::core::diag::Span,
+}
+
+#[derive(Clone, Debug)]
+struct ProvenanceHandlerShape {
+    typestate_name: String,
+    request_ty: Type,
+    response_ty: Type,
+    request_site_label: Option<String>,
+    span: crate::core::diag::Span,
+}
+
+fn check_typestate_request_response_shape(engine: &TypecheckEngine) -> Vec<TypeCheckError> {
+    let request_sites = collect_typestate_request_sites(engine);
+    let handler_shapes = collect_provenance_handler_shapes(engine);
+    if request_sites.is_empty() && handler_shapes.is_empty() {
+        return Vec::new();
+    }
+
+    let mut errors = Vec::new();
+    let typestates_with_requests: HashSet<String> = request_sites
+        .iter()
+        .map(|site| site.typestate_name.clone())
+        .collect();
+
+    for site in &request_sites {
+        let label_suffix = site
+            .request_site_label
+            .as_ref()
+            .map(|label| format!(":{label}"))
+            .unwrap_or_default();
+
+        for response_ty in &site.response_tys {
+            let has_handler = handler_shapes.iter().any(|handler| {
+                if handler.typestate_name != site.typestate_name
+                    || handler.request_ty != site.request_ty
+                    || handler.response_ty != *response_ty
+                {
+                    return false;
+                }
+                match (&site.request_site_label, &handler.request_site_label) {
+                    // Unlabeled request sites can only route to unlabeled handlers.
+                    (None, None) => true,
+                    // Labeled sites route to exact label first, then unlabeled fallback.
+                    (Some(site_label), Some(handler_label)) => site_label == handler_label,
+                    (Some(_), None) => true,
+                    (None, Some(_)) => false,
+                }
+            });
+            if !has_handler {
+                errors.push(
+                    TypeCheckErrorKind::TypestateRequestMissingResponseHandler(
+                        site.typestate_name.clone(),
+                        site.request_ty.clone(),
+                        label_suffix.clone(),
+                        response_ty.clone(),
+                        site.span,
+                    )
+                    .into(),
+                );
+            }
+        }
+    }
+
+    for handler in &handler_shapes {
+        if !typestates_with_requests.contains(&handler.typestate_name) {
+            continue;
+        }
+        let label_suffix = handler
+            .request_site_label
+            .as_ref()
+            .map(|label| format!(":{label}"))
+            .unwrap_or_default();
+        let supported = request_sites.iter().any(|site| {
+            if site.typestate_name != handler.typestate_name
+                || site.request_ty != handler.request_ty
+            {
+                return false;
+            }
+            let label_matches = match (&site.request_site_label, &handler.request_site_label) {
+                (Some(site_label), Some(handler_label)) => site_label == handler_label,
+                (None, None) => true,
+                (Some(_), None) => true,
+                (None, Some(_)) => false,
+            };
+            label_matches && site.response_tys.contains(&handler.response_ty)
+        });
+        if !supported {
+            errors.push(
+                TypeCheckErrorKind::TypestateHandlerUnsupportedResponseVariant(
+                    handler.typestate_name.clone(),
+                    handler.request_ty.clone(),
+                    label_suffix,
+                    handler.response_ty.clone(),
+                    handler.span,
+                )
+                .into(),
+            );
+        }
+    }
+
+    errors
+}
+
+fn collect_typestate_request_sites(engine: &TypecheckEngine) -> Vec<RequestSiteShape> {
+    let mut collector = TypestateRequestCollector {
+        node_types: &engine.state().solve.resolved_node_types,
+        current_typestate: None,
+        sites: Vec::new(),
+    };
+    collector.visit_module(&engine.context().module);
+    collector.sites
+}
+
+struct TypestateRequestCollector<'a> {
+    node_types: &'a HashMap<NodeId, Type>,
+    current_typestate: Option<String>,
+    sites: Vec<RequestSiteShape>,
+}
+
+impl Visitor<DefId, ()> for TypestateRequestCollector<'_> {
+    fn visit_method_block(&mut self, method_block: &crate::core::tree::resolved::MethodBlock) {
+        let prev = self.current_typestate.clone();
+        self.current_typestate =
+            parse_typestate_and_state_from_generated_state(&method_block.type_name)
+                .map(|(typestate_name, _)| typestate_name);
+        visit::walk_method_block(self, method_block);
+        self.current_typestate = prev;
+    }
+
+    fn visit_expr(&mut self, expr: &crate::core::tree::resolved::Expr) {
+        if let Some(typestate_name) = &self.current_typestate
+            && let ExprKind::Emit {
+                kind:
+                    crate::core::tree::EmitKind::Request {
+                        payload,
+                        request_site_label,
+                        ..
+                    },
+            } = &expr.kind
+            && let Some(request_ty) = self.node_types.get(&payload.id)
+            && let Some(Type::Pending { response_tys }) = self.node_types.get(&expr.id)
+        {
+            self.sites.push(RequestSiteShape {
+                typestate_name: typestate_name.clone(),
+                request_ty: request_ty.clone(),
+                response_tys: response_tys.clone(),
+                request_site_label: request_site_label.clone(),
+                span: expr.span,
+            });
+        }
+        visit::walk_expr(self, expr);
+    }
+}
+
+fn collect_provenance_handler_shapes(engine: &TypecheckEngine) -> Vec<ProvenanceHandlerShape> {
+    let mut out = Vec::new();
+    for method_block in engine.context().module.method_blocks() {
+        let Some((typestate_name, _state_name)) =
+            parse_typestate_and_state_from_generated_state(&method_block.type_name)
+        else {
+            continue;
+        };
+        for method_item in &method_block.method_items {
+            let MethodItem::Def(method_def) = method_item else {
+                continue;
+            };
+            if !method_def.sig.name.starts_with("__ts_on_") {
+                continue;
+            }
+            // `for RequestType(binding)` handlers lower to:
+            //   (__event, __pending: Pending<Selector>, request_binding, ...)
+            if method_def.sig.params.len() < 3 || method_def.sig.params[1].ident != "__pending" {
+                continue;
+            }
+            let Ok(pending_ty) = resolve_type_expr(
+                &engine.context().def_table,
+                &engine.context().module,
+                &method_def.sig.params[1].typ,
+            ) else {
+                continue;
+            };
+            let Type::Pending { .. } = pending_ty else {
+                continue;
+            };
+            let Ok(response_ty) = resolve_type_expr(
+                &engine.context().def_table,
+                &engine.context().module,
+                &method_def.sig.params[0].typ,
+            ) else {
+                continue;
+            };
+            let Ok(request_ty) = resolve_type_expr(
+                &engine.context().def_table,
+                &engine.context().module,
+                &method_def.sig.params[2].typ,
+            ) else {
+                continue;
+            };
+
+            out.push(ProvenanceHandlerShape {
+                typestate_name: typestate_name.clone(),
+                request_ty,
+                response_ty,
+                request_site_label: parse_generated_handler_site_label(&method_def.sig.name)
+                    .map(ToString::to_string),
+                span: method_def.sig.span,
+            });
+        }
     }
     out
 }

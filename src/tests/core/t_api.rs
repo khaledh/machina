@@ -797,6 +797,100 @@ typestate Connection {
 }
 
 #[test]
+fn typestate_for_provenance_missing_response_variant_is_rejected() {
+    let source = r#"
+type Start = {}
+type AuthCheck = {}
+type AuthApproved = {}
+type AuthDenied = {}
+
+typestate Connection {
+    fn new() -> AwaitAuth {
+        AwaitAuth {}
+    }
+
+    state AwaitAuth {
+        on Start(start) -> stay {
+            let pending: Pending<AuthApproved | AuthDenied> = request(0, AuthCheck {});
+            pending;
+            start;
+        }
+
+        on AuthApproved(ok) for AuthCheck(req) -> stay {
+            ok;
+            req;
+        }
+    }
+}
+"#;
+    let parsed = parsed_context_typestate(source);
+    let out = resolve_typecheck_pipeline_with_policy(
+        parsed,
+        ResolveInputs::default(),
+        None,
+        FrontendPolicy::Strict,
+    );
+    assert!(
+        out.type_errors.iter().any(|e| {
+            matches!(
+                e.kind(),
+                TypeCheckErrorKind::TypestateRequestMissingResponseHandler(ts, _, _, _, _)
+                    if ts == "Connection"
+            )
+        }),
+        "expected missing response-variant diagnostic, got {:?}",
+        out.type_errors
+    );
+}
+
+#[test]
+fn typestate_for_provenance_unsupported_response_variant_is_rejected() {
+    let source = r#"
+type Start = {}
+type AuthCheck = {}
+type AuthApproved = {}
+type AuthDenied = {}
+
+typestate Connection {
+    fn new() -> AwaitAuth {
+        AwaitAuth {}
+    }
+
+    state AwaitAuth {
+        on Start(start) -> stay {
+            let pending: Pending<AuthApproved> = request:auth1(0, AuthCheck {});
+            pending;
+            start;
+        }
+
+        on AuthDenied(err) for AuthCheck:auth1(req) -> stay {
+            err;
+            req;
+        }
+    }
+}
+"#;
+    let parsed = parsed_context_typestate(source);
+    let out = resolve_typecheck_pipeline_with_policy(
+        parsed,
+        ResolveInputs::default(),
+        None,
+        FrontendPolicy::Strict,
+    );
+    assert!(
+        out.type_errors.iter().any(|e| {
+            matches!(
+                e.kind(),
+                TypeCheckErrorKind::TypestateHandlerUnsupportedResponseVariant(ts, _, _, _, _)
+                    if ts == "Connection"
+            )
+        }),
+        "expected unsupported response-variant diagnostic, got {:?}",
+        out.type_errors
+    );
+}
+
+#[test]
 fn typestate_handler_surface_sugar_normalizes_before_resolve() {
     let source = r#"
 type Ping = {}

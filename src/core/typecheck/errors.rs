@@ -353,6 +353,10 @@ pub enum TypeCheckErrorKind {
         "Typestate {0} state {1} has ambiguous response provenance for selector {2} on variants {3:?}; use request-site labels (for RequestType:label(...)) to disambiguate"
     )]
     TypestateAmbiguousResponseProvenance(String, String, Type, Vec<Type>, Span),
+    #[error("Typestate {0} request {1}{2} has no handler for expected response variant {3}")]
+    TypestateRequestMissingResponseHandler(String, Type, String, Type, Span),
+    #[error("Typestate {0} handler for request {1}{2} uses unsupported response variant {3}")]
+    TypestateHandlerUnsupportedResponseVariant(String, Type, String, Type, Span),
 
     #[error("`reply` can only be used inside typestate `on` handlers")]
     ReplyOutsideHandler(Span),
@@ -492,6 +496,10 @@ impl TypeCheckError {
             TypeCheckErrorKind::ProtocolOutgoingPayloadNotAllowed(_, _, _, span) => *span,
             TypeCheckErrorKind::TypestateOverlappingOnHandlers(_, _, _, _, span) => *span,
             TypeCheckErrorKind::TypestateAmbiguousResponseProvenance(_, _, _, _, span) => *span,
+            TypeCheckErrorKind::TypestateRequestMissingResponseHandler(_, _, _, _, span) => *span,
+            TypeCheckErrorKind::TypestateHandlerUnsupportedResponseVariant(_, _, _, _, span) => {
+                *span
+            }
             TypeCheckErrorKind::ReplyOutsideHandler(span) => *span,
             TypeCheckErrorKind::ReplyCapExpected(_, span) => *span,
             TypeCheckErrorKind::ReplyPayloadNotAllowed(_, _, span) => *span,

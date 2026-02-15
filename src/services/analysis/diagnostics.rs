@@ -860,6 +860,8 @@ macro_rules! with_typecheck_variants {
             ProtocolOutgoingPayloadNotAllowed,
             TypestateOverlappingOnHandlers,
             TypestateAmbiguousResponseProvenance,
+            TypestateRequestMissingResponseHandler,
+            TypestateHandlerUnsupportedResponseVariant,
             ReplyOutsideHandler,
             ReplyCapExpected,
             ReplyPayloadNotAllowed,
