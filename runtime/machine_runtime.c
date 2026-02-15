@@ -10,6 +10,7 @@ void __mc_free(void *ptr);
 // Default capacities tuned for simple v1 behavior.
 #define MC_MACHINE_INITIAL_CAP 8u
 #define MC_READY_INITIAL_CAP 16u
+#define MC_SUBS_INITIAL_CAP 16u
 #define MC_MAILBOX_MIN_CAP 1u
 
 // Resolve mutable machine slot from 1-based id.
@@ -124,6 +125,7 @@ static uint8_t mc_machine_ensure_cap(mc_machine_runtime_t *rt, uint32_t min_cap)
 
     for (uint32_t i = rt->machine_cap; i < new_cap; i++) {
         new_slots[i].lifecycle = MC_MACHINE_STOPPED;
+        new_slots[i].state_word = 0;
         new_slots[i].mailbox.items = NULL;
         new_slots[i].mailbox.cap = 0;
         new_slots[i].mailbox.len = 0;
@@ -171,6 +173,78 @@ static uint8_t mc_mailbox_pop(mc_machine_mailbox_t *mailbox, mc_machine_envelope
     return 1;
 }
 
+// Subscription helpers ------------------------------------------------------
+
+static uint8_t mc_subscription_ensure_cap(mc_subscription_registry_t *subs, uint32_t min_cap) {
+    if (subs->cap >= min_cap) {
+        return 1;
+    }
+
+    uint32_t new_cap = subs->cap == 0 ? MC_SUBS_INITIAL_CAP : subs->cap;
+    while (new_cap < min_cap) {
+        uint32_t grown = new_cap * 2u;
+        if (grown < new_cap) {
+            return 0;
+        }
+        new_cap = grown;
+    }
+
+    mc_subscription_entry_t *new_entries = (mc_subscription_entry_t *)__mc_realloc(
+        subs->entries,
+        (size_t)new_cap * sizeof(mc_subscription_entry_t),
+        _Alignof(mc_subscription_entry_t)
+    );
+    if (!new_entries) {
+        return 0;
+    }
+
+    subs->entries = new_entries;
+    subs->cap = new_cap;
+    return 1;
+}
+
+static uint8_t mc_subscription_matches(
+    const mc_subscription_entry_t *entry,
+    mc_machine_id_t machine_id,
+    uint64_t kind,
+    uint64_t routing
+) {
+    return entry->machine_id == machine_id && entry->kind == kind && entry->routing == routing;
+}
+
+static uint8_t mc_subscription_contains(
+    const mc_subscription_registry_t *subs,
+    mc_machine_id_t machine_id,
+    uint64_t kind,
+    uint64_t routing
+) {
+    for (uint32_t i = 0; i < subs->len; i++) {
+        if (mc_subscription_matches(&subs->entries[i], machine_id, kind, routing)) {
+            return 1;
+        }
+    }
+    return 0;
+}
+
+static void mc_subscription_remove(
+    mc_subscription_registry_t *subs,
+    mc_machine_id_t machine_id,
+    uint64_t kind,
+    uint64_t routing
+) {
+    uint32_t write = 0;
+    for (uint32_t read = 0; read < subs->len; read++) {
+        if (mc_subscription_matches(&subs->entries[read], machine_id, kind, routing)) {
+            continue;
+        }
+        if (write != read) {
+            subs->entries[write] = subs->entries[read];
+        }
+        write += 1;
+    }
+    subs->len = write;
+}
+
 // Best-effort dead-letter callback.
 static void mc_emit_dead_letter(
     mc_machine_runtime_t *rt,
@@ -190,15 +264,159 @@ static void mc_emit_fault(mc_machine_runtime_t *rt, mc_machine_id_t machine_id, 
     }
 }
 
+// Apply fault policy to the machine lifecycle.
+static void mc_apply_fault_policy(
+    mc_machine_runtime_t *rt,
+    mc_machine_slot_t *slot,
+    mc_machine_id_t machine_id,
+    uint64_t fault_code
+) {
+    if (rt->fault_policy == MC_FAULT_POLICY_MARK_STOPPED) {
+        slot->lifecycle = MC_MACHINE_STOPPED;
+    } else {
+        slot->lifecycle = MC_MACHINE_FAULTED;
+    }
+    mc_emit_fault(rt, machine_id, fault_code);
+}
+
+// Validate that outbox commit can succeed fully before any state mutation.
+// This gives all-or-nothing commit behavior for outbox delivery.
+static uint8_t mc_preflight_outbox(
+    mc_machine_runtime_t *rt,
+    const mc_machine_outbox_effect_t *outbox,
+    uint32_t outbox_len
+) {
+    // Validate destination existence/lifecycle first.
+    for (uint32_t i = 0; i < outbox_len; i++) {
+        const mc_machine_outbox_effect_t *eff = &outbox[i];
+        mc_machine_slot_t *dst = mc_get_slot(rt, eff->dst);
+        if (!dst) {
+            return 0;
+        }
+        if (dst->lifecycle != MC_MACHINE_RUNNING && dst->lifecycle != MC_MACHINE_CREATED) {
+            return 0;
+        }
+    }
+
+    // For each unique destination, ensure cumulative mailbox capacity exists.
+    uint32_t additional_ready = 0;
+    for (uint32_t i = 0; i < outbox_len; i++) {
+        mc_machine_id_t dst_id = outbox[i].dst;
+
+        uint8_t seen = 0;
+        for (uint32_t k = 0; k < i; k++) {
+            if (outbox[k].dst == dst_id) {
+                seen = 1;
+                break;
+            }
+        }
+        if (seen) {
+            continue;
+        }
+
+        mc_machine_slot_t *dst = mc_get_slot(rt, dst_id);
+        uint32_t needed = 0;
+        for (uint32_t j = i; j < outbox_len; j++) {
+            if (outbox[j].dst == dst_id) {
+                needed += 1;
+            }
+        }
+
+        uint32_t free_slots = dst->mailbox.cap - dst->mailbox.len;
+        if (needed > free_slots) {
+            return 0;
+        }
+
+        if (dst->lifecycle == MC_MACHINE_RUNNING
+            && dst->mailbox.len == 0
+            && !dst->mailbox.in_ready_queue) {
+            additional_ready += 1;
+        }
+    }
+
+    // Ensure ready queue can accommodate all newly-ready destinations.
+    return mc_ready_ensure_cap(&rt->ready, rt->ready.len + additional_ready);
+}
+
+// Commit staged outbox after successful preflight.
+static uint8_t mc_commit_outbox(
+    mc_machine_runtime_t *rt,
+    const mc_machine_outbox_effect_t *outbox,
+    uint32_t outbox_len
+) {
+    for (uint32_t i = 0; i < outbox_len; i++) {
+        const mc_machine_outbox_effect_t *eff = &outbox[i];
+        mc_machine_slot_t *dst = mc_get_slot(rt, eff->dst);
+        if (!dst) {
+            return 0;
+        }
+        if (!mc_mailbox_push(&dst->mailbox, &eff->env)) {
+            return 0;
+        }
+
+        if (dst->lifecycle == MC_MACHINE_RUNNING && !dst->mailbox.in_ready_queue) {
+            if (!mc_ready_push(&rt->ready, eff->dst)) {
+                return 0;
+            }
+            dst->mailbox.in_ready_queue = 1;
+        }
+    }
+    return 1;
+}
+
+// Preflight subscription capacity for add operations.
+static uint8_t mc_preflight_subscriptions(
+    mc_machine_runtime_t *rt,
+    const mc_subscription_update_t *updates,
+    uint32_t updates_len
+) {
+    uint32_t add_ops = 0;
+    for (uint32_t i = 0; i < updates_len; i++) {
+        if (updates[i].op == MC_SUBSCRIPTION_ADD) {
+            add_ops += 1;
+        }
+    }
+    return mc_subscription_ensure_cap(&rt->subscriptions, rt->subscriptions.len + add_ops);
+}
+
+// Commit staged subscription updates.
+static void mc_commit_subscriptions(
+    mc_machine_runtime_t *rt,
+    const mc_subscription_update_t *updates,
+    uint32_t updates_len
+) {
+    for (uint32_t i = 0; i < updates_len; i++) {
+        const mc_subscription_update_t *up = &updates[i];
+        if (up->op == MC_SUBSCRIPTION_REMOVE) {
+            mc_subscription_remove(&rt->subscriptions, up->machine_id, up->kind, up->routing);
+            continue;
+        }
+
+        if (!mc_subscription_contains(&rt->subscriptions, up->machine_id, up->kind, up->routing)) {
+            rt->subscriptions.entries[rt->subscriptions.len].machine_id = up->machine_id;
+            rt->subscriptions.entries[rt->subscriptions.len].kind = up->kind;
+            rt->subscriptions.entries[rt->subscriptions.len].routing = up->routing;
+            rt->subscriptions.len += 1;
+        }
+    }
+}
+
 // Public API: initialize empty runtime state.
 void __mc_machine_runtime_init(mc_machine_runtime_t *rt) {
     rt->machines = NULL;
     rt->machine_len = 0;
     rt->machine_cap = 0;
+
     rt->ready.items = NULL;
     rt->ready.cap = 0;
     rt->ready.len = 0;
     rt->ready.head = 0;
+
+    rt->subscriptions.entries = NULL;
+    rt->subscriptions.len = 0;
+    rt->subscriptions.cap = 0;
+
+    rt->fault_policy = MC_FAULT_POLICY_MARK_FAULTED;
     rt->dead_letter_hook = NULL;
     rt->fault_hook = NULL;
     rt->hook_ctx = NULL;
@@ -215,6 +433,7 @@ void __mc_machine_runtime_drop(mc_machine_runtime_t *rt) {
     }
     __mc_free(rt->machines);
     __mc_free(rt->ready.items);
+    __mc_free(rt->subscriptions.entries);
     __mc_machine_runtime_init(rt);
 }
 
@@ -228,6 +447,25 @@ void __mc_machine_runtime_set_hooks(
     rt->dead_letter_hook = dead_letter_hook;
     rt->fault_hook = fault_hook;
     rt->hook_ctx = hook_ctx;
+}
+
+void __mc_machine_runtime_set_fault_policy(
+    mc_machine_runtime_t *rt,
+    mc_machine_fault_policy_t policy
+) {
+    if (!rt) {
+        return;
+    }
+    rt->fault_policy = policy;
+}
+
+mc_machine_fault_policy_t __mc_machine_runtime_fault_policy(
+    const mc_machine_runtime_t *rt
+) {
+    if (!rt) {
+        return MC_FAULT_POLICY_MARK_FAULTED;
+    }
+    return rt->fault_policy;
 }
 
 // Public API: create a managed machine slot in CREATED state.
@@ -246,6 +484,7 @@ uint8_t __mc_machine_runtime_spawn(
         return 0;
     }
     slot->lifecycle = MC_MACHINE_CREATED;
+    slot->state_word = 0;
 
     rt->machine_len += 1;
     if (out_id) {
@@ -299,12 +538,35 @@ uint8_t __mc_machine_runtime_start(
     return 1;
 }
 
+void __mc_machine_runtime_set_state(
+    mc_machine_runtime_t *rt,
+    mc_machine_id_t machine_id,
+    uint64_t state_word
+) {
+    mc_machine_slot_t *slot = mc_get_slot(rt, machine_id);
+    if (!slot) {
+        return;
+    }
+    slot->state_word = state_word;
+}
+
+uint64_t __mc_machine_runtime_state(
+    const mc_machine_runtime_t *rt,
+    mc_machine_id_t machine_id
+) {
+    const mc_machine_slot_t *slot = mc_get_slot_const(rt, machine_id);
+    if (!slot) {
+        return 0;
+    }
+    return slot->state_word;
+}
+
 // Public API: enqueue envelope for destination machine.
 //
 // Key behavior:
-// - Unknown/Stopped/Faulted destinations are rejected and optionally dead-lettered.
-// - Mailbox overflow is rejected and optionally dead-lettered.
-// - Successfully enqueued machines are inserted once into ready queue.
+// - Unknown/Faulted/Stopped destinations are rejected and optionally dead-lettered.
+// - CREATED destination buffers messages but is not scheduled.
+// - RUNNING destination buffers and is scheduled once.
 mc_mailbox_enqueue_result_t __mc_machine_runtime_enqueue(
     mc_machine_runtime_t *rt,
     mc_machine_id_t dst,
@@ -342,17 +604,14 @@ mc_mailbox_enqueue_result_t __mc_machine_runtime_enqueue(
     return MC_MAILBOX_ENQUEUE_OK;
 }
 
-// Public API: execute at most one dispatch from ready queue.
+// Public API: execute at most one dispatch using transactional callback.
 //
-// Deterministic flow:
-// 1. Pop next ready machine id.
-// 2. Pop one envelope from that machine mailbox.
-// 3. Run callback once.
-// 4. Update lifecycle on callback result.
-// 5. Requeue machine if it remains RUNNING and mailbox still has messages.
-uint8_t __mc_machine_runtime_dispatch_one(
+// Commit semantics:
+// - staged effects are committed only on MC_DISPATCH_OK and successful preflight.
+// - on faults/stops, staged effects are discarded.
+uint8_t __mc_machine_runtime_dispatch_one_txn(
     mc_machine_runtime_t *rt,
-    mc_machine_dispatch_fn dispatch,
+    mc_machine_dispatch_txn_fn dispatch,
     void *dispatch_ctx
 ) {
     mc_machine_id_t machine_id = 0;
@@ -374,13 +633,41 @@ uint8_t __mc_machine_runtime_dispatch_one(
         }
 
         uint64_t fault_code = 0;
+        mc_machine_dispatch_txn_t txn = {
+            .has_next_state = 0,
+            .next_state = 0,
+            .outbox = NULL,
+            .outbox_len = 0,
+            .subscriptions = NULL,
+            .subscriptions_len = 0,
+        };
         mc_dispatch_result_t result = dispatch
-            ? dispatch(dispatch_ctx, machine_id, &env, &fault_code)
+            ? dispatch(dispatch_ctx, machine_id, slot->state_word, &env, &txn, &fault_code)
             : MC_DISPATCH_OK;
 
+        if (result == MC_DISPATCH_OK) {
+            uint8_t preflight_ok = mc_preflight_subscriptions(rt, txn.subscriptions, txn.subscriptions_len)
+                && mc_preflight_outbox(rt, txn.outbox, txn.outbox_len);
+            if (!preflight_ok) {
+                fault_code = MC_FAULT_CODE_TXN_COMMIT_REJECTED;
+                result = MC_DISPATCH_FAULT;
+            }
+        }
+
+        if (result == MC_DISPATCH_OK) {
+            // Commit transaction after preflight has guaranteed capacity.
+            mc_commit_subscriptions(rt, txn.subscriptions, txn.subscriptions_len);
+            if (!mc_commit_outbox(rt, txn.outbox, txn.outbox_len)) {
+                // Defensive guard: this should be unreachable after preflight.
+                fault_code = MC_FAULT_CODE_TXN_COMMIT_REJECTED;
+                result = MC_DISPATCH_FAULT;
+            } else if (txn.has_next_state) {
+                slot->state_word = txn.next_state;
+            }
+        }
+
         if (result == MC_DISPATCH_FAULT) {
-            slot->lifecycle = MC_MACHINE_FAULTED;
-            mc_emit_fault(rt, machine_id, fault_code);
+            mc_apply_fault_policy(rt, slot, machine_id, fault_code);
         } else if (result == MC_DISPATCH_STOP) {
             slot->lifecycle = MC_MACHINE_STOPPED;
         }
@@ -410,4 +697,20 @@ uint32_t __mc_machine_runtime_mailbox_len(
 ) {
     const mc_machine_slot_t *slot = mc_get_slot_const(rt, machine_id);
     return slot ? slot->mailbox.len : 0;
+}
+
+uint32_t __mc_machine_runtime_subscription_len(const mc_machine_runtime_t *rt) {
+    return rt ? rt->subscriptions.len : 0;
+}
+
+uint8_t __mc_machine_runtime_subscription_contains(
+    const mc_machine_runtime_t *rt,
+    mc_machine_id_t machine_id,
+    uint64_t kind,
+    uint64_t routing
+) {
+    if (!rt) {
+        return 0;
+    }
+    return mc_subscription_contains(&rt->subscriptions, machine_id, kind, routing);
 }
