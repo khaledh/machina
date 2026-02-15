@@ -242,12 +242,13 @@ pub fn compile_with_path(
     let target = Arm64Target::new();
 
     // --- Lower to SSA IR ---
-    let lowered = backend::lower::lower_module_with_opts(
+    let lowered = backend::lower::lower_module_with_machine_plans_with_opts(
         &analyzed_context.module,
         &analyzed_context.def_table,
         &analyzed_context.type_map,
         &analyzed_context.lowering_plans,
         &analyzed_context.drop_plans,
+        &analyzed_context.machine_plans,
         opts.trace_alloc,
         opts.trace_drops,
     )
@@ -266,11 +267,14 @@ pub fn compile_with_path(
 
     let mut optimized_funcs = Vec::with_capacity(lowered.funcs.len());
     for (func, lowered_func) in funcs.into_iter().zip(lowered.funcs.iter()) {
-        let should_keep = reachable
+        let reachable_keep = reachable
             .as_ref()
             .map(|defs| defs.contains(&func.def_id))
             .unwrap_or(true);
-        if should_keep {
+        // Keep managed dispatch thunks alive even when not yet reachable from
+        // `main`; runtime bootstrap consumes them via descriptor tables.
+        let machine_thunk_keep = func.name.starts_with("__mc_machine_dispatch_thunk_");
+        if reachable_keep || machine_thunk_keep {
             let types = lowered_func.types.clone();
             let globals = lowered_func.globals.clone();
             optimized_funcs.push(backend::lower::LoweredFunction {

@@ -64,6 +64,7 @@ pub(super) fn assert_ir_eq(actual: impl AsRef<str>, expected: impl AsRef<str>) {
 
 pub(super) use crate::core::backend::lower::lower_func;
 pub(super) use crate::core::backend::lower::lower_module;
+pub(super) use crate::core::backend::lower::lower_module_with_machine_plans_with_opts;
 pub(super) use crate::core::ir::format::format_func;
 pub(super) use indoc::indoc;
 

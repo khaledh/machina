@@ -392,14 +392,19 @@ mc_machine_reply_result_t __mc_machine_runtime_reply(
 
 // Managed typestate effect ABI shims used by compiler-lowered `emit`/`reply`.
 //
-// V1: backend lowers these calls from typestate handler bodies while full
-// descriptor/thunk wiring is still evolving. The payload ABI is an opaque pair:
+// These APIs are valid only while a managed dispatch callback is executing via
+// `__mc_machine_runtime_dispatch_one_txn`. Calls outside dispatch return
+// failure/zero and stage nothing.
+//
+// The payload ABI is an opaque pair:
 // - `payload0`: payload pointer/int payload word.
 // - `payload1`: payload layout identifier.
 //
 // Return values:
 // - send/reply: non-zero on success, zero on failure.
 // - request: minted pending id on success, zero on failure.
+//
+// Success means "staged into the active transaction", not "already delivered".
 uint8_t __mc_machine_emit_send(
     uint64_t dst,
     uint64_t payload0,

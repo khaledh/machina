@@ -16,6 +16,7 @@ mod join;
 mod linear;
 mod locals;
 mod lowerer;
+mod machine;
 mod mapping;
 mod r#match;
 mod place;
@@ -128,6 +129,30 @@ pub fn lower_module_with_opts(
     trace_alloc: bool,
     trace_drops: bool,
 ) -> Result<LoweredModule, LowerToIrError> {
+    let empty_machine_plans = sem::MachinePlanMap::default();
+    lower_module_with_machine_plans_with_opts(
+        module,
+        def_table,
+        type_map,
+        lowering_plans,
+        drop_plans,
+        &empty_machine_plans,
+        trace_alloc,
+        trace_drops,
+    )
+}
+
+/// Lowers a semantic module with machine plans and optional SSA lowering flags.
+pub fn lower_module_with_machine_plans_with_opts(
+    module: &sem::Module,
+    def_table: &DefTable,
+    type_map: &TypeMap,
+    lowering_plans: &sem::LoweringPlanMap,
+    drop_plans: &sem::DropPlanMap,
+    machine_plans: &sem::MachinePlanMap,
+    trace_alloc: bool,
+    trace_drops: bool,
+) -> Result<LoweredModule, LowerToIrError> {
     let mut globals = GlobalArena::new();
     let mut funcs = Vec::new();
     let mut drop_glue = DropGlueRegistry::from_module(def_table, module);
@@ -173,6 +198,10 @@ pub fn lower_module_with_opts(
     let mut glue_funcs =
         drop_glue.take_glue_functions(def_table, type_map, &mut globals, trace_drops)?;
     funcs.append(&mut glue_funcs);
+
+    // Materialize managed machine descriptors + thunk placeholders as backend
+    // artifacts. Full runtime bootstrap wiring will consume these.
+    machine::append_machine_runtime_artifacts(machine_plans, def_table, &mut funcs, &mut globals);
 
     Ok(LoweredModule {
         funcs,

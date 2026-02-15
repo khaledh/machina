@@ -798,6 +798,18 @@ fn typestate_compile_opts() -> CompileOptions {
     }
 }
 
+fn typestate_emit_ir_compile_opts() -> CompileOptions {
+    CompileOptions {
+        dump: None,
+        emit_ir: true,
+        verify_ir: false,
+        trace_alloc: false,
+        trace_drops: false,
+        inject_prelude: false,
+        experimental_typestate: true,
+    }
+}
+
 #[test]
 fn compile_ir_dump_is_deterministic() {
     let source = r#"
@@ -1028,4 +1040,36 @@ fn main() -> u64 {
 
     compile(source, &typestate_compile_opts())
         .expect("typestate carried-field shorthand compile should succeed");
+}
+
+#[test]
+fn compile_typestate_handler_keeps_machine_runtime_artifacts_in_ir() {
+    let source = r#"
+type Ping = {}
+
+typestate M {
+    fn new() -> S { S {} }
+
+    state S {
+        on Ping(e: Ping) -> S {
+            e;
+            S {}
+        }
+    }
+}
+
+fn main() -> u64 { 0 }
+"#;
+
+    let out = compile(source, &typestate_emit_ir_compile_opts())
+        .expect("typestate handler compile should succeed");
+    let ir = out.ir.expect("emit_ir should provide IR output");
+    assert!(
+        ir.contains("fn __mc_machine_dispatch_thunk_"),
+        "expected managed machine dispatch thunk in emitted IR: {ir}"
+    );
+    assert!(
+        ir.contains("global _g") && ir.contains("bytes [77, 67, 72, 68"),
+        "expected managed machine descriptor blob in emitted IR: {ir}"
+    );
 }

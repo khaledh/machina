@@ -54,7 +54,14 @@ pub fn prune_globals(module: &mut LoweredModule) -> bool {
         return false;
     }
 
-    let used = collect_used_globals(&module.funcs);
+    let mut used = collect_used_globals(&module.funcs);
+    // Keep managed machine descriptors even before runtime bootstrap wires
+    // explicit references into generated code.
+    for global in &module.globals {
+        if global.bytes.starts_with(b"MCHD") {
+            used.insert(global.id);
+        }
+    }
     if used.len() == module.globals.len() {
         return false;
     }

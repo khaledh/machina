@@ -49,3 +49,15 @@ fn test_machine_runtime_transactional_request_reply_staging() {
     let run = run_c_program("machine_runtime_txn_reqreply", &source_path);
     assert_eq!(run.status.code(), Some(0));
 }
+
+#[test]
+fn test_machine_runtime_emit_shims_stage_transactional_effects() {
+    let repo_root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    let source_path = repo_root
+        .join("runtime")
+        .join("tests")
+        .join("machine_runtime_emit_staging.c");
+
+    let run = run_c_program("machine_runtime_emit_staging", &source_path);
+    assert_eq!(run.status.code(), Some(0));
+}
