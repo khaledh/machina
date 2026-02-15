@@ -230,6 +230,11 @@ typedef struct mc_machine_slot {
     mc_machine_lifecycle_t lifecycle;
     // Machine-local runtime state token (opaque to scheduler).
     mc_machine_state_token_t state_word;
+    // Optional per-machine dispatch callback used when dispatcher entrypoint
+    // does not supply an explicit callback.
+    mc_machine_dispatch_txn_fn dispatch;
+    // Opaque context pointer paired with `dispatch`.
+    void *dispatch_ctx;
     // Bounded FIFO for this machine.
     mc_machine_mailbox_t mailbox;
 } mc_machine_slot_t;
@@ -345,6 +350,15 @@ void __mc_machine_runtime_set_lifecycle(
 uint8_t __mc_machine_runtime_start(
     mc_machine_runtime_t *rt,
     mc_machine_id_t machine_id
+);
+
+// Bind one machine-local dispatch callback used by step/dispatch entrypoints
+// when no explicit callback argument is provided.
+void __mc_machine_runtime_bind_dispatch(
+    mc_machine_runtime_t *rt,
+    mc_machine_id_t machine_id,
+    mc_machine_dispatch_txn_fn dispatch,
+    void *dispatch_ctx
 );
 
 // Set/get opaque machine-local state word.

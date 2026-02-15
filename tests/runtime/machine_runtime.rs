@@ -75,6 +75,18 @@ fn test_machine_runtime_handle_bridge_helpers() {
 }
 
 #[test]
+fn test_machine_runtime_bound_dispatch_step() {
+    let repo_root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    let source_path = repo_root
+        .join("runtime")
+        .join("tests")
+        .join("machine_runtime_bound_dispatch.c");
+
+    let run = run_c_program("machine_runtime_bound_dispatch", &source_path);
+    assert_eq!(run.status.code(), Some(0));
+}
+
+#[test]
 fn test_std_machine_module_bridge_compiles_and_runs() {
     let source = r#"
 requires {

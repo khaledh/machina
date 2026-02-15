@@ -413,6 +413,8 @@ static uint8_t mc_machine_ensure_cap(mc_machine_runtime_t *rt, uint32_t min_cap)
     for (uint32_t i = rt->machine_cap; i < new_cap; i++) {
         new_slots[i].lifecycle = MC_MACHINE_STOPPED;
         new_slots[i].state_word = 0;
+        new_slots[i].dispatch = NULL;
+        new_slots[i].dispatch_ctx = NULL;
         new_slots[i].mailbox.items = NULL;
         new_slots[i].mailbox.cap = 0;
         new_slots[i].mailbox.len = 0;
@@ -1109,6 +1111,8 @@ uint8_t __mc_machine_runtime_spawn(
     }
     slot->lifecycle = MC_MACHINE_CREATED;
     slot->state_word = 0;
+    slot->dispatch = NULL;
+    slot->dispatch_ctx = NULL;
 
     rt->machine_len += 1;
     if (out_id) {
@@ -1160,6 +1164,22 @@ uint8_t __mc_machine_runtime_start(
         slot->mailbox.in_ready_queue = 1;
     }
     return 1;
+}
+
+// Public API: bind one machine-local dispatch callback used by step/dispatch
+// helpers when no explicit callback argument is supplied.
+void __mc_machine_runtime_bind_dispatch(
+    mc_machine_runtime_t *rt,
+    mc_machine_id_t machine_id,
+    mc_machine_dispatch_txn_fn dispatch,
+    void *dispatch_ctx
+) {
+    mc_machine_slot_t *slot = mc_get_slot(rt, machine_id);
+    if (!slot) {
+        return;
+    }
+    slot->dispatch = dispatch;
+    slot->dispatch_ctx = dispatch_ctx;
 }
 
 void __mc_machine_runtime_set_state(
@@ -1464,8 +1484,20 @@ static uint8_t mc_machine_runtime_dispatch_one_txn_impl(
         // every handler ABI.
         mc_emit_staging_ctx_t emit_ctx;
         mc_emit_staging_begin(&emit_ctx, rt, machine_id);
-        mc_dispatch_result_t result = dispatch
-            ? dispatch(dispatch_ctx, machine_id, slot->state_word, &env, &txn, &fault_code)
+        // Explicit callback argument takes precedence; otherwise fall back to
+        // machine-local callback bound during spawn/bootstrap.
+        mc_machine_dispatch_txn_fn effective_dispatch =
+            dispatch ? dispatch : slot->dispatch;
+        void *effective_dispatch_ctx = dispatch ? dispatch_ctx : slot->dispatch_ctx;
+        mc_dispatch_result_t result = effective_dispatch
+            ? effective_dispatch(
+                  effective_dispatch_ctx,
+                  machine_id,
+                  slot->state_word,
+                  &env,
+                  &txn,
+                  &fault_code
+              )
             : MC_DISPATCH_OK;
 
         if (result == MC_DISPATCH_OK && !mc_emit_merge_into_txn(&emit_ctx, &txn)) {
