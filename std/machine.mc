@@ -45,6 +45,9 @@ type StepStatus = Idle | DidWork | Faulted
 type BindDispatchFailed = {}
 
 @[public]
+type ManagedRuntimeUnavailable = {}
+
+@[public]
 fn new_runtime() -> Runtime {
   Runtime {
     _raw: __mc_machine_runtime_new(),
@@ -55,6 +58,17 @@ fn new_runtime() -> Runtime {
 fn close_runtime(inout rt: Runtime) {
   __mc_machine_runtime_free(rt._raw);
   rt._raw = 0;
+}
+
+// Returns the process-managed runtime handle initialized by `@[machines]` main.
+@[public]
+fn managed_runtime() -> Runtime | ManagedRuntimeUnavailable {
+  let raw = __mc_machine_runtime_managed_current_u64();
+  if raw == 0 {
+    ManagedRuntimeUnavailable {}
+  } else {
+    Runtime { _raw: raw }
+  }
 }
 
 @[public]

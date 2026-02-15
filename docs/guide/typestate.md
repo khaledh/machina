@@ -71,10 +71,12 @@ fn main() {
 3. `self` is implicit in transition methods (do not write it explicitly).
 4. Transition return type must be a state, or a union where the first variant is
    a state (`Connected | ConnectError`).
-5. State literals are only valid inside typestate constructor/transition bodies.
-6. Typestate-level `fields` are carried across transitions automatically.
-7. State-local field names cannot shadow carried field names.
-8. Transition names must be unique within a state.
+5. `on` handlers can return a state, `stay`, or `State | Error...`.
+6. `on Event(payload)` and `on Event` shorthand forms are supported.
+7. State literals are only valid inside typestate constructor/transition bodies.
+8. Typestate-level `fields` are carried across transitions automatically.
+9. State-local field names cannot shadow carried field names.
+10. Transition names must be unique within a state.
 
 ## Error Handling in Transitions
 
@@ -114,14 +116,30 @@ See `/examples/typestate/` for runnable examples.
 
 ## Managed Events And Protocol Flows
 
-Machina also supports protocol/role flow declarations with typestate handlers.
-This lets you model machine-to-machine request/reply contracts in the type
-system.
+Machina also supports managed typestate machines with event handlers and
+protocol/role flow declarations.
+
+Tier 1 managed entrypoint model:
+- mark binary entrypoint with `@[machines]`,
+- spawn managed machines through `Typestate::spawn(...)`,
+- drive event dispatch via `std::machine::step`.
+
+`spawn(...)` mirrors constructor parameters exactly:
+- `fn new(auth: u64) -> Idle` implies `AuthClient::spawn(auth)`.
 
 ```mc
+requires {
+    std::machine::managed_runtime
+    std::machine::send
+    std::machine::step
+    std::machine::Runtime
+    std::machine::StepStatus
+}
+
 type AuthorizeReq = { user: string }
 type AuthApproved = {}
 type AuthDenied = {}
+type Start = { user: string }
 
 protocol Auth {
     role Client;
@@ -137,8 +155,8 @@ typestate GatewayClient : Auth::Client {
     }
 
     state Idle {
-        fn authorize(user: string) -> AwaitAuth {
-            let pending = emit Request(to: self.auth_peer, AuthorizeReq { user });
+        on Start(start) -> AwaitAuth {
+            let pending = request(self.auth_peer, AuthorizeReq { user: start.user });
             AwaitAuth { pending }
         }
     }
@@ -146,8 +164,8 @@ typestate GatewayClient : Auth::Client {
     state AwaitAuth {
         fields { pending: Pending<AuthApproved | AuthDenied> }
 
-        on Response(pending, AuthApproved) -> Connected { Connected }
-        on Response(pending, AuthDenied) -> Idle { Idle }
+        on Response(pending, AuthApproved) -> Connected { Connected {} }
+        on Response(pending, AuthDenied) -> Idle { Idle {} }
     }
 
     state Connected {}
@@ -157,26 +175,53 @@ typestate AuthService : Auth::Server {
     fn new() -> Ready { Ready {} }
 
     state Ready {
-        on AuthorizeReq(req: AuthorizeReq, cap: ReplyCap<AuthApproved | AuthDenied>) -> Ready {
+        on AuthorizeReq(req: AuthorizeReq, cap: ReplyCap<AuthApproved | AuthDenied>) -> stay {
             if req.user.len > 0 {
                 reply(cap, AuthApproved {});
             } else {
                 reply(cap, AuthDenied {});
             };
-            Ready {}
         }
     }
+}
+
+@[machines]
+fn main() {
+    let auth: Machine = match AuthService::spawn() {
+        m: Machine => m,
+        _ => { return; },
+    };
+    let client: Machine = match GatewayClient::spawn(auth._id) {
+        m: Machine => m,
+        _ => { return; },
+    };
+    let client_id = client._id;
+
+    let rt: Runtime = match managed_runtime() {
+        r: Runtime => r,
+        _ => { return; },
+    };
+
+    // Event kind ids are currently runtime ABI-level integers.
+    match send(rt, client_id, 1, 0, 0) {
+        ok: () => { ok; }
+        _ => { return; },
+    };
+    step(rt);
+    step(rt);
+    step(rt);
 }
 ```
 
 Key ideas:
-- `emit Send(...)` and `emit Request(...)` are outbound effects checked against
+- `send(...)` and `request(...)` handler sugar lower to outbound effects checked against
   `flow` declarations for the implemented role.
-- `emit Request(...)` returns `Pending<...>` so later handlers can correlate
+- `request(...)` returns `Pending<...>` so later handlers can correlate
   responses.
 - Pattern-form handlers (`on Response(pending, Variant) -> ...`) keep response
   routing explicit and checked.
 - `reply(cap, value)` consumes `ReplyCap<...>` and enforces response-set safety.
+- `@[machines]` is required to use `Typestate::spawn(...)` in binaries.
 
 Examples:
 - runnable single-role event flow:
@@ -193,12 +238,11 @@ cargo mcr --experimental typestate examples/typestate/inter_machine_req_reply_ch
 
 ## Managed Mode Limits (V1)
 
-Current managed/event support is runnable through `std::machine`, but still
-early-stage.
+Current managed/event support is runnable but still early-stage.
 
-- Runtime setup is explicit:
-  - create runtime, spawn machines, bind descriptors, start, send, step.
-  - examples currently hardcode deterministic descriptor ids/state tags.
+- `Machine` handles currently expose machine id fields; ergonomic handle methods
+  (`handle.send(...)`, `handle.request(...)`) are follow-up work.
+- Event kind ids in `std::machine::send(...)` are still ABI-level integers.
 - Emit payload ABI is currently minimal:
   - `emit Send/Request/reply` carries event kind + payload words.
   - rich payload boxing/unboxing and drop paths are still being expanded.

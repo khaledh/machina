@@ -1,12 +1,9 @@
 requires {
     std::io::println
-    std::machine::new_runtime
-    std::machine::close_runtime
-    std::machine::spawn
-    std::machine::start
+    std::machine::managed_runtime
     std::machine::send
-    std::machine::bind_descriptor
     std::machine::step
+    std::machine::Runtime
     std::machine::StepStatus
 }
 
@@ -33,17 +30,15 @@ typestate AuthClient {
     }
 
     state Idle {
-        on KickApprove(e: KickApprove) -> AwaitAuth {
+        on KickApprove(e) -> AwaitAuth {
             e;
-            let pending: Pending<AuthApproved | AuthDenied> =
-                emit Request(to: 1, ReqApprove {});
+            let pending: Pending<AuthApproved | AuthDenied> = request(1, ReqApprove {});
             AwaitAuth { pending: pending }
         }
 
-        on KickDeny(e: KickDeny) -> AwaitAuth {
+        on KickDeny(e) -> AwaitAuth {
             e;
-            let pending: Pending<AuthApproved | AuthDenied> =
-                emit Request(to: 1, ReqDeny {});
+            let pending: Pending<AuthApproved | AuthDenied> = request(1, ReqDeny {});
             AwaitAuth { pending: pending }
         }
     }
@@ -71,152 +66,73 @@ typestate AuthServer {
     }
 
     state Ready {
-        on ReqApprove(req: ReqApprove, cap: ReplyCap<AuthApproved | AuthDenied>) -> Ready {
+        on ReqApprove(req: ReqApprove, cap: ReplyCap<AuthApproved | AuthDenied>) -> stay {
             req;
             reply(cap, AuthApproved {});
-            Ready {}
         }
 
-        on ReqDeny(req: ReqDeny, cap: ReplyCap<AuthApproved | AuthDenied>) -> Ready {
+        on ReqDeny(req: ReqDeny, cap: ReplyCap<AuthApproved | AuthDenied>) -> stay {
             req;
             reply(cap, AuthDenied {});
-            Ready {}
         }
     }
 }
 
-fn main() -> u64 {
-    var rt = new_runtime();
-
+@[machines]
+fn main() {
     // Spawn server first so its machine id is 1 (used by client Request `to:`).
-    var server_id = 0;
-    match spawn(rt, 8) {
-        id: u64 => {
-            server_id = id;
-        }
-        _ => {
-            close_runtime(inout rt);
-            return 1;
-        }
+    let server: Machine = match AuthServer::spawn() {
+        m: Machine => m,
+        _ => { return; },
     };
-    var client_id = 0;
-    match spawn(rt, 8) {
-        id: u64 => {
-            client_id = id;
-        }
-        _ => {
-            close_runtime(inout rt);
-            return 1;
-        }
+    let client: Machine = match AuthClient::spawn() {
+        m: Machine => m,
+        _ => { return; },
     };
+    let server_id = server._id;
+    let client_id = client._id;
 
-    // Descriptor ids are deterministic by typestate name sort:
-    //   AuthClient -> 1, AuthServer -> 2.
-    // State tags are deterministic by state name sort:
-    //   AuthClient: AwaitAuth -> 1, Idle -> 2.
-    //   AuthServer: Ready -> 1.
-    match bind_descriptor(rt, server_id, 2, 1) {
-        ok: () => {
-            ok;
-        }
-        _ => {
-            close_runtime(inout rt);
-            return 1;
-        }
-    };
-    match bind_descriptor(rt, client_id, 1, 2) {
-        ok: () => {
-            ok;
-        }
-        _ => {
-            close_runtime(inout rt);
-            return 1;
-        }
-    };
+    server_id;
+    client_id;
 
-    match start(rt, server_id) {
-        ok: () => {
-            ok;
-        }
-        _ => {
-            close_runtime(inout rt);
-            return 1;
-        }
-    };
-    match start(rt, client_id) {
-        ok: () => {
-            ok;
-        }
-        _ => {
-            close_runtime(inout rt);
-            return 1;
-        }
+    let rt: Runtime = match managed_runtime() {
+        r: Runtime => r,
+        _ => { return; },
     };
 
     // Kick approve flow: client -> server -> client(response).
     match send(rt, client_id, 1, 0, 0) {
-        ok: () => {
-            ok;
-        }
-        _ => {
-            close_runtime(inout rt);
-            return 1;
-        }
+        ok: () => { ok; }
+        _ => { return; },
     };
     match step(rt) {
         StepStatus::DidWork => {}
-        _ => {
-            close_runtime(inout rt);
-            return 1;
-        }
+        _ => { return; },
     };
     match step(rt) {
         StepStatus::DidWork => {}
-        _ => {
-            close_runtime(inout rt);
-            return 1;
-        }
+        _ => { return; },
     };
     match step(rt) {
         StepStatus::DidWork => {}
-        _ => {
-            close_runtime(inout rt);
-            return 1;
-        }
+        _ => { return; },
     };
 
     // Kick deny flow: client -> server -> client(response).
     match send(rt, client_id, 2, 0, 0) {
-        ok: () => {
-            ok;
-        }
-        _ => {
-            close_runtime(inout rt);
-            return 1;
-        }
+        ok: () => { ok; }
+        _ => { return; },
     };
     match step(rt) {
         StepStatus::DidWork => {}
-        _ => {
-            close_runtime(inout rt);
-            return 1;
-        }
+        _ => { return; },
     };
     match step(rt) {
         StepStatus::DidWork => {}
-        _ => {
-            close_runtime(inout rt);
-            return 1;
-        }
+        _ => { return; },
     };
     match step(rt) {
         StepStatus::DidWork => {}
-        _ => {
-            close_runtime(inout rt);
-            return 1;
-        }
+        _ => { return; },
     };
-
-    close_runtime(inout rt);
-    0
 }
