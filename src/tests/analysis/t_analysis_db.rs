@@ -1888,6 +1888,81 @@ fn run() -> u64 { 1 }
 }
 
 #[test]
+fn def_location_at_file_points_typestate_role_binding_to_protocol_role() {
+    let mut db = AnalysisDb::new();
+    db.set_experimental_typestate(true);
+
+    let source = r#"
+type AuthReq = {}
+
+protocol Auth {
+    role Client;
+    role Server;
+    flow Client -> Server: AuthReq;
+}
+
+typestate Gateway : Auth::Client {
+    fn new() -> Ready {
+        Ready {}
+    }
+
+    state Ready {}
+}
+"#;
+    let file_id = db.upsert_disk_text(PathBuf::from("examples/analysis_protocol_role_defloc.mc"), source);
+
+    let role_decl = span_for_substring(source, "role Client");
+    let role_use = span_for_substring(source, "Auth::Client");
+    let mut use_span = role_use;
+    use_span.start = position_at(source, role_use.start.offset + "Auth::".len());
+    use_span.end = position_at(source, use_span.start.offset + "Client".len());
+
+    let location = db
+        .def_location_at_file(file_id, use_span)
+        .expect("definition location query should succeed")
+        .expect("expected definition location for protocol role");
+
+    assert_eq!(location.file_id, file_id);
+    assert_eq!(location.span.start, role_decl.start);
+}
+
+#[test]
+fn hover_at_file_resolves_typestate_role_binding_symbol() {
+    let mut db = AnalysisDb::new();
+    db.set_experimental_typestate(true);
+
+    let source = r#"
+type AuthReq = {}
+
+protocol Auth {
+    role Client;
+    role Server;
+    flow Client -> Server: AuthReq;
+}
+
+typestate Gateway : Auth::Client {
+    fn new() -> Ready {
+        Ready {}
+    }
+
+    state Ready {}
+}
+"#;
+    let file_id = db.upsert_disk_text(PathBuf::from("examples/analysis_protocol_role_hover.mc"), source);
+    let role_use = span_for_substring(source, "Auth::Client");
+    let mut query_span = role_use;
+    query_span.start = position_at(source, role_use.start.offset + "Auth::".len());
+    query_span.end = position_at(source, query_span.start.offset + "Client".len());
+
+    let hover = db
+        .hover_at_file(file_id, query_span)
+        .expect("hover query should succeed")
+        .expect("expected hover information for protocol role binding");
+
+    assert_eq!(hover.def_name.as_deref(), Some("Auth::Client"));
+}
+
+#[test]
 fn completions_at_program_file_include_imported_symbols() {
     let run_id = ANALYSIS_TMP_COUNTER.fetch_add(1, Ordering::Relaxed);
     let temp_dir = std::env::temp_dir().join(format!(

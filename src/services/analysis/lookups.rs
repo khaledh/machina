@@ -23,13 +23,19 @@ use crate::services::analysis::syntax_index::{
 
 pub(crate) fn def_at_span(state: &LookupState, query_span: Span) -> Option<DefId> {
     let resolved = state.resolved.as_ref()?;
-    best_def_use_at_span(
+    if let Some((_, def_id)) = best_def_use_at_span(
         &resolved.module,
         &resolved.def_table,
         &state.poisoned_nodes,
         query_span,
+    ) {
+        return Some(def_id);
+    }
+    typestate_role_def_at_span(
+        &resolved.typestate_role_impls,
+        &resolved.def_table,
+        query_span,
     )
-    .map(|(_, def_id)| def_id)
 }
 
 pub(crate) fn def_location_at_span(
@@ -39,12 +45,20 @@ pub(crate) fn def_location_at_span(
     query_span: Span,
 ) -> Option<Location> {
     let resolved = state.resolved.as_ref()?;
-    let (_, def_id) = best_def_use_at_span(
+    let def_id = if let Some((_, def_id)) = best_def_use_at_span(
         &resolved.module,
         &resolved.def_table,
         &state.poisoned_nodes,
         query_span,
-    )?;
+    ) {
+        def_id
+    } else {
+        typestate_role_def_at_span(
+            &resolved.typestate_role_impls,
+            &resolved.def_table,
+            query_span,
+        )?
+    };
     let def_loc = resolved.def_table.lookup_def_location(def_id)?;
 
     Some(Location {
@@ -97,6 +111,42 @@ fn best_def_use_at_span<D, T>(
         }
     }
     None
+}
+
+fn typestate_role_def_at_span(
+    role_impls: &[crate::core::context::TypestateRoleImplBinding],
+    def_table: &DefTable,
+    query_span: Span,
+) -> Option<DefId> {
+    let mut best: Option<(usize, usize, DefId)> = None;
+    for role_impl in role_impls {
+        let Some(def_id) = role_impl.role_def_id else {
+            continue;
+        };
+        if def_id == UNKNOWN_DEF_ID {
+            continue;
+        }
+        if !span_contains_span(role_impl.span, query_span) {
+            continue;
+        }
+        if def_table.lookup_def(def_id).is_none() {
+            continue;
+        }
+
+        let width = role_impl
+            .span
+            .end
+            .offset
+            .saturating_sub(role_impl.span.start.offset);
+        let start = role_impl.span.start.offset;
+        let replace = best
+            .as_ref()
+            .is_none_or(|(best_width, best_start, _)| width < *best_width || (width == *best_width && start > *best_start));
+        if replace {
+            best = Some((width, start, def_id));
+        }
+    }
+    best.map(|(_, _, def_id)| def_id)
 }
 
 pub(crate) fn type_at_span(state: &LookupState, query_span: Span) -> Option<Type> {
@@ -253,6 +303,31 @@ pub(crate) fn hover_at_span_in_file(
         if let Some((_, _, _, info)) = best {
             return Some(info);
         }
+        if let Some(def_id) = typestate_role_def_at_span(
+            &typed.typestate_role_impls,
+            &typed.def_table,
+            query_span,
+        ) {
+            let def_name = typed.def_table.lookup_def(def_id).map(|def| def.name.clone());
+            if let (Some(def_name), Some(query_ident)) = (def_name.as_deref(), query_ident.as_deref())
+                && !def_name_matches_query(def_name, query_ident, &demangler)
+            {
+                return None;
+            }
+            let ty = None;
+            let display = format_hover_label(def_name.as_deref(), None, &typed.def_table);
+            return Some(HoverInfo {
+                node_id: typed
+                    .def_table
+                    .lookup_def_node_id(def_id)
+                    .unwrap_or(crate::core::tree::NodeId(0)),
+                span: query_span,
+                def_id: Some(def_id),
+                def_name,
+                ty,
+                display,
+            });
+        }
         if let Some(fallback) = fallback_hover_from_def_table(
             &typed.def_table,
             Some(&typed.type_map),
@@ -288,7 +363,14 @@ pub(crate) fn hover_at_span_in_file(
     let def_id = resolved
         .def_table
         .lookup_node_def_id(node_id)
-        .filter(|id| *id != UNKNOWN_DEF_ID)?;
+        .filter(|id| *id != UNKNOWN_DEF_ID)
+        .or_else(|| {
+            typestate_role_def_at_span(
+                &resolved.typestate_role_impls,
+                &resolved.def_table,
+                query_span,
+            )
+        })?;
     if should_skip_runtime_hover_def(&resolved.def_table, def_id, current_file_path) {
         return None;
     }
