@@ -66,6 +66,9 @@ pub enum ResolveError {
     #[error("Attribute `{0}` is not allowed on {1}")]
     AttrNotAllowed(String, &'static str, Span),
 
+    #[error("Attribute `machines` is only allowed on top-level `fn main` definitions")]
+    AttrMachinesRequiresMain(Span),
+
     #[error("Duplicate requires alias: {0}")]
     DuplicateRequireAlias(String, Span),
 
@@ -142,6 +145,9 @@ pub enum ResolveError {
 
     #[error("State literal `{0}` is only allowed inside typestate constructor/transition methods")]
     TypestateStateLiteralOutsideTypestate(String, Span),
+
+    #[error("Managed typestate spawn requires `@[machines] fn main(...)` entrypoint opt-in")]
+    TypestateSpawnRequiresMachinesOptIn(Span),
 }
 
 impl ResolveError {
@@ -167,6 +173,7 @@ impl ResolveError {
             ResolveError::AttrWrongArgCount(_, _, _, span) => *span,
             ResolveError::AttrWrongArgType(_, span) => *span,
             ResolveError::AttrNotAllowed(_, _, span) => *span,
+            ResolveError::AttrMachinesRequiresMain(span) => *span,
             ResolveError::DuplicateRequireAlias(_, span) => *span,
             ResolveError::ModuleQualifiedAccessUnsupported(_, _, span) => *span,
             ResolveError::ModuleMemberUndefined(_, _, span) => *span,
@@ -190,6 +197,7 @@ impl ResolveError {
             ResolveError::TypestateInvalidStateOnHandlerReturn(_, _, span) => *span,
             ResolveError::TypestateDuplicateTransition(_, _, _, span) => *span,
             ResolveError::TypestateStateLiteralOutsideTypestate(_, span) => *span,
+            ResolveError::TypestateSpawnRequiresMachinesOptIn(span) => *span,
         }
     }
 }

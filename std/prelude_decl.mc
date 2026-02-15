@@ -19,6 +19,15 @@ fn __mc_machine_runtime_new() -> u64;
 fn __mc_machine_runtime_free(runtime: u64);
 
 @[runtime]
+fn __mc_machine_runtime_managed_bootstrap_u64() -> u64;
+
+@[runtime]
+fn __mc_machine_runtime_managed_current_u64() -> u64;
+
+@[runtime]
+fn __mc_machine_runtime_managed_shutdown_u64() -> u64;
+
+@[runtime]
 fn __mc_machine_runtime_spawn_u64(runtime: u64, mailbox_cap: u64) -> u64;
 
 @[runtime]

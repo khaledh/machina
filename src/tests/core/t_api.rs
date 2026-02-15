@@ -822,17 +822,56 @@ typestate Connection {
     let spawn = spawn.expect("expected generated typestate spawn function");
 
     assert_eq!(ctor.sig.params.len(), 2);
-    assert_eq!(spawn.sig.params.len(), ctor.sig.params.len() + 2);
-    assert_eq!(spawn.sig.params[0].ident, "__mc_rt");
-    assert_eq!(spawn.sig.params[1].ident, "__mc_mailbox_cap");
-    assert_eq!(spawn.sig.params[2].ident, "addr");
-    assert_eq!(spawn.sig.params[3].ident, "retries");
+    assert_eq!(spawn.sig.params.len(), ctor.sig.params.len());
+    assert_eq!(spawn.sig.params[0].ident, "addr");
+    assert_eq!(spawn.sig.params[1].ident, "retries");
 
     let mut finder = SpawnForwardCtorCallFinder::default();
     finder.visit_expr(&spawn.body);
     assert!(
         finder.forwards_ctor_call,
         "expected spawn body to forward constructor args through __ts_ctor_Connection call"
+    );
+}
+
+#[test]
+fn machines_entrypoint_injects_managed_runtime_calls_without_prelude() {
+    let source = r#"
+@[machines]
+fn main() {}
+"#;
+
+    let parsed = parsed_context_typestate(source);
+    let out = resolve_stage_with_policy(parsed, ResolveInputs::default(), FrontendPolicy::Strict);
+    assert!(
+        out.errors.is_empty(),
+        "expected @[machines] rewrite to resolve cleanly, got {:?}",
+        out.errors
+    );
+    let resolved = out
+        .context
+        .expect("resolve should succeed for machines entrypoint rewrite");
+
+    let mut found_main = false;
+    let mut found_bootstrap_call = false;
+    for item in &resolved.module.top_level_items {
+        let res::TopLevelItem::FuncDef(func) = item else {
+            continue;
+        };
+        if func.sig.name != "main" {
+            continue;
+        }
+        found_main = true;
+        let mut finder = BootstrapCallFinder::default();
+        finder.visit_expr(&func.body);
+        found_bootstrap_call = finder.found;
+        break;
+    }
+
+    assert!(found_main, "expected rewritten main function");
+    assert!(
+        found_bootstrap_call,
+        "expected managed runtime bootstrap call in rewritten main body"
     );
 }
 
@@ -879,6 +918,23 @@ impl Visitor<crate::core::resolve::DefId> for SpawnForwardCtorCallFinder {
             && args.len() == 2
         {
             self.forwards_ctor_call = true;
+        }
+        visit::walk_expr(self, expr);
+    }
+}
+
+#[derive(Default)]
+struct BootstrapCallFinder {
+    found: bool,
+}
+
+impl Visitor<crate::core::resolve::DefId> for BootstrapCallFinder {
+    fn visit_expr(&mut self, expr: &res::Expr) {
+        if let res::ExprKind::Call { callee, .. } = &expr.kind
+            && let res::ExprKind::Var { ident, .. } = &callee.kind
+            && ident == "__mc_machine_runtime_managed_bootstrap_u64"
+        {
+            self.found = true;
         }
         visit::walk_expr(self, expr);
     }

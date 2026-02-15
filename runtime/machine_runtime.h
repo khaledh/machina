@@ -554,6 +554,13 @@ uint8_t __mc_machine_runtime_pending_contains(
 //   once on first `__mc_machine_runtime_new()` call.
 uint64_t __mc_machine_runtime_new(void);
 void __mc_machine_runtime_free(uint64_t runtime);
+// Process-global managed runtime bridge used by `@[machines]` entrypoints.
+// - bootstrap: lazily creates and stores process runtime handle, returns it.
+// - current: returns active managed runtime handle, or 0 when not bootstrapped.
+// - shutdown: drops active managed runtime handle and clears global slot.
+uint64_t __mc_machine_runtime_managed_bootstrap_u64(void);
+uint64_t __mc_machine_runtime_managed_current_u64(void);
+uint64_t __mc_machine_runtime_managed_shutdown_u64(void);
 uint64_t __mc_machine_runtime_spawn_u64(uint64_t runtime, uint64_t mailbox_cap);
 uint64_t __mc_machine_runtime_start_u64(uint64_t runtime, uint64_t machine_id);
 uint64_t __mc_machine_runtime_send_u64(

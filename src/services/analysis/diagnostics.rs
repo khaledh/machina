@@ -275,6 +275,7 @@ impl Diagnostic {
                 );
                 "MC-RESOLVE-ATTRIBUTE-NOT-ALLOWED"
             }
+            ResolveError::AttrMachinesRequiresMain(_) => "MC-RESOLVE-ATTRIBUTE-MACHINES-MAIN-ONLY",
             ResolveError::DuplicateRequireAlias(alias, _) => {
                 metadata.insert("alias".to_string(), DiagnosticValue::String(alias.clone()));
                 "MC-RESOLVE-DUPLICATE-REQUIRE-ALIAS"
@@ -460,6 +461,9 @@ impl Diagnostic {
             ResolveError::TypestateStateLiteralOutsideTypestate(state, _) => {
                 metadata.insert("state".to_string(), DiagnosticValue::String(state.clone()));
                 "MC-TYPESTATE-STATE-LITERAL-OUTSIDE-TYPESTATE"
+            }
+            ResolveError::TypestateSpawnRequiresMachinesOptIn(_) => {
+                "MC-TYPESTATE-SPAWN-REQUIRES-MACHINES-OPT-IN"
             }
         };
         Self {

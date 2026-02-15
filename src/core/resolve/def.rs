@@ -110,6 +110,7 @@ pub struct TypeAttrs {
 pub struct FuncAttrs {
     pub intrinsic: bool,
     pub runtime: bool,
+    pub machines: bool,
     pub link_name: Option<String>,
     pub visibility: Visibility,
 }

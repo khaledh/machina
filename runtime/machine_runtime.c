@@ -1,6 +1,7 @@
 #include "machine_runtime.h"
 
 #include <stddef.h>
+#include <stdlib.h>
 #include <string.h>
 
 #if defined(__GNUC__) || defined(__clang__)
@@ -84,6 +85,12 @@ static mc_machine_descriptor_t *g_descriptor_registry = NULL;
 static uint32_t g_descriptor_registry_len = 0;
 static uint32_t g_descriptor_registry_cap = 0;
 static uint64_t g_next_descriptor_id = 1;
+
+// Optional process-global managed runtime used by `@[machines]` entrypoint
+// bootstrap. This keeps runtime ownership explicit at source level while
+// removing runtime-handle plumbing from machine-centric app code.
+static uint64_t g_managed_runtime_handle = 0;
+static uint8_t g_managed_runtime_atexit_registered = 0;
 
 static uint8_t mc_thunk_registry_ensure_cap(uint32_t min_cap) {
     if (g_thunk_registry_cap >= min_cap) {
@@ -2094,6 +2101,15 @@ static mc_machine_runtime_t *mc_runtime_from_handle(uint64_t runtime) {
     return (mc_machine_runtime_t *)(uintptr_t)runtime;
 }
 
+static void mc_machine_runtime_managed_atexit_cleanup(void) {
+    if (g_managed_runtime_handle == 0) {
+        return;
+    }
+    uint64_t runtime = g_managed_runtime_handle;
+    g_managed_runtime_handle = 0;
+    __mc_machine_runtime_free(runtime);
+}
+
 uint64_t __mc_machine_runtime_new(void) {
     static uint8_t bootstrap_done = 0;
     if (!bootstrap_done) {
@@ -2119,6 +2135,38 @@ void __mc_machine_runtime_free(uint64_t runtime) {
     }
     __mc_machine_runtime_drop(rt);
     __mc_free(rt);
+}
+
+uint64_t __mc_machine_runtime_managed_bootstrap_u64(void) {
+    if (g_managed_runtime_handle != 0) {
+        return g_managed_runtime_handle;
+    }
+    uint64_t runtime = __mc_machine_runtime_new();
+    if (runtime == 0) {
+        return 0;
+    }
+    g_managed_runtime_handle = runtime;
+
+    if (!g_managed_runtime_atexit_registered) {
+        if (atexit(mc_machine_runtime_managed_atexit_cleanup) == 0) {
+            g_managed_runtime_atexit_registered = 1;
+        }
+    }
+    return g_managed_runtime_handle;
+}
+
+uint64_t __mc_machine_runtime_managed_current_u64(void) {
+    return g_managed_runtime_handle;
+}
+
+uint64_t __mc_machine_runtime_managed_shutdown_u64(void) {
+    if (g_managed_runtime_handle == 0) {
+        return 0;
+    }
+    uint64_t runtime = g_managed_runtime_handle;
+    g_managed_runtime_handle = 0;
+    __mc_machine_runtime_free(runtime);
+    return 1;
 }
 
 uint64_t __mc_machine_runtime_spawn_u64(uint64_t runtime, uint64_t mailbox_cap) {

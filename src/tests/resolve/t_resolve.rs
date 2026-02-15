@@ -684,6 +684,28 @@ fn test_resolve_attr_duplicate() {
 }
 
 #[test]
+fn test_resolve_attr_machines_allowed_on_main() {
+    let source = "@[machines] fn main() {}";
+    let result = resolve_source(source);
+    assert!(result.is_ok());
+}
+
+#[test]
+fn test_resolve_attr_machines_requires_main() {
+    let source = "@[machines] fn foo() {}";
+    let result = resolve_source(source);
+    assert!(result.is_err());
+
+    if let Err(errors) = result {
+        assert!(
+            errors
+                .iter()
+                .any(|e| matches!(e, ResolveError::AttrMachinesRequiresMain(_)))
+        );
+    }
+}
+
+#[test]
 fn test_resolve_trait_undefined_in_method_block() {
     let source = r#"
         type Process = { name: string }

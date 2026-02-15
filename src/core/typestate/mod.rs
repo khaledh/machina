@@ -27,6 +27,10 @@ const MACHINE_HANDLE_TYPE_NAME: &str = "Machine";
 const MACHINE_SPAWN_FAILED_TYPE_NAME: &str = "MachineSpawnFailed";
 const MACHINE_BIND_FAILED_TYPE_NAME: &str = "MachineBindFailed";
 const MACHINE_START_FAILED_TYPE_NAME: &str = "MachineStartFailed";
+const MANAGED_RUNTIME_DEFAULT_MAILBOX_CAP: u64 = 8;
+const MANAGED_RUNTIME_BOOTSTRAP_FN: &str = "__mc_machine_runtime_managed_bootstrap_u64";
+const MANAGED_RUNTIME_CURRENT_FN: &str = "__mc_machine_runtime_managed_current_u64";
+const MANAGED_RUNTIME_SHUTDOWN_FN: &str = "__mc_machine_runtime_managed_shutdown_u64";
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct TypestateRoleImplRef {
@@ -86,12 +90,25 @@ pub fn desugar_module(module: &mut Module, node_id_gen: &mut NodeIdGen) -> Vec<R
     }
 
     module.top_level_items = out;
+    let machines_opted_in = rewrite_machines_entrypoint(module, node_id_gen);
     if saw_typestate {
         ensure_machine_support_types(module, node_id_gen);
+    }
+    if saw_typestate || machines_opted_in {
         ensure_machine_runtime_intrinsics(module, node_id_gen);
     }
     // Rewrite `Typestate::new(...)` enum-variant syntax into generated ctor calls.
-    rewrite_constructor_invocations(module, &ctor_by_typestate, &spawn_by_typestate, node_id_gen);
+    let first_spawn_call_span = rewrite_constructor_invocations(
+        module,
+        &ctor_by_typestate,
+        &spawn_by_typestate,
+        node_id_gen,
+    );
+    if let Some(span) = first_spawn_call_span
+        && !machines_opted_in
+    {
+        errors.push(ResolveError::TypestateSpawnRequiresMachinesOptIn(span));
+    }
     // Enforce constructor-only entry: reject state literals outside typestate
     // constructor/transition bodies.
     errors.extend(find_external_state_literal_errors(
@@ -302,6 +319,111 @@ struct TypestateDesugarOutput {
     errors: Vec<ResolveError>,
 }
 
+fn rewrite_machines_entrypoint(module: &mut Module, node_id_gen: &mut NodeIdGen) -> bool {
+    let mut opted_in = false;
+    for item in &mut module.top_level_items {
+        let TopLevelItem::FuncDef(func) = item else {
+            continue;
+        };
+        let has_machines_attr = func
+            .attrs
+            .iter()
+            .any(|attr| attr.name == "machines" && attr.args.is_empty());
+        if !has_machines_attr || func.sig.name != "main" {
+            continue;
+        }
+
+        opted_in = true;
+        wrap_main_with_managed_runtime(func, node_id_gen);
+    }
+    opted_in
+}
+
+fn wrap_main_with_managed_runtime(main: &mut FuncDef, node_id_gen: &mut NodeIdGen) {
+    let span = main.body.span;
+    let original_body = std::mem::replace(
+        &mut main.body,
+        Expr {
+            id: node_id_gen.new_id(),
+            kind: ExprKind::UnitLit,
+            ty: (),
+            span,
+        },
+    );
+    let bootstrap_call = Expr {
+        id: node_id_gen.new_id(),
+        kind: ExprKind::Call {
+            callee: Box::new(Expr {
+                id: node_id_gen.new_id(),
+                kind: ExprKind::Var {
+                    ident: MANAGED_RUNTIME_BOOTSTRAP_FN.to_string(),
+                    def_id: (),
+                },
+                ty: (),
+                span,
+            }),
+            args: Vec::new(),
+        },
+        ty: (),
+        span,
+    };
+    let shutdown_call = Expr {
+        id: node_id_gen.new_id(),
+        kind: ExprKind::Call {
+            callee: Box::new(Expr {
+                id: node_id_gen.new_id(),
+                kind: ExprKind::Var {
+                    ident: MANAGED_RUNTIME_SHUTDOWN_FN.to_string(),
+                    def_id: (),
+                },
+                ty: (),
+                span,
+            }),
+            args: Vec::new(),
+        },
+        ty: (),
+        span,
+    };
+
+    main.body = Expr {
+        id: node_id_gen.new_id(),
+        kind: ExprKind::Block {
+            items: vec![
+                parsed::BlockItem::Expr(bootstrap_call),
+                parsed::BlockItem::Stmt(StmtExpr {
+                    id: node_id_gen.new_id(),
+                    kind: StmtExprKind::LetBind {
+                        pattern: BindPattern {
+                            id: node_id_gen.new_id(),
+                            kind: BindPatternKind::Name {
+                                ident: "__mc_main_result".to_string(),
+                                def_id: (),
+                            },
+                            span,
+                        },
+                        decl_ty: None,
+                        value: Box::new(original_body),
+                    },
+                    ty: (),
+                    span,
+                }),
+                parsed::BlockItem::Expr(shutdown_call),
+            ],
+            tail: Some(Box::new(Expr {
+                id: node_id_gen.new_id(),
+                kind: ExprKind::Var {
+                    ident: "__mc_main_result".to_string(),
+                    def_id: (),
+                },
+                ty: (),
+                span,
+            })),
+        },
+        ty: (),
+        span,
+    };
+}
+
 fn ensure_machine_support_types(module: &mut Module, node_id_gen: &mut NodeIdGen) {
     let existing: HashSet<String> = module
         .top_level_items
@@ -390,6 +512,9 @@ fn ensure_machine_runtime_intrinsics(module: &mut Module, node_id_gen: &mut Node
         }));
     };
 
+    push_decl(MANAGED_RUNTIME_BOOTSTRAP_FN, &[]);
+    push_decl(MANAGED_RUNTIME_CURRENT_FN, &[]);
+    push_decl(MANAGED_RUNTIME_SHUTDOWN_FN, &[]);
     push_decl(
         "__mc_machine_runtime_spawn_u64",
         &["runtime", "mailbox_cap"],
@@ -1060,22 +1185,6 @@ fn lower_spawn_func(
 
     let span = ctor.span;
     let mut params = Vec::new();
-    params.push(parsed::Param {
-        id: node_id_gen.new_id(),
-        ident: "__mc_rt".to_string(),
-        def_id: (),
-        typ: u64_type_expr(node_id_gen, span),
-        mode: ParamMode::In,
-        span,
-    });
-    params.push(parsed::Param {
-        id: node_id_gen.new_id(),
-        ident: "__mc_mailbox_cap".to_string(),
-        def_id: (),
-        typ: u64_type_expr(node_id_gen, span),
-        mode: ParamMode::In,
-        span,
-    });
     params.extend(
         ctor.sig
             .params
@@ -1109,11 +1218,17 @@ fn lower_spawn_func(
         .map(|param| var_expr(&param.ident, node_id_gen, span))
         .collect();
     let ctor_call = call_expr(&ctor.sig.name, ctor_call_args, node_id_gen, span);
+    let runtime_current_call = call_expr(MANAGED_RUNTIME_CURRENT_FN, Vec::new(), node_id_gen, span);
     let spawn_call = call_expr(
         "__mc_machine_runtime_spawn_u64",
         vec![
             var_expr("__mc_rt", node_id_gen, span),
-            var_expr("__mc_mailbox_cap", node_id_gen, span),
+            Expr {
+                id: node_id_gen.new_id(),
+                kind: ExprKind::IntLit(MANAGED_RUNTIME_DEFAULT_MAILBOX_CAP),
+                ty: (),
+                span,
+            },
         ],
         node_id_gen,
         span,
@@ -1149,6 +1264,18 @@ fn lower_spawn_func(
         id: node_id_gen.new_id(),
         kind: ExprKind::Block {
             items: vec![
+                parsed::BlockItem::Stmt(let_bind_stmt(
+                    "__mc_rt",
+                    runtime_current_call,
+                    node_id_gen,
+                    span,
+                )),
+                parsed::BlockItem::Expr(make_error_return_if_zero(
+                    "__mc_rt",
+                    MACHINE_SPAWN_FAILED_TYPE_NAME,
+                    node_id_gen,
+                    span,
+                )),
                 parsed::BlockItem::Stmt(let_bind_stmt(
                     "__mc_initial_state",
                     ctor_call,
@@ -1620,15 +1747,17 @@ fn rewrite_constructor_invocations(
     ctor_by_typestate: &HashMap<String, String>,
     spawn_by_typestate: &HashMap<String, String>,
     node_id_gen: &mut NodeIdGen,
-) {
+) -> Option<Span> {
     // Global rewrite after all typestate declarations are lowered so call sites
     // can target the generated constructor symbol.
     let mut rewriter = CtorCallRewriter {
         ctor_by_typestate,
         spawn_by_typestate,
         node_id_gen,
+        first_spawn_call_span: None,
     };
     rewriter.visit_module(module);
+    rewriter.first_spawn_call_span
 }
 
 struct CtorCallRewriter<'a> {
@@ -1637,6 +1766,7 @@ struct CtorCallRewriter<'a> {
     // Map source typestate name -> generated managed spawn function name.
     spawn_by_typestate: &'a HashMap<String, String>,
     node_id_gen: &'a mut NodeIdGen,
+    first_spawn_call_span: Option<Span>,
 }
 
 impl VisitorMut<()> for CtorCallRewriter<'_> {
@@ -1660,6 +1790,9 @@ impl VisitorMut<()> for CtorCallRewriter<'_> {
         {
             // Parsed form of `Type::new(a, b)` arrives as enum-variant syntax in
             // the parsed tree. Lower it to a plain call expression.
+            if variant == "spawn" && self.first_spawn_call_span.is_none() {
+                self.first_spawn_call_span = Some(expr.span);
+            }
             let payload = std::mem::take(payload);
             let args = payload
                 .into_iter()

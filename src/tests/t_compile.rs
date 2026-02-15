@@ -1129,12 +1129,81 @@ typestate Worker {
     }
 }
 
+@[machines]
 fn main() {
-    let spawned = Worker::spawn(0, 8, 42);
+    let spawned = Worker::spawn(42);
     spawned;
 }
 "#;
 
     compile(source, &typestate_compile_opts())
         .expect("typestate spawn constructor path should compile");
+}
+
+#[test]
+fn compile_typestate_spawn_requires_machines_entrypoint_opt_in() {
+    let source = r#"
+typestate Worker {
+    fn new(seed: u64) -> Idle {
+        seed;
+        Idle {}
+    }
+
+    state Idle {}
+}
+
+fn main() {
+    let spawned = Worker::spawn(42);
+    spawned;
+}
+"#;
+
+    let err = match compile(source, &typestate_compile_opts()) {
+        Ok(_) => panic!("spawn without @[machines] should be rejected"),
+        Err(err) => err,
+    };
+    let has_opt_in_error = err.iter().any(|e| {
+        matches!(
+            e,
+            crate::core::diag::CompileError::Resolve(
+                crate::core::resolve::ResolveError::TypestateSpawnRequiresMachinesOptIn(_)
+            )
+        )
+    });
+    assert!(
+        has_opt_in_error,
+        "expected typestate spawn opt-in error, got {:?}",
+        err
+    );
+}
+
+#[test]
+fn compile_machines_opt_in_injects_managed_runtime_bootstrap() {
+    let source = r#"
+@[machines]
+fn main() {}
+"#;
+
+    let out = compile(source, &typestate_emit_ir_compile_opts())
+        .expect("opted-in entrypoint should compile");
+    let ir = out.ir.expect("emit_ir should include SSA dump");
+    assert!(
+        ir.contains("__mc_machine_runtime_managed_bootstrap_u64"),
+        "expected managed bootstrap call in opted-in main IR"
+    );
+}
+
+#[test]
+fn compile_without_machines_opt_in_does_not_inject_managed_runtime_bootstrap() {
+    let source = r#"
+fn main() {}
+"#;
+
+    let out = compile(source, &typestate_emit_ir_compile_opts())
+        .expect("plain entrypoint should compile");
+    let ir = out.ir.expect("emit_ir should include SSA dump");
+    assert!(
+        !ir.contains("__mc_machine_runtime_managed_bootstrap_u64"),
+        "did not expect managed bootstrap call without @[machines] opt-in"
+    );
 }
