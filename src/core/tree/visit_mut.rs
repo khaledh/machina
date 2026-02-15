@@ -325,6 +325,9 @@ pub fn walk_typestate_on_handler<V: VisitorMut<D, T> + ?Sized, D, T>(
     for param in &mut handler.params {
         v.visit_param(param);
     }
+    if let Some(provenance) = &mut handler.provenance {
+        v.visit_param(provenance);
+    }
     v.visit_type_expr(&mut handler.ret_ty_expr);
     v.visit_expr(&mut handler.body);
 }

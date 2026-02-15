@@ -784,6 +784,123 @@ typestate M {
 }
 
 #[test]
+fn typestate_for_provenance_lowers_to_hidden_pending_and_origin_param() {
+    let source = r#"
+type AuthCheck = {}
+type AuthApproved = {}
+
+typestate Connection {
+    fn new() -> AwaitAuth { AwaitAuth {} }
+
+    state AwaitAuth {
+        on AuthApproved(ok) for AuthCheck(req) -> stay {
+            ok;
+            req;
+        }
+    }
+}
+"#;
+
+    let parsed = parsed_context_typestate(source);
+    let out = resolve_stage_with_policy(parsed, ResolveInputs::default(), FrontendPolicy::Strict);
+    assert!(
+        out.errors.is_empty(),
+        "expected provenance handler sugar to resolve cleanly, got {:?}",
+        out.errors
+    );
+    let resolved = out
+        .context
+        .expect("resolve should succeed for provenance lowering test");
+
+    let handler = resolved
+        .module
+        .method_blocks()
+        .iter()
+        .filter(|block| block.type_name.starts_with("__ts_"))
+        .flat_map(|block| &block.method_items)
+        .filter_map(|item| match item {
+            res::MethodItem::Def(def) if def.sig.name.starts_with("__ts_on_") => Some(def),
+            _ => None,
+        })
+        .next()
+        .expect("expected lowered typestate handler");
+
+    let names = handler
+        .sig
+        .params
+        .iter()
+        .map(|param| param.ident.as_str())
+        .collect::<Vec<_>>();
+    assert_eq!(names, vec!["__event", "__pending", "req", "ok"]);
+    assert!(
+        matches!(handler.sig.params[1].typ.kind, res::TypeExprKind::Named { ref ident, .. } if ident == "Pending"),
+        "expected hidden pending parameter in lowered provenance handler"
+    );
+    assert!(
+        matches!(handler.sig.params[2].typ.kind, res::TypeExprKind::Named { ref ident, .. } if ident == "AuthCheck"),
+        "expected provenance binding parameter type to be preserved"
+    );
+}
+
+#[test]
+fn typestate_for_provenance_sets_thunk_origin_param_index() {
+    let source = r#"
+type AuthCheck = {}
+type AuthApproved = {}
+
+typestate Connection {
+    fn new() -> AwaitAuth { AwaitAuth {} }
+
+    state AwaitAuth {
+        on AuthApproved(ok) for AuthCheck(req) -> stay {
+            ok;
+            req;
+        }
+    }
+}
+"#;
+
+    let parsed = parsed_context_typestate(source);
+    let resolved =
+        resolve_stage_with_policy(parsed, ResolveInputs::default(), FrontendPolicy::Strict);
+    let resolved_ctx = resolved
+        .context
+        .expect("resolve should succeed for provenance plan test");
+    let typed = typecheck_stage_with_policy(
+        resolved_ctx,
+        resolved.imported_facts,
+        FrontendPolicy::Strict,
+    )
+    .context
+    .expect("typecheck should succeed for provenance plan test");
+    let sem_checked =
+        semcheck_stage(typed).expect("semcheck should succeed for provenance plan test");
+    let elaborated = elaborate_stage(sem_checked);
+
+    let handler_def_id = elaborated
+        .module
+        .method_blocks()
+        .iter()
+        .filter(|block| block.type_name.starts_with("__ts_"))
+        .flat_map(|block| &block.method_items)
+        .find_map(|item| match item {
+            sem::MethodItem::Def(def) if def.sig.name.starts_with("__ts_on_") => Some(def.def_id),
+            _ => None,
+        })
+        .expect("expected lowered typestate handler");
+    let thunk = elaborated
+        .machine_plans
+        .thunks
+        .get(&handler_def_id)
+        .expect("expected dispatch thunk plan for handler");
+    assert_eq!(
+        thunk.provenance_param_index,
+        Some(2),
+        "expected provenance binding to map to param index 2"
+    );
+}
+
+#[test]
 fn typestate_spawn_mirrors_constructor_params_and_forwards_call() {
     let source = r#"
 typestate Connection {

@@ -2539,6 +2539,66 @@ fn test_parse_typestate_pattern_on_handler_desugars_to_canonical_params() {
 }
 
 #[test]
+fn test_parse_typestate_handler_for_provenance_binding() {
+    let source = r#"
+        type AuthCheck = {}
+        type AuthApproved = {}
+
+        typestate Gateway {
+            fn new() -> AwaitAuth { AwaitAuth {} }
+
+            state AwaitAuth {
+                on AuthApproved(ok) for AuthCheck(req) -> stay {
+                    ok;
+                    req;
+                }
+            }
+        }
+    "#;
+
+    let module = parse_module_with_options(
+        source,
+        ParserOptions {
+            experimental_typestate: true,
+        },
+    )
+    .expect("typestate on-handler provenance form should parse");
+
+    let typestate = match &module.top_level_items[2] {
+        TopLevelItem::TypestateDef(def) => def,
+        _ => panic!("expected typestate top-level item"),
+    };
+    let state = typestate
+        .items
+        .iter()
+        .find_map(|item| match item {
+            TypestateItem::State(state) if state.name == "AwaitAuth" => Some(state),
+            _ => None,
+        })
+        .expect("expected AwaitAuth state");
+    let handler = state
+        .items
+        .iter()
+        .find_map(|item| match item {
+            TypestateStateItem::Handler(handler) => Some(handler),
+            _ => None,
+        })
+        .expect("expected on-handler");
+
+    assert_eq!(handler.params.len(), 1);
+    assert_eq!(handler.params[0].ident, "ok");
+    let provenance = handler
+        .provenance
+        .as_ref()
+        .expect("expected for-provenance binding");
+    assert_eq!(provenance.ident, "req");
+    assert!(matches!(
+        provenance.typ.kind,
+        TypeExprKind::Named { ref ident, .. } if ident == "AuthCheck"
+    ));
+}
+
+#[test]
 fn test_parse_typestate_handler_shorthand_and_stay_forms() {
     let source = r#"
         type Ping = {}

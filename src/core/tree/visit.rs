@@ -326,6 +326,9 @@ pub fn walk_typestate_on_handler<V: Visitor<D, T> + ?Sized, D, T>(
     for param in &handler.params {
         v.visit_param(param);
     }
+    if let Some(provenance) = &handler.provenance {
+        v.visit_param(provenance);
+    }
     v.visit_type_expr(&handler.ret_ty_expr);
     v.visit_expr(&handler.body);
 }

@@ -357,6 +357,9 @@ fn build_dispatch_thunk(
     let reply_cap_id = load_struct_field(&mut builder, env_ptr, 2, u64_ty, u64_ptr_ty);
     let payload0 = load_struct_field(&mut builder, env_ptr, 4, u64_ty, u64_ptr_ty);
     let payload_ptr = builder.cast(CastKind::IntToPtr, payload0, handler_payload_ptr_ty);
+    let origin_payload0 = load_struct_field(&mut builder, env_ptr, 6, u64_ty, u64_ptr_ty);
+    let origin_payload_ptr =
+        builder.cast(CastKind::IntToPtr, origin_payload0, handler_payload_ptr_ty);
 
     // Build a typed function pointer for indirect call. Using `Callee::Value`
     // avoids cross-function type-id coupling in verifier signature checks.
@@ -366,6 +369,12 @@ fn build_dispatch_thunk(
         let abi_ty = lower_handler_param_abi_ty(param, &mut lowerer);
         call_arg_tys.push(abi_ty);
 
+        let from_origin = plan.provenance_param_index == Some(idx);
+        let source_payload_ptr = if from_origin {
+            origin_payload_ptr
+        } else {
+            payload_ptr
+        };
         let arg = if idx == 0 {
             state_ptr
         } else if matches!(param.ty, Type::Pending { .. }) {
@@ -375,11 +384,11 @@ fn build_dispatch_thunk(
         } else if param.ty.is_scalar() {
             // Scalar payload parameters are loaded by value from payload box.
             let scalar_ptr_ty = lowerer.ptr_to(abi_ty);
-            let typed_ptr = builder.cast(CastKind::PtrToPtr, payload_ptr, scalar_ptr_ty);
+            let typed_ptr = builder.cast(CastKind::PtrToPtr, source_payload_ptr, scalar_ptr_ty);
             builder.load(typed_ptr, abi_ty)
         } else {
             // Aggregate payload parameters are passed by pointer.
-            builder.cast(CastKind::PtrToPtr, payload_ptr, abi_ty)
+            builder.cast(CastKind::PtrToPtr, source_payload_ptr, abi_ty)
         };
         call_args.push(arg);
     }
@@ -529,6 +538,14 @@ fn add_machine_env_type(types: &mut IrTypeCache, u64_ty: IrTypeId) -> IrTypeId {
         },
         IrStructField {
             name: "payload1".to_string(),
+            ty: u64_ty,
+        },
+        IrStructField {
+            name: "origin_payload0".to_string(),
+            ty: u64_ty,
+        },
+        IrStructField {
+            name: "origin_payload1".to_string(),
             ty: u64_ty,
         },
     ];

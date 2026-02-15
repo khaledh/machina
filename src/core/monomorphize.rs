@@ -767,6 +767,9 @@ fn reseed_typestate_on_handler(handler: &mut res::TypestateOnHandler, node_id_ge
     for param in &mut handler.params {
         reseed_param(param, node_id_gen);
     }
+    if let Some(provenance) = &mut handler.provenance {
+        reseed_param(provenance, node_id_gen);
+    }
     reseed_type_expr(&mut handler.ret_ty_expr, node_id_gen);
     reseed_expr(&mut handler.body, node_id_gen);
 }

@@ -1390,6 +1390,31 @@ fn lower_handler_to_method_source(
         mode: ParamMode::In,
         span: handler.selector_ty.span,
     }];
+
+    if handler.provenance.is_some() {
+        // `for RequestType(binding)` handlers need response correlation id at
+        // runtime so lowering can recover the originating request payload.
+        // We model this via a hidden `Pending<Selector>` parameter.
+        params.push(parsed::Param {
+            id: node_id_gen.new_id(),
+            ident: "__pending".to_string(),
+            def_id: (),
+            typ: TypeExpr {
+                id: node_id_gen.new_id(),
+                kind: TypeExprKind::Named {
+                    ident: "Pending".to_string(),
+                    def_id: (),
+                    type_args: vec![handler.selector_ty.clone()],
+                },
+                span: handler.selector_ty.span,
+            },
+            mode: ParamMode::In,
+            span: handler.selector_ty.span,
+        });
+        if let Some(provenance) = &handler.provenance {
+            params.push(provenance.clone());
+        }
+    }
     params.extend(handler.params.clone());
     let mut body = handler.body.clone();
     rewrite_handler_command_sugar(&mut body);

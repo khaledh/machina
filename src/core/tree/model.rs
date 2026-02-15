@@ -228,6 +228,8 @@ pub struct TypestateOnHandler<D, T = ()> {
     pub id: NodeId,
     pub selector_ty: TypeExpr<D>,
     pub params: Vec<Param<D>>,
+    /// Optional request provenance binding from `for RequestType(binding)`.
+    pub provenance: Option<Param<D>>,
     pub ret_ty_expr: TypeExpr<D>,
     pub body: Expr<D, T>,
     pub span: Span,

@@ -633,6 +633,10 @@ pub fn walk_typestate_on_handler<M: TreeMapper + ?Sized>(
             .iter()
             .map(|param| mapper.map_param(param, ctx))
             .collect(),
+        provenance: handler
+            .provenance
+            .as_ref()
+            .map(|param| mapper.map_param(param, ctx)),
         ret_ty_expr: mapper.map_type_expr(&handler.ret_ty_expr, ctx),
         body: mapper.map_expr(&handler.body, ctx),
         span: handler.span,

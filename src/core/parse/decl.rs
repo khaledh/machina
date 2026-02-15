@@ -359,6 +359,11 @@ impl<'a> Parser<'a> {
         } else {
             Vec::new()
         };
+        let provenance = if self.curr_token.kind == TK::KwFor {
+            Some(self.parse_typestate_on_handler_provenance()?)
+        } else {
+            None
+        };
         let ret_ty_expr = if self.curr_token.kind == TK::Arrow {
             self.consume(&TK::Arrow)?;
             self.parse_type_expr()?
@@ -371,8 +376,26 @@ impl<'a> Parser<'a> {
             id: self.id_gen.new_id(),
             selector_ty,
             params,
+            provenance,
             ret_ty_expr,
             body,
+            span: self.close(marker),
+        })
+    }
+
+    fn parse_typestate_on_handler_provenance(&mut self) -> Result<Param, ParseError> {
+        let marker = self.mark();
+        self.consume_keyword(TK::KwFor)?;
+        let request_ty = self.parse_type_expr()?;
+        self.consume(&TK::LParen)?;
+        let binding = self.parse_ident()?;
+        self.consume(&TK::RParen)?;
+        Ok(Param {
+            id: self.id_gen.new_id(),
+            ident: binding,
+            def_id: (),
+            typ: request_ty,
+            mode: ParamMode::In,
             span: self.close(marker),
         })
     }

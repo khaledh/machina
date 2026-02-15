@@ -228,6 +228,9 @@ impl TypestateOnHandler {
                 writeln!(f, "{}{}", indent(level + 2), param)?;
             }
         }
+        if let Some(provenance) = &self.provenance {
+            writeln!(f, "{}Provenance: {}", indent(level + 1), provenance)?;
+        }
         writeln!(f, "{}Return: {}", indent(level + 1), self.ret_ty_expr)?;
         writeln!(f, "{}Body:", indent(level + 1))?;
         self.body.fmt_with_indent(f, level + 2)

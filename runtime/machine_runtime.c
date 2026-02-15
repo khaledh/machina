@@ -806,12 +806,16 @@ static uint8_t mc_pending_contains_identity(
 static uint8_t mc_pending_insert_active(
     mc_pending_reply_table_t *pending,
     mc_pending_correlation_id_t correlation,
+    uint64_t request_payload0,
+    mc_payload_layout_id_t request_payload1,
     mc_machine_id_t requester
 ) {
     for (uint32_t i = 0; i < pending->len; i++) {
         if (!pending->entries[i].active) {
             pending->entries[i].correlation = correlation;
             pending->entries[i].requester = requester;
+            pending->entries[i].request_payload0 = request_payload0;
+            pending->entries[i].request_payload1 = request_payload1;
             pending->entries[i].active = 1;
             return 1;
         }
@@ -821,6 +825,8 @@ static uint8_t mc_pending_insert_active(
     }
     pending->entries[pending->len].correlation = correlation;
     pending->entries[pending->len].requester = requester;
+    pending->entries[pending->len].request_payload0 = request_payload0;
+    pending->entries[pending->len].request_payload1 = request_payload1;
     pending->entries[pending->len].active = 1;
     pending->len += 1;
     return 1;
@@ -1079,6 +1085,8 @@ static uint8_t mc_commit_requests(
         request_env.src = src;
         request_env.reply_cap_id = req->pending_id;
         request_env.pending_id = 0;
+        request_env.origin_payload0 = 0;
+        request_env.origin_payload1 = 0;
 
         if (!mc_mailbox_push(&dst->mailbox, &request_env)) {
             return 0;
@@ -1093,7 +1101,13 @@ static uint8_t mc_commit_requests(
             .pending_id = req->pending_id,
             .request_site_key = req->request_site_key,
         };
-        if (!mc_pending_insert_active(&rt->pending, correlation, src)) {
+        if (!mc_pending_insert_active(
+                &rt->pending,
+                correlation,
+                req->env.payload0,
+                req->env.payload1,
+                src
+            )) {
             return 0;
         }
     }
@@ -1192,6 +1206,8 @@ static uint8_t mc_commit_replies(
         response_env.src = src;
         response_env.reply_cap_id = 0;
         response_env.pending_id = reply->reply_cap_id;
+        response_env.origin_payload0 = rt->pending.entries[(uint32_t)idx].request_payload0;
+        response_env.origin_payload1 = rt->pending.entries[(uint32_t)idx].request_payload1;
 
         if (!mc_mailbox_push(&dst->mailbox, &response_env)) {
             return 0;
@@ -1778,6 +1794,8 @@ mc_mailbox_enqueue_result_t __mc_machine_runtime_request(
     request_env.src = src;
     request_env.reply_cap_id = pending_id;
     request_env.pending_id = 0;
+    request_env.origin_payload0 = 0;
+    request_env.origin_payload1 = 0;
 
     mc_mailbox_enqueue_result_t res = __mc_machine_runtime_enqueue(rt, dst, &request_env);
     if (res != MC_MAILBOX_ENQUEUE_OK) {
@@ -1789,7 +1807,13 @@ mc_mailbox_enqueue_result_t __mc_machine_runtime_request(
         .pending_id = pending_id,
         .request_site_key = 0,
     };
-    (void)mc_pending_insert_active(&rt->pending, correlation, src);
+    (void)mc_pending_insert_active(
+        &rt->pending,
+        correlation,
+        env->payload0,
+        env->payload1,
+        src
+    );
 
     *out_pending_id = pending_id;
     return MC_MAILBOX_ENQUEUE_OK;
@@ -1819,6 +1843,8 @@ mc_machine_reply_result_t __mc_machine_runtime_reply(
     response_env.src = src;
     response_env.reply_cap_id = 0;
     response_env.pending_id = reply_cap_id;
+    response_env.origin_payload0 = rt->pending.entries[(uint32_t)idx].request_payload0;
+    response_env.origin_payload1 = rt->pending.entries[(uint32_t)idx].request_payload1;
 
     mc_mailbox_enqueue_result_t enqueue_res =
         __mc_machine_runtime_enqueue(rt, requester, &response_env);

@@ -101,6 +101,12 @@ typedef struct mc_machine_envelope {
     // - payload1: payload layout id used for decode/drop glue dispatch.
     uint64_t payload0;
     mc_payload_layout_id_t payload1;
+    // Correlated origin request payload ABI (response envelopes only):
+    // - origin_payload0: pointer/int payload word of originating request.
+    // - origin_payload1: payload layout id of originating request.
+    // Zero for non-response envelopes or when unavailable.
+    uint64_t origin_payload0;
+    mc_payload_layout_id_t origin_payload1;
 } mc_machine_envelope_t;
 
 typedef enum mc_machine_reply_result {
@@ -290,6 +296,9 @@ typedef struct mc_pending_correlation_id {
 typedef struct mc_pending_reply_entry {
     mc_pending_correlation_id_t correlation;
     mc_machine_id_t requester;
+    // Captured request payload ABI so response handlers can bind provenance.
+    uint64_t request_payload0;
+    mc_payload_layout_id_t request_payload1;
     uint8_t active;
 } mc_pending_reply_entry_t;
 

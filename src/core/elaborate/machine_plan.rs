@@ -35,6 +35,7 @@ struct HandlerPlanSeed {
     state_name: String,
     state_layout_ty: TypeId,
     event_key: sem::MachineEventKeyPlan,
+    provenance_param_index: Option<usize>,
     payload_layout_ty: TypeId,
     next_state_layout_ty: TypeId,
 }
@@ -127,8 +128,15 @@ fn collect_typestate_builders(
                 "selector",
             );
 
-            let (event_key, payload_layout_ty) =
-                resolve_handler_event_key(module, def_table, type_map, method_def, selector_ty);
+            let (event_key, payload_layout_ty) = resolve_handler_event_key(
+                module,
+                def_table,
+                type_map,
+                method_def,
+                selector_ty.clone(),
+            );
+            let provenance_param_index =
+                resolve_handler_provenance_param_index(method_def, &selector_ty);
 
             let next_state_layout_ty = resolve_type_id(
                 module,
@@ -145,6 +153,7 @@ fn collect_typestate_builders(
                 state_name: state_seed.state_name.clone(),
                 state_layout_ty: state_seed.state_layout_ty,
                 event_key,
+                provenance_param_index,
                 // Selector payload layout is used when no response override applies.
                 payload_layout_ty: payload_layout_ty.unwrap_or(selector_ty_id),
                 next_state_layout_ty,
@@ -215,30 +224,46 @@ fn resolve_handler_event_key(
     method_def: &sem::MethodDef,
     selector_ty: Type,
 ) -> (sem::MachineEventKeyPlan, Option<TypeId>) {
-    // Pattern-form `on Response(pending, Variant)` lowers to handler params:
-    //   (__event: Response, pending: Pending<...>, __response: Variant)
-    // For runtime dispatch kind assignment we key on actual response payload
-    // (`Variant`) while still recording the selector for descriptor metadata.
+    // Response forms include a hidden/explicit `Pending<...>` parameter.
+    // We always keep selector metadata, and choose payload event key from the
+    // concrete response type:
+    // - legacy pattern form: `on Response(pending, Variant)` => param[2]
+    // - `for RequestType(binding)` form: selector itself is response payload.
     if method_def.sig.params.len() >= 3 {
         let pending_param = &method_def.sig.params[1];
         let pending_ty = resolve_type_expr(def_table, module, &pending_param.typ).ok();
         if matches!(pending_ty, Some(Type::Pending { .. })) {
-            let response_param = &method_def.sig.params[2];
-            let response_ty = resolve_type_expr(def_table, module, &response_param.typ)
-                .unwrap_or_else(|err| {
-                    panic!(
-                        "compiler bug: cannot resolve typestate response payload type in {}: {err}",
-                        method_def.sig.name
-                    )
-                });
-            let response_ty_id = resolve_type_id(
-                module,
-                def_table,
-                type_map,
-                &response_param.typ,
-                &method_def.sig.name,
-                "response payload",
-            );
+            let (response_ty, response_ty_id) = if is_response_selector_type(&selector_ty) {
+                let response_param = &method_def.sig.params[2];
+                let response_ty = resolve_type_expr(def_table, module, &response_param.typ)
+                    .unwrap_or_else(|err| {
+                        panic!(
+                            "compiler bug: cannot resolve typestate response payload type in {}: {err}",
+                            method_def.sig.name
+                        )
+                    });
+                let response_ty_id = resolve_type_id(
+                    module,
+                    def_table,
+                    type_map,
+                    &response_param.typ,
+                    &method_def.sig.name,
+                    "response payload",
+                );
+                (response_ty, response_ty_id)
+            } else {
+                let event_param = &method_def.sig.params[0];
+                let response_ty = selector_ty.clone();
+                let response_ty_id = resolve_type_id(
+                    module,
+                    def_table,
+                    type_map,
+                    &event_param.typ,
+                    &method_def.sig.name,
+                    "response payload",
+                );
+                (response_ty, response_ty_id)
+            };
             return (
                 sem::MachineEventKeyPlan::Response {
                     selector_ty,
@@ -255,6 +280,29 @@ fn resolve_handler_event_key(
         },
         None,
     )
+}
+
+fn is_response_selector_type(selector_ty: &Type) -> bool {
+    match selector_ty {
+        Type::Struct { name, .. } | Type::Enum { name, .. } => name == "Response",
+        _ => false,
+    }
+}
+
+fn resolve_handler_provenance_param_index(
+    method_def: &sem::MethodDef,
+    selector_ty: &Type,
+) -> Option<usize> {
+    // `for RequestType(binding)` lowering injects hidden `__pending` as param[1]
+    // and places provenance binding at param[2].
+    if method_def.sig.params.len() >= 3
+        && method_def.sig.params[1].ident == "__pending"
+        && !is_response_selector_type(selector_ty)
+    {
+        Some(2)
+    } else {
+        None
+    }
 }
 
 fn resolve_type_id(
@@ -382,6 +430,7 @@ fn materialize_machine_plans(builders: BTreeMap<String, TypestatePlanSeed>) -> s
                         typestate_name: typestate_name.clone(),
                         state_name: handler.state_name.clone(),
                         event_key: handler.event_key.clone(),
+                        provenance_param_index: handler.provenance_param_index,
                         next_state_tag: *state_tag_by_layout.get(&handler.next_state_layout_ty).unwrap_or_else(|| {
                             panic!(
                                 "compiler bug: missing state tag for typestate {} handler {} next-state layout {:?}",
@@ -567,6 +616,7 @@ mod tests {
             event_key: sem::MachineEventKeyPlan::Payload {
                 payload_ty: named_payload(event),
             },
+            provenance_param_index: None,
             payload_layout_ty: dummy_type_id(),
             next_state_layout_ty: dummy_type_id(),
         };
@@ -613,6 +663,7 @@ mod tests {
             state_name: "A".to_string(),
             state_layout_ty: dummy_type_id(),
             event_key: event_kinds[0].key.clone(),
+            provenance_param_index: None,
             payload_layout_ty: dummy_type_id(),
             next_state_layout_ty: dummy_type_id(),
         };
@@ -622,6 +673,7 @@ mod tests {
             state_name: "A".to_string(),
             state_layout_ty: dummy_type_id(),
             event_key: event_kinds[1].key.clone(),
+            provenance_param_index: None,
             payload_layout_ty: dummy_type_id(),
             next_state_layout_ty: dummy_type_id(),
         };
@@ -688,6 +740,7 @@ mod tests {
                 state_name: "A".to_string(),
                 state_layout_ty: dummy_type_id(),
                 event_key: event_key.clone(),
+                provenance_param_index: None,
                 payload_layout_ty: dummy_type_id(),
                 next_state_layout_ty: dummy_type_id(),
             }],
@@ -702,6 +755,7 @@ mod tests {
                 state_name: "B".to_string(),
                 state_layout_ty: dummy_type_id(),
                 event_key,
+                provenance_param_index: None,
                 payload_layout_ty: dummy_type_id(),
                 next_state_layout_ty: dummy_type_id(),
             }],
