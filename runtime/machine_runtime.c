@@ -207,7 +207,7 @@ static uint8_t mc_subscription_ensure_cap(mc_subscription_registry_t *subs, uint
 static uint8_t mc_subscription_matches(
     const mc_subscription_entry_t *entry,
     mc_machine_id_t machine_id,
-    uint64_t kind,
+    mc_machine_event_kind_t kind,
     uint64_t routing
 ) {
     return entry->machine_id == machine_id && entry->kind == kind && entry->routing == routing;
@@ -216,7 +216,7 @@ static uint8_t mc_subscription_matches(
 static uint8_t mc_subscription_contains(
     const mc_subscription_registry_t *subs,
     mc_machine_id_t machine_id,
-    uint64_t kind,
+    mc_machine_event_kind_t kind,
     uint64_t routing
 ) {
     for (uint32_t i = 0; i < subs->len; i++) {
@@ -230,7 +230,7 @@ static uint8_t mc_subscription_contains(
 static void mc_subscription_remove(
     mc_subscription_registry_t *subs,
     mc_machine_id_t machine_id,
-    uint64_t kind,
+    mc_machine_event_kind_t kind,
     uint64_t routing
 ) {
     uint32_t write = 0;
@@ -649,7 +649,7 @@ uint8_t __mc_machine_runtime_start(
 void __mc_machine_runtime_set_state(
     mc_machine_runtime_t *rt,
     mc_machine_id_t machine_id,
-    uint64_t state_word
+    mc_machine_state_token_t state_word
 ) {
     mc_machine_slot_t *slot = mc_get_slot(rt, machine_id);
     if (!slot) {
@@ -658,7 +658,7 @@ void __mc_machine_runtime_set_state(
     slot->state_word = state_word;
 }
 
-uint64_t __mc_machine_runtime_state(
+mc_machine_state_token_t __mc_machine_runtime_state(
     const mc_machine_runtime_t *rt,
     mc_machine_id_t machine_id
 ) {
@@ -904,7 +904,7 @@ uint32_t __mc_machine_runtime_subscription_len(const mc_machine_runtime_t *rt) {
 uint8_t __mc_machine_runtime_subscription_contains(
     const mc_machine_runtime_t *rt,
     mc_machine_id_t machine_id,
-    uint64_t kind,
+    mc_machine_event_kind_t kind,
     uint64_t routing
 ) {
     if (!rt) {
