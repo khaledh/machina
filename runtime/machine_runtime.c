@@ -11,6 +11,7 @@ void __mc_free(void *ptr);
 #define MC_MACHINE_INITIAL_CAP 8u
 #define MC_READY_INITIAL_CAP 16u
 #define MC_SUBS_INITIAL_CAP 16u
+#define MC_PENDING_INITIAL_CAP 16u
 #define MC_MAILBOX_MIN_CAP 1u
 
 // Resolve mutable machine slot from 1-based id.
@@ -245,6 +246,107 @@ static void mc_subscription_remove(
     subs->len = write;
 }
 
+// Pending reply-cap table helpers ------------------------------------------
+
+static uint8_t mc_pending_ensure_cap(mc_pending_reply_table_t *pending, uint32_t min_cap) {
+    if (pending->cap >= min_cap) {
+        return 1;
+    }
+
+    uint32_t new_cap = pending->cap == 0 ? MC_PENDING_INITIAL_CAP : pending->cap;
+    while (new_cap < min_cap) {
+        uint32_t grown = new_cap * 2u;
+        if (grown < new_cap) {
+            return 0;
+        }
+        new_cap = grown;
+    }
+
+    mc_pending_reply_entry_t *new_entries = (mc_pending_reply_entry_t *)__mc_realloc(
+        pending->entries,
+        (size_t)new_cap * sizeof(mc_pending_reply_entry_t),
+        _Alignof(mc_pending_reply_entry_t)
+    );
+    if (!new_entries) {
+        return 0;
+    }
+
+    pending->entries = new_entries;
+    pending->cap = new_cap;
+    return 1;
+}
+
+// Locate an active pending entry by capability id.
+// Returns -1 when the id is not currently active.
+static int32_t mc_pending_find_active(const mc_pending_reply_table_t *pending, uint64_t cap_id) {
+    for (uint32_t i = 0; i < pending->len; i++) {
+        if (pending->entries[i].active && pending->entries[i].cap_id == cap_id) {
+            return (int32_t)i;
+        }
+    }
+    return -1;
+}
+
+// Fast membership helper used by test/debug introspection.
+static uint8_t mc_pending_contains_active(const mc_pending_reply_table_t *pending, uint64_t cap_id) {
+    return mc_pending_find_active(pending, cap_id) >= 0;
+}
+
+// Insert a newly-minted pending capability.
+// Reuses inactive slots first to keep table growth bounded over time.
+static uint8_t mc_pending_insert_active(
+    mc_pending_reply_table_t *pending,
+    uint64_t cap_id,
+    mc_machine_id_t requester
+) {
+    for (uint32_t i = 0; i < pending->len; i++) {
+        if (!pending->entries[i].active) {
+            pending->entries[i].cap_id = cap_id;
+            pending->entries[i].requester = requester;
+            pending->entries[i].active = 1;
+            return 1;
+        }
+    }
+    if (!mc_pending_ensure_cap(pending, pending->len + 1)) {
+        return 0;
+    }
+    pending->entries[pending->len].cap_id = cap_id;
+    pending->entries[pending->len].requester = requester;
+    pending->entries[pending->len].active = 1;
+    pending->len += 1;
+    return 1;
+}
+
+// Monotonic capability id allocator.
+// Zero is reserved as "no capability id".
+static uint8_t mc_pending_next_cap_id(mc_pending_reply_table_t *pending, uint64_t *out_cap_id) {
+    if (!out_cap_id) {
+        return 0;
+    }
+    uint64_t id = pending->next_cap_id;
+    if (id == 0) {
+        return 0;
+    }
+    pending->next_cap_id += 1;
+    if (pending->next_cap_id == 0) {
+        // Exhausted the 64-bit id space.
+        return 0;
+    }
+    *out_cap_id = id;
+    return 1;
+}
+
+// Count active pending capabilities (used by tests/introspection APIs).
+static uint32_t mc_pending_active_len(const mc_pending_reply_table_t *pending) {
+    uint32_t count = 0;
+    for (uint32_t i = 0; i < pending->len; i++) {
+        if (pending->entries[i].active) {
+            count += 1;
+        }
+    }
+    return count;
+}
+
 // Best-effort dead-letter callback.
 static void mc_emit_dead_letter(
     mc_machine_runtime_t *rt,
@@ -416,6 +518,11 @@ void __mc_machine_runtime_init(mc_machine_runtime_t *rt) {
     rt->subscriptions.len = 0;
     rt->subscriptions.cap = 0;
 
+    rt->pending.entries = NULL;
+    rt->pending.len = 0;
+    rt->pending.cap = 0;
+    rt->pending.next_cap_id = 1;
+
     rt->fault_policy = MC_FAULT_POLICY_MARK_FAULTED;
     rt->dead_letter_hook = NULL;
     rt->fault_hook = NULL;
@@ -434,6 +541,7 @@ void __mc_machine_runtime_drop(mc_machine_runtime_t *rt) {
     __mc_free(rt->machines);
     __mc_free(rt->ready.items);
     __mc_free(rt->subscriptions.entries);
+    __mc_free(rt->pending.entries);
     __mc_machine_runtime_init(rt);
 }
 
@@ -604,6 +712,96 @@ mc_mailbox_enqueue_result_t __mc_machine_runtime_enqueue(
     return MC_MAILBOX_ENQUEUE_OK;
 }
 
+mc_mailbox_enqueue_result_t __mc_machine_runtime_request(
+    mc_machine_runtime_t *rt,
+    mc_machine_id_t src,
+    mc_machine_id_t dst,
+    const mc_machine_envelope_t *env,
+    uint64_t *out_pending_id
+) {
+    // Keep API behavior deterministic on invalid inputs.
+    if (!rt || !env || !out_pending_id) {
+        return MC_MAILBOX_ENQUEUE_MACHINE_UNKNOWN;
+    }
+
+    // Preflight local pending table capacity so request enqueue + pending insert
+    // can complete as one unit.
+    uint8_t has_inactive_slot = 0;
+    for (uint32_t i = 0; i < rt->pending.len; i++) {
+        if (!rt->pending.entries[i].active) {
+            has_inactive_slot = 1;
+            break;
+        }
+    }
+    if (!has_inactive_slot && !mc_pending_ensure_cap(&rt->pending, rt->pending.len + 1)) {
+        return MC_MAILBOX_ENQUEUE_FULL;
+    }
+
+    uint64_t cap_id = 0;
+    if (!mc_pending_next_cap_id(&rt->pending, &cap_id)) {
+        return MC_MAILBOX_ENQUEUE_FULL;
+    }
+
+    // Runtime-owned correlation fields override caller-provided values.
+    mc_machine_envelope_t request_env = *env;
+    request_env.src = src;
+    request_env.reply_cap_id = cap_id;
+    request_env.pending_id = 0;
+
+    mc_mailbox_enqueue_result_t res = __mc_machine_runtime_enqueue(rt, dst, &request_env);
+    if (res != MC_MAILBOX_ENQUEUE_OK) {
+        return res;
+    }
+
+    // Record requester lookup keyed by minted capability id.
+    (void)mc_pending_insert_active(&rt->pending, cap_id, src);
+
+    *out_pending_id = cap_id;
+    return MC_MAILBOX_ENQUEUE_OK;
+}
+
+mc_machine_reply_result_t __mc_machine_runtime_reply(
+    mc_machine_runtime_t *rt,
+    mc_machine_id_t src,
+    uint64_t reply_cap_id,
+    const mc_machine_envelope_t *env
+) {
+    // Invalid inputs map to deterministic "unknown cap" behavior.
+    if (!rt || !env) {
+        return MC_REPLY_CAP_UNKNOWN;
+    }
+
+    // Reply is routed by reply capability id, not by explicit destination.
+    int32_t idx = mc_pending_find_active(&rt->pending, reply_cap_id);
+    if (idx < 0) {
+        mc_emit_dead_letter(rt, 0, MC_DEAD_LETTER_REPLY_CAP_UNKNOWN, env);
+        return MC_REPLY_CAP_UNKNOWN;
+    }
+
+    mc_machine_id_t requester = rt->pending.entries[(uint32_t)idx].requester;
+    // Runtime-owned correlation fields override caller-provided values.
+    mc_machine_envelope_t response_env = *env;
+    response_env.src = src;
+    response_env.reply_cap_id = 0;
+    response_env.pending_id = reply_cap_id;
+
+    mc_mailbox_enqueue_result_t enqueue_res =
+        __mc_machine_runtime_enqueue(rt, requester, &response_env);
+    if (enqueue_res == MC_MAILBOX_ENQUEUE_OK) {
+        // Consume capability on successful reply delivery.
+        rt->pending.entries[(uint32_t)idx].active = 0;
+        return MC_REPLY_OK;
+    }
+    // Failed delivery keeps capability active so caller can retry.
+    if (enqueue_res == MC_MAILBOX_ENQUEUE_MACHINE_UNKNOWN) {
+        return MC_REPLY_DEST_UNKNOWN;
+    }
+    if (enqueue_res == MC_MAILBOX_ENQUEUE_MACHINE_NOT_RUNNING) {
+        return MC_REPLY_DEST_NOT_RUNNING;
+    }
+    return MC_REPLY_FULL;
+}
+
 // Public API: execute at most one dispatch using transactional callback.
 //
 // Commit semantics:
@@ -713,4 +911,21 @@ uint8_t __mc_machine_runtime_subscription_contains(
         return 0;
     }
     return mc_subscription_contains(&rt->subscriptions, machine_id, kind, routing);
+}
+
+uint32_t __mc_machine_runtime_pending_len(const mc_machine_runtime_t *rt) {
+    if (!rt) {
+        return 0;
+    }
+    return mc_pending_active_len(&rt->pending);
+}
+
+uint8_t __mc_machine_runtime_pending_contains(
+    const mc_machine_runtime_t *rt,
+    uint64_t cap_id
+) {
+    if (!rt) {
+        return 0;
+    }
+    return mc_pending_contains_active(&rt->pending, cap_id);
 }

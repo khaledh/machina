@@ -55,6 +55,8 @@ typedef enum mc_dead_letter_reason {
     MC_DEAD_LETTER_FAULTED_MACHINE = 3,
     // Enqueue target mailbox was at capacity.
     MC_DEAD_LETTER_MAILBOX_FULL = 4,
+    // Reply attempted with unknown/consumed reply capability id.
+    MC_DEAD_LETTER_REPLY_CAP_UNKNOWN = 5,
 } mc_dead_letter_reason_t;
 
 typedef enum mc_dispatch_result {
@@ -76,10 +78,24 @@ typedef struct mc_machine_envelope {
     uint64_t kind;
     // Source machine id (0 when external/unknown).
     uint64_t src;
+    // Request-side capability id delivered to responder.
+    // Zero for non-request envelopes.
+    uint64_t reply_cap_id;
+    // Response-side correlation id delivered to requester.
+    // Zero for non-response envelopes.
+    uint64_t pending_id;
     // Payload slots for v1 scaffold.
     uint64_t payload0;
     uint64_t payload1;
 } mc_machine_envelope_t;
+
+typedef enum mc_machine_reply_result {
+    MC_REPLY_OK = 0,
+    MC_REPLY_CAP_UNKNOWN = 1,
+    MC_REPLY_DEST_UNKNOWN = 2,
+    MC_REPLY_DEST_NOT_RUNNING = 3,
+    MC_REPLY_FULL = 4,
+} mc_machine_reply_result_t;
 
 // One staged outbox delivery emitted by a successful transition.
 typedef struct mc_machine_outbox_effect {
@@ -191,6 +207,20 @@ typedef struct mc_subscription_registry {
     uint32_t cap;
 } mc_subscription_registry_t;
 
+// Correlation table for request/reply capability ids.
+typedef struct mc_pending_reply_entry {
+    uint64_t cap_id;
+    mc_machine_id_t requester;
+    uint8_t active;
+} mc_pending_reply_entry_t;
+
+typedef struct mc_pending_reply_table {
+    mc_pending_reply_entry_t *entries;
+    uint32_t len;
+    uint32_t cap;
+    uint64_t next_cap_id;
+} mc_pending_reply_table_t;
+
 // Top-level managed runtime state.
 typedef struct mc_machine_runtime {
     // Dense table of machine slots (id = index + 1).
@@ -203,6 +233,9 @@ typedef struct mc_machine_runtime {
 
     // Subscription registry.
     mc_subscription_registry_t subscriptions;
+
+    // Pending request/reply-correlation table.
+    mc_pending_reply_table_t pending;
 
     // Fault lifecycle policy.
     mc_machine_fault_policy_t fault_policy;
@@ -290,6 +323,33 @@ mc_mailbox_enqueue_result_t __mc_machine_runtime_enqueue(
     const mc_machine_envelope_t *env
 );
 
+// Enqueue a request envelope and mint correlation ids for Pending/ReplyCap.
+//
+// On success:
+// - request is enqueued to `dst`
+// - envelope delivered to destination has `src` and `reply_cap_id` populated
+// - `out_pending_id` receives the minted correlation id
+mc_mailbox_enqueue_result_t __mc_machine_runtime_request(
+    mc_machine_runtime_t *rt,
+    mc_machine_id_t src,
+    mc_machine_id_t dst,
+    const mc_machine_envelope_t *env,
+    uint64_t *out_pending_id
+);
+
+// Route a response envelope by reply capability back to the original requester.
+//
+// On success:
+// - response is enqueued to requester machine
+// - delivered envelope has `src` and `pending_id` populated
+// - corresponding reply capability is consumed
+mc_machine_reply_result_t __mc_machine_runtime_reply(
+    mc_machine_runtime_t *rt,
+    mc_machine_id_t src,
+    uint64_t reply_cap_id,
+    const mc_machine_envelope_t *env
+);
+
 // Executes at most one envelope dispatch using transactional callback.
 //
 // Transaction model:
@@ -320,6 +380,13 @@ uint8_t __mc_machine_runtime_subscription_contains(
     mc_machine_id_t machine_id,
     uint64_t kind,
     uint64_t routing
+);
+
+// Pending-correlation introspection helpers for tests/debugging.
+uint32_t __mc_machine_runtime_pending_len(const mc_machine_runtime_t *rt);
+uint8_t __mc_machine_runtime_pending_contains(
+    const mc_machine_runtime_t *rt,
+    uint64_t cap_id
 );
 
 #endif

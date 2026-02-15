@@ -104,10 +104,11 @@
 - Header: `machine_runtime.h`
 - Purpose: foundational scheduler substrate for managed typestate machines.
 - Includes:
-  - machine table with lifecycle (`Running | Faulted | Stopped`)
+  - machine table with lifecycle (`Created | Running | Faulted | Stopped`)
   - bounded per-machine FIFO mailboxes
   - global ready queue
-  - single-envelope deterministic dispatch entrypoint
+  - single-envelope deterministic dispatch entrypoint (transactional callback form)
+  - request/reply correlation plumbing (`Pending`/`ReplyCap` ids)
   - dead-letter and fault hook callbacks
 
 ## Types
