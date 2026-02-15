@@ -127,6 +127,16 @@ pub enum ResolveError {
     )]
     TypestateInvalidTransitionReturn(String, String, String, Span),
 
+    #[error(
+        "Typestate `{0}` `on` handler return type must be a declared state, `stay`, or `State | Error...`"
+    )]
+    TypestateInvalidOnHandlerReturn(String, Span),
+
+    #[error(
+        "State `{0}.{1}` `on` handler return type must be a declared state, `stay`, or `State | Error...`"
+    )]
+    TypestateInvalidStateOnHandlerReturn(String, String, Span),
+
     #[error("State `{0}.{1}` has duplicate transition `{2}`")]
     TypestateDuplicateTransition(String, String, String, Span),
 
@@ -176,6 +186,8 @@ impl ResolveError {
             ResolveError::TypestateInvalidNewReturn(_, span) => *span,
             ResolveError::TypestateExplicitSelfNotAllowed(_, _, _, span) => *span,
             ResolveError::TypestateInvalidTransitionReturn(_, _, _, span) => *span,
+            ResolveError::TypestateInvalidOnHandlerReturn(_, span) => *span,
+            ResolveError::TypestateInvalidStateOnHandlerReturn(_, _, span) => *span,
             ResolveError::TypestateDuplicateTransition(_, _, _, span) => *span,
             ResolveError::TypestateStateLiteralOutsideTypestate(_, span) => *span,
         }

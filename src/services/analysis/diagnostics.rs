@@ -430,6 +430,21 @@ impl Diagnostic {
                 );
                 "MC-TYPESTATE-TRANSITION-RETURN"
             }
+            ResolveError::TypestateInvalidOnHandlerReturn(name, _) => {
+                metadata.insert(
+                    "typestate".to_string(),
+                    DiagnosticValue::String(name.clone()),
+                );
+                "MC-TYPESTATE-ON-HANDLER-RETURN"
+            }
+            ResolveError::TypestateInvalidStateOnHandlerReturn(name, state, _) => {
+                metadata.insert(
+                    "typestate".to_string(),
+                    DiagnosticValue::String(name.clone()),
+                );
+                metadata.insert("state".to_string(), DiagnosticValue::String(state.clone()));
+                "MC-TYPESTATE-STATE-ON-HANDLER-RETURN"
+            }
             ResolveError::TypestateDuplicateTransition(name, state, method, _) => {
                 metadata.insert(
                     "typestate".to_string(),

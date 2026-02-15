@@ -206,6 +206,70 @@ fn main() -> u64 {
 }
 
 #[test]
+fn typestate_invalid_on_handler_return_reports_targeted_error() {
+    let source = r#"
+type Ping = {}
+
+typestate Connection {
+    fn new() -> Disconnected {
+        Disconnected {}
+    }
+
+    state Disconnected {
+        on Ping() -> u64 {
+            0
+        }
+    }
+}
+"#;
+    let parsed = parsed_context_typestate(source);
+    let out = resolve_stage_with_policy(parsed, ResolveInputs::default(), FrontendPolicy::Strict);
+    assert!(out.context.is_none());
+    assert!(out.errors.iter().any(|err| {
+        matches!(
+            err,
+            ResolveError::TypestateInvalidStateOnHandlerReturn(ts, state, _)
+                if ts == "Connection" && state == "Disconnected"
+        )
+    }));
+}
+
+#[test]
+fn typestate_on_handler_stay_union_return_is_accepted() {
+    let source = r#"
+type Ping = {}
+type Recoverable = {}
+
+typestate Connection {
+    fn new() -> Disconnected {
+        Disconnected {}
+    }
+
+    state Disconnected {
+        on Ping() -> stay | Recoverable {
+            if true {
+                return Recoverable {};
+            };
+        }
+    }
+}
+"#;
+    let parsed = parsed_context_typestate(source);
+    let out = resolve_typecheck_pipeline_with_policy(
+        parsed,
+        ResolveInputs::default(),
+        None,
+        FrontendPolicy::Strict,
+    );
+    assert!(
+        !out.has_errors(),
+        "expected `on` handler `stay | Error` return shape to pass, got resolve={:?}, type={:?}",
+        out.resolve_errors,
+        out.type_errors
+    );
+}
+
+#[test]
 fn typestate_protocol_shape_missing_handler_reports_type_error() {
     let source = r#"
 type AuthReq = {}

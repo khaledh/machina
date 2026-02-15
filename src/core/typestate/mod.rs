@@ -361,6 +361,16 @@ fn analyze_typestate(typestate: &TypestateDef) -> TypestateAnalysis {
             &mut errors,
         );
     }
+    // Typestate-level handlers apply in every state, so they follow the same
+    // transition-return contract as state-local handlers.
+    for handler in &handlers {
+        if !is_valid_on_handler_return(&handler.ret_ty_expr, &state_names) {
+            errors.push(ResolveError::TypestateInvalidOnHandlerReturn(
+                ts_name.clone(),
+                handler.ret_ty_expr.span,
+            ));
+        }
+    }
 
     // 4) Validate constructor shape (`new`) and select one constructor body
     // for lowering so the pipeline can continue with diagnostics.
@@ -462,37 +472,49 @@ fn validate_state_items(
     // Transition names must be unique per source state.
     let mut seen_methods = HashSet::new();
     for item in &state.items {
-        let TypestateStateItem::Method(method) = item else {
-            continue;
-        };
+        match item {
+            TypestateStateItem::Method(method) => {
+                if !seen_methods.insert(method.sig.name.clone()) {
+                    errors.push(ResolveError::TypestateDuplicateTransition(
+                        ts_name.to_string(),
+                        state.name.clone(),
+                        method.sig.name.clone(),
+                        method.sig.span,
+                    ));
+                }
 
-        if !seen_methods.insert(method.sig.name.clone()) {
-            errors.push(ResolveError::TypestateDuplicateTransition(
-                ts_name.to_string(),
-                state.name.clone(),
-                method.sig.name.clone(),
-                method.sig.span,
-            ));
-        }
+                // `self` is implicit in typestate transitions.
+                if let Some(self_param) =
+                    method.sig.params.iter().find(|param| param.ident == "self")
+                {
+                    errors.push(ResolveError::TypestateExplicitSelfNotAllowed(
+                        ts_name.to_string(),
+                        state.name.clone(),
+                        method.sig.name.clone(),
+                        self_param.span,
+                    ));
+                }
 
-        // `self` is implicit in typestate transitions.
-        if let Some(self_param) = method.sig.params.iter().find(|param| param.ident == "self") {
-            errors.push(ResolveError::TypestateExplicitSelfNotAllowed(
-                ts_name.to_string(),
-                state.name.clone(),
-                method.sig.name.clone(),
-                self_param.span,
-            ));
-        }
-
-        // Transition success return follows the same shape rule as `new`.
-        if !is_valid_state_return(&method.sig.ret_ty_expr, state_names) {
-            errors.push(ResolveError::TypestateInvalidTransitionReturn(
-                ts_name.to_string(),
-                state.name.clone(),
-                method.sig.name.clone(),
-                method.sig.ret_ty_expr.span,
-            ));
+                // Transition success return follows the same shape rule as `new`.
+                if !is_valid_state_return(&method.sig.ret_ty_expr, state_names) {
+                    errors.push(ResolveError::TypestateInvalidTransitionReturn(
+                        ts_name.to_string(),
+                        state.name.clone(),
+                        method.sig.name.clone(),
+                        method.sig.ret_ty_expr.span,
+                    ));
+                }
+            }
+            TypestateStateItem::Handler(handler) => {
+                if !is_valid_on_handler_return(&handler.ret_ty_expr, state_names) {
+                    errors.push(ResolveError::TypestateInvalidStateOnHandlerReturn(
+                        ts_name.to_string(),
+                        state.name.clone(),
+                        handler.ret_ty_expr.span,
+                    ));
+                }
+            }
+            TypestateStateItem::Fields(_) => {}
         }
     }
 }
@@ -509,6 +531,30 @@ fn is_valid_state_return(ret_ty: &TypeExpr, state_names: &HashSet<String>) -> bo
                 &first.kind,
                 TypeExprKind::Named { ident, .. } if state_names.contains(ident)
             )
+        }
+        _ => false,
+    }
+}
+
+fn is_valid_on_handler_return(ret_ty: &TypeExpr, state_names: &HashSet<String>) -> bool {
+    match &ret_ty.kind {
+        // `stay` is handler-only sugar for "current state".
+        TypeExprKind::Named { ident, .. } if ident == "stay" => true,
+        _ => is_valid_state_return_or_stay_union(ret_ty, state_names),
+    }
+}
+
+fn is_valid_state_return_or_stay_union(ret_ty: &TypeExpr, state_names: &HashSet<String>) -> bool {
+    match &ret_ty.kind {
+        TypeExprKind::Named { ident, .. } => state_names.contains(ident),
+        TypeExprKind::Union { variants } => {
+            let Some(first) = variants.first() else {
+                return false;
+            };
+            match &first.kind {
+                TypeExprKind::Named { ident, .. } => ident == "stay" || state_names.contains(ident),
+                _ => false,
+            }
         }
         _ => false,
     }
@@ -595,7 +641,7 @@ fn lower_handler_to_method_source(
     rewrite_handler_command_sugar(&mut body);
     let mut ret_ty_expr =
         rewrite_handler_return_type(&handler.ret_ty_expr, state_name, node_id_gen);
-    if type_expr_is_stay(&handler.ret_ty_expr) {
+    if handler_return_uses_stay(&handler.ret_ty_expr) {
         inject_self_tail_for_stay(&mut body, node_id_gen);
     }
     MethodDefSource {
@@ -634,7 +680,7 @@ fn rewrite_handler_return_type(
     state_name: &str,
     node_id_gen: &mut NodeIdGen,
 ) -> TypeExpr {
-    if type_expr_is_stay(ret_ty_expr) {
+    fn concrete_state_ty(state_name: &str, node_id_gen: &mut NodeIdGen, span: Span) -> TypeExpr {
         TypeExpr {
             id: node_id_gen.new_id(),
             kind: TypeExprKind::Named {
@@ -642,11 +688,40 @@ fn rewrite_handler_return_type(
                 def_id: (),
                 type_args: Vec::new(),
             },
-            span: ret_ty_expr.span,
+            span,
         }
-    } else {
-        ret_ty_expr.clone()
     }
+
+    if type_expr_is_stay(ret_ty_expr) {
+        return concrete_state_ty(state_name, node_id_gen, ret_ty_expr.span);
+    }
+
+    let TypeExprKind::Union { variants } = &ret_ty_expr.kind else {
+        return ret_ty_expr.clone();
+    };
+    let Some(first) = variants.first() else {
+        return ret_ty_expr.clone();
+    };
+    if !type_expr_is_stay(first) {
+        return ret_ty_expr.clone();
+    }
+
+    let mut rewritten = ret_ty_expr.clone();
+    let TypeExprKind::Union { variants } = &mut rewritten.kind else {
+        return rewritten;
+    };
+    variants[0] = concrete_state_ty(state_name, node_id_gen, first.span);
+    rewritten
+}
+
+fn handler_return_uses_stay(ret_ty_expr: &TypeExpr) -> bool {
+    if type_expr_is_stay(ret_ty_expr) {
+        return true;
+    }
+    let TypeExprKind::Union { variants } = &ret_ty_expr.kind else {
+        return false;
+    };
+    variants.first().is_some_and(type_expr_is_stay)
 }
 
 fn inject_self_tail_for_stay(body: &mut Expr, node_id_gen: &mut NodeIdGen) {
