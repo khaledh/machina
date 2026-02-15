@@ -21,7 +21,7 @@ pub fn reachable_def_ids(funcs: &[Function]) -> HashSet<DefId> {
 
     let mut worklist = VecDeque::new();
     for func in funcs {
-        if func.name == "main" {
+        if func.name == "main" || func.name == "__mc_machine_bootstrap" {
             worklist.push_back(func.def_id);
         }
     }

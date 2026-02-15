@@ -1072,4 +1072,12 @@ fn main() -> u64 { 0 }
         ir.contains("global _g") && ir.contains("bytes [77, 67, 72, 68"),
         "expected managed machine descriptor blob in emitted IR: {ir}"
     );
+    assert!(
+        ir.contains("__mc_machine_bootstrap"),
+        "expected managed machine bootstrap function in emitted IR: {ir}"
+    );
+    assert!(
+        ir.contains("__mc_machine_runtime_register_thunk_u64"),
+        "expected managed machine thunk registration call in emitted IR: {ir}"
+    );
 }

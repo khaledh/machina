@@ -44,6 +44,7 @@ pub(super) fn append_machine_runtime_artifacts(
         &descriptor_globals,
         funcs,
     );
+    append_bootstrap_registration_fn(type_map, def_table.next_def_id(), &thunk_ids, funcs);
 }
 
 fn assign_thunk_def_ids(
@@ -94,6 +95,61 @@ fn append_dispatch_thunks(
             type_map,
         ));
     }
+}
+
+fn append_bootstrap_registration_fn(
+    type_map: &TypeMap,
+    first_def_id: DefId,
+    thunk_ids: &HashMap<DefId, DefId>,
+    funcs: &mut Vec<LoweredFunction>,
+) {
+    if thunk_ids.is_empty() {
+        return;
+    }
+
+    let bootstrap_def_id = DefId(first_def_id.0 + thunk_ids.len() as u32);
+    let mut lowerer = TypeLowerer::new(type_map);
+    let u64_ty = lowerer.ir_type_cache.add(IrTypeKind::Int {
+        signed: false,
+        bits: 64,
+    });
+    let u8_ty = lowerer.ir_type_cache.add(IrTypeKind::Int {
+        signed: false,
+        bits: 8,
+    });
+    let unit_ty = lowerer.lower_type(&Type::Unit);
+    let sig = FunctionSig {
+        params: Vec::new(),
+        ret: unit_ty,
+    };
+    let mut builder = FunctionBuilder::new(bootstrap_def_id, "__mc_machine_bootstrap", sig);
+
+    let thunk_fn_ty = lowerer.ir_type_cache.add(IrTypeKind::Fn {
+        params: vec![u64_ty; 6],
+        ret: u8_ty,
+    });
+    let mut rows: Vec<_> = thunk_ids.values().copied().collect();
+    rows.sort_by_key(|id| id.0);
+    for thunk_def_id in rows {
+        let thunk_id_word = builder.const_int(thunk_def_id.0 as i128, false, 64, u64_ty);
+        let thunk_addr = builder.const_func_addr(thunk_def_id, thunk_fn_ty);
+        let thunk_addr_word = builder.cast(CastKind::PtrToInt, thunk_addr, u64_ty);
+        builder.call(
+            Callee::Runtime(RuntimeFn::MachineRegisterThunk),
+            vec![thunk_id_word, thunk_addr_word],
+            unit_ty,
+        );
+    }
+
+    let unit_zero = builder.const_int(0, false, 8, unit_ty);
+    builder.terminate(Terminator::Return {
+        value: Some(unit_zero),
+    });
+    funcs.push(LoweredFunction {
+        func: builder.finish(),
+        types: lowerer.ir_type_cache,
+        globals: Vec::new(),
+    });
 }
 
 fn build_dispatch_thunk(
