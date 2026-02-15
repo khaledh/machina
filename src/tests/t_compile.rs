@@ -1112,3 +1112,29 @@ fn main() {}
     compile(source, &typestate_compile_opts())
         .expect("typestate handler sugar forms should compile");
 }
+
+#[test]
+fn compile_typestate_spawn_constructor_path() {
+    let source = r#"
+type Ping = {}
+
+typestate Worker {
+    fn new(seed: u64) -> Idle {
+        seed;
+        Idle {}
+    }
+
+    state Idle {
+        on Ping() -> stay {}
+    }
+}
+
+fn main() {
+    let spawned = Worker::spawn(0, 8, 42);
+    spawned;
+}
+"#;
+
+    compile(source, &typestate_compile_opts())
+        .expect("typestate spawn constructor path should compile");
+}

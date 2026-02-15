@@ -13,7 +13,7 @@ use crate::core::ir::{
     Callee, CastKind, CmpOp, FunctionBuilder, FunctionSig, GlobalId, IrStructField, IrTypeCache,
     IrTypeId, IrTypeKind, RuntimeFn, Terminator, ValueId,
 };
-use crate::core::resolve::{DefId, DefTable};
+use crate::core::resolve::{DefId, DefKind, DefTable};
 use crate::core::tree::semantic as sem;
 use crate::core::typecheck::type_map::TypeMap;
 use crate::core::types::{FnParam, Type};
@@ -52,6 +52,7 @@ pub(super) fn append_machine_runtime_artifacts(
         &descriptor_globals,
         funcs,
     );
+    append_descriptor_id_helpers(machine_plans, type_map, def_table, funcs);
 }
 
 fn assign_thunk_def_ids(
@@ -183,6 +184,71 @@ fn append_bootstrap_registration_fn(
         types: lowerer.ir_type_cache,
         globals: Vec::new(),
     });
+}
+
+fn append_descriptor_id_helpers(
+    machine_plans: &sem::MachinePlanMap,
+    type_map: &TypeMap,
+    def_table: &DefTable,
+    funcs: &mut Vec<LoweredFunction>,
+) {
+    if machine_plans.descriptors.is_empty() {
+        return;
+    }
+
+    let mut descriptor_names: Vec<_> = machine_plans.descriptors.keys().cloned().collect();
+    descriptor_names.sort();
+    for (idx, typestate_name) in descriptor_names.iter().enumerate() {
+        // Keep helper ids aligned with bootstrap registration order so source-
+        // level `Typestate::spawn(...)` lowering can bind descriptors without
+        // hard-coding typestate-specific runtime metadata in user code.
+        let helper_name = format!("__mc_machine_descriptor_id_{typestate_name}");
+        let helper_def_id = def_table
+            .defs()
+            .iter()
+            .find(|def| {
+                def.name == helper_name
+                    && matches!(def.kind, DefKind::FuncDef { .. } | DefKind::FuncDecl { .. })
+            })
+            .map(|def| def.id);
+        let Some(helper_def_id) = helper_def_id else {
+            continue;
+        };
+        funcs.push(build_descriptor_id_helper(
+            helper_def_id,
+            &helper_name,
+            idx as u64 + 1,
+            type_map,
+        ));
+    }
+}
+
+fn build_descriptor_id_helper(
+    helper_def_id: DefId,
+    helper_name: &str,
+    descriptor_id: u64,
+    type_map: &TypeMap,
+) -> LoweredFunction {
+    let mut lowerer = TypeLowerer::new(type_map);
+    let ret_ty = lowerer.ir_type_cache.add(IrTypeKind::Int {
+        signed: false,
+        bits: 64,
+    });
+    let sig = FunctionSig {
+        params: Vec::new(),
+        ret: ret_ty,
+    };
+    let mut builder = FunctionBuilder::new(helper_def_id, helper_name, sig);
+    let ret_val = builder.const_int(descriptor_id as i128, false, 64, ret_ty);
+    builder.terminate(Terminator::Return {
+        value: Some(ret_val),
+    });
+
+    LoweredFunction {
+        func: builder.finish(),
+        types: lowerer.ir_type_cache,
+        globals: Vec::new(),
+    }
 }
 
 fn build_dispatch_thunk(

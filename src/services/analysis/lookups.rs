@@ -184,6 +184,10 @@ pub(crate) fn hover_at_span_in_file(
                 || def
                     .name
                     .strip_prefix("__ts_ctor_")
+                    .is_some_and(|owner| owner == query_ident)
+                || def
+                    .name
+                    .strip_prefix("__ts_spawn_")
                     .is_some_and(|owner| owner == query_ident))
         {
             let ty = typed.type_map.lookup_def_type(def);
@@ -907,7 +911,12 @@ impl TypestateNameDemangler {
         let mut typestate_names: Vec<String> = def_table
             .defs()
             .iter()
-            .filter_map(|def| def.name.strip_prefix("__ts_ctor_").map(ToString::to_string))
+            .filter_map(|def| {
+                def.name
+                    .strip_prefix("__ts_ctor_")
+                    .or_else(|| def.name.strip_prefix("__ts_spawn_"))
+                    .map(ToString::to_string)
+            })
             .collect();
         typestate_names.sort_by_key(|name| std::cmp::Reverse(name.len()));
         typestate_names.dedup();
@@ -946,6 +955,11 @@ impl TypestateNameDemangler {
             && !ts_name.is_empty()
         {
             return Some(format!("{ts_name}::new"));
+        }
+        if let Some(ts_name) = symbol.strip_prefix("__ts_spawn_")
+            && !ts_name.is_empty()
+        {
+            return Some(format!("{ts_name}::spawn"));
         }
         self.demangle_state_short(symbol)
     }

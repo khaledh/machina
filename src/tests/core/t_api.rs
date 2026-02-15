@@ -761,7 +761,6 @@ typestate M {
                 method.sig.ret_ty_expr.kind,
                 res::TypeExprKind::Named { ref ident, .. } if ident != "stay"
             ));
-
             aggregate.visit_expr(&method.body);
         }
     }
@@ -781,6 +780,59 @@ typestate M {
     assert!(
         !aggregate.sugar_send_call_seen && !aggregate.sugar_request_call_seen,
         "expected no raw send/request call sugar after typestate normalization"
+    );
+}
+
+#[test]
+fn typestate_spawn_mirrors_constructor_params_and_forwards_call() {
+    let source = r#"
+typestate Connection {
+    fn new(addr: string, retries: u64) -> Disconnected {
+        Disconnected {}
+    }
+
+    state Disconnected {}
+}
+"#;
+
+    let parsed = parsed_context_typestate(source);
+    let out = resolve_stage_with_policy(parsed, ResolveInputs::default(), FrontendPolicy::Strict);
+    assert!(
+        out.errors.is_empty(),
+        "expected typestate spawn lowering to resolve cleanly, got {:?}",
+        out.errors
+    );
+    let resolved = out
+        .context
+        .expect("resolve should succeed for typestate spawn contract test");
+
+    let mut ctor: Option<&res::FuncDef> = None;
+    let mut spawn: Option<&res::FuncDef> = None;
+    for item in &resolved.module.top_level_items {
+        let res::TopLevelItem::FuncDef(func) = item else {
+            continue;
+        };
+        if func.sig.name == "__ts_ctor_Connection" {
+            ctor = Some(func);
+        } else if func.sig.name == "__ts_spawn_Connection" {
+            spawn = Some(func);
+        }
+    }
+    let ctor = ctor.expect("expected generated typestate constructor");
+    let spawn = spawn.expect("expected generated typestate spawn function");
+
+    assert_eq!(ctor.sig.params.len(), 2);
+    assert_eq!(spawn.sig.params.len(), ctor.sig.params.len() + 2);
+    assert_eq!(spawn.sig.params[0].ident, "__mc_rt");
+    assert_eq!(spawn.sig.params[1].ident, "__mc_mailbox_cap");
+    assert_eq!(spawn.sig.params[2].ident, "addr");
+    assert_eq!(spawn.sig.params[3].ident, "retries");
+
+    let mut finder = SpawnForwardCtorCallFinder::default();
+    finder.visit_expr(&spawn.body);
+    assert!(
+        finder.forwards_ctor_call,
+        "expected spawn body to forward constructor args through __ts_ctor_Connection call"
     );
 }
 
@@ -809,6 +861,24 @@ impl Visitor<crate::core::resolve::DefId> for HandlerCommandNormalizationFinder 
                 res::EmitKind::Request { .. } => self.emit_request_seen = true,
             },
             _ => {}
+        }
+        visit::walk_expr(self, expr);
+    }
+}
+
+#[derive(Default)]
+struct SpawnForwardCtorCallFinder {
+    forwards_ctor_call: bool,
+}
+
+impl Visitor<crate::core::resolve::DefId> for SpawnForwardCtorCallFinder {
+    fn visit_expr(&mut self, expr: &res::Expr) {
+        if let res::ExprKind::Call { callee, args } = &expr.kind
+            && let res::ExprKind::Var { ident, .. } = &callee.kind
+            && ident == "__ts_ctor_Connection"
+            && args.len() == 2
+        {
+            self.forwards_ctor_call = true;
         }
         visit::walk_expr(self, expr);
     }

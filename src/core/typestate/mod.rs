@@ -23,6 +23,11 @@ use crate::core::tree::visit::{self, Visitor};
 use crate::core::tree::visit_mut::{self, VisitorMut};
 use crate::core::tree::{CallArgMode, InitInfo, ParamMode};
 
+const MACHINE_HANDLE_TYPE_NAME: &str = "Machine";
+const MACHINE_SPAWN_FAILED_TYPE_NAME: &str = "MachineSpawnFailed";
+const MACHINE_BIND_FAILED_TYPE_NAME: &str = "MachineBindFailed";
+const MACHINE_START_FAILED_TYPE_NAME: &str = "MachineStartFailed";
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct TypestateRoleImplRef {
     pub id: crate::core::tree::NodeId,
@@ -51,17 +56,26 @@ pub fn desugar_module(module: &mut Module, node_id_gen: &mut NodeIdGen) -> Vec<R
     // Typestate `Type::new(...)` calls are rewritten after lowering, so we keep
     // a typestate-name -> generated-constructor-name map across the whole module.
     let mut ctor_by_typestate = HashMap::<String, String>::new();
+    // Managed constructor sugar (`Type::spawn(...)`) rewrites similarly.
+    let mut spawn_by_typestate = HashMap::<String, String>::new();
     // Keep both source and generated state names so external-literal checks can
     // flag either form.
     let mut source_state_names = HashSet::new();
     let mut generated_state_names = HashSet::new();
     let mut errors = Vec::new();
+    let mut saw_typestate = false;
 
     for item in module.top_level_items.drain(..) {
         match item {
             TopLevelItem::TypestateDef(typestate) => {
+                saw_typestate = true;
                 // One typestate can lower to multiple top-level items.
-                let lowered = desugar_typestate(typestate, node_id_gen, &mut ctor_by_typestate);
+                let lowered = desugar_typestate(
+                    typestate,
+                    node_id_gen,
+                    &mut ctor_by_typestate,
+                    &mut spawn_by_typestate,
+                );
                 out.extend(lowered.items);
                 source_state_names.extend(lowered.source_state_names);
                 generated_state_names.extend(lowered.generated_state_names);
@@ -72,8 +86,12 @@ pub fn desugar_module(module: &mut Module, node_id_gen: &mut NodeIdGen) -> Vec<R
     }
 
     module.top_level_items = out;
+    if saw_typestate {
+        ensure_machine_support_types(module, node_id_gen);
+        ensure_machine_runtime_intrinsics(module, node_id_gen);
+    }
     // Rewrite `Typestate::new(...)` enum-variant syntax into generated ctor calls.
-    rewrite_constructor_invocations(module, &ctor_by_typestate, node_id_gen);
+    rewrite_constructor_invocations(module, &ctor_by_typestate, &spawn_by_typestate, node_id_gen);
     // Enforce constructor-only entry: reject state literals outside typestate
     // constructor/transition bodies.
     errors.extend(find_external_state_literal_errors(
@@ -88,10 +106,14 @@ fn desugar_typestate(
     typestate: TypestateDef,
     node_id_gen: &mut NodeIdGen,
     ctor_by_typestate: &mut HashMap<String, String>,
+    spawn_by_typestate: &mut HashMap<String, String>,
 ) -> TypestateDesugarOutput {
     let ts_name = typestate.name.clone();
     let ctor_name = format!("__ts_ctor_{}", ts_name);
+    let spawn_name = format!("__ts_spawn_{}", ts_name);
+    let descriptor_id_helper_name = format!("__mc_machine_descriptor_id_{}", ts_name);
     ctor_by_typestate.insert(ts_name.clone(), ctor_name.clone());
+    spawn_by_typestate.insert(ts_name.clone(), spawn_name.clone());
 
     let analysis = analyze_typestate(&typestate);
     // We preserve source state names for user-facing checks and to support the
@@ -212,7 +234,15 @@ fn desugar_typestate(
         // Rewrite them to generated names to make the lowered module consistent.
         ctor.sig.name = ctor_name;
         rewrite_state_refs_in_func(&mut ctor, &state_name_map);
+        let spawn = lower_spawn_func(
+            &spawn_name,
+            &descriptor_id_helper_name,
+            &ctor,
+            &state_name_map,
+            node_id_gen,
+        );
         lowered.push(TopLevelItem::FuncDef(ctor));
+        lowered.push(TopLevelItem::FuncDef(spawn));
     } else {
         // Keep parser/product permissive in #80/#81. Validation in #82 will
         // enforce required constructor.
@@ -234,6 +264,19 @@ fn desugar_typestate(
             span: typestate.span,
         }));
     }
+    lowered.push(TopLevelItem::FuncDecl(FuncDecl {
+        id: node_id_gen.new_id(),
+        def_id: (),
+        attrs: Vec::new(),
+        sig: parsed::FunctionSig {
+            name: descriptor_id_helper_name,
+            type_params: Vec::new(),
+            params: Vec::new(),
+            ret_ty_expr: u64_type_expr(node_id_gen, typestate.span),
+            span: typestate.span,
+        },
+        span: typestate.span,
+    }));
 
     TypestateDesugarOutput {
         // Everything downstream consumes this lowered form only.
@@ -257,6 +300,167 @@ struct TypestateDesugarOutput {
     generated_state_names: HashSet<String>,
     // Validation diagnostics gathered while lowering this typestate.
     errors: Vec<ResolveError>,
+}
+
+fn ensure_machine_support_types(module: &mut Module, node_id_gen: &mut NodeIdGen) {
+    let existing: HashSet<String> = module
+        .top_level_items
+        .iter()
+        .filter_map(|item| match item {
+            TopLevelItem::TypeDef(def) => Some(def.name.clone()),
+            _ => None,
+        })
+        .collect();
+
+    let mut prepend = Vec::new();
+    if !existing.contains(MACHINE_HANDLE_TYPE_NAME) {
+        prepend.push(machine_handle_type_def(node_id_gen));
+    }
+    if !existing.contains(MACHINE_SPAWN_FAILED_TYPE_NAME) {
+        prepend.push(empty_struct_type_def(
+            MACHINE_SPAWN_FAILED_TYPE_NAME,
+            node_id_gen,
+        ));
+    }
+    if !existing.contains(MACHINE_BIND_FAILED_TYPE_NAME) {
+        prepend.push(empty_struct_type_def(
+            MACHINE_BIND_FAILED_TYPE_NAME,
+            node_id_gen,
+        ));
+    }
+    if !existing.contains(MACHINE_START_FAILED_TYPE_NAME) {
+        prepend.push(empty_struct_type_def(
+            MACHINE_START_FAILED_TYPE_NAME,
+            node_id_gen,
+        ));
+    }
+
+    if prepend.is_empty() {
+        return;
+    }
+
+    let mut items = Vec::with_capacity(prepend.len() + module.top_level_items.len());
+    items.extend(prepend);
+    items.extend(std::mem::take(&mut module.top_level_items));
+    module.top_level_items = items;
+}
+
+fn ensure_machine_runtime_intrinsics(module: &mut Module, node_id_gen: &mut NodeIdGen) {
+    let existing_callables: HashSet<String> = module
+        .top_level_items
+        .iter()
+        .filter_map(|item| match item {
+            TopLevelItem::FuncDecl(decl) => Some(decl.sig.name.clone()),
+            TopLevelItem::FuncDef(def) => Some(def.sig.name.clone()),
+            _ => None,
+        })
+        .collect();
+
+    let span = Span::default();
+    let mut append = Vec::new();
+    let mut push_decl = |name: &str, param_names: &[&str]| {
+        if existing_callables.contains(name) {
+            return;
+        }
+        // These declarations keep typestate-managed spawn lowering self-contained
+        // even when prelude runtime declarations are not present in the source
+        // module under test.
+        append.push(TopLevelItem::FuncDecl(FuncDecl {
+            id: node_id_gen.new_id(),
+            def_id: (),
+            attrs: Vec::new(),
+            sig: parsed::FunctionSig {
+                name: name.to_string(),
+                type_params: Vec::new(),
+                params: param_names
+                    .iter()
+                    .map(|param_name| parsed::Param {
+                        id: node_id_gen.new_id(),
+                        ident: (*param_name).to_string(),
+                        def_id: (),
+                        typ: u64_type_expr(node_id_gen, span),
+                        mode: ParamMode::In,
+                        span,
+                    })
+                    .collect(),
+                ret_ty_expr: u64_type_expr(node_id_gen, span),
+                span,
+            },
+            span,
+        }));
+    };
+
+    push_decl(
+        "__mc_machine_runtime_spawn_u64",
+        &["runtime", "mailbox_cap"],
+    );
+    push_decl(
+        "__mc_machine_runtime_bind_descriptor_u64",
+        &[
+            "runtime",
+            "machine_id",
+            "descriptor_id",
+            "initial_state_tag",
+        ],
+    );
+    push_decl("__mc_machine_runtime_start_u64", &["runtime", "machine_id"]);
+
+    module.top_level_items.extend(append);
+}
+
+fn machine_handle_type_def(node_id_gen: &mut NodeIdGen) -> TopLevelItem {
+    TopLevelItem::TypeDef(TypeDef {
+        id: node_id_gen.new_id(),
+        def_id: (),
+        attrs: Vec::new(),
+        name: MACHINE_HANDLE_TYPE_NAME.to_string(),
+        type_params: Vec::new(),
+        kind: TypeDefKind::Struct {
+            fields: vec![StructDefField {
+                id: node_id_gen.new_id(),
+                name: "_id".to_string(),
+                ty: u64_type_expr(node_id_gen, Span::default()),
+                span: Span::default(),
+            }],
+        },
+        span: Span::default(),
+    })
+}
+
+fn empty_struct_type_def(name: &str, node_id_gen: &mut NodeIdGen) -> TopLevelItem {
+    TopLevelItem::TypeDef(TypeDef {
+        id: node_id_gen.new_id(),
+        def_id: (),
+        attrs: Vec::new(),
+        name: name.to_string(),
+        type_params: Vec::new(),
+        kind: TypeDefKind::Struct { fields: Vec::new() },
+        span: Span::default(),
+    })
+}
+
+fn u64_type_expr(node_id_gen: &mut NodeIdGen, span: Span) -> TypeExpr {
+    TypeExpr {
+        id: node_id_gen.new_id(),
+        kind: TypeExprKind::Named {
+            ident: "u64".to_string(),
+            def_id: (),
+            type_args: Vec::new(),
+        },
+        span,
+    }
+}
+
+fn named_type_expr(name: &str, node_id_gen: &mut NodeIdGen, span: Span) -> TypeExpr {
+    TypeExpr {
+        id: node_id_gen.new_id(),
+        kind: TypeExprKind::Named {
+            ident: name.to_string(),
+            def_id: (),
+            type_args: Vec::new(),
+        },
+        span,
+    }
 }
 
 /// Build a deterministic generated type name for every source state name.
@@ -619,6 +823,429 @@ fn lower_state_method(
 
 // Parsed typestate methods are represented as function defs before lowering.
 type MethodDefSource = FuncDef;
+
+fn clone_type_expr_with_new_ids(ty: &TypeExpr, node_id_gen: &mut NodeIdGen) -> TypeExpr {
+    let kind = match &ty.kind {
+        TypeExprKind::Infer => TypeExprKind::Infer,
+        TypeExprKind::Union { variants } => TypeExprKind::Union {
+            variants: variants
+                .iter()
+                .map(|variant| clone_type_expr_with_new_ids(variant, node_id_gen))
+                .collect(),
+        },
+        TypeExprKind::Named {
+            ident,
+            def_id,
+            type_args,
+        } => TypeExprKind::Named {
+            ident: ident.clone(),
+            def_id: *def_id,
+            type_args: type_args
+                .iter()
+                .map(|arg| clone_type_expr_with_new_ids(arg, node_id_gen))
+                .collect(),
+        },
+        TypeExprKind::Refined {
+            base_ty_expr,
+            refinements,
+        } => TypeExprKind::Refined {
+            base_ty_expr: Box::new(clone_type_expr_with_new_ids(base_ty_expr, node_id_gen)),
+            refinements: refinements.clone(),
+        },
+        TypeExprKind::Array { elem_ty_expr, dims } => TypeExprKind::Array {
+            elem_ty_expr: Box::new(clone_type_expr_with_new_ids(elem_ty_expr, node_id_gen)),
+            dims: dims.clone(),
+        },
+        TypeExprKind::DynArray { elem_ty_expr } => TypeExprKind::DynArray {
+            elem_ty_expr: Box::new(clone_type_expr_with_new_ids(elem_ty_expr, node_id_gen)),
+        },
+        TypeExprKind::Tuple { field_ty_exprs } => TypeExprKind::Tuple {
+            field_ty_exprs: field_ty_exprs
+                .iter()
+                .map(|expr| clone_type_expr_with_new_ids(expr, node_id_gen))
+                .collect(),
+        },
+        TypeExprKind::Slice { elem_ty_expr } => TypeExprKind::Slice {
+            elem_ty_expr: Box::new(clone_type_expr_with_new_ids(elem_ty_expr, node_id_gen)),
+        },
+        TypeExprKind::Heap { elem_ty_expr } => TypeExprKind::Heap {
+            elem_ty_expr: Box::new(clone_type_expr_with_new_ids(elem_ty_expr, node_id_gen)),
+        },
+        TypeExprKind::Ref {
+            mutable,
+            elem_ty_expr,
+        } => TypeExprKind::Ref {
+            mutable: *mutable,
+            elem_ty_expr: Box::new(clone_type_expr_with_new_ids(elem_ty_expr, node_id_gen)),
+        },
+        TypeExprKind::Fn {
+            params,
+            ret_ty_expr,
+        } => TypeExprKind::Fn {
+            params: params
+                .iter()
+                .map(|param| parsed::FnTypeParam {
+                    mode: param.mode.clone(),
+                    ty_expr: clone_type_expr_with_new_ids(&param.ty_expr, node_id_gen),
+                })
+                .collect(),
+            ret_ty_expr: Box::new(clone_type_expr_with_new_ids(ret_ty_expr, node_id_gen)),
+        },
+    };
+
+    TypeExpr {
+        id: node_id_gen.new_id(),
+        kind,
+        span: ty.span,
+    }
+}
+
+fn clone_param_with_new_ids(param: &parsed::Param, node_id_gen: &mut NodeIdGen) -> parsed::Param {
+    parsed::Param {
+        id: node_id_gen.new_id(),
+        ident: param.ident.clone(),
+        def_id: (),
+        typ: clone_type_expr_with_new_ids(&param.typ, node_id_gen),
+        mode: param.mode.clone(),
+        span: param.span,
+    }
+}
+
+fn lower_spawn_func(
+    spawn_name: &str,
+    descriptor_id_helper_name: &str,
+    ctor: &FuncDef,
+    state_name_map: &HashMap<String, String>,
+    node_id_gen: &mut NodeIdGen,
+) -> FuncDef {
+    // V1 managed constructor flow:
+    // 1) evaluate `new(...)` to enforce mirror-forward constructor contract,
+    // 2) allocate/bind/start a runtime machine slot,
+    // 3) return a machine handle wrapper on success.
+    fn var_expr(name: &str, node_id_gen: &mut NodeIdGen, span: Span) -> Expr {
+        Expr {
+            id: node_id_gen.new_id(),
+            kind: ExprKind::Var {
+                ident: name.to_string(),
+                def_id: (),
+            },
+            ty: (),
+            span,
+        }
+    }
+
+    fn call_expr(
+        callee_name: &str,
+        args: Vec<Expr>,
+        node_id_gen: &mut NodeIdGen,
+        span: Span,
+    ) -> Expr {
+        Expr {
+            id: node_id_gen.new_id(),
+            kind: ExprKind::Call {
+                callee: Box::new(var_expr(callee_name, node_id_gen, span)),
+                args: args
+                    .into_iter()
+                    .map(|expr| CallArg {
+                        mode: CallArgMode::Default,
+                        expr,
+                        init: InitInfo::default(),
+                        span,
+                    })
+                    .collect(),
+            },
+            ty: (),
+            span,
+        }
+    }
+
+    fn let_bind_stmt(
+        ident: &str,
+        value: Expr,
+        node_id_gen: &mut NodeIdGen,
+        span: Span,
+    ) -> StmtExpr {
+        StmtExpr {
+            id: node_id_gen.new_id(),
+            kind: StmtExprKind::LetBind {
+                pattern: BindPattern {
+                    id: node_id_gen.new_id(),
+                    kind: BindPatternKind::Name {
+                        ident: ident.to_string(),
+                        def_id: (),
+                    },
+                    span,
+                },
+                decl_ty: None,
+                value: Box::new(value),
+            },
+            ty: (),
+            span,
+        }
+    }
+
+    fn return_stmt(value: Expr, node_id_gen: &mut NodeIdGen, span: Span) -> StmtExpr {
+        StmtExpr {
+            id: node_id_gen.new_id(),
+            kind: StmtExprKind::Return {
+                value: Some(Box::new(value)),
+            },
+            ty: (),
+            span,
+        }
+    }
+
+    fn make_error_return_if_zero(
+        value_var: &str,
+        error_type_name: &str,
+        node_id_gen: &mut NodeIdGen,
+        span: Span,
+    ) -> Expr {
+        let cond = Expr {
+            id: node_id_gen.new_id(),
+            kind: ExprKind::BinOp {
+                left: Box::new(var_expr(value_var, node_id_gen, span)),
+                op: crate::core::tree::BinaryOp::Eq,
+                right: Box::new(Expr {
+                    id: node_id_gen.new_id(),
+                    kind: ExprKind::IntLit(0),
+                    ty: (),
+                    span,
+                }),
+            },
+            ty: (),
+            span,
+        };
+        let then_body = Expr {
+            id: node_id_gen.new_id(),
+            kind: ExprKind::Block {
+                items: vec![parsed::BlockItem::Stmt(return_stmt(
+                    Expr {
+                        id: node_id_gen.new_id(),
+                        kind: ExprKind::StructLit {
+                            name: error_type_name.to_string(),
+                            type_args: Vec::new(),
+                            fields: Vec::new(),
+                        },
+                        ty: (),
+                        span,
+                    },
+                    node_id_gen,
+                    span,
+                ))],
+                tail: None,
+            },
+            ty: (),
+            span,
+        };
+        Expr {
+            id: node_id_gen.new_id(),
+            kind: ExprKind::If {
+                cond: Box::new(cond),
+                then_body: Box::new(then_body),
+                else_body: Box::new(Expr {
+                    id: node_id_gen.new_id(),
+                    kind: ExprKind::Block {
+                        items: Vec::new(),
+                        tail: None,
+                    },
+                    ty: (),
+                    span,
+                }),
+            },
+            ty: (),
+            span,
+        }
+    }
+
+    let span = ctor.span;
+    let mut params = Vec::new();
+    params.push(parsed::Param {
+        id: node_id_gen.new_id(),
+        ident: "__mc_rt".to_string(),
+        def_id: (),
+        typ: u64_type_expr(node_id_gen, span),
+        mode: ParamMode::In,
+        span,
+    });
+    params.push(parsed::Param {
+        id: node_id_gen.new_id(),
+        ident: "__mc_mailbox_cap".to_string(),
+        def_id: (),
+        typ: u64_type_expr(node_id_gen, span),
+        mode: ParamMode::In,
+        span,
+    });
+    params.extend(
+        ctor.sig
+            .params
+            .iter()
+            .map(|param| clone_param_with_new_ids(param, node_id_gen)),
+    );
+
+    let mut state_names: Vec<String> = state_name_map.values().cloned().collect();
+    state_names.sort();
+    let initial_state_name = match &ctor.sig.ret_ty_expr.kind {
+        TypeExprKind::Named { ident, .. } => ident.clone(),
+        TypeExprKind::Union { variants } => variants
+            .first()
+            .and_then(|variant| match &variant.kind {
+                TypeExprKind::Named { ident, .. } => Some(ident.clone()),
+                _ => None,
+            })
+            .unwrap_or_else(|| state_names.first().cloned().unwrap_or_default()),
+        _ => state_names.first().cloned().unwrap_or_default(),
+    };
+    let initial_state_tag = state_names
+        .iter()
+        .position(|name| name == &initial_state_name)
+        .map(|idx| idx as u64 + 1)
+        .unwrap_or(1);
+
+    let ctor_call_args: Vec<Expr> = ctor
+        .sig
+        .params
+        .iter()
+        .map(|param| var_expr(&param.ident, node_id_gen, span))
+        .collect();
+    let ctor_call = call_expr(&ctor.sig.name, ctor_call_args, node_id_gen, span);
+    let spawn_call = call_expr(
+        "__mc_machine_runtime_spawn_u64",
+        vec![
+            var_expr("__mc_rt", node_id_gen, span),
+            var_expr("__mc_mailbox_cap", node_id_gen, span),
+        ],
+        node_id_gen,
+        span,
+    );
+    let descriptor_id_call = call_expr(descriptor_id_helper_name, Vec::new(), node_id_gen, span);
+    let bind_call = call_expr(
+        "__mc_machine_runtime_bind_descriptor_u64",
+        vec![
+            var_expr("__mc_rt", node_id_gen, span),
+            var_expr("__mc_machine_id", node_id_gen, span),
+            var_expr("__mc_descriptor_id", node_id_gen, span),
+            Expr {
+                id: node_id_gen.new_id(),
+                kind: ExprKind::IntLit(initial_state_tag),
+                ty: (),
+                span,
+            },
+        ],
+        node_id_gen,
+        span,
+    );
+    let start_call = call_expr(
+        "__mc_machine_runtime_start_u64",
+        vec![
+            var_expr("__mc_rt", node_id_gen, span),
+            var_expr("__mc_machine_id", node_id_gen, span),
+        ],
+        node_id_gen,
+        span,
+    );
+
+    let body = Expr {
+        id: node_id_gen.new_id(),
+        kind: ExprKind::Block {
+            items: vec![
+                parsed::BlockItem::Stmt(let_bind_stmt(
+                    "__mc_initial_state",
+                    ctor_call,
+                    node_id_gen,
+                    span,
+                )),
+                // Keep the constructor value live so side effects and argument
+                // evaluation semantics match direct `new(...)` usage.
+                parsed::BlockItem::Stmt(let_bind_stmt(
+                    "__mc_machine_id",
+                    spawn_call,
+                    node_id_gen,
+                    span,
+                )),
+                parsed::BlockItem::Expr(make_error_return_if_zero(
+                    "__mc_machine_id",
+                    MACHINE_SPAWN_FAILED_TYPE_NAME,
+                    node_id_gen,
+                    span,
+                )),
+                parsed::BlockItem::Stmt(let_bind_stmt(
+                    "__mc_descriptor_id",
+                    descriptor_id_call,
+                    node_id_gen,
+                    span,
+                )),
+                parsed::BlockItem::Stmt(let_bind_stmt(
+                    "__mc_bind_status",
+                    bind_call,
+                    node_id_gen,
+                    span,
+                )),
+                parsed::BlockItem::Expr(make_error_return_if_zero(
+                    "__mc_bind_status",
+                    MACHINE_BIND_FAILED_TYPE_NAME,
+                    node_id_gen,
+                    span,
+                )),
+                parsed::BlockItem::Stmt(let_bind_stmt(
+                    "__mc_start_status",
+                    start_call,
+                    node_id_gen,
+                    span,
+                )),
+                parsed::BlockItem::Expr(make_error_return_if_zero(
+                    "__mc_start_status",
+                    MACHINE_START_FAILED_TYPE_NAME,
+                    node_id_gen,
+                    span,
+                )),
+            ],
+            tail: Some(Box::new(Expr {
+                id: node_id_gen.new_id(),
+                kind: ExprKind::StructLit {
+                    name: MACHINE_HANDLE_TYPE_NAME.to_string(),
+                    type_args: Vec::new(),
+                    fields: vec![StructLitField {
+                        id: node_id_gen.new_id(),
+                        name: "_id".to_string(),
+                        value: var_expr("__mc_machine_id", node_id_gen, span),
+                        span,
+                    }],
+                },
+                ty: (),
+                span,
+            })),
+        },
+        ty: (),
+        span,
+    };
+
+    FuncDef {
+        id: node_id_gen.new_id(),
+        def_id: (),
+        attrs: Vec::new(),
+        sig: parsed::FunctionSig {
+            name: spawn_name.to_string(),
+            type_params: Vec::new(),
+            params,
+            ret_ty_expr: TypeExpr {
+                id: node_id_gen.new_id(),
+                kind: TypeExprKind::Union {
+                    variants: vec![
+                        named_type_expr(MACHINE_HANDLE_TYPE_NAME, node_id_gen, span),
+                        named_type_expr(MACHINE_SPAWN_FAILED_TYPE_NAME, node_id_gen, span),
+                        named_type_expr(MACHINE_BIND_FAILED_TYPE_NAME, node_id_gen, span),
+                        named_type_expr(MACHINE_START_FAILED_TYPE_NAME, node_id_gen, span),
+                    ],
+                },
+                span,
+            },
+            span,
+        },
+        body,
+        span,
+    }
+}
 
 fn lower_handler_to_method_source(
     handler: &TypestateOnHandler,
@@ -991,12 +1618,14 @@ impl VisitorMut<()> for StateRefRewriter<'_> {
 fn rewrite_constructor_invocations(
     module: &mut Module,
     ctor_by_typestate: &HashMap<String, String>,
+    spawn_by_typestate: &HashMap<String, String>,
     node_id_gen: &mut NodeIdGen,
 ) {
     // Global rewrite after all typestate declarations are lowered so call sites
     // can target the generated constructor symbol.
     let mut rewriter = CtorCallRewriter {
         ctor_by_typestate,
+        spawn_by_typestate,
         node_id_gen,
     };
     rewriter.visit_module(module);
@@ -1005,6 +1634,8 @@ fn rewrite_constructor_invocations(
 struct CtorCallRewriter<'a> {
     // Map source typestate name -> generated constructor function name.
     ctor_by_typestate: &'a HashMap<String, String>,
+    // Map source typestate name -> generated managed spawn function name.
+    spawn_by_typestate: &'a HashMap<String, String>,
     node_id_gen: &'a mut NodeIdGen,
 }
 
@@ -1019,8 +1650,13 @@ impl VisitorMut<()> for CtorCallRewriter<'_> {
             payload,
             ..
         } = &mut expr.kind
-            && variant == "new"
-            && let Some(ctor_name) = self.ctor_by_typestate.get(enum_name)
+            && let Some(callee_name) = if variant == "new" {
+                self.ctor_by_typestate.get(enum_name)
+            } else if variant == "spawn" {
+                self.spawn_by_typestate.get(enum_name)
+            } else {
+                None
+            }
         {
             // Parsed form of `Type::new(a, b)` arrives as enum-variant syntax in
             // the parsed tree. Lower it to a plain call expression.
@@ -1039,7 +1675,7 @@ impl VisitorMut<()> for CtorCallRewriter<'_> {
                 callee: Box::new(Expr {
                     id: self.node_id_gen.new_id(),
                     kind: ExprKind::Var {
-                        ident: ctor_name.clone(),
+                        ident: callee_name.clone(),
                         def_id: (),
                     },
                     ty: (),
