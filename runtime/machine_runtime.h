@@ -505,6 +505,10 @@ uint8_t __mc_machine_runtime_pending_contains(
 // These helpers expose machine runtime capabilities through plain integer
 // handles so user code does not need to model `mc_machine_runtime_t` layout.
 // Handle value `0` is always invalid.
+//
+// Optional bootstrap hook:
+// - if binary defines `void __mc_machine_bootstrap(void)`, runtime invokes it
+//   once on first `__mc_machine_runtime_new()` call.
 uint64_t __mc_machine_runtime_new(void);
 void __mc_machine_runtime_free(uint64_t runtime);
 uint64_t __mc_machine_runtime_spawn_u64(uint64_t runtime, uint64_t mailbox_cap);

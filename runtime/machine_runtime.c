@@ -3,10 +3,20 @@
 #include <stddef.h>
 #include <string.h>
 
+#if defined(__GNUC__) || defined(__clang__)
+#define MC_WEAK __attribute__((weak))
+#else
+#define MC_WEAK
+#endif
+
 // Runtime allocator entrypoints from alloc.c.
 void *__mc_alloc(size_t size, size_t align);
 void *__mc_realloc(void *ptr, size_t size, size_t align);
 void __mc_free(void *ptr);
+
+// Optional process-level bootstrap hook emitted by compiler artifacts.
+// Runtime calls this once lazily on first `__mc_machine_runtime_new()`.
+MC_WEAK void __mc_machine_bootstrap(void) {}
 
 // Default capacities tuned for simple v1 behavior.
 #define MC_MACHINE_INITIAL_CAP 8u
@@ -1727,6 +1737,12 @@ static mc_machine_runtime_t *mc_runtime_from_handle(uint64_t runtime) {
 }
 
 uint64_t __mc_machine_runtime_new(void) {
+    static uint8_t bootstrap_done = 0;
+    if (!bootstrap_done) {
+        __mc_machine_bootstrap();
+        bootstrap_done = 1;
+    }
+
     mc_machine_runtime_t *rt = (mc_machine_runtime_t *)__mc_alloc(
         sizeof(mc_machine_runtime_t),
         _Alignof(mc_machine_runtime_t)
