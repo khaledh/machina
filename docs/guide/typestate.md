@@ -179,24 +179,28 @@ Key ideas:
 - `reply(cap, value)` consumes `ReplyCap<...>` and enforces response-set safety.
 
 Examples:
-- check-only single-role event flow:
+- runnable single-role event flow:
   `/examples/typestate/machine_events_check.mc`
-- check-only two-machine request/reply flow:
+- runnable two-machine request/reply flow:
   `/examples/typestate/inter_machine_req_reply_check.mc`
 
 Run them with:
 
 ```bash
-cargo run -- check --experimental typestate examples/typestate/machine_events_check.mc
-cargo run -- check --experimental typestate examples/typestate/inter_machine_req_reply_check.mc
+cargo mcr --experimental typestate examples/typestate/machine_events_check.mc
+cargo mcr --experimental typestate examples/typestate/inter_machine_req_reply_check.mc
 ```
 
 ## Managed Mode Limits (V1)
 
-Current managed/event support is frontend-checked but not yet wired to a
-user-facing runtime API.
+Current managed/event support is runnable through `std::machine`, but still
+early-stage.
 
-- Use `mcc check`/`cargo mcr check` to validate managed/protocol examples.
-- Runtime scheduler/dispatch entrypoints are still under active development.
+- Runtime setup is explicit:
+  - create runtime, spawn machines, bind descriptors, start, send, step.
+  - examples currently hardcode deterministic descriptor ids/state tags.
+- Emit payload ABI is currently minimal:
+  - `emit Send/Request/reply` carries event kind + payload words.
+  - rich payload boxing/unboxing and drop paths are still being expanded.
 - Protocol conformance is shape-based for v1 (flows/handlers/payload families),
   without full per-state protocol projection checks yet.
