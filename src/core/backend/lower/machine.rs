@@ -44,7 +44,13 @@ pub(super) fn append_machine_runtime_artifacts(
         &descriptor_globals,
         funcs,
     );
-    append_bootstrap_registration_fn(type_map, def_table.next_def_id(), &thunk_ids, funcs);
+    append_bootstrap_registration_fn(
+        type_map,
+        def_table.next_def_id(),
+        &thunk_ids,
+        &descriptor_globals,
+        funcs,
+    );
 }
 
 fn assign_thunk_def_ids(
@@ -72,7 +78,7 @@ fn append_dispatch_thunks(
     def_table: &DefTable,
     type_map: &TypeMap,
     thunk_ids: &HashMap<DefId, DefId>,
-    descriptor_globals: &HashMap<String, GlobalId>,
+    descriptor_globals: &HashMap<String, (GlobalId, usize)>,
     funcs: &mut Vec<LoweredFunction>,
 ) {
     let mut plans: Vec<_> = machine_plans.thunks.values().collect();
@@ -86,7 +92,9 @@ fn append_dispatch_thunks(
         let Some(thunk_def_id) = thunk_ids.get(&plan.handler_def_id).copied() else {
             continue;
         };
-        let descriptor_global = descriptor_globals.get(&plan.typestate_name).copied();
+        let descriptor_global = descriptor_globals
+            .get(&plan.typestate_name)
+            .map(|(id, _)| *id);
         funcs.push(build_dispatch_thunk(
             plan,
             thunk_def_id,
@@ -101,9 +109,10 @@ fn append_bootstrap_registration_fn(
     type_map: &TypeMap,
     first_def_id: DefId,
     thunk_ids: &HashMap<DefId, DefId>,
+    descriptor_globals: &HashMap<String, (GlobalId, usize)>,
     funcs: &mut Vec<LoweredFunction>,
 ) {
-    if thunk_ids.is_empty() {
+    if thunk_ids.is_empty() && descriptor_globals.is_empty() {
         return;
     }
 
@@ -117,6 +126,7 @@ fn append_bootstrap_registration_fn(
         signed: false,
         bits: 8,
     });
+    let u8_ptr_ty = lowerer.ptr_to(u8_ty);
     let unit_ty = lowerer.lower_type(&Type::Unit);
     let sig = FunctionSig {
         params: Vec::new(),
@@ -138,6 +148,18 @@ fn append_bootstrap_registration_fn(
             Callee::Runtime(RuntimeFn::MachineRegisterThunk),
             vec![thunk_id_word, thunk_addr_word],
             unit_ty,
+        );
+    }
+
+    let mut descriptors: Vec<_> = descriptor_globals.iter().collect();
+    descriptors.sort_by(|(a, _), (b, _)| a.cmp(b));
+    for (_, (global_id, desc_len)) in descriptors {
+        let desc_ptr = builder.const_global_addr(*global_id, u8_ptr_ty);
+        let desc_len_val = builder.const_int(*desc_len as i128, false, 64, u64_ty);
+        let _desc_id = builder.call(
+            Callee::Runtime(RuntimeFn::MachineRegisterDescriptor),
+            vec![desc_ptr, desc_len_val],
+            u64_ty,
         );
     }
 
@@ -499,15 +521,16 @@ fn append_descriptor_globals(
     machine_plans: &sem::MachinePlanMap,
     thunk_ids: &HashMap<DefId, DefId>,
     globals: &mut GlobalArena,
-) -> HashMap<String, GlobalId> {
+) -> HashMap<String, (GlobalId, usize)> {
     let mut out = HashMap::new();
     let mut descriptors: Vec<_> = machine_plans.descriptors.values().collect();
     descriptors.sort_by(|a, b| a.typestate_name.cmp(&b.typestate_name));
 
     for desc in descriptors {
         let bytes = serialize_descriptor(desc, thunk_ids);
+        let byte_len = bytes.len();
         let global_id = globals.add_bytes(bytes);
-        out.insert(desc.typestate_name.clone(), global_id);
+        out.insert(desc.typestate_name.clone(), (global_id, byte_len));
     }
     out
 }

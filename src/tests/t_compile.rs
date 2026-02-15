@@ -1080,4 +1080,8 @@ fn main() -> u64 { 0 }
         ir.contains("__mc_machine_runtime_register_thunk_u64"),
         "expected managed machine thunk registration call in emitted IR: {ir}"
     );
+    assert!(
+        ir.contains("__mc_machine_runtime_register_descriptor_u64"),
+        "expected managed machine descriptor registration call in emitted IR: {ir}"
+    );
 }

@@ -336,6 +336,10 @@ fn runtime_call_spec(runtime: &RuntimeFn) -> RuntimeCallSpec {
             args: &[Int, Int],
             ret: Unit,
         },
+        RuntimeFn::MachineRegisterDescriptor => RuntimeCallSpec {
+            args: &[Ptr, Int],
+            ret: RetInt,
+        },
         RuntimeFn::Alloc => RuntimeCallSpec {
             args: &[Int, Int],
             ret: RetPtr,
