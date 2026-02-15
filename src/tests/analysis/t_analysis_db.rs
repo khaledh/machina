@@ -2387,6 +2387,51 @@ fn diagnostics_for_program_file_typestate_connection_example_is_clean_when_enabl
 }
 
 #[test]
+fn diagnostics_for_program_file_reports_typestate_handler_overlap() {
+    let mut db = AnalysisDb::new();
+    db.set_experimental_typestate(true);
+
+    let source = r#"
+type Response = {}
+type AuthApproved = {}
+
+typestate Connection {
+    fn new() -> AwaitAuth {
+        AwaitAuth {}
+    }
+
+    state AwaitAuth {
+        on Response(pending, AuthApproved) -> AwaitAuth {
+            AwaitAuth {}
+        }
+
+        on Response(pending, AuthApproved) -> AwaitAuth {
+            AwaitAuth {}
+        }
+    }
+}
+
+fn main() -> u64 {
+    0
+}
+"#;
+    let file_id = db.upsert_disk_text(
+        PathBuf::from("examples/analysis_typestate_handler_overlap.mc"),
+        source,
+    );
+
+    let diagnostics = db
+        .diagnostics_for_program_file(file_id)
+        .expect("program diagnostics query should succeed");
+    assert!(
+        diagnostics
+            .iter()
+            .any(|d| d.code == "MC-TYPECHECK-TypestateOverlappingOnHandlers"),
+        "expected typestate handler-overlap diagnostic, got: {diagnostics:#?}"
+    );
+}
+
+#[test]
 fn hover_for_program_typestate_example_uses_source_facing_names() {
     let mut db = AnalysisDb::new();
     db.set_experimental_typestate(true);
