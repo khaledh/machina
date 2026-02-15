@@ -10,7 +10,7 @@ use crate::core::analysis::facts::{DefTableOverlay, TypeMapOverlay};
 use crate::core::context::TypestateRoleImplBinding;
 use crate::core::tree::semantic as sem;
 use crate::core::typecheck::type_map::resolve_type_expr;
-use crate::core::types::{Type, TypeId};
+use crate::core::types::{StructField, Type, TypeId};
 
 const GENERATED_STATE_PREFIX: &str = "__ts_";
 const GENERATED_HANDLER_PREFIX: &str = "__ts_on_";
@@ -72,15 +72,7 @@ fn collect_typestate_builders(
             continue;
         };
 
-        let state_layout_ty = def_table
-            .lookup_def(type_def.def_id)
-            .and_then(|def| type_map.lookup_def_type_id(def))
-            .unwrap_or_else(|| {
-                panic!(
-                    "compiler bug: missing state type id for generated state {}",
-                    type_def.name
-                )
-            });
+        let state_layout_ty = resolve_state_layout_type_id(module, def_table, type_map, type_def);
 
         let typestate = out.entry(typestate_name).or_default();
         typestate.states.insert(
@@ -170,6 +162,49 @@ fn collect_typestate_builders(
     out
 }
 
+fn resolve_state_layout_type_id(
+    module: &sem::Module,
+    def_table: &DefTableOverlay,
+    type_map: &TypeMapOverlay,
+    type_def: &sem::TypeDef,
+) -> TypeId {
+    if let Some(def) = def_table.lookup_def(type_def.def_id)
+        && let Some(id) = type_map.lookup_def_type_id(def)
+        && !contains_unresolved_type(type_map.type_table().get(id))
+    {
+        return id;
+    }
+
+    let sem::TypeDefKind::Struct { fields } = &type_def.kind else {
+        panic!(
+            "compiler bug: expected generated typestate state to be struct, found {}",
+            type_def.name
+        );
+    };
+    let struct_fields = fields
+        .iter()
+        .map(|field| StructField {
+            name: field.name.clone(),
+            ty: resolve_type_expr(def_table, module, &field.ty).unwrap_or_else(|err| {
+                panic!(
+                    "compiler bug: cannot resolve generated state field type {}.{}: {err}",
+                    type_def.name, field.name
+                )
+            }),
+        })
+        .collect::<Vec<_>>();
+    let state_ty = Type::Struct {
+        name: type_def.name.clone(),
+        fields: struct_fields,
+    };
+    type_map.type_table().lookup_id(&state_ty).unwrap_or_else(|| {
+        panic!(
+            "compiler bug: missing interned generated state type id for {}",
+            type_def.name
+        )
+    })
+}
+
 fn resolve_handler_event_key(
     module: &sem::Module,
     def_table: &DefTableOverlay,
@@ -228,7 +263,10 @@ fn resolve_type_id(
     label: &str,
 ) -> TypeId {
     if let Some(id) = type_map.lookup_node_type_id(ty_expr.id) {
-        return id;
+        let ty = type_map.type_table().get(id);
+        if !contains_unresolved_type(ty) {
+            return id;
+        }
     }
     let ty = resolve_type_expr(def_table, module, ty_expr).unwrap_or_else(|err| {
         panic!(
@@ -240,6 +278,41 @@ fn resolve_type_id(
             "compiler bug: missing interned {label} type id for typestate handler {handler_name}"
         )
     })
+}
+
+fn contains_unresolved_type(ty: &Type) -> bool {
+    match ty {
+        Type::Unknown | Type::Var(_) => true,
+        Type::Fn { params, ret_ty } => {
+            params.iter().any(|param| contains_unresolved_type(&param.ty))
+                || contains_unresolved_type(ret_ty.as_ref())
+        }
+        Type::Tuple { field_tys } => field_tys.iter().any(contains_unresolved_type),
+        Type::Struct { fields, .. } => fields
+            .iter()
+            .any(|field| contains_unresolved_type(&field.ty)),
+        Type::Enum { variants, .. } => variants
+            .iter()
+            .any(|variant| variant.payload.iter().any(contains_unresolved_type)),
+        Type::Array { elem_ty, .. }
+        | Type::Slice { elem_ty }
+        | Type::Heap { elem_ty }
+        | Type::DynArray { elem_ty }
+        | Type::Set { elem_ty } => contains_unresolved_type(elem_ty.as_ref()),
+        Type::Map { key_ty, value_ty } => {
+            contains_unresolved_type(key_ty.as_ref()) || contains_unresolved_type(value_ty.as_ref())
+        }
+        Type::Ref { elem_ty, .. } => contains_unresolved_type(elem_ty.as_ref()),
+        Type::Pending { response_tys } | Type::ReplyCap { response_tys } => {
+            response_tys.iter().any(contains_unresolved_type)
+        }
+        Type::ErrorUnion { ok_ty, err_tys } => {
+            contains_unresolved_type(ok_ty.as_ref())
+                || err_tys.iter().any(contains_unresolved_type)
+        }
+        Type::Range { elem_ty } => contains_unresolved_type(elem_ty.as_ref()),
+        Type::Int { .. } | Type::Bool | Type::Char | Type::String | Type::Unit => false,
+    }
 }
 
 fn attach_role_impls(

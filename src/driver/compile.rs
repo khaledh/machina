@@ -266,6 +266,8 @@ pub fn compile_with_path(
     };
 
     let mut optimized_funcs = Vec::with_capacity(lowered.funcs.len());
+    let machine_handler_defs: std::collections::HashSet<_> =
+        analyzed_context.machine_plans.thunks.keys().copied().collect();
     for (func, lowered_func) in funcs.into_iter().zip(lowered.funcs.iter()) {
         let reachable_keep = reachable
             .as_ref()
@@ -274,7 +276,10 @@ pub fn compile_with_path(
         // Keep managed dispatch thunks alive even when not yet reachable from
         // `main`; runtime bootstrap consumes them via descriptor tables.
         let machine_thunk_keep = func.name.starts_with("__mc_machine_dispatch_thunk_");
-        if reachable_keep || machine_thunk_keep {
+        // Keep generated typestate handler defs because dispatch thunks invoke
+        // them indirectly via function-address constants.
+        let machine_handler_keep = machine_handler_defs.contains(&func.def_id);
+        if reachable_keep || machine_thunk_keep || machine_handler_keep {
             let types = lowered_func.types.clone();
             let globals = lowered_func.globals.clone();
             optimized_funcs.push(backend::lower::LoweredFunction {

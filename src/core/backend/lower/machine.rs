@@ -7,10 +7,16 @@
 
 use std::collections::HashMap;
 
+use crate::core::backend::lower::types::TypeLowerer;
 use crate::core::backend::lower::{GlobalArena, LoweredFunction};
-use crate::core::ir::{FunctionBuilder, FunctionSig, GlobalId, IrTypeCache, IrTypeKind, Terminator};
+use crate::core::ir::{
+    Callee, CastKind, CmpOp, FunctionBuilder, FunctionSig, GlobalId, IrStructField, IrTypeCache,
+    IrTypeId, IrTypeKind, RuntimeFn, Terminator, ValueId,
+};
 use crate::core::resolve::{DefId, DefTable};
 use crate::core::tree::semantic as sem;
+use crate::core::typecheck::type_map::TypeMap;
+use crate::core::types::{FnParam, Type};
 
 /// Appends machine runtime artifacts derived from semantic machine plans.
 ///
@@ -20,6 +26,7 @@ use crate::core::tree::semantic as sem;
 pub(super) fn append_machine_runtime_artifacts(
     machine_plans: &sem::MachinePlanMap,
     def_table: &DefTable,
+    type_map: &TypeMap,
     funcs: &mut Vec<LoweredFunction>,
     globals: &mut GlobalArena,
 ) {
@@ -29,7 +36,14 @@ pub(super) fn append_machine_runtime_artifacts(
 
     let thunk_ids = assign_thunk_def_ids(machine_plans, def_table.next_def_id());
     let descriptor_globals = append_descriptor_globals(machine_plans, &thunk_ids, globals);
-    append_dispatch_thunks(machine_plans, &thunk_ids, &descriptor_globals, funcs);
+    append_dispatch_thunks(
+        machine_plans,
+        def_table,
+        type_map,
+        &thunk_ids,
+        &descriptor_globals,
+        funcs,
+    );
 }
 
 fn assign_thunk_def_ids(
@@ -54,6 +68,8 @@ fn assign_thunk_def_ids(
 
 fn append_dispatch_thunks(
     machine_plans: &sem::MachinePlanMap,
+    def_table: &DefTable,
+    type_map: &TypeMap,
     thunk_ids: &HashMap<DefId, DefId>,
     descriptor_globals: &HashMap<String, GlobalId>,
     funcs: &mut Vec<LoweredFunction>,
@@ -70,13 +86,210 @@ fn append_dispatch_thunks(
             continue;
         };
         let descriptor_global = descriptor_globals.get(&plan.typestate_name).copied();
-        funcs.push(build_stub_dispatch_thunk(plan, thunk_def_id, descriptor_global));
+        funcs.push(build_dispatch_thunk(
+            plan,
+            thunk_def_id,
+            descriptor_global,
+            def_table,
+            type_map,
+        ));
     }
 }
 
-fn build_stub_dispatch_thunk(
+fn build_dispatch_thunk(
     plan: &sem::MachineDispatchThunkPlan,
     thunk_def_id: DefId,
+    descriptor_global: Option<GlobalId>,
+    def_table: &DefTable,
+    type_map: &TypeMap,
+) -> LoweredFunction {
+    let state_ty_src = type_map.type_table().get(plan.state_layout_ty);
+    let payload_ty_src = type_map.type_table().get(plan.payload_layout_ty);
+    let next_state_ty_src = type_map.type_table().get(plan.next_state_layout_ty);
+    if contains_unresolved_type(state_ty_src)
+        || contains_unresolved_type(payload_ty_src)
+        || contains_unresolved_type(next_state_ty_src)
+    {
+        return build_fault_only_dispatch_thunk(thunk_def_id, &plan.symbol, descriptor_global);
+    }
+
+    let mut lowerer = TypeLowerer::new(type_map);
+    let u64_ty = lowerer.ir_type_cache.add(IrTypeKind::Int {
+        signed: false,
+        bits: 64,
+    });
+    let u8_ty = lowerer.ir_type_cache.add(IrTypeKind::Int {
+        signed: false,
+        bits: 8,
+    });
+    let bool_ty = lowerer.ir_type_cache.add(IrTypeKind::Bool);
+    let handler_ret_ty = lowerer.lower_type_id(plan.next_state_layout_ty);
+    let handler_state_ty = lowerer.lower_type_id(plan.state_layout_ty);
+    let handler_payload_ty = lowerer.lower_type_id(plan.payload_layout_ty);
+    let handler_payload_ptr_ty = lowerer.ptr_to(handler_payload_ty);
+    let handler_state_ptr_ty = lowerer.ptr_to(handler_state_ty);
+    let env_ty = add_machine_env_type(&mut lowerer.ir_type_cache, u64_ty);
+    let env_ptr_ty = lowerer.ptr_to(env_ty);
+    let txn_prefix_ty = add_txn_prefix_type(&mut lowerer.ir_type_cache, u8_ty, u64_ty);
+    let txn_prefix_ptr_ty = lowerer.ptr_to(txn_prefix_ty);
+    let u8_ptr_ty = lowerer.ptr_to(u8_ty);
+    let u64_ptr_ty = lowerer.ptr_to(u64_ty);
+
+    let handler_def = def_table.lookup_def(plan.handler_def_id).unwrap_or_else(|| {
+        panic!(
+            "backend machine thunk missing handler def for {:?}",
+            plan.handler_def_id
+        )
+    });
+    let handler_ty = type_map.lookup_def_type(handler_def).unwrap_or_else(|| {
+        panic!(
+            "backend machine thunk missing handler type for {:?}",
+            plan.handler_def_id
+        )
+    });
+    let (handler_params, handler_ret_ty_src) = match handler_ty {
+        Type::Fn { params, ret_ty } => (params.clone(), ret_ty),
+        other => panic!(
+            "backend machine thunk expected fn handler type, found {:?}",
+            other
+        ),
+    };
+    if handler_params
+        .iter()
+        .any(|param| contains_unresolved_type(&param.ty))
+        || contains_unresolved_type(handler_ret_ty_src.as_ref())
+    {
+        // Some synthetic handler signatures can still carry unresolved parts in
+        // early slices. Fall back to deterministic FAULT thunk until the full
+        // managed ABI path resolves all generated types before lowering.
+        return build_fault_only_dispatch_thunk(thunk_def_id, &plan.symbol, descriptor_global);
+    }
+
+    // Runtime callback ABI:
+    //   fn(ctx, machine_id, current_state, env_ptr, txn_ptr, fault_code_ptr) -> dispatch_result
+    let sig = FunctionSig {
+        params: vec![u64_ty; 6],
+        ret: u8_ty,
+    };
+    let mut builder = FunctionBuilder::new(thunk_def_id, plan.symbol.clone(), sig);
+    let entry = builder.current_block();
+    let mut abi_params = Vec::new();
+    for _ in 0..6 {
+        abi_params.push(builder.add_block_param(entry, u64_ty));
+    }
+
+    if let Some(global_id) = descriptor_global {
+        // Keep descriptor blobs live through module-DCE/global-pruning by
+        // referencing them from retained dispatch thunks.
+        let _descriptor_ptr = builder.const_global_addr(global_id, u8_ptr_ty);
+    }
+
+    // Decode ABI pointers and current-state token.
+    let current_state_word = abi_params[2];
+    let env_ptr_word = abi_params[3];
+    let txn_ptr_word = abi_params[4];
+    let fault_ptr_word = abi_params[5];
+    let env_ptr = builder.cast(CastKind::IntToPtr, env_ptr_word, env_ptr_ty);
+    let txn_ptr = builder.cast(CastKind::IntToPtr, txn_ptr_word, txn_prefix_ptr_ty);
+    let fault_ptr = builder.cast(CastKind::IntToPtr, fault_ptr_word, u64_ptr_ty);
+    let state_ptr = builder.cast(CastKind::IntToPtr, current_state_word, handler_state_ptr_ty);
+
+    // Envelope payload + correlation fields.
+    let pending_id = load_struct_field(&mut builder, env_ptr, 3, u64_ty, u64_ptr_ty);
+    let reply_cap_id = load_struct_field(&mut builder, env_ptr, 2, u64_ty, u64_ptr_ty);
+    let payload0 = load_struct_field(&mut builder, env_ptr, 4, u64_ty, u64_ptr_ty);
+    let payload_ptr = builder.cast(CastKind::IntToPtr, payload0, handler_payload_ptr_ty);
+
+    // Build a typed function pointer for indirect call. Using `Callee::Value`
+    // avoids cross-function type-id coupling in verifier signature checks.
+    let mut call_arg_tys = Vec::new();
+    let mut call_args = Vec::new();
+    for (idx, param) in handler_params.iter().enumerate() {
+        let abi_ty = lower_handler_param_abi_ty(param, &mut lowerer);
+        call_arg_tys.push(abi_ty);
+
+        let arg = if idx == 0 {
+            state_ptr
+        } else if matches!(param.ty, Type::Pending { .. }) {
+            pending_id
+        } else if matches!(param.ty, Type::ReplyCap { .. }) {
+            reply_cap_id
+        } else if param.ty.is_scalar() {
+            // Scalar payload parameters are loaded by value from payload box.
+            let scalar_ptr_ty = lowerer.ptr_to(abi_ty);
+            let typed_ptr = builder.cast(CastKind::PtrToPtr, payload_ptr, scalar_ptr_ty);
+            builder.load(typed_ptr, abi_ty)
+        } else {
+            // Aggregate payload parameters are passed by pointer.
+            builder.cast(CastKind::PtrToPtr, payload_ptr, abi_ty)
+        };
+        call_args.push(arg);
+    }
+    let handler_fn_ty = lowerer.ir_type_cache.add(IrTypeKind::Fn {
+        params: call_arg_tys,
+        ret: handler_ret_ty,
+    });
+    let handler_fn = builder.const_func_addr(plan.handler_def_id, handler_fn_ty);
+    let next_state_value = builder.call(Callee::Value(handler_fn), call_args, handler_ret_ty);
+
+    // Heap-box the returned next state token.
+    let layout = lowerer.ir_type_cache.layout(handler_ret_ty);
+    // Zero-sized state layouts still need a non-null token pointer for runtime.
+    let alloc_size = std::cmp::max(layout.size(), 1);
+    let size = builder.const_int(alloc_size as i128, false, 64, u64_ty);
+    let align = builder.const_int(layout.align() as i128, false, 64, u64_ty);
+    let next_state_ptr_u8 = builder.call(
+        Callee::Runtime(RuntimeFn::Alloc),
+        vec![size, align],
+        u8_ptr_ty,
+    );
+    let next_state_word = builder.cast(CastKind::PtrToInt, next_state_ptr_u8, u64_ty);
+
+    // Allocation failure => deterministic FAULT result and fault code.
+    let zero = builder.const_int(0, false, 64, u64_ty);
+    let alloc_is_null = builder.cmp(CmpOp::Eq, next_state_word, zero, bool_ty);
+    let bb_fault = builder.add_block();
+    let bb_ok = builder.add_block();
+    builder.terminate(Terminator::CondBr {
+        cond: alloc_is_null,
+        then_bb: bb_fault,
+        then_args: Vec::new(),
+        else_bb: bb_ok,
+        else_args: Vec::new(),
+    });
+
+    builder.select_block(bb_fault);
+    let fault_code = builder.const_int(1, false, 64, u64_ty);
+    builder.store(fault_ptr, fault_code);
+    let fault_result = builder.const_int(1, false, 8, u8_ty);
+    builder.terminate(Terminator::Return {
+        value: Some(fault_result),
+    });
+
+    builder.select_block(bb_ok);
+    let typed_next_state_ptr = builder.cast(CastKind::PtrToPtr, next_state_ptr_u8, handler_state_ptr_ty);
+    builder.store(typed_next_state_ptr, next_state_value);
+
+    // Stage txn next-state fields.
+    let has_next_ptr = builder.field_addr(txn_ptr, 0, u8_ptr_ty);
+    let one_u8 = builder.const_int(1, false, 8, u8_ty);
+    builder.store(has_next_ptr, one_u8);
+    let next_state_field_ptr = builder.field_addr(txn_ptr, 1, u64_ptr_ty);
+    builder.store(next_state_field_ptr, next_state_word);
+
+    let ok = builder.const_int(0, false, 8, u8_ty);
+    builder.terminate(Terminator::Return { value: Some(ok) });
+
+    LoweredFunction {
+        func: builder.finish(),
+        types: lowerer.ir_type_cache,
+        globals: Vec::new(),
+    }
+}
+
+fn build_fault_only_dispatch_thunk(
+    thunk_def_id: DefId,
+    symbol: &str,
     descriptor_global: Option<GlobalId>,
 ) -> LoweredFunction {
     let mut types = IrTypeCache::new();
@@ -88,39 +301,137 @@ fn build_stub_dispatch_thunk(
         signed: false,
         bits: 8,
     });
-
-    // Runtime callback ABI:
-    //   fn(ctx, machine_id, current_state, env_ptr, txn_ptr, fault_code_ptr) -> dispatch_result
+    let u8_ptr_ty = types.add(IrTypeKind::Ptr { elem: u8_ty });
     let sig = FunctionSig {
         params: vec![u64_ty; 6],
         ret: u8_ty,
     };
-    let mut builder = FunctionBuilder::new(thunk_def_id, plan.symbol.clone(), sig);
+    let mut builder = FunctionBuilder::new(thunk_def_id, symbol.to_string(), sig);
     let entry = builder.current_block();
     for _ in 0..6 {
         let _ = builder.add_block_param(entry, u64_ty);
     }
-
     if let Some(global_id) = descriptor_global {
-        // Keep descriptor blobs live through module-DCE/global-pruning by
-        // referencing them from retained dispatch thunks.
-        let u8_ty = types.add(IrTypeKind::Int {
-            signed: false,
-            bits: 8,
-        });
-        let u8_ptr_ty = types.add(IrTypeKind::Ptr { elem: u8_ty });
         let _descriptor_ptr = builder.const_global_addr(global_id, u8_ptr_ty);
     }
-
-    // Placeholder behavior until real state/payload decode + handler call ABI
-    // is wired: always return `MC_DISPATCH_FAULT` (enum value 1).
     let fault = builder.const_int(1, false, 8, u8_ty);
     builder.terminate(Terminator::Return { value: Some(fault) });
-
     LoweredFunction {
         func: builder.finish(),
         types,
         globals: Vec::new(),
+    }
+}
+
+fn lower_handler_param_abi_ty(param: &FnParam, lowerer: &mut TypeLowerer<'_>) -> IrTypeId {
+    let ty = lowerer.lower_type(&param.ty);
+    match param.mode {
+        crate::core::types::FnParamMode::In | crate::core::types::FnParamMode::Sink => {
+            if param.ty.is_scalar() {
+                ty
+            } else {
+                lowerer.ptr_to(ty)
+            }
+        }
+        crate::core::types::FnParamMode::Out | crate::core::types::FnParamMode::InOut => {
+            lowerer.ptr_to(ty)
+        }
+    }
+}
+
+fn add_machine_env_type(types: &mut IrTypeCache, u64_ty: IrTypeId) -> IrTypeId {
+    let fields = vec![
+        IrStructField {
+            name: "kind".to_string(),
+            ty: u64_ty,
+        },
+        IrStructField {
+            name: "src".to_string(),
+            ty: u64_ty,
+        },
+        IrStructField {
+            name: "reply_cap_id".to_string(),
+            ty: u64_ty,
+        },
+        IrStructField {
+            name: "pending_id".to_string(),
+            ty: u64_ty,
+        },
+        IrStructField {
+            name: "payload0".to_string(),
+            ty: u64_ty,
+        },
+        IrStructField {
+            name: "payload1".to_string(),
+            ty: u64_ty,
+        },
+    ];
+    types.add_named(IrTypeKind::Struct { fields }, "__mc_machine_env".to_string())
+}
+
+fn add_txn_prefix_type(types: &mut IrTypeCache, u8_ty: IrTypeId, u64_ty: IrTypeId) -> IrTypeId {
+    let fields = vec![
+        IrStructField {
+            name: "has_next_state".to_string(),
+            ty: u8_ty,
+        },
+        IrStructField {
+            name: "next_state".to_string(),
+            ty: u64_ty,
+        },
+    ];
+    types.add_named(
+        IrTypeKind::Struct { fields },
+        "__mc_machine_txn_prefix".to_string(),
+    )
+}
+
+fn load_struct_field(
+    builder: &mut FunctionBuilder,
+    base_ptr: ValueId,
+    field_idx: usize,
+    field_ty: IrTypeId,
+    field_ptr_ty: IrTypeId,
+) -> ValueId {
+    let ptr = builder.field_addr(base_ptr, field_idx, field_ptr_ty);
+    builder.load(ptr, field_ty)
+}
+
+fn contains_unresolved_type(ty: &Type) -> bool {
+    match ty {
+        Type::Unknown | Type::Var(_) => true,
+        Type::Fn { params, ret_ty } => {
+            params.iter().any(|param| contains_unresolved_type(&param.ty))
+                || contains_unresolved_type(ret_ty.as_ref())
+        }
+        Type::Tuple { field_tys } => field_tys.iter().any(contains_unresolved_type),
+        Type::Struct { fields, .. } => fields
+            .iter()
+            .any(|field| contains_unresolved_type(&field.ty)),
+        Type::Enum { variants, .. } => variants.iter().any(|variant| {
+            variant
+                .payload
+                .iter()
+                .any(contains_unresolved_type)
+        }),
+        Type::Array { elem_ty, .. } | Type::Slice { elem_ty } | Type::Heap { elem_ty } => {
+            contains_unresolved_type(elem_ty.as_ref())
+        }
+        Type::DynArray { elem_ty } => contains_unresolved_type(elem_ty.as_ref()),
+        Type::Set { elem_ty } => contains_unresolved_type(elem_ty.as_ref()),
+        Type::Map { key_ty, value_ty } => {
+            contains_unresolved_type(key_ty.as_ref()) || contains_unresolved_type(value_ty.as_ref())
+        }
+        Type::Ref { elem_ty, .. } => contains_unresolved_type(elem_ty.as_ref()),
+        Type::Pending { response_tys } | Type::ReplyCap { response_tys } => {
+            response_tys.iter().any(contains_unresolved_type)
+        }
+        Type::ErrorUnion { ok_ty, err_tys } => {
+            contains_unresolved_type(ok_ty.as_ref())
+                || err_tys.iter().any(contains_unresolved_type)
+        }
+        Type::Range { elem_ty } => contains_unresolved_type(elem_ty.as_ref()),
+        Type::Int { .. } | Type::Bool | Type::Char | Type::String | Type::Unit => false,
     }
 }
 

@@ -201,7 +201,13 @@ pub fn lower_module_with_machine_plans_with_opts(
 
     // Materialize managed machine descriptors + thunk placeholders as backend
     // artifacts. Full runtime bootstrap wiring will consume these.
-    machine::append_machine_runtime_artifacts(machine_plans, def_table, &mut funcs, &mut globals);
+    machine::append_machine_runtime_artifacts(
+        machine_plans,
+        def_table,
+        type_map,
+        &mut funcs,
+        &mut globals,
+    );
 
     Ok(LoweredModule {
         funcs,

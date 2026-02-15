@@ -3,6 +3,7 @@ use super::{
     lower_module_with_machine_plans_with_opts,
 };
 use crate::core::ir::IrTypeKind;
+use crate::core::types::Type;
 use crate::core::tree::semantic as sem;
 use std::collections::HashMap;
 
@@ -159,6 +160,19 @@ fn test_lower_module_typestate_machine_plans_materialize_artifacts() {
     )
     .expect("failed to lower typestate machine artifacts");
 
+    // Machine plans should already be concretized enough for backend materialization.
+    for plan in ctx.machine_plans.thunks.values() {
+        let state_ty = ctx.type_map.type_table().get(plan.state_layout_ty);
+        let payload_ty = ctx.type_map.type_table().get(plan.payload_layout_ty);
+        let next_ty = ctx.type_map.type_table().get(plan.next_state_layout_ty);
+        assert!(
+            !contains_unresolved_type(state_ty)
+                && !contains_unresolved_type(payload_ty)
+                && !contains_unresolved_type(next_ty),
+            "expected concrete machine plan layout types, got state={state_ty:?} payload={payload_ty:?} next={next_ty:?}"
+        );
+    }
+
     let thunk = lowered
         .funcs
         .iter()
@@ -179,6 +193,16 @@ fn test_lower_module_typestate_machine_plans_materialize_artifacts() {
         ),
         "expected dispatch thunk return type to be u8 dispatch result"
     );
+    let thunk_text = format_func(&thunk.func, &thunk.types);
+    assert!(
+        thunk_text.contains("fn(ptr<__ts_M_Ready>, ptr<Ping>, ptr<Ping>) -> __ts_M_Ready = const @")
+            && thunk_text.contains("call %v20("),
+        "expected dispatch thunk to call a concrete typestate handler, got: {thunk_text}"
+    );
+    assert!(
+        thunk_text.contains("__rt_alloc"),
+        "expected dispatch thunk to allocate next-state token, got: {thunk_text}"
+    );
 
     let has_descriptor_magic = lowered
         .globals
@@ -188,4 +212,39 @@ fn test_lower_module_typestate_machine_plans_materialize_artifacts() {
         has_descriptor_magic,
         "expected serialized machine descriptor blob in lowered globals"
     );
+}
+
+fn contains_unresolved_type(ty: &Type) -> bool {
+    match ty {
+        Type::Unknown | Type::Var(_) => true,
+        Type::Fn { params, ret_ty } => {
+            params.iter().any(|param| contains_unresolved_type(&param.ty))
+                || contains_unresolved_type(ret_ty.as_ref())
+        }
+        Type::Tuple { field_tys } => field_tys.iter().any(contains_unresolved_type),
+        Type::Struct { fields, .. } => fields
+            .iter()
+            .any(|field| contains_unresolved_type(&field.ty)),
+        Type::Enum { variants, .. } => variants
+            .iter()
+            .any(|variant| variant.payload.iter().any(contains_unresolved_type)),
+        Type::Array { elem_ty, .. }
+        | Type::Slice { elem_ty }
+        | Type::Heap { elem_ty }
+        | Type::DynArray { elem_ty }
+        | Type::Set { elem_ty } => contains_unresolved_type(elem_ty.as_ref()),
+        Type::Map { key_ty, value_ty } => {
+            contains_unresolved_type(key_ty.as_ref()) || contains_unresolved_type(value_ty.as_ref())
+        }
+        Type::Ref { elem_ty, .. } => contains_unresolved_type(elem_ty.as_ref()),
+        Type::Pending { response_tys } | Type::ReplyCap { response_tys } => {
+            response_tys.iter().any(contains_unresolved_type)
+        }
+        Type::ErrorUnion { ok_ty, err_tys } => {
+            contains_unresolved_type(ok_ty.as_ref())
+                || err_tys.iter().any(contains_unresolved_type)
+        }
+        Type::Range { elem_ty } => contains_unresolved_type(elem_ty.as_ref()),
+        Type::Int { .. } | Type::Bool | Type::Char | Type::String | Type::Unit => false,
+    }
 }
