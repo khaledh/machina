@@ -13,16 +13,15 @@ requires {
 //   cargo mcr --experimental typestate examples/typestate/inter_machine_req_reply_check.mc
 //
 // Expected output includes:
+//   approve path
 //   approved
+//   deny path
 //   denied
 
 type KickApprove = {}
 type KickDeny = {}
-type ReqApprove = {}
-type ReqDeny = {}
-type Response = {}
-type AuthApproved = {}
-type AuthDenied = {}
+type AuthCheck = {}
+type AuthReply = {}
 
 typestate AuthClient {
     fn new() -> Idle {
@@ -30,32 +29,34 @@ typestate AuthClient {
     }
 
     state Idle {
-        on KickApprove(e) -> AwaitAuth {
+        on KickApprove(e) -> stay {
             e;
-            let pending: Pending<AuthApproved | AuthDenied> = request(1, ReqApprove {});
-            AwaitAuth { pending: pending }
+            // Two concurrent same-type inflight requests are disambiguated by
+            // request-site labels.
+            let p: Pending<AuthReply> =
+                request:approve(1, AuthCheck {});
+            p;
         }
 
-        on KickDeny(e) -> AwaitAuth {
+        on KickDeny(e) -> stay {
             e;
-            let pending: Pending<AuthApproved | AuthDenied> = request(1, ReqDeny {});
-            AwaitAuth { pending: pending }
-        }
-    }
-
-    state AwaitAuth {
-        fields {
-            pending: Pending<AuthApproved | AuthDenied>,
+            let p: Pending<AuthReply> =
+                request:deny(1, AuthCheck {});
+            p;
         }
 
-        on Response(pending, AuthApproved) -> Idle {
+        on AuthReply(resp) for AuthCheck:approve(req) -> stay {
+            req;
+            resp;
+            println("approve path");
             println("approved");
-            Idle {}
         }
 
-        on Response(pending, AuthDenied) -> Idle {
+        on AuthReply(resp) for AuthCheck:deny(req) -> stay {
+            req;
+            resp;
+            println("deny path");
             println("denied");
-            Idle {}
         }
     }
 }
@@ -66,14 +67,9 @@ typestate AuthServer {
     }
 
     state Ready {
-        on ReqApprove(req: ReqApprove, cap: ReplyCap<AuthApproved | AuthDenied>) -> stay {
+        on AuthCheck(req: AuthCheck, cap: ReplyCap<AuthReply>) -> stay {
             req;
-            reply(cap, AuthApproved {});
-        }
-
-        on ReqDeny(req: ReqDeny, cap: ReplyCap<AuthApproved | AuthDenied>) -> stay {
-            req;
-            reply(cap, AuthDenied {});
+            reply(cap, AuthReply {});
         }
     }
 }
@@ -100,39 +96,23 @@ fn main() {
         _ => { return; },
     };
 
-    // Kick approve flow: client -> server -> client(response).
+    // Queue two concurrent same-type requests.
     match send(rt, client_id, 1, 0, 0) {
         ok: () => { ok; }
         _ => { return; },
     };
-    match step(rt) {
-        StepStatus::DidWork => {}
-        _ => { return; },
-    };
-    match step(rt) {
-        StepStatus::DidWork => {}
-        _ => { return; },
-    };
-    match step(rt) {
-        StepStatus::DidWork => {}
-        _ => { return; },
-    };
-
-    // Kick deny flow: client -> server -> client(response).
     match send(rt, client_id, 2, 0, 0) {
         ok: () => { ok; }
         _ => { return; },
     };
-    match step(rt) {
-        StepStatus::DidWork => {}
-        _ => { return; },
-    };
-    match step(rt) {
-        StepStatus::DidWork => {}
-        _ => { return; },
-    };
-    match step(rt) {
-        StepStatus::DidWork => {}
-        _ => { return; },
-    };
+
+    // Drain a bounded number of dispatch steps.
+    match step(rt) { StepStatus::Faulted => { return; } _ => {} };
+    match step(rt) { StepStatus::Faulted => { return; } _ => {} };
+    match step(rt) { StepStatus::Faulted => { return; } _ => {} };
+    match step(rt) { StepStatus::Faulted => { return; } _ => {} };
+    match step(rt) { StepStatus::Faulted => { return; } _ => {} };
+    match step(rt) { StepStatus::Faulted => { return; } _ => {} };
+    match step(rt) { StepStatus::Faulted => { return; } _ => {} };
+    match step(rt) { StepStatus::Faulted => { return; } _ => {} };
 }

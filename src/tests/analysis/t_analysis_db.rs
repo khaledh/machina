@@ -2553,6 +2553,106 @@ fn main() -> u64 {
 }
 
 #[test]
+fn diagnostics_for_program_file_reports_typestate_provenance_ambiguity() {
+    let mut db = AnalysisDb::new();
+    db.set_experimental_typestate(true);
+
+    let source = r#"
+type Kick = {}
+type AuthCheck = {}
+type AuthApproved = {}
+
+typestate Client {
+    fn new() -> Ready {
+        Ready {}
+    }
+
+    state Ready {
+        on Kick(k) -> stay {
+            let pending: Pending<AuthApproved> = request(0, AuthCheck {});
+            k;
+            pending;
+        }
+
+        on AuthApproved(ok) for AuthCheck(req) -> stay {
+            ok;
+            req;
+        }
+
+        on AuthApproved(ok) for AuthCheck:auth2(req) -> stay {
+            ok;
+            req;
+        }
+    }
+}
+"#;
+    let file_id = db.upsert_disk_text(
+        PathBuf::from("examples/analysis_typestate_provenance_ambiguity.mc"),
+        source,
+    );
+
+    let diagnostics = db
+        .diagnostics_for_program_file(file_id)
+        .expect("program diagnostics query should succeed");
+    assert!(
+        diagnostics
+            .iter()
+            .any(|d| d.code == "MC-TYPECHECK-TypestateAmbiguousResponseProvenance"),
+        "expected provenance ambiguity diagnostic, got: {diagnostics:#?}"
+    );
+}
+
+#[test]
+fn diagnostics_for_program_file_accepts_labeled_provenance_disambiguation() {
+    let mut db = AnalysisDb::new();
+    db.set_experimental_typestate(true);
+
+    let source = r#"
+type Kick = {}
+type AuthCheck = {}
+type AuthApproved = {}
+
+typestate Client {
+    fn new() -> Ready {
+        Ready {}
+    }
+
+    state Ready {
+        on Kick(k) -> stay {
+            let p1: Pending<AuthApproved> = request:auth1(0, AuthCheck {});
+            let p2: Pending<AuthApproved> = request:auth2(0, AuthCheck {});
+            k;
+            p1;
+            p2;
+        }
+
+        on AuthApproved(ok) for AuthCheck:auth1(req) -> stay {
+            ok;
+            req;
+        }
+
+        on AuthApproved(ok) for AuthCheck:auth2(req) -> stay {
+            ok;
+            req;
+        }
+    }
+}
+"#;
+    let file_id = db.upsert_disk_text(
+        PathBuf::from("examples/analysis_typestate_provenance_labels_ok.mc"),
+        source,
+    );
+
+    let diagnostics = db
+        .diagnostics_for_program_file(file_id)
+        .expect("program diagnostics query should succeed");
+    assert!(
+        diagnostics.is_empty(),
+        "expected no diagnostics for labeled provenance disambiguation, got: {diagnostics:#?}"
+    );
+}
+
+#[test]
 fn hover_for_program_typestate_example_uses_source_facing_names() {
     let mut db = AnalysisDb::new();
     db.set_experimental_typestate(true);

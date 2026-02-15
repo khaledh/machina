@@ -261,7 +261,7 @@ fn main() -> u64 {
 }
 
 #[test]
-fn test_typestate_machine_runtime_two_machine_request_reply_approved_and_denied() {
+fn test_typestate_machine_runtime_two_machine_request_reply_with_labeled_provenance() {
     let source = r#"
 requires {
     std::io::println
@@ -274,11 +274,8 @@ requires {
 
 type KickApprove = {}
 type KickDeny = {}
-type ReqApprove = {}
-type ReqDeny = {}
-type Response = {}
-type AuthApproved = {}
-type AuthDenied = {}
+type AuthCheck = {}
+type AuthReply = {}
 
 typestate AuthClient {
     fn new() -> Idle {
@@ -286,32 +283,32 @@ typestate AuthClient {
     }
 
     state Idle {
-        on KickApprove(e) -> AwaitAuth {
+        on KickApprove(e) -> stay {
             e;
-            let pending: Pending<AuthApproved | AuthDenied> = request(1, ReqApprove {});
-            AwaitAuth { pending: pending }
+            let p: Pending<AuthReply> =
+                request:approve(1, AuthCheck {});
+            p;
         }
 
-        on KickDeny(e) -> AwaitAuth {
+        on KickDeny(e) -> stay {
             e;
-            let pending: Pending<AuthApproved | AuthDenied> = request(1, ReqDeny {});
-            AwaitAuth { pending: pending }
-        }
-    }
-
-    state AwaitAuth {
-        fields {
-            pending: Pending<AuthApproved | AuthDenied>,
+            let p: Pending<AuthReply> =
+                request:deny(1, AuthCheck {});
+            p;
         }
 
-        on Response(pending, AuthApproved) -> Idle {
+        on AuthReply(resp) for AuthCheck:approve(req) -> stay {
+            req;
+            resp;
+            println("approve path");
             println("approved");
-            Idle {}
         }
 
-        on Response(pending, AuthDenied) -> Idle {
+        on AuthReply(resp) for AuthCheck:deny(req) -> stay {
+            req;
+            resp;
+            println("deny path");
             println("denied");
-            Idle {}
         }
     }
 }
@@ -322,14 +319,9 @@ typestate AuthServer {
     }
 
     state Ready {
-        on ReqApprove(req: ReqApprove, cap: ReplyCap<AuthApproved | AuthDenied>) -> stay {
+        on AuthCheck(req: AuthCheck, cap: ReplyCap<AuthReply>) -> stay {
             req;
-            reply(cap, AuthApproved {});
-        }
-
-        on ReqDeny(req: ReqDeny, cap: ReplyCap<AuthApproved | AuthDenied>) -> stay {
-            req;
-            reply(cap, AuthDenied {});
+            reply(cap, AuthReply {});
         }
     }
 }
@@ -352,41 +344,25 @@ fn main() -> u64 {
         _ => { return 1; },
     };
 
-    // Kick approve flow (3 dispatches): client -> server -> client(response).
+    // Queue two same-type requests from distinct labeled request sites.
     match send(rt, client_id, 1, 0, 0) {
         ok: () => { ok; }
         _ => { return 1; },
     };
-    match step(rt) {
-        StepStatus::DidWork => {}
-        _ => { return 1; },
-    };
-    match step(rt) {
-        StepStatus::DidWork => {}
-        _ => { return 1; },
-    };
-    match step(rt) {
-        StepStatus::DidWork => {}
-        _ => { return 1; },
-    };
-
-    // Kick deny flow (same 3-dispatch pattern).
     match send(rt, client_id, 2, 0, 0) {
         ok: () => { ok; }
         _ => { return 1; },
     };
-    match step(rt) {
-        StepStatus::DidWork => {}
-        _ => { return 1; },
-    };
-    match step(rt) {
-        StepStatus::DidWork => {}
-        _ => { return 1; },
-    };
-    match step(rt) {
-        StepStatus::DidWork => {}
-        _ => { return 1; },
-    };
+
+    // Drain a bounded number of dispatch steps.
+    match step(rt) { StepStatus::Faulted => { return 1; } _ => {} };
+    match step(rt) { StepStatus::Faulted => { return 1; } _ => {} };
+    match step(rt) { StepStatus::Faulted => { return 1; } _ => {} };
+    match step(rt) { StepStatus::Faulted => { return 1; } _ => {} };
+    match step(rt) { StepStatus::Faulted => { return 1; } _ => {} };
+    match step(rt) { StepStatus::Faulted => { return 1; } _ => {} };
+    match step(rt) { StepStatus::Faulted => { return 1; } _ => {} };
+    match step(rt) { StepStatus::Faulted => { return 1; } _ => {} };
     0
 }
 "#;
@@ -407,7 +383,10 @@ fn main() -> u64 {
     assert_eq!(run.status.code(), Some(0));
     let stdout = String::from_utf8_lossy(&run.stdout);
     assert!(
-        stdout.contains("approved") && stdout.contains("denied"),
-        "expected both request/reply outcomes in stdout, got: {stdout}"
+        stdout.contains("approve path")
+            && stdout.contains("approved")
+            && stdout.contains("deny path")
+            && stdout.contains("denied"),
+        "expected deterministic labeled routing outcomes in stdout, got: {stdout}"
     );
 }

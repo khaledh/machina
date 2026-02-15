@@ -124,8 +124,8 @@ Tier 1 managed entrypoint model:
 - spawn managed machines through `Typestate::spawn(...)`,
 - drive event dispatch via `std::machine::step`.
 
-`spawn(...)` mirrors constructor parameters exactly:
-- `fn new(auth: u64) -> Idle` implies `AuthClient::spawn(auth)`.
+Current limitation:
+- managed `spawn(...)` supports zero-argument constructors in v1.
 
 ```mc
 requires {
@@ -136,36 +136,48 @@ requires {
     std::machine::StepStatus
 }
 
-type AuthorizeReq = { user: string }
-type AuthApproved = {}
-type AuthDenied = {}
-type Start = { user: string }
+type AuthorizeReq = {}
+type AuthReply = {}
+type Start = {}
+type Retry = {}
 
 protocol Auth {
     role Client;
     role Server;
-    flow Client -> Server: AuthorizeReq -> AuthApproved | AuthDenied;
+    flow Client -> Server: AuthorizeReq -> AuthReply;
 }
 
 typestate GatewayClient : Auth::Client {
-    fields { auth_peer: u64 }
-
-    fn new(auth_peer: u64) -> Idle {
-        Idle { auth_peer }
+    fn new() -> Idle {
+        Idle {}
     }
 
     state Idle {
         on Start(start) -> AwaitAuth {
-            let pending = request(self.auth_peer, AuthorizeReq { user: start.user });
-            AwaitAuth { pending }
+            start;
+            request:initial(1, AuthorizeReq {});
+            AwaitAuth {}
+        }
+
+        on Retry(start) -> AwaitAuth {
+            start;
+            request:retry(1, AuthorizeReq {});
+            AwaitAuth {}
         }
     }
 
     state AwaitAuth {
-        fields { pending: Pending<AuthApproved | AuthDenied> }
+        on AuthReply(resp) for AuthorizeReq:initial(req) -> Connected | Idle {
+            req;
+            resp;
+            Connected {}
+        }
 
-        on Response(pending, AuthApproved) -> Connected { Connected {} }
-        on Response(pending, AuthDenied) -> Idle { Idle {} }
+        on AuthReply(resp) for AuthorizeReq:retry(req) -> Connected | Idle {
+            req;
+            resp;
+            Idle {}
+        }
     }
 
     state Connected {}
@@ -175,12 +187,9 @@ typestate AuthService : Auth::Server {
     fn new() -> Ready { Ready {} }
 
     state Ready {
-        on AuthorizeReq(req: AuthorizeReq, cap: ReplyCap<AuthApproved | AuthDenied>) -> stay {
-            if req.user.len > 0 {
-                reply(cap, AuthApproved {});
-            } else {
-                reply(cap, AuthDenied {});
-            };
+        on AuthorizeReq(req: AuthorizeReq, cap: ReplyCap<AuthReply>) -> stay {
+            req;
+            reply(cap, AuthReply {});
         }
     }
 }
@@ -191,7 +200,7 @@ fn main() {
         m: Machine => m,
         _ => { return; },
     };
-    let client: Machine = match GatewayClient::spawn(auth._id) {
+    let client: Machine = match GatewayClient::spawn() {
         m: Machine => m,
         _ => { return; },
     };
@@ -214,12 +223,14 @@ fn main() {
 ```
 
 Key ideas:
-- `send(...)` and `request(...)` handler sugar lower to outbound effects checked against
-  `flow` declarations for the implemented role.
-- `request(...)` returns `Pending<...>` so later handlers can correlate
-  responses.
-- Pattern-form handlers (`on Response(pending, Variant) -> ...`) keep response
-  routing explicit and checked.
+- `send(...)` and `request(...)` handler sugar lower to outbound effects checked
+  against `flow` declarations for the implemented role.
+- Correlation is implicit by default. Use `for RequestType(binding)` on
+  response handlers when you need provenance (or when disambiguation is
+  required).
+- Request-site labels (`request:label(...)`) disambiguate concurrent same-type
+  inflight requests; handlers match them with `for RequestType:label(binding)`.
+- `Pending<...>`/`ReplyCap<...>` remain available as explicit advanced forms.
 - `reply(cap, value)` consumes `ReplyCap<...>` and enforces response-set safety.
 - `@[machines]` is required to use `Typestate::spawn(...)` in binaries.
 
