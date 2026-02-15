@@ -31,7 +31,14 @@ int main(void) {
         return 1;
     }
 
-    __mc_machine_runtime_bind_dispatch(&rt, m, test_dispatch, NULL);
+    if (__mc_machine_runtime_bind_dispatch_u64(
+            (uint64_t)(uintptr_t)&rt,
+            m,
+            (uint64_t)(uintptr_t)test_dispatch,
+            0
+        ) == 0) {
+        return 1;
+    }
     __mc_machine_runtime_set_state(&rt, m, 10);
     if (!__mc_machine_runtime_start(&rt, m)) {
         return 1;

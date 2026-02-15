@@ -42,6 +42,9 @@ type ReplyMailboxFull = {}
 type StepStatus = Idle | DidWork | Faulted
 
 @[public]
+type BindDispatchFailed = {}
+
+@[public]
 fn new_runtime() -> Runtime {
   Runtime {
     _raw: __mc_machine_runtime_new(),
@@ -133,6 +136,22 @@ fn send_reply(
     ReplyDestNotRunning {}
   } else {
     ReplyMailboxFull {}
+  }
+}
+
+// Low-level bridge used by compiler-generated managed bootstrap paths.
+// `dispatch_fn` and `dispatch_ctx` are opaque runtime pointer words.
+@[public]
+fn bind_dispatch(
+  rt: Runtime,
+  machine_id: u64,
+  dispatch_fn: u64,
+  dispatch_ctx: u64,
+) -> () | BindDispatchFailed {
+  if __mc_machine_runtime_bind_dispatch_u64(rt._raw, machine_id, dispatch_fn, dispatch_ctx) == 0 {
+    BindDispatchFailed {}
+  } else {
+    ()
   }
 }
 

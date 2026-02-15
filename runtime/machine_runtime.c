@@ -1756,6 +1756,32 @@ uint64_t __mc_machine_runtime_reply_u64(
     return (uint64_t)__mc_machine_runtime_reply(rt, (mc_machine_id_t)src, reply_cap_id, &env);
 }
 
+uint64_t __mc_machine_runtime_bind_dispatch_u64(
+    uint64_t runtime,
+    uint64_t machine_id,
+    uint64_t dispatch_fn,
+    uint64_t dispatch_ctx
+) {
+    mc_machine_runtime_t *rt = mc_runtime_from_handle(runtime);
+    if (!rt || machine_id == 0 || machine_id > UINT32_MAX) {
+        return 0;
+    }
+    mc_machine_slot_t *slot = mc_get_slot(rt, (mc_machine_id_t)machine_id);
+    if (!slot) {
+        return 0;
+    }
+
+    mc_machine_dispatch_txn_fn typed_dispatch =
+        (mc_machine_dispatch_txn_fn)(uintptr_t)dispatch_fn;
+    __mc_machine_runtime_bind_dispatch(
+        rt,
+        (mc_machine_id_t)machine_id,
+        typed_dispatch,
+        (void *)(uintptr_t)dispatch_ctx
+    );
+    return 1;
+}
+
 uint64_t __mc_machine_runtime_step_u64(uint64_t runtime) {
     mc_machine_runtime_t *rt = mc_runtime_from_handle(runtime);
     if (!rt) {

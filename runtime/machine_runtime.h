@@ -516,6 +516,16 @@ uint64_t __mc_machine_runtime_reply_u64(
     uint64_t payload0,
     uint64_t payload1
 );
+// Bind machine-local dispatch callback through opaque-handle bridge.
+// `dispatch_fn` is a `mc_machine_dispatch_txn_fn` pointer encoded as `u64`.
+// `dispatch_ctx` is an opaque pointer value passed to callback.
+// Returns 1 on success, 0 on invalid handle/id.
+uint64_t __mc_machine_runtime_bind_dispatch_u64(
+    uint64_t runtime,
+    uint64_t machine_id,
+    uint64_t dispatch_fn,
+    uint64_t dispatch_ctx
+);
 // Runs one dispatch step through the managed runtime bridge.
 // Returns `mc_machine_step_status_t` value.
 uint64_t __mc_machine_runtime_step_u64(uint64_t runtime);
