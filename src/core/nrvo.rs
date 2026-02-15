@@ -226,9 +226,12 @@ impl NrvoSafetyChecker {
                 let args_ok = args.iter().all(|arg| self.check_call_arg(arg));
                 receiver_ok && args_ok
             }
-            VEK::EmitSend { to, payload } | VEK::EmitRequest { to, payload } => {
-                self.check_expr(to, false) && self.check_expr(payload, false)
-            }
+            VEK::EmitSend { to, payload }
+            | VEK::EmitRequest {
+                to,
+                payload,
+                request_site_key: _,
+            } => self.check_expr(to, false) && self.check_expr(payload, false),
             VEK::Reply { cap, value } => {
                 self.check_expr(cap, false) && self.check_expr(value, false)
             }

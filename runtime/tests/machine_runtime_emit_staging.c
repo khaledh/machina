@@ -92,7 +92,7 @@ static mc_dispatch_result_t emit_dispatch(
     }
 
     if (machine_id == state->src_req && env->kind == 3) {
-        uint64_t pending = __mc_machine_emit_request(state->dst_server, 30, 55, 66);
+        uint64_t pending = __mc_machine_emit_request(state->dst_server, 30, 55, 66, 3001);
         if (pending == 0) {
             *fault_code = 30;
             return MC_DISPATCH_FAULT;
@@ -141,7 +141,7 @@ int main(void) {
     if (__mc_machine_emit_send(1, 0, 0, 0) != 0) {
         return 1;
     }
-    if (__mc_machine_emit_request(1, 0, 0, 0) != 0) {
+    if (__mc_machine_emit_request(1, 0, 0, 0, 0) != 0) {
         return 1;
     }
     if (__mc_machine_emit_reply(1, 0, 0, 0) != 0) {
@@ -238,6 +238,12 @@ int main(void) {
         return 1;
     }
     if (state.minted_pending_id == 0 || !__mc_machine_runtime_pending_contains(&rt, state.minted_pending_id)) {
+        return 1;
+    }
+    if (!__mc_machine_runtime_pending_contains_identity(&rt, state.minted_pending_id, 3001)) {
+        return 1;
+    }
+    if (__mc_machine_runtime_pending_request_site(&rt, state.minted_pending_id) != 3001) {
         return 1;
     }
     if (__mc_machine_runtime_mailbox_len(&rt, state.dst_server) != 1) {

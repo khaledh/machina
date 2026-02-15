@@ -134,6 +134,8 @@ typedef struct mc_machine_outbox_effect {
 typedef struct mc_machine_request_effect {
     mc_machine_id_t dst;
     uint64_t pending_id;
+    // Compiler-provided request-site identity (0 when unknown/not provided).
+    uint64_t request_site_key;
     mc_machine_envelope_t env;
 } mc_machine_request_effect_t;
 
@@ -278,8 +280,15 @@ typedef struct mc_subscription_registry {
 } mc_subscription_registry_t;
 
 // Correlation table for request/reply capability ids.
+typedef struct mc_pending_correlation_id {
+    // Runtime-minted capability id returned to requester as `Pending<T>`.
+    uint64_t pending_id;
+    // Compiler-provided request-site identity (0 when unknown/not provided).
+    uint64_t request_site_key;
+} mc_pending_correlation_id_t;
+
 typedef struct mc_pending_reply_entry {
-    uint64_t cap_id;
+    mc_pending_correlation_id_t correlation;
     mc_machine_id_t requester;
     uint8_t active;
 } mc_pending_reply_entry_t;
@@ -479,6 +488,8 @@ mc_machine_reply_result_t __mc_machine_runtime_reply(
 // - `kind`: event kind used for descriptor dispatch row selection.
 // - `payload0`: payload pointer/int payload word.
 // - `payload1`: payload layout identifier.
+// - `request_site_key` (request only): compiler-provided request-site identity
+//   used to annotate inflight correlation entries.
 //
 // Return values:
 // - send/reply: non-zero on success, zero on failure.
@@ -495,7 +506,8 @@ uint64_t __mc_machine_emit_request(
     uint64_t dst,
     uint64_t kind,
     uint64_t payload0,
-    uint64_t payload1
+    uint64_t payload1,
+    uint64_t request_site_key
 );
 uint8_t __mc_machine_emit_reply(
     uint64_t cap,
@@ -540,7 +552,18 @@ uint8_t __mc_machine_runtime_subscription_contains(
 uint32_t __mc_machine_runtime_pending_len(const mc_machine_runtime_t *rt);
 uint8_t __mc_machine_runtime_pending_contains(
     const mc_machine_runtime_t *rt,
-    uint64_t cap_id
+    uint64_t pending_id
+);
+// True only when both pending id and request-site key match an active entry.
+uint8_t __mc_machine_runtime_pending_contains_identity(
+    const mc_machine_runtime_t *rt,
+    uint64_t pending_id,
+    uint64_t request_site_key
+);
+// Returns request-site key for active pending id, or 0 when not found.
+uint64_t __mc_machine_runtime_pending_request_site(
+    const mc_machine_runtime_t *rt,
+    uint64_t pending_id
 );
 
 // Opaque-handle runtime bridge for Machina std wrappers.

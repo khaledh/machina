@@ -401,7 +401,11 @@ impl<'a> DropPlanBuilder<'a> {
                 }
             }
             sem::ValueExprKind::EmitSend { to, payload }
-            | sem::ValueExprKind::EmitRequest { to, payload } => {
+            | sem::ValueExprKind::EmitRequest {
+                to,
+                payload,
+                request_site_key: _,
+            } => {
                 self.visit_value_expr(to);
                 self.visit_value_expr(payload);
             }

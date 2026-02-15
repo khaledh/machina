@@ -1244,7 +1244,7 @@ fn value_has_for(value: &sem::ValueExpr) -> bool {
             receiver_has_for || args.iter().any(call_arg_has_for)
         }
         sem::ValueExprKind::EmitSend { to, payload }
-        | sem::ValueExprKind::EmitRequest { to, payload } => {
+        | sem::ValueExprKind::EmitRequest { to, payload, .. } => {
             value_has_for(to) || value_has_for(payload)
         }
         sem::ValueExprKind::Reply { cap, value } => value_has_for(cap) || value_has_for(value),

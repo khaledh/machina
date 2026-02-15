@@ -61,6 +61,7 @@ static mc_dispatch_result_t txn_reqreply_dispatch(
 
         state->req[0].dst = state->server;
         state->req[0].pending_id = 9001;
+        state->req[0].request_site_key = 7001;
         state->req[0].env.kind = 100;
         state->req[0].env.src = 0;
         state->req[0].env.reply_cap_id = 0;
@@ -96,6 +97,7 @@ static mc_dispatch_result_t txn_reqreply_dispatch(
 
         state->req[0].dst = state->server_full;
         state->req[0].pending_id = 9002;
+        state->req[0].request_site_key = 7002;
         state->req[0].env.kind = 101;
         state->req[0].env.src = 0;
         state->req[0].env.reply_cap_id = 0;
@@ -210,6 +212,12 @@ int main(void) {
     if (!__mc_machine_runtime_pending_contains(&rt, 9001)) {
         return 17;
     }
+    if (!__mc_machine_runtime_pending_contains_identity(&rt, 9001, 7001)) {
+        return 39;
+    }
+    if (__mc_machine_runtime_pending_request_site(&rt, 9001) != 7001) {
+        return 40;
+    }
     if (__mc_machine_runtime_mailbox_len(&rt, state.server) != 2) {
         return 18;
     }
@@ -255,6 +263,9 @@ int main(void) {
     }
     if (__mc_machine_runtime_pending_contains(&rt, 9002)) {
         return 28;
+    }
+    if (__mc_machine_runtime_pending_contains_identity(&rt, 9002, 7002)) {
+        return 41;
     }
     if (__mc_machine_runtime_mailbox_len(&rt, state.server_full) != 1) {
         return 29;

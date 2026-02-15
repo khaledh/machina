@@ -401,7 +401,11 @@ impl<'a> Elaborator<'a> {
                 }
             }
             sem::ValueExprKind::EmitSend { to, payload }
-            | sem::ValueExprKind::EmitRequest { to, payload } => {
+            | sem::ValueExprKind::EmitRequest {
+                to,
+                payload,
+                request_site_key: _,
+            } => {
                 self.desugar_value_expr(to);
                 self.desugar_value_expr(payload);
             }

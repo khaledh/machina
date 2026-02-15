@@ -298,7 +298,11 @@ pub fn format_semantic_value_expr_compact(expr: &sem::ValueExpr) -> String {
             format_semantic_value_expr_compact(to),
             format_semantic_value_expr_compact(payload)
         ),
-        sem::ValueExprKind::EmitRequest { to, payload } => format!(
+        sem::ValueExprKind::EmitRequest {
+            to,
+            payload,
+            request_site_key: _,
+        } => format!(
             "emit Request(to: {}, payload: {})",
             format_semantic_value_expr_compact(to),
             format_semantic_value_expr_compact(payload)

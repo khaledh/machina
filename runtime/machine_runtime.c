@@ -751,11 +751,34 @@ static uint8_t mc_pending_ensure_cap(mc_pending_reply_table_t *pending, uint32_t
     return 1;
 }
 
-// Locate an active pending entry by capability id.
+// Locate an active pending entry by runtime pending id.
 // Returns -1 when the id is not currently active.
-static int32_t mc_pending_find_active(const mc_pending_reply_table_t *pending, uint64_t cap_id) {
+static int32_t mc_pending_find_active(
+    const mc_pending_reply_table_t *pending,
+    uint64_t pending_id
+) {
     for (uint32_t i = 0; i < pending->len; i++) {
-        if (pending->entries[i].active && pending->entries[i].cap_id == cap_id) {
+        if (pending->entries[i].active
+            && pending->entries[i].correlation.pending_id == pending_id) {
+            return (int32_t)i;
+        }
+    }
+    return -1;
+}
+
+// Locate an active pending entry by full correlation identity.
+// Returns -1 when the identity is not currently active.
+static int32_t mc_pending_find_active_identity(
+    const mc_pending_reply_table_t *pending,
+    mc_pending_correlation_id_t correlation
+) {
+    for (uint32_t i = 0; i < pending->len; i++) {
+        if (!pending->entries[i].active) {
+            continue;
+        }
+        const mc_pending_correlation_id_t entry = pending->entries[i].correlation;
+        if (entry.pending_id == correlation.pending_id
+            && entry.request_site_key == correlation.request_site_key) {
             return (int32_t)i;
         }
     }
@@ -763,20 +786,31 @@ static int32_t mc_pending_find_active(const mc_pending_reply_table_t *pending, u
 }
 
 // Fast membership helper used by test/debug introspection.
-static uint8_t mc_pending_contains_active(const mc_pending_reply_table_t *pending, uint64_t cap_id) {
-    return mc_pending_find_active(pending, cap_id) >= 0;
+static uint8_t mc_pending_contains_active(
+    const mc_pending_reply_table_t *pending,
+    uint64_t pending_id
+) {
+    return mc_pending_find_active(pending, pending_id) >= 0;
+}
+
+// Identity membership helper used by test/debug introspection.
+static uint8_t mc_pending_contains_identity(
+    const mc_pending_reply_table_t *pending,
+    mc_pending_correlation_id_t correlation
+) {
+    return mc_pending_find_active_identity(pending, correlation) >= 0;
 }
 
 // Insert a newly-minted pending capability.
 // Reuses inactive slots first to keep table growth bounded over time.
 static uint8_t mc_pending_insert_active(
     mc_pending_reply_table_t *pending,
-    uint64_t cap_id,
+    mc_pending_correlation_id_t correlation,
     mc_machine_id_t requester
 ) {
     for (uint32_t i = 0; i < pending->len; i++) {
         if (!pending->entries[i].active) {
-            pending->entries[i].cap_id = cap_id;
+            pending->entries[i].correlation = correlation;
             pending->entries[i].requester = requester;
             pending->entries[i].active = 1;
             return 1;
@@ -785,7 +819,7 @@ static uint8_t mc_pending_insert_active(
     if (!mc_pending_ensure_cap(pending, pending->len + 1)) {
         return 0;
     }
-    pending->entries[pending->len].cap_id = cap_id;
+    pending->entries[pending->len].correlation = correlation;
     pending->entries[pending->len].requester = requester;
     pending->entries[pending->len].active = 1;
     pending->len += 1;
@@ -1055,7 +1089,11 @@ static uint8_t mc_commit_requests(
             }
             dst->mailbox.in_ready_queue = 1;
         }
-        if (!mc_pending_insert_active(&rt->pending, req->pending_id, src)) {
+        mc_pending_correlation_id_t correlation = {
+            .pending_id = req->pending_id,
+            .request_site_key = req->request_site_key,
+        };
+        if (!mc_pending_insert_active(&rt->pending, correlation, src)) {
             return 0;
         }
     }
@@ -1730,15 +1768,15 @@ mc_mailbox_enqueue_result_t __mc_machine_runtime_request(
         return MC_MAILBOX_ENQUEUE_FULL;
     }
 
-    uint64_t cap_id = 0;
-    if (!mc_pending_next_cap_id(&rt->pending, &cap_id)) {
+    uint64_t pending_id = 0;
+    if (!mc_pending_next_cap_id(&rt->pending, &pending_id)) {
         return MC_MAILBOX_ENQUEUE_FULL;
     }
 
     // Runtime-owned correlation fields override caller-provided values.
     mc_machine_envelope_t request_env = *env;
     request_env.src = src;
-    request_env.reply_cap_id = cap_id;
+    request_env.reply_cap_id = pending_id;
     request_env.pending_id = 0;
 
     mc_mailbox_enqueue_result_t res = __mc_machine_runtime_enqueue(rt, dst, &request_env);
@@ -1746,10 +1784,14 @@ mc_mailbox_enqueue_result_t __mc_machine_runtime_request(
         return res;
     }
 
-    // Record requester lookup keyed by minted capability id.
-    (void)mc_pending_insert_active(&rt->pending, cap_id, src);
+    // Record requester lookup keyed by minted pending correlation identity.
+    mc_pending_correlation_id_t correlation = {
+        .pending_id = pending_id,
+        .request_site_key = 0,
+    };
+    (void)mc_pending_insert_active(&rt->pending, correlation, src);
 
-    *out_pending_id = cap_id;
+    *out_pending_id = pending_id;
     return MC_MAILBOX_ENQUEUE_OK;
 }
 
@@ -1830,7 +1872,8 @@ uint64_t __mc_machine_emit_request(
     uint64_t dst,
     uint64_t kind,
     uint64_t payload0,
-    uint64_t payload1
+    uint64_t payload1,
+    uint64_t request_site_key
 ) {
     mc_emit_staging_ctx_t *ctx = g_emit_staging_ctx;
     if (!ctx) {
@@ -1846,6 +1889,7 @@ uint64_t __mc_machine_emit_request(
     mc_machine_request_effect_t effect = {
         .dst = (mc_machine_id_t)dst,
         .pending_id = pending_id,
+        .request_site_key = request_site_key,
         .env = {
             .kind = kind,
             .src = ctx->machine_id,
@@ -2084,12 +2128,41 @@ uint32_t __mc_machine_runtime_pending_len(const mc_machine_runtime_t *rt) {
 
 uint8_t __mc_machine_runtime_pending_contains(
     const mc_machine_runtime_t *rt,
-    uint64_t cap_id
+    uint64_t pending_id
 ) {
     if (!rt) {
         return 0;
     }
-    return mc_pending_contains_active(&rt->pending, cap_id);
+    return mc_pending_contains_active(&rt->pending, pending_id);
+}
+
+uint8_t __mc_machine_runtime_pending_contains_identity(
+    const mc_machine_runtime_t *rt,
+    uint64_t pending_id,
+    uint64_t request_site_key
+) {
+    if (!rt) {
+        return 0;
+    }
+    mc_pending_correlation_id_t correlation = {
+        .pending_id = pending_id,
+        .request_site_key = request_site_key,
+    };
+    return mc_pending_contains_identity(&rt->pending, correlation);
+}
+
+uint64_t __mc_machine_runtime_pending_request_site(
+    const mc_machine_runtime_t *rt,
+    uint64_t pending_id
+) {
+    if (!rt) {
+        return 0;
+    }
+    int32_t idx = mc_pending_find_active(&rt->pending, pending_id);
+    if (idx < 0) {
+        return 0;
+    }
+    return rt->pending.entries[(uint32_t)idx].correlation.request_site_key;
 }
 
 // Opaque-handle runtime bridge ------------------------------------------------

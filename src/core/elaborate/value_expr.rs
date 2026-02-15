@@ -452,6 +452,9 @@ impl<'a> Elaborator<'a> {
                 norm::EmitKind::Request { to, payload } => sem::ValueExprKind::EmitRequest {
                     to: Box::new(self.elab_value(to)),
                     payload: Box::new(self.elab_value(payload)),
+                    // Preserve source request-site identity for runtime
+                    // correlation metadata; NodeId is stable within module.
+                    request_site_key: expr.id.0 as u64,
                 },
             },
             norm::ExprKind::Reply { cap, value } => sem::ValueExprKind::Reply {

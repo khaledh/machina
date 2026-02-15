@@ -532,6 +532,8 @@ pub enum ValueExprKind {
     EmitRequest {
         to: Box<ValueExpr>,
         payload: Box<ValueExpr>,
+        /// Stable request-site identity used by runtime correlation plumbing.
+        request_site_key: u64,
     },
     Reply {
         cap: Box<ValueExpr>,

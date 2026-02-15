@@ -992,7 +992,11 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
                 let unit_ty = self.type_lowerer.lower_type_id(expr.ty);
                 Ok(self.builder.const_int(0, false, 8, unit_ty).into())
             }
-            sem::ValueExprKind::EmitRequest { to, payload } => {
+            sem::ValueExprKind::EmitRequest {
+                to,
+                payload,
+                request_site_key,
+            } => {
                 let dst = match self.lower_value_expr_value(to)? {
                     BranchResult::Value(value) => value,
                     BranchResult::Return => return Ok(BranchResult::Return),
@@ -1008,10 +1012,13 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
                 let event_kind = self.machine_payload_event_kind(&payload_ty).unwrap_or(0);
                 let kind = self.builder.const_int(event_kind as i128, false, 64, u64_ty);
                 let zero = self.builder.const_int(0, false, 64, u64_ty);
+                let request_site =
+                    self.builder
+                        .const_int(*request_site_key as i128, false, 64, u64_ty);
                 let pending_ty = self.type_lowerer.lower_type_id(expr.ty);
                 let pending = self.builder.call(
                     Callee::Runtime(RuntimeFn::MachineEmitRequest),
-                    vec![dst, kind, zero, zero],
+                    vec![dst, kind, zero, zero, request_site],
                     pending_ty,
                 );
                 Ok(pending.into())
