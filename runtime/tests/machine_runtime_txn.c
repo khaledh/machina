@@ -52,6 +52,10 @@ static mc_dispatch_result_t txn_dispatch(
     txn->outbox_len = 0;
     txn->subscriptions = NULL;
     txn->subscriptions_len = 0;
+    txn->requests = NULL;
+    txn->requests_len = 0;
+    txn->replies = NULL;
+    txn->replies_len = 0;
 
     if (env->kind == 1) {
         // Successful staged transition.

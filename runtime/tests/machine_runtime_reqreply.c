@@ -50,6 +50,10 @@ static mc_dispatch_result_t reqreply_dispatch(
     txn->outbox_len = 0;
     txn->subscriptions = NULL;
     txn->subscriptions_len = 0;
+    txn->requests = NULL;
+    txn->requests_len = 0;
+    txn->replies = NULL;
+    txn->replies_len = 0;
 
     if (machine_id == state->server && env->kind == 100) {
         state->server_dispatch_count += 1;

@@ -69,6 +69,10 @@ static mc_dispatch_result_t dispatch(
     txn->outbox_len = 0;
     txn->subscriptions = NULL;
     txn->subscriptions_len = 0;
+    txn->requests = NULL;
+    txn->requests_len = 0;
+    txn->replies = NULL;
+    txn->replies_len = 0;
     uint32_t i = state->dispatch_count++;
     state->seen_machine[i] = machine_id;
     state->seen_kind[i] = env->kind;

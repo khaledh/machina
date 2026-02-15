@@ -117,6 +117,24 @@ typedef struct mc_machine_outbox_effect {
     mc_machine_envelope_t env;
 } mc_machine_outbox_effect_t;
 
+// One staged request delivery emitted by a successful transition.
+//
+// `pending_id` is the capability id to insert into pending-correlation table on
+// commit. Commit rejects duplicate/zero/active ids.
+typedef struct mc_machine_request_effect {
+    mc_machine_id_t dst;
+    uint64_t pending_id;
+    mc_machine_envelope_t env;
+} mc_machine_request_effect_t;
+
+// One staged reply delivery emitted by a successful transition.
+//
+// `reply_cap_id` identifies the pending requester route to consume on commit.
+typedef struct mc_machine_reply_effect {
+    uint64_t reply_cap_id;
+    mc_machine_envelope_t env;
+} mc_machine_reply_effect_t;
+
 typedef enum mc_subscription_op {
     MC_SUBSCRIPTION_ADD = 0,
     MC_SUBSCRIPTION_REMOVE = 1,
@@ -138,13 +156,21 @@ typedef struct mc_machine_dispatch_txn {
     // Next machine-local state value.
     uint64_t next_state;
 
-    // Outbox effects to commit atomically with state/subscriptions.
+    // Outbox effects to commit atomically with state/subscriptions/req-reply.
     const mc_machine_outbox_effect_t *outbox;
     uint32_t outbox_len;
 
-    // Subscription updates to commit atomically with state/outbox.
+    // Subscription updates to commit atomically with state/outbox/req-reply.
     const mc_subscription_update_t *subscriptions;
     uint32_t subscriptions_len;
+
+    // Request effects to commit atomically with state/outbox/subscriptions.
+    const mc_machine_request_effect_t *requests;
+    uint32_t requests_len;
+
+    // Reply effects to commit atomically with state/outbox/subscriptions.
+    const mc_machine_reply_effect_t *replies;
+    uint32_t replies_len;
 } mc_machine_dispatch_txn_t;
 
 // Called when an enqueue attempt cannot be delivered.
@@ -367,7 +393,7 @@ mc_machine_reply_result_t __mc_machine_runtime_reply(
 // Executes at most one envelope dispatch using transactional callback.
 //
 // Transaction model:
-// - on `MC_DISPATCH_OK`: commit `(state update, outbox effects, subscription updates)` atomically.
+// - on `MC_DISPATCH_OK`: commit `(state update, outbox effects, subscription updates, request/reply effects)` atomically.
 // - on `MC_DISPATCH_FAULT`: rollback staged outputs and apply fault policy.
 // - on `MC_DISPATCH_STOP`: rollback staged outputs and stop machine.
 //

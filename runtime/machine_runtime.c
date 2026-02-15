@@ -347,6 +347,17 @@ static uint32_t mc_pending_active_len(const mc_pending_reply_table_t *pending) {
     return count;
 }
 
+// Count inactive pending slots available for reuse.
+static uint32_t mc_pending_inactive_len(const mc_pending_reply_table_t *pending) {
+    uint32_t count = 0;
+    for (uint32_t i = 0; i < pending->len; i++) {
+        if (!pending->entries[i].active) {
+            count += 1;
+        }
+    }
+    return count;
+}
+
 // Best-effort dead-letter callback.
 static void mc_emit_dead_letter(
     mc_machine_runtime_t *rt,
@@ -462,6 +473,225 @@ static uint8_t mc_commit_outbox(
             }
             dst->mailbox.in_ready_queue = 1;
         }
+    }
+    return 1;
+}
+
+// Validate staged requests before commit.
+static uint8_t mc_preflight_requests(
+    mc_machine_runtime_t *rt,
+    const mc_machine_request_effect_t *requests,
+    uint32_t requests_len
+) {
+    // Validate pending ids are non-zero, unique in txn, and not already active.
+    for (uint32_t i = 0; i < requests_len; i++) {
+        uint64_t pending_id = requests[i].pending_id;
+        if (pending_id == 0) {
+            return 0;
+        }
+        if (mc_pending_find_active(&rt->pending, pending_id) >= 0) {
+            return 0;
+        }
+        for (uint32_t k = 0; k < i; k++) {
+            if (requests[k].pending_id == pending_id) {
+                return 0;
+            }
+        }
+    }
+
+    // Ensure pending table has enough reusable/new slots for all staged requests.
+    uint32_t inactive = mc_pending_inactive_len(&rt->pending);
+    uint32_t need_new = requests_len > inactive ? (requests_len - inactive) : 0;
+    if (need_new > 0 && !mc_pending_ensure_cap(&rt->pending, rt->pending.len + need_new)) {
+        return 0;
+    }
+
+    // Validate destinations and cumulative mailbox capacity.
+    for (uint32_t i = 0; i < requests_len; i++) {
+        mc_machine_slot_t *dst = mc_get_slot(rt, requests[i].dst);
+        if (!dst) {
+            return 0;
+        }
+        if (dst->lifecycle != MC_MACHINE_RUNNING && dst->lifecycle != MC_MACHINE_CREATED) {
+            return 0;
+        }
+    }
+
+    uint32_t additional_ready = 0;
+    for (uint32_t i = 0; i < requests_len; i++) {
+        mc_machine_id_t dst_id = requests[i].dst;
+        uint8_t seen = 0;
+        for (uint32_t k = 0; k < i; k++) {
+            if (requests[k].dst == dst_id) {
+                seen = 1;
+                break;
+            }
+        }
+        if (seen) {
+            continue;
+        }
+
+        mc_machine_slot_t *dst = mc_get_slot(rt, dst_id);
+        uint32_t needed = 0;
+        for (uint32_t j = i; j < requests_len; j++) {
+            if (requests[j].dst == dst_id) {
+                needed += 1;
+            }
+        }
+        uint32_t free_slots = dst->mailbox.cap - dst->mailbox.len;
+        if (needed > free_slots) {
+            return 0;
+        }
+        if (dst->lifecycle == MC_MACHINE_RUNNING
+            && dst->mailbox.len == 0
+            && !dst->mailbox.in_ready_queue) {
+            additional_ready += 1;
+        }
+    }
+
+    return mc_ready_ensure_cap(&rt->ready, rt->ready.len + additional_ready);
+}
+
+// Commit staged requests after successful preflight.
+static uint8_t mc_commit_requests(
+    mc_machine_runtime_t *rt,
+    mc_machine_id_t src,
+    const mc_machine_request_effect_t *requests,
+    uint32_t requests_len
+) {
+    for (uint32_t i = 0; i < requests_len; i++) {
+        const mc_machine_request_effect_t *req = &requests[i];
+        mc_machine_slot_t *dst = mc_get_slot(rt, req->dst);
+        if (!dst) {
+            return 0;
+        }
+
+        mc_machine_envelope_t request_env = req->env;
+        request_env.src = src;
+        request_env.reply_cap_id = req->pending_id;
+        request_env.pending_id = 0;
+
+        if (!mc_mailbox_push(&dst->mailbox, &request_env)) {
+            return 0;
+        }
+        if (dst->lifecycle == MC_MACHINE_RUNNING && !dst->mailbox.in_ready_queue) {
+            if (!mc_ready_push(&rt->ready, req->dst)) {
+                return 0;
+            }
+            dst->mailbox.in_ready_queue = 1;
+        }
+        if (!mc_pending_insert_active(&rt->pending, req->pending_id, src)) {
+            return 0;
+        }
+    }
+    return 1;
+}
+
+// Validate staged replies before commit.
+static uint8_t mc_preflight_replies(
+    mc_machine_runtime_t *rt,
+    const mc_machine_reply_effect_t *replies,
+    uint32_t replies_len
+) {
+    // Validate reply caps are active and unique in this txn.
+    for (uint32_t i = 0; i < replies_len; i++) {
+        uint64_t cap = replies[i].reply_cap_id;
+        if (cap == 0 || mc_pending_find_active(&rt->pending, cap) < 0) {
+            return 0;
+        }
+        for (uint32_t k = 0; k < i; k++) {
+            if (replies[k].reply_cap_id == cap) {
+                return 0;
+            }
+        }
+    }
+
+    // Validate requester destinations and mailbox capacity.
+    uint32_t additional_ready = 0;
+    for (uint32_t i = 0; i < replies_len; i++) {
+        int32_t idx = mc_pending_find_active(&rt->pending, replies[i].reply_cap_id);
+        if (idx < 0) {
+            return 0;
+        }
+        mc_machine_id_t requester = rt->pending.entries[(uint32_t)idx].requester;
+        mc_machine_slot_t *dst = mc_get_slot(rt, requester);
+        if (!dst) {
+            return 0;
+        }
+        if (dst->lifecycle != MC_MACHINE_RUNNING && dst->lifecycle != MC_MACHINE_CREATED) {
+            return 0;
+        }
+
+        uint8_t seen = 0;
+        for (uint32_t k = 0; k < i; k++) {
+            int32_t prev_idx = mc_pending_find_active(&rt->pending, replies[k].reply_cap_id);
+            if (prev_idx >= 0
+                && rt->pending.entries[(uint32_t)prev_idx].requester == requester) {
+                seen = 1;
+                break;
+            }
+        }
+        if (seen) {
+            continue;
+        }
+
+        uint32_t needed = 0;
+        for (uint32_t j = i; j < replies_len; j++) {
+            int32_t ridx = mc_pending_find_active(&rt->pending, replies[j].reply_cap_id);
+            if (ridx >= 0 && rt->pending.entries[(uint32_t)ridx].requester == requester) {
+                needed += 1;
+            }
+        }
+        uint32_t free_slots = dst->mailbox.cap - dst->mailbox.len;
+        if (needed > free_slots) {
+            return 0;
+        }
+        if (dst->lifecycle == MC_MACHINE_RUNNING
+            && dst->mailbox.len == 0
+            && !dst->mailbox.in_ready_queue) {
+            additional_ready += 1;
+        }
+    }
+
+    return mc_ready_ensure_cap(&rt->ready, rt->ready.len + additional_ready);
+}
+
+// Commit staged replies after successful preflight.
+static uint8_t mc_commit_replies(
+    mc_machine_runtime_t *rt,
+    mc_machine_id_t src,
+    const mc_machine_reply_effect_t *replies,
+    uint32_t replies_len
+) {
+    for (uint32_t i = 0; i < replies_len; i++) {
+        const mc_machine_reply_effect_t *reply = &replies[i];
+        int32_t idx = mc_pending_find_active(&rt->pending, reply->reply_cap_id);
+        if (idx < 0) {
+            return 0;
+        }
+        mc_machine_id_t requester = rt->pending.entries[(uint32_t)idx].requester;
+        mc_machine_slot_t *dst = mc_get_slot(rt, requester);
+        if (!dst) {
+            return 0;
+        }
+
+        mc_machine_envelope_t response_env = reply->env;
+        response_env.src = src;
+        response_env.reply_cap_id = 0;
+        response_env.pending_id = reply->reply_cap_id;
+
+        if (!mc_mailbox_push(&dst->mailbox, &response_env)) {
+            return 0;
+        }
+        if (dst->lifecycle == MC_MACHINE_RUNNING && !dst->mailbox.in_ready_queue) {
+            if (!mc_ready_push(&rt->ready, requester)) {
+                return 0;
+            }
+            dst->mailbox.in_ready_queue = 1;
+        }
+
+        // Consume capability only after successful delivery.
+        rt->pending.entries[(uint32_t)idx].active = 0;
     }
     return 1;
 }
@@ -805,7 +1035,8 @@ mc_machine_reply_result_t __mc_machine_runtime_reply(
 // Public API: execute at most one dispatch using transactional callback.
 //
 // Commit semantics:
-// - staged effects are committed only on MC_DISPATCH_OK and successful preflight.
+// - staged effects (outbox/subscriptions/request/reply) are committed only on
+//   MC_DISPATCH_OK and successful preflight.
 // - on faults/stops, staged effects are discarded.
 uint8_t __mc_machine_runtime_dispatch_one_txn(
     mc_machine_runtime_t *rt,
@@ -838,14 +1069,26 @@ uint8_t __mc_machine_runtime_dispatch_one_txn(
             .outbox_len = 0,
             .subscriptions = NULL,
             .subscriptions_len = 0,
+            .requests = NULL,
+            .requests_len = 0,
+            .replies = NULL,
+            .replies_len = 0,
         };
         mc_dispatch_result_t result = dispatch
             ? dispatch(dispatch_ctx, machine_id, slot->state_word, &env, &txn, &fault_code)
             : MC_DISPATCH_OK;
 
         if (result == MC_DISPATCH_OK) {
-            uint8_t preflight_ok = mc_preflight_subscriptions(rt, txn.subscriptions, txn.subscriptions_len)
-                && mc_preflight_outbox(rt, txn.outbox, txn.outbox_len);
+            uint8_t preflight_ok =
+                mc_ready_ensure_cap(
+                    &rt->ready,
+                    rt->ready.len + txn.outbox_len + txn.requests_len + txn.replies_len
+                )
+                &&
+                mc_preflight_subscriptions(rt, txn.subscriptions, txn.subscriptions_len)
+                && mc_preflight_outbox(rt, txn.outbox, txn.outbox_len)
+                && mc_preflight_requests(rt, txn.requests, txn.requests_len)
+                && mc_preflight_replies(rt, txn.replies, txn.replies_len);
             if (!preflight_ok) {
                 fault_code = MC_FAULT_CODE_TXN_COMMIT_REJECTED;
                 result = MC_DISPATCH_FAULT;
@@ -855,7 +1098,9 @@ uint8_t __mc_machine_runtime_dispatch_one_txn(
         if (result == MC_DISPATCH_OK) {
             // Commit transaction after preflight has guaranteed capacity.
             mc_commit_subscriptions(rt, txn.subscriptions, txn.subscriptions_len);
-            if (!mc_commit_outbox(rt, txn.outbox, txn.outbox_len)) {
+            if (!mc_commit_outbox(rt, txn.outbox, txn.outbox_len)
+                || !mc_commit_requests(rt, machine_id, txn.requests, txn.requests_len)
+                || !mc_commit_replies(rt, machine_id, txn.replies, txn.replies_len)) {
                 // Defensive guard: this should be unreachable after preflight.
                 fault_code = MC_FAULT_CODE_TXN_COMMIT_REJECTED;
                 result = MC_DISPATCH_FAULT;
