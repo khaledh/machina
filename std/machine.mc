@@ -177,6 +177,22 @@ fn bind_dispatch_thunk(
   }
 }
 
+// Binds descriptor-driven dispatch to machine slot.
+// `descriptor_id` is assigned at bootstrap registration time.
+@[public]
+fn bind_descriptor(
+  rt: Runtime,
+  machine_id: u64,
+  descriptor_id: u64,
+  initial_state_tag: u64,
+) -> () | BindDispatchFailed {
+  if __mc_machine_runtime_bind_descriptor_u64(rt._raw, machine_id, descriptor_id, initial_state_tag) == 0 {
+    BindDispatchFailed {}
+  } else {
+    ()
+  }
+}
+
 @[public]
 fn step(rt: Runtime) -> StepStatus {
   let status = __mc_machine_runtime_step_u64(rt._raw);

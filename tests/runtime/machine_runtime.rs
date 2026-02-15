@@ -1,6 +1,8 @@
 use std::path::PathBuf;
 
-use crate::common::{run_c_program, run_program};
+use machina::driver::compile::CompileOptions;
+
+use crate::common::{run_c_program, run_program, run_program_with_opts};
 
 #[test]
 fn test_machine_runtime_core() {
@@ -135,6 +137,7 @@ fn main() -> u64 {
             return 1;
         }
     };
+
     match start(rt, id) {
         _ok: () => {}
         _ => {
@@ -160,4 +163,106 @@ fn main() -> u64 {
 
     let run = run_program("std_machine_bridge", source);
     assert_eq!(run.status.code(), Some(0));
+}
+
+#[test]
+fn test_typestate_machine_runtime_descriptor_bootstrap_executes_handler() {
+    let source = r#"
+requires {
+    std::io::println
+    std::machine::new_runtime
+    std::machine::close_runtime
+    std::machine::spawn
+    std::machine::start
+    std::machine::send
+    std::machine::bind_descriptor
+    std::machine::step
+    std::machine::StepStatus
+}
+
+type Ping = {}
+
+typestate M {
+    fn new() -> S {
+        S {}
+    }
+
+    state S {
+        on Ping(e: Ping) -> S {
+            e;
+            println("handled");
+            S {}
+        }
+    }
+}
+
+fn main() -> u64 {
+    var rt = new_runtime();
+    var id = 0;
+    match spawn(rt, 8) {
+        machine_id: u64 => {
+            id = machine_id;
+        }
+        _ => {
+            close_runtime(inout rt);
+            return 1;
+        }
+    };
+    // Descriptor id/state tag are deterministic for this single-typestate fixture.
+    match bind_descriptor(rt, id, 1, 1) {
+        ok: () => {
+            ok;
+        }
+        _ => {
+            close_runtime(inout rt);
+            return 1;
+        }
+    };
+    match start(rt, id) {
+        ok: () => {
+            ok;
+        }
+        _ => {
+            close_runtime(inout rt);
+            return 1;
+        }
+    };
+    match send(rt, id, 1, 0, 0) {
+        ok: () => {
+            ok;
+        }
+        _ => {
+            close_runtime(inout rt);
+            return 1;
+        }
+    };
+
+    let status = step(rt);
+    close_runtime(inout rt);
+    match status {
+        StepStatus::DidWork => 0,
+        _ => 1,
+    }
+}
+"#;
+
+    let run = run_program_with_opts(
+        "typestate_machine_runtime_exec",
+        source,
+        CompileOptions {
+            dump: None,
+            emit_ir: false,
+            verify_ir: false,
+            trace_alloc: false,
+            trace_drops: false,
+            inject_prelude: true,
+            experimental_typestate: true,
+        },
+    );
+    assert_eq!(run.status.code(), Some(0));
+    let stdout = String::from_utf8_lossy(&run.stdout);
+    assert!(
+        stdout.contains("handled"),
+        "expected handler output in runtime execution, got stdout: {stdout}"
+    );
 }

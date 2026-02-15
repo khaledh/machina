@@ -307,6 +307,19 @@ pub fn compile_with_path(
         backend::verify::verify_module(&lowered).map_err(|e| vec![e.into()])?;
     }
 
+    // Synthetic managed-machine artifacts are injected after resolve, so they
+    // do not exist in resolver symbol tables by default. Seed codegen names
+    // from lowered IR function names to preserve required runtime symbols
+    // (notably `__mc_machine_bootstrap` weak-hook override).
+    let mut codegen_def_names = analyzed_context.symbols.def_names.clone();
+    for f in &lowered.funcs {
+        if f.func.name.starts_with("__mc_machine_") {
+            codegen_def_names
+                .entry(f.func.def_id)
+                .or_insert_with(|| f.func.name.clone());
+        }
+    }
+
     let formatted_ir = if opts.emit_ir || dump_ir {
         let mut out = String::new();
         out.push_str(&format_globals(&lowered.globals));
@@ -317,7 +330,7 @@ pub fn compile_with_path(
             out.push_str(&format_func_with_comments_and_names(
                 &func.func,
                 &func.types,
-                &analyzed_context.symbols.def_names,
+                &codegen_def_names,
             ));
         }
         Some(out)
@@ -334,8 +347,7 @@ pub fn compile_with_path(
 
     let ir = if opts.emit_ir { formatted_ir } else { None };
 
-    let asm =
-        backend::codegen::emit_module_arm64(&lowered, &analyzed_context.symbols.def_names, &target);
+    let asm = backend::codegen::emit_module_arm64(&lowered, &codegen_def_names, &target);
 
     if dump_asm {
         println!("ASM:");
