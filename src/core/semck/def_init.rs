@@ -1055,7 +1055,12 @@ impl<'a> DefInitChecker<'a> {
                 }
             }
             ExprKind::Emit { kind } => match kind {
-                EmitKind::Send { to, payload } | EmitKind::Request { to, payload } => {
+                EmitKind::Send { to, payload }
+                | EmitKind::Request {
+                    to,
+                    payload,
+                    request_site_label: _,
+                } => {
                     self.check_expr(to);
                     self.check_expr(payload);
                 }

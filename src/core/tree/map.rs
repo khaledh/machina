@@ -636,7 +636,10 @@ pub fn walk_typestate_on_handler<M: TreeMapper + ?Sized>(
         provenance: handler
             .provenance
             .as_ref()
-            .map(|param| mapper.map_param(param, ctx)),
+            .map(|provenance| TypestateHandlerProvenance {
+                param: mapper.map_param(&provenance.param, ctx),
+                request_site_label: provenance.request_site_label.clone(),
+            }),
         ret_ty_expr: mapper.map_type_expr(&handler.ret_ty_expr, ctx),
         body: mapper.map_expr(&handler.body, ctx),
         span: handler.span,
@@ -1513,9 +1516,14 @@ pub fn walk_expr_kind<M: TreeMapper + ?Sized>(
                     to: Box::new(mapper.map_expr(to, ctx)),
                     payload: Box::new(mapper.map_expr(payload, ctx)),
                 },
-                EmitKind::Request { to, payload } => EmitKind::Request {
+                EmitKind::Request {
+                    to,
+                    payload,
+                    request_site_label,
+                } => EmitKind::Request {
                     to: Box::new(mapper.map_expr(to, ctx)),
                     payload: Box::new(mapper.map_expr(payload, ctx)),
+                    request_site_label: request_site_label.clone(),
                 },
             },
         },

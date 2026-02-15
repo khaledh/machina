@@ -15,6 +15,7 @@
 //!    control flow, etc.
 
 use crate::core::elaborate::elaborator::Elaborator;
+use crate::core::machine::request_site::labeled_request_site_key;
 use crate::core::tree::normalized as norm;
 use crate::core::tree::semantic as sem;
 use crate::core::tree::{CoerceKind, ParamMode};
@@ -449,12 +450,19 @@ impl<'a> Elaborator<'a> {
                     to: Box::new(self.elab_value(to)),
                     payload: Box::new(self.elab_value(payload)),
                 },
-                norm::EmitKind::Request { to, payload } => sem::ValueExprKind::EmitRequest {
+                norm::EmitKind::Request {
+                    to,
+                    payload,
+                    request_site_label,
+                } => sem::ValueExprKind::EmitRequest {
                     to: Box::new(self.elab_value(to)),
                     payload: Box::new(self.elab_value(payload)),
-                    // Preserve source request-site identity for runtime
-                    // correlation metadata; NodeId is stable within module.
-                    request_site_key: expr.id.0 as u64,
+                    // Labeled request sites use deterministic symbolic keys;
+                    // unlabeled sites keep per-expression identity.
+                    request_site_key: request_site_label
+                        .as_deref()
+                        .map(labeled_request_site_key)
+                        .unwrap_or(expr.id.0 as u64),
                 },
             },
             norm::ExprKind::Reply { cap, value } => sem::ValueExprKind::Reply {

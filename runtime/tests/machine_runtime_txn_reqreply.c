@@ -22,6 +22,9 @@ typedef struct txn_reqreply_ctx {
     mc_machine_request_effect_t req[1];
     mc_machine_reply_effect_t reply[1];
 
+    uint64_t last_response_pending_id;
+    uint64_t last_response_origin_request_site_key;
+
     uint32_t fault_count;
     uint64_t fault_code[8];
 } txn_reqreply_ctx_t;
@@ -123,6 +126,13 @@ static mc_dispatch_result_t txn_reqreply_dispatch(
         state->reply[0].env.payload1 = 0;
         txn->replies = state->reply;
         txn->replies_len = 1;
+        return MC_DISPATCH_OK;
+    }
+
+    // Observe delivered correlated response metadata.
+    if (machine_id == state->src_req_ok && env->pending_id != 0) {
+        state->last_response_pending_id = env->pending_id;
+        state->last_response_origin_request_site_key = env->origin_request_site_key;
         return MC_DISPATCH_OK;
     }
 
@@ -245,6 +255,10 @@ int main(void) {
     }
     if (__mc_machine_runtime_mailbox_len(&rt, state.src_req_ok) != 0) {
         return 38;
+    }
+    if (state.last_response_pending_id != 9001
+        || state.last_response_origin_request_site_key != 7001) {
+        return 41;
     }
 
     // Failure path: staged request preflight reject (server_full already full).

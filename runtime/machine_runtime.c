@@ -1087,6 +1087,7 @@ static uint8_t mc_commit_requests(
         request_env.pending_id = 0;
         request_env.origin_payload0 = 0;
         request_env.origin_payload1 = 0;
+        request_env.origin_request_site_key = 0;
 
         if (!mc_mailbox_push(&dst->mailbox, &request_env)) {
             return 0;
@@ -1208,6 +1209,8 @@ static uint8_t mc_commit_replies(
         response_env.pending_id = reply->reply_cap_id;
         response_env.origin_payload0 = rt->pending.entries[(uint32_t)idx].request_payload0;
         response_env.origin_payload1 = rt->pending.entries[(uint32_t)idx].request_payload1;
+        response_env.origin_request_site_key =
+            rt->pending.entries[(uint32_t)idx].correlation.request_site_key;
 
         if (!mc_mailbox_push(&dst->mailbox, &response_env)) {
             return 0;
@@ -1487,18 +1490,29 @@ uint8_t __mc_machine_runtime_bind_dispatch_thunk(
 static const mc_machine_dispatch_row_t *mc_descriptor_find_row(
     const mc_machine_descriptor_t *descriptor,
     uint64_t state_tag,
-    mc_machine_event_kind_t event_kind
+    mc_machine_event_kind_t event_kind,
+    uint64_t request_site_key
 ) {
     if (!descriptor) {
         return NULL;
     }
+    // Dispatch rows can include site-specific response matches as well as a
+    // wildcard row (`request_site_key == 0`). Prefer exact site match first.
+    const mc_machine_dispatch_row_t *wildcard = NULL;
     for (uint32_t i = 0; i < descriptor->rows_len; i++) {
         const mc_machine_dispatch_row_t *row = &descriptor->rows[i];
-        if (row->state_tag == state_tag && row->event_kind == event_kind) {
+        if (row->state_tag != state_tag || row->event_kind != event_kind) {
+            continue;
+        }
+        if (row->request_site_key == request_site_key && request_site_key != 0) {
+            // Exact site-specific match wins.
             return row;
         }
+        if (row->request_site_key == 0) {
+            wildcard = row;
+        }
     }
-    return NULL;
+    return wildcard;
 }
 
 static mc_dispatch_result_t mc_descriptor_dispatch(
@@ -1519,7 +1533,12 @@ static mc_dispatch_result_t mc_descriptor_dispatch(
     }
 
     const mc_machine_dispatch_row_t *row =
-        mc_descriptor_find_row(slot->descriptor, slot->state_tag, env->kind);
+        mc_descriptor_find_row(
+            slot->descriptor,
+            slot->state_tag,
+            env->kind,
+            env->origin_request_site_key
+        );
     if (!row) {
         if (fault_code) {
             *fault_code = MC_FAULT_CODE_DESCRIPTOR_ROW_MISSING;
@@ -1642,6 +1661,7 @@ uint64_t __mc_machine_runtime_register_descriptor(
     for (uint32_t i = 0; i < row_count; i++) {
         if (!mc_desc_read_u64(&c, &rows[i].state_tag)
             || !mc_desc_read_u64(&c, &rows[i].event_kind)
+            || !mc_desc_read_u64(&c, &rows[i].request_site_key)
             || !mc_desc_read_u64(&c, &rows[i].state_local_thunk_id)
             || !mc_desc_read_u64(&c, &rows[i].typestate_fallback_thunk_id)) {
             __mc_free(rows);
@@ -1796,6 +1816,7 @@ mc_mailbox_enqueue_result_t __mc_machine_runtime_request(
     request_env.pending_id = 0;
     request_env.origin_payload0 = 0;
     request_env.origin_payload1 = 0;
+    request_env.origin_request_site_key = 0;
 
     mc_mailbox_enqueue_result_t res = __mc_machine_runtime_enqueue(rt, dst, &request_env);
     if (res != MC_MAILBOX_ENQUEUE_OK) {
@@ -1845,6 +1866,8 @@ mc_machine_reply_result_t __mc_machine_runtime_reply(
     response_env.pending_id = reply_cap_id;
     response_env.origin_payload0 = rt->pending.entries[(uint32_t)idx].request_payload0;
     response_env.origin_payload1 = rt->pending.entries[(uint32_t)idx].request_payload1;
+    response_env.origin_request_site_key =
+        rt->pending.entries[(uint32_t)idx].correlation.request_site_key;
 
     mc_mailbox_enqueue_result_t enqueue_res =
         __mc_machine_runtime_enqueue(rt, requester, &response_env);
@@ -1889,6 +1912,9 @@ uint8_t __mc_machine_emit_send(
             .pending_id = 0,
             .payload0 = payload0,
             .payload1 = payload1,
+            .origin_payload0 = 0,
+            .origin_payload1 = 0,
+            .origin_request_site_key = 0,
         },
     };
     return mc_emit_stage_outbox(ctx, &effect);
@@ -1923,6 +1949,9 @@ uint64_t __mc_machine_emit_request(
             .pending_id = 0,
             .payload0 = payload0,
             .payload1 = payload1,
+            .origin_payload0 = 0,
+            .origin_payload1 = 0,
+            .origin_request_site_key = 0,
         },
     };
     if (!mc_emit_stage_request(ctx, &effect)) {
@@ -1952,6 +1981,9 @@ uint8_t __mc_machine_emit_reply(
             .pending_id = 0,
             .payload0 = payload0,
             .payload1 = payload1,
+            .origin_payload0 = 0,
+            .origin_payload1 = 0,
+            .origin_request_site_key = 0,
         },
     };
     return mc_emit_stage_reply(ctx, &effect);

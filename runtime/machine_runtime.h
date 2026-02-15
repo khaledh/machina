@@ -107,6 +107,9 @@ typedef struct mc_machine_envelope {
     // Zero for non-response envelopes or when unavailable.
     uint64_t origin_payload0;
     mc_payload_layout_id_t origin_payload1;
+    // Correlated origin request-site key (response envelopes only).
+    // Zero for non-response envelopes and unlabeled request sites.
+    uint64_t origin_request_site_key;
 } mc_machine_envelope_t;
 
 typedef enum mc_machine_reply_result {
@@ -153,10 +156,12 @@ typedef struct mc_machine_reply_effect {
     mc_machine_envelope_t env;
 } mc_machine_reply_effect_t;
 
-// One descriptor dispatch row keyed by (state tag, event kind).
+// One descriptor dispatch row keyed by (state tag, event kind, request-site).
 typedef struct mc_machine_dispatch_row {
     uint64_t state_tag;
     mc_machine_event_kind_t event_kind;
+    // Optional response request-site match key. Zero means wildcard.
+    uint64_t request_site_key;
     uint64_t state_local_thunk_id;
     uint64_t typestate_fallback_thunk_id;
 } mc_machine_dispatch_row_t;

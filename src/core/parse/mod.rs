@@ -1,7 +1,9 @@
 use crate::core::diag::{Position, Span};
 use crate::core::lexer::{Token, TokenKind, TokenKind as TK};
 use crate::core::tree::parsed::*;
-use crate::core::tree::{BinaryOp, CallArgMode, InitInfo, ParamMode, UnaryOp};
+use crate::core::tree::{
+    BinaryOp, CallArgMode, InitInfo, ParamMode, TypestateHandlerProvenance, UnaryOp,
+};
 use std::collections::HashSet;
 
 mod bind_pattern;

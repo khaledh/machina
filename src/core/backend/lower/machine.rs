@@ -548,6 +548,10 @@ fn add_machine_env_type(types: &mut IrTypeCache, u64_ty: IrTypeId) -> IrTypeId {
             name: "origin_payload1".to_string(),
             ty: u64_ty,
         },
+        IrStructField {
+            name: "origin_request_site_key".to_string(),
+            ty: u64_ty,
+        },
     ];
     types.add_named(
         IrTypeKind::Struct { fields },
@@ -688,10 +692,17 @@ fn serialize_descriptor(
     }
 
     let mut dispatch_rows = desc.dispatch_table.clone();
-    dispatch_rows.sort_by_key(|row| (row.state_tag, row.event_kind));
+    dispatch_rows.sort_by_key(|row| {
+        (
+            row.state_tag,
+            row.event_kind,
+            row.request_site_key.unwrap_or(0),
+        )
+    });
     for row in &dispatch_rows {
         push_u64(&mut bytes, row.state_tag);
         push_u64(&mut bytes, row.event_kind);
+        push_u64(&mut bytes, row.request_site_key.unwrap_or(0));
         push_u64(
             &mut bytes,
             row.state_local_thunk

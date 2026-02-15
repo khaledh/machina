@@ -2591,11 +2591,68 @@ fn test_parse_typestate_handler_for_provenance_binding() {
         .provenance
         .as_ref()
         .expect("expected for-provenance binding");
-    assert_eq!(provenance.ident, "req");
+    assert_eq!(provenance.param.ident, "req");
+    assert!(provenance.request_site_label.is_none());
     assert!(matches!(
-        provenance.typ.kind,
+        provenance.param.typ.kind,
         TypeExprKind::Named { ref ident, .. } if ident == "AuthCheck"
     ));
+}
+
+#[test]
+fn test_parse_typestate_handler_for_labeled_provenance_and_labeled_request_call() {
+    let source = r#"
+        type AuthCheck = {}
+        type AuthApproved = {}
+
+        typestate Gateway {
+            fn new() -> AwaitAuth { AwaitAuth {} }
+
+            state AwaitAuth {
+                on AuthApproved(ok) for AuthCheck:auth1(req) {
+                    let pending = request:auth1(self, req);
+                    pending;
+                    ok;
+                }
+            }
+        }
+    "#;
+
+    let module = parse_module_with_options(
+        source,
+        ParserOptions {
+            experimental_typestate: true,
+        },
+    )
+    .expect("labeled provenance/request forms should parse");
+
+    let typestate = match &module.top_level_items[2] {
+        TopLevelItem::TypestateDef(def) => def,
+        _ => panic!("expected typestate top-level item"),
+    };
+    let state = typestate
+        .items
+        .iter()
+        .find_map(|item| match item {
+            TypestateItem::State(state) if state.name == "AwaitAuth" => Some(state),
+            _ => None,
+        })
+        .expect("expected AwaitAuth state");
+    let handler = state
+        .items
+        .iter()
+        .find_map(|item| match item {
+            TypestateStateItem::Handler(handler) => Some(handler),
+            _ => None,
+        })
+        .expect("expected on-handler");
+
+    let provenance = handler
+        .provenance
+        .as_ref()
+        .expect("expected labeled for-provenance binding");
+    assert_eq!(provenance.request_site_label.as_deref(), Some("auth1"));
+    assert_eq!(provenance.param.ident, "req");
 }
 
 #[test]

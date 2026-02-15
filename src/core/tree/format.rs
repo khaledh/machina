@@ -486,6 +486,16 @@ impl<T> fmt::Display for model::Param<T> {
     }
 }
 
+impl<T> fmt::Display for model::TypestateHandlerProvenance<T> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}", self.param)?;
+        if let Some(label) = &self.request_site_label {
+            write!(f, " @{}", label)?;
+        }
+        Ok(())
+    }
+}
+
 impl<T> fmt::Display for model::BindPattern<T> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         self.fmt_with_indent(f, 0)
@@ -945,13 +955,20 @@ impl Expr {
                     writeln!(f, "{}Payload:", pad1)?;
                     payload.fmt_with_indent(f, level + 2)?;
                 }
-                EmitKind::Request { to, payload } => {
+                EmitKind::Request {
+                    to,
+                    payload,
+                    request_site_label,
+                } => {
                     let pad1 = indent(level + 1);
                     writeln!(f, "{}EmitRequest [{}]", pad, self.id)?;
                     writeln!(f, "{}To:", pad1)?;
                     to.fmt_with_indent(f, level + 2)?;
                     writeln!(f, "{}Payload:", pad1)?;
                     payload.fmt_with_indent(f, level + 2)?;
+                    if let Some(label) = request_site_label {
+                        writeln!(f, "{}SiteLabel: {}", pad1, label)?;
+                    }
                 }
             },
             ExprKind::Reply { cap, value } => {

@@ -56,7 +56,7 @@ TypestateOnHandler ::= "on" TypeExpr TypestateHandlerParams? TypestateHandlerPro
 TypestateHandlerParams ::= "(" TypestateHandlerParamList? ")"
 TypestateHandlerParamList ::= TypestateHandlerParam ("," TypestateHandlerParam)* ","?
 TypestateHandlerParam ::= Param | Identifier
-TypestateHandlerProvenance ::= "for" TypeExpr "(" Identifier ")"
+TypestateHandlerProvenance ::= "for" TypeExpr ( ":" Identifier )? "(" Identifier ")"
 TypestateHandlerReturn ::= "->" (TypeExpr | "stay")
 TypestateState     ::= "state" Identifier "{" TypestateStateItem* "}"
 TypestateStateItem ::= TypestateStateFields | TypestateStateMethod | TypestateOnHandler
@@ -206,9 +206,10 @@ UnaryExpr          ::= ( "-" | "!" | "~" | "^" ) UnaryExpr
                      | "move" UnaryExpr
                      | PostfixExpr
 
-PostfixExpr        ::= Primary ( Call | ArrayIndex | SliceRange | TupleField | StructField | MethodCall )*
+PostfixExpr        ::= Primary ( Call | LabeledCall | ArrayIndex | SliceRange | TupleField | StructField | MethodCall )*
 
 Call               ::= "(" CallArgList? ")"
+LabeledCall        ::= ":" Identifier "(" CallArgList? ")"
 CallArgList        ::= CallArg ("," CallArg)* ","?
 CallArg            ::= ( "inout" | "out" | "move" )? Expr
 
@@ -228,7 +229,7 @@ Primary            ::= Literal
                      | Block
                      | ClosureExpr
 
-EmitExpr           ::= "emit" ("Send" | "Request") "(" "to" ":" Expr "," Expr ")"
+EmitExpr           ::= "emit" ("Send" | ("Request" ( ":" Identifier )?)) "(" "to" ":" Expr "," Expr ")"
 ReplyExpr          ::= "reply" "(" Expr "," Expr ")"
 
 ClosureExpr        ::= ClosureCaptureList? ClosureSig Expr

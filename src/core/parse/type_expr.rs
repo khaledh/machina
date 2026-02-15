@@ -23,6 +23,27 @@ impl<'a> Parser<'a> {
         })
     }
 
+    pub(super) fn parse_type_expr_no_refinement(&mut self) -> Result<TypeExpr, ParseError> {
+        let marker = self.mark();
+        let first = self.parse_type_term_no_refinement()?;
+
+        if self.curr_token.kind != TK::Pipe || !self.pipe_starts_type_union() {
+            return Ok(first);
+        }
+
+        let mut variants = vec![first];
+        while self.curr_token.kind == TK::Pipe && self.pipe_starts_type_union() {
+            self.advance();
+            variants.push(self.parse_type_term_no_refinement()?);
+        }
+
+        Ok(TypeExpr {
+            id: self.id_gen.new_id(),
+            kind: TypeExprKind::Union { variants },
+            span: self.close(marker),
+        })
+    }
+
     fn pipe_starts_type_union(&self) -> bool {
         self.peek()
             .is_some_and(|tok| Self::token_can_start_type(&tok.kind, self.tokens, self.pos + 1))
@@ -66,6 +87,22 @@ impl<'a> Parser<'a> {
             break;
         }
 
+        Ok(typ)
+    }
+
+    fn parse_type_term_no_refinement(&mut self) -> Result<TypeExpr, ParseError> {
+        let mut typ = self.parse_type_atom()?;
+        loop {
+            if self.curr_token.kind == TK::LBracket {
+                typ = self.parse_array_type(typ)?;
+                continue;
+            }
+            if self.curr_token.kind == TK::Caret {
+                typ = self.parse_heap_type_postfix(typ);
+                continue;
+            }
+            break;
+        }
         Ok(typ)
     }
 

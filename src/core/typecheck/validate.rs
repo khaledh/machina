@@ -159,6 +159,7 @@ fn check_protocol_shape_conformance(engine: &TypecheckEngine) -> Vec<TypeCheckEr
 struct HandlerResponsePattern {
     selector_ty: Type,
     response_tys: Vec<Type>,
+    request_site_label: Option<String>,
     span: crate::core::diag::Span,
 }
 
@@ -193,16 +194,37 @@ fn check_typestate_handler_overlap(engine: &TypecheckEngine) -> Vec<TypeCheckErr
                     continue;
                 }
 
-                errors.push(
-                    TypeCheckErrorKind::TypestateOverlappingOnHandlers(
-                        typestate_name.clone(),
-                        state_name.clone(),
-                        left.selector_ty.clone(),
-                        overlap,
-                        right.span,
-                    )
-                    .into(),
-                );
+                // Distinct labeled provenance handlers are deterministic:
+                // runtime picks exact request-site key first.
+                if let (Some(left_label), Some(right_label)) =
+                    (&left.request_site_label, &right.request_site_label)
+                    && left_label != right_label
+                {
+                    continue;
+                }
+                if left.request_site_label.is_none() && right.request_site_label.is_none() {
+                    errors.push(
+                        TypeCheckErrorKind::TypestateOverlappingOnHandlers(
+                            typestate_name.clone(),
+                            state_name.clone(),
+                            left.selector_ty.clone(),
+                            overlap,
+                            right.span,
+                        )
+                        .into(),
+                    );
+                } else {
+                    errors.push(
+                        TypeCheckErrorKind::TypestateAmbiguousResponseProvenance(
+                            typestate_name.clone(),
+                            state_name.clone(),
+                            left.selector_ty.clone(),
+                            overlap,
+                            right.span,
+                        )
+                        .into(),
+                    );
+                }
             }
         }
     }
@@ -249,6 +271,8 @@ fn collect_handler_response_patterns(
         out.push(HandlerResponsePattern {
             selector_ty,
             response_tys,
+            request_site_label: parse_generated_handler_site_label(&method_def.sig.name)
+                .map(ToString::to_string),
             span: method_def.sig.span,
         });
     }
@@ -732,6 +756,18 @@ fn parse_typestate_and_state_from_generated_state(type_name: &str) -> Option<(St
     let rest = type_name.strip_prefix("__ts_")?;
     let (typestate_name, state_name) = rest.rsplit_once('_')?;
     Some((typestate_name.to_string(), state_name.to_string()))
+}
+
+fn parse_generated_handler_site_label(method_name: &str) -> Option<&str> {
+    // Typestate lowering encodes provenance site labels into generated handler
+    // names (`__ts_on_<ordinal>__site_<label>`) so later phases can recover
+    // deterministic dispatch/diagnostic facts without extra side tables.
+    let suffix = method_name.strip_prefix("__ts_on_")?;
+    let (_, label) = suffix.split_once("__site_")?;
+    if label.is_empty() {
+        return None;
+    }
+    Some(label)
 }
 
 #[cfg(test)]

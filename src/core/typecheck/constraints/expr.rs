@@ -584,7 +584,7 @@ impl<'a> ConstraintCollector<'a> {
                         ConstraintReason::Expr(expr.id, expr.span),
                     );
                 }
-                EmitKind::Request { to, payload } => {
+                EmitKind::Request { to, payload, .. } => {
                     self.collect_expr(to, None);
                     self.collect_expr(payload, None);
                 }

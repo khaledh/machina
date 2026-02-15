@@ -1380,7 +1380,15 @@ fn lower_handler_to_method_source(
     next_index: &mut usize,
     node_id_gen: &mut NodeIdGen,
 ) -> MethodDefSource {
-    let name = format!("__ts_on_{}", *next_index);
+    let provenance_site_suffix = handler
+        .provenance
+        .as_ref()
+        .and_then(|provenance| provenance.request_site_label.as_deref())
+        .map(|label| format!("__site_{label}"))
+        .unwrap_or_default();
+    // Preserve source-level provenance labels in generated handler symbols so
+    // downstream machine-plan synthesis can recover deterministic site filters.
+    let name = format!("__ts_on_{}{}", *next_index, provenance_site_suffix);
     *next_index += 1;
     let mut params = vec![parsed::Param {
         id: node_id_gen.new_id(),
@@ -1412,7 +1420,7 @@ fn lower_handler_to_method_source(
             span: handler.selector_ty.span,
         });
         if let Some(provenance) = &handler.provenance {
-            params.push(provenance.clone());
+            params.push(provenance.param.clone());
         }
     }
     params.extend(handler.params.clone());
@@ -1537,9 +1545,9 @@ impl VisitorMut<()> for HandlerCommandSugarRewriter {
         let ExprKind::Var { ident, .. } = &callee.kind else {
             return;
         };
-        if ident != "send" && ident != "request" {
+        let Some((command, request_site_label)) = parse_handler_command_name(ident) else {
             return;
-        }
+        };
         if args.len() != 2 || !args.iter().all(|arg| arg.mode == CallArgMode::Default) {
             return;
         }
@@ -1553,7 +1561,7 @@ impl VisitorMut<()> for HandlerCommandSugarRewriter {
             .pop()
             .expect("call arg shape checked by typestate handler sugar rewrite")
             .expr;
-        let kind = if ident == "send" {
+        let kind = if command == "send" {
             parsed::EmitKind::Send {
                 to: Box::new(to),
                 payload: Box::new(payload),
@@ -1562,10 +1570,26 @@ impl VisitorMut<()> for HandlerCommandSugarRewriter {
             parsed::EmitKind::Request {
                 to: Box::new(to),
                 payload: Box::new(payload),
+                request_site_label,
             }
         };
         expr.kind = ExprKind::Emit { kind };
     }
+}
+
+fn parse_handler_command_name(ident: &str) -> Option<(&str, Option<String>)> {
+    if ident == "send" {
+        return Some(("send", None));
+    }
+    if ident == "request" {
+        return Some(("request", None));
+    }
+    // Labeled request sugar is parsed as synthetic callee `request:label(...)`.
+    let (command, label) = ident.split_once(':')?;
+    if command != "request" || label.is_empty() {
+        return None;
+    }
+    Some(("request", Some(label.to_string())))
 }
 
 fn rewrite_transition_literals_in_method(

@@ -327,7 +327,7 @@ pub fn walk_typestate_on_handler<V: Visitor<D, T> + ?Sized, D, T>(
         v.visit_param(param);
     }
     if let Some(provenance) = &handler.provenance {
-        v.visit_param(provenance);
+        v.visit_param(&provenance.param);
     }
     v.visit_type_expr(&handler.ret_ty_expr);
     v.visit_expr(&handler.body);
@@ -760,7 +760,12 @@ pub fn walk_expr<V: Visitor<D, T> + ?Sized, D, T>(v: &mut V, expr: &Expr<D, T>) 
             }
         }
         ExprKind::Emit { kind } => match kind {
-            EmitKind::Send { to, payload } | EmitKind::Request { to, payload } => {
+            EmitKind::Send { to, payload }
+            | EmitKind::Request {
+                to,
+                payload,
+                request_site_label: _,
+            } => {
                 v.visit_expr(to);
                 v.visit_expr(payload);
             }

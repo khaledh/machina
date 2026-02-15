@@ -859,6 +859,7 @@ macro_rules! with_typecheck_variants {
             ProtocolFlowHandlerMissing,
             ProtocolOutgoingPayloadNotAllowed,
             TypestateOverlappingOnHandlers,
+            TypestateAmbiguousResponseProvenance,
             ReplyOutsideHandler,
             ReplyCapExpected,
             ReplyPayloadNotAllowed,

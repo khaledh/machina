@@ -349,6 +349,10 @@ pub enum TypeCheckErrorKind {
         "Typestate {0} state {1} has overlapping `on` handlers for selector {2} on response variants {3:?}"
     )]
     TypestateOverlappingOnHandlers(String, String, Type, Vec<Type>, Span),
+    #[error(
+        "Typestate {0} state {1} has ambiguous response provenance for selector {2} on variants {3:?}; use request-site labels (for RequestType:label(...)) to disambiguate"
+    )]
+    TypestateAmbiguousResponseProvenance(String, String, Type, Vec<Type>, Span),
 
     #[error("`reply` can only be used inside typestate `on` handlers")]
     ReplyOutsideHandler(Span),
@@ -487,6 +491,7 @@ impl TypeCheckError {
             TypeCheckErrorKind::ProtocolFlowHandlerMissing(_, _, _, span) => *span,
             TypeCheckErrorKind::ProtocolOutgoingPayloadNotAllowed(_, _, _, span) => *span,
             TypeCheckErrorKind::TypestateOverlappingOnHandlers(_, _, _, _, span) => *span,
+            TypeCheckErrorKind::TypestateAmbiguousResponseProvenance(_, _, _, _, span) => *span,
             TypeCheckErrorKind::ReplyOutsideHandler(span) => *span,
             TypeCheckErrorKind::ReplyCapExpected(_, span) => *span,
             TypeCheckErrorKind::ReplyPayloadNotAllowed(_, _, span) => *span,

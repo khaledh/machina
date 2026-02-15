@@ -76,6 +76,8 @@ impl MachineEventKeyPlan {
 pub struct MachineDispatchEntryPlan {
     pub state_tag: u64,
     pub event_kind: u64,
+    /// Optional request-site match for correlated response dispatch.
+    pub request_site_key: Option<u64>,
     pub state_local_thunk: Option<DefId>,
     pub typestate_fallback_thunk: Option<DefId>,
 }

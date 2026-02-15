@@ -4,6 +4,7 @@ use crate::core::api::{
     resolve_typecheck_pipeline_with_policy, semcheck_stage, typecheck_stage_with_policy,
 };
 use crate::core::context::ParsedContext;
+use crate::core::machine::request_site::labeled_request_site_key;
 use crate::core::resolve::ResolveError;
 use crate::core::tree::NodeIdGen;
 use crate::core::tree::resolved as res;
@@ -708,6 +709,94 @@ typestate Connection {
 }
 
 #[test]
+fn typestate_for_provenance_with_distinct_site_labels_is_accepted() {
+    let source = r#"
+type AuthCheck = {}
+type AuthApproved = {}
+
+typestate Connection {
+    fn new() -> AwaitAuth {
+        AwaitAuth {}
+    }
+
+    state AwaitAuth {
+        on AuthApproved(ok) for AuthCheck:auth1(req) -> stay {
+            ok;
+            req;
+        }
+
+        on AuthApproved(ok) for AuthCheck:auth2(req) -> stay {
+            ok;
+            req;
+        }
+    }
+}
+"#;
+    let parsed = parsed_context_typestate(source);
+    let out = resolve_typecheck_pipeline_with_policy(
+        parsed,
+        ResolveInputs::default(),
+        None,
+        FrontendPolicy::Strict,
+    );
+    assert!(
+        !out.has_errors(),
+        "expected labeled provenance handlers to disambiguate overlap, got resolve={:?} type={:?}",
+        out.resolve_errors,
+        out.type_errors
+    );
+}
+
+#[test]
+fn typestate_for_provenance_label_mixture_is_rejected_as_ambiguous() {
+    let source = r#"
+type AuthCheck = {}
+type AuthApproved = {}
+
+typestate Connection {
+    fn new() -> AwaitAuth {
+        AwaitAuth {}
+    }
+
+    state AwaitAuth {
+        on AuthApproved(ok) for AuthCheck(req) -> stay {
+            ok;
+            req;
+        }
+
+        on AuthApproved(ok) for AuthCheck:auth2(req) -> stay {
+            ok;
+            req;
+        }
+    }
+}
+"#;
+    let parsed = parsed_context_typestate(source);
+    let out = resolve_typecheck_pipeline_with_policy(
+        parsed,
+        ResolveInputs::default(),
+        None,
+        FrontendPolicy::Strict,
+    );
+    assert!(
+        out.type_errors.iter().any(|e| {
+            matches!(
+                e.kind(),
+                TypeCheckErrorKind::TypestateAmbiguousResponseProvenance(
+                    ts,
+                    state,
+                    _,
+                    _,
+                    _
+                ) if ts == "Connection" && state == "AwaitAuth"
+            )
+        }),
+        "expected ambiguous provenance diagnostic for mixed labeled/unlabeled handlers, got {:?}",
+        out.type_errors
+    );
+}
+
+#[test]
 fn typestate_handler_surface_sugar_normalizes_before_resolve() {
     let source = r#"
 type Ping = {}
@@ -897,6 +986,56 @@ typestate Connection {
         thunk.provenance_param_index,
         Some(2),
         "expected provenance binding to map to param index 2"
+    );
+}
+
+#[test]
+fn typestate_for_provenance_label_maps_to_site_specific_dispatch_row() {
+    let source = r#"
+type AuthCheck = {}
+type AuthApproved = {}
+
+typestate Connection {
+    fn new() -> AwaitAuth { AwaitAuth {} }
+
+    state AwaitAuth {
+        on AuthApproved(ok) for AuthCheck:auth1(req) -> stay {
+            ok;
+            req;
+        }
+    }
+}
+"#;
+
+    let parsed = parsed_context_typestate(source);
+    let resolved =
+        resolve_stage_with_policy(parsed, ResolveInputs::default(), FrontendPolicy::Strict);
+    let resolved_ctx = resolved
+        .context
+        .expect("resolve should succeed for provenance label dispatch-row test");
+    let typed = typecheck_stage_with_policy(
+        resolved_ctx,
+        resolved.imported_facts,
+        FrontendPolicy::Strict,
+    )
+    .context
+    .expect("typecheck should succeed for provenance label dispatch-row test");
+    let sem_checked = semcheck_stage(typed)
+        .expect("semcheck should succeed for provenance label dispatch-row test");
+    let elaborated = elaborate_stage(sem_checked);
+
+    let descriptor = elaborated
+        .machine_plans
+        .descriptors
+        .get("Connection")
+        .expect("expected Connection machine descriptor plan");
+    let expected_site = labeled_request_site_key("auth1");
+    assert!(
+        descriptor
+            .dispatch_table
+            .iter()
+            .any(|row| row.request_site_key == Some(expected_site)),
+        "expected site-specific dispatch row for auth1 provenance label"
     );
 }
 

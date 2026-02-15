@@ -8,6 +8,7 @@ use std::collections::{BTreeMap, HashMap};
 
 use crate::core::analysis::facts::{DefTableOverlay, TypeMapOverlay};
 use crate::core::context::TypestateRoleImplBinding;
+use crate::core::machine::request_site::labeled_request_site_key;
 use crate::core::tree::semantic as sem;
 use crate::core::typecheck::type_map::resolve_type_expr;
 use crate::core::types::{StructField, Type, TypeId};
@@ -35,14 +36,19 @@ struct HandlerPlanSeed {
     state_name: String,
     state_layout_ty: TypeId,
     event_key: sem::MachineEventKeyPlan,
+    request_site_key_match: Option<u64>,
     provenance_param_index: Option<usize>,
     payload_layout_ty: TypeId,
     next_state_layout_ty: TypeId,
 }
 
 impl HandlerPlanSeed {
-    fn stable_event_key(&self) -> String {
-        self.event_key.stable_key()
+    fn stable_dispatch_key(&self) -> String {
+        let event = self.event_key.stable_key();
+        match self.request_site_key_match {
+            Some(site_key) => format!("{event}:site:{site_key}"),
+            None => format!("{event}:site:*"),
+        }
     }
 }
 
@@ -137,6 +143,8 @@ fn collect_typestate_builders(
             );
             let provenance_param_index =
                 resolve_handler_provenance_param_index(method_def, &selector_ty);
+            let request_site_key_match = parse_generated_handler_site_label(&method_def.sig.name)
+                .map(labeled_request_site_key);
 
             let next_state_layout_ty = resolve_type_id(
                 module,
@@ -153,6 +161,7 @@ fn collect_typestate_builders(
                 state_name: state_seed.state_name.clone(),
                 state_layout_ty: state_seed.state_layout_ty,
                 event_key,
+                request_site_key_match,
                 provenance_param_index,
                 // Selector payload layout is used when no response override applies.
                 payload_layout_ty: payload_layout_ty.unwrap_or(selector_ty_id),
@@ -477,13 +486,13 @@ fn shared_fallback_prefix_len(states: &[&StatePlanSeed]) -> usize {
         // key and the concrete handler identity are identical across states.
         // Matching on key alone can incorrectly route state-specific handlers
         // through one state's implementation.
-        let key = first.stable_event_key();
+        let key = first.stable_dispatch_key();
         let def_id = first.def_id;
         if states.iter().skip(1).any(|state| {
             state
                 .handlers
                 .get(idx)
-                .map(|h| (h.stable_event_key(), h.def_id))
+                .map(|h| (h.stable_dispatch_key(), h.def_id))
                 != Some((key.clone(), def_id))
         }) {
             return idx;
@@ -501,7 +510,7 @@ fn build_fallback_map(
         return out;
     };
     for handler in first.handlers.iter().take(prefix_len) {
-        out.insert(handler.stable_event_key(), handler.def_id);
+        out.insert(handler.stable_dispatch_key(), handler.def_id);
     }
     out
 }
@@ -516,7 +525,9 @@ fn collect_event_defs(states: &[&StatePlanSeed]) -> BTreeMap<String, EventDef> {
     let mut out = BTreeMap::<String, EventDef>::new();
     for state in states {
         for handler in &state.handlers {
-            let stable_key = handler.stable_event_key();
+            // Event-kind assignment is payload-driven. Site-label disambiguation
+            // is handled at dispatch-row matching, not by splitting kind space.
+            let stable_key = handler.event_key.stable_key();
             out.entry(stable_key).or_insert_with(|| EventDef {
                 key: handler.event_key.clone(),
                 payload_layout_ty: handler.payload_layout_ty,
@@ -545,7 +556,7 @@ fn build_dispatch_table(
     fallback_map: &HashMap<String, crate::core::resolve::DefId>,
     fallback_prefix_len: usize,
 ) -> Vec<sem::MachineDispatchEntryPlan> {
-    let mut rows = Vec::with_capacity(states.len() * event_kinds.len());
+    let mut rows = Vec::new();
 
     for state in states {
         let state_tag = *state_tag_by_name.get(&state.state_name).unwrap_or_else(|| {
@@ -557,20 +568,51 @@ fn build_dispatch_table(
         let local_handlers = state.handlers.iter().skip(fallback_prefix_len).fold(
             HashMap::<String, crate::core::resolve::DefId>::new(),
             |mut acc, handler| {
-                acc.entry(handler.stable_event_key())
+                acc.entry(handler.stable_dispatch_key())
                     .or_insert(handler.def_id);
                 acc
             },
         );
 
         for event in event_kinds {
-            let key = event.key.stable_key();
+            // Each event kind may have:
+            // - one wildcard row (`site:*`), and/or
+            // - one or more site-specific rows (`site:<key>`).
+            //
+            // Runtime lookup resolves exact site first, then wildcard.
+            let base = event.key.stable_key();
+            let wildcard_key = format!("{base}:site:*");
+            let mut site_keys = Vec::new();
+
+            for dispatch_key in local_handlers.keys().chain(fallback_map.keys()) {
+                if let Some(suffix) = dispatch_key.strip_prefix(&format!("{base}:site:"))
+                    && suffix != "*"
+                    && let Ok(site_key) = suffix.parse::<u64>()
+                    && !site_keys.contains(&site_key)
+                {
+                    site_keys.push(site_key);
+                }
+            }
+            site_keys.sort_unstable();
+
             rows.push(sem::MachineDispatchEntryPlan {
                 state_tag,
                 event_kind: event.kind,
-                state_local_thunk: local_handlers.get(&key).copied(),
-                typestate_fallback_thunk: fallback_map.get(&key).copied(),
+                request_site_key: None,
+                state_local_thunk: local_handlers.get(&wildcard_key).copied(),
+                typestate_fallback_thunk: fallback_map.get(&wildcard_key).copied(),
             });
+
+            for site_key in site_keys {
+                let key = format!("{base}:site:{site_key}");
+                rows.push(sem::MachineDispatchEntryPlan {
+                    state_tag,
+                    event_kind: event.kind,
+                    request_site_key: Some(site_key),
+                    state_local_thunk: local_handlers.get(&key).copied(),
+                    typestate_fallback_thunk: fallback_map.get(&key).copied(),
+                });
+            }
         }
     }
 
@@ -585,7 +627,25 @@ fn parse_generated_state_name(type_name: &str) -> Option<(String, String)> {
 
 fn parse_generated_handler_ordinal(method_name: &str) -> Option<usize> {
     let suffix = method_name.strip_prefix(GENERATED_HANDLER_PREFIX)?;
-    suffix.parse::<usize>().ok()
+    let digits_len = suffix
+        .bytes()
+        .take_while(|byte| byte.is_ascii_digit())
+        .count();
+    if digits_len == 0 {
+        return None;
+    }
+    suffix[..digits_len].parse::<usize>().ok()
+}
+
+fn parse_generated_handler_site_label(method_name: &str) -> Option<&str> {
+    // Generated by typestate lowering:
+    //   __ts_on_<ordinal>__site_<label>
+    let suffix = method_name.strip_prefix(GENERATED_HANDLER_PREFIX)?;
+    let (_, label_suffix) = suffix.split_once("__site_")?;
+    if label_suffix.is_empty() {
+        return None;
+    }
+    Some(label_suffix)
 }
 
 #[cfg(test)]
@@ -616,6 +676,7 @@ mod tests {
             event_key: sem::MachineEventKeyPlan::Payload {
                 payload_ty: named_payload(event),
             },
+            request_site_key_match: None,
             provenance_param_index: None,
             payload_layout_ty: dummy_type_id(),
             next_state_layout_ty: dummy_type_id(),
@@ -663,6 +724,7 @@ mod tests {
             state_name: "A".to_string(),
             state_layout_ty: dummy_type_id(),
             event_key: event_kinds[0].key.clone(),
+            request_site_key_match: None,
             provenance_param_index: None,
             payload_layout_ty: dummy_type_id(),
             next_state_layout_ty: dummy_type_id(),
@@ -673,6 +735,7 @@ mod tests {
             state_name: "A".to_string(),
             state_layout_ty: dummy_type_id(),
             event_key: event_kinds[1].key.clone(),
+            request_site_key_match: None,
             provenance_param_index: None,
             payload_layout_ty: dummy_type_id(),
             next_state_layout_ty: dummy_type_id(),
@@ -694,7 +757,10 @@ mod tests {
             }],
         };
 
-        let fallback_map = HashMap::from([(event_kinds[0].key.stable_key(), DefId(100))]);
+        let fallback_map = HashMap::from([(
+            format!("{}:site:*", event_kinds[0].key.stable_key()),
+            DefId(100),
+        )]);
         let rows = build_dispatch_table(
             &[&state_a, &state_b],
             &state_tag_by_name,
@@ -740,6 +806,7 @@ mod tests {
                 state_name: "A".to_string(),
                 state_layout_ty: dummy_type_id(),
                 event_key: event_key.clone(),
+                request_site_key_match: None,
                 provenance_param_index: None,
                 payload_layout_ty: dummy_type_id(),
                 next_state_layout_ty: dummy_type_id(),
@@ -755,6 +822,7 @@ mod tests {
                 state_name: "B".to_string(),
                 state_layout_ty: dummy_type_id(),
                 event_key,
+                request_site_key_match: None,
                 provenance_param_index: None,
                 payload_layout_ty: dummy_type_id(),
                 next_state_layout_ty: dummy_type_id(),

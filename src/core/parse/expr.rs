@@ -155,6 +155,9 @@ impl<'a> Parser<'a> {
         loop {
             let next = match self.curr_token.kind {
                 TK::LParen => self.parse_call_postfix(expr, marker)?,
+                TK::Colon if self.is_labeled_call_postfix(&expr) => {
+                    self.parse_labeled_call_postfix(expr, marker)?
+                }
                 TK::LBracket => self.parse_index_or_slice_postfix(expr, marker)?,
                 TK::Dot => self.parse_dot_postfix(expr, marker)?,
                 TK::Question => self.parse_try_postfix(expr, marker)?,
@@ -348,6 +351,12 @@ impl<'a> Parser<'a> {
         let marker = self.mark();
         self.consume_keyword(TK::KwEmit)?;
         let kind_name = self.parse_ident()?;
+        let request_site_label = if kind_name == "Request" && self.curr_token.kind == TK::Colon {
+            self.consume(&TK::Colon)?;
+            Some(self.parse_ident()?)
+        } else {
+            None
+        };
         self.consume(&TK::LParen)?;
         let to_label = self.parse_ident()?;
         if to_label != "to" {
@@ -370,6 +379,7 @@ impl<'a> Parser<'a> {
             "Request" => EmitKind::Request {
                 to: Box::new(to),
                 payload: Box::new(payload),
+                request_site_label,
             },
             _ => return Err(ParseError::ExpectedPrimary(self.curr_token.clone())),
         };
@@ -415,6 +425,57 @@ impl<'a> Parser<'a> {
             ty: (),
             span: self.close(marker),
         })
+    }
+
+    fn parse_labeled_call_postfix(
+        &mut self,
+        expr: Expr,
+        marker: Marker,
+    ) -> Result<Expr, ParseError> {
+        // `foo:label(args...)` sugar is currently reserved for command helpers
+        // (`request:auth(...)`). We encode this as a synthetic callee name so
+        // typestate command desugaring can lower it deterministically before
+        // resolve/typecheck.
+        let ExprKind::Var { ident, .. } = &expr.kind else {
+            return Err(ParseError::ExpectedToken(
+                TK::LParen,
+                self.curr_token.clone(),
+            ));
+        };
+
+        self.consume(&TK::Colon)?;
+        let label = self.parse_ident()?;
+        self.consume(&TK::LParen)?;
+        let args = self.parse_list(TK::Comma, TK::RParen, |parser| parser.parse_call_arg())?;
+        self.consume(&TK::RParen)?;
+
+        let callee = Expr {
+            id: self.id_gen.new_id(),
+            kind: ExprKind::Var {
+                ident: format!("{ident}:{label}"),
+                def_id: (),
+            },
+            ty: (),
+            span: expr.span,
+        };
+        Ok(Expr {
+            id: self.id_gen.new_id(),
+            kind: ExprKind::Call {
+                callee: Box::new(callee),
+                args,
+            },
+            ty: (),
+            span: self.close(marker),
+        })
+    }
+
+    fn is_labeled_call_postfix(&self, expr: &Expr) -> bool {
+        matches!(expr.kind, ExprKind::Var { .. })
+            && matches!(self.peek().map(|tok| &tok.kind), Some(TK::Ident(_)))
+            && matches!(
+                self.tokens.get(self.pos + 2).map(|tok| &tok.kind),
+                Some(TK::LParen)
+            )
     }
 
     fn parse_call_arg(&mut self) -> Result<CallArg, ParseError> {

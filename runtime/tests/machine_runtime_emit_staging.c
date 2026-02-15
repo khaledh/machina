@@ -35,6 +35,7 @@ typedef struct emit_test_ctx {
     uint64_t resp_payload0;
     uint64_t resp_payload1;
     uint64_t resp_pending_id;
+    uint64_t resp_origin_request_site_key;
 
     uint64_t minted_pending_id;
 
@@ -130,6 +131,7 @@ static mc_dispatch_result_t emit_dispatch(
         state->resp_payload0 = env->payload0;
         state->resp_payload1 = env->payload1;
         state->resp_pending_id = env->pending_id;
+        state->resp_origin_request_site_key = env->origin_request_site_key;
         return MC_DISPATCH_OK;
     }
 
@@ -268,7 +270,8 @@ int main(void) {
         return 1;
     }
     if (!state.saw_response || state.resp_src != state.dst_server || state.resp_payload0 != 77
-        || state.resp_payload1 != 88 || state.resp_pending_id != state.minted_pending_id) {
+        || state.resp_payload1 != 88 || state.resp_pending_id != state.minted_pending_id
+        || state.resp_origin_request_site_key != 3001) {
         return 1;
     }
 

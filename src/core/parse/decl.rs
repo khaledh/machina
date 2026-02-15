@@ -383,20 +383,33 @@ impl<'a> Parser<'a> {
         })
     }
 
-    fn parse_typestate_on_handler_provenance(&mut self) -> Result<Param, ParseError> {
+    fn parse_typestate_on_handler_provenance(
+        &mut self,
+    ) -> Result<TypestateHandlerProvenance, ParseError> {
         let marker = self.mark();
         self.consume_keyword(TK::KwFor)?;
-        let request_ty = self.parse_type_expr()?;
+        // Parse provenance request type in a mode that leaves `:label(...)`
+        // available for request-site disambiguation syntax.
+        let request_ty = self.parse_type_expr_no_refinement()?;
+        let request_site_label = if self.curr_token.kind == TK::Colon {
+            self.consume(&TK::Colon)?;
+            Some(self.parse_ident()?)
+        } else {
+            None
+        };
         self.consume(&TK::LParen)?;
         let binding = self.parse_ident()?;
         self.consume(&TK::RParen)?;
-        Ok(Param {
-            id: self.id_gen.new_id(),
-            ident: binding,
-            def_id: (),
-            typ: request_ty,
-            mode: ParamMode::In,
-            span: self.close(marker),
+        Ok(TypestateHandlerProvenance {
+            param: Param {
+                id: self.id_gen.new_id(),
+                ident: binding,
+                def_id: (),
+                typ: request_ty,
+                mode: ParamMode::In,
+                span: self.close(marker),
+            },
+            request_site_label,
         })
     }
 

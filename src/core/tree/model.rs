@@ -229,10 +229,17 @@ pub struct TypestateOnHandler<D, T = ()> {
     pub selector_ty: TypeExpr<D>,
     pub params: Vec<Param<D>>,
     /// Optional request provenance binding from `for RequestType(binding)`.
-    pub provenance: Option<Param<D>>,
+    pub provenance: Option<TypestateHandlerProvenance<D>>,
     pub ret_ty_expr: TypeExpr<D>,
     pub body: Expr<D, T>,
     pub span: Span,
+}
+
+#[derive(Clone, Debug)]
+pub struct TypestateHandlerProvenance<D = ()> {
+    pub param: Param<D>,
+    /// Optional request-site label from `for RequestType:label(binding)`.
+    pub request_site_label: Option<String>,
 }
 
 #[derive(Clone, Debug)]
@@ -969,6 +976,8 @@ pub enum EmitKind<D, T = ()> {
     Request {
         to: Box<Expr<D, T>>,
         payload: Box<Expr<D, T>>,
+        /// Optional site label from `request:label(...)` sugar.
+        request_site_label: Option<String>,
     },
 }
 
