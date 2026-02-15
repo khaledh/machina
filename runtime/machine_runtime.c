@@ -808,7 +808,8 @@ static uint8_t mc_pending_insert_active(
     mc_pending_correlation_id_t correlation,
     uint64_t request_payload0,
     mc_payload_layout_id_t request_payload1,
-    mc_machine_id_t requester
+    mc_machine_id_t requester,
+    uint64_t created_tick
 ) {
     for (uint32_t i = 0; i < pending->len; i++) {
         if (!pending->entries[i].active) {
@@ -816,6 +817,7 @@ static uint8_t mc_pending_insert_active(
             pending->entries[i].requester = requester;
             pending->entries[i].request_payload0 = request_payload0;
             pending->entries[i].request_payload1 = request_payload1;
+            pending->entries[i].created_tick = created_tick;
             pending->entries[i].active = 1;
             return 1;
         }
@@ -827,6 +829,7 @@ static uint8_t mc_pending_insert_active(
     pending->entries[pending->len].requester = requester;
     pending->entries[pending->len].request_payload0 = request_payload0;
     pending->entries[pending->len].request_payload1 = request_payload1;
+    pending->entries[pending->len].created_tick = created_tick;
     pending->entries[pending->len].active = 1;
     pending->len += 1;
     return 1;
@@ -873,6 +876,79 @@ static uint32_t mc_pending_inactive_len(const mc_pending_reply_table_t *pending)
     return count;
 }
 
+static uint8_t mc_pending_cleanup_reason_valid(mc_pending_cleanup_reason_t reason) {
+    return reason >= MC_PENDING_CLEANUP_COMPLETED && reason <= MC_PENDING_CLEANUP_TIMEOUT;
+}
+
+// Record one pending lifecycle transition in counters and optional hook.
+static void mc_emit_pending_cleanup(
+    mc_machine_runtime_t *rt,
+    const mc_pending_reply_entry_t *entry,
+    mc_pending_cleanup_reason_t reason
+) {
+    if (!rt || !entry || !mc_pending_cleanup_reason_valid(reason)) {
+        return;
+    }
+    rt->pending_cleanup_counts[(uint32_t)reason] += 1;
+    if (rt->pending_hook) {
+        rt->pending_hook(
+            rt->hook_ctx,
+            entry->requester,
+            entry->correlation.pending_id,
+            entry->correlation.request_site_key,
+            reason
+        );
+    }
+}
+
+// Drop all inflight request entries for one requester machine.
+static uint32_t mc_pending_cleanup_requester(
+    mc_machine_runtime_t *rt,
+    mc_machine_id_t requester,
+    mc_pending_cleanup_reason_t reason
+) {
+    if (!rt || !mc_pending_cleanup_reason_valid(reason)) {
+        return 0;
+    }
+    uint32_t dropped = 0;
+    for (uint32_t i = 0; i < rt->pending.len; i++) {
+        mc_pending_reply_entry_t *entry = &rt->pending.entries[i];
+        if (!entry->active || entry->requester != requester) {
+            continue;
+        }
+        entry->active = 0;
+        mc_emit_pending_cleanup(rt, entry, reason);
+        dropped += 1;
+    }
+    return dropped;
+}
+
+// Drop expired pending entries based on dispatch-step timeout horizon.
+static uint32_t mc_pending_cleanup_timeouts(mc_machine_runtime_t *rt) {
+    if (!rt || rt->pending_timeout_steps == 0) {
+        return 0;
+    }
+    uint32_t dropped = 0;
+    for (uint32_t i = 0; i < rt->pending.len; i++) {
+        mc_pending_reply_entry_t *entry = &rt->pending.entries[i];
+        if (!entry->active) {
+            continue;
+        }
+        if (rt->dispatch_tick < entry->created_tick) {
+            // Counter wrapped; keep entry until timeline catches up.
+            continue;
+        }
+        uint64_t age = rt->dispatch_tick - entry->created_tick;
+        if (age < rt->pending_timeout_steps) {
+            continue;
+        }
+        entry->active = 0;
+        mc_emit_pending_cleanup(rt, entry, MC_PENDING_CLEANUP_TIMEOUT);
+        dropped += 1;
+    }
+    return dropped;
+}
+
 // Best-effort dead-letter callback.
 static void mc_emit_dead_letter(
     mc_machine_runtime_t *rt,
@@ -904,6 +980,8 @@ static void mc_apply_fault_policy(
     } else {
         slot->lifecycle = MC_MACHINE_FAULTED;
     }
+    // Faulting requester invalidates all outstanding inflight correlations.
+    (void)mc_pending_cleanup_requester(rt, machine_id, MC_PENDING_CLEANUP_REQUESTER_FAULTED);
     mc_emit_fault(rt, machine_id, fault_code);
 }
 
@@ -1107,10 +1185,12 @@ static uint8_t mc_commit_requests(
                 correlation,
                 req->env.payload0,
                 req->env.payload1,
-                src
+                src,
+                rt->dispatch_tick
             )) {
             return 0;
         }
+        rt->pending_created_count += 1;
     }
     return 1;
 }
@@ -1224,6 +1304,11 @@ static uint8_t mc_commit_replies(
 
         // Consume capability only after successful delivery.
         rt->pending.entries[(uint32_t)idx].active = 0;
+        mc_emit_pending_cleanup(
+            rt,
+            &rt->pending.entries[(uint32_t)idx],
+            MC_PENDING_CLEANUP_COMPLETED
+        );
     }
     return 1;
 }
@@ -1288,7 +1373,13 @@ void __mc_machine_runtime_init(mc_machine_runtime_t *rt) {
     rt->fault_policy = MC_FAULT_POLICY_MARK_FAULTED;
     rt->dead_letter_hook = NULL;
     rt->fault_hook = NULL;
+    rt->pending_hook = NULL;
     rt->hook_ctx = NULL;
+
+    rt->dispatch_tick = 0;
+    rt->pending_timeout_steps = 0;
+    rt->pending_created_count = 0;
+    memset(rt->pending_cleanup_counts, 0, sizeof(rt->pending_cleanup_counts));
 }
 
 // Public API: free all runtime-owned buffers and reset state.
@@ -1319,6 +1410,16 @@ void __mc_machine_runtime_set_hooks(
     rt->hook_ctx = hook_ctx;
 }
 
+void __mc_machine_runtime_set_pending_hook(
+    mc_machine_runtime_t *rt,
+    mc_pending_lifecycle_hook_t pending_hook
+) {
+    if (!rt) {
+        return;
+    }
+    rt->pending_hook = pending_hook;
+}
+
 void __mc_machine_runtime_set_fault_policy(
     mc_machine_runtime_t *rt,
     mc_machine_fault_policy_t policy
@@ -1336,6 +1437,22 @@ mc_machine_fault_policy_t __mc_machine_runtime_fault_policy(
         return MC_FAULT_POLICY_MARK_FAULTED;
     }
     return rt->fault_policy;
+}
+
+void __mc_machine_runtime_set_pending_timeout_steps(
+    mc_machine_runtime_t *rt,
+    uint64_t steps
+) {
+    if (!rt) {
+        return;
+    }
+    rt->pending_timeout_steps = steps;
+}
+
+uint64_t __mc_machine_runtime_pending_timeout_steps(
+    const mc_machine_runtime_t *rt
+) {
+    return rt ? rt->pending_timeout_steps : 0;
 }
 
 // Public API: create a managed machine slot in CREATED state.
@@ -1389,7 +1506,15 @@ void __mc_machine_runtime_set_lifecycle(
     if (!slot) {
         return;
     }
+    if (slot->lifecycle == lifecycle) {
+        return;
+    }
     slot->lifecycle = lifecycle;
+    if (lifecycle == MC_MACHINE_STOPPED) {
+        (void)mc_pending_cleanup_requester(rt, machine_id, MC_PENDING_CLEANUP_REQUESTER_STOPPED);
+    } else if (lifecycle == MC_MACHINE_FAULTED) {
+        (void)mc_pending_cleanup_requester(rt, machine_id, MC_PENDING_CLEANUP_REQUESTER_FAULTED);
+    }
 }
 
 // Public API: start a CREATED machine.
@@ -1833,8 +1958,10 @@ mc_mailbox_enqueue_result_t __mc_machine_runtime_request(
         correlation,
         env->payload0,
         env->payload1,
-        src
+        src,
+        rt->dispatch_tick
     );
+    rt->pending_created_count += 1;
 
     *out_pending_id = pending_id;
     return MC_MAILBOX_ENQUEUE_OK;
@@ -1874,13 +2001,35 @@ mc_machine_reply_result_t __mc_machine_runtime_reply(
     if (enqueue_res == MC_MAILBOX_ENQUEUE_OK) {
         // Consume capability on successful reply delivery.
         rt->pending.entries[(uint32_t)idx].active = 0;
+        mc_emit_pending_cleanup(
+            rt,
+            &rt->pending.entries[(uint32_t)idx],
+            MC_PENDING_CLEANUP_COMPLETED
+        );
         return MC_REPLY_OK;
     }
-    // Failed delivery keeps capability active so caller can retry.
+    // Full mailbox keeps capability active so caller can retry.
+    // For stopped/faulted requester, reclaim now to avoid stale inflight ids.
     if (enqueue_res == MC_MAILBOX_ENQUEUE_MACHINE_UNKNOWN) {
         return MC_REPLY_DEST_UNKNOWN;
     }
     if (enqueue_res == MC_MAILBOX_ENQUEUE_MACHINE_NOT_RUNNING) {
+        mc_machine_lifecycle_t lifecycle = __mc_machine_runtime_lifecycle(rt, requester);
+        if (lifecycle == MC_MACHINE_STOPPED) {
+            rt->pending.entries[(uint32_t)idx].active = 0;
+            mc_emit_pending_cleanup(
+                rt,
+                &rt->pending.entries[(uint32_t)idx],
+                MC_PENDING_CLEANUP_REQUESTER_STOPPED
+            );
+        } else if (lifecycle == MC_MACHINE_FAULTED) {
+            rt->pending.entries[(uint32_t)idx].active = 0;
+            mc_emit_pending_cleanup(
+                rt,
+                &rt->pending.entries[(uint32_t)idx],
+                MC_PENDING_CLEANUP_REQUESTER_FAULTED
+            );
+        }
         return MC_REPLY_DEST_NOT_RUNNING;
     }
     return MC_REPLY_FULL;
@@ -2026,6 +2175,8 @@ static uint8_t mc_machine_runtime_dispatch_one_txn_impl(
             // Stale ready-queue entry: nothing to process.
             continue;
         }
+        // Dispatch-step clock advances once per consumed envelope.
+        rt->dispatch_tick += 1;
 
         uint64_t fault_code = 0;
         mc_machine_dispatch_txn_t txn = {
@@ -2115,6 +2266,11 @@ static uint8_t mc_machine_runtime_dispatch_one_txn_impl(
             }
         } else if (result == MC_DISPATCH_STOP) {
             slot->lifecycle = MC_MACHINE_STOPPED;
+            (void)mc_pending_cleanup_requester(
+                rt,
+                machine_id,
+                MC_PENDING_CLEANUP_REQUESTER_STOPPED
+            );
         }
 
         if (slot->lifecycle == MC_MACHINE_RUNNING && slot->mailbox.len > 0) {
@@ -2125,6 +2281,10 @@ static uint8_t mc_machine_runtime_dispatch_one_txn_impl(
 
         // Always release dispatch-local staging buffers after commit/rollback.
         mc_emit_staging_end(&emit_ctx);
+
+        // Timeout cleanup runs after each dispatch step and reclaims inflight
+        // entries that exceeded configured dispatch-step horizon.
+        (void)mc_pending_cleanup_timeouts(rt);
 
         // Exactly one dispatch per call.
         return 1;
@@ -2221,6 +2381,22 @@ uint64_t __mc_machine_runtime_pending_request_site(
         return 0;
     }
     return rt->pending.entries[(uint32_t)idx].correlation.request_site_key;
+}
+
+uint64_t __mc_machine_runtime_pending_created_count(
+    const mc_machine_runtime_t *rt
+) {
+    return rt ? rt->pending_created_count : 0;
+}
+
+uint64_t __mc_machine_runtime_pending_cleanup_count(
+    const mc_machine_runtime_t *rt,
+    mc_pending_cleanup_reason_t reason
+) {
+    if (!rt || !mc_pending_cleanup_reason_valid(reason)) {
+        return 0;
+    }
+    return rt->pending_cleanup_counts[(uint32_t)reason];
 }
 
 // Opaque-handle runtime bridge ------------------------------------------------

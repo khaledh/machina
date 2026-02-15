@@ -189,7 +189,7 @@ int main(void) {
         return 25;
     }
 
-    // If requester is stopped, reply delivery fails and pending remains active.
+    // If requester is stopped, inflight pending ids are reclaimed immediately.
     __mc_machine_runtime_set_lifecycle(&rt, state.server, MC_MACHINE_RUNNING);
     uint64_t pending2 = 0;
     if (__mc_machine_runtime_request(&rt, state.client, state.server, &req, &pending2)
@@ -201,30 +201,26 @@ int main(void) {
     }
 
     __mc_machine_runtime_set_lifecycle(&rt, state.client, MC_MACHINE_STOPPED);
-    if (__mc_machine_runtime_reply(&rt, state.server, pending2, &resp)
-        != MC_REPLY_DEST_NOT_RUNNING) {
+    if (__mc_machine_runtime_pending_len(&rt) != 0) {
         return 28;
     }
-    if (__mc_machine_runtime_pending_len(&rt) != 1) {
+    if (__mc_machine_runtime_pending_contains(&rt, pending2)) {
         return 29;
     }
-    if (!__mc_machine_runtime_pending_contains(&rt, pending2)) {
+    if (__mc_machine_runtime_reply(&rt, state.server, pending2, &resp) != MC_REPLY_CAP_UNKNOWN) {
         return 30;
     }
-
-    // Restore requester and retry reply successfully.
-    __mc_machine_runtime_set_lifecycle(&rt, state.client, MC_MACHINE_RUNNING);
-    if (__mc_machine_runtime_reply(&rt, state.server, pending2, &resp) != MC_REPLY_OK) {
+    if (state.dead_count != 4 || state.dead_reason[3] != MC_DEAD_LETTER_REPLY_CAP_UNKNOWN) {
         return 31;
     }
+
+    // Restore requester; timed-out/stopped correlations stay reclaimed.
+    __mc_machine_runtime_set_lifecycle(&rt, state.client, MC_MACHINE_RUNNING);
     if (__mc_machine_runtime_pending_len(&rt) != 0) {
         return 32;
     }
     if (__mc_machine_runtime_pending_contains(&rt, pending2)) {
         return 33;
-    }
-    if (!__mc_machine_runtime_dispatch_one_txn(&rt, reqreply_dispatch, &state)) {
-        return 34;
     }
 
     // Out-of-order response routing:
@@ -285,6 +281,23 @@ int main(void) {
     }
     if (__mc_machine_runtime_pending_len(&rt) != 0) {
         return 47;
+    }
+    if (__mc_machine_runtime_pending_created_count(&rt) != 4) {
+        return 48;
+    }
+    if (__mc_machine_runtime_pending_cleanup_count(&rt, MC_PENDING_CLEANUP_COMPLETED) != 3) {
+        return 49;
+    }
+    if (__mc_machine_runtime_pending_cleanup_count(&rt, MC_PENDING_CLEANUP_REQUESTER_STOPPED)
+        != 1) {
+        return 50;
+    }
+    if (__mc_machine_runtime_pending_cleanup_count(&rt, MC_PENDING_CLEANUP_REQUESTER_FAULTED)
+        != 0) {
+        return 51;
+    }
+    if (__mc_machine_runtime_pending_cleanup_count(&rt, MC_PENDING_CLEANUP_TIMEOUT) != 0) {
+        return 52;
     }
 
     __mc_machine_runtime_drop(&rt);

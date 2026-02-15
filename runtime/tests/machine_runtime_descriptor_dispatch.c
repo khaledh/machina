@@ -125,12 +125,14 @@ static void build_test_descriptor(byte_buf_t *b) {
     // dispatch row: state 1 + kind 10 => local thunk 101.
     buf_u64(b, 1);
     buf_u64(b, 10);
+    buf_u64(b, 0);
     buf_u64(b, 101);
     buf_u64(b, 202);
 
     // dispatch row: state 2 + kind 20 => fallback thunk 202.
     buf_u64(b, 2);
     buf_u64(b, 20);
+    buf_u64(b, 0);
     buf_u64(b, 0);
     buf_u64(b, 202);
 }

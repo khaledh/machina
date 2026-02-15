@@ -304,6 +304,9 @@ typedef struct mc_pending_reply_entry {
     // Captured request payload ABI so response handlers can bind provenance.
     uint64_t request_payload0;
     mc_payload_layout_id_t request_payload1;
+    // Dispatch-step tick at request insertion time.
+    // Used by timeout-based inflight cleanup policy.
+    uint64_t created_tick;
     uint8_t active;
 } mc_pending_reply_entry_t;
 
@@ -313,6 +316,27 @@ typedef struct mc_pending_reply_table {
     uint32_t cap;
     uint64_t next_cap_id;
 } mc_pending_reply_table_t;
+
+// Reason why a pending correlation entry was reclaimed.
+typedef enum mc_pending_cleanup_reason {
+    // Entry was consumed by successful reply delivery.
+    MC_PENDING_CLEANUP_COMPLETED = 1,
+    // Requester machine transitioned to STOPPED.
+    MC_PENDING_CLEANUP_REQUESTER_STOPPED = 2,
+    // Requester machine transitioned to FAULTED.
+    MC_PENDING_CLEANUP_REQUESTER_FAULTED = 3,
+    // Entry exceeded configured timeout horizon.
+    MC_PENDING_CLEANUP_TIMEOUT = 4,
+} mc_pending_cleanup_reason_t;
+
+// Optional hook called whenever a pending entry is reclaimed.
+typedef void (*mc_pending_lifecycle_hook_t)(
+    void *ctx,
+    mc_machine_id_t requester,
+    uint64_t pending_id,
+    uint64_t request_site_key,
+    mc_pending_cleanup_reason_t reason
+);
 
 // Top-level managed runtime state.
 typedef struct mc_machine_runtime {
@@ -336,7 +360,17 @@ typedef struct mc_machine_runtime {
     // Optional runtime hooks.
     mc_dead_letter_hook_t dead_letter_hook;
     mc_fault_hook_t fault_hook;
+    mc_pending_lifecycle_hook_t pending_hook;
     void *hook_ctx;
+
+    // Monotonic dispatch-step counter used by timeout policy.
+    uint64_t dispatch_tick;
+    // Pending timeout horizon in dispatch steps.
+    // 0 disables timeout cleanup.
+    uint64_t pending_timeout_steps;
+    // Pending lifecycle counters for observability/tests.
+    uint64_t pending_created_count;
+    uint64_t pending_cleanup_counts[5];
 } mc_machine_runtime_t;
 
 // Initialize runtime state to empty.
@@ -353,12 +387,29 @@ void __mc_machine_runtime_set_hooks(
     void *hook_ctx
 );
 
+// Configure optional pending-lifecycle hook.
+// Hook shares `hook_ctx` with dead-letter/fault hooks.
+void __mc_machine_runtime_set_pending_hook(
+    mc_machine_runtime_t *rt,
+    mc_pending_lifecycle_hook_t pending_hook
+);
+
 // Set/get runtime fault lifecycle policy.
 void __mc_machine_runtime_set_fault_policy(
     mc_machine_runtime_t *rt,
     mc_machine_fault_policy_t policy
 );
 mc_machine_fault_policy_t __mc_machine_runtime_fault_policy(
+    const mc_machine_runtime_t *rt
+);
+
+// Set/get timeout horizon for pending correlations.
+// `steps == 0` disables timeout cleanup.
+void __mc_machine_runtime_set_pending_timeout_steps(
+    mc_machine_runtime_t *rt,
+    uint64_t steps
+);
+uint64_t __mc_machine_runtime_pending_timeout_steps(
     const mc_machine_runtime_t *rt
 );
 
@@ -578,6 +629,14 @@ uint8_t __mc_machine_runtime_pending_contains_identity(
 uint64_t __mc_machine_runtime_pending_request_site(
     const mc_machine_runtime_t *rt,
     uint64_t pending_id
+);
+// Pending lifecycle metrics for observability/tests.
+uint64_t __mc_machine_runtime_pending_created_count(
+    const mc_machine_runtime_t *rt
+);
+uint64_t __mc_machine_runtime_pending_cleanup_count(
+    const mc_machine_runtime_t *rt,
+    mc_pending_cleanup_reason_t reason
 );
 
 // Opaque-handle runtime bridge for Machina std wrappers.
