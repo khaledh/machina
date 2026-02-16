@@ -518,6 +518,12 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
         if self.drop_manager.known_live(item.def_id) == Some(false) {
             return Ok(());
         }
+        // Skip drop for locals not yet registered in the lowerer. This happens when
+        // an early return unwinds past a let-binding that hasn't been lowered yet
+        // (e.g. generated spawn function bodies with guard-return patterns).
+        if self.locals.get(item.def_id).is_none() {
+            return Ok(());
+        }
 
         match item.guard {
             sem::DropGuard::Always => {
