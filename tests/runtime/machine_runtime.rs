@@ -317,6 +317,80 @@ fn main() {
 }
 
 #[test]
+fn test_typestate_final_state_stops_machine_and_rejects_future_send() {
+    let source = r#"
+requires {
+    std::machine::managed_runtime
+    std::machine::step
+    std::machine::MachineNotRunning
+    std::machine::Runtime
+    std::machine::StepStatus
+}
+
+type Start = {}
+
+typestate OneShot {
+    fn new() -> Idle {
+        Idle {}
+    }
+
+    state Idle {
+        on Start(s) -> Done {
+            s;
+            Done {}
+        }
+    }
+
+    @final
+    state Done {}
+}
+
+@machines
+fn main() -> u64 {
+    let machine: Machine<OneShot> = match OneShot::spawn() {
+        m: Machine<OneShot> => m,
+        _ => { return 1; },
+    };
+
+    match machine.send(1, 0, 0) {
+        _ok: () => {}
+        _ => { return 1; },
+    };
+
+    let rt: Runtime = match managed_runtime() {
+        r: Runtime => r,
+        _ => { return 1; },
+    };
+
+    match step(rt) {
+        StepStatus::DidWork => {}
+        _ => { return 1; },
+    };
+
+    match machine.send(1, 0, 0) {
+        _stopped: MachineNotRunning => 0,
+        _ => 1,
+    }
+}
+"#;
+
+    let run = run_program_with_opts(
+        "typestate_final_state_stop",
+        source,
+        CompileOptions {
+            dump: None,
+            emit_ir: false,
+            verify_ir: false,
+            trace_alloc: false,
+            trace_drops: false,
+            inject_prelude: true,
+            experimental_typestate: true,
+        },
+    );
+    assert_eq!(run.status.code(), Some(0));
+}
+
+#[test]
 fn test_typestate_machine_runtime_two_machine_request_reply_with_labeled_provenance() {
     let source = r#"
 requires {

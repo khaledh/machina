@@ -9,7 +9,8 @@ use std::collections::{BTreeMap, HashMap};
 use crate::core::analysis::facts::{DefTableOverlay, TypeMapOverlay};
 use crate::core::context::TypestateRoleImplBinding;
 use crate::core::machine::naming::{
-    GENERATED_HANDLER_PREFIX, GENERATED_STATE_PREFIX, parse_generated_handler_site_label,
+    GENERATED_FINAL_STATE_MARKER, GENERATED_HANDLER_PREFIX, GENERATED_STATE_PREFIX,
+    parse_generated_handler_site_label,
 };
 use crate::core::machine::request_site::labeled_request_site_key;
 use crate::core::tree::semantic as sem;
@@ -62,6 +63,8 @@ struct StatePlanSeed {
     state_name: String,
     state_type_def_id: crate::core::resolve::DefId,
     state_layout_ty: TypeId,
+    // Source `@final` marker propagated from typestate desugaring.
+    is_final: bool,
     handlers: Vec<HandlerPlanSeed>,
 }
 
@@ -93,6 +96,7 @@ fn collect_typestate_builders(
                 state_name,
                 state_type_def_id: type_def.def_id,
                 state_layout_ty,
+                is_final: false,
                 handlers: Vec::new(),
             },
         );
@@ -116,6 +120,13 @@ fn collect_typestate_builders(
             let sem::MethodItem::Def(method_def) = item else {
                 continue;
             };
+            // Typestate lowering injects a synthetic marker method in `@final`
+            // states so later stages can recover terminal-state facts without
+            // carrying source attributes through semantic trees.
+            if method_def.sig.name == GENERATED_FINAL_STATE_MARKER {
+                state_seed.is_final = true;
+                continue;
+            }
             let Some(ordinal) = parse_generated_handler_ordinal(&method_def.sig.name) else {
                 continue;
             };
@@ -372,10 +383,12 @@ fn materialize_machine_plans(builders: BTreeMap<String, TypestatePlanSeed>) -> s
         let mut state_tags = Vec::with_capacity(state_rows.len());
         let mut state_tag_by_name = HashMap::<String, u64>::new();
         let mut state_tag_by_layout = HashMap::<TypeId, u64>::new();
+        let mut state_is_final_by_layout = HashMap::<TypeId, bool>::new();
         for (idx, state) in state_rows.iter().enumerate() {
             let tag = (idx + 1) as u64;
             state_tag_by_name.insert(state.state_name.clone(), tag);
             state_tag_by_layout.insert(state.state_layout_ty, tag);
+            state_is_final_by_layout.insert(state.state_layout_ty, state.is_final);
             state_tags.push(sem::MachineStateTagPlan {
                 state_name: state.state_name.clone(),
                 state_type_def_id: state.state_type_def_id,
@@ -415,6 +428,14 @@ fn materialize_machine_plans(builders: BTreeMap<String, TypestatePlanSeed>) -> s
                                 typestate_name, handler.def_id.0, handler.next_state_layout_ty
                             )
                         }),
+                        transitions_to_final: *state_is_final_by_layout
+                            .get(&handler.next_state_layout_ty)
+                            .unwrap_or_else(|| {
+                                panic!(
+                                    "compiler bug: missing final-state marker for typestate {} handler {} next-state layout {:?}",
+                                    typestate_name, handler.def_id.0, handler.next_state_layout_ty
+                                )
+                            }),
                         state_layout_ty: handler.state_layout_ty,
                         payload_layout_ty: handler.payload_layout_ty,
                         next_state_layout_ty: handler.next_state_layout_ty,
@@ -645,12 +666,14 @@ mod tests {
             state_name: "A".to_string(),
             state_type_def_id: DefId(1),
             state_layout_ty: dummy_type_id(),
+            is_final: false,
             handlers: vec![make_handler(0, "Ping"), make_handler(1, "Pong")],
         };
         let state_b = StatePlanSeed {
             state_name: "B".to_string(),
             state_type_def_id: DefId(2),
             state_layout_ty: dummy_type_id(),
+            is_final: false,
             handlers: vec![make_handler(0, "Ping")],
         };
 
@@ -704,12 +727,14 @@ mod tests {
             state_name: "A".to_string(),
             state_type_def_id: DefId(1),
             state_layout_ty: dummy_type_id(),
+            is_final: false,
             handlers: vec![ping.clone(), pong_local],
         };
         let state_b = StatePlanSeed {
             state_name: "B".to_string(),
             state_type_def_id: DefId(2),
             state_layout_ty: dummy_type_id(),
+            is_final: false,
             handlers: vec![HandlerPlanSeed {
                 state_name: "B".to_string(),
                 ..ping
@@ -762,6 +787,7 @@ mod tests {
             state_name: "A".to_string(),
             state_type_def_id: DefId(1),
             state_layout_ty: dummy_type_id(),
+            is_final: false,
             handlers: vec![HandlerPlanSeed {
                 def_id: DefId(100),
                 ordinal: 0,
@@ -778,6 +804,7 @@ mod tests {
             state_name: "B".to_string(),
             state_type_def_id: DefId(2),
             state_layout_ty: dummy_type_id(),
+            is_final: false,
             handlers: vec![HandlerPlanSeed {
                 def_id: DefId(200),
                 ordinal: 0,

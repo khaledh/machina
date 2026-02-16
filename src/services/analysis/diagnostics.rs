@@ -458,6 +458,34 @@ impl Diagnostic {
                 );
                 "MC-TYPESTATE-DUPLICATE-TRANSITION"
             }
+            ResolveError::TypestateUnknownStateAttribute(name, state, attr, _) => {
+                metadata.insert(
+                    "typestate".to_string(),
+                    DiagnosticValue::String(name.clone()),
+                );
+                metadata.insert("state".to_string(), DiagnosticValue::String(state.clone()));
+                metadata.insert(
+                    "attribute".to_string(),
+                    DiagnosticValue::String(attr.clone()),
+                );
+                "MC-TYPESTATE-UNKNOWN-STATE-ATTRIBUTE"
+            }
+            ResolveError::TypestateFinalStateHasTransition(name, state, _) => {
+                metadata.insert(
+                    "typestate".to_string(),
+                    DiagnosticValue::String(name.clone()),
+                );
+                metadata.insert("state".to_string(), DiagnosticValue::String(state.clone()));
+                "MC-TYPESTATE-FINAL-STATE-HAS-TRANSITION"
+            }
+            ResolveError::TypestateFinalStateHasHandler(name, state, _) => {
+                metadata.insert(
+                    "typestate".to_string(),
+                    DiagnosticValue::String(name.clone()),
+                );
+                metadata.insert("state".to_string(), DiagnosticValue::String(state.clone()));
+                "MC-TYPESTATE-FINAL-STATE-HAS-HANDLER"
+            }
             ResolveError::TypestateStateLiteralOutsideTypestate(state, _) => {
                 metadata.insert("state".to_string(), DiagnosticValue::String(state.clone()));
                 "MC-TYPESTATE-STATE-LITERAL-OUTSIDE-TYPESTATE"

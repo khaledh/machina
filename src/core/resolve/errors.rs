@@ -143,6 +143,15 @@ pub enum ResolveError {
     #[error("State `{0}.{1}` has duplicate transition `{2}`")]
     TypestateDuplicateTransition(String, String, String, Span),
 
+    #[error("Unknown typestate state attribute: `{2}` on state `{0}.{1}`")]
+    TypestateUnknownStateAttribute(String, String, String, Span),
+
+    #[error("Final state `{0}.{1}` must not declare transition methods")]
+    TypestateFinalStateHasTransition(String, String, Span),
+
+    #[error("Final state `{0}.{1}` must not declare `on` handlers")]
+    TypestateFinalStateHasHandler(String, String, Span),
+
     #[error("State literal `{0}` is only allowed inside typestate constructor/transition methods")]
     TypestateStateLiteralOutsideTypestate(String, Span),
 
@@ -196,6 +205,9 @@ impl ResolveError {
             ResolveError::TypestateInvalidOnHandlerReturn(_, span) => *span,
             ResolveError::TypestateInvalidStateOnHandlerReturn(_, _, span) => *span,
             ResolveError::TypestateDuplicateTransition(_, _, _, span) => *span,
+            ResolveError::TypestateUnknownStateAttribute(_, _, _, span) => *span,
+            ResolveError::TypestateFinalStateHasTransition(_, _, span) => *span,
+            ResolveError::TypestateFinalStateHasHandler(_, _, span) => *span,
             ResolveError::TypestateStateLiteralOutsideTypestate(_, span) => *span,
             ResolveError::TypestateSpawnRequiresMachinesOptIn(span) => *span,
         }

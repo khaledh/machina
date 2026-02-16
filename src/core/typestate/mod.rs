@@ -10,6 +10,7 @@
 use std::collections::{HashMap, HashSet};
 
 use crate::core::diag::Span;
+use crate::core::machine::naming::GENERATED_FINAL_STATE_MARKER;
 use crate::core::resolve::ResolveError;
 use crate::core::tree::NodeIdGen;
 use crate::core::tree::parsed::{
@@ -236,6 +237,7 @@ fn desugar_typestate(
     let shared_fields = analysis.shared_fields;
     let states = analysis.states;
     let typestate_handlers = analysis.handlers;
+    let final_state_names = analysis.final_state_names;
     let state_name_map = build_state_name_map(&ts_name, &states);
     let generated_state_names: HashSet<String> = state_name_map.values().cloned().collect();
     // Local fields are used by shorthand transition rewriting (`State`) to know
@@ -259,6 +261,7 @@ fn desugar_typestate(
     lowered.push(machine_handle_method_block(&handle_type_name, node_id_gen));
 
     for state in states {
+        let is_final_state = final_state_names.contains(&state.name);
         // Each source state becomes a generated struct type that includes both
         // carried fields and local state fields.
         let state_ty_name = state_name_map
@@ -283,26 +286,31 @@ fn desugar_typestate(
         // and apply transition-literal rewrites before state-name mangling.
         let mut method_items = Vec::new();
         let mut handler_index = 0usize;
-        for handler in &typestate_handlers {
-            let method_source = lower_handler_to_method_source(
-                handler,
-                &state.name,
-                &mut handler_index,
-                node_id_gen,
-            );
-            method_items.push(MethodItem::Def(lower_state_method(
-                method_source,
-                node_id_gen,
-                &source_state_names,
-                &local_fields_by_state,
-                &carried_field_names,
-                &state_name_map,
-                state.span,
-            )));
+        if !is_final_state {
+            for handler in &typestate_handlers {
+                let method_source = lower_handler_to_method_source(
+                    handler,
+                    &state.name,
+                    &mut handler_index,
+                    node_id_gen,
+                );
+                method_items.push(MethodItem::Def(lower_state_method(
+                    method_source,
+                    node_id_gen,
+                    &source_state_names,
+                    &local_fields_by_state,
+                    &carried_field_names,
+                    &state_name_map,
+                    state.span,
+                )));
+            }
         }
         for item in state.items {
             match item {
                 TypestateStateItem::Method(method) => {
+                    if is_final_state {
+                        continue;
+                    }
                     method_items.push(MethodItem::Def(lower_state_method(
                         method,
                         node_id_gen,
@@ -314,6 +322,9 @@ fn desugar_typestate(
                     )));
                 }
                 TypestateStateItem::Handler(handler) => {
+                    if is_final_state {
+                        continue;
+                    }
                     let method_source = lower_handler_to_method_source(
                         &handler,
                         &state.name,
@@ -332,6 +343,12 @@ fn desugar_typestate(
                 }
                 TypestateStateItem::Fields(_) => {}
             }
+        }
+        if is_final_state {
+            method_items.push(MethodItem::Def(final_state_marker_method_def(
+                state.span,
+                node_id_gen,
+            )));
         }
         if !method_items.is_empty() {
             lowered.push(TopLevelItem::MethodBlock(MethodBlock {
@@ -1389,6 +1406,8 @@ struct TypestateAnalysis {
     states: Vec<TypestateState>,
     // Typestate-level handlers copied onto each lowered state.
     handlers: Vec<TypestateOnHandler>,
+    // Source states marked with `@final`.
+    final_state_names: HashSet<String>,
     // The selected `new` constructor (first one if multiple are present).
     constructor: Option<FuncDef>,
     // All validation diagnostics for this typestate block.
@@ -1426,11 +1445,15 @@ fn analyze_typestate(typestate: &TypestateDef) -> TypestateAnalysis {
     // 2) Collect unique states and report duplicates.
     // Keep first state occurrence and report duplicates.
     let mut unique_state_names = HashSet::new();
+    let mut final_state_names = HashSet::new();
     let mut states = Vec::new();
     let mut handlers = Vec::new();
     for item in &typestate.items {
         match item {
             TypestateItem::State(state) => {
+                if parse_state_attrs(&ts_name, state, &mut errors) {
+                    final_state_names.insert(state.name.clone());
+                }
                 if unique_state_names.insert(state.name.clone()) {
                     states.push(state.clone());
                 } else {
@@ -1466,6 +1489,7 @@ fn analyze_typestate(typestate: &TypestateDef) -> TypestateAnalysis {
         validate_state_items(
             &ts_name,
             state,
+            final_state_names.contains(&state.name),
             &state_names,
             &shared_field_names,
             &mut errors,
@@ -1535,14 +1559,52 @@ fn analyze_typestate(typestate: &TypestateDef) -> TypestateAnalysis {
         shared_fields,
         states,
         handlers,
+        final_state_names,
         constructor,
         errors,
     }
 }
 
+fn parse_state_attrs(
+    ts_name: &str,
+    state: &TypestateState,
+    errors: &mut Vec<ResolveError>,
+) -> bool {
+    let mut seen = HashSet::new();
+    let mut is_final = false;
+    for attr in &state.attrs {
+        if !seen.insert(attr.name.clone()) {
+            errors.push(ResolveError::AttrDuplicate(attr.name.clone(), attr.span));
+            continue;
+        }
+        match attr.name.as_str() {
+            "final" => {
+                if !attr.args.is_empty() {
+                    errors.push(ResolveError::AttrWrongArgCount(
+                        attr.name.clone(),
+                        0,
+                        attr.args.len(),
+                        attr.span,
+                    ));
+                    continue;
+                }
+                is_final = true;
+            }
+            _ => errors.push(ResolveError::TypestateUnknownStateAttribute(
+                ts_name.to_string(),
+                state.name.clone(),
+                attr.name.clone(),
+                attr.span,
+            )),
+        }
+    }
+    is_final
+}
+
 fn validate_state_items(
     ts_name: &str,
     state: &TypestateState,
+    is_final_state: bool,
     state_names: &HashSet<String>,
     shared_field_names: &HashSet<String>,
     errors: &mut Vec<ResolveError>,
@@ -1576,6 +1638,29 @@ fn validate_state_items(
                 ));
             }
         }
+    }
+
+    if is_final_state {
+        for item in &state.items {
+            match item {
+                TypestateStateItem::Method(method) => {
+                    errors.push(ResolveError::TypestateFinalStateHasTransition(
+                        ts_name.to_string(),
+                        state.name.clone(),
+                        method.sig.span,
+                    ));
+                }
+                TypestateStateItem::Handler(handler) => {
+                    errors.push(ResolveError::TypestateFinalStateHasHandler(
+                        ts_name.to_string(),
+                        state.name.clone(),
+                        handler.span,
+                    ));
+                }
+                TypestateStateItem::Fields(_) => {}
+            }
+        }
+        return;
     }
 
     // 2) Validate transition signatures for this state.
@@ -1626,6 +1711,38 @@ fn validate_state_items(
             }
             TypestateStateItem::Fields(_) => {}
         }
+    }
+}
+
+fn final_state_marker_method_def(span: Span, node_id_gen: &mut NodeIdGen) -> MethodDef {
+    // Marker used by machine planning to classify generated state types as
+    // terminal without leaking source-only typestate attributes downstream.
+    MethodDef {
+        id: node_id_gen.new_id(),
+        def_id: (),
+        attrs: Vec::new(),
+        sig: MethodSig {
+            name: GENERATED_FINAL_STATE_MARKER.to_string(),
+            type_params: Vec::new(),
+            self_param: SelfParam {
+                id: node_id_gen.new_id(),
+                def_id: (),
+                mode: ParamMode::In,
+                span,
+            },
+            params: Vec::new(),
+            // Keep marker typing explicit to avoid introducing unresolved
+            // inference variables in final-state-only method blocks.
+            ret_ty_expr: named_type_expr("()", node_id_gen, span),
+            span,
+        },
+        body: Expr {
+            id: node_id_gen.new_id(),
+            kind: ExprKind::UnitLit,
+            ty: (),
+            span,
+        },
+        span,
     }
 }
 

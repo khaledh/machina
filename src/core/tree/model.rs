@@ -203,6 +203,7 @@ pub struct TypestateFields<D> {
 #[derive(Clone, Debug)]
 pub struct TypestateState<D, T = ()> {
     pub id: NodeId,
+    pub attrs: Vec<Attribute>,
     pub name: String,
     pub items: Vec<TypestateStateItem<D, T>>,
     pub span: Span,

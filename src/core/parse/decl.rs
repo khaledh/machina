@@ -252,21 +252,33 @@ impl<'a> Parser<'a> {
 
         let mut items = Vec::new();
         while self.curr_token.kind != TK::RBrace {
+            let attrs = self.parse_attribute_list()?;
             if self.is_contextual_keyword("fields") {
+                if !attrs.is_empty() {
+                    return Err(ParseError::AttributeNotAllowed(attrs[0].span));
+                }
                 items.push(TypestateItem::Fields(self.parse_typestate_fields_block()?));
                 continue;
             }
             if self.curr_token.kind == TK::KwFn {
+                if !attrs.is_empty() {
+                    return Err(ParseError::AttributeNotAllowed(attrs[0].span));
+                }
                 let func = self.parse_typestate_func_def(format!("{name}$new"))?;
                 items.push(TypestateItem::Constructor(func));
                 continue;
             }
             if self.curr_token.kind == TK::KwOn {
+                if !attrs.is_empty() {
+                    return Err(ParseError::AttributeNotAllowed(attrs[0].span));
+                }
                 items.push(TypestateItem::Handler(self.parse_typestate_on_handler()?));
                 continue;
             }
             if self.is_contextual_keyword("state") {
-                items.push(TypestateItem::State(self.parse_typestate_state(&name)?));
+                items.push(TypestateItem::State(
+                    self.parse_typestate_state(attrs, &name)?,
+                ));
                 continue;
             }
             return Err(ParseError::ExpectedToken(
@@ -305,6 +317,7 @@ impl<'a> Parser<'a> {
 
     fn parse_typestate_state(
         &mut self,
+        attrs: Vec<Attribute>,
         typestate_name: &str,
     ) -> Result<TypestateState, ParseError> {
         let marker = self.mark();
@@ -341,6 +354,7 @@ impl<'a> Parser<'a> {
         self.consume(&TK::RBrace)?;
         Ok(TypestateState {
             id: self.id_gen.new_id(),
+            attrs,
             name,
             items,
             span: self.close(marker),

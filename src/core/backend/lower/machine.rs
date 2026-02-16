@@ -423,6 +423,19 @@ fn build_dispatch_thunk(
     let handler_fn = builder.const_func_addr(plan.handler_def_id, handler_fn_ty);
     let next_state_value = builder.call(Callee::Value(handler_fn), call_args, handler_ret_ty);
 
+    if plan.transitions_to_final {
+        // `@final` transitions stop machine execution after the handler runs.
+        // We intentionally do not stage `txn.next_state` for final transitions:
+        // runtime treats STOP as terminal and does not commit staged state.
+        let stop = builder.const_int(2, false, 8, u8_ty);
+        builder.terminate(Terminator::Return { value: Some(stop) });
+        return LoweredFunction {
+            func: builder.finish(),
+            types: lowerer.ir_type_cache,
+            globals: Vec::new(),
+        };
+    }
+
     // Heap-box the returned next state token.
     let layout = lowerer.ir_type_cache.layout(handler_ret_ty);
     // Zero-sized state layouts still need a non-null token pointer for runtime.

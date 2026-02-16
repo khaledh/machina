@@ -99,6 +99,9 @@ pub struct MachineDispatchThunkPlan {
     pub state_name: String,
     pub event_key: MachineEventKeyPlan,
     pub next_state_tag: u64,
+    /// When true, handler transition targets a `@final` typestate state and the
+    /// thunk should return `MC_DISPATCH_STOP` instead of committing next-state.
+    pub transitions_to_final: bool,
     /// Parameter index bound by `for RequestType(binding)` provenance form.
     pub provenance_param_index: Option<usize>,
     /// Layout ids required by runtime bridge.

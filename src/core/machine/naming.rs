@@ -2,6 +2,7 @@
 
 pub const GENERATED_STATE_PREFIX: &str = "__ts_";
 pub const GENERATED_HANDLER_PREFIX: &str = "__ts_on_";
+pub const GENERATED_FINAL_STATE_MARKER: &str = "__ts_final_state_marker";
 
 /// Parses a generated handler name to extract the request-site label suffix.
 ///

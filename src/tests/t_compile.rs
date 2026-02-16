@@ -1114,6 +1114,89 @@ fn main() {}
 }
 
 #[test]
+fn compile_typestate_final_state_rejects_transitions_and_handlers() {
+    let source = r#"
+type Ping = {}
+
+typestate M {
+    fn new() -> Open { Open {} }
+
+    state Open {
+        fn close() -> Closed {
+            Closed {}
+        }
+    }
+
+    @final
+    state Closed {
+        fn reopen() -> Open {
+            Open {}
+        }
+
+        on Ping(p) -> stay {
+            p;
+        }
+    }
+}
+
+fn main() {}
+"#;
+
+    let errs = match compile(source, &typestate_compile_opts()) {
+        Ok(_) => panic!("expected @final state transition/handler diagnostics"),
+        Err(errs) => errs,
+    };
+    let has_transition_err = errs.iter().any(|err| {
+        matches!(
+            err,
+            crate::core::diag::CompileError::Resolve(
+                crate::core::resolve::ResolveError::TypestateFinalStateHasTransition(_, _, _)
+            )
+        )
+    });
+    let has_handler_err = errs.iter().any(|err| {
+        matches!(
+            err,
+            crate::core::diag::CompileError::Resolve(
+                crate::core::resolve::ResolveError::TypestateFinalStateHasHandler(_, _, _)
+            )
+        )
+    });
+    assert!(
+        has_transition_err && has_handler_err,
+        "expected both @final transition and handler diagnostics, got {errs:?}"
+    );
+}
+
+#[test]
+fn compile_typestate_rejects_unknown_state_attribute() {
+    let source = r#"
+typestate M {
+    fn new() -> S { S {} }
+
+    @terminal
+    state S {}
+}
+
+fn main() {}
+"#;
+
+    let errs = match compile(source, &typestate_compile_opts()) {
+        Ok(_) => panic!("expected unknown state attribute diagnostic"),
+        Err(errs) => errs,
+    };
+    assert!(
+        errs.iter().any(|err| matches!(
+            err,
+            crate::core::diag::CompileError::Resolve(
+                crate::core::resolve::ResolveError::TypestateUnknownStateAttribute(_, _, _, _)
+            )
+        )),
+        "expected TypestateUnknownStateAttribute diagnostic, got {errs:?}"
+    );
+}
+
+#[test]
 fn compile_typestate_spawn_constructor_path() {
     let source = r#"
 type Ping = {}

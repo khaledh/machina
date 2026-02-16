@@ -592,6 +592,7 @@ pub fn walk_typestate_state<M: TreeMapper + ?Sized>(
 ) -> TypestateState<M::OutD, M::OutT> {
     TypestateState {
         id: state.id,
+        attrs: state.attrs.clone(),
         name: state.name.clone(),
         items: state
             .items

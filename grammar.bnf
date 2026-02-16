@@ -49,7 +49,10 @@ ProtocolFlowDecl   ::= "flow" Identifier "->" Identifier ":" TypeExpr ( "->" Typ
 TypestateDef       ::= "typestate" Identifier TypestateRoleImplList? "{" TypestateItem* "}"
 TypestateRoleImplList ::= ":" TypestateRolePath ("," TypestateRolePath)*
 TypestateRolePath  ::= Identifier ("::" Identifier)+
-TypestateItem      ::= TypestateFields | TypestateNew | TypestateOnHandler | TypestateState
+TypestateItem      ::= TypestateFields
+                     | TypestateNew
+                     | TypestateOnHandler
+                     | (AttributeList TypestateState)
 TypestateFields    ::= "fields" "{" StructFieldList? "}"
 TypestateNew       ::= "fn" "new" TypeParamList? "(" ParamList? ")" ( "->" TypeExpr )? Block
 TypestateOnHandler ::= "on" TypeExpr TypestateHandlerParams? TypestateHandlerProvenance? TypestateHandlerReturn? Block

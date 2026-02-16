@@ -62,6 +62,7 @@ fn managed_check_examples() -> Vec<PathBuf> {
     vec![
         root.join("examples/typestate/machine_events_check.mc"),
         root.join("examples/typestate/inter_machine_req_reply_check.mc"),
+        root.join("examples/typestate/final_state_machine.mc"),
     ]
 }
 
