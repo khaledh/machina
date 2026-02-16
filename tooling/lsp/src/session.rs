@@ -209,6 +209,73 @@ impl AnalysisSession {
     pub fn stale_policy(&self) -> StaleResultPolicy {
         StaleResultPolicy::LatestOnly
     }
+
+    /// Check whether the given 0-based position falls inside a `//` line
+    /// comment. Used by hover/definition/signatureHelp handlers to suppress
+    /// analysis results when the cursor is over commented-out code.
+    pub fn is_position_in_line_comment(&self, file_id: FileId, line0: usize, col0: usize) -> bool {
+        let snapshot = self.snapshot();
+        let Some(source) = snapshot.text(file_id) else {
+            return false;
+        };
+        let Some(line) = source.lines().nth(line0) else {
+            return false;
+        };
+        is_column_in_line_comment(line, col0)
+    }
+}
+
+/// Scan a single source line left-to-right, tracking string and char literal
+/// state, to determine whether `col0` sits inside a `//` comment. We need
+/// the literal tracking to avoid false positives on `"//"` in strings.
+fn is_column_in_line_comment(line: &str, col0: usize) -> bool {
+    let chars: Vec<char> = line.chars().collect();
+    let mut i = 0usize;
+    let mut in_string = false;
+    let mut in_char = false;
+    let mut escaped = false;
+
+    while i + 1 < chars.len() {
+        let ch = chars[i];
+        if in_string {
+            if escaped {
+                escaped = false;
+            } else if ch == '\\' {
+                escaped = true;
+            } else if ch == '"' {
+                in_string = false;
+            }
+            i += 1;
+            continue;
+        }
+        if in_char {
+            if escaped {
+                escaped = false;
+            } else if ch == '\\' {
+                escaped = true;
+            } else if ch == '\'' {
+                in_char = false;
+            }
+            i += 1;
+            continue;
+        }
+
+        if ch == '"' {
+            in_string = true;
+            i += 1;
+            continue;
+        }
+        if ch == '\'' {
+            in_char = true;
+            i += 1;
+            continue;
+        }
+        if ch == '/' && chars[i + 1] == '/' {
+            return col0 >= i;
+        }
+        i += 1;
+    }
+    false
 }
 
 fn filter_diagnostics_for_file(

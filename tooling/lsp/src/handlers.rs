@@ -1,8 +1,18 @@
-//! Minimal JSON-RPC request handlers for LSP bootstrap methods.
+//! JSON-RPC request handlers for the machina language server.
+//!
+//! Each LSP method is dispatched from [`handle_message`]. Position-based read
+//! requests (hover, definition, completion, signatureHelp) share a common
+//! `dispatch_read_request` helper that handles param parsing, version lookup,
+//! and response framing. Response functions use `resolve_versioned_file` and
+//! `version_guarded_query` to bracket the actual analysis query with document-
+//! version staleness checks — ensuring the editor never sees results computed
+//! from an outdated snapshot.
 
 use serde_json::{Map, Value, json};
 use std::path::Path;
 
+use machina::services::analysis::db::AnalysisDb;
+use machina::services::analysis::query::QueryResult;
 use machina::services::analysis::snapshot::FileId;
 
 use crate::session::{AnalysisSession, SessionError};
@@ -59,10 +69,9 @@ pub fn handle_message(
     match method {
         Some("initialize") => {
             session.set_experimental_typestate(parse_initialize_typestate_flag(params));
-            let response = json!({
-                "jsonrpc": "2.0",
-                "id": id,
-                "result": {
+            let response = success_response(
+                id.unwrap_or(Value::Null),
+                json!({
                     "capabilities": {
                         "textDocumentSync": {
                             "openClose": true,
@@ -88,8 +97,8 @@ pub fn handle_message(
                         "name": "machina-lsp",
                         "version": env!("CARGO_PKG_VERSION")
                     }
-                }
-            });
+                }),
+            );
             (HandlerAction::Continue, Some(response))
         }
         Some("initialized") => (HandlerAction::Continue, None),
@@ -138,91 +147,15 @@ pub fn handle_message(
             });
             (HandlerAction::Continue, Some(notification))
         }
-        Some("textDocument/hover") => {
-            let Some(params) = params.and_then(parse_read_request_params) else {
-                return (HandlerAction::Continue, invalid_params_response(id));
-            };
-            let Some(id) = id else {
-                return (HandlerAction::Continue, None);
-            };
-            let version = match read_request_version(session, &params) {
-                Ok(version) => version,
-                Err(error) => {
-                    return (
-                        HandlerAction::Continue,
-                        Some(session_error_response(id, &error)),
-                    );
-                }
-            };
-            let response =
-                hover_response(session, id, &params.uri, params.line0, params.col0, version);
-            (HandlerAction::Continue, Some(response))
-        }
+        Some("textDocument/hover") => dispatch_read_request(session, params, id, hover_response),
         Some("textDocument/definition") => {
-            let Some(params) = params.and_then(parse_read_request_params) else {
-                return (HandlerAction::Continue, invalid_params_response(id));
-            };
-            let Some(id) = id else {
-                return (HandlerAction::Continue, None);
-            };
-            let version = match read_request_version(session, &params) {
-                Ok(version) => version,
-                Err(error) => {
-                    return (
-                        HandlerAction::Continue,
-                        Some(session_error_response(id, &error)),
-                    );
-                }
-            };
-            let response =
-                definition_response(session, id, &params.uri, params.line0, params.col0, version);
-            (HandlerAction::Continue, Some(response))
+            dispatch_read_request(session, params, id, definition_response)
         }
         Some("textDocument/completion") => {
-            let Some(params) = params.and_then(parse_read_request_params) else {
-                return (HandlerAction::Continue, invalid_params_response(id));
-            };
-            let Some(id) = id else {
-                return (HandlerAction::Continue, None);
-            };
-            let version = match read_request_version(session, &params) {
-                Ok(version) => version,
-                Err(error) => {
-                    return (
-                        HandlerAction::Continue,
-                        Some(session_error_response(id, &error)),
-                    );
-                }
-            };
-            let response =
-                completion_response(session, id, &params.uri, params.line0, params.col0, version);
-            (HandlerAction::Continue, Some(response))
+            dispatch_read_request(session, params, id, completion_response)
         }
         Some("textDocument/signatureHelp") => {
-            let Some(params) = params.and_then(parse_read_request_params) else {
-                return (HandlerAction::Continue, invalid_params_response(id));
-            };
-            let Some(id) = id else {
-                return (HandlerAction::Continue, None);
-            };
-            let version = match read_request_version(session, &params) {
-                Ok(version) => version,
-                Err(error) => {
-                    return (
-                        HandlerAction::Continue,
-                        Some(session_error_response(id, &error)),
-                    );
-                }
-            };
-            let response = signature_help_response(
-                session,
-                id,
-                &params.uri,
-                params.line0,
-                params.col0,
-                version,
-            );
-            (HandlerAction::Continue, Some(response))
+            dispatch_read_request(session, params, id, signature_help_response)
         }
         Some("textDocument/codeAction") => {
             let Some(params) = params.and_then(parse_code_action_request_params) else {
@@ -254,38 +187,16 @@ pub fn handle_message(
             (HandlerAction::Continue, Some(response))
         }
         Some("shutdown") => {
-            let response = json!({
-                "jsonrpc": "2.0",
-                "id": id,
-                "result": Value::Null
-            });
+            let response = success_response(id.unwrap_or(Value::Null), Value::Null);
             (HandlerAction::Continue, Some(response))
         }
         Some("exit") => (HandlerAction::Exit, None),
         Some(_) => {
-            let response = id.map(|id| {
-                json!({
-                    "jsonrpc": "2.0",
-                    "id": id,
-                    "error": {
-                        "code": -32601,
-                        "message": "method not found"
-                    }
-                })
-            });
+            let response = id.map(|id| error_response(id, -32601, "method not found"));
             (HandlerAction::Continue, response)
         }
         None => {
-            let response = id.map(|id| {
-                json!({
-                    "jsonrpc": "2.0",
-                    "id": id,
-                    "error": {
-                        "code": -32600,
-                        "message": "invalid request"
-                    }
-                })
-            });
+            let response = id.map(|id| error_response(id, -32600, "invalid request"));
             (HandlerAction::Continue, response)
         }
     }
@@ -425,6 +336,7 @@ fn publish_diagnostics_if_current(
     (HandlerAction::Continue, Some(notification))
 }
 
+/// Convert LSP 0-based line/column to a 1-based point span used internally.
 fn span_from_lsp_position(line0: usize, col0: usize) -> machina::core::diag::Span {
     let line = line0.saturating_add(1);
     let col = col0.saturating_add(1);
@@ -442,6 +354,80 @@ fn span_from_lsp_position(line0: usize, col0: usize) -> machina::core::diag::Spa
     }
 }
 
+/// Build a JSON-RPC 2.0 success envelope.
+fn success_response(id: Value, result: Value) -> Value {
+    json!({"jsonrpc": "2.0", "id": id, "result": result})
+}
+
+/// Build a JSON-RPC 2.0 error envelope.
+fn error_response(id: Value, code: i32, message: &str) -> Value {
+    json!({"jsonrpc": "2.0", "id": id, "error": {"code": code, "message": message}})
+}
+
+/// Shared dispatch for position-based read requests (hover, definition,
+/// completion, signatureHelp). Parses params, resolves the document version,
+/// and delegates to the given `handler` to build the response.
+fn dispatch_read_request(
+    session: &mut AnalysisSession,
+    params: Option<&Value>,
+    id: Option<Value>,
+    handler: impl FnOnce(&mut AnalysisSession, Value, &str, usize, usize, i32) -> Value,
+) -> (HandlerAction, Option<Value>) {
+    let Some(params) = params.and_then(parse_read_request_params) else {
+        return (HandlerAction::Continue, invalid_params_response(id));
+    };
+    let Some(id) = id else {
+        return (HandlerAction::Continue, None);
+    };
+    let version = match read_request_version(session, &params) {
+        Ok(version) => version,
+        Err(error) => {
+            return (
+                HandlerAction::Continue,
+                Some(session_error_response(id, &error)),
+            );
+        }
+    };
+    let response = handler(session, id, &params.uri, params.line0, params.col0, version);
+    (HandlerAction::Continue, Some(response))
+}
+
+/// Pre-query staleness gate: verify the document version is still current,
+/// then resolve the URI to a `FileId`. Returns `Err(response)` if stale or
+/// unknown, so callers can early-return with the response directly.
+fn resolve_versioned_file(
+    session: &AnalysisSession,
+    id: &Value,
+    uri: &str,
+    version: i32,
+) -> Result<FileId, Value> {
+    if !matches!(session.is_current_version(uri, version), Ok(true)) {
+        return Err(stale_result_response(id.clone()));
+    }
+    session
+        .file_id_for_uri(uri)
+        .map_err(|e| session_error_response(id.clone(), &e))
+}
+
+/// Execute an analysis query, then re-check document version afterwards.
+/// A didChange may arrive while the query runs; the post-check discards
+/// results computed against an outdated snapshot.
+fn version_guarded_query<T>(
+    session: &mut AnalysisSession,
+    id: &Value,
+    uri: &str,
+    version: i32,
+    query: impl FnOnce(&mut AnalysisDb) -> QueryResult<T>,
+) -> Result<T, Value> {
+    let result = session
+        .execute_query(query)
+        .map_err(|_| session_error_response(id.clone(), &SessionError::Cancelled))?;
+    if !matches!(session.is_current_version(uri, version), Ok(true)) {
+        return Err(stale_result_response(id.clone()));
+    }
+    Ok(result)
+}
+
 fn hover_response(
     session: &mut AnalysisSession,
     id: Value,
@@ -450,26 +436,24 @@ fn hover_response(
     col0: usize,
     version: i32,
 ) -> Value {
-    if !matches!(session.is_current_version(uri, version), Ok(true)) {
-        return stale_result_response(id);
-    }
-    let file_id = match session.file_id_for_uri(uri) {
-        Ok(file_id) => file_id,
-        Err(error) => return session_error_response(id, &error),
+    let file_id = match resolve_versioned_file(session, &id, uri, version) {
+        Ok(fid) => fid,
+        Err(r) => return r,
     };
-    if is_position_in_line_comment(session, file_id, line0, col0) {
-        return json!({"jsonrpc":"2.0","id":id,"result": Value::Null});
+    if session.is_position_in_line_comment(file_id, line0, col0) {
+        return success_response(id, Value::Null);
     }
     let span = span_from_lsp_position(line0, col0);
-    let result = session.execute_query(|db| db.hover_at_program_file(file_id, span));
-    if !matches!(session.is_current_version(uri, version), Ok(true)) {
-        return stale_result_response(id);
-    }
+    let result = match version_guarded_query(session, &id, uri, version, |db| {
+        db.hover_at_program_file(file_id, span)
+    }) {
+        Ok(r) => r,
+        Err(r) => return r,
+    };
     match result {
-        Ok(Some(hover)) => json!({
-            "jsonrpc": "2.0",
-            "id": id,
-            "result": {
+        Some(hover) => success_response(
+            id,
+            json!({
                 "contents": {
                     "kind": "markdown",
                     "value": hover_markdown_value(&hover.display)
@@ -478,82 +462,15 @@ fn hover_response(
                     "start": {"line": hover.span.start.line.saturating_sub(1), "character": hover.span.start.column.saturating_sub(1)},
                     "end": {"line": hover.span.end.line.saturating_sub(1), "character": hover.span.end.column.saturating_sub(1)}
                 }
-            }
-        }),
-        Ok(None) => json!({"jsonrpc":"2.0","id":id,"result": Value::Null}),
-        Err(_) => session_error_response(id, &SessionError::Cancelled),
+            }),
+        ),
+        None => success_response(id, Value::Null),
     }
 }
 
 fn hover_markdown_value(display: &str) -> String {
     let escaped = display.replace("```", "\\`\\`\\`");
     format!("```machina\n{escaped}\n```")
-}
-
-fn is_position_in_line_comment(
-    session: &AnalysisSession,
-    file_id: FileId,
-    line0: usize,
-    col0: usize,
-) -> bool {
-    let snapshot = session.snapshot();
-    let Some(source) = snapshot.text(file_id) else {
-        return false;
-    };
-    let Some(line) = source.lines().nth(line0) else {
-        return false;
-    };
-    is_column_in_line_comment(line, col0)
-}
-
-fn is_column_in_line_comment(line: &str, col0: usize) -> bool {
-    let chars: Vec<char> = line.chars().collect();
-    let mut i = 0usize;
-    let mut in_string = false;
-    let mut in_char = false;
-    let mut escaped = false;
-
-    while i + 1 < chars.len() {
-        let ch = chars[i];
-        if in_string {
-            if escaped {
-                escaped = false;
-            } else if ch == '\\' {
-                escaped = true;
-            } else if ch == '"' {
-                in_string = false;
-            }
-            i += 1;
-            continue;
-        }
-        if in_char {
-            if escaped {
-                escaped = false;
-            } else if ch == '\\' {
-                escaped = true;
-            } else if ch == '\'' {
-                in_char = false;
-            }
-            i += 1;
-            continue;
-        }
-
-        if ch == '"' {
-            in_string = true;
-            i += 1;
-            continue;
-        }
-        if ch == '\'' {
-            in_char = true;
-            i += 1;
-            continue;
-        }
-        if ch == '/' && chars[i + 1] == '/' {
-            return col0 >= i;
-        }
-        i += 1;
-    }
-    false
 }
 
 fn definition_response(
@@ -564,50 +481,45 @@ fn definition_response(
     col0: usize,
     version: i32,
 ) -> Value {
-    if !matches!(session.is_current_version(uri, version), Ok(true)) {
-        return stale_result_response(id);
-    }
-    let file_id = match session.file_id_for_uri(uri) {
-        Ok(file_id) => file_id,
-        Err(error) => return session_error_response(id, &error),
+    let file_id = match resolve_versioned_file(session, &id, uri, version) {
+        Ok(fid) => fid,
+        Err(r) => return r,
     };
-    if is_position_in_line_comment(session, file_id, line0, col0) {
-        return json!({"jsonrpc":"2.0","id":id,"result": []});
+    if session.is_position_in_line_comment(file_id, line0, col0) {
+        return success_response(id, json!([]));
     }
     let span = span_from_lsp_position(line0, col0);
-    let result = session.execute_query(|db| db.def_location_at_program_file(file_id, span));
-    if !matches!(session.is_current_version(uri, version), Ok(true)) {
-        return stale_result_response(id);
-    }
+    let result = match version_guarded_query(session, &id, uri, version, |db| {
+        db.def_location_at_program_file(file_id, span)
+    }) {
+        Ok(r) => r,
+        Err(r) => return r,
+    };
     match result {
-        Ok(Some(location)) => {
+        Some(location) => {
             let uri = location
                 .path
                 .as_deref()
                 .map(path_to_file_uri)
                 .unwrap_or_else(|| uri.to_string());
-            json!({
-                "jsonrpc": "2.0",
-                "id": id,
-                "result": [
-                    {
-                        "uri": uri,
-                        "range": {
-                            "start": {
-                                "line": location.span.start.line.saturating_sub(1),
-                                "character": location.span.start.column.saturating_sub(1)
-                            },
-                            "end": {
-                                "line": location.span.end.line.saturating_sub(1),
-                                "character": location.span.end.column.saturating_sub(1)
-                            }
+            success_response(
+                id,
+                json!([{
+                    "uri": uri,
+                    "range": {
+                        "start": {
+                            "line": location.span.start.line.saturating_sub(1),
+                            "character": location.span.start.column.saturating_sub(1)
+                        },
+                        "end": {
+                            "line": location.span.end.line.saturating_sub(1),
+                            "character": location.span.end.column.saturating_sub(1)
                         }
                     }
-                ]
-            })
+                }]),
+            )
         }
-        Ok(None) => json!({"jsonrpc":"2.0","id":id,"result": []}),
-        Err(_) => session_error_response(id, &SessionError::Cancelled),
+        None => success_response(id, json!([])),
     }
 }
 
@@ -623,50 +535,43 @@ fn completion_response(
     col0: usize,
     version: i32,
 ) -> Value {
-    if !matches!(session.is_current_version(uri, version), Ok(true)) {
-        return stale_result_response(id);
-    }
-    let file_id = match session.file_id_for_uri(uri) {
-        Ok(file_id) => file_id,
-        Err(error) => return session_error_response(id, &error),
+    let file_id = match resolve_versioned_file(session, &id, uri, version) {
+        Ok(fid) => fid,
+        Err(r) => return r,
     };
     let span = span_from_lsp_position(line0, col0);
-    let result = session.execute_query(|db| db.completions_at_program_file(file_id, span));
-    if !matches!(session.is_current_version(uri, version), Ok(true)) {
-        return stale_result_response(id);
-    }
-    match result {
-        Ok(items) => {
-            let items: Vec<Value> = items
-                .into_iter()
-                .map(|item| {
-                    let kind = match item.kind {
-                        machina::services::analysis::results::CompletionKind::Function => 3,
-                        machina::services::analysis::results::CompletionKind::Type => 7,
-                        machina::services::analysis::results::CompletionKind::Trait => 7,
-                        machina::services::analysis::results::CompletionKind::Variable => 6,
-                        machina::services::analysis::results::CompletionKind::Parameter => 6,
-                        machina::services::analysis::results::CompletionKind::TypeParameter => 25,
-                        machina::services::analysis::results::CompletionKind::EnumVariant => 20,
-                    };
-                    json!({
-                        "label": item.label,
-                        "kind": kind,
-                        "detail": item.detail
-                    })
-                })
-                .collect();
+    let items = match version_guarded_query(session, &id, uri, version, |db| {
+        db.completions_at_program_file(file_id, span)
+    }) {
+        Ok(r) => r,
+        Err(r) => return r,
+    };
+    let items: Vec<Value> = items
+        .into_iter()
+        .map(|item| {
+            let kind = match item.kind {
+                machina::services::analysis::results::CompletionKind::Function => 3,
+                machina::services::analysis::results::CompletionKind::Type => 7,
+                machina::services::analysis::results::CompletionKind::Trait => 7,
+                machina::services::analysis::results::CompletionKind::Variable => 6,
+                machina::services::analysis::results::CompletionKind::Parameter => 6,
+                machina::services::analysis::results::CompletionKind::TypeParameter => 25,
+                machina::services::analysis::results::CompletionKind::EnumVariant => 20,
+            };
             json!({
-                "jsonrpc": "2.0",
-                "id": id,
-                "result": {
-                    "isIncomplete": false,
-                    "items": items
-                }
+                "label": item.label,
+                "kind": kind,
+                "detail": item.detail
             })
-        }
-        Err(_) => session_error_response(id, &SessionError::Cancelled),
-    }
+        })
+        .collect();
+    success_response(
+        id,
+        json!({
+            "isIncomplete": false,
+            "items": items
+        }),
+    )
 }
 
 fn signature_help_response(
@@ -677,43 +582,40 @@ fn signature_help_response(
     col0: usize,
     version: i32,
 ) -> Value {
-    if !matches!(session.is_current_version(uri, version), Ok(true)) {
-        return stale_result_response(id);
-    }
-    let file_id = match session.file_id_for_uri(uri) {
-        Ok(file_id) => file_id,
-        Err(error) => return session_error_response(id, &error),
+    let file_id = match resolve_versioned_file(session, &id, uri, version) {
+        Ok(fid) => fid,
+        Err(r) => return r,
     };
-    if is_position_in_line_comment(session, file_id, line0, col0) {
-        return json!({"jsonrpc":"2.0","id":id,"result": Value::Null});
+    if session.is_position_in_line_comment(file_id, line0, col0) {
+        return success_response(id, Value::Null);
     }
     let span = span_from_lsp_position(line0, col0);
-    let result = session.execute_query(|db| db.signature_help_at_program_file(file_id, span));
-    if !matches!(session.is_current_version(uri, version), Ok(true)) {
-        return stale_result_response(id);
-    }
+    let result = match version_guarded_query(session, &id, uri, version, |db| {
+        db.signature_help_at_program_file(file_id, span)
+    }) {
+        Ok(r) => r,
+        Err(r) => return r,
+    };
     match result {
-        Ok(Some(sig)) => {
+        Some(sig) => {
             let parameters: Vec<Value> = sig
                 .parameters
                 .iter()
                 .map(|param| json!({ "label": param }))
                 .collect();
-            json!({
-                "jsonrpc": "2.0",
-                "id": id,
-                "result": {
+            success_response(
+                id,
+                json!({
                     "signatures": [{
                         "label": sig.label,
                         "parameters": parameters
                     }],
                     "activeSignature": 0,
                     "activeParameter": sig.active_parameter
-                }
-            })
+                }),
+            )
         }
-        Ok(None) => json!({"jsonrpc":"2.0","id":id,"result": Value::Null}),
-        Err(_) => session_error_response(id, &SessionError::Cancelled),
+        None => success_response(id, Value::Null),
     }
 }
 
@@ -725,88 +627,74 @@ fn code_action_response(
     version: i32,
     context_diagnostics: Vec<Value>,
 ) -> Value {
-    if !matches!(session.is_current_version(uri, version), Ok(true)) {
-        return stale_result_response(id);
-    }
-    let file_id = match session.file_id_for_uri(uri) {
-        Ok(file_id) => file_id,
-        Err(error) => return session_error_response(id, &error),
+    let file_id = match resolve_versioned_file(session, &id, uri, version) {
+        Ok(fid) => fid,
+        Err(r) => return r,
     };
     let diagnostics = match session.diagnostics_for_uri_if_version(uri, version) {
         Ok(Some(diag)) => diag,
         Ok(None) => return stale_result_response(id),
         Err(error) => return session_error_response(id, &error),
     };
-    let result = session.execute_query(move |db| {
+    let actions = match version_guarded_query(session, &id, uri, version, move |db| {
         db.code_actions_for_diagnostics_at_file(file_id, range, diagnostics)
-    });
-    if !matches!(session.is_current_version(uri, version), Ok(true)) {
-        return stale_result_response(id);
-    }
-    match result {
-        Ok(actions) => {
-            let items: Vec<Value> = actions
+    }) {
+        Ok(r) => r,
+        Err(r) => return r,
+    };
+    let items: Vec<Value> = actions
+        .into_iter()
+        .map(|action| {
+            let edits: Vec<Value> = action
+                .edits
                 .into_iter()
-                .map(|action| {
-                    let edits: Vec<Value> = action
-                        .edits
-                        .into_iter()
-                        .map(|edit| {
-                            json!({
-                                "range": {
-                                    "start": {
-                                        "line": edit.span.start.line.saturating_sub(1),
-                                        "character": edit.span.start.column.saturating_sub(1)
-                                    },
-                                    "end": {
-                                        "line": edit.span.end.line.saturating_sub(1),
-                                        "character": edit.span.end.column.saturating_sub(1)
-                                    }
-                                },
-                                "newText": edit.new_text
-                            })
-                        })
-                        .collect();
-                    let mut changes = Map::new();
-                    changes.insert(uri.to_string(), Value::Array(edits));
-                    let action_diagnostics: Vec<Value> = context_diagnostics
-                        .iter()
-                        .filter(|diag| {
-                            diag.get("code")
-                                .and_then(Value::as_str)
-                                .is_some_and(|code| code == action.diagnostic_code)
-                        })
-                        .cloned()
-                        .collect();
+                .map(|edit| {
                     json!({
-                        "title": action.title,
-                        "kind": "quickfix",
-                        "diagnostics": action_diagnostics,
-                        "edit": {
-                            "changes": changes
+                        "range": {
+                            "start": {
+                                "line": edit.span.start.line.saturating_sub(1),
+                                "character": edit.span.start.column.saturating_sub(1)
+                            },
+                            "end": {
+                                "line": edit.span.end.line.saturating_sub(1),
+                                "character": edit.span.end.column.saturating_sub(1)
+                            }
                         },
-                        "data": {
-                            "diagnosticCode": action.diagnostic_code
-                        }
+                        "newText": edit.new_text
                     })
                 })
                 .collect();
+            let mut changes = Map::new();
+            changes.insert(uri.to_string(), Value::Array(edits));
+            let action_diagnostics: Vec<Value> = context_diagnostics
+                .iter()
+                .filter(|diag| {
+                    diag.get("code")
+                        .and_then(Value::as_str)
+                        .is_some_and(|code| code == action.diagnostic_code)
+                })
+                .cloned()
+                .collect();
             json!({
-                "jsonrpc": "2.0",
-                "id": id,
-                "result": items
+                "title": action.title,
+                "kind": "quickfix",
+                "diagnostics": action_diagnostics,
+                "edit": {
+                    "changes": changes
+                },
+                "data": {
+                    "diagnosticCode": action.diagnostic_code
+                }
             })
-        }
-        Err(_) => session_error_response(id, &SessionError::Cancelled),
-    }
+        })
+        .collect();
+    success_response(id, json!(items))
 }
 
+/// Stale results are returned as `null` (a valid "no info" response) rather
+/// than an error, since staleness is a normal race condition, not a fault.
 fn stale_result_response(id: Value) -> Value {
-    json!({
-        "jsonrpc": "2.0",
-        "id": id,
-        "result": Value::Null
-    })
+    success_response(id, Value::Null)
 }
 
 fn publish_diagnostics_notification(
@@ -853,27 +741,11 @@ fn session_error_response(id: Value, error: &SessionError) -> Value {
         SessionError::Cancelled => "analysis query cancelled",
         SessionError::StaleVersion { .. } => "stale document version",
     };
-    json!({
-        "jsonrpc": "2.0",
-        "id": id,
-        "error": {
-            "code": -32001,
-            "message": message
-        }
-    })
+    error_response(id, -32001, message)
 }
 
 fn invalid_params_response(id: Option<Value>) -> Option<Value> {
-    id.map(|id| {
-        json!({
-            "jsonrpc": "2.0",
-            "id": id,
-            "error": {
-                "code": -32602,
-                "message": "invalid params"
-            }
-        })
-    })
+    id.map(|id| error_response(id, -32602, "invalid params"))
 }
 
 #[cfg(test)]
