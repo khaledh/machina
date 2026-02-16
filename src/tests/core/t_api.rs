@@ -1456,17 +1456,18 @@ typestate Connection {
         .map(|event| event.kind)
         .expect("expected Pong event kind");
 
-    // Connected + Ping -> typestate fallback only.
+    // Connected + Ping -> state-local only (each state has its own handler def,
+    // so stricter fallback detection no longer considers it a typestate-level fallback).
     let connected_ping = descriptor
         .dispatch_table
         .iter()
         .find(|row| row.state_tag == 1 && row.event_kind == ping_kind)
         .expect("expected dispatch row for Connected/Ping");
-    assert!(connected_ping.state_local_thunk.is_none());
     assert!(
-        connected_ping.typestate_fallback_thunk.is_some(),
-        "expected typestate-level fallback handler for Ping"
+        connected_ping.state_local_thunk.is_some(),
+        "expected state-local handler for Ping in Connected"
     );
+    assert!(connected_ping.typestate_fallback_thunk.is_none());
 
     // Disconnected + Pong -> state-local handler only.
     let disconnected_pong = descriptor
