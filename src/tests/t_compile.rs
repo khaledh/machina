@@ -1144,6 +1144,36 @@ fn main() {
 }
 
 #[test]
+fn compile_typestate_spawn_mirrors_new_param_arity() {
+    let source = r#"
+typestate Worker {
+    fn new(seed: u64) -> Idle {
+        seed;
+        Idle {}
+    }
+
+    state Idle {}
+}
+
+@[machines]
+fn main() {
+    let spawned = Worker::spawn();
+    spawned;
+}
+"#;
+
+    let errs = match compile(source, &typestate_compile_opts()) {
+        Ok(_) => panic!("spawn without required new(...) args should fail"),
+        Err(errs) => errs,
+    };
+    assert!(
+        errs.iter()
+            .any(|err| matches!(err, crate::core::diag::CompileError::TypeCheck(_))),
+        "expected typecheck error for spawn/new arity mismatch, got {errs:?}"
+    );
+}
+
+#[test]
 fn compile_typestate_machine_handle_types_are_distinct() {
     let source = r#"
 typestate A {

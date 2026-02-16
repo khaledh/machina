@@ -386,3 +386,79 @@ fn main() -> u64 {
         "expected deterministic labeled routing outcomes in stdout, got: {stdout}"
     );
 }
+
+#[test]
+fn test_typestate_spawn_forwards_constructor_args_under_managed_runtime() {
+    let source = r#"
+requires {
+    std::io::println
+    std::machine::managed_runtime
+    std::machine::step
+    std::machine::Runtime
+    std::machine::StepStatus
+}
+
+type Ping = {}
+
+typestate Worker {
+    fn new(seed: u64) -> Idle {
+        if seed == 42 {
+            println("new-42");
+        } else {
+            println("new-other");
+        };
+        Idle {}
+    }
+
+    state Idle {
+        on Ping(e) -> stay {
+            e;
+            println("handled");
+        }
+    }
+}
+
+@[machines]
+fn main() -> u64 {
+    match Worker::spawn(42) {
+        m: Machine<Worker> => {
+            match m.send(1, 0, 0) {
+                _ok: () => {}
+                _ => { return 1; }
+            };
+        }
+        _ => { return 1; }
+    };
+
+    let rt: Runtime = match managed_runtime() {
+        r: Runtime => r,
+        _ => { return 1; },
+    };
+
+    match step(rt) {
+        StepStatus::DidWork => 0,
+        _ => 1,
+    }
+}
+"#;
+
+    let run = run_program_with_opts(
+        "typestate_spawn_constructor_args",
+        source,
+        CompileOptions {
+            dump: None,
+            emit_ir: false,
+            verify_ir: false,
+            trace_alloc: false,
+            trace_drops: false,
+            inject_prelude: true,
+            experimental_typestate: true,
+        },
+    );
+    assert_eq!(run.status.code(), Some(0));
+    let stdout = String::from_utf8_lossy(&run.stdout);
+    assert!(
+        stdout.contains("new-42") && stdout.contains("handled"),
+        "expected constructor argument forwarding + managed handler execution, got: {stdout}"
+    );
+}
