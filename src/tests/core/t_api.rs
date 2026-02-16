@@ -1521,12 +1521,35 @@ typestate Connection {
         .get("Connection")
         .expect("expected Connection descriptor in second run");
 
+    // Compare only deterministic fields (state_name, tag) — TypeId / DefId values
+    // are non-deterministic across separate compilations within the same process.
+    let first_state_tags: Vec<_> = first_plan
+        .state_tags
+        .iter()
+        .map(|s| (&s.state_name, s.tag))
+        .collect();
+    let second_state_tags: Vec<_> = second_plan
+        .state_tags
+        .iter()
+        .map(|s| (&s.state_name, s.tag))
+        .collect();
     assert_eq!(
-        first_plan.state_tags, second_plan.state_tags,
+        first_state_tags, second_state_tags,
         "state tags must be deterministic"
     );
+
+    let first_event_kinds: Vec<_> = first_plan
+        .event_kinds
+        .iter()
+        .map(|e| (e.key.stable_key(), e.kind))
+        .collect();
+    let second_event_kinds: Vec<_> = second_plan
+        .event_kinds
+        .iter()
+        .map(|e| (e.key.stable_key(), e.kind))
+        .collect();
     assert_eq!(
-        first_plan.event_kinds, second_plan.event_kinds,
+        first_event_kinds, second_event_kinds,
         "event kinds must be deterministic"
     );
 }
