@@ -2,13 +2,13 @@ requires {
     examples::modules_visibility::runtime as rt
 }
 
-@[opaque]
+@opaque
 type Config = {
     _name: string,
     _ticks: u64,
 }
 
-@[public]
+@public
 fn make(name: string, ticks: u64) -> Config {
     Config {
         _name: name,
@@ -17,12 +17,12 @@ fn make(name: string, ticks: u64) -> Config {
 }
 
 Config :: {
-    @[public]
+    @public
     prop name: string {
         get { self._name }
     }
 
-    @[public]
+    @public
     prop tick_count: u64 {
         get { self._ticks }
         set(v) { self._ticks = v; }
@@ -35,7 +35,7 @@ Config :: rt::Runnable {
     }
 }
 
-@[public]
+@public
 fn answer() -> u64 {
     2
 }

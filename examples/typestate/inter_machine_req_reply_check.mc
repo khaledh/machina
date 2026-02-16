@@ -69,7 +69,7 @@ typestate AuthServer {
     }
 }
 
-@[machines]
+@machines
 fn main() {
     // Spawn server first so its machine id is 1 (used by client Request `to:`).
     match AuthServer::spawn() {
@@ -91,5 +91,5 @@ fn main() {
         _ => { return; },
     };
 
-    // `@[machines]` auto-drives the managed runtime until it reaches idle.
+    // `@machines` auto-drives the managed runtime until it reaches idle.
 }

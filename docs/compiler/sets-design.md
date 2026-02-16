@@ -94,11 +94,11 @@ set<T> :: {
     fn contains(self, value: T) -> bool;
     fn clear(inout self);
 
-    @[intrinsic]
+    @intrinsic
     prop len: u64 { get; }
-    @[intrinsic]
+    @intrinsic
     prop capacity: u64 { get; }
-    @[intrinsic]
+    @intrinsic
     prop is_empty: bool { get; }
 }
 ```

@@ -146,7 +146,7 @@ pub enum ResolveError {
     #[error("State literal `{0}` is only allowed inside typestate constructor/transition methods")]
     TypestateStateLiteralOutsideTypestate(String, Span),
 
-    #[error("Managed typestate spawn requires `@[machines] fn main(...)` entrypoint opt-in")]
+    #[error("Managed typestate spawn requires `@machines fn main(...)` entrypoint opt-in")]
     TypestateSpawnRequiresMachinesOptIn(Span),
 }
 

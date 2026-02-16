@@ -548,7 +548,7 @@ fn wrap_main_with_managed_runtime(main: &mut FuncDef, node_id_gen: &mut NodeIdGe
         ty: (),
         span,
     };
-    // Auto-drive policy for `@[machines]`:
+    // Auto-drive policy for `@machines`:
     // keep stepping while runtime reports "did work", and stop once it reaches
     // idle or faulted. We still return the user's main result.
     let auto_drive_if = Expr {

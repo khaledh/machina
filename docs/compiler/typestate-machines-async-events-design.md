@@ -56,7 +56,7 @@ sections conflict with this one, this section wins.
    - on successful paths, exactly one reply must be produced.
    - explicit `ReplyCap<RespSet>` binding (when used) remains linear and
      exactly-once on successful paths.
-   - v1 has no no-reply escape hatch (`@[no_reply]` is out of scope).
+   - v1 has no no-reply escape hatch (`@no_reply` is out of scope).
 7. **Protocol conformance scope**
    - v1 enforces shape only.
    - stronger protocol refinement/projection checks are explicitly deferred.

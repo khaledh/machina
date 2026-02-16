@@ -120,7 +120,7 @@ Machina also supports managed typestate machines with event handlers and
 protocol/role flow declarations.
 
 Tier 1 managed entrypoint model:
-- mark binary entrypoint with `@[machines]`,
+- mark binary entrypoint with `@machines`,
 - spawn managed machines through `Typestate::spawn(...)`,
 - use typed handles (`Machine<Typestate>`) with method-style ops
   (`handle.send(...)`, `handle.request(...)`),
@@ -189,7 +189,7 @@ typestate AuthService : Auth::Server {
     }
 }
 
-@[machines]
+@machines
 fn main() {
     match AuthService::spawn() {
         auth: Machine<AuthService> => { auth; }
@@ -205,7 +205,7 @@ fn main() {
         }
         _ => { return; },
     };
-    // `@[machines]` auto-drives dispatch after `main` exits.
+    // `@machines` auto-drives dispatch after `main` exits.
     println("queued start event");
 }
 ```
@@ -220,7 +220,7 @@ Key ideas:
   inflight requests; handlers match them with `for RequestType:label(binding)`.
 - `Pending<...>`/`ReplyCap<...>` remain available as explicit advanced forms.
 - `reply(cap, value)` consumes `ReplyCap<...>` and enforces response-set safety.
-- `@[machines]` is required to use `Typestate::spawn(...)` in binaries.
+- `@machines` is required to use `Typestate::spawn(...)` in binaries.
 
 Examples:
 - runnable single-role event flow:

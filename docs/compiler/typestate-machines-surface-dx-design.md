@@ -125,7 +125,7 @@ Managed execution should be visible at the entrypoint via a one-line opt-in
 marker (exact syntax TBD), e.g. an attribute-like form:
 
 ```mc
-@[machines]
+@machines
 fn main() {
     let client = Client::spawn();
     client.send(Ping { id: 1 });

@@ -14,8 +14,8 @@ RequireItem        ::= RequirePath ("as" Identifier)? ("," | ";")?
 RequirePath        ::= Identifier ("::" Identifier)*
 
 # Attributes
-AttributeList      ::= ("@[" AttributeItem ("," AttributeItem)* ","? "]")?
-AttributeItem      ::= Identifier ("(" StringLit ("," StringLit)* ")")?
+AttributeList      ::= ("@" Attribute)*
+Attribute          ::= Identifier ("(" StringLit ("," StringLit)* ")")?
 
 # Type Definitions
 TypeDef            ::= "type" Identifier TypeParamList? "=" TypeDefBody

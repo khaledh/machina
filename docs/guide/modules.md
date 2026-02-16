@@ -58,20 +58,20 @@ Top-level declarations are module-private by default.
 Use attributes to expose items:
 
 ```mc
-@[public]
+@public
 fn parse_u64(s: string) -> u64 {
     // ...
 }
 
-@[opaque]
+@opaque
 type Buffer = {
     _data: u8[]^,
     _len: u64,
 }
 ```
 
-- `@[public]`: exported from the module.
-- `@[opaque]`: exported type whose internal fields are hidden outside the
+- `@public`: exported from the module.
+- `@opaque`: exported type whose internal fields are hidden outside the
   defining module.
 
 ## Opaque Types and APIs
@@ -80,12 +80,12 @@ Opaque types are intended to be manipulated through public methods/properties:
 
 ```mc
 Buffer :: {
-    @[public]
+    @public
     fn new() -> Buffer {
         // ...
     }
 
-    @[public]
+    @public
     prop len: u64 {
         get { self._len }
     }

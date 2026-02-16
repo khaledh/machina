@@ -210,13 +210,13 @@ fn test_resolve_program_tracks_imported_symbol_origins() {
         }
     "#;
     let dep_src = r#"
-        @[public]
+        @public
         fn run() -> u64 { 1 }
 
-        @[public]
+        @public
         type Config = { value: u64 }
 
-        @[public]
+        @public
         trait Runnable {}
     "#;
     let mut modules = HashMap::new();
@@ -310,10 +310,10 @@ fn test_resolve_program_builds_import_env_from_export_facts() {
         }
     "#;
     let dep_src = r#"
-        @[public]
+        @public
         fn run() -> u64 { 1 }
 
-        @[public]
+        @public
         type Config = { value: u64 }
 
         type Hidden = { value: u64 }
@@ -615,7 +615,7 @@ fn test_resolve_function_decl_conflicts_with_def() {
 
 #[test]
 fn test_resolve_unknown_attribute() {
-    let source = "@[nope] fn foo() -> u64 { 0 }";
+    let source = "@nope fn foo() -> u64 { 0 }";
     let result = resolve_source(source);
     assert!(result.is_err());
 
@@ -629,7 +629,7 @@ fn test_resolve_unknown_attribute() {
 
 #[test]
 fn test_resolve_attr_wrong_args_intrinsic() {
-    let source = "@[intrinsic(\"x\")] fn foo() -> u64 { 0 }";
+    let source = "@intrinsic(\"x\") fn foo() -> u64 { 0 }";
     let result = resolve_source(source);
     assert!(result.is_err());
 
@@ -643,7 +643,7 @@ fn test_resolve_attr_wrong_args_intrinsic() {
 
 #[test]
 fn test_resolve_attr_wrong_args_link_name() {
-    let source = "@[link_name] fn foo() -> u64 { 0 }";
+    let source = "@link_name fn foo() -> u64 { 0 }";
     let result = resolve_source(source);
     assert!(result.is_err());
 
@@ -657,7 +657,7 @@ fn test_resolve_attr_wrong_args_link_name() {
 
 #[test]
 fn test_resolve_attr_not_allowed_on_type() {
-    let source = "@[link_name(\"x\")] type Foo = {}";
+    let source = "@link_name(\"x\") type Foo = {}";
     let result = resolve_source(source);
     assert!(result.is_err());
 
@@ -671,7 +671,7 @@ fn test_resolve_attr_not_allowed_on_type() {
 
 #[test]
 fn test_resolve_attr_duplicate() {
-    let source = "@[intrinsic, intrinsic] fn foo() -> u64 { 0 }";
+    let source = "@intrinsic @intrinsic fn foo() -> u64 { 0 }";
     let result = resolve_source(source);
     assert!(result.is_err());
 
@@ -685,14 +685,14 @@ fn test_resolve_attr_duplicate() {
 
 #[test]
 fn test_resolve_attr_machines_allowed_on_main() {
-    let source = "@[machines] fn main() {}";
+    let source = "@machines fn main() {}";
     let result = resolve_source(source);
     assert!(result.is_ok());
 }
 
 #[test]
 fn test_resolve_attr_machines_requires_main() {
-    let source = "@[machines] fn foo() {}";
+    let source = "@machines fn foo() {}";
     let result = resolve_source(source);
     assert!(result.is_err());
 
@@ -908,10 +908,10 @@ fn test_resolve_program_module_member_undefined() {
 #[test]
 fn test_resolve_visibility_and_opacity_attrs_on_types() {
     let source = r#"
-        @[public]
+        @public
         type Config = { host: string }
 
-        @[opaque]
+        @opaque
         type Buffer = { data: u8^[] }
     "#;
 
@@ -946,12 +946,12 @@ fn test_resolve_visibility_and_opacity_attrs_on_types() {
 #[test]
 fn test_resolve_public_attrs_on_trait_and_function() {
     let source = r#"
-        @[public]
+        @public
         trait Runnable {
             fn run(self);
         }
 
-        @[public]
+        @public
         fn execute() -> u64 {
             0
         }
@@ -985,7 +985,7 @@ fn test_resolve_public_attrs_on_trait_and_function() {
 
 #[test]
 fn test_resolve_opaque_attr_not_allowed_on_function() {
-    let source = "@[opaque] fn foo() -> u64 { 0 }";
+    let source = "@opaque fn foo() -> u64 { 0 }";
     let result = resolve_source(source);
     assert!(result.is_err());
 

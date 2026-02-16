@@ -31,7 +31,7 @@ typestate Timer {
     }
 }
 
-@[machines]
+@machines
 fn main() {
     match Timer::spawn() {
         timer: Machine<Timer> => {

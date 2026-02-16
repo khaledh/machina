@@ -215,7 +215,7 @@ typestate M {
     }
 }
 
-@[machines]
+@machines
 fn main() -> u64 {
     match M::spawn() {
         m: Machine<M> => {
@@ -281,7 +281,7 @@ typestate M {
     }
 }
 
-@[machines]
+@machines
 fn main() {
     match M::spawn() {
         m: Machine<M> => {
@@ -381,7 +381,7 @@ typestate AuthServer {
     }
 }
 
-@[machines]
+@machines
 fn main() -> u64 {
     // Spawn server first so its machine id is 1 (used by client Request `to:`).
     match AuthServer::spawn() {
@@ -475,7 +475,7 @@ typestate Worker {
     }
 }
 
-@[machines]
+@machines
 fn main() -> u64 {
     match Worker::spawn(42) {
         m: Machine<Worker> => {

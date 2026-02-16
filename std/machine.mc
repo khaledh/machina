@@ -3,65 +3,65 @@
 // V1 goal: expose runtime operations to Machina code without leaking runtime
 // struct layouts into user programs.
 
-@[public]
+@public
 type Runtime = {
   _raw: u64,
 }
 
-@[public]
+@public
 type SpawnFailed = {}
 
-@[public]
+@public
 type StartFailed = {}
 
-@[public]
+@public
 type MachineUnknown = {}
 
-@[public]
+@public
 type MachineNotRunning = {}
 
-@[public]
+@public
 type MailboxFull = {}
 
-@[public]
+@public
 type RequestFailed = {}
 
-@[public]
+@public
 type ReplyCapUnknown = {}
 
-@[public]
+@public
 type ReplyDestUnknown = {}
 
-@[public]
+@public
 type ReplyDestNotRunning = {}
 
-@[public]
+@public
 type ReplyMailboxFull = {}
 
-@[public]
+@public
 type StepStatus = Idle | DidWork | Faulted
 
-@[public]
+@public
 type BindDispatchFailed = {}
 
-@[public]
+@public
 type ManagedRuntimeUnavailable = {}
 
-@[public]
+@public
 fn new_runtime() -> Runtime {
   Runtime {
     _raw: __mc_machine_runtime_new(),
   }
 }
 
-@[public]
+@public
 fn close_runtime(inout rt: Runtime) {
   __mc_machine_runtime_free(rt._raw);
   rt._raw = 0;
 }
 
-// Returns the process-managed runtime handle initialized by `@[machines]` main.
-@[public]
+// Returns the process-managed runtime handle initialized by `@machines` main.
+@public
 fn managed_runtime() -> Runtime | ManagedRuntimeUnavailable {
   let raw = __mc_machine_runtime_managed_current_u64();
   if raw == 0 {
@@ -71,7 +71,7 @@ fn managed_runtime() -> Runtime | ManagedRuntimeUnavailable {
   }
 }
 
-@[public]
+@public
 fn spawn(rt: Runtime, mailbox_cap: u64) -> u64 | SpawnFailed {
   let id = __mc_machine_runtime_spawn_u64(rt._raw, mailbox_cap);
   if id == 0 {
@@ -81,7 +81,7 @@ fn spawn(rt: Runtime, mailbox_cap: u64) -> u64 | SpawnFailed {
   }
 }
 
-@[public]
+@public
 fn start(rt: Runtime, machine_id: u64) -> () | StartFailed {
   if __mc_machine_runtime_start_u64(rt._raw, machine_id) == 0 {
     StartFailed {}
@@ -90,7 +90,7 @@ fn start(rt: Runtime, machine_id: u64) -> () | StartFailed {
   }
 }
 
-@[public]
+@public
 fn send(
   rt: Runtime,
   dst: u64,
@@ -110,7 +110,7 @@ fn send(
   }
 }
 
-@[public]
+@public
 fn request(
   rt: Runtime,
   src: u64,
@@ -129,7 +129,7 @@ fn request(
   }
 }
 
-@[public]
+@public
 fn send_reply(
   rt: Runtime,
   src: u64,
@@ -155,7 +155,7 @@ fn send_reply(
 
 // Low-level bridge used by compiler-generated managed bootstrap paths.
 // `dispatch_fn` and `dispatch_ctx` are opaque runtime pointer words.
-@[public]
+@public
 fn bind_dispatch(
   rt: Runtime,
   machine_id: u64,
@@ -171,13 +171,13 @@ fn bind_dispatch(
 
 // Registers a thunk id -> function pointer mapping in runtime global registry.
 // Intended for compiler-generated bootstrap glue.
-@[public]
+@public
 fn register_thunk(thunk_id: u64, dispatch_fn: u64) {
   __mc_machine_runtime_register_thunk_u64(thunk_id, dispatch_fn);
 }
 
 // Binds a machine slot to a previously-registered thunk id.
-@[public]
+@public
 fn bind_dispatch_thunk(
   rt: Runtime,
   machine_id: u64,
@@ -193,7 +193,7 @@ fn bind_dispatch_thunk(
 
 // Binds descriptor-driven dispatch to machine slot.
 // `descriptor_id` is assigned at bootstrap registration time.
-@[public]
+@public
 fn bind_descriptor(
   rt: Runtime,
   machine_id: u64,
@@ -207,7 +207,7 @@ fn bind_descriptor(
   }
 }
 
-@[public]
+@public
 fn step(rt: Runtime) -> StepStatus {
   let status = __mc_machine_runtime_step_u64(rt._raw);
   if status == 0 {

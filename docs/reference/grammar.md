@@ -26,8 +26,8 @@ TopLevelItem       ::= (AttributeList (TypeDef | TraitDef | FuncDecl | FuncDef))
                      | MethodBlock
                      | TypestateDef
 
-AttributeList      ::= ("@[" AttributeItem ("," AttributeItem)* ","? "]")?
-AttributeItem      ::= Identifier ("(" StringLit ("," StringLit)* ")")?
+AttributeList      ::= ("@" Attribute)*
+Attribute          ::= Identifier ("(" StringLit ("," StringLit)* ")")?
 
 TypeDef            ::= "type" Identifier TypeParamList? "=" TypeDefBody
 TypeDefBody        ::= TypeExpr ";"?

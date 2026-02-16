@@ -113,7 +113,7 @@ fn test_modules_opaque_field_access_rejected() {
     "#;
 
     let secret_source = r#"
-        @[opaque]
+        @opaque
         type Secret = { x: u64 }
     "#;
 
@@ -158,10 +158,10 @@ fn test_modules_opaque_construction_rejected() {
     "#;
 
     let secret_source = r#"
-        @[opaque]
+        @opaque
         type Secret = { x: u64 }
 
-        @[public]
+        @public
         fn take(v: Secret) -> u64 {
             0
         }
@@ -209,7 +209,7 @@ fn test_modules_private_method_call_rejected() {
     "#;
 
     let secret_source = r#"
-        @[public]
+        @public
         type Counter = { ticks: u64 }
 
         Counter :: {
@@ -260,7 +260,7 @@ fn test_modules_private_property_access_rejected() {
     "#;
 
     let secret_source = r#"
-        @[public]
+        @public
         type Counter = { ticks: u64 }
 
         Counter :: {
@@ -412,7 +412,7 @@ fn test_check_module_graph_parity_multi_module_requires() {
     "#;
 
     let util_source = r#"
-        @[public]
+        @public
         fn answer() -> u64 {
             42
         }
@@ -473,10 +473,10 @@ fn test_modules_opaque_pattern_destructure_rejected() {
     "#;
 
     let secret_source = r#"
-        @[opaque]
+        @opaque
         type Token = { raw: u64 }
 
-        @[public]
+        @public
         fn make() -> Token {
             Token { raw: 7 }
         }
@@ -570,12 +570,12 @@ fn test_modules_duplicate_public_function_names_allowed_with_aliases() {
     "#;
 
     let util_source = r#"
-        @[public]
+        @public
         fn answer() -> u64 { 7 }
     "#;
 
     let math_source = r#"
-        @[public]
+        @public
         fn answer() -> u64 { 11 }
     "#;
 

@@ -1187,7 +1187,7 @@ typestate Connection {
 #[test]
 fn machines_entrypoint_injects_managed_runtime_calls_without_prelude() {
     let source = r#"
-@[machines]
+@machines
 fn main() {}
 "#;
 
@@ -1195,7 +1195,7 @@ fn main() {}
     let out = resolve_stage_with_policy(parsed, ResolveInputs::default(), FrontendPolicy::Strict);
     assert!(
         out.errors.is_empty(),
-        "expected @[machines] rewrite to resolve cleanly, got {:?}",
+        "expected @machines rewrite to resolve cleanly, got {:?}",
         out.errors
     );
     let resolved = out

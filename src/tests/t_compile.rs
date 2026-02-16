@@ -124,7 +124,7 @@ fn flatten_capsule_rewrites_alias_method_call_to_plain_call() {
     let mut modules = HashMap::new();
     modules.insert(
         "app.util".to_string(),
-        "@[public] fn answer() -> u64 { 7 }".to_string(),
+        "@public fn answer() -> u64 { 7 }".to_string(),
     );
     let loader = MockLoader { modules };
     let entry_path = ModulePath::new(vec!["app".to_string(), "main".to_string()]).unwrap();
@@ -161,7 +161,7 @@ fn flatten_capsule_rewrites_alias_member_access_to_var() {
     let mut modules = HashMap::new();
     modules.insert(
         "app.util".to_string(),
-        "@[public] fn answer() -> u64 { 7 }".to_string(),
+        "@public fn answer() -> u64 { 7 }".to_string(),
     );
     let loader = MockLoader { modules };
     let entry_path = ModulePath::new(vec!["app".to_string(), "main".to_string()]).unwrap();
@@ -197,7 +197,7 @@ fn flatten_capsule_rewrites_alias_type_reference_to_plain_type_name() {
     let mut modules = HashMap::new();
     modules.insert(
         "app.config".to_string(),
-        "@[public] type Config = { port: u64 }".to_string(),
+        "@public type Config = { port: u64 }".to_string(),
     );
     let loader = MockLoader { modules };
     let entry_path = ModulePath::new(vec!["app".to_string(), "main".to_string()]).unwrap();
@@ -233,7 +233,7 @@ fn flatten_capsule_rewrites_alias_trait_bound_to_plain_trait_name() {
     let mut modules = HashMap::new();
     modules.insert(
         "app.runnable".to_string(),
-        "@[public] trait Runnable { fn run(self); }".to_string(),
+        "@public trait Runnable { fn run(self); }".to_string(),
     );
     let loader = MockLoader { modules };
     let entry_path = ModulePath::new(vec!["app".to_string(), "main".to_string()]).unwrap();
@@ -273,7 +273,7 @@ fn flatten_capsule_rewrites_alias_trait_name_in_method_block() {
     let mut modules = HashMap::new();
     modules.insert(
         "app.runnable".to_string(),
-        "@[public] trait Runnable { fn run(self); }".to_string(),
+        "@public trait Runnable { fn run(self); }".to_string(),
     );
     let loader = MockLoader { modules };
     let entry_path = ModulePath::new(vec!["app".to_string(), "main".to_string()]).unwrap();
@@ -337,7 +337,7 @@ fn flatten_capsule_reports_missing_trait_member_on_alias() {
     let mut modules = HashMap::new();
     modules.insert(
         "app.runnable".to_string(),
-        "@[public] trait Runnable { fn run(self); }".to_string(),
+        "@public trait Runnable { fn run(self); }".to_string(),
     );
     let loader = MockLoader { modules };
     let entry_path = ModulePath::new(vec!["app".to_string(), "main".to_string()]).unwrap();
@@ -486,11 +486,11 @@ fn flatten_capsule_allows_conflicting_public_export_names_via_module_qualificati
     let mut modules = HashMap::new();
     modules.insert(
         "app.util".to_string(),
-        "@[public] fn answer() -> u64 { 7 }".to_string(),
+        "@public fn answer() -> u64 { 7 }".to_string(),
     );
     modules.insert(
         "app.math".to_string(),
-        "@[public] fn answer() -> u64 { 11 }".to_string(),
+        "@public fn answer() -> u64 { 11 }".to_string(),
     );
     let loader = MockLoader { modules };
     let entry_path = ModulePath::new(vec!["app".to_string(), "main".to_string()]).unwrap();
@@ -553,7 +553,7 @@ fn flatten_capsule_mangles_private_dependency_function_names() {
         "app.util".to_string(),
         r#"
             fn secret() -> u64 { 7 }
-            @[public] fn answer() -> u64 { secret() }
+            @public fn answer() -> u64 { secret() }
         "#
         .to_string(),
     );
@@ -609,11 +609,11 @@ fn program_bindings_include_visibility_and_opaque_flags() {
         "app.util".to_string(),
         r#"
             fn secret() -> u64 { 7 }
-            @[public] fn answer() -> u64 { 7 }
+            @public fn answer() -> u64 { 7 }
             type Hidden = { x: u64 }
-            @[opaque] type Buffer = { data: u64 }
+            @opaque type Buffer = { data: u64 }
             trait Internal { fn f(self); }
-            @[public] trait Runnable { fn run(self); }
+            @public trait Runnable { fn run(self); }
         "#
         .to_string(),
     );
@@ -656,7 +656,7 @@ fn flatten_capsule_tracks_top_level_item_owners() {
     let mut modules = HashMap::new();
     modules.insert(
         "app.util".to_string(),
-        "@[public] fn answer() -> u64 { 7 }".to_string(),
+        "@public fn answer() -> u64 { 7 }".to_string(),
     );
     let loader = MockLoader { modules };
     let entry_path = ModulePath::new(vec!["app".to_string(), "main".to_string()]).unwrap();
@@ -712,7 +712,7 @@ fn flatten_capsule_accepts_public_symbol_import() {
     let mut modules = HashMap::new();
     modules.insert(
         "app.util".to_string(),
-        "@[public] fn answer() -> u64 { 7 }".to_string(),
+        "@public fn answer() -> u64 { 7 }".to_string(),
     );
     let loader = MockLoader { modules };
     let entry_path = ModulePath::new(vec!["app".to_string(), "main".to_string()]).unwrap();
@@ -1129,7 +1129,7 @@ typestate Worker {
     }
 }
 
-@[machines]
+@machines
 fn main() {
     let spawned: Machine<Worker> = match Worker::spawn(42) {
         m: Machine<Worker> => m,
@@ -1155,7 +1155,7 @@ typestate Worker {
     state Idle {}
 }
 
-@[machines]
+@machines
 fn main() {
     let spawned = Worker::spawn();
     spawned;
@@ -1186,7 +1186,7 @@ typestate B {
     state S {}
 }
 
-@[machines]
+@machines
 fn main() {
     let a: Machine<A> = match A::spawn() {
         m: Machine<A> => m,
@@ -1241,7 +1241,7 @@ fn main() {
 "#;
 
     let err = match compile(source, &typestate_compile_opts()) {
-        Ok(_) => panic!("spawn without @[machines] should be rejected"),
+        Ok(_) => panic!("spawn without @machines should be rejected"),
         Err(err) => err,
     };
     let has_opt_in_error = err.iter().any(|e| {
@@ -1262,7 +1262,7 @@ fn main() {
 #[test]
 fn compile_machines_opt_in_injects_managed_runtime_bootstrap() {
     let source = r#"
-@[machines]
+@machines
 fn main() {}
 "#;
 
@@ -1290,6 +1290,6 @@ fn main() {}
     let ir = out.ir.expect("emit_ir should include SSA dump");
     assert!(
         !ir.contains("__mc_machine_runtime_managed_bootstrap_u64"),
-        "did not expect managed bootstrap call without @[machines] opt-in"
+        "did not expect managed bootstrap call without @machines opt-in"
     );
 }

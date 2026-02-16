@@ -1958,7 +1958,7 @@ fn test_parse_closure_capture_list() {
 
 #[test]
 fn test_parse_intrinsic_func_attr() {
-    let source = "@[intrinsic] fn foo() { 1 }";
+    let source = "@intrinsic fn foo() { 1 }";
     let funcs = parse_source(source).expect("Failed to parse");
 
     assert_eq!(funcs.len(), 1);
@@ -1972,7 +1972,7 @@ fn test_parse_intrinsic_method_attr() {
     let source = r#"
         type Foo = {}
         Foo :: {
-            @[intrinsic] fn bar(self) { 1 }
+            @intrinsic fn bar(self) { 1 }
         }
     "#;
     let module = parse_module(source).expect("Failed to parse");
@@ -1992,7 +1992,7 @@ fn test_parse_intrinsic_method_attr() {
 
 #[test]
 fn test_parse_link_name_attr() {
-    let source = "@[link_name(\"__mc_foo\")] fn foo() { 1 }";
+    let source = "@link_name(\"__mc_foo\") fn foo() { 1 }";
     let funcs = parse_source(source).expect("Failed to parse");
 
     assert_eq!(funcs.len(), 1);
@@ -2009,7 +2009,7 @@ fn test_parse_method_decl() {
     let source = r#"
         type Foo = {}
         Foo :: {
-            @[intrinsic] fn len(self) -> u64;
+            @intrinsic fn len(self) -> u64;
         }
     "#;
     let module = parse_module(source).expect("Failed to parse");
@@ -2027,7 +2027,7 @@ fn test_parse_method_decl() {
 
 #[test]
 fn test_parse_attr_on_method_block_rejected() {
-    let source = "@[intrinsic] Foo :: { fn bar(self) { 1 } }";
+    let source = "@intrinsic Foo :: { fn bar(self) { 1 } }";
     let result = parse_module(source);
 
     assert!(matches!(result, Err(ParseError::AttributeNotAllowed(_))));

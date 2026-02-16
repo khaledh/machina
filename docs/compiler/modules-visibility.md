@@ -72,22 +72,22 @@ Default visibility is module-private.
 
 Attributes:
 
-1. `@[public]` for externally visible symbols.
-2. `@[opaque]` for public type identity with hidden representation.
+1. `@public` for externally visible symbols.
+2. `@opaque` for public type identity with hidden representation.
 
 Examples:
 
 ```mc
-@[public]
+@public
 fn load(path: string) -> Config | IoError { ... }
 
-@[public]
+@public
 type Config = {
     host: string,
     port: u16,
 }
 
-@[opaque]
+@opaque
 type Buffer = {
     data: u8[]^,
     len: u64,
@@ -96,33 +96,33 @@ type Buffer = {
 
 Semantics:
 
-1. `@[public] type`:
+1. `@public type`:
    - Type name is visible outside module.
    - Struct literal construction and field access are allowed outside module.
-2. `@[opaque] type`:
+2. `@opaque type`:
    - Type name is visible outside module.
    - No external struct literal construction.
    - No external direct field access.
-   - Access only through `@[public]` methods/properties.
+   - Access only through `@public` methods/properties.
 
 ## Methods, Properties, Traits Visibility
 
 1. Methods/properties default private even inside public/opaque types.
-2. Mark member with `@[public]` to expose it outside module.
-3. Trait definitions can be `@[public]` or private.
+2. Mark member with `@public` to expose it outside module.
+3. Trait definitions can be `@public` or private.
 4. Trait impl blocks themselves are not exported objects; visibility is determined by trait/member visibility.
-5. `@[opaque]` values must be constructed externally through `@[public]` factory/constructor APIs.
+5. `@opaque` values must be constructed externally through `@public` factory/constructor APIs.
 
 Example:
 
 ```mc
-@[opaque]
+@opaque
 type Point = { _x: f64, _y: f64 }
 
 Point :: {
-    @[public] fn new(x: f64, y: f64) -> Point { ... }
+    @public fn new(x: f64, y: f64) -> Point { ... }
 
-    @[public]
+    @public
     prop x: f64 {
         get { self._x }
         set(v) { self._x = v; }
@@ -162,7 +162,7 @@ Point :: {
 
 1. Parser:
    - Add `requires` block AST.
-   - Add `@[public]` / `@[opaque]` item attributes in AST where missing.
+   - Add `@public` / `@opaque` item attributes in AST where missing.
 2. Context:
    - Build module graph from file paths.
    - Build program-level bindings (`frontend::bind`) that map each module's

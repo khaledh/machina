@@ -3,7 +3,7 @@ use super::lower_and_optimize;
 #[test]
 fn test_empty_string_print_peephole() {
     let src = r#"
-@[runtime]
+@runtime
 fn __rt_print(s: string, newline: u64);
 
 fn main() {

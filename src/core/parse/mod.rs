@@ -235,33 +235,28 @@ impl<'a> Parser<'a> {
     }
 
     fn parse_attribute_list(&mut self) -> Result<Vec<Attribute>, ParseError> {
-        if self.curr_token.kind != TK::At {
-            return Ok(Vec::new());
-        }
+        let mut attrs = Vec::new();
 
-        self.advance();
-        self.consume(&TK::LBracket)?;
-
-        let attrs = self.parse_list(TK::Comma, TK::RBracket, |parser| {
-            let marker = parser.mark();
-            let name = parser.parse_ident()?;
+        while self.curr_token.kind == TK::At {
+            self.advance();
+            let marker = self.mark();
+            let name = self.parse_ident()?;
             let mut args = Vec::new();
-            if parser.curr_token.kind == TK::LParen {
-                parser.advance();
-                args = parser.parse_list(TK::Comma, TK::RParen, |parser| {
+            if self.curr_token.kind == TK::LParen {
+                self.advance();
+                args = self.parse_list(TK::Comma, TK::RParen, |parser| {
                     let value = parser.parse_string_lit()?;
                     Ok(AttrArg::String(value))
                 })?;
-                parser.consume(&TK::RParen)?;
+                self.consume(&TK::RParen)?;
             }
-            Ok(Attribute {
+            attrs.push(Attribute {
                 name,
                 args,
-                span: parser.close(marker),
-            })
-        })?;
+                span: self.close(marker),
+            });
+        }
 
-        self.consume(&TK::RBracket)?;
         Ok(attrs)
     }
 

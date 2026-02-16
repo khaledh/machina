@@ -1517,7 +1517,7 @@ mod tests {
 fn main() -> u64 {
     run()
 }"#;
-        let dep_source = r#"@[public]
+        let dep_source = r#"@public
 fn run() -> u64 { 1 }
 "#;
         std::fs::write(&entry_path, entry_source).expect("failed to write entry source");
@@ -1660,7 +1660,7 @@ fn run() -> u64 { 1 }
 fn main() -> u64 {
     run(1, true)
 }"#;
-        let dep_source = r#"@[public]
+        let dep_source = r#"@public
 fn run(x: u64, y: bool) -> u64 { x }
 "#;
         std::fs::write(&entry_path, entry_source).expect("failed to write entry source");

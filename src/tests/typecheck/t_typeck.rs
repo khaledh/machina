@@ -517,7 +517,7 @@ fn test_struct_field_access_through_heap() {
 #[test]
 fn test_opaque_struct_construction_cross_module_rejected() {
     let source = r#"
-        @[opaque]
+        @opaque
         type Secret = { x: u64 }
 
         fn build_secret() -> Secret {
@@ -541,7 +541,7 @@ fn test_opaque_struct_construction_cross_module_rejected() {
 #[test]
 fn test_opaque_struct_field_access_cross_module_rejected() {
     let source = r#"
-        @[opaque]
+        @opaque
         type Secret = { x: u64 }
 
         fn read_secret(s: Secret) -> u64 {

@@ -84,11 +84,11 @@ map<K, V> :: {
     fn remove(inout self, key: K) -> bool;
     fn clear(inout self);
 
-    @[intrinsic]
+    @intrinsic
     prop len: u64 { get; }
-    @[intrinsic]
+    @intrinsic
     prop capacity: u64 { get; }
-    @[intrinsic]
+    @intrinsic
     prop is_empty: bool { get; }
 }
 ```

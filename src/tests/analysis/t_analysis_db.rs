@@ -262,7 +262,7 @@ fn main() -> u64 {
     run()
 }
 "#;
-    let dep_source = r#"@[public]
+    let dep_source = r#"@public
 fn run() -> u64 { 1 }
 "#;
 
@@ -310,7 +310,7 @@ fn main() -> u64 {
     x.value
 }
 "#;
-    let dep_source = r#"@[public]
+    let dep_source = r#"@public
 type Foo = { value: u64 }
 "#;
 
@@ -370,12 +370,12 @@ fn main() -> u64 {
     execute(Task {})
 }
 "#;
-    let dep_source = r#"@[public]
+    let dep_source = r#"@public
 trait Runner {
     fn run(self) -> u64;
 }
 
-@[public]
+@public
 type Task = {}
 
 Task :: Runner {
@@ -1373,7 +1373,7 @@ fn main() -> u64 {
 }
 "#;
     let dep_source = r#"
-@[public]
+@public
 fn value() -> u64 {
     1
 }
@@ -1428,7 +1428,7 @@ fn main() -> u64 {
 }
 "#;
     let dep_source = r#"
-@[public]
+@public
 fn value() -> u64 {
     true
 }
@@ -1484,7 +1484,7 @@ fn main() -> u64 {
 }
 "#;
     let dep_source = r#"
-@[public]
+@public
 fn value() -> u64 {
     1
 }
@@ -1504,7 +1504,7 @@ fn value() -> u64 {
     db.set_overlay(
         dep_id,
         r#"
-@[public]
+@public
 fn value() -> u64 {
     2
 }
@@ -1549,11 +1549,11 @@ fn main() -> u64 {
 }
 "#;
     let dep_bad = r#"
-@[public]
+@public
 fn run(x: u64) -> u64 { x }
 "#;
     let dep_good = r#"
-@[public]
+@public
 fn run(x: bool) -> u64 {
     if x { 1 } else { 0 }
 }
@@ -1618,7 +1618,7 @@ fn main() -> u64 {
 }
 "#;
     let dep_source = r#"
-@[public]
+@public
 fn run() -> u64 { 1 }
 "#;
     fs::write(&entry_path, entry_source).expect("failed to write entry source");
@@ -1675,7 +1675,7 @@ fn main() -> u64 {
 }
 "#;
     let dep_source = r#"
-@[public]
+@public
 fn value() -> u64 {
     1
 }
@@ -1726,7 +1726,7 @@ fn main() -> u64 {
 }
 "#;
     let dep_source = r#"
-@[public]
+@public
 fn run() -> u64 { 1 }
 "#;
 
@@ -1861,7 +1861,7 @@ fn main() -> u64 {
 }
 "#;
     let dep_source = r#"
-@[public]
+@public
 fn run() -> u64 { 1 }
 "#;
 
@@ -2032,7 +2032,7 @@ fn main() -> u64 {
 }
 "#;
     let dep_source = r#"
-@[public]
+@public
 fn run() -> u64 { 1 }
 "#;
 
@@ -2080,7 +2080,7 @@ fn main() -> bool {
 }
 "#;
     let dep_source = r#"
-@[public]
+@public
 type Num = bool
 "#;
 
@@ -2124,7 +2124,7 @@ fn main() -> u64 {
 }
 "#;
     let dep_source = r#"
-@[public]
+@public
 fn run(x: u64, y: bool) -> u64 { x }
 "#;
 
@@ -2173,7 +2173,7 @@ fn main() -> u64 {
 }
 "#;
     let dep_source = r#"
-@[public]
+@public
 fn run(x: u64) -> u64 { x }
 "#;
 
@@ -2227,7 +2227,7 @@ fn main() -> u64 {
 }
 "#;
     let dep_source = r#"
-@[public]
+@public
 type Num = bool
 "#;
 
@@ -2294,7 +2294,7 @@ fn main() -> u64 {
 }
 "#;
     let dep_source = r#"
-@[public]
+@public
 trait Runnable {
     fn run(self) -> u64;
 }

@@ -730,7 +730,7 @@ mod tests {
         let mut modules = HashMap::new();
         modules.insert(
             "app.util".to_string(),
-            "@[public] fn answer() -> u64 { 7 }".to_string(),
+            "@public fn answer() -> u64 { 7 }".to_string(),
         );
         let loader = MockLoader { modules };
         let entry_path = ModulePath::new(vec!["app".to_string(), "main".to_string()]).unwrap();
@@ -766,7 +766,7 @@ mod tests {
         let mut modules = HashMap::new();
         modules.insert(
             "app.util".to_string(),
-            "@[public] fn answer() -> u64 { 7 }".to_string(),
+            "@public fn answer() -> u64 { 7 }".to_string(),
         );
         let loader = MockLoader { modules };
         let entry_path = ModulePath::new(vec!["app".to_string(), "main".to_string()]).unwrap();
