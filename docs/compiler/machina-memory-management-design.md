@@ -2,7 +2,7 @@
 
 ## Status
 
-Design proposal, February 2026. Revised after panel review.
+Design proposal, February 2026. Revised after panel review (v1, v2).
 
 ## Overview
 
@@ -13,8 +13,8 @@ data stays in its region, and state machine data stays in its heap until
 explicitly transferred.
 
 CVS builds on Machina's existing value semantics and ownership model (parameter
-modes, `T^` heap values, move-only ownership, second-class slices) and extends
-it with three new mechanisms:
+modes, `T^` owned allocated values, move-only ownership, second-class slices)
+and extends it with three new mechanisms:
 
 1. **Copy-on-write (COW)** for heap-backed collection types.
 2. **Regions** as a first-class scoping construct with interior references.
@@ -67,10 +67,75 @@ in the existing model remains:
 |------------------|--------|-----------------|
 | Value semantics (assignment = independent copy) | Unchanged | COW optimizes the copy for collections |
 | Parameter modes (`inout`, `out`, `sink`) | Unchanged | Regions interact with `inout` (see below) |
-| Heap values (`T^`, `^expr`, `move`) | Unchanged | `^expr` targets the ambient allocator (heap or region) |
+| Owned allocated values (`T^`, `^expr`, `move`) | Unchanged | `^expr` targets the ambient allocator (heap or region) |
 | Slices (second-class, no escape) | Unchanged | Regions provide a more powerful alternative |
 | No overlapping mutable arguments | Unchanged | Applies within regions as well |
 | Initialization tracking | Unchanged | Extends to region-allocated values |
+
+### Terminology note: `T^` as "owned allocated value"
+
+The existing documentation refers to `T^` as a "heap value." With regions, the
+`^expr` syntax allocates into the **ambient allocator**, which may be the machine
+heap or a region. The type `T^` means "owned, dynamically allocated value of
+type T" — it does not imply a specific allocation target. The allocation target
+is determined by context (see Layer 3, ambient allocator). The surface type is
+the same; the provenance differs (see Provenance Model below).
+
+---
+
+## Provenance Model
+
+Many CVS rules depend on distinguishing where a value was allocated and what
+kind of ownership it carries. The compiler tracks **provenance** — the
+allocation origin and ownership category of every value — through the IR. This
+is not exposed in surface syntax; it is an internal compiler property used to
+enforce eligibility checks and confinement rules.
+
+### Provenance categories
+
+| Category | Meaning | Created by |
+|----------|---------|------------|
+| `Owned<Heap>` | Value allocated on the machine heap (or process heap). Lifetime tied to the owning binding's scope. | `^expr` outside any region |
+| `Owned<Region r>` | Value allocated in region `r`. Lifetime tied to `r`'s lexical scope. Cannot outlive `r`. | `^expr` inside `region r { ... }` |
+| `Borrowed<scope>` | Non-owning reference into a value owned by another binding. Cannot escape `scope`. | Default (read-only) params, `inout` params, slices, `&expr` |
+| `SharedFrozen` | Deeply immutable, reference-counted. Not confined to any single machine. | `shared expr` |
+
+### Provenance rules
+
+1. **Provenance is assigned at creation.** When `^expr` executes, the resulting
+   value receives provenance from the ambient allocator context.
+
+2. **Provenance propagates through references.** A reference derived from an
+   `Owned<Region r>` value is `Borrowed<r>` — it inherits the region's scope as
+   its confinement boundary.
+
+3. **Provenance constrains operations.** Values with `Owned<Region r>` or
+   `Borrowed<scope>` provenance cannot be sent through mailboxes, frozen into
+   `shared`, or stored in locations that outlive their provenance scope.
+
+4. **Type alone is insufficient for eligibility.** A `u64[*]` has the same
+   surface type regardless of provenance, but a `u64[*]` with `Owned<Region r>`
+   provenance is not payload-eligible, while one with `Owned<Heap>` provenance
+   is. Eligibility checks use provenance, not just types.
+
+5. **Provenance is erased at copy boundaries.** When a value is copied out of a
+   region via `.to_owned()` or `.copy()`, the copy receives `Owned<Heap>`
+   provenance (or `Owned<Region r>` if the copy occurs inside a different
+   region). The copy is independent of the original's provenance.
+
+### COW backing storage invariant
+
+COW introduces hidden sharing of backing storage between collection values.
+This is safe only if backing storage identity is **unobservable** in safe code:
+
+- No operation exposes whether two values share backing storage.
+- No operation depends on whether a mutation triggers COW detach or mutates in
+  place.
+- The only observable effect is value equality — `a` and `b` have the same
+  contents after `let b = a`, regardless of whether they share storage.
+
+This invariant means COW is purely an optimization. The programmer reasons about
+value semantics; the compiler manages storage sharing transparently.
 
 ---
 
@@ -101,7 +166,9 @@ Rules:
    mutated. This is the only point where a deep copy occurs.
 3. The reference count is non-atomic. State machines are single-threaded
    (handlers are synchronous, run-to-completion), so no atomic operations are
-   needed within a machine.
+   needed within a machine. Non-atomic COW refcounts are safe because COW
+   backing storage is confined to a single machine's heap — cross-machine
+   sharing of COW backing is prevented by transfer preconditions (see Layer 4).
 4. Move optimization still applies: when the compiler can prove that `a` is not
    used after `let b = a`, it elides the reference count entirely and transfers
    ownership.
@@ -111,10 +178,10 @@ Rules:
 
 ### The `nocopy` qualifier
 
-For performance-sensitive code where even a COW-deferred copy is unacceptable,
-a type or binding can be marked `nocopy`. This makes any implicit copy a
-compile error — the programmer must explicitly `.copy()` or restructure to use
-moves.
+For performance-sensitive code where copies must be explicit and visible, a type
+or binding can be marked `nocopy`. A `nocopy` value is **affine**: it can be
+moved but not implicitly copied. Any operation that would create a second alias
+to the value is a compile error.
 
 ```
 let a: nocopy u64[*] = [1, 2, 3];
@@ -136,27 +203,41 @@ fn consume(sink buf: nocopy Buffer) { ... }
 
 ### `nocopy` formal semantics
 
-#### What counts as a copy
+#### Affine rule
 
-A **copy** is an operation that produces a new independent value from an
-existing one such that mutations to either do not affect the other. The
-following operations are copies:
+`nocopy` means **affine**: the value can be used at most once as an owned value.
+Assignment, passing by value, and any other operation that would create a second
+independent handle to the same logical value is forbidden. Only `move` (which
+transfers the single handle) and explicit `.copy()` (which the programmer
+deliberately requests) are allowed.
 
-| Operation | Copy? | Notes |
-|-----------|-------|-------|
-| `let b = a` (value assignment) | Yes | Produces independent value |
-| `a.copy()` (explicit copy) | Yes | Always a copy, never suppressed |
-| Passing to default (read-only) param | No | Borrow, not a copy |
-| Passing to `inout` param | No | Mutable borrow, not a copy |
-| Passing to `sink` param with `move` | No | Move, not a copy |
-| COW handle sharing (internal refcount increment) | No | Not observable as a copy |
-| COW detach on mutation (internal deep copy) | Yes | Observable copy; triggered by mutation |
-| Return by value | Depends | Copy if source is still live; move if source is last use |
+| Operation | Allowed for `nocopy`? | Notes |
+|-----------|----------------------|-------|
+| `let b = a` (value assignment) | No | Would create second alias |
+| `let b = move a` | Yes | Transfers single handle |
+| `a.copy()` (explicit copy) | Yes | Programmer's deliberate choice |
+| Passing to default (read-only) param | Yes | Borrow, no alias created |
+| Passing to `inout` param | Yes | Mutable borrow, no alias |
+| Passing to `sink` param with `move` | Yes | Transfer, no alias |
+| Return by value (last use) | Yes | Move, no alias |
+| Return by value (not last use) | No | Would create copy |
 
-COW handle sharing (incrementing the refcount on assignment) is **not** a copy
-for `nocopy` purposes. The value has not been duplicated — two handles share
-the same backing storage. The copy occurs at mutation (COW detach), and that
-**is** a copy for `nocopy` purposes.
+This is simpler and more consistent than allowing alias-creating assignment and
+then rejecting mutation (which would leave a shared-but-unmutatable value). The
+rule is: **`nocopy` values have exactly one owner at all times.**
+
+#### Interaction with COW
+
+Because `nocopy` prevents alias-creating assignment, COW handle sharing never
+occurs for `nocopy` collections. A `nocopy u64[*]` always has refcount 1. This
+means:
+
+- Mutations are always in-place (no detach, no surprise copies).
+- The `nocopy` qualifier provides a performance guarantee: no hidden COW copies,
+  ever.
+
+This is the intended use case: `nocopy` is for values where you need full
+control over when copies happen and want the compiler to enforce uniqueness.
 
 #### Transitivity
 
@@ -173,10 +254,12 @@ type Buffer = {
 let a = Buffer { data: [1, 2, 3], pos: 0 };
 let b = a;          // error: implicit copy of nocopy value (via field data)
 let b = a.copy();   // ok: explicit deep copy
+let b = move a;     // ok: move
 ```
 
 An explicit `.copy()` on a struct with `nocopy` fields performs a deep copy of
-the entire struct, including all `nocopy` fields.
+the entire struct, including all `nocopy` fields. The result is an independent
+value (also `nocopy`).
 
 #### Generics
 
@@ -196,20 +279,27 @@ deferred to the generics design.
 
 ### Interaction with parameter modes
 
-COW does not change parameter mode semantics:
-
-- Default (read-only): callee receives a shared COW handle. No copy unless the
-  caller mutates the original while the callee still holds a reference. In
-  practice, the callee's reference is short-lived (function duration), so this
-  is almost always zero-copy.
-- `inout`: callee mutates the caller's value directly. No COW interaction (there
-  is no second handle).
+- Default (read-only): callee receives a borrow. No copy. No COW interaction.
+- `inout`: callee mutates the caller's value directly via exclusive access. If
+  the value has COW-shared backing storage (from a prior assignment), the
+  runtime **detaches** the backing before granting exclusive access — the caller
+  gets a unique copy, and the prior aliases retain the original. This is
+  equivalent to Swift's exclusivity enforcement triggering COW copy-on-write.
 - `sink`: ownership transfers. No COW interaction (the value moves).
+
+```
+var a: u64[*] = [1, 2, 3];
+let b = a;               // COW: shared backing, refcount = 2
+tweak(inout a);           // detach: a gets unique backing, b retains original
+                          // refcount on a's new backing = 1
+                          // refcount on b's backing = 1
+```
 
 ### COW observability
 
 Because COW detach points are predictable (at mutation of shared backing
-storage) but not always obvious, the compiler provides optional diagnostics:
+storage, or at `inout` access to shared backing) but not always obvious, the
+compiler provides optional diagnostics:
 
 - A warning mode (opt-in per scope or module) that reports COW detach sites.
 - Runtime counters (debug builds) that track detach frequency per allocation
@@ -234,8 +324,9 @@ help with:
 This layer is already implemented in Machina. Summarized here for completeness
 and to establish terminology used in later sections.
 
-**Second-class references** are references that cannot escape their immediate
-scope. In Machina, this manifests as:
+**Second-class references** (also called **scoped borrows** in user-facing
+documentation) are references that cannot escape their immediate scope. In
+Machina, this manifests as:
 
 - Default parameter mode: read-only borrow, cannot be returned or stored.
 - `inout` parameter mode: mutable borrow, scoped to the call.
@@ -310,9 +401,9 @@ borrow checker, but made explicit rather than inferred.
 ### Region allocation and the ambient allocator
 
 Entering a `region` block changes the **ambient allocator**. Inside a region,
-heap allocation expressions (`^expr`) allocate into the region rather than the
-machine heap. This means region allocation uses the same syntax as regular heap
-allocation — no special API:
+the `^expr` syntax allocates into the region rather than the machine heap. This
+means region allocation uses the same syntax as regular heap allocation — no
+special API:
 
 ```
 region r {
@@ -322,9 +413,13 @@ region r {
 // node and list are freed when r ends
 ```
 
+The resulting values have `Owned<Region r>` provenance. The surface type (`T^`)
+is the same as a heap-allocated value, but the compiler tracks the provenance
+internally to enforce confinement.
+
 Outside any region, `^expr` allocates on the machine heap (or the process heap
-for non-machine code) as it does today. The ambient allocator is determined by
-the innermost enclosing region scope.
+for non-machine code) as it does today, producing `Owned<Heap>` provenance. The
+ambient allocator is determined by the innermost enclosing region scope.
 
 For nested regions where you need to target a specific outer region, explicit
 allocation is available:
@@ -341,6 +436,12 @@ region outer {
 `r.alloc(expr)` is the explicit form. `^expr` is sugar for "allocate in the
 ambient region." In the absence of any enclosing region, `^expr` targets the
 default heap allocator.
+
+**Refactoring note:** Because `^expr` changes behavior inside a region block,
+moving code into or out of a `region` block changes allocation provenance. This
+is an intentional context-sensitivity (the region is a visible lexical scope),
+but it means refactoring tools should flag `^expr` when extracting code across
+region boundaries.
 
 Allocation within a region is bump-allocation by default: fast (pointer
 increment), no individual deallocation, bulk free at region end. This makes
@@ -378,13 +479,14 @@ region r {
 
 ### Returning values from regions
 
-To get data out of a region, you must copy or move it into the enclosing scope
-as an owned value:
+To get data out of a region, you must copy it into the enclosing scope as an
+owned value. The copy receives the provenance of the enclosing scope (heap or
+outer region):
 
 ```
 region r {
     let nodes = ^parse(input);
-    let result = nodes.to_owned();    // deep copy out of r into caller's scope
+    let result = nodes.to_owned();    // deep copy; result gets Owned<Heap> provenance
 }
 // result is an owned value, independent of r
 use(result);
@@ -538,6 +640,34 @@ region r {
 Outside a region, closures capture by value (with move optimization), as they
 do today.
 
+### Region teardown and drop semantics
+
+When a region scope ends, the region is torn down:
+
+1. **Destructors run in reverse allocation order.** Each value allocated in the
+   region has its destructor called (if it has one). This handles COW refcount
+   decrements, nested owned values, and any future resource-managing types.
+   The region maintains a **destructor list** alongside the bump allocator —
+   each allocation that requires cleanup registers a destructor entry.
+
+2. **Backing memory is freed in bulk.** After all destructors have run, the
+   region's backing memory pages are freed or returned to the allocator pool.
+
+3. **Values without destructors skip step 1.** Pure value types (scalars,
+   structs of scalars, fixed arrays of scalars) do not register destructor
+   entries. They are freed in bulk with the backing memory.
+
+4. **Destructor failure.** If a destructor panics during teardown, the panic
+   is captured and the remaining destructors still run (same as Rust's
+   `Drop` behavior during unwinding). After all destructors complete, the
+   first captured panic is re-raised.
+
+This means region-allocated values **may** hold resources (COW collections,
+nested `T^` values, future file handles, etc.). The destructor list adds
+a small per-allocation overhead for values that need cleanup, but values that
+don't need cleanup (the common case for region-scoped intermediates) pay
+nothing.
+
 ### Region design constraints
 
 Regions have deliberate limitations:
@@ -573,7 +703,7 @@ state, without dangling references, and without a global garbage collector.
 
 ### Design
 
-Each managed machine has its own **heap** — a private memory region that holds
+Each managed machine has its own **heap** — a private memory area that holds
 all of the machine's state, local variables, and dynamically allocated data.
 Machine heaps are isolated: no machine can directly reference another machine's
 heap.
@@ -586,9 +716,9 @@ opened during handler execution all live within (or nested under) this root
 region.
 
 The machine heap is the **ambient allocator** for all code within a handler.
-Regular `^expr` allocations go to the machine heap. Explicit `region` blocks
-override the ambient allocator for their scope, but the machine heap remains the
-default outside any region.
+Regular `^expr` allocations go to the machine heap (producing `Owned<Heap>`
+provenance). Explicit `region` blocks override the ambient allocator for their
+scope, but the machine heap remains the default outside any region.
 
 ```
 typestate Connection {
@@ -634,50 +764,88 @@ send(target, move msg);
 use(msg);    // error: use after move
 ```
 
+#### Transfer preconditions
+
+The transfer path must guarantee that no COW backing storage is shared across
+machine boundaries. Without this, non-atomic COW refcounts would be accessed
+from multiple machines concurrently — a data race.
+
+**COW uniqueness rule:** before a value is transferred (staged for
+`send`/`request`/`reply`), the runtime ensures that all COW-backed collections
+within the value's object graph have unique backing storage (refcount == 1). If
+any COW collection has refcount > 1 (shared backing), the runtime **detaches**
+it (deep-copies the backing storage) before staging.
+
+```
+var a: u64[*] = [1, 2, 3];
+let b = a;                       // COW: shared backing, refcount = 2
+send(target, move a);            // runtime detaches a's backing before transfer
+                                 // a's new backing: refcount = 1, transferred
+                                 // b's original backing: refcount = 1, retained
+```
+
+This ensures:
+- Transferred values always have fully independent backing storage.
+- The sender's remaining aliases are unaffected.
+- Non-atomic COW refcounts are safe because COW backing is always confined to
+  a single machine.
+
+The pointer-handoff optimization (O(1) transfer for same-process machines) is
+only valid when the value's entire object graph has unique backing. The runtime
+checks this as part of staging.
+
 #### Payload eligibility
 
 Not all values can appear in mailbox payloads. The compiler enforces a
-**payload eligibility** check on the type graph of every `send`, `request`, and
-`reply` argument:
+**payload eligibility** check on the type and provenance of every `send`,
+`request`, and `reply` argument.
 
-A type is **payload-eligible** if and only if:
+Eligibility has two components:
 
-1. It is a value type (scalars, structs, enums, fixed arrays, tuples).
-2. It is a heap-owning type (`T^`, `T[*]`, `string`).
-3. It is `shared T` (shared immutable reference).
-4. It is a composite whose fields are all recursively payload-eligible.
+**1. Structural (type-based):** The type must not contain reference types.
 
-A type is **not** payload-eligible if it contains:
+A type is structurally payload-eligible if:
+- It is a value type (scalars, structs, enums, fixed arrays, tuples).
+- It is an owning type (`T^`, `T[*]`, `string`).
+- It is `shared T`.
+- It is a composite whose fields are all recursively payload-eligible.
 
-- Region references (references into a `region` scope).
-- Second-class references (slices, borrows from parameters).
-- Closures that capture region references or second-class references.
+A type is structurally **not** payload-eligible if it contains:
+- Reference types (`&T`, `T[]`).
+- Closures that capture references.
+
+**2. Provenance-based (value-based):** The value must not originate from a region.
+
+A value with `Owned<Region r>` or `Borrowed<scope>` provenance is not
+payload-eligible, even if its surface type passes the structural check. A
+`u64[*]` allocated on the heap is eligible; the same type allocated in a
+region is not.
 
 ```
 region r {
-    let data = ^[1, 2, 3];
-    send(target, data);            // error: data is a region reference,
-                                   //        not payload-eligible
+    let data = ^[1, 2, 3];        // Owned<Region r> provenance
+    send(target, data);            // error: region-provenance value is not
+                                   //        payload-eligible
 
-    let owned = data.to_owned();
-    send(target, move owned);      // ok: owned value, payload-eligible
+    let owned = data.to_owned();   // Owned<Heap> provenance (copied out)
+    send(target, move owned);      // ok: heap-provenance, payload-eligible
 }
 ```
 
-This rule prevents dangling references in mailbox payloads. The compiler
-reports the specific field path that fails eligibility.
+The compiler reports both structural and provenance failures with specific
+field paths.
 
 #### Transfer implementation strategies
 
-The `send` operation has well-defined semantics (move) but the runtime may
-choose different strategies depending on context:
+The `send` operation has well-defined semantics (move with uniqueness guarantee)
+but the runtime may choose different strategies depending on context:
 
-| Context | Strategy | Cost |
-|---------|----------|------|
-| Same process, small value | memcpy into receiver's heap | O(n) where n = value size |
-| Same process, large value | Pointer handoff between heaps (shared backing allocator with ownership tags) | O(1) |
-| Cross-process, same host | Serialize into shared memory segment, receiver deserializes | O(n) |
-| Cross-host | Serialize over network channel | O(n) + network |
+| Context | Strategy | Cost | Precondition |
+|---------|----------|------|--------------|
+| Same process, small value | memcpy into receiver's heap | O(n) | COW detached |
+| Same process, large value, unique backing | Pointer handoff (ownership tag transfer) | O(1) | COW refcount == 1 for entire graph |
+| Cross-process, same host | Serialize into shared memory segment | O(n) | COW detached |
+| Cross-host | Serialize over network channel | O(n) + network | COW detached |
 
 The programmer writes the same `send` regardless of context. The runtime
 selects the strategy. This is the key to transparent cross-process promotion:
@@ -687,8 +855,8 @@ distributed.
 #### Interaction with regions
 
 A machine handler may open sub-regions for temporary work. Data that must
-survive the handler (state fields, outgoing messages) must be owned values, not
-region references:
+survive the handler (state fields, outgoing messages) must be owned values with
+heap provenance, not region references:
 
 ```
 state Processing {
@@ -696,7 +864,7 @@ state Processing {
         region scratch {
             let parsed = ^parse(input);
             let refs = build_cross_refs(parsed);    // references within scratch
-            let summary = summarize(refs).to_owned(); // copy result out
+            let summary = summarize(refs).to_owned(); // copy out with heap provenance
         }
         // scratch is freed; summary is an owned value
         send(reporter, move summary);
@@ -723,15 +891,15 @@ ownership states within a handler:
 ```
 available ──→ staged ──→ committed
                 │
-                └──→ restored (on rollback)
+                └──→ dropped (on rollback)
 ```
 
 | State | Meaning |
 |-------|---------|
 | **available** | Value is owned by the handler. Normal access and mutation. |
-| **staged** | Value has been passed to `send`/`request`/`reply`. The handler has lost access (use-after-move is a compile error). The runtime holds the value in a staging buffer. |
+| **staged** | Value has been passed to `send`/`request`/`reply`. The handler has lost access (use-after-move is a compile error). The runtime holds the value in a staging buffer. COW detach (if needed) occurs at this point. |
 | **committed** | Handler completed successfully. The runtime flushes the staging buffer: payloads are transferred to destination mailboxes. |
-| **restored** | Handler failed. The runtime discards the staging buffer. Staged values are dropped. |
+| **dropped** | Handler failed. The runtime drops all staged values exactly once, then discards the transaction. |
 
 ##### Compile-time invariants
 
@@ -764,6 +932,9 @@ The runtime maintains these guarantees:
    move-from bindings remain inaccessible.
 4. **Atomic commit.** The commit unit is `(next state, all staged payloads,
    subscription updates)`. Either all are committed or none are.
+5. **COW isolation.** All COW-backed collections in staged payloads have
+   unique backing (refcount == 1) at staging time. This is enforced by the
+   runtime before the value enters the staging buffer.
 
 ##### Staging buffer
 
@@ -804,7 +975,8 @@ let config = shared Config.load("settings.toml");
 ```
 
 `shared` values are the single exception to the confinement rule: they are not
-confined to one machine's heap because immutability makes sharing safe.
+confined to one machine's heap because immutability makes sharing safe. Their
+provenance is `SharedFrozen`.
 
 #### Rules
 
@@ -841,9 +1013,10 @@ use(config);                // still accessible
 #### Freeze eligibility
 
 Not all types can be frozen into `shared` values. The compiler enforces a
-structural **freeze eligibility** predicate at every `shared` construction site.
+**freeze eligibility** predicate at every `shared` construction site. This
+check has both structural and provenance components.
 
-A type is **freeze-eligible** if and only if:
+**Structural check** — a type is freeze-eligible if:
 
 1. It is a scalar type (`u8`, `u16`, `u32`, `u64`, `i8`, ..., `bool`, `f32`,
    `f64`).
@@ -851,26 +1024,34 @@ A type is **freeze-eligible** if and only if:
 3. It is a `T[*]` (dynamic array) where `T` is freeze-eligible.
 4. It is a struct or enum where all fields are recursively freeze-eligible.
 5. It is `shared T` (already frozen; nesting is fine).
-6. It is a `T^` (heap value) where `T` is freeze-eligible.
+6. It is a `T^` where `T` is freeze-eligible.
 
-A type is **not** freeze-eligible if it contains:
+A type is structurally **not** freeze-eligible if it contains:
 
-- Region references (references into a `region` scope).
-- Second-class references (slices, parameter borrows).
+- Reference types (`&T`, `T[]`).
 - Closures that capture mutable or region-bound state.
 - Opaque FFI types (unless explicitly marked freeze-safe via annotation).
 
+**Provenance check** — the value being frozen must have `Owned<Heap>`
+provenance. A region-provenance value must be copied out before freezing.
+
 ```
 type Config = { debug: bool, max_retries: u64 }
-let c = shared Config { debug: false, max_retries: 3 };  // ok: all fields freeze-eligible
+let c = shared Config { debug: false, max_retries: 3 };  // ok: freeze-eligible, heap provenance
 
 type Bad = { data: &u64[] }    // contains a slice reference
 let b = shared Bad { ... };    // error: Bad is not freeze-eligible
                                //        field 'data' is a reference type
+
+region r {
+    let cfg = ^Config { debug: true, max_retries: 5 };
+    let s = shared cfg;        // error: cannot freeze region-provenance value
+    let s = shared cfg.to_owned();  // ok: copy has heap provenance
+}
 ```
 
-The compiler reports the specific field path that fails eligibility, enabling
-actionable diagnostics.
+The compiler reports the specific field path or provenance that fails
+eligibility, enabling actionable diagnostics.
 
 #### Creating shared values
 
@@ -940,7 +1121,7 @@ The full model has six concepts. The first two cover the vast majority of code:
 | Concept | When to use | Rust equivalent |
 |---------|-------------|-----------------|
 | Values (default) | Everyday code | Owned values + Clone |
-| `nocopy` | Performance-critical paths | No direct equivalent |
+| `nocopy` | Performance-critical paths | Affine types (move-only) |
 | Second-class refs | Function-scoped borrowing | `&`/`&mut` with elided lifetimes |
 | Regions | Complex intermediate structures | `'a` lifetimes + Arena + scoped threads |
 | Transfer on send | Machine-to-machine communication | `Send` + ownership transfer |
@@ -1047,8 +1228,9 @@ future versions; others are inherent tradeoffs.
 5. **COW mutation cliffs.** A COW collection with many shared references will
    deep-copy on first mutation. The copy point is predictable (at mutation, not
    at assignment) but may surprise users who expect in-place performance.
-   Mitigation: `nocopy` makes this visible; move semantics avoid it entirely;
-   COW observability diagnostics surface detach sites.
+   Mitigation: `nocopy` enforces uniqueness (no COW sharing at all); move
+   semantics avoid it entirely; COW observability diagnostics surface detach
+   sites.
 
 6. **FFI boundary.** External code (C libraries, system calls) does not respect
    confinement. An `unsafe` boundary is required for FFI, and safety guarantees
@@ -1058,6 +1240,12 @@ future versions; others are inherent tradeoffs.
    iterators must yield owned values (copies). Within regions, iterators can
    yield references. This means performance-sensitive iteration requires region
    scoping.
+
+8. **COW detach on transfer.** Values with shared COW backing are detached
+   (deep-copied) before cross-machine transfer. For large collections with
+   shared backing, this adds transfer latency. Mitigation: use `nocopy` or
+   `move` to ensure unique backing before send; the pointer-handoff optimization
+   rewards uniqueness.
 
 ---
 
@@ -1082,8 +1270,8 @@ Stopped) and heap deallocation follows machine lifecycle:
 - **Faulted**: heap is frozen (no new allocations). Pending staged effects are
   discarded (transactional rollback). `shared` references held by the machine
   are released (reference counts decremented).
-- **Stopped**: heap is freed in bulk. All owned data is deallocated. `shared`
-  references are released.
+- **Stopped**: heap is freed in bulk (with destructor pass for values requiring
+  cleanup). All owned data is deallocated. `shared` references are released.
 
 ### Per-machine allocator isolation
 
@@ -1093,12 +1281,17 @@ completion, one at a time), the allocator requires no locks, no atomic
 operations, and no contention. This is a structural performance advantage over
 languages with a single global allocator shared across threads.
 
+Combined with the COW uniqueness rule on transfer, this guarantees that COW
+backing storage is always confined to a single machine. Non-atomic COW refcounts
+are safe by construction.
+
 ### Mailbox payloads
 
 Mailbox payloads (the values in `send`, `request`, `reply`) are owned values
 that transfer from sender heap to receiver heap. The envelope model carries the
 payload as bytes or as a transferable value, depending on the runtime strategy.
-All payloads must pass the payload eligibility check (see Layer 4).
+All payloads must pass both structural and provenance eligibility checks (see
+Layer 4).
 
 `shared` values in payloads are not transferred — a reference is shared. The
 envelope carries a reference (pointer + refcount increment) rather than a copy.
@@ -1122,9 +1315,10 @@ the specific source location, the violated rule, and actionable guidance.
 | `RegionEscape` | 3 | Region reference used outside its region scope |
 | `CrossRegionRef` | 3 | Reference from inner region stored in outer region |
 | `RegionMutationWhileBorrowed` | 3 | Mutation of region value while interior reference is live |
-| `NocopyImplicitCopy` | 1 | Implicit copy of a `nocopy` value |
-| `PayloadNotEligible` | 4 | `send`/`request`/`reply` payload contains region ref or borrow |
-| `SharedFreezeRejected` | 5 | Type is not freeze-eligible (with field path) |
+| `NocopyImplicitCopy` | 1 | Implicit copy (including alias-creating assignment) of a `nocopy` value |
+| `PayloadNotEligible` | 4 | Payload contains references or has region provenance |
+| `PayloadCowDetach` | 4 | Transfer triggered COW detach (informational, opt-in) |
+| `SharedFreezeRejected` | 5 | Type or provenance is not freeze-eligible (with field path) |
 | `UseAfterStagedMove` | 4 | Use of value after it was staged for transfer |
 
 ---
@@ -1143,7 +1337,7 @@ that confinement guards against.
 | 1 | Values + COW | Values are independent; COW defers copy to mutation |
 | 2 | Second-class refs | References cannot escape their scope |
 | 3 | Regions | References cannot escape their region; mutation blocked while borrowed |
-| 4 | Machine heaps | Data cannot escape its machine without explicit transfer; payloads are staged and committed transactionally |
+| 4 | Machine heaps | Data cannot escape its machine without explicit transfer; COW backing is detached at transfer; payloads are staged and committed transactionally |
 | 5 | `shared` | Exception: deeply immutable, freeze-eligible data may be shared across machines |
 
 The model avoids garbage collection, lifetime annotations, and borrow checking.
@@ -1159,7 +1353,7 @@ predictability over maximum flexibility.
 | Language / System | Relevant idea | CVS relationship |
 |-------------------|---------------|------------------|
 | Hylo/Val | Mutable value semantics, second-class references | Direct foundation for Layers 1-2 |
-| Swift | COW for value-type collections | Inspiration for Layer 1 COW strategy |
+| Swift | COW for value-type collections, exclusivity enforcement | Inspiration for Layer 1 COW and `inout` detach behavior |
 | MLKit / Cyclone | Region-based memory management | Foundation for Layer 3 region design |
 | Pony | Reference capabilities for actors (`iso`, `val`) | Similar goals; CVS is simpler (fewer capabilities) |
 | Erlang/BEAM | Per-process heaps, copy-on-send | Proven model for Layer 4 machine isolation |
