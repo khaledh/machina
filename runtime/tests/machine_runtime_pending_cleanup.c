@@ -1,7 +1,7 @@
 #include <stddef.h>
 #include <stdint.h>
 
-#include "machine_runtime.h"
+#include "machine/runtime.h"
 
 // Covers pending lifecycle cleanup paths and metrics hooks:
 // - completed reply consumption

@@ -1,7 +1,7 @@
 #include <stdint.h>
 #include <stddef.h>
 
-#include "machine_runtime.h"
+#include "machine/runtime.h"
 
 typedef struct reqreply_ctx {
     mc_machine_runtime_t *rt;

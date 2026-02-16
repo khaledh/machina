@@ -1,7 +1,7 @@
 #include <stdint.h>
 #include <stddef.h>
 
-#include "machine_runtime.h"
+#include "machine/runtime.h"
 
 // Transactional request/reply staging test.
 //

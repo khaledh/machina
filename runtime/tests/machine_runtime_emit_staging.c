@@ -1,7 +1,7 @@
 #include <stdint.h>
 #include <stdio.h>
 
-#include "machine_runtime.h"
+#include "machine/runtime.h"
 
 // End-to-end test for compiler ABI shims:
 // - __mc_machine_emit_send
