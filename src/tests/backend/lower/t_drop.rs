@@ -1,5 +1,5 @@
 use super::{analyze, format_func, indoc, lower_func};
-use crate::core::backend::lower::lower_module_with_opts;
+use crate::core::backend::lower::{LowerOpts, lower_module_with_opts};
 use crate::core::ir::format::format_func_with_comments;
 
 fn count(text: &str, needle: &str) -> usize {
@@ -24,8 +24,10 @@ fn test_drop_on_field_overwrite() {
         &ctx.type_map,
         &ctx.lowering_plans,
         &ctx.drop_plans,
-        false,
-        true,
+        &LowerOpts {
+            trace_drops: true,
+            ..Default::default()
+        },
     )
     .expect("failed to lower");
     let func_names: Vec<_> = lowered.funcs.iter().map(|f| f.func.name.clone()).collect();
@@ -64,8 +66,10 @@ fn test_drop_promotes_full_init() {
         &ctx.type_map,
         &ctx.lowering_plans,
         &ctx.drop_plans,
-        false,
-        true,
+        &LowerOpts {
+            trace_drops: true,
+            ..Default::default()
+        },
     )
     .expect("failed to lower");
     let func_names: Vec<_> = lowered.funcs.iter().map(|f| f.func.name.clone()).collect();

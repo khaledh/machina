@@ -48,6 +48,15 @@ pub struct LoweredModule {
     pub globals: Vec<GlobalData>,
 }
 
+/// Options for module SSA lowering beyond the core semantic inputs.
+#[derive(Clone, Default)]
+pub struct LowerOpts<'a> {
+    pub machine_plans: Option<&'a sem::MachinePlanMap>,
+    pub trace_alloc: bool,
+    pub trace_drops: bool,
+    pub executable: bool,
+}
+
 pub use error::LowerToIrError;
 
 /// Lowers a semantic function definition into SSA IR.
@@ -65,27 +74,6 @@ pub fn lower_func(
     lowering_plans: &sem::LoweringPlanMap,
     drop_plans: &sem::DropPlanMap,
 ) -> Result<LoweredFunction, LowerToIrError> {
-    lower_func_with_opts(
-        func,
-        def_table,
-        type_map,
-        lowering_plans,
-        drop_plans,
-        false,
-        false,
-    )
-}
-
-/// Lowers a semantic function with optional SSA lowering flags.
-pub fn lower_func_with_opts(
-    func: &sem::FuncDef,
-    def_table: &DefTable,
-    type_map: &TypeMap,
-    lowering_plans: &sem::LoweringPlanMap,
-    drop_plans: &sem::DropPlanMap,
-    trace_alloc: bool,
-    trace_drops: bool,
-) -> Result<LoweredFunction, LowerToIrError> {
     let mut globals = GlobalArena::new();
     let mut drop_glue = DropGlueRegistry::new(def_table);
     let empty_machine_plans = sem::MachinePlanMap::default();
@@ -97,13 +85,14 @@ pub fn lower_func_with_opts(
         lowering_plans,
         &empty_machine_plans,
         drop_plans,
-        trace_alloc,
-        trace_drops,
+        false,
+        false,
         &mut drop_glue,
         &mut globals,
     )
 }
 
+/// Lowers a semantic module with default options.
 pub fn lower_module(
     module: &sem::Module,
     def_table: &DefTable,
@@ -117,45 +106,21 @@ pub fn lower_module(
         type_map,
         lowering_plans,
         drop_plans,
-        false,
-        false,
+        &LowerOpts::default(),
     )
 }
 
-/// Lowers a semantic module with optional SSA lowering flags.
+/// Lowers a semantic module with configurable options.
 pub fn lower_module_with_opts(
     module: &sem::Module,
     def_table: &DefTable,
     type_map: &TypeMap,
     lowering_plans: &sem::LoweringPlanMap,
     drop_plans: &sem::DropPlanMap,
-    trace_alloc: bool,
-    trace_drops: bool,
+    opts: &LowerOpts<'_>,
 ) -> Result<LoweredModule, LowerToIrError> {
-    let empty_machine_plans = sem::MachinePlanMap::default();
-    lower_module_with_machine_plans_with_opts(
-        module,
-        def_table,
-        type_map,
-        lowering_plans,
-        drop_plans,
-        &empty_machine_plans,
-        trace_alloc,
-        trace_drops,
-    )
-}
-
-/// Lowers a semantic module with machine plans and optional SSA lowering flags.
-pub fn lower_module_with_machine_plans_with_opts(
-    module: &sem::Module,
-    def_table: &DefTable,
-    type_map: &TypeMap,
-    lowering_plans: &sem::LoweringPlanMap,
-    drop_plans: &sem::DropPlanMap,
-    machine_plans: &sem::MachinePlanMap,
-    trace_alloc: bool,
-    trace_drops: bool,
-) -> Result<LoweredModule, LowerToIrError> {
+    let default_machine_plans = sem::MachinePlanMap::default();
+    let machine_plans = opts.machine_plans.unwrap_or(&default_machine_plans);
     lower_module_impl(
         module,
         def_table,
@@ -163,36 +128,9 @@ pub fn lower_module_with_machine_plans_with_opts(
         lowering_plans,
         drop_plans,
         machine_plans,
-        trace_alloc,
-        trace_drops,
-        false,
-    )
-}
-
-/// Lowers a semantic module for executable emission.
-///
-/// This variant injects a C-ABI entry wrapper that calls user `main` and
-/// handles unhandled error-union returns with a runtime trap message.
-pub fn lower_module_for_executable_with_machine_plans_with_opts(
-    module: &sem::Module,
-    def_table: &DefTable,
-    type_map: &TypeMap,
-    lowering_plans: &sem::LoweringPlanMap,
-    drop_plans: &sem::DropPlanMap,
-    machine_plans: &sem::MachinePlanMap,
-    trace_alloc: bool,
-    trace_drops: bool,
-) -> Result<LoweredModule, LowerToIrError> {
-    lower_module_impl(
-        module,
-        def_table,
-        type_map,
-        lowering_plans,
-        drop_plans,
-        machine_plans,
-        trace_alloc,
-        trace_drops,
-        true,
+        opts.trace_alloc,
+        opts.trace_drops,
+        opts.executable,
     )
 }
 

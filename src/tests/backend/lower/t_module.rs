@@ -1,7 +1,5 @@
-use super::{
-    analyze, analyze_typestate, assert_ir_eq, format_func, indoc, lower_module,
-    lower_module_with_machine_plans_with_opts,
-};
+use super::{analyze, analyze_typestate, assert_ir_eq, format_func, indoc, lower_module};
+use crate::core::backend::lower::{LowerOpts, lower_module_with_opts};
 use crate::core::ir::IrTypeKind;
 use crate::core::tree::semantic as sem;
 use std::collections::HashMap;
@@ -147,15 +145,16 @@ fn test_lower_module_typestate_machine_plans_materialize_artifacts() {
         }
     "});
 
-    let lowered = lower_module_with_machine_plans_with_opts(
+    let lowered = lower_module_with_opts(
         &ctx.module,
         &ctx.def_table,
         &ctx.type_map,
         &ctx.lowering_plans,
         &ctx.drop_plans,
-        &ctx.machine_plans,
-        false,
-        false,
+        &LowerOpts {
+            machine_plans: Some(&ctx.machine_plans),
+            ..Default::default()
+        },
     )
     .expect("failed to lower typestate machine artifacts");
 

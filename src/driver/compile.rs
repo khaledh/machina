@@ -242,15 +242,18 @@ pub fn compile_with_path(
     let target = Arm64Target::new();
 
     // --- Lower to SSA IR ---
-    let lowered = backend::lower::lower_module_for_executable_with_machine_plans_with_opts(
+    let lowered = backend::lower::lower_module_with_opts(
         &analyzed_context.module,
         &analyzed_context.def_table,
         &analyzed_context.type_map,
         &analyzed_context.lowering_plans,
         &analyzed_context.drop_plans,
-        &analyzed_context.machine_plans,
-        opts.trace_alloc,
-        opts.trace_drops,
+        &backend::lower::LowerOpts {
+            machine_plans: Some(&analyzed_context.machine_plans),
+            trace_alloc: opts.trace_alloc,
+            trace_drops: opts.trace_drops,
+            executable: true,
+        },
     )
     .map_err(|e| vec![e.into()])?;
 
