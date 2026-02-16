@@ -261,9 +261,9 @@ fn build_dispatch_thunk(
     let state_ty_src = type_map.type_table().get(plan.state_layout_ty);
     let payload_ty_src = type_map.type_table().get(plan.payload_layout_ty);
     let next_state_ty_src = type_map.type_table().get(plan.next_state_layout_ty);
-    if contains_unresolved_type(state_ty_src)
-        || contains_unresolved_type(payload_ty_src)
-        || contains_unresolved_type(next_state_ty_src)
+    if state_ty_src.contains_unresolved()
+        || payload_ty_src.contains_unresolved()
+        || next_state_ty_src.contains_unresolved()
     {
         return build_fault_only_dispatch_thunk(thunk_def_id, &plan.symbol, descriptor_global);
     }
@@ -314,8 +314,8 @@ fn build_dispatch_thunk(
     };
     if handler_params
         .iter()
-        .any(|param| contains_unresolved_type(&param.ty))
-        || contains_unresolved_type(handler_ret_ty_src.as_ref())
+        .any(|param| param.ty.contains_unresolved())
+        || handler_ret_ty_src.contains_unresolved()
     {
         // Some synthetic handler signatures can still carry unresolved parts in
         // early slices. Fall back to deterministic FAULT thunk until the full
@@ -353,11 +353,35 @@ fn build_dispatch_thunk(
     let state_ptr = builder.cast(CastKind::IntToPtr, current_state_word, handler_state_ptr_ty);
 
     // Envelope payload + correlation fields.
-    let pending_id = load_struct_field(&mut builder, env_ptr, 3, u64_ty, u64_ptr_ty);
-    let reply_cap_id = load_struct_field(&mut builder, env_ptr, 2, u64_ty, u64_ptr_ty);
-    let payload0 = load_struct_field(&mut builder, env_ptr, 4, u64_ty, u64_ptr_ty);
+    let pending_id = load_struct_field(
+        &mut builder,
+        env_ptr,
+        ENV_FIELD_PENDING_ID,
+        u64_ty,
+        u64_ptr_ty,
+    );
+    let reply_cap_id = load_struct_field(
+        &mut builder,
+        env_ptr,
+        ENV_FIELD_REPLY_CAP_ID,
+        u64_ty,
+        u64_ptr_ty,
+    );
+    let payload0 = load_struct_field(
+        &mut builder,
+        env_ptr,
+        ENV_FIELD_PAYLOAD0,
+        u64_ty,
+        u64_ptr_ty,
+    );
     let payload_ptr = builder.cast(CastKind::IntToPtr, payload0, handler_payload_ptr_ty);
-    let origin_payload0 = load_struct_field(&mut builder, env_ptr, 6, u64_ty, u64_ptr_ty);
+    let origin_payload0 = load_struct_field(
+        &mut builder,
+        env_ptr,
+        ENV_FIELD_ORIGIN_PAYLOAD0,
+        u64_ty,
+        u64_ptr_ty,
+    );
     let origin_payload_ptr =
         builder.cast(CastKind::IntToPtr, origin_payload0, handler_payload_ptr_ty);
 
@@ -514,6 +538,12 @@ fn lower_handler_param_abi_ty(param: &FnParam, lowerer: &mut TypeLowerer<'_>) ->
     }
 }
 
+// Envelope struct field indices (must match the layout in `add_machine_env_type`).
+const ENV_FIELD_REPLY_CAP_ID: usize = 2;
+const ENV_FIELD_PENDING_ID: usize = 3;
+const ENV_FIELD_PAYLOAD0: usize = 4;
+const ENV_FIELD_ORIGIN_PAYLOAD0: usize = 6;
+
 fn add_machine_env_type(types: &mut IrTypeCache, u64_ty: IrTypeId) -> IrTypeId {
     let fields = vec![
         IrStructField {
@@ -589,42 +619,6 @@ fn load_struct_field(
 ) -> ValueId {
     let ptr = builder.field_addr(base_ptr, field_idx, field_ptr_ty);
     builder.load(ptr, field_ty)
-}
-
-fn contains_unresolved_type(ty: &Type) -> bool {
-    match ty {
-        Type::Unknown | Type::Var(_) => true,
-        Type::Fn { params, ret_ty } => {
-            params
-                .iter()
-                .any(|param| contains_unresolved_type(&param.ty))
-                || contains_unresolved_type(ret_ty.as_ref())
-        }
-        Type::Tuple { field_tys } => field_tys.iter().any(contains_unresolved_type),
-        Type::Struct { fields, .. } => fields
-            .iter()
-            .any(|field| contains_unresolved_type(&field.ty)),
-        Type::Enum { variants, .. } => variants
-            .iter()
-            .any(|variant| variant.payload.iter().any(contains_unresolved_type)),
-        Type::Array { elem_ty, .. } | Type::Slice { elem_ty } | Type::Heap { elem_ty } => {
-            contains_unresolved_type(elem_ty.as_ref())
-        }
-        Type::DynArray { elem_ty } => contains_unresolved_type(elem_ty.as_ref()),
-        Type::Set { elem_ty } => contains_unresolved_type(elem_ty.as_ref()),
-        Type::Map { key_ty, value_ty } => {
-            contains_unresolved_type(key_ty.as_ref()) || contains_unresolved_type(value_ty.as_ref())
-        }
-        Type::Ref { elem_ty, .. } => contains_unresolved_type(elem_ty.as_ref()),
-        Type::Pending { response_tys } | Type::ReplyCap { response_tys } => {
-            response_tys.iter().any(contains_unresolved_type)
-        }
-        Type::ErrorUnion { ok_ty, err_tys } => {
-            contains_unresolved_type(ok_ty.as_ref()) || err_tys.iter().any(contains_unresolved_type)
-        }
-        Type::Range { elem_ty } => contains_unresolved_type(elem_ty.as_ref()),
-        Type::Int { .. } | Type::Bool | Type::Char | Type::String | Type::Unit => false,
-    }
 }
 
 fn append_descriptor_globals(

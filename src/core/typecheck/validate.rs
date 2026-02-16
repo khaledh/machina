@@ -6,6 +6,7 @@
 use std::collections::{HashMap, HashSet};
 
 use crate::core::analysis::dataflow::{DataflowGraph, solve_forward};
+use crate::core::machine::naming::parse_generated_handler_site_label;
 use crate::core::resolve::DefId;
 use crate::core::tree::NodeId;
 use crate::core::tree::cfg::{AstBlockId, TreeCfgBuilder, TreeCfgItem, TreeCfgNode};
@@ -976,18 +977,6 @@ fn parse_typestate_and_state_from_generated_state(type_name: &str) -> Option<(St
     let rest = type_name.strip_prefix("__ts_")?;
     let (typestate_name, state_name) = rest.rsplit_once('_')?;
     Some((typestate_name.to_string(), state_name.to_string()))
-}
-
-fn parse_generated_handler_site_label(method_name: &str) -> Option<&str> {
-    // Typestate lowering encodes provenance site labels into generated handler
-    // names (`__ts_on_<ordinal>__site_<label>`) so later phases can recover
-    // deterministic dispatch/diagnostic facts without extra side tables.
-    let suffix = method_name.strip_prefix("__ts_on_")?;
-    let (_, label) = suffix.split_once("__site_")?;
-    if label.is_empty() {
-        return None;
-    }
-    Some(label)
 }
 
 #[cfg(test)]

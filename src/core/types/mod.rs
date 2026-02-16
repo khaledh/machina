@@ -1038,6 +1038,12 @@ impl Type {
         }
     }
 
+    /// Returns `true` when the type or any nested child contains `Unknown` or
+    /// `Var`, i.e. the type is not fully resolved.
+    pub fn contains_unresolved(&self) -> bool {
+        self.any(&|t| matches!(t, Type::Unknown | Type::Var(_)))
+    }
+
     /// Returns `true` if `predicate` holds for this type or any nested child type.
     pub fn any(&self, predicate: &impl Fn(&Type) -> bool) -> bool {
         if predicate(self) {
@@ -1063,6 +1069,9 @@ impl Type {
             Type::Enum { variants, .. } => variants
                 .iter()
                 .any(|v| v.payload.iter().any(|ty| ty.any(predicate))),
+            Type::Pending { response_tys } | Type::ReplyCap { response_tys } => {
+                response_tys.iter().any(|ty| ty.any(predicate))
+            }
             _ => false,
         }
     }

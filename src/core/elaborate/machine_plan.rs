@@ -8,13 +8,13 @@ use std::collections::{BTreeMap, HashMap};
 
 use crate::core::analysis::facts::{DefTableOverlay, TypeMapOverlay};
 use crate::core::context::TypestateRoleImplBinding;
+use crate::core::machine::naming::{
+    GENERATED_HANDLER_PREFIX, GENERATED_STATE_PREFIX, parse_generated_handler_site_label,
+};
 use crate::core::machine::request_site::labeled_request_site_key;
 use crate::core::tree::semantic as sem;
 use crate::core::typecheck::type_map::resolve_type_expr;
 use crate::core::types::{StructField, Type, TypeId};
-
-const GENERATED_STATE_PREFIX: &str = "__ts_";
-const GENERATED_HANDLER_PREFIX: &str = "__ts_on_";
 
 /// Build managed-machine plans for all typestates present in the semantic
 /// module. Plans are deterministic by typestate/state/event lexical ordering.
@@ -42,12 +42,17 @@ struct HandlerPlanSeed {
     next_state_layout_ty: TypeId,
 }
 
+#[derive(Clone, Debug, Hash, Eq, PartialEq)]
+struct DispatchKey {
+    event_stable_key: String,
+    site: Option<u64>, // None = wildcard
+}
+
 impl HandlerPlanSeed {
-    fn stable_dispatch_key(&self) -> String {
-        let event = self.event_key.stable_key();
-        match self.request_site_key_match {
-            Some(site_key) => format!("{event}:site:{site_key}"),
-            None => format!("{event}:site:*"),
+    fn dispatch_key(&self) -> DispatchKey {
+        DispatchKey {
+            event_stable_key: self.event_key.stable_key(),
+            site: self.request_site_key_match,
         }
     }
 }
@@ -188,7 +193,7 @@ fn resolve_state_layout_type_id(
 ) -> TypeId {
     if let Some(def) = def_table.lookup_def(type_def.def_id)
         && let Some(id) = type_map.lookup_def_type_id(def)
-        && !contains_unresolved_type(type_map.type_table().get(id))
+        && !type_map.type_table().get(id).contains_unresolved()
     {
         return id;
     }
@@ -324,7 +329,7 @@ fn resolve_type_id(
 ) -> TypeId {
     if let Some(id) = type_map.lookup_node_type_id(ty_expr.id) {
         let ty = type_map.type_table().get(id);
-        if !contains_unresolved_type(ty) {
+        if !ty.contains_unresolved() {
             return id;
         }
     }
@@ -338,42 +343,6 @@ fn resolve_type_id(
             "compiler bug: missing interned {label} type id for typestate handler {handler_name}"
         )
     })
-}
-
-fn contains_unresolved_type(ty: &Type) -> bool {
-    match ty {
-        Type::Unknown | Type::Var(_) => true,
-        Type::Fn { params, ret_ty } => {
-            params
-                .iter()
-                .any(|param| contains_unresolved_type(&param.ty))
-                || contains_unresolved_type(ret_ty.as_ref())
-        }
-        Type::Tuple { field_tys } => field_tys.iter().any(contains_unresolved_type),
-        Type::Struct { fields, .. } => fields
-            .iter()
-            .any(|field| contains_unresolved_type(&field.ty)),
-        Type::Enum { variants, .. } => variants
-            .iter()
-            .any(|variant| variant.payload.iter().any(contains_unresolved_type)),
-        Type::Array { elem_ty, .. }
-        | Type::Slice { elem_ty }
-        | Type::Heap { elem_ty }
-        | Type::DynArray { elem_ty }
-        | Type::Set { elem_ty } => contains_unresolved_type(elem_ty.as_ref()),
-        Type::Map { key_ty, value_ty } => {
-            contains_unresolved_type(key_ty.as_ref()) || contains_unresolved_type(value_ty.as_ref())
-        }
-        Type::Ref { elem_ty, .. } => contains_unresolved_type(elem_ty.as_ref()),
-        Type::Pending { response_tys } | Type::ReplyCap { response_tys } => {
-            response_tys.iter().any(contains_unresolved_type)
-        }
-        Type::ErrorUnion { ok_ty, err_tys } => {
-            contains_unresolved_type(ok_ty.as_ref()) || err_tys.iter().any(contains_unresolved_type)
-        }
-        Type::Range { elem_ty } => contains_unresolved_type(elem_ty.as_ref()),
-        Type::Int { .. } | Type::Bool | Type::Char | Type::String | Type::Unit => false,
-    }
 }
 
 fn attach_role_impls(
@@ -486,13 +455,13 @@ fn shared_fallback_prefix_len(states: &[&StatePlanSeed]) -> usize {
         // key and the concrete handler identity are identical across states.
         // Matching on key alone can incorrectly route state-specific handlers
         // through one state's implementation.
-        let key = first.stable_dispatch_key();
+        let key = first.dispatch_key();
         let def_id = first.def_id;
         if states.iter().skip(1).any(|state| {
             state
                 .handlers
                 .get(idx)
-                .map(|h| (h.stable_dispatch_key(), h.def_id))
+                .map(|h| (h.dispatch_key(), h.def_id))
                 != Some((key.clone(), def_id))
         }) {
             return idx;
@@ -504,13 +473,13 @@ fn shared_fallback_prefix_len(states: &[&StatePlanSeed]) -> usize {
 fn build_fallback_map(
     states: &[&StatePlanSeed],
     prefix_len: usize,
-) -> HashMap<String, crate::core::resolve::DefId> {
+) -> HashMap<DispatchKey, crate::core::resolve::DefId> {
     let mut out = HashMap::new();
     let Some(first) = states.first() else {
         return out;
     };
     for handler in first.handlers.iter().take(prefix_len) {
-        out.insert(handler.stable_dispatch_key(), handler.def_id);
+        out.insert(handler.dispatch_key(), handler.def_id);
     }
     out
 }
@@ -553,7 +522,7 @@ fn build_dispatch_table(
     states: &[&StatePlanSeed],
     state_tag_by_name: &HashMap<String, u64>,
     event_kinds: &[sem::MachineEventKindPlan],
-    fallback_map: &HashMap<String, crate::core::resolve::DefId>,
+    fallback_map: &HashMap<DispatchKey, crate::core::resolve::DefId>,
     fallback_prefix_len: usize,
 ) -> Vec<sem::MachineDispatchEntryPlan> {
     let mut rows = Vec::new();
@@ -566,34 +535,32 @@ fn build_dispatch_table(
             )
         });
         let local_handlers = state.handlers.iter().skip(fallback_prefix_len).fold(
-            HashMap::<String, crate::core::resolve::DefId>::new(),
+            HashMap::<DispatchKey, crate::core::resolve::DefId>::new(),
             |mut acc, handler| {
-                acc.entry(handler.stable_dispatch_key())
-                    .or_insert(handler.def_id);
+                acc.entry(handler.dispatch_key()).or_insert(handler.def_id);
                 acc
             },
         );
 
         for event in event_kinds {
             // Each event kind may have:
-            // - one wildcard row (`site:*`), and/or
-            // - one or more site-specific rows (`site:<key>`).
+            // - one wildcard row (`site: None`), and/or
+            // - one or more site-specific rows (`site: Some(key)`).
             //
             // Runtime lookup resolves exact site first, then wildcard.
-            let base = event.key.stable_key();
-            let wildcard_key = format!("{base}:site:*");
-            let mut site_keys = Vec::new();
-
-            for dispatch_key in local_handlers.keys().chain(fallback_map.keys()) {
-                if let Some(suffix) = dispatch_key.strip_prefix(&format!("{base}:site:"))
-                    && suffix != "*"
-                    && let Ok(site_key) = suffix.parse::<u64>()
-                    && !site_keys.contains(&site_key)
-                {
-                    site_keys.push(site_key);
-                }
-            }
+            let event_stable_key = event.key.stable_key();
+            let wildcard_key = DispatchKey {
+                event_stable_key: event_stable_key.clone(),
+                site: None,
+            };
+            let mut site_keys: Vec<u64> = local_handlers
+                .keys()
+                .chain(fallback_map.keys())
+                .filter(|dk| dk.event_stable_key == event_stable_key)
+                .filter_map(|dk| dk.site)
+                .collect();
             site_keys.sort_unstable();
+            site_keys.dedup();
 
             rows.push(sem::MachineDispatchEntryPlan {
                 state_tag,
@@ -604,7 +571,10 @@ fn build_dispatch_table(
             });
 
             for site_key in site_keys {
-                let key = format!("{base}:site:{site_key}");
+                let key = DispatchKey {
+                    event_stable_key: event_stable_key.clone(),
+                    site: Some(site_key),
+                };
                 rows.push(sem::MachineDispatchEntryPlan {
                     state_tag,
                     event_kind: event.kind,
@@ -635,17 +605,6 @@ fn parse_generated_handler_ordinal(method_name: &str) -> Option<usize> {
         return None;
     }
     suffix[..digits_len].parse::<usize>().ok()
-}
-
-fn parse_generated_handler_site_label(method_name: &str) -> Option<&str> {
-    // Generated by typestate lowering:
-    //   __ts_on_<ordinal>__site_<label>
-    let suffix = method_name.strip_prefix(GENERATED_HANDLER_PREFIX)?;
-    let (_, label_suffix) = suffix.split_once("__site_")?;
-    if label_suffix.is_empty() {
-        return None;
-    }
-    Some(label_suffix)
 }
 
 #[cfg(test)]
@@ -758,7 +717,10 @@ mod tests {
         };
 
         let fallback_map = HashMap::from([(
-            format!("{}:site:*", event_kinds[0].key.stable_key()),
+            DispatchKey {
+                event_stable_key: event_kinds[0].key.stable_key(),
+                site: None,
+            },
             DefId(100),
         )]);
         let rows = build_dispatch_table(
