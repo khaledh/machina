@@ -1,9 +1,5 @@
 requires {
     std::io::println
-    std::machine::managed_runtime
-    std::machine::step
-    std::machine::Runtime
-    std::machine::StepStatus
 }
 
 // Runnable managed typestate request/reply flow.
@@ -95,18 +91,5 @@ fn main() {
         _ => { return; },
     };
 
-    let rt: Runtime = match managed_runtime() {
-        r: Runtime => r,
-        _ => { return; },
-    };
-
-    // Drain a bounded number of dispatch steps.
-    match step(rt) { StepStatus::Faulted => { return; } _ => {} };
-    match step(rt) { StepStatus::Faulted => { return; } _ => {} };
-    match step(rt) { StepStatus::Faulted => { return; } _ => {} };
-    match step(rt) { StepStatus::Faulted => { return; } _ => {} };
-    match step(rt) { StepStatus::Faulted => { return; } _ => {} };
-    match step(rt) { StepStatus::Faulted => { return; } _ => {} };
-    match step(rt) { StepStatus::Faulted => { return; } _ => {} };
-    match step(rt) { StepStatus::Faulted => { return; } _ => {} };
+    // `@[machines]` auto-drives the managed runtime until it reaches idle.
 }

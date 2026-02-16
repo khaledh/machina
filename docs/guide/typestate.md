@@ -122,18 +122,13 @@ protocol/role flow declarations.
 Tier 1 managed entrypoint model:
 - mark binary entrypoint with `@[machines]`,
 - spawn managed machines through `Typestate::spawn(...)`,
-- drive event dispatch via `std::machine::step`.
-
-Current limitation:
-- managed `spawn(...)` supports zero-argument constructors in v1.
+- use typed handles (`Machine<Typestate>`) with method-style ops
+  (`handle.send(...)`, `handle.request(...)`),
+- let the compiler-managed runtime auto-drive dispatch after `main` returns.
 
 ```mc
 requires {
-    std::machine::managed_runtime
-    std::machine::send
-    std::machine::step
-    std::machine::Runtime
-    std::machine::StepStatus
+    std::io::println
 }
 
 type AuthorizeReq = {}
@@ -196,29 +191,22 @@ typestate AuthService : Auth::Server {
 
 @[machines]
 fn main() {
-    let auth: Machine = match AuthService::spawn() {
-        m: Machine => m,
+    match AuthService::spawn() {
+        auth: Machine<AuthService> => { auth; }
         _ => { return; },
     };
-    let client: Machine = match GatewayClient::spawn() {
-        m: Machine => m,
+    match GatewayClient::spawn() {
+        client: Machine<GatewayClient> => {
+            // Event kind ids are currently runtime ABI-level integers.
+            match client.send(1, 0, 0) {
+                ok: () => { ok; }
+                _ => { return; },
+            };
+        }
         _ => { return; },
     };
-    let client_id = client._id;
-
-    let rt: Runtime = match managed_runtime() {
-        r: Runtime => r,
-        _ => { return; },
-    };
-
-    // Event kind ids are currently runtime ABI-level integers.
-    match send(rt, client_id, 1, 0, 0) {
-        ok: () => { ok; }
-        _ => { return; },
-    };
-    step(rt);
-    step(rt);
-    step(rt);
+    // `@[machines]` auto-drives dispatch after `main` exits.
+    println("queued start event");
 }
 ```
 
@@ -251,9 +239,7 @@ cargo mcr --experimental typestate examples/typestate/inter_machine_req_reply_ch
 
 Current managed/event support is runnable but still early-stage.
 
-- `Machine` handles currently expose machine id fields; ergonomic handle methods
-  (`handle.send(...)`, `handle.request(...)`) are follow-up work.
-- Event kind ids in `std::machine::send(...)` are still ABI-level integers.
+- Event kind ids in `Machine<T>::send/request(...)` are still ABI-level integers.
 - Emit payload ABI is currently minimal:
   - `emit Send/Request/reply` carries event kind + payload words.
   - rich payload boxing/unboxing and drop paths are still being expanded.
