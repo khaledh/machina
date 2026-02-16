@@ -76,6 +76,9 @@ fn test_lower_typestate_handler_reply_runtime_call() {
                     reply(cap, Ok {});
                     Ready {}
                 }
+                on Ok(resp: Ok) for Req(origin) -> Ready {
+                    Ready {}
+                }
             }
         }
     "});
