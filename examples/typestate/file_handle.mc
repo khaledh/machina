@@ -1,3 +1,7 @@
+requires {
+    std::io::println
+}
+
 typestate FileHandle {
     fields {
         path: string,
@@ -25,9 +29,9 @@ typestate FileHandle {
     }
 }
 
-fn main() -> u64 {
+fn main() {
     let h0 = FileHandle::new("a.txt");
     let h1 = h0.open();
     let h2 = h1.close();
-    h2.path.len + h2.retries
+    println(f"path.len + retries = {h2.path.len + h2.retries}");
 }

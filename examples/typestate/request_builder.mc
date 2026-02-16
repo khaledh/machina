@@ -1,3 +1,7 @@
+requires {
+    std::io::println
+}
+
 typestate RequestBuilder {
     fields {
         url: string,
@@ -30,9 +34,9 @@ typestate RequestBuilder {
     }
 }
 
-fn main() -> u64 {
+fn main() {
     let r0 = RequestBuilder::new("https://machina.dev");
     let r1 = r0.with_header();
     let r2 = r1.send();
-    r2.status
+    println(f"status = {r2.status}");
 }
