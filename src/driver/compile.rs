@@ -242,7 +242,7 @@ pub fn compile_with_path(
     let target = Arm64Target::new();
 
     // --- Lower to SSA IR ---
-    let lowered = backend::lower::lower_module_with_machine_plans_with_opts(
+    let lowered = backend::lower::lower_module_for_executable_with_machine_plans_with_opts(
         &analyzed_context.module,
         &analyzed_context.def_table,
         &analyzed_context.type_map,
@@ -313,6 +313,12 @@ pub fn compile_with_path(
     // (notably `__mc_machine_bootstrap` weak-hook override).
     let mut codegen_def_names = analyzed_context.symbols.def_names.clone();
     for f in &lowered.funcs {
+        if f.func.name == "__mc_user_main" {
+            codegen_def_names.insert(f.func.def_id, "__mc_user_main".to_string());
+        }
+        if f.func.name == "__mc_entry_main_wrapper" {
+            codegen_def_names.insert(f.func.def_id, "main".to_string());
+        }
         if f.func.name.starts_with("__mc_machine_") {
             codegen_def_names
                 .entry(f.func.def_id)

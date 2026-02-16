@@ -99,3 +99,109 @@ fn test_nonzero_check_traps_with_message_and_exit_code() {
         "unexpected stderr: {stderr}"
     );
 }
+
+#[test]
+fn test_main_error_union_reports_unhandled_error_name() {
+    let run = run_program(
+        "main_error_union_unhandled_name",
+        r#"
+            type IoError = {
+                code: u64,
+            }
+
+            fn fail() -> u64 | IoError {
+                IoError { code: 7 }
+            }
+
+            fn main() -> u64 | IoError {
+                let v = fail()?;
+                v
+            }
+        "#,
+    );
+    assert_eq!(run.status.code(), Some(106));
+    let stderr = String::from_utf8_lossy(&run.stderr);
+    assert_eq!(
+        stderr, "Runtime error: Unhandled error in main: IoError\n",
+        "unexpected stderr: {stderr}"
+    );
+}
+
+#[test]
+fn test_main_error_union_enum_error_reports_variant_name() {
+    let run = run_program(
+        "main_error_union_enum_variant_name",
+        r#"
+            type AppError
+              = NotFound
+              | InvalidCode(u64)
+
+            fn fail() -> u64 | AppError {
+                AppError::InvalidCode(7)
+            }
+
+            fn main() -> u64 | AppError {
+                let v = fail()?;
+                v
+            }
+        "#,
+    );
+    assert_eq!(run.status.code(), Some(106));
+    let stderr = String::from_utf8_lossy(&run.stderr);
+    assert_eq!(
+        stderr, "Runtime error: Unhandled error in main: AppError::InvalidCode\n",
+        "unexpected stderr: {stderr}"
+    );
+}
+
+#[test]
+fn test_main_error_union_large_payload_is_reported_not_crashed() {
+    let run = run_program(
+        "main_error_union_large_payload",
+        r#"
+            type BigError = {
+                a: u64,
+                b: u64,
+                c: u64,
+                d: u64,
+            }
+
+            fn fail() -> u64 | BigError {
+                BigError { a: 1, b: 2, c: 3, d: 4 }
+            }
+
+            fn main() -> u64 | BigError {
+                let v = fail()?;
+                v
+            }
+        "#,
+    );
+    assert_eq!(run.status.code(), Some(106));
+    let stderr = String::from_utf8_lossy(&run.stderr);
+    assert_eq!(
+        stderr, "Runtime error: Unhandled error in main: BigError\n",
+        "unexpected stderr: {stderr}"
+    );
+}
+
+#[test]
+fn test_main_error_union_ok_payload_maps_to_exit_code() {
+    let run = run_program(
+        "main_error_union_ok_exit_code",
+        r#"
+            type IoError = {
+                code: u64,
+            }
+
+            fn ok(value: u64) -> u64 | IoError {
+                value
+            }
+
+            fn main() -> u64 | IoError {
+                ok(42)
+            }
+        "#,
+    );
+    assert_eq!(run.status.code(), Some(42));
+    assert_eq!(run.stderr, b"");
+}

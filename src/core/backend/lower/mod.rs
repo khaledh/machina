@@ -8,6 +8,7 @@ mod branching;
 mod calls;
 mod drop_glue;
 mod drops;
+mod entry_wrapper;
 mod equality;
 mod error;
 mod fstring;
@@ -155,6 +156,58 @@ pub fn lower_module_with_machine_plans_with_opts(
     trace_alloc: bool,
     trace_drops: bool,
 ) -> Result<LoweredModule, LowerToIrError> {
+    lower_module_impl(
+        module,
+        def_table,
+        type_map,
+        lowering_plans,
+        drop_plans,
+        machine_plans,
+        trace_alloc,
+        trace_drops,
+        false,
+    )
+}
+
+/// Lowers a semantic module for executable emission.
+///
+/// This variant injects a C-ABI entry wrapper that calls user `main` and
+/// handles unhandled error-union returns with a runtime trap message.
+pub fn lower_module_for_executable_with_machine_plans_with_opts(
+    module: &sem::Module,
+    def_table: &DefTable,
+    type_map: &TypeMap,
+    lowering_plans: &sem::LoweringPlanMap,
+    drop_plans: &sem::DropPlanMap,
+    machine_plans: &sem::MachinePlanMap,
+    trace_alloc: bool,
+    trace_drops: bool,
+) -> Result<LoweredModule, LowerToIrError> {
+    lower_module_impl(
+        module,
+        def_table,
+        type_map,
+        lowering_plans,
+        drop_plans,
+        machine_plans,
+        trace_alloc,
+        trace_drops,
+        true,
+    )
+}
+
+#[allow(clippy::too_many_arguments)]
+fn lower_module_impl(
+    module: &sem::Module,
+    def_table: &DefTable,
+    type_map: &TypeMap,
+    lowering_plans: &sem::LoweringPlanMap,
+    drop_plans: &sem::DropPlanMap,
+    machine_plans: &sem::MachinePlanMap,
+    trace_alloc: bool,
+    trace_drops: bool,
+    inject_entry_wrapper: bool,
+) -> Result<LoweredModule, LowerToIrError> {
     let mut globals = GlobalArena::new();
     let mut funcs = Vec::new();
     let mut drop_glue = DropGlueRegistry::from_module(def_table, module);
@@ -212,6 +265,16 @@ pub fn lower_module_with_machine_plans_with_opts(
         &mut funcs,
         &mut globals,
     );
+
+    if inject_entry_wrapper {
+        entry_wrapper::append_executable_entry_wrapper(
+            module,
+            def_table,
+            type_map,
+            &mut funcs,
+            &mut globals,
+        );
+    }
 
     Ok(LoweredModule {
         funcs,

@@ -205,7 +205,7 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
         };
 
         let union_ty = self.type_map.type_table().get(inner.ty).clone();
-        let Type::ErrorUnion { err_tys, .. } = &union_ty else {
+        let Type::ErrorUnion { ok_ty, err_tys } = &union_ty else {
             panic!(
                 "backend try operator expects error union operand, found {:?}",
                 union_ty
@@ -279,7 +279,9 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
         self.builder.select_block(ok_bb);
         let ok_value =
             self.load_union_payload(union_slot.addr, blob_ty, ok_payload_ty, ok_payload_offset);
-        join.emit_branch(self, ok_value, expr.span)?;
+        let try_sem_ty = self.type_map.type_table().get(expr.ty).clone();
+        let ok_coerced = self.coerce_value(ok_value, ok_ty, &try_sem_ty);
+        join.emit_branch(self, ok_coerced, expr.span)?;
 
         join.restore_locals(self);
         self.builder.select_block(err_dispatch_bb);

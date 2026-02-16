@@ -39,6 +39,13 @@ static void write_i64(int64_t value) {
     }
 }
 
+static void write_bytes(const uint8_t *ptr, uint64_t len) {
+    if (ptr == NULL || len == 0) {
+        return;
+    }
+    (void)write(STDERR_FILENO, ptr, (size_t)len);
+}
+
 /*
  * Runtime trap handler called by generated code.
  * - kind: check kind discriminator
@@ -113,6 +120,10 @@ void __mc_trap(uint64_t kind, uint64_t arg0, uint64_t arg1, uint64_t arg2) {
         case 5: // signed nonzero check
             write_msg(nonzero_msg);
             write_i64((int64_t)arg0);
+            break;
+
+        case 6: // unhandled main error message (arg0 = ptr, arg1 = len)
+            write_bytes((const uint8_t *)(uintptr_t)arg0, arg1);
             break;
 
         default: // unknown trap
