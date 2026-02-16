@@ -28,7 +28,15 @@
         ],
         "extensions": [
           ".mc"
-        ]
+        ],
+        "configuration": "./language-configuration.json"
+      }
+    ],
+    "grammars": [
+      {
+        "language": "machina",
+        "scopeName": "source.machina",
+        "path": "./syntaxes/machina.tmLanguage.json"
       }
     ],
     "commands": [
@@ -65,6 +73,11 @@
           "type": "boolean",
           "default": false,
           "description": "Enable verbose extension-side LSP request/response logging in the Machina output channel."
+        },
+        "machina.tokenColors.enabled": {
+          "type": "boolean",
+          "default": true,
+          "description": "Apply default Machina token colors. Disable to rely entirely on your active color theme."
         },
         "machina.languageServer.experimentalFeatures": {
           "type": "array",

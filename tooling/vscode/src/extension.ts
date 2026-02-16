@@ -42,12 +42,123 @@ export function activate(context: vscode.ExtensionContext): void {
     }
   );
 
-  context.subscriptions.push(output, showOutput, ping, restartLanguageServer);
+  const onThemeChange = vscode.window.onDidChangeActiveColorTheme(
+    () => void applyDefaultTokenColors()
+  );
+
+  context.subscriptions.push(output, showOutput, ping, restartLanguageServer, onThemeChange);
+  void applyDefaultTokenColors();
   void ensureClientStarted(context);
 }
 
 export async function deactivate(): Promise<void> {
   await stopClient();
+}
+
+// Default token color rules for Machina files, tuned per theme kind.
+// Scopes are `.machina`-suffixed so they only affect Machina grammar tokens
+// and are inert if the extension is later disabled.
+
+type TokenRule = { scope: string | string[]; settings: Record<string, string> };
+
+const DARK_TOKEN_RULES: TokenRule[] = [
+  { scope: "comment.line.double-slash.machina", settings: { foreground: "#6A9955" } },
+  { scope: "keyword.control.machina", settings: { foreground: "#C586C0" } },
+  { scope: "keyword.other.machina", settings: { foreground: "#569CD6" } },
+  { scope: "storage.modifier.machina", settings: { foreground: "#569CD6" } },
+  { scope: "constant.language.boolean.machina", settings: { foreground: "#569CD6" } },
+  { scope: "entity.name.tag.machina", settings: { foreground: "#D7BA7D", fontStyle: "italic" } },
+  { scope: "entity.name.function.machina", settings: { foreground: "#DCDCAA" } },
+  { scope: "entity.name.function.definition.machina", settings: { foreground: "#DCDCAA", fontStyle: "bold" } },
+  { scope: "entity.name.type.machina", settings: { foreground: "#78DCE8" } },
+  { scope: "support.type.primitive.machina", settings: { foreground: "#4EC9B0" } },
+  { scope: "string.quoted.double.machina", settings: { foreground: "#CE9178" } },
+  { scope: "string.quoted.single.machina", settings: { foreground: "#CE9178" } },
+  { scope: "constant.character.escape.machina", settings: { foreground: "#D7BA7D" } },
+  {
+    scope: [
+      "constant.numeric.decimal.machina",
+      "constant.numeric.binary.machina",
+      "constant.numeric.octal.machina",
+      "constant.numeric.hex.machina",
+    ],
+    settings: { foreground: "#B5CEA8" },
+  },
+  { scope: "keyword.operator.arrow.machina", settings: { foreground: "#569CD6" } },
+];
+
+const LIGHT_TOKEN_RULES: TokenRule[] = [
+  { scope: "comment.line.double-slash.machina", settings: { foreground: "#A0A0A0" } },
+  { scope: "keyword.control.machina", settings: { foreground: "#AF00DB" } },
+  { scope: "keyword.other.machina", settings: { foreground: "#0000FF" } },
+  { scope: "storage.modifier.machina", settings: { foreground: "#0000FF" } },
+  { scope: "constant.language.boolean.machina", settings: { foreground: "#0000FF" } },
+  { scope: "entity.name.tag.machina", settings: { foreground: "#795E26", fontStyle: "italic" } },
+  { scope: "entity.name.function.machina", settings: { foreground: "#000000" } },
+  { scope: "entity.name.function.definition.machina", settings: { foreground: "#000000", fontStyle: "bold" } },
+  { scope: "entity.name.type.machina", settings: { foreground: "#C73D1A" } },
+  { scope: "support.type.primitive.machina", settings: { foreground: "#267F99" } },
+  { scope: "string.quoted.double.machina", settings: { foreground: "#008000" } },
+  { scope: "string.quoted.single.machina", settings: { foreground: "#008000" } },
+  { scope: "constant.character.escape.machina", settings: { foreground: "#EE0000" } },
+  {
+    scope: [
+      "constant.numeric.decimal.machina",
+      "constant.numeric.binary.machina",
+      "constant.numeric.octal.machina",
+      "constant.numeric.hex.machina",
+    ],
+    settings: { foreground: "#098658" },
+  },
+  { scope: "keyword.operator.arrow.machina", settings: { foreground: "#0000FF" } },
+];
+
+function tokenRulesForThemeKind(): TokenRule[] {
+  const kind = vscode.window.activeColorTheme.kind;
+  if (kind === vscode.ColorThemeKind.Light || kind === vscode.ColorThemeKind.HighContrastLight) {
+    return LIGHT_TOKEN_RULES;
+  }
+  return DARK_TOKEN_RULES;
+}
+
+function isMachinaScope(scope: unknown): boolean {
+  if (typeof scope === "string") {
+    return scope.includes(".machina");
+  }
+  if (Array.isArray(scope)) {
+    return scope.some((s) => typeof s === "string" && s.includes(".machina"));
+  }
+  return false;
+}
+
+/** Apply Machina token colors matching the active theme kind. On theme
+ *  changes the old Machina rules are swapped out for the new set. Skips
+ *  entirely if `machina.tokenColors.enabled` is false. */
+async function applyDefaultTokenColors(): Promise<void> {
+  const enabled = vscode.workspace
+    .getConfiguration("machina.tokenColors")
+    .get<boolean>("enabled", true);
+  if (!enabled) {
+    return;
+  }
+
+  const editorConfig = vscode.workspace.getConfiguration("editor");
+  const existing = editorConfig.get<Record<string, unknown>>("tokenColorCustomizations") ?? {};
+  const existingRules = (existing.textMateRules as Array<{ scope: unknown }>) ?? [];
+
+  // Strip any previously-injected Machina rules so we can replace them
+  // with the set matching the current theme kind.
+  const nonMachinaRules = existingRules.filter((rule) => !isMachinaScope(rule.scope));
+
+  const merged = {
+    ...existing,
+    textMateRules: [...nonMachinaRules, ...tokenRulesForThemeKind()],
+  };
+  await editorConfig.update(
+    "tokenColorCustomizations",
+    merged,
+    vscode.ConfigurationTarget.Global
+  );
 }
 
 async function ensureClientStarted(context: vscode.ExtensionContext): Promise<boolean> {
