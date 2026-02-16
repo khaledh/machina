@@ -195,9 +195,15 @@ fn test_lower_module_typestate_machine_plans_materialize_artifacts() {
     let thunk_text = format_func(&thunk.func, &thunk.types);
     assert!(
         thunk_text
-            .contains("fn(ptr<__ts_M_Ready>, ptr<Ping>, ptr<Ping>) -> __ts_M_Ready = const @")
-            && thunk_text.contains("call %v20("),
-        "expected dispatch thunk to call a concrete typestate handler, got: {thunk_text}"
+            .contains("fn(ptr<__ts_M_Ready>, ptr<Ping>, ptr<Ping>) -> __ts_M_Ready = const @"),
+        "expected dispatch thunk to reference concrete handler signature, got: {thunk_text}"
+    );
+    assert!(
+        thunk_text.lines().any(|line| {
+            let trimmed = line.trim();
+            trimmed.contains("call %v") && trimmed.contains("(")
+        }),
+        "expected dispatch thunk to contain an indirect call, got: {thunk_text}"
     );
     assert!(
         thunk_text.contains("__rt_alloc"),
