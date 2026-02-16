@@ -200,8 +200,12 @@ typestate Client {
 }
 "#;
 
-    let errors = check_source(source, "examples/typestate/managed_ambiguous_provenance.mc", true)
-        .expect_err("expected ambiguous provenance diagnostic");
+    let errors = check_source(
+        source,
+        "examples/typestate/managed_ambiguous_provenance.mc",
+        true,
+    )
+    .expect_err("expected ambiguous provenance diagnostic");
     assert!(
         errors.iter().any(|err| {
             matches!(
@@ -249,6 +253,10 @@ typestate Client {
 }
 "#;
 
-    check_source(source, "examples/typestate/managed_labeled_provenance.mc", true)
-        .unwrap_or_else(|errs| panic!("expected success for labeled provenance source: {errs:?}"));
+    check_source(
+        source,
+        "examples/typestate/managed_labeled_provenance.mc",
+        true,
+    )
+    .unwrap_or_else(|errs| panic!("expected success for labeled provenance source: {errs:?}"));
 }

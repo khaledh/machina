@@ -1,7 +1,6 @@
 requires {
     std::io::println
     std::machine::managed_runtime
-    std::machine::send
     std::machine::step
     std::machine::Runtime
     std::machine::StepStatus
@@ -38,18 +37,18 @@ typestate Timer {
 
 @[machines]
 fn main() {
-    let timer: Machine = match Timer::spawn() {
-        m: Machine => m,
+    match Timer::spawn() {
+        timer: Machine<Timer> => {
+            match timer.send(1, 0, 0) {
+                ok: () => { ok; }
+                _ => { return; },
+            };
+        }
         _ => { return; },
     };
 
     let rt: Runtime = match managed_runtime() {
         r: Runtime => r,
-        _ => { return; },
-    };
-
-    match send(rt, timer._id, 1, 0, 0) {
-        ok: () => { ok; }
         _ => { return; },
     };
 

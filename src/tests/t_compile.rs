@@ -1131,7 +1131,10 @@ typestate Worker {
 
 @[machines]
 fn main() {
-    let spawned = Worker::spawn(42);
+    let spawned: Machine<Worker> = match Worker::spawn(42) {
+        m: Machine<Worker> => m,
+        _ => { return; },
+    };
     spawned;
 }
 "#;

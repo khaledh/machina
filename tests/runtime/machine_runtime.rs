@@ -195,7 +195,6 @@ fn test_typestate_machine_runtime_descriptor_bootstrap_executes_handler() {
 requires {
     std::io::println
     std::machine::managed_runtime
-    std::machine::send
     std::machine::step
     std::machine::Runtime
     std::machine::StepStatus
@@ -218,17 +217,17 @@ typestate M {
 
 @[machines]
 fn main() -> u64 {
-    let m: Machine = match M::spawn() {
-        m: Machine => m,
+    match M::spawn() {
+        m: Machine<M> => {
+            match m.send(1, 0, 0) {
+                ok: () => { ok; }
+                _ => { return 1; },
+            };
+        }
         _ => { return 1; },
     };
     let rt: Runtime = match managed_runtime() {
         r: Runtime => r,
-        _ => { return 1; },
-    };
-
-    match send(rt, m._id, 1, 0, 0) {
-        ok: () => { ok; }
         _ => { return 1; },
     };
 
@@ -266,7 +265,6 @@ fn test_typestate_machine_runtime_two_machine_request_reply_with_labeled_provena
 requires {
     std::io::println
     std::machine::managed_runtime
-    std::machine::send
     std::machine::step
     std::machine::Runtime
     std::machine::StepStatus
@@ -329,28 +327,26 @@ typestate AuthServer {
 @[machines]
 fn main() -> u64 {
     // Spawn server first so its machine id is 1 (used by client Request `to:`).
-    let server: Machine = match AuthServer::spawn() {
-        m: Machine => m,
+    match AuthServer::spawn() {
+        m: Machine<AuthServer> => { m; }
         _ => { return 1; },
     };
-    let client: Machine = match AuthClient::spawn() {
-        m: Machine => m,
+    match AuthClient::spawn() {
+        client: Machine<AuthClient> => {
+            // Queue two same-type requests from distinct labeled request sites.
+            match client.send(1, 0, 0) {
+                ok: () => { ok; }
+                _ => { return 1; },
+            };
+            match client.send(2, 0, 0) {
+                ok: () => { ok; }
+                _ => { return 1; },
+            };
+        }
         _ => { return 1; },
     };
-    let server_id = server._id;
-    let client_id = client._id;
     let rt: Runtime = match managed_runtime() {
         r: Runtime => r,
-        _ => { return 1; },
-    };
-
-    // Queue two same-type requests from distinct labeled request sites.
-    match send(rt, client_id, 1, 0, 0) {
-        ok: () => { ok; }
-        _ => { return 1; },
-    };
-    match send(rt, client_id, 2, 0, 0) {
-        ok: () => { ok; }
         _ => { return 1; },
     };
 

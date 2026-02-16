@@ -1,7 +1,6 @@
 requires {
     std::io::println
     std::machine::managed_runtime
-    std::machine::send
     std::machine::step
     std::machine::Runtime
     std::machine::StepStatus
@@ -77,32 +76,27 @@ typestate AuthServer {
 @[machines]
 fn main() {
     // Spawn server first so its machine id is 1 (used by client Request `to:`).
-    let server: Machine = match AuthServer::spawn() {
-        m: Machine => m,
+    match AuthServer::spawn() {
+        m: Machine<AuthServer> => { m; }
         _ => { return; },
     };
-    let client: Machine = match AuthClient::spawn() {
-        m: Machine => m,
+    match AuthClient::spawn() {
+        client: Machine<AuthClient> => {
+            // Queue two concurrent same-type requests.
+            match client.send(1, 0, 0) {
+                ok: () => { ok; }
+                _ => { return; },
+            };
+            match client.send(2, 0, 0) {
+                ok: () => { ok; }
+                _ => { return; },
+            };
+        }
         _ => { return; },
     };
-    let server_id = server._id;
-    let client_id = client._id;
-
-    server_id;
-    client_id;
 
     let rt: Runtime = match managed_runtime() {
         r: Runtime => r,
-        _ => { return; },
-    };
-
-    // Queue two concurrent same-type requests.
-    match send(rt, client_id, 1, 0, 0) {
-        ok: () => { ok; }
-        _ => { return; },
-    };
-    match send(rt, client_id, 2, 0, 0) {
-        ok: () => { ok; }
         _ => { return; },
     };
 
