@@ -36,6 +36,7 @@ const MANAGED_RUNTIME_DEFAULT_MAILBOX_CAP: u64 = 8;
 const MANAGED_RUNTIME_BOOTSTRAP_FN: &str = "__mc_machine_runtime_managed_bootstrap_u64";
 const MANAGED_RUNTIME_CURRENT_FN: &str = "__mc_machine_runtime_managed_current_u64";
 const MANAGED_RUNTIME_SHUTDOWN_FN: &str = "__mc_machine_runtime_managed_shutdown_u64";
+const MANAGED_RUNTIME_STEP_FN: &str = "__mc_machine_runtime_step_u64";
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct TypestateRoleImplRef {
@@ -438,6 +439,77 @@ fn rewrite_machines_entrypoint(module: &mut Module, node_id_gen: &mut NodeIdGen)
 }
 
 fn wrap_main_with_managed_runtime(main: &mut FuncDef, node_id_gen: &mut NodeIdGen) {
+    fn var_expr(name: &str, node_id_gen: &mut NodeIdGen, span: Span) -> Expr {
+        Expr {
+            id: node_id_gen.new_id(),
+            kind: ExprKind::Var {
+                ident: name.to_string(),
+                def_id: (),
+            },
+            ty: (),
+            span,
+        }
+    }
+
+    fn int_expr(value: u64, node_id_gen: &mut NodeIdGen, span: Span) -> Expr {
+        Expr {
+            id: node_id_gen.new_id(),
+            kind: ExprKind::IntLit(value),
+            ty: (),
+            span,
+        }
+    }
+
+    fn call_expr(
+        callee_name: &str,
+        args: Vec<Expr>,
+        node_id_gen: &mut NodeIdGen,
+        span: Span,
+    ) -> Expr {
+        Expr {
+            id: node_id_gen.new_id(),
+            kind: ExprKind::Call {
+                callee: Box::new(var_expr(callee_name, node_id_gen, span)),
+                args: args
+                    .into_iter()
+                    .map(|expr| CallArg {
+                        mode: CallArgMode::Default,
+                        expr,
+                        init: InitInfo::default(),
+                        span,
+                    })
+                    .collect(),
+            },
+            ty: (),
+            span,
+        }
+    }
+
+    fn let_bind_stmt(
+        ident: &str,
+        value: Expr,
+        node_id_gen: &mut NodeIdGen,
+        span: Span,
+    ) -> StmtExpr {
+        StmtExpr {
+            id: node_id_gen.new_id(),
+            kind: StmtExprKind::LetBind {
+                pattern: BindPattern {
+                    id: node_id_gen.new_id(),
+                    kind: BindPatternKind::Name {
+                        ident: ident.to_string(),
+                        def_id: (),
+                    },
+                    span,
+                },
+                decl_ty: None,
+                value: Box::new(value),
+            },
+            ty: (),
+            span,
+        }
+    }
+
     let span = main.body.span;
     let original_body = std::mem::replace(
         &mut main.body,
@@ -448,36 +520,127 @@ fn wrap_main_with_managed_runtime(main: &mut FuncDef, node_id_gen: &mut NodeIdGe
             span,
         },
     );
-    let bootstrap_call = Expr {
+    let bootstrap_call = call_expr(MANAGED_RUNTIME_BOOTSTRAP_FN, Vec::new(), node_id_gen, span);
+    let shutdown_call = call_expr(MANAGED_RUNTIME_SHUTDOWN_FN, Vec::new(), node_id_gen, span);
+    let step_call = call_expr(
+        MANAGED_RUNTIME_STEP_FN,
+        vec![var_expr("__mc_rt", node_id_gen, span)],
+        node_id_gen,
+        span,
+    );
+    let step_status_is_did_work = Expr {
         id: node_id_gen.new_id(),
-        kind: ExprKind::Call {
-            callee: Box::new(Expr {
-                id: node_id_gen.new_id(),
-                kind: ExprKind::Var {
-                    ident: MANAGED_RUNTIME_BOOTSTRAP_FN.to_string(),
-                    def_id: (),
-                },
-                ty: (),
-                span,
-            }),
-            args: Vec::new(),
+        kind: ExprKind::BinOp {
+            left: Box::new(var_expr("__mc_step_status", node_id_gen, span)),
+            op: crate::core::tree::BinaryOp::Eq,
+            right: Box::new(int_expr(1, node_id_gen, span)),
         },
         ty: (),
         span,
     };
-    let shutdown_call = Expr {
+    let runtime_available_cond = Expr {
         id: node_id_gen.new_id(),
-        kind: ExprKind::Call {
-            callee: Box::new(Expr {
+        kind: ExprKind::BinOp {
+            left: Box::new(var_expr("__mc_rt", node_id_gen, span)),
+            op: crate::core::tree::BinaryOp::Ne,
+            right: Box::new(int_expr(0, node_id_gen, span)),
+        },
+        ty: (),
+        span,
+    };
+    // Auto-drive policy for `@[machines]`:
+    // keep stepping while runtime reports "did work", and stop once it reaches
+    // idle or faulted. We still return the user's main result.
+    let auto_drive_if = Expr {
+        id: node_id_gen.new_id(),
+        kind: ExprKind::If {
+            cond: Box::new(runtime_available_cond),
+            then_body: Box::new(Expr {
                 id: node_id_gen.new_id(),
-                kind: ExprKind::Var {
-                    ident: MANAGED_RUNTIME_SHUTDOWN_FN.to_string(),
-                    def_id: (),
+                kind: ExprKind::Block {
+                    items: vec![parsed::BlockItem::Stmt(StmtExpr {
+                        id: node_id_gen.new_id(),
+                        kind: StmtExprKind::While {
+                            cond: Box::new(Expr {
+                                id: node_id_gen.new_id(),
+                                kind: ExprKind::BoolLit(true),
+                                ty: (),
+                                span,
+                            }),
+                            body: Box::new(Expr {
+                                id: node_id_gen.new_id(),
+                                kind: ExprKind::Block {
+                                    items: vec![
+                                        parsed::BlockItem::Stmt(let_bind_stmt(
+                                            "__mc_step_status",
+                                            step_call,
+                                            node_id_gen,
+                                            span,
+                                        )),
+                                        parsed::BlockItem::Expr(Expr {
+                                            id: node_id_gen.new_id(),
+                                            kind: ExprKind::If {
+                                                cond: Box::new(step_status_is_did_work),
+                                                then_body: Box::new(Expr {
+                                                    id: node_id_gen.new_id(),
+                                                    kind: ExprKind::Block {
+                                                        items: vec![parsed::BlockItem::Stmt(
+                                                            StmtExpr {
+                                                                id: node_id_gen.new_id(),
+                                                                kind: StmtExprKind::Continue,
+                                                                ty: (),
+                                                                span,
+                                                            },
+                                                        )],
+                                                        tail: None,
+                                                    },
+                                                    ty: (),
+                                                    span,
+                                                }),
+                                                else_body: Box::new(Expr {
+                                                    id: node_id_gen.new_id(),
+                                                    kind: ExprKind::Block {
+                                                        items: vec![parsed::BlockItem::Stmt(
+                                                            StmtExpr {
+                                                                id: node_id_gen.new_id(),
+                                                                kind: StmtExprKind::Break,
+                                                                ty: (),
+                                                                span,
+                                                            },
+                                                        )],
+                                                        tail: None,
+                                                    },
+                                                    ty: (),
+                                                    span,
+                                                }),
+                                            },
+                                            ty: (),
+                                            span,
+                                        }),
+                                    ],
+                                    tail: None,
+                                },
+                                ty: (),
+                                span,
+                            }),
+                        },
+                        ty: (),
+                        span,
+                    })],
+                    tail: None,
                 },
                 ty: (),
                 span,
             }),
-            args: Vec::new(),
+            else_body: Box::new(Expr {
+                id: node_id_gen.new_id(),
+                kind: ExprKind::Block {
+                    items: Vec::new(),
+                    tail: None,
+                },
+                ty: (),
+                span,
+            }),
         },
         ty: (),
         span,
@@ -487,24 +650,19 @@ fn wrap_main_with_managed_runtime(main: &mut FuncDef, node_id_gen: &mut NodeIdGe
         id: node_id_gen.new_id(),
         kind: ExprKind::Block {
             items: vec![
-                parsed::BlockItem::Expr(bootstrap_call),
-                parsed::BlockItem::Stmt(StmtExpr {
-                    id: node_id_gen.new_id(),
-                    kind: StmtExprKind::LetBind {
-                        pattern: BindPattern {
-                            id: node_id_gen.new_id(),
-                            kind: BindPatternKind::Name {
-                                ident: "__mc_main_result".to_string(),
-                                def_id: (),
-                            },
-                            span,
-                        },
-                        decl_ty: None,
-                        value: Box::new(original_body),
-                    },
-                    ty: (),
+                parsed::BlockItem::Stmt(let_bind_stmt(
+                    "__mc_rt",
+                    bootstrap_call,
+                    node_id_gen,
                     span,
-                }),
+                )),
+                parsed::BlockItem::Stmt(let_bind_stmt(
+                    "__mc_main_result",
+                    original_body,
+                    node_id_gen,
+                    span,
+                )),
+                parsed::BlockItem::Expr(auto_drive_if),
                 parsed::BlockItem::Expr(shutdown_call),
             ],
             tail: Some(Box::new(Expr {
@@ -667,6 +825,7 @@ fn ensure_machine_runtime_intrinsics(module: &mut Module, node_id_gen: &mut Node
         ],
     );
     push_decl("__mc_machine_runtime_start_u64", &["runtime", "machine_id"]);
+    push_decl("__mc_machine_runtime_step_u64", &["runtime"]);
     push_decl(
         "__mc_machine_runtime_send_u64",
         &["runtime", "dst", "kind", "payload0", "payload1"],

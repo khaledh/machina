@@ -1,9 +1,5 @@
 requires {
     std::io::println
-    std::machine::managed_runtime
-    std::machine::step
-    std::machine::Runtime
-    std::machine::StepStatus
 }
 
 // Runnable managed typestate send/event loop.
@@ -44,21 +40,6 @@ fn main() {
                 _ => { return; },
             };
         }
-        _ => { return; },
-    };
-
-    let rt: Runtime = match managed_runtime() {
-        r: Runtime => r,
-        _ => { return; },
-    };
-
-    // Kick handler then Tick handler.
-    match step(rt) {
-        StepStatus::DidWork => {}
-        _ => { return; },
-    };
-    match step(rt) {
-        StepStatus::DidWork => {}
         _ => { return; },
     };
 }

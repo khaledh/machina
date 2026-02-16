@@ -1273,6 +1273,10 @@ fn main() {}
         ir.contains("__mc_machine_runtime_managed_bootstrap_u64"),
         "expected managed bootstrap call in opted-in main IR"
     );
+    assert!(
+        ir.contains("__mc_machine_runtime_step_u64"),
+        "expected managed runtime auto-drive step call in opted-in main IR"
+    );
 }
 
 #[test]

@@ -260,6 +260,63 @@ fn main() -> u64 {
 }
 
 #[test]
+fn test_typestate_machines_entrypoint_auto_drives_runtime_without_plumbing() {
+    let source = r#"
+requires {
+    std::io::println
+}
+
+type Ping = {}
+
+typestate M {
+    fn new() -> S {
+        S {}
+    }
+
+    state S {
+        on Ping(e) -> stay {
+            e;
+            println("handled");
+        }
+    }
+}
+
+@[machines]
+fn main() {
+    match M::spawn() {
+        m: Machine<M> => {
+            match m.send(1, 0, 0) {
+                ok: () => { ok; }
+                _ => { return; },
+            };
+        }
+        _ => { return; },
+    };
+}
+"#;
+
+    let run = run_program_with_opts(
+        "typestate_machine_runtime_auto_drive",
+        source,
+        CompileOptions {
+            dump: None,
+            emit_ir: false,
+            verify_ir: false,
+            trace_alloc: false,
+            trace_drops: false,
+            inject_prelude: true,
+            experimental_typestate: true,
+        },
+    );
+    assert_eq!(run.status.code(), Some(0));
+    let stdout = String::from_utf8_lossy(&run.stdout);
+    assert!(
+        stdout.contains("handled"),
+        "expected handler output via auto-driven managed runtime, got stdout: {stdout}"
+    );
+}
+
+#[test]
 fn test_typestate_machine_runtime_two_machine_request_reply_with_labeled_provenance() {
     let source = r#"
 requires {
