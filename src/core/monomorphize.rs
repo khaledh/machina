@@ -335,8 +335,8 @@ pub(crate) fn monomorphize_with_plan(
 
                 if !kept_items.is_empty() {
                     method_block.method_items = kept_items;
+                    method_block.id = node_id_gen.new_id();
                     rewrite_calls_in_item(&mut item, &call_inst_map);
-                    reseed_ids_in_item(&mut item, &mut node_id_gen);
                     new_items.push(item);
                 }
             }
@@ -492,13 +492,15 @@ fn merge_typecheck_results(
 }
 
 fn merge_type_maps(base: &mut TypeMap, patch: &TypeMap) {
+    // The second-pass retype module strips non-specialized function bodies to
+    // FuncDecls, so their parameter/local defs and body nodes are never
+    // constrained and finalize defaults them to Unknown. Skip these to avoid
+    // overwriting correct first-pass types. But if the base doesn't already
+    // have an entry, this is a new def/node from specialization — keep it
+    // even if Unknown.
     for (def, patch_type_id) in patch.iter_def_type_ids() {
         let ty = patch.type_table().get(patch_type_id).clone();
-        // The second-pass retype module strips non-specialized function bodies
-        // to FuncDecls, so their parameter/local defs are never constrained and
-        // finalize defaults them to Unknown. Skip these to avoid overwriting
-        // correct first-pass types.
-        if matches!(ty, Type::Unknown) {
+        if matches!(ty, Type::Unknown) && base.lookup_def_type_id(&def).is_some() {
             continue;
         }
         let new_type_id = base.insert_def_type(def.clone(), ty);
@@ -509,10 +511,7 @@ fn merge_type_maps(base: &mut TypeMap, patch: &TypeMap) {
 
     for (node_id, patch_type_id) in patch.iter_node_type_ids() {
         let ty = patch.type_table().get(patch_type_id).clone();
-        // Same rationale as def types: skip Unknown entries so they don't
-        // overwrite correct first-pass types for nodes that the second-pass
-        // sparse module did not re-typecheck.
-        if matches!(ty, Type::Unknown) {
+        if matches!(ty, Type::Unknown) && base.lookup_node_type_id(node_id).is_some() {
             continue;
         }
         let new_type_id = base.insert_node_type(node_id, ty);
