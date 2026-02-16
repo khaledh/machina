@@ -494,6 +494,13 @@ fn merge_typecheck_results(
 fn merge_type_maps(base: &mut TypeMap, patch: &TypeMap) {
     for (def, patch_type_id) in patch.iter_def_type_ids() {
         let ty = patch.type_table().get(patch_type_id).clone();
+        // The second-pass retype module strips non-specialized function bodies
+        // to FuncDecls, so their parameter/local defs are never constrained and
+        // finalize defaults them to Unknown. Skip these to avoid overwriting
+        // correct first-pass types.
+        if matches!(ty, Type::Unknown) {
+            continue;
+        }
         let new_type_id = base.insert_def_type(def.clone(), ty);
         if let Some(nominal) = patch.lookup_nominal_key_for_type_id(patch_type_id).cloned() {
             base.record_nominal_key_for_type_id(new_type_id, nominal);
@@ -502,6 +509,12 @@ fn merge_type_maps(base: &mut TypeMap, patch: &TypeMap) {
 
     for (node_id, patch_type_id) in patch.iter_node_type_ids() {
         let ty = patch.type_table().get(patch_type_id).clone();
+        // Same rationale as def types: skip Unknown entries so they don't
+        // overwrite correct first-pass types for nodes that the second-pass
+        // sparse module did not re-typecheck.
+        if matches!(ty, Type::Unknown) {
+            continue;
+        }
         let new_type_id = base.insert_node_type(node_id, ty);
         if let Some(nominal) = patch.lookup_nominal_key_for_type_id(patch_type_id).cloned() {
             base.record_nominal_key_for_type_id(new_type_id, nominal);
