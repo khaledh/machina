@@ -7,23 +7,25 @@ use crate::services::analysis::results::Location;
 use crate::services::analysis::snapshot::{AnalysisSnapshot, FileId};
 use crate::services::analysis::syntax_index::{node_span_map, span_contains_span};
 
-/// Resolve the definition under `query_span`. Tries regular AST node
-/// definitions first, then falls back to typestate role bindings.
+/// Resolve the definition under `query_span`. Prefers role-binding matches
+/// over AST node matches — generated typestate items may carry synthetic
+/// spans that shadow the original role reference.
 pub(crate) fn def_at_span(state: &LookupState, query_span: Span) -> Option<DefId> {
     let resolved = state.resolved.as_ref()?;
-    if let Some((_, def_id)) = best_def_use_at_span(
-        &resolved.module,
+    if let Some(def_id) = typestate_role_def_at_span(
+        &resolved.typestate_role_impls,
         &resolved.def_table,
-        &state.poisoned_nodes,
         query_span,
     ) {
         return Some(def_id);
     }
-    typestate_role_def_at_span(
-        &resolved.typestate_role_impls,
+    best_def_use_at_span(
+        &resolved.module,
         &resolved.def_table,
+        &state.poisoned_nodes,
         query_span,
     )
+    .map(|(_, def_id)| def_id)
 }
 
 /// Go-to-definition: resolve the definition under `query_span` and return
@@ -35,7 +37,17 @@ pub(crate) fn def_location_at_span(
     query_span: Span,
 ) -> Option<Location> {
     let resolved = state.resolved.as_ref()?;
-    let def_id = if let Some((_, def_id)) = best_def_use_at_span(
+    // Try role-binding lookup first — generated typestate items may carry
+    // synthetic spans that overlap with the role reference, causing
+    // `best_def_use_at_span` to match a generated node instead of the
+    // original protocol role.
+    let def_id = if let Some(def_id) = typestate_role_def_at_span(
+        &resolved.typestate_role_impls,
+        &resolved.def_table,
+        query_span,
+    ) {
+        def_id
+    } else if let Some((_, def_id)) = best_def_use_at_span(
         &resolved.module,
         &resolved.def_table,
         &state.poisoned_nodes,
@@ -43,11 +55,7 @@ pub(crate) fn def_location_at_span(
     ) {
         def_id
     } else {
-        typestate_role_def_at_span(
-            &resolved.typestate_role_impls,
-            &resolved.def_table,
-            query_span,
-        )?
+        return None;
     };
     let def_loc = resolved.def_table.lookup_def_location(def_id)?;
 
