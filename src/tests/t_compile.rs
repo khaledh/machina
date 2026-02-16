@@ -1144,6 +1144,55 @@ fn main() {
 }
 
 #[test]
+fn compile_typestate_machine_handle_types_are_distinct() {
+    let source = r#"
+typestate A {
+    fn new() -> S { S {} }
+    state S {}
+}
+
+typestate B {
+    fn new() -> S { S {} }
+    state S {}
+}
+
+@[machines]
+fn main() {
+    let a: Machine<A> = match A::spawn() {
+        m: Machine<A> => m,
+        _ => { return; },
+    };
+    let b: Machine<B> = match B::spawn() {
+        m: Machine<B> => m,
+        _ => { return; },
+    };
+
+    // Non-erased handles must remain distinct.
+    let wrong: Machine<A> = b;
+    a;
+    wrong;
+}
+"#;
+
+    match compile(source, &typestate_compile_opts()) {
+        Ok(_) => panic!("expected distinct machine handle mismatch to be rejected"),
+        Err(errs) => {
+            let has_type_error = errs.iter().any(|err| {
+                matches!(
+                    err,
+                    crate::core::diag::CompileError::TypeCheck(_)
+                        | crate::core::diag::CompileError::SemCheck(_)
+                )
+            });
+            assert!(
+                has_type_error,
+                "expected type/semantic mismatch for cross-typestate handle assignment, got {errs:?}"
+            );
+        }
+    }
+}
+
+#[test]
 fn compile_typestate_spawn_requires_machines_entrypoint_opt_in() {
     let source = r#"
 typestate Worker {
