@@ -1281,14 +1281,7 @@ typestate Worker {
 }
 
 @machines
-fn main() -> ()
-    | MachineSpawnFailed
-    | MachineBindFailed
-    | MachineStartFailed
-    | ManagedRuntimeUnavailable
-    | MachineUnknown
-    | MachineNotRunning
-    | MailboxFull {
+fn main() -> () | MachineError {
     let worker = Worker::spawn()?;
     worker.send(Kick {})?;
 }
@@ -1312,14 +1305,7 @@ typestate Worker {
 }
 
 @machines
-fn main() -> ()
-    | MachineSpawnFailed
-    | MachineBindFailed
-    | MachineStartFailed
-    | ManagedRuntimeUnavailable
-    | MachineUnknown
-    | MachineNotRunning
-    | MailboxFull {
+fn main() -> () | MachineError {
     let worker = Worker::spawn()?;
     worker.send(Msg { x: 7 })?;
 }
@@ -1343,12 +1329,7 @@ typestate Worker {
 }
 
 @machines
-fn main() -> ()
-    | MachineSpawnFailed
-    | MachineBindFailed
-    | MachineStartFailed
-    | ManagedRuntimeUnavailable
-    | RequestFailed {
+fn main() -> () | MachineError {
     let worker = Worker::spawn()?;
     let peer = Worker::spawn()?;
     worker.request(peer, Msg { x: 7 })?;
@@ -1401,14 +1382,7 @@ typestate Client {
 }
 
 @machines
-fn main() -> ()
-    | MachineSpawnFailed
-    | MachineBindFailed
-    | MachineStartFailed
-    | ManagedRuntimeUnavailable
-    | MachineUnknown
-    | MachineNotRunning
-    | MailboxFull {
+fn main() -> () | MachineError {
     let auth = AuthServer::spawn()?;
     let client = Client::spawn(auth)?;
     client.send(Start {})?;
@@ -1448,12 +1422,7 @@ typestate Client {
 }
 
 @machines
-fn main() -> ()
-    | MachineSpawnFailed
-    | MachineBindFailed
-    | MachineStartFailed
-    | ManagedRuntimeUnavailable
-    | RequestFailed {
+fn main() -> () | MachineError {
     let auth = AuthServer::spawn()?;
     let client = Client::spawn()?;
     let p: Pending<AuthReply> = client.request(auth, AuthCheck {})?;

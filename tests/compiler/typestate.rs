@@ -202,12 +202,7 @@ typestate Client {
 }
 
 @machines
-fn main() -> ()
-    | MachineSpawnFailed
-    | MachineBindFailed
-    | MachineStartFailed
-    | ManagedRuntimeUnavailable
-    | RequestFailed {
+fn main() -> () | MachineError {
     let auth = AuthServer::spawn()?;
     let client = Client::spawn()?;
     let p: Pending<AuthReply> = client.request(auth, AuthCheck { token: 41 })?;

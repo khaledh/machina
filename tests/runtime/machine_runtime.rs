@@ -350,14 +350,7 @@ typestate M {
 }
 
 @machines
-fn main() -> ()
-    | MachineSpawnFailed
-    | MachineBindFailed
-    | MachineStartFailed
-    | ManagedRuntimeUnavailable
-    | MachineUnknown
-    | MachineNotRunning
-    | MailboxFull {
+fn main() -> () | MachineError {
     let m = M::spawn()?;
     m.send(Ping { id: 7 })?;
 }
@@ -390,7 +383,6 @@ fn test_typestate_final_state_stops_machine_and_rejects_future_send() {
 requires {
     std::machine::managed_runtime
     std::machine::step
-    std::machine::MachineNotRunning
     std::machine::Runtime
     std::machine::StepStatus
 }
@@ -435,9 +427,26 @@ fn main() -> u64 {
         _ => { return 1; },
     };
 
+    var stopped = false;
     match machine.send(1, 0, 0) {
-        _stopped: MachineNotRunning => 0,
-        _ => 1,
+        _ok: () => {
+            stopped = false;
+        }
+        err: MachineError => {
+            match err {
+                MachineError::NotRunning => {
+                    stopped = true;
+                }
+                _ => {
+                    stopped = false;
+                }
+            };
+        }
+    };
+    if stopped {
+        0
+    } else {
+        1
     }
 }
 "#;

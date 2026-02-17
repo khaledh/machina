@@ -4,6 +4,18 @@
 
 Draft proposal focused on source-level ergonomics for typestate machines.
 
+Implementation snapshot (current):
+- `@machines` managed entrypoint opt-in: implemented.
+- `Typestate::spawn(...) -> Machine<T> | ...`: implemented.
+- typed handle methods: `send(payload)` and `request(dst, payload)`: implemented.
+- typed request destinations: `u64` or `Machine<...>` handles: implemented.
+- handler sugar:
+  - `send(dst, payload)` / `request(dst, payload)` lowering: implemented.
+  - `cap.reply(payload)` lowering: implemented.
+  - `reply(payload)` implicit-cap form: not implemented yet.
+- same-state ergonomics (`-> stay`, fieldless shorthand): implemented.
+- provenance binding (`for RequestType(binding)` + labels): implemented.
+
 This document complements:
 - `docs/compiler/typestate-machines-async-events-design.md` (semantics/protocol model), and
 - `docs/compiler/typestate-machines-runtime-execution-design.md` (compiler/runtime bridge).
@@ -101,17 +113,17 @@ typestate Client {
     }
 
     state Connected {
-        on Ping(p: Ping) -> Connected {
+        on Ping(p) -> stay {
             println(f"ping {p.id}");
-            Connected {}
         }
     }
 }
 
-fn main() {
-    let client = Client::spawn();
-    client.send(Connect { token: "secret" });
-    client.send(Ping { id: 1 });
+@machines
+fn main() -> () | MachineError {
+    let client = Client::spawn()?;
+    client.send(Connect { token: "secret" })?;
+    client.send(Ping { id: 1 })?;
 }
 ```
 
@@ -121,14 +133,13 @@ Key property: app code does not create or pass a runtime object.
 
 ### 1) Explicit runtime opt-in for binaries
 
-Managed execution should be visible at the entrypoint via a one-line opt-in
-marker (exact syntax TBD), e.g. an attribute-like form:
+Managed execution is visible at the entrypoint via `@machines`:
 
 ```mc
 @machines
-fn main() {
-    let client = Client::spawn();
-    client.send(Ping { id: 1 });
+fn main() -> () | MachineError {
+    let client = Client::spawn()?;
+    client.send(Ping { id: 1 })?;
 }
 ```
 
@@ -152,12 +163,12 @@ Runtime ownership rules:
 `Typestate::spawn(...)` returns a typed machine handle.
 
 ```mc
-let c: Machine<Client> = Client::spawn();
+let c: Machine<Client> = Client::spawn()?;
 ```
 
 Handle capabilities in V1:
 - `send(payload)`
-- `request(payload)`
+- `request(dst, payload)` where `dst` may be `u64` or typed machine handle
 - optional lifecycle queries (future)
 
 No descriptor ids, state tags, or runtime pointers are exposed.
@@ -201,13 +212,13 @@ fallible type (exact surface to be finalized in runtime API design).
 
 Handlers and callers use typed payloads only:
 - `send(Msg { ... })`
-- `request(Req { ... })`
-- `reply(Resp { ... })`
+- `request(dst, Req { ... })`
+- `cap.reply(Resp { ... })`
 
 These desugar to existing runtime ABI calls through compiler-generated metadata.
 
 In ergonomic mode:
-- `reply(Resp { ... })` is preferred in request handlers (implicit capability),
+- `cap.reply(Resp { ... })` is preferred in request handlers,
 - explicit `Pending<T>` / `ReplyCap<T>` forms remain available as escape hatches.
 
 ### 4) Keep direct typestate mode unchanged
@@ -242,7 +253,7 @@ Prefer method style in docs/examples.
 Inside `on` handlers, support direct forms:
 - `send(to, Msg {})`
 - `request(to, Req {})`
-- `reply(Resp {})`
+- `cap.reply(Resp {})`
 
 No `emit ...` ceremony required in the common case.
 
@@ -382,11 +393,11 @@ typestate AuthService {
     }
 
     state Ready {
-        on AuthCheck(req) {
+        on AuthCheck(req, cap: ReplyCap<AuthApproved | AuthDenied>) {
             if req.token == "secret" {
-                reply(AuthApproved { user_id: req.conn_id + 1000 });
+                cap.reply(AuthApproved { user_id: req.conn_id + 1000 });
             } else {
-                reply(AuthDenied { reason: "invalid token" });
+                cap.reply(AuthDenied { reason: "invalid token" });
             }
         }
     }

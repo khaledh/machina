@@ -55,14 +55,7 @@ typestate AuthServer {
 }
 
 @machines
-fn main() -> ()
-    | MachineSpawnFailed
-    | MachineBindFailed
-    | MachineStartFailed
-    | ManagedRuntimeUnavailable
-    | MachineUnknown
-    | MachineNotRunning
-    | MailboxFull {
+fn main() -> () | MachineError {
     let auth = AuthServer::spawn()?;
     let client = Client::spawn(auth)?;
     client.send(StartAuth { token: 41 })?;

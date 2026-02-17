@@ -1,6 +1,5 @@
 requires {
     std::io::println
-    std::machine::MachineNotRunning
     std::machine::Runtime
     std::machine::StepStatus
     std::machine::managed_runtime
@@ -65,11 +64,18 @@ fn main() {
     };
 
     match machine.send(1, 0, 0) {
-        _stopped: MachineNotRunning => {
-            println("machine stopped after final state");
+        _ok: () => {
+            println("expected MachineError::NotRunning after final state");
         }
-        _ => {
-            println("expected MachineNotRunning after final state");
+        err: MachineError => {
+            match err {
+                MachineError::NotRunning => {
+                    println("machine stopped after final state");
+                }
+                _ => {
+                    println("expected MachineError::NotRunning after final state");
+                }
+            };
         }
     };
 }

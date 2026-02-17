@@ -25,14 +25,7 @@ typestate Timer {
 }
 
 @machines
-fn main() -> ()
-    | MachineSpawnFailed
-    | MachineBindFailed
-    | MachineStartFailed
-    | ManagedRuntimeUnavailable
-    | MachineUnknown
-    | MachineNotRunning
-    | MailboxFull {
+fn main() -> () | MachineError {
     let timer = Timer::spawn()?;
     timer.send(Kick { n: 1 })?;
 }

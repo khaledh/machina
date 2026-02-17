@@ -18,13 +18,14 @@ use crate::core::tree::parsed::{
     MethodBlock, MethodDef, MethodItem, MethodSig, Module, SelfParam, StmtExpr, StmtExprKind,
     StructDefField, StructLitField, TopLevelItem, TypeDef, TypeDefKind, TypeExpr, TypeExprKind,
     TypestateDef, TypestateFields, TypestateItem, TypestateOnHandler, TypestateState,
-    TypestateStateItem,
+    TypestateStateItem, EnumDefVariant,
 };
 use crate::core::tree::visit::{self, Visitor};
 use crate::core::tree::visit_mut::{self, VisitorMut};
 use crate::core::tree::{CallArgMode, InitInfo, ParamMode};
 
 const MACHINE_HANDLE_TYPE_NAME: &str = "Machine";
+const MACHINE_ERROR_TYPE_NAME: &str = "MachineError";
 const MACHINE_SPAWN_FAILED_TYPE_NAME: &str = "MachineSpawnFailed";
 const MACHINE_BIND_FAILED_TYPE_NAME: &str = "MachineBindFailed";
 const MACHINE_START_FAILED_TYPE_NAME: &str = "MachineStartFailed";
@@ -39,6 +40,15 @@ const MANAGED_RUNTIME_BOOTSTRAP_FN: &str = "__mc_machine_runtime_managed_bootstr
 const MANAGED_RUNTIME_CURRENT_FN: &str = "__mc_machine_runtime_managed_current_u64";
 const MANAGED_RUNTIME_SHUTDOWN_FN: &str = "__mc_machine_runtime_managed_shutdown_u64";
 const MANAGED_RUNTIME_STEP_FN: &str = "__mc_machine_runtime_step_u64";
+
+const MACHINE_ERROR_VARIANT_SPAWN_FAILED: &str = "SpawnFailed";
+const MACHINE_ERROR_VARIANT_BIND_FAILED: &str = "BindFailed";
+const MACHINE_ERROR_VARIANT_START_FAILED: &str = "StartFailed";
+const MACHINE_ERROR_VARIANT_MANAGED_RUNTIME_UNAVAILABLE: &str = "RuntimeUnavailable";
+const MACHINE_ERROR_VARIANT_UNKNOWN: &str = "Unknown";
+const MACHINE_ERROR_VARIANT_NOT_RUNNING: &str = "NotRunning";
+const MACHINE_ERROR_VARIANT_MAILBOX_FULL: &str = "MailboxFull";
+const MACHINE_ERROR_VARIANT_REQUEST_FAILED: &str = "RequestFailed";
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct TypestateRoleImplRef {
@@ -975,6 +985,9 @@ fn ensure_machine_support_types(module: &mut Module, node_id_gen: &mut NodeIdGen
     if !existing.contains(MACHINE_HANDLE_TYPE_NAME) {
         prepend.push(machine_handle_type_def(node_id_gen));
     }
+    if !existing.contains(MACHINE_ERROR_TYPE_NAME) {
+        prepend.push(machine_error_type_def(node_id_gen));
+    }
     if !existing.contains(MACHINE_SPAWN_FAILED_TYPE_NAME) {
         prepend.push(empty_struct_type_def(
             MACHINE_SPAWN_FAILED_TYPE_NAME,
@@ -1217,6 +1230,104 @@ fn empty_struct_type_def(name: &str, node_id_gen: &mut NodeIdGen) -> TopLevelIte
         kind: TypeDefKind::Struct { fields: Vec::new() },
         span: Span::default(),
     })
+}
+
+fn machine_error_type_def(node_id_gen: &mut NodeIdGen) -> TopLevelItem {
+    let span = Span::default();
+    TopLevelItem::TypeDef(TypeDef {
+        id: node_id_gen.new_id(),
+        def_id: (),
+        attrs: Vec::new(),
+        name: MACHINE_ERROR_TYPE_NAME.to_string(),
+        type_params: Vec::new(),
+        kind: TypeDefKind::Enum {
+            variants: vec![
+                EnumDefVariant {
+                    id: node_id_gen.new_id(),
+                    name: MACHINE_ERROR_VARIANT_SPAWN_FAILED.to_string(),
+                    payload: Vec::new(),
+                    span,
+                },
+                EnumDefVariant {
+                    id: node_id_gen.new_id(),
+                    name: MACHINE_ERROR_VARIANT_BIND_FAILED.to_string(),
+                    payload: Vec::new(),
+                    span,
+                },
+                EnumDefVariant {
+                    id: node_id_gen.new_id(),
+                    name: MACHINE_ERROR_VARIANT_START_FAILED.to_string(),
+                    payload: Vec::new(),
+                    span,
+                },
+                EnumDefVariant {
+                    id: node_id_gen.new_id(),
+                    name: MACHINE_ERROR_VARIANT_MANAGED_RUNTIME_UNAVAILABLE.to_string(),
+                    payload: Vec::new(),
+                    span,
+                },
+                EnumDefVariant {
+                    id: node_id_gen.new_id(),
+                    name: MACHINE_ERROR_VARIANT_UNKNOWN.to_string(),
+                    payload: Vec::new(),
+                    span,
+                },
+                EnumDefVariant {
+                    id: node_id_gen.new_id(),
+                    name: MACHINE_ERROR_VARIANT_NOT_RUNNING.to_string(),
+                    payload: Vec::new(),
+                    span,
+                },
+                EnumDefVariant {
+                    id: node_id_gen.new_id(),
+                    name: MACHINE_ERROR_VARIANT_MAILBOX_FULL.to_string(),
+                    payload: Vec::new(),
+                    span,
+                },
+                EnumDefVariant {
+                    id: node_id_gen.new_id(),
+                    name: MACHINE_ERROR_VARIANT_REQUEST_FAILED.to_string(),
+                    payload: Vec::new(),
+                    span,
+                },
+            ],
+        },
+        span,
+    })
+}
+
+fn machine_error_variant_for_type_name(error_type_name: &str) -> Option<&'static str> {
+    match error_type_name {
+        MACHINE_SPAWN_FAILED_TYPE_NAME => Some(MACHINE_ERROR_VARIANT_SPAWN_FAILED),
+        MACHINE_BIND_FAILED_TYPE_NAME => Some(MACHINE_ERROR_VARIANT_BIND_FAILED),
+        MACHINE_START_FAILED_TYPE_NAME => Some(MACHINE_ERROR_VARIANT_START_FAILED),
+        MACHINE_MANAGED_RUNTIME_UNAVAILABLE_TYPE_NAME => {
+            Some(MACHINE_ERROR_VARIANT_MANAGED_RUNTIME_UNAVAILABLE)
+        }
+        MACHINE_UNKNOWN_TYPE_NAME => Some(MACHINE_ERROR_VARIANT_UNKNOWN),
+        MACHINE_NOT_RUNNING_TYPE_NAME => Some(MACHINE_ERROR_VARIANT_NOT_RUNNING),
+        MACHINE_MAILBOX_FULL_TYPE_NAME => Some(MACHINE_ERROR_VARIANT_MAILBOX_FULL),
+        MACHINE_REQUEST_FAILED_TYPE_NAME => Some(MACHINE_ERROR_VARIANT_REQUEST_FAILED),
+        _ => None,
+    }
+}
+
+fn machine_error_variant_expr(
+    variant_name: &str,
+    node_id_gen: &mut NodeIdGen,
+    span: Span,
+) -> Expr {
+    Expr {
+        id: node_id_gen.new_id(),
+        kind: ExprKind::EnumVariant {
+            enum_name: MACHINE_ERROR_TYPE_NAME.to_string(),
+            type_args: Vec::new(),
+            variant: variant_name.to_string(),
+            payload: Vec::new(),
+        },
+        ty: (),
+        span,
+    }
 }
 
 fn machine_target_id_u64_helper_def(node_id_gen: &mut NodeIdGen) -> TopLevelItem {
@@ -1481,16 +1592,12 @@ fn machine_handle_method_block(
             id: node_id_gen.new_id(),
             kind: ExprKind::Block {
                 items: vec![parsed::BlockItem::Stmt(return_stmt(
-                    Expr {
-                        id: node_id_gen.new_id(),
-                        kind: ExprKind::StructLit {
-                            name: error_type_name.to_string(),
-                            type_args: Vec::new(),
-                            fields: Vec::new(),
-                        },
-                        ty: (),
+                    machine_error_variant_expr(
+                        machine_error_variant_for_type_name(error_type_name)
+                            .expect("machine error mapping should exist"),
+                        node_id_gen,
                         span,
-                    },
+                    ),
                     node_id_gen,
                     span,
                 ))],
@@ -1540,16 +1647,12 @@ fn machine_handle_method_block(
             id: node_id_gen.new_id(),
             kind: ExprKind::Block {
                 items: vec![parsed::BlockItem::Stmt(return_stmt(
-                    Expr {
-                        id: node_id_gen.new_id(),
-                        kind: ExprKind::StructLit {
-                            name: error_type_name.to_string(),
-                            type_args: Vec::new(),
-                            fields: Vec::new(),
-                        },
-                        ty: (),
+                    machine_error_variant_expr(
+                        machine_error_variant_for_type_name(error_type_name)
+                            .expect("machine error mapping should exist"),
+                        node_id_gen,
                         span,
-                    },
+                    ),
                     node_id_gen,
                     span,
                 ))],
@@ -1584,14 +1687,7 @@ fn machine_handle_method_block(
             kind: TypeExprKind::Union {
                 variants: vec![
                     named_type_expr("()", node_id_gen, span),
-                    named_type_expr(
-                        MACHINE_MANAGED_RUNTIME_UNAVAILABLE_TYPE_NAME,
-                        node_id_gen,
-                        span,
-                    ),
-                    named_type_expr(MACHINE_UNKNOWN_TYPE_NAME, node_id_gen, span),
-                    named_type_expr(MACHINE_NOT_RUNNING_TYPE_NAME, node_id_gen, span),
-                    named_type_expr(MACHINE_MAILBOX_FULL_TYPE_NAME, node_id_gen, span),
+                    named_type_expr(MACHINE_ERROR_TYPE_NAME, node_id_gen, span),
                 ],
             },
             span,
@@ -1604,12 +1700,7 @@ fn machine_handle_method_block(
             kind: TypeExprKind::Union {
                 variants: vec![
                     named_type_expr("u64", node_id_gen, span),
-                    named_type_expr(
-                        MACHINE_MANAGED_RUNTIME_UNAVAILABLE_TYPE_NAME,
-                        node_id_gen,
-                        span,
-                    ),
-                    named_type_expr(MACHINE_REQUEST_FAILED_TYPE_NAME, node_id_gen, span),
+                    named_type_expr(MACHINE_ERROR_TYPE_NAME, node_id_gen, span),
                 ],
             },
             span,
@@ -2935,16 +3026,12 @@ fn lower_spawn_func(
             id: node_id_gen.new_id(),
             kind: ExprKind::Block {
                 items: vec![parsed::BlockItem::Stmt(return_stmt(
-                    Expr {
-                        id: node_id_gen.new_id(),
-                        kind: ExprKind::StructLit {
-                            name: error_type_name.to_string(),
-                            type_args: Vec::new(),
-                            fields: Vec::new(),
-                        },
-                        ty: (),
+                    machine_error_variant_expr(
+                        machine_error_variant_for_type_name(error_type_name)
+                            .expect("machine error mapping should exist"),
+                        node_id_gen,
                         span,
-                    },
+                    ),
                     node_id_gen,
                     span,
                 ))],
@@ -3192,9 +3279,7 @@ fn lower_spawn_func(
                 kind: TypeExprKind::Union {
                     variants: vec![
                         named_type_expr(handle_type_name, node_id_gen, span),
-                        named_type_expr(MACHINE_SPAWN_FAILED_TYPE_NAME, node_id_gen, span),
-                        named_type_expr(MACHINE_BIND_FAILED_TYPE_NAME, node_id_gen, span),
-                        named_type_expr(MACHINE_START_FAILED_TYPE_NAME, node_id_gen, span),
+                        named_type_expr(MACHINE_ERROR_TYPE_NAME, node_id_gen, span),
                     ],
                 },
                 span,

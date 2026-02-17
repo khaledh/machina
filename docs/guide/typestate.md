@@ -143,39 +143,39 @@ protocol Auth {
 }
 
 typestate GatewayClient : Auth::Client {
-    fn new() -> Idle {
-        Idle {}
+    fields {
+        auth: Machine<AuthService>,
+    }
+
+    fn new(auth: Machine<AuthService>) -> Idle {
+        Idle { auth: auth }
     }
 
     state Idle {
-        on Start(start) -> AwaitAuth {
+        on Start(start) -> stay {
             start;
-            request:initial(1, AuthorizeReq {});
-            AwaitAuth {}
+            let p: Pending<AuthReply> = request:initial(self.auth, AuthorizeReq {});
+            p;
         }
 
-        on Retry(start) -> AwaitAuth {
+        on Retry(start) -> stay {
             start;
-            request:retry(1, AuthorizeReq {});
-            AwaitAuth {}
+            let p: Pending<AuthReply> = request:retry(self.auth, AuthorizeReq {});
+            p;
         }
-    }
 
-    state AwaitAuth {
-        on AuthReply(resp) for AuthorizeReq:initial(req) -> Connected | Idle {
+        on AuthReply(resp) for AuthorizeReq:initial(req) -> stay {
             req;
             resp;
-            Connected {}
+            println("initial path");
         }
 
-        on AuthReply(resp) for AuthorizeReq:retry(req) -> Connected | Idle {
+        on AuthReply(resp) for AuthorizeReq:retry(req) -> stay {
             req;
             resp;
-            Idle {}
+            println("retry path");
         }
     }
-
-    state Connected {}
 }
 
 typestate AuthService : Auth::Server {
@@ -184,27 +184,17 @@ typestate AuthService : Auth::Server {
     state Ready {
         on AuthorizeReq(req: AuthorizeReq, cap: ReplyCap<AuthReply>) -> stay {
             req;
-            reply(cap, AuthReply {});
+            cap.reply(AuthReply {});
         }
     }
 }
 
 @machines
-fn main() {
-    match AuthService::spawn() {
-        auth: Machine<AuthService> => { auth; }
-        _ => { return; },
-    };
-    match GatewayClient::spawn() {
-        client: Machine<GatewayClient> => {
-            // Event kind ids are currently runtime ABI-level integers.
-            match client.send(1, 0, 0) {
-                ok: () => { ok; }
-                _ => { return; },
-            };
-        }
-        _ => { return; },
-    };
+fn main() -> () | MachineError {
+    let auth = AuthService::spawn()?;
+    let client = GatewayClient::spawn(auth)?;
+    client.send(Start {})?;
+    client.send(Retry {})?;
     // `@machines` auto-drives dispatch after `main` exits.
     println("queued start event");
 }
@@ -219,7 +209,7 @@ Key ideas:
 - Request-site labels (`request:label(...)`) disambiguate concurrent same-type
   inflight requests; handlers match them with `for RequestType:label(binding)`.
 - `Pending<...>`/`ReplyCap<...>` remain available as explicit advanced forms.
-- `reply(cap, value)` consumes `ReplyCap<...>` and enforces response-set safety.
+- `cap.reply(value)` consumes `ReplyCap<...>` and enforces response-set safety.
 - `@machines` is required to use `Typestate::spawn(...)` in binaries.
 
 Examples:
@@ -239,9 +229,11 @@ cargo mcr --experimental typestate examples/typestate/inter_machine_req_reply_ch
 
 Current managed/event support is runnable but still early-stage.
 
-- Event kind ids in `Machine<T>::send/request(...)` are still ABI-level integers.
-- Emit payload ABI is currently minimal:
+- Raw ABI-level overloads still exist (`send(kind, payload0, payload1)` and
+  `request(dst, kind, payload0, payload1)`), but normal app code should prefer
+  typed forms.
+- Emit payload ABI is still being expanded:
   - `emit Send/Request/reply` carries event kind + payload words.
-  - rich payload boxing/unboxing and drop paths are still being expanded.
+  - rich payload boxing/unboxing and drop paths are still under active work.
 - Protocol conformance is shape-based for v1 (flows/handlers/payload families),
   without full per-state protocol projection checks yet.

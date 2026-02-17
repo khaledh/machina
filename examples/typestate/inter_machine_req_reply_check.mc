@@ -70,14 +70,7 @@ typestate AuthServer {
 }
 
 @machines
-fn main() -> ()
-    | MachineSpawnFailed
-    | MachineBindFailed
-    | MachineStartFailed
-    | ManagedRuntimeUnavailable
-    | MachineUnknown
-    | MachineNotRunning
-    | MailboxFull {
+fn main() -> () | MachineError {
     // Spawn server first so its machine id is 1 (used by client Request `to:`).
     let _server = AuthServer::spawn()?;
     let client = AuthClient::spawn()?;
