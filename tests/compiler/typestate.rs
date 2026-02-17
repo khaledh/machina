@@ -60,10 +60,41 @@ fn valid_examples() -> Vec<PathBuf> {
 fn managed_check_examples() -> Vec<PathBuf> {
     let root = repo_root();
     vec![
+        root.join("examples/typestate/managed_state_transitions.mc"),
         root.join("examples/typestate/machine_events_check.mc"),
         root.join("examples/typestate/inter_machine_req_reply_check.mc"),
         root.join("examples/typestate/machine_handle_request_check.mc"),
         root.join("examples/typestate/final_state_machine.mc"),
+    ]
+}
+
+fn invalid_example_cases() -> Vec<(PathBuf, fn(&ResolveError) -> bool)> {
+    let root = repo_root();
+    vec![
+        (
+            root.join("examples/typestate/connection_invalid.mc"),
+            |err| matches!(err, ResolveError::TypestateStateLiteralOutsideTypestate(..)),
+        ),
+        (
+            root.join("examples/typestate/file_handle_invalid.mc"),
+            |err| matches!(err, ResolveError::TypestateInvalidTransitionReturn(..)),
+        ),
+        (root.join("examples/typestate/job_invalid.mc"), |err| {
+            matches!(err, ResolveError::TypestateMissingNew(..))
+        }),
+        (
+            root.join("examples/typestate/request_builder_invalid.mc"),
+            |err| {
+                matches!(
+                    err,
+                    ResolveError::TypestateStateFieldShadowsCarriedField(..)
+                )
+            },
+        ),
+        (
+            root.join("examples/typestate/service_lifecycle_invalid.mc"),
+            |err| matches!(err, ResolveError::TypestateDuplicateTransition(..)),
+        ),
     ]
 }
 
@@ -98,35 +129,7 @@ fn typestate_examples_are_rejected_without_experimental_flag() {
 
 #[test]
 fn typestate_invalid_examples_emit_expected_diagnostics() {
-    let root = repo_root();
-    let cases: Vec<(PathBuf, fn(&ResolveError) -> bool)> = vec![
-        (
-            root.join("examples/typestate/connection_invalid.mc"),
-            |err| matches!(err, ResolveError::TypestateStateLiteralOutsideTypestate(..)),
-        ),
-        (
-            root.join("examples/typestate/file_handle_invalid.mc"),
-            |err| matches!(err, ResolveError::TypestateInvalidTransitionReturn(..)),
-        ),
-        (root.join("examples/typestate/job_invalid.mc"), |err| {
-            matches!(err, ResolveError::TypestateMissingNew(..))
-        }),
-        (
-            root.join("examples/typestate/request_builder_invalid.mc"),
-            |err| {
-                matches!(
-                    err,
-                    ResolveError::TypestateStateFieldShadowsCarriedField(..)
-                )
-            },
-        ),
-        (
-            root.join("examples/typestate/service_lifecycle_invalid.mc"),
-            |err| matches!(err, ResolveError::TypestateDuplicateTransition(..)),
-        ),
-    ];
-
-    for (path, predicate) in cases {
+    for (path, predicate) in invalid_example_cases() {
         let errors = compile_example(&path, true)
             .expect_err("invalid typestate example should fail in experimental mode");
         assert!(errors.iter().any(|err| {
@@ -166,6 +169,24 @@ fn typestate_machine_handle_request_example_runs_in_experimental_mode() {
     assert!(
         stdout.contains("got 42"),
         "expected typed handle request/reply output, got: {stdout}"
+    );
+}
+
+#[test]
+fn typestate_managed_state_transitions_example_runs_in_experimental_mode() {
+    let path = repo_root().join("examples/typestate/managed_state_transitions.mc");
+    let source = std::fs::read_to_string(&path)
+        .expect("failed to read typestate managed state-transition fixture");
+    let run = run_program_with_opts(
+        "typestate_managed_state_transitions",
+        &source,
+        typestate_opts(true),
+    );
+    assert_eq!(run.status.code(), Some(0));
+    let stdout = String::from_utf8_lossy(&run.stdout);
+    assert!(
+        stdout.contains("door transitioned: Closed -> Waiting -> Open"),
+        "expected managed state-transition output, got: {stdout}"
     );
 }
 
@@ -246,6 +267,28 @@ fn typestate_managed_examples_are_rejected_without_experimental_flag() {
             )
         }));
     }
+}
+
+#[test]
+fn typestate_example_lists_cover_all_typestate_fixtures() {
+    use std::collections::HashSet;
+    let root = repo_root();
+    let fixture_dir = root.join("examples/typestate");
+    let disk: HashSet<PathBuf> = std::fs::read_dir(&fixture_dir)
+        .expect("failed to read typestate fixture directory")
+        .filter_map(|entry| entry.ok().map(|e| e.path()))
+        .filter(|path| path.extension().and_then(|e| e.to_str()) == Some("mc"))
+        .collect();
+
+    let mut covered: HashSet<PathBuf> = HashSet::new();
+    covered.extend(valid_examples());
+    covered.extend(managed_check_examples());
+    covered.extend(invalid_example_cases().into_iter().map(|(path, _)| path));
+
+    assert_eq!(
+        disk, covered,
+        "typestate fixtures and test coverage lists are out of sync"
+    );
 }
 
 #[test]

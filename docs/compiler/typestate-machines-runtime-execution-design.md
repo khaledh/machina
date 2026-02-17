@@ -315,7 +315,7 @@ Add execution-path diagnostics (compiler + runtime):
 ### 3. Examples
 
 Keep runnable fixtures current as lowering/runtime evolves:
-- `examples/typestate/machine_events_check.mc`
+- `examples/typestate/managed_state_transitions.mc`
 - `examples/typestate/inter_machine_req_reply_check.mc`
 
 These fixtures should have two coverage forms:
