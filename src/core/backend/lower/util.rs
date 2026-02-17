@@ -11,6 +11,8 @@ use crate::core::resolve::DefId;
 use crate::core::tree::semantic as sem;
 use crate::core::types::{Type, TypeAssignability, type_assignable};
 
+const MACHINE_PAYLOAD_LAYOUT_OWNED_MASK: u64 = 1u64 << 63;
+
 impl<'a, 'g> FuncLowerer<'a, 'g> {
     pub(super) fn lookup_local(&self, def_id: DefId) -> LocalValue {
         self.locals
@@ -868,9 +870,12 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
             .cast(CastKind::PtrToInt, payload_ptr_u8, u64_ty);
 
         let payload_layout_id = self.machine_payload_layout_id(payload_ty).unwrap_or(0);
-        let payload1 = self
-            .builder
-            .const_int(payload_layout_id as i128, false, 64, u64_ty);
+        let payload1 = self.builder.const_int(
+            (payload_layout_id | MACHINE_PAYLOAD_LAYOUT_OWNED_MASK) as i128,
+            false,
+            64,
+            u64_ty,
+        );
         (payload0, payload1)
     }
 

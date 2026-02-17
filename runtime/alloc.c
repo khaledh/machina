@@ -17,6 +17,9 @@ typedef struct mc_alloc_header_t {
 
 // Runtime toggle for emitting allocation trace messages.
 static int mc_trace_allocs = 0;
+static uint64_t mc_live_blocks = 0;
+static uint64_t mc_total_allocs = 0;
+static uint64_t mc_total_frees = 0;
 
 void __mc_set_alloc_trace(uint8_t enabled) {
     mc_trace_allocs = enabled != 0;
@@ -117,6 +120,10 @@ static mc_alloc_header_t *mc_header_from_ptr(void *ptr) {
 void *__mc_alloc(size_t size, size_t align) {
     // v1: always allocate from the default heap.
     void *ptr = mc_alloc_with_heap(&MC_DEFAULT_HEAP, size, align);
+    if (ptr) {
+        mc_live_blocks += 1;
+        mc_total_allocs += 1;
+    }
     mc_trace_log("alloc", ptr, size, align, &MC_DEFAULT_HEAP);
     return ptr;
 }
@@ -157,7 +164,23 @@ void __mc_free(void *ptr) {
     mc_alloc_header_t *header = mc_header_from_ptr(ptr);
     mc_heap_t *heap = header->heap ? header->heap : &MC_DEFAULT_HEAP;
     mc_trace_log("free", ptr, header->size, 0, heap);
+    if (mc_live_blocks > 0) {
+        mc_live_blocks -= 1;
+    }
+    mc_total_frees += 1;
     heap->vtable->free(header->raw);
+}
+
+uint64_t __mc_alloc_live_blocks(void) {
+    return mc_live_blocks;
+}
+
+uint64_t __mc_alloc_total_allocs(void) {
+    return mc_total_allocs;
+}
+
+uint64_t __mc_alloc_total_frees(void) {
+    return mc_total_frees;
 }
 
 void *__rt_alloc(uint64_t size, uint64_t align) {

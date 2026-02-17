@@ -29,6 +29,22 @@ typedef uint64_t mc_machine_state_token_t;
 // id to select decode/drop glue on commit/rollback/dead-letter paths.
 typedef uint64_t mc_payload_layout_id_t;
 
+// High-bit ownership marker carried in envelope payload layout ids.
+// When set, payload word is treated as runtime-owned boxed storage and should
+// be released on envelope/pending cleanup paths.
+#define MC_PAYLOAD_LAYOUT_OWNED_MASK (1ull << 63)
+#define MC_PAYLOAD_LAYOUT_ID_MASK (~MC_PAYLOAD_LAYOUT_OWNED_MASK)
+
+static inline uint8_t mc_payload_layout_is_owned(mc_payload_layout_id_t payload_layout) {
+    return (payload_layout & MC_PAYLOAD_LAYOUT_OWNED_MASK) != 0;
+}
+
+static inline mc_payload_layout_id_t mc_payload_layout_id(
+    mc_payload_layout_id_t payload_layout
+) {
+    return payload_layout & MC_PAYLOAD_LAYOUT_ID_MASK;
+}
+
 typedef enum mc_machine_lifecycle {
     // Machine exists, can buffer mailbox messages, but cannot dispatch yet.
     MC_MACHINE_CREATED = 0,
@@ -98,7 +114,8 @@ typedef struct mc_machine_envelope {
     uint64_t pending_id;
     // Boxed payload ABI (v1):
     // - payload0: pointer to heap-owned payload box.
-    // - payload1: payload layout id used for decode/drop glue dispatch.
+    // - payload1: payload layout metadata (layout id + ownership bit).
+    //   Use `mc_payload_layout_id(...)` to recover canonical layout id.
     uint64_t payload0;
     mc_payload_layout_id_t payload1;
     // Correlated origin request payload ABI (response envelopes only):
@@ -552,7 +569,7 @@ mc_machine_reply_result_t __mc_machine_runtime_reply(
 // ABI payload layout:
 // - `kind`: event kind used for descriptor dispatch row selection.
 // - `payload0`: payload pointer/int payload word.
-// - `payload1`: payload layout identifier.
+// - `payload1`: payload layout metadata (layout id + ownership bit).
 // - `request_site_key` (request only): compiler-provided request-site identity
 //   used to annotate inflight correlation entries.
 //

@@ -154,6 +154,17 @@ uint32_t mc_pending_inactive_len(const mc_pending_reply_table_t *pending) {
     return count;
 }
 
+void mc_pending_release_request_payload(mc_pending_reply_entry_t *entry) {
+    if (!entry) {
+        return;
+    }
+    if (entry->request_payload0 != 0 && mc_payload_layout_is_owned(entry->request_payload1)) {
+        __mc_free((void *)(uintptr_t)entry->request_payload0);
+    }
+    entry->request_payload0 = 0;
+    entry->request_payload1 = 0;
+}
+
 uint8_t mc_pending_cleanup_reason_valid(mc_pending_cleanup_reason_t reason) {
     return reason >= MC_PENDING_CLEANUP_COMPLETED && reason <= MC_PENDING_CLEANUP_TIMEOUT;
 }
@@ -194,6 +205,7 @@ uint32_t mc_pending_cleanup_requester(
         if (!entry->active || entry->requester != requester) {
             continue;
         }
+        mc_pending_release_request_payload(entry);
         entry->active = 0;
         mc_emit_pending_cleanup(rt, entry, reason);
         dropped += 1;
@@ -220,6 +232,7 @@ uint32_t mc_pending_cleanup_timeouts(mc_machine_runtime_t *rt) {
         if (age < rt->pending_timeout_steps) {
             continue;
         }
+        mc_pending_release_request_payload(entry);
         entry->active = 0;
         mc_emit_pending_cleanup(rt, entry, MC_PENDING_CLEANUP_TIMEOUT);
         dropped += 1;

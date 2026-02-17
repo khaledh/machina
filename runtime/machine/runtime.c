@@ -6,6 +6,43 @@
 
 #include <string.h>
 
+static void mc_release_payload_word(uint64_t payload0, mc_payload_layout_id_t payload1) {
+    if (payload0 == 0 || !mc_payload_layout_is_owned(payload1)) {
+        return;
+    }
+    __mc_free((void *)(uintptr_t)payload0);
+}
+
+static void mc_release_envelope_payloads(
+    const mc_machine_envelope_t *env,
+    uint8_t release_payload,
+    uint8_t release_origin
+) {
+    if (!env) {
+        return;
+    }
+
+    if (release_payload) {
+        mc_release_payload_word(env->payload0, env->payload1);
+    }
+    if (release_origin) {
+        // If both words alias the same boxed payload, free exactly once.
+        if (release_payload && env->origin_payload0 == env->payload0
+            && env->origin_payload1 == env->payload1) {
+            return;
+        }
+        mc_release_payload_word(env->origin_payload0, env->origin_payload1);
+    }
+}
+
+static uint8_t mc_envelope_is_request(const mc_machine_envelope_t *env) {
+    return env && env->reply_cap_id != 0 && env->pending_id == 0;
+}
+
+static uint8_t mc_envelope_is_response(const mc_machine_envelope_t *env) {
+    return env && env->pending_id != 0;
+}
+
 // Resolve mutable machine slot from 1-based id.
 mc_machine_slot_t *mc_get_slot(mc_machine_runtime_t *rt, mc_machine_id_t machine_id) {
     if (!rt || machine_id == 0) {
@@ -685,8 +722,19 @@ void __mc_machine_runtime_drop(mc_machine_runtime_t *rt) {
         return;
     }
     for (uint32_t i = 0; i < rt->machine_len; i++) {
+        mc_machine_mailbox_t *mailbox = &rt->machines[i].mailbox;
+        for (uint32_t j = 0; j < mailbox->len; j++) {
+            uint32_t idx = (mailbox->head + j) % (mailbox->cap == 0 ? 1u : mailbox->cap);
+            mc_machine_envelope_t *env = &mailbox->items[idx];
+            const uint8_t release_payload = !mc_envelope_is_request(env);
+            const uint8_t release_origin = mc_envelope_is_response(env);
+            mc_release_envelope_payloads(env, release_payload, release_origin);
+        }
         __mc_free(rt->machines[i].mailbox.items);
         rt->machines[i].mailbox.items = NULL;
+    }
+    for (uint32_t i = 0; i < rt->pending.len; i++) {
+        mc_pending_release_request_payload(&rt->pending.entries[i]);
     }
     __mc_free(rt->machines);
     __mc_free(rt->ready.items);
@@ -887,6 +935,7 @@ mc_mailbox_enqueue_result_t __mc_machine_runtime_enqueue(
     mc_machine_slot_t *slot = mc_get_slot(rt, dst);
     if (!slot) {
         mc_emit_dead_letter(rt, dst, MC_DEAD_LETTER_UNKNOWN_MACHINE, env);
+        mc_release_envelope_payloads(env, 1, 0);
         return MC_MAILBOX_ENQUEUE_MACHINE_UNKNOWN;
     }
 
@@ -897,11 +946,13 @@ mc_mailbox_enqueue_result_t __mc_machine_runtime_enqueue(
             ? MC_DEAD_LETTER_FAULTED_MACHINE
             : MC_DEAD_LETTER_STOPPED_MACHINE;
         mc_emit_dead_letter(rt, dst, reason, env);
+        mc_release_envelope_payloads(env, 1, 0);
         return MC_MAILBOX_ENQUEUE_MACHINE_NOT_RUNNING;
     }
 
     if (!mc_mailbox_push(&slot->mailbox, env)) {
         mc_emit_dead_letter(rt, dst, MC_DEAD_LETTER_MAILBOX_FULL, env);
+        mc_release_envelope_payloads(env, 1, 0);
         return MC_MAILBOX_ENQUEUE_FULL;
     }
 
@@ -994,6 +1045,7 @@ mc_machine_reply_result_t __mc_machine_runtime_reply(
     int32_t idx = mc_pending_find_active(&rt->pending, reply_cap_id);
     if (idx < 0) {
         mc_emit_dead_letter(rt, 0, MC_DEAD_LETTER_REPLY_CAP_UNKNOWN, env);
+        mc_release_envelope_payloads(env, 1, 1);
         return MC_REPLY_CAP_UNKNOWN;
     }
 
@@ -1011,6 +1063,10 @@ mc_machine_reply_result_t __mc_machine_runtime_reply(
     mc_mailbox_enqueue_result_t enqueue_res =
         __mc_machine_runtime_enqueue(rt, requester, &response_env);
     if (enqueue_res == MC_MAILBOX_ENQUEUE_OK) {
+        // Transfer request payload ownership from pending table into response
+        // provenance fields so response-dispatch cleanup can release it.
+        rt->pending.entries[(uint32_t)idx].request_payload0 = 0;
+        rt->pending.entries[(uint32_t)idx].request_payload1 = 0;
         // Consume capability on successful reply delivery.
         rt->pending.entries[(uint32_t)idx].active = 0;
         mc_emit_pending_cleanup(
@@ -1028,6 +1084,7 @@ mc_machine_reply_result_t __mc_machine_runtime_reply(
     if (enqueue_res == MC_MAILBOX_ENQUEUE_MACHINE_NOT_RUNNING) {
         mc_machine_lifecycle_t lifecycle = __mc_machine_runtime_lifecycle(rt, requester);
         if (lifecycle == MC_MACHINE_STOPPED) {
+            mc_pending_release_request_payload(&rt->pending.entries[(uint32_t)idx]);
             rt->pending.entries[(uint32_t)idx].active = 0;
             mc_emit_pending_cleanup(
                 rt,
@@ -1035,6 +1092,7 @@ mc_machine_reply_result_t __mc_machine_runtime_reply(
                 MC_PENDING_CLEANUP_REQUESTER_STOPPED
             );
         } else if (lifecycle == MC_MACHINE_FAULTED) {
+            mc_pending_release_request_payload(&rt->pending.entries[(uint32_t)idx]);
             rt->pending.entries[(uint32_t)idx].active = 0;
             mc_emit_pending_cleanup(
                 rt,
@@ -1194,6 +1252,13 @@ uint8_t mc_machine_runtime_dispatch_one_txn_impl(
         // Timeout cleanup runs after each dispatch step and reclaims inflight
         // entries that exceeded configured dispatch-step horizon.
         (void)mc_pending_cleanup_timeouts(rt);
+
+        // Envelope has been consumed; release boxed payload ownership.
+        // Request envelopes keep `payload0` owned by pending-correlation table
+        // until a correlated response is routed or pending cleanup reclaims it.
+        const uint8_t release_payload = !mc_envelope_is_request(&env);
+        const uint8_t release_origin = mc_envelope_is_response(&env);
+        mc_release_envelope_payloads(&env, release_payload, release_origin);
 
         // Exactly one dispatch per call.
         return 1;

@@ -54,3 +54,6 @@ typedef struct mc_heap_t {
 
 // Debug helpers
 void __mc_set_alloc_trace(uint8_t enabled);
+uint64_t __mc_alloc_live_blocks(void);
+uint64_t __mc_alloc_total_allocs(void);
+uint64_t __mc_alloc_total_frees(void);

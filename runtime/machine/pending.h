@@ -38,6 +38,7 @@ uint8_t mc_pending_next_cap_id(mc_pending_reply_table_t *pending, uint64_t *out_
 
 uint32_t mc_pending_active_len(const mc_pending_reply_table_t *pending);
 uint32_t mc_pending_inactive_len(const mc_pending_reply_table_t *pending);
+void mc_pending_release_request_payload(mc_pending_reply_entry_t *entry);
 
 uint8_t mc_pending_cleanup_reason_valid(mc_pending_cleanup_reason_t reason);
 void mc_emit_pending_cleanup(
