@@ -9,7 +9,7 @@ requires {
 //   cargo mcr --experimental typestate examples/typestate/managed_state_transitions.mc
 //
 // Expected output:
-//   opening request 1
+//   open event 1
 //   door transitioned: Closed -> Waiting -> Open
 
 type OpenPressed = { id: u64 }

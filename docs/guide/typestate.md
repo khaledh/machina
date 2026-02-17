@@ -131,72 +131,55 @@ requires {
     std::io::println
 }
 
-type AuthorizeReq = {}
-type AuthReply = {}
-type Start = {}
-type Retry = {}
+type OpenPressed = { id: u64 }
+type OpenCmd = {}
+type Opened = {}
 
-protocol Auth {
-    role Client;
-    role Server;
-    flow Client -> Server: AuthorizeReq -> AuthReply;
-}
-
-typestate GatewayClient : Auth::Client {
-    fields {
-        auth: Machine<AuthService>,
+typestate DoorActuator {
+    fn new() -> Ready {
+        Ready {}
     }
-
-    fn new(auth: Machine<AuthService>) -> Idle {
-        Idle { auth: auth }
-    }
-
-    state Idle {
-        on Start(start) -> stay {
-            start;
-            let p: Pending<AuthReply> = request:initial(self.auth, AuthorizeReq {});
-            p;
-        }
-
-        on Retry(start) -> stay {
-            start;
-            let p: Pending<AuthReply> = request:retry(self.auth, AuthorizeReq {});
-            p;
-        }
-
-        on AuthReply(resp) for AuthorizeReq:initial(req) -> stay {
-            req;
-            resp;
-            println("initial path");
-        }
-
-        on AuthReply(resp) for AuthorizeReq:retry(req) -> stay {
-            req;
-            resp;
-            println("retry path");
-        }
-    }
-}
-
-typestate AuthService : Auth::Server {
-    fn new() -> Ready { Ready {} }
 
     state Ready {
-        on AuthorizeReq(req: AuthorizeReq, cap: ReplyCap<AuthReply>) -> stay {
-            req;
-            cap.reply(AuthReply {});
+        on OpenCmd(_cmd: OpenCmd, cap: ReplyCap<Opened>) -> stay {
+            cap.reply(Opened {});
         }
     }
+}
+
+typestate DoorController {
+    fields {
+        door: Machine<DoorActuator>,
+    }
+
+    fn new(door: Machine<DoorActuator>) -> Closed {
+        Closed { door: door }
+    }
+
+    state Closed {
+        on OpenPressed(evt) -> Waiting {
+            println(f"open event {evt.id}");
+            let _pending: Pending<Opened> = request(self.door, OpenCmd {});
+            Waiting
+        }
+    }
+
+    state Waiting {
+        on Opened(_evt) for OpenCmd(_origin) -> Open {
+            println("door transitioned: Closed -> Waiting -> Open");
+            Open
+        }
+    }
+
+    @final
+    state Open {}
 }
 
 @machines
 fn main() -> () | MachineError {
-    let auth = AuthService::spawn()?;
-    let client = GatewayClient::spawn(auth)?;
-    client.send(Start {})?;
-    client.send(Retry {})?;
-    // `@machines` auto-drives dispatch after `main` exits.
-    println("queued start event");
+    let actuator = DoorActuator::spawn()?;
+    let controller = DoorController::spawn(actuator)?;
+    controller.send(OpenPressed { id: 1 })?;
 }
 ```
 
@@ -213,15 +196,15 @@ Key ideas:
 - `@machines` is required to use `Typestate::spawn(...)` in binaries.
 
 Examples:
-- runnable single-role event flow:
-  `/examples/typestate/machine_events_check.mc`
-- runnable two-machine request/reply flow:
+- canonical managed interaction + state transitions:
+  `/examples/typestate/managed_state_transitions.mc`
+- focused labeled-provenance request/reply flow:
   `/examples/typestate/inter_machine_req_reply_check.mc`
 
 Run them with:
 
 ```bash
-cargo mcr --experimental typestate examples/typestate/machine_events_check.mc
+cargo mcr --experimental typestate examples/typestate/managed_state_transitions.mc
 cargo mcr --experimental typestate examples/typestate/inter_machine_req_reply_check.mc
 ```
 

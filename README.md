@@ -49,7 +49,7 @@ typestate DoorActuator {
     }
 
     state Ready {
-        on OpenCmd(cmd: OpenCmd, cap: ReplyCap<Opened>) -> stay {
+        on OpenCmd(_cmd: OpenCmd, cap: ReplyCap<Opened>) -> stay {
             cap.reply(Opened {});
         }
     }
