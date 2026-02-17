@@ -14,11 +14,11 @@ use crate::core::machine::naming::GENERATED_FINAL_STATE_MARKER;
 use crate::core::resolve::ResolveError;
 use crate::core::tree::NodeIdGen;
 use crate::core::tree::parsed::{
-    self, BindPattern, BindPatternKind, CallArg, Expr, ExprKind, FuncDecl, FuncDef, MatchPattern,
-    MethodBlock, MethodDef, MethodItem, MethodSig, Module, SelfParam, StmtExpr, StmtExprKind,
-    StructDefField, StructLitField, TopLevelItem, TypeDef, TypeDefKind, TypeExpr, TypeExprKind,
-    TypestateDef, TypestateFields, TypestateItem, TypestateOnHandler, TypestateState,
-    TypestateStateItem, EnumDefVariant,
+    self, BindPattern, BindPatternKind, CallArg, EnumDefVariant, Expr, ExprKind, FuncDecl, FuncDef,
+    MatchPattern, MethodBlock, MethodDef, MethodItem, MethodSig, Module, SelfParam, StmtExpr,
+    StmtExprKind, StructDefField, StructLitField, TopLevelItem, TypeDef, TypeDefKind, TypeExpr,
+    TypeExprKind, TypestateDef, TypestateFields, TypestateItem, TypestateOnHandler, TypestateState,
+    TypestateStateItem,
 };
 use crate::core::tree::visit::{self, Visitor};
 use crate::core::tree::visit_mut::{self, VisitorMut};
@@ -1312,11 +1312,7 @@ fn machine_error_variant_for_type_name(error_type_name: &str) -> Option<&'static
     }
 }
 
-fn machine_error_variant_expr(
-    variant_name: &str,
-    node_id_gen: &mut NodeIdGen,
-    span: Span,
-) -> Expr {
+fn machine_error_variant_expr(variant_name: &str, node_id_gen: &mut NodeIdGen, span: Span) -> Expr {
     Expr {
         id: node_id_gen.new_id(),
         kind: ExprKind::EnumVariant {
