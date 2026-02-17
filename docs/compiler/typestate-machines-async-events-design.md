@@ -291,7 +291,10 @@ Lifecycle model (V1):
 - `Created`: machine exists and may buffer mailbox messages, but is not dispatchable.
 - `Running`: dispatchable.
 - `Faulted`: quarantined after handler fault.
-- `Stopped`: explicitly halted.
+- `Stopped`: explicitly halted; runtime eagerly cleans up per-machine resources
+  (mailbox contents/storage, machine-owned subscriptions, dispatch bindings).
+  Machine id remains reserved so stale handles keep deterministic `NotRunning`
+  behavior.
 
 Start semantics (V1):
 - `spawn` creates in `Created`.
@@ -437,7 +440,11 @@ sequenceDiagram
 Default policy:
 - log fault diagnostics,
 - mark machine `Faulted`,
-- stop further dispatch for that machine unless explicitly restarted.
+- stop further dispatch for that machine.
+
+Note:
+- source-level managed API does not expose restart; low-level runtime lifecycle
+  overrides are test/runtime-internal control paths.
 
 Required runtime hooks:
 - dead-letter callback

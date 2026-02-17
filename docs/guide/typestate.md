@@ -195,6 +195,19 @@ Key ideas:
 - `cap.reply(value)` consumes `ReplyCap<...>` and enforces response-set safety.
 - `@machines` is required to use `Typestate::spawn(...)` in binaries.
 
+### Final states and stop behavior
+
+When a machine reaches an `@final` state, runtime dispatch transitions that
+machine to `Stopped`.
+
+Practical behavior:
+- Future `send(...)` / `request(...)` calls to that handle return
+  `MachineError::NotRunning`.
+- Per-machine runtime resources are cleaned up eagerly on stop (mailbox queue,
+  dispatch bindings, and machine-owned subscriptions).
+- Machine identity remains reserved, so stale handles remain deterministic
+  (`NotRunning` rather than `Unknown`).
+
 Examples:
 - canonical managed interaction + state transitions:
   `/examples/typestate/managed_state_transitions.mc`

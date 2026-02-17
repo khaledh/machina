@@ -206,7 +206,11 @@ let s = Connection::new(auth, "api");
 ```
 
 If runtime allocation/registration is fallible, `spawn` should return a
-fallible type (exact surface to be finalized in runtime API design).
+fallible type. Current surface:
+
+```mc
+Typestate::spawn(...) -> Machine<Typestate> | MachineError
+```
 
 ### 3) Typed messaging surface
 

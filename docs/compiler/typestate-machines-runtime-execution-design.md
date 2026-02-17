@@ -223,10 +223,19 @@ No silent drop at source API boundary.
 `step()` returns status enum, not bool:
 - `Idle`
 - `DidWork`
-- `Faulted(machine_id, code)`
+- `Faulted`
 
 This keeps loop control and observability explicit for advanced/runtime-test
-paths while default app code uses implicit runtime dispatch.
+paths while default app code uses implicit runtime dispatch. Detailed fault
+metadata remains available through runtime hooks/diagnostics.
+
+### Stop Semantics (Current Runtime)
+
+When a machine stops (`@final` transition, explicit stop, or stop fault policy),
+runtime keeps the machine id/lifecycle in `Stopped` and eagerly releases
+per-machine runtime resources. This preserves deterministic stale-handle
+behavior (`MachineError::NotRunning`) without retaining mailbox/subscription
+buffers indefinitely.
 
 ## Compiler Pipeline Changes
 

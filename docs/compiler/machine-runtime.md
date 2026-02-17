@@ -38,6 +38,15 @@ Each machine is a numbered slot (1-based IDs). A slot holds:
 - **Mailbox** -- a bounded ring buffer of envelopes
 - **Dispatch callback** -- the function to call when processing a message
 
+When a machine enters `STOPPED`, runtime performs eager per-machine cleanup:
+- pending correlations for that requester are reclaimed,
+- machine-owned subscriptions are removed,
+- mailbox envelopes are drained and mailbox storage is released,
+- dispatch/descriptor/state pointers are cleared.
+
+Machine IDs remain stable and reserved; stale handles continue to observe
+`NotRunning` instead of becoming `Unknown`.
+
 ```
 Machine Table (dense array):
 ┌─────┬───────────┬────────────┬─────────────┐
@@ -134,7 +143,7 @@ Callback returns OK ──→ Preflight ──→ ✓ Commit all effects
                                   └──→ ✗ Fault (rollback)
 
 Callback returns FAULT ──→ Apply fault policy, discard effects
-Callback returns STOP  ──→ Mark STOPPED, discard effects
+Callback returns STOP  ──→ Mark STOPPED, discard effects, eager cleanup
 ```
 
 ## Request/Reply Correlation
@@ -268,8 +277,19 @@ spawn(cap=4)     start()        enqueue(✉)      dispatch()
                          FAULTED    │   STOPPED
                                     │
                             (pending entries cleaned up
-                             on fault/stop transitions)
+                             on fault/stop transitions;
+                             STOPPED also drains/releases
+                             per-machine resources)
 ```
+
+## Runtime Metrics
+
+The runtime tracks cleanup counters for observability/tests:
+- pending lifecycle counts:
+  `__mc_machine_runtime_pending_created_count(...)`,
+  `__mc_machine_runtime_pending_cleanup_count(...)`
+- stop cleanup count:
+  `__mc_machine_runtime_stopped_cleanup_count(...)`
 
 ---
 
