@@ -5,7 +5,7 @@ requires {
 // Runnable managed typestate request/reply flow.
 //
 // Run:
-//   cargo mcr --experimental typestate examples/typestate/inter_machine_req_reply_check.mc
+//   cargo mcr --experimental typestate examples/typestate/inter_machine_request_reply.mc
 //
 // Expected output includes:
 //   approve path

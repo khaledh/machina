@@ -1,5 +1,5 @@
-use super::*;
 use super::ast_build::{int_expr, return_stmt, var_expr};
+use super::*;
 
 pub(super) fn machine_error_type_def(node_id_gen: &mut NodeIdGen) -> TopLevelItem {
     let span = Span::default();
@@ -65,9 +65,7 @@ pub(super) fn machine_error_type_def(node_id_gen: &mut NodeIdGen) -> TopLevelIte
     })
 }
 
-pub(super) fn machine_error_variant_for_type_name(
-    error_type_name: &str,
-) -> Option<&'static str> {
+pub(super) fn machine_error_variant_for_type_name(error_type_name: &str) -> Option<&'static str> {
     match error_type_name {
         MACHINE_SPAWN_FAILED_TYPE_NAME => Some(MACHINE_ERROR_VARIANT_SPAWN_FAILED),
         MACHINE_BIND_FAILED_TYPE_NAME => Some(MACHINE_ERROR_VARIANT_BIND_FAILED),

@@ -1,7 +1,10 @@
-use super::*;
 use super::ast_build::{call_expr, int_expr, let_bind_stmt, var_expr};
+use super::*;
 
-pub(super) fn rewrite_machines_entrypoint(module: &mut Module, node_id_gen: &mut NodeIdGen) -> bool {
+pub(super) fn rewrite_machines_entrypoint(
+    module: &mut Module,
+    node_id_gen: &mut NodeIdGen,
+) -> bool {
     let mut opted_in = false;
     for item in &mut module.top_level_items {
         let TopLevelItem::FuncDef(func) = item else {

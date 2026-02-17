@@ -264,7 +264,6 @@ pub(super) fn empty_struct_type_def(name: &str, node_id_gen: &mut NodeIdGen) -> 
     })
 }
 
-
 pub(super) fn machine_target_id_u64_helper_def(node_id_gen: &mut NodeIdGen) -> TopLevelItem {
     let span = Span::default();
     TopLevelItem::FuncDef(FuncDef {

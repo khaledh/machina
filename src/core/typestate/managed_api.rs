@@ -1,7 +1,7 @@
-use super::*;
 use super::ast_build::{
     call_expr, int_expr, let_bind_stmt, self_field_expr, tuple_field_expr, var_expr,
 };
+use super::*;
 
 pub(super) fn machine_handle_method_block(
     handle_type_name: &str,
@@ -492,7 +492,6 @@ pub(super) fn machine_handle_method_block(
         span,
     })
 }
-
 
 pub(super) fn lower_spawn_func(
     spawn_name: &str,

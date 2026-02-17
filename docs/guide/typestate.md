@@ -199,13 +199,13 @@ Examples:
 - canonical managed interaction + state transitions:
   `/examples/typestate/managed_state_transitions.mc`
 - focused labeled-provenance request/reply flow:
-  `/examples/typestate/inter_machine_req_reply_check.mc`
+  `/examples/typestate/inter_machine_request_reply.mc`
 
 Run them with:
 
 ```bash
 cargo mcr --experimental typestate examples/typestate/managed_state_transitions.mc
-cargo mcr --experimental typestate examples/typestate/inter_machine_req_reply_check.mc
+cargo mcr --experimental typestate examples/typestate/inter_machine_request_reply.mc
 ```
 
 ## Managed Mode Limits (V1)

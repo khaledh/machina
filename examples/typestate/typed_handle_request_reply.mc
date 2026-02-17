@@ -11,7 +11,7 @@ requires {
 //   `on ResponseType(...) for RequestType(...)`.
 //
 // Run:
-//   cargo mcr --experimental typestate examples/typestate/machine_handle_request_check.mc
+//   cargo mcr --experimental typestate examples/typestate/typed_handle_request_reply.mc
 //
 // Expected output:
 //   got 42

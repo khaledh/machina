@@ -24,31 +24,26 @@ use crate::core::tree::visit::{self, Visitor};
 use crate::core::tree::visit_mut::{self, VisitorMut};
 use crate::core::tree::{CallArgMode, InitInfo, ParamMode};
 
+mod ast_build;
+mod managed_api;
 mod managed_entrypoint;
 mod rewrite_handles;
-mod managed_api;
-mod ast_build;
 
 use managed_api::{lower_spawn_func, machine_handle_method_block};
 
 use managed_entrypoint::rewrite_machines_entrypoint;
 use rewrite_handles::{
-    rewrite_machine_request_method_destinations,
-    rewrite_typed_machine_handle_refs,
+    rewrite_machine_request_method_destinations, rewrite_typed_machine_handle_refs,
 };
 
 mod machine_error;
 mod support_types;
 
 use machine_error::{
-    machine_error_type_def,
-    return_machine_error_if_eq,
-    return_machine_error_if_zero,
+    machine_error_type_def, return_machine_error_if_eq, return_machine_error_if_zero,
 };
 use support_types::{
-    ensure_machine_runtime_intrinsics,
-    ensure_machine_support_types,
-    machine_handle_named_type_def,
+    ensure_machine_runtime_intrinsics, ensure_machine_support_types, machine_handle_named_type_def,
     machine_target_id_handle_helper_def,
 };
 

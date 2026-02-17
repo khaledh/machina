@@ -5,7 +5,7 @@ requires {
 // Runnable managed typestate send/event loop.
 //
 // Run:
-//   cargo mcr --experimental typestate examples/typestate/machine_events_check.mc
+//   cargo mcr --experimental typestate examples/typestate/machine_events.mc
 //
 // Expected output:
 //   tick 1

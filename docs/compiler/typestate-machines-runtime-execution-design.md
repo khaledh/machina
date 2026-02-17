@@ -316,7 +316,7 @@ Add execution-path diagnostics (compiler + runtime):
 
 Keep runnable fixtures current as lowering/runtime evolves:
 - `examples/typestate/managed_state_transitions.mc`
-- `examples/typestate/inter_machine_req_reply_check.mc`
+- `examples/typestate/inter_machine_request_reply.mc`
 
 These fixtures should have two coverage forms:
 - ergonomic API tests (implicit runtime),

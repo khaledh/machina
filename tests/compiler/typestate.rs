@@ -49,22 +49,22 @@ fn check_source(
 fn valid_examples() -> Vec<PathBuf> {
     let root = repo_root();
     vec![
-        root.join("examples/typestate/connection.mc"),
-        root.join("examples/typestate/file_handle.mc"),
-        root.join("examples/typestate/job.mc"),
-        root.join("examples/typestate/request_builder.mc"),
-        root.join("examples/typestate/service_lifecycle.mc"),
+        root.join("tests/fixtures/typestate/connection.mc"),
+        root.join("tests/fixtures/typestate/file_handle.mc"),
+        root.join("tests/fixtures/typestate/job.mc"),
+        root.join("tests/fixtures/typestate/request_builder.mc"),
+        root.join("tests/fixtures/typestate/service_lifecycle.mc"),
     ]
 }
 
 fn managed_check_examples() -> Vec<PathBuf> {
     let root = repo_root();
     vec![
-        root.join("examples/typestate/managed_state_transitions.mc"),
-        root.join("examples/typestate/machine_events_check.mc"),
-        root.join("examples/typestate/inter_machine_req_reply_check.mc"),
-        root.join("examples/typestate/machine_handle_request_check.mc"),
-        root.join("examples/typestate/final_state_machine.mc"),
+        root.join("tests/fixtures/typestate/managed_state_transitions.mc"),
+        root.join("tests/fixtures/typestate/machine_events.mc"),
+        root.join("tests/fixtures/typestate/inter_machine_request_reply.mc"),
+        root.join("tests/fixtures/typestate/typed_handle_request_reply.mc"),
+        root.join("tests/fixtures/typestate/final_state_machine.mc"),
     ]
 }
 
@@ -72,18 +72,19 @@ fn invalid_example_cases() -> Vec<(PathBuf, fn(&ResolveError) -> bool)> {
     let root = repo_root();
     vec![
         (
-            root.join("examples/typestate/connection_invalid.mc"),
+            root.join("tests/fixtures/typestate/connection_invalid.mc"),
             |err| matches!(err, ResolveError::TypestateStateLiteralOutsideTypestate(..)),
         ),
         (
-            root.join("examples/typestate/file_handle_invalid.mc"),
+            root.join("tests/fixtures/typestate/file_handle_invalid.mc"),
             |err| matches!(err, ResolveError::TypestateInvalidTransitionReturn(..)),
         ),
-        (root.join("examples/typestate/job_invalid.mc"), |err| {
-            matches!(err, ResolveError::TypestateMissingNew(..))
-        }),
         (
-            root.join("examples/typestate/request_builder_invalid.mc"),
+            root.join("tests/fixtures/typestate/job_invalid.mc"),
+            |err| matches!(err, ResolveError::TypestateMissingNew(..)),
+        ),
+        (
+            root.join("tests/fixtures/typestate/request_builder_invalid.mc"),
             |err| {
                 matches!(
                     err,
@@ -92,7 +93,7 @@ fn invalid_example_cases() -> Vec<(PathBuf, fn(&ResolveError) -> bool)> {
             },
         ),
         (
-            root.join("examples/typestate/service_lifecycle_invalid.mc"),
+            root.join("tests/fixtures/typestate/service_lifecycle_invalid.mc"),
             |err| matches!(err, ResolveError::TypestateDuplicateTransition(..)),
         ),
     ]
@@ -140,7 +141,7 @@ fn typestate_invalid_examples_emit_expected_diagnostics() {
 
 #[test]
 fn typestate_example_runs_in_experimental_mode() {
-    let path = repo_root().join("examples/typestate/connection.mc");
+    let path = repo_root().join("tests/fixtures/typestate/connection.mc");
     let source = std::fs::read_to_string(&path).expect("failed to read typestate runtime fixture");
     let run = run_program_with_opts("typestate_connection", &source, typestate_opts(true));
     assert_eq!(run.status.code(), Some(0));
@@ -156,7 +157,7 @@ fn typestate_managed_examples_typecheck_with_experimental_flag() {
 
 #[test]
 fn typestate_machine_handle_request_example_runs_in_experimental_mode() {
-    let path = repo_root().join("examples/typestate/machine_handle_request_check.mc");
+    let path = repo_root().join("tests/fixtures/typestate/typed_handle_request_reply.mc");
     let source = std::fs::read_to_string(&path)
         .expect("failed to read typestate machine-handle request fixture");
     let run = run_program_with_opts(
@@ -174,7 +175,7 @@ fn typestate_machine_handle_request_example_runs_in_experimental_mode() {
 
 #[test]
 fn typestate_managed_state_transitions_example_runs_in_experimental_mode() {
-    let path = repo_root().join("examples/typestate/managed_state_transitions.mc");
+    let path = repo_root().join("tests/fixtures/typestate/managed_state_transitions.mc");
     let source = std::fs::read_to_string(&path)
         .expect("failed to read typestate managed state-transition fixture");
     let run = run_program_with_opts(
@@ -273,7 +274,7 @@ fn typestate_managed_examples_are_rejected_without_experimental_flag() {
 fn typestate_example_lists_cover_all_typestate_fixtures() {
     use std::collections::HashSet;
     let root = repo_root();
-    let fixture_dir = root.join("examples/typestate");
+    let fixture_dir = root.join("tests/fixtures/typestate");
     let disk: HashSet<PathBuf> = std::fs::read_dir(&fixture_dir)
         .expect("failed to read typestate fixture directory")
         .filter_map(|entry| entry.ok().map(|e| e.path()))
@@ -323,7 +324,7 @@ typestate Client {
 
     let errors = check_source(
         source,
-        "examples/typestate/managed_ambiguous_provenance.mc",
+        "tests/fixtures/typestate/managed_ambiguous_provenance.mc",
         true,
     )
     .expect_err("expected ambiguous provenance diagnostic");
@@ -376,7 +377,7 @@ typestate Client {
 
     check_source(
         source,
-        "examples/typestate/managed_labeled_provenance.mc",
+        "tests/fixtures/typestate/managed_labeled_provenance.mc",
         true,
     )
     .unwrap_or_else(|errs| panic!("expected success for labeled provenance source: {errs:?}"));
