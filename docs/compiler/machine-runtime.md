@@ -493,32 +493,48 @@ registry and descriptor registry that the runtime uses during dispatch.
 
 ### Step 4: Spawn -- Creating a Machine
 
-When user code creates a typestate instance, the compiler generates a **spawn wrapper**:
+When user code calls `Typestate::spawn(...)`, the compiler lowers it to a
+generated **spawn wrapper**:
 
 ```
 // User writes:
-let ping = Ping(some_arg);
+let ping = Ping::spawn(some_arg)?;
 
-// Compiler generates a call to __ts_spawn_Ping(rt, some_arg):
+// Compiler lowers to:
+//   __ts_spawn_Ping(some_arg)
 
-fn __ts_spawn_Ping(rt: u64, arg: u64) -> u64 {
+fn __ts_spawn_Ping(arg: u64) -> __mc_machine_handle_Ping | MachineError {
+    // 0. Use managed runtime in @machines entrypoints
+    let rt = __mc_machine_runtime_managed_current_u64();
+    // Current lowering treats missing managed runtime as spawn failure.
+    // (A follow-up can map this to RuntimeUnavailable directly.)
+    if rt == 0 { return MachineError::SpawnFailed; }
+
     // 1. Allocate machine slot
     let id = __mc_machine_runtime_spawn_u64(rt, mailbox_cap);
+    if id == 0 { return MachineError::SpawnFailed; }
 
     // 2. Bind descriptor (connects dispatch table)
-    __mc_machine_runtime_bind_descriptor_u64(rt, id, desc_id, initial_tag);
+    if __mc_machine_runtime_bind_descriptor_u64(rt, id, desc_id, initial_tag) == 0 {
+        return MachineError::BindFailed;
+    }
 
     // 3. Run constructor to get initial state
     let state = __ts_ctor_Ping(arg);
     let boxed = heap_box(state);
 
-    // 4. Store state word
+    // 4. Seed state word
     // (state word = pointer to heap-allocated state struct)
+    if __mc_machine_runtime_set_state_u64(rt, id, boxed.ptr_word) == 0 {
+        return MachineError::BindFailed;
+    }
 
     // 5. Start machine (CREATED -> RUNNING)
-    __mc_machine_runtime_start_u64(rt, id);
+    if __mc_machine_runtime_start_u64(rt, id) == 0 {
+        return MachineError::StartFailed;
+    }
 
-    return id;   // returned as machine handle
+    return __mc_machine_handle_Ping { _id: id };
 }
 ```
 
@@ -550,7 +566,7 @@ __mc_machine_emit_send(
 
 ```
 // User writes:
-let pending = request(target, MyRequest { data: 1 }) label my_site;
+let pending = request:my_site(target, MyRequest { data: 1 });
 
 // Compiler lowers to:
 let pending = __mc_machine_emit_request(
@@ -571,7 +587,8 @@ answering.
 
 ```
 // User writes (inside a handler that received a request):
-reply(cap, MyResponse { result: 42 });
+cap.reply(MyResponse { result: 42 });
+// (explicit form is also valid: reply(cap, MyResponse { ... }))
 
 // Compiler lowers to:
 __mc_machine_emit_reply(
@@ -589,29 +606,31 @@ The `@machines` attribute on `main()` wraps the user's code with runtime lifecyc
 ```
 // User writes:
 @machines
-fn main() {
-    let p = Ping();
-    send(p, Start {});
+fn main() -> () | MachineError {
+    let p = Ping::spawn()?;
+    p.send(Start {})?;
 }
 
 // Compiler rewrites to:
-fn main() {
+fn main() -> () | MachineError {
     // 1. Bootstrap runtime (triggers __mc_machine_bootstrap)
     let rt = __mc_machine_runtime_managed_bootstrap_u64();
 
     // 2. Run user code (spawns machines, sends initial messages)
     let result = {
-        let p = Ping();      // calls __ts_spawn_Ping(rt, ...)
-        send(p, Start {});   // enqueues into p's mailbox
+        let p = __ts_spawn_Ping()?;  // typed machine handle
+        p.send(Start {})?;            // typed send wrapper
     };
 
-    // 3. Auto-drive dispatch loop
-    loop {
-        let status = __mc_machine_runtime_step_u64(rt);
-        if status != MC_STEP_DID_WORK { break; }
-        //  MC_STEP_IDLE    = 0  (no runnable machines)
-        //  MC_STEP_DID_WORK = 1  (dispatched one envelope)
-        //  MC_STEP_FAULTED  = 2  (dispatched + faulted)
+    // 3. Auto-drive dispatch loop (only when runtime is available)
+    if rt != 0 {
+        loop {
+            let status = __mc_machine_runtime_step_u64(rt);
+            if status != MC_STEP_DID_WORK { break; }
+            //  MC_STEP_IDLE     = 0  (no runnable machines)
+            //  MC_STEP_DID_WORK = 1  (dispatched one envelope)
+            //  MC_STEP_FAULTED  = 2  (dispatched + faulted)
+        }
     }
 
     // 4. Tear down
@@ -621,7 +640,9 @@ fn main() {
 }
 ```
 
-The loop runs until all mailboxes are empty and no machines are in the ready queue.
+The loop runs until there is no more runnable work (`IDLE`) or a faulted step is observed
+(`FAULTED`). User-visible failures still flow through typed wrappers (`spawn/send/request`)
+as `MachineError` variants.
 
 ### Putting It All Together
 
@@ -638,8 +659,8 @@ Here's the full sequence for a simple program:
                              │ -> dispatch rows    │
   @machines                  │ -> thunks           │
   fn main() {                └──────────┬──────────┘
-    let p = Ping();                     │
-    send(p, Msg {});                    │
+    let p = Ping::spawn()?;             │
+    p.send(Msg {})?;                    │
   }                                     ▼
 
               Generates:                Executes:
@@ -651,13 +672,14 @@ Here's the full sequence for a simple program:
   __ts_spawn_Ping()                       -> registers descriptor blob
   __ts_ctor_Ping()
   wrapped main()                        2. main() body runs
-                                           -> __ts_spawn_Ping(rt)
+                                           -> __ts_spawn_Ping()
                                               -> spawn slot, bind desc
                                               -> run constructor
+                                              -> set state word
                                               -> start machine
-                                           -> send(p, Msg{})
-                                              -> __mc_machine_emit_send
-                                              or __mc_machine_runtime_enqueue
+                                           -> p.send(Msg {})
+                                              -> typed wrapper packs payload
+                                              -> __mc_machine_runtime_send_u64
 
                                         3. dispatch loop
                                            -> step_u64(rt)

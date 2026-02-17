@@ -21,12 +21,12 @@ This document is intentionally separate from
 
 Current repository status is split:
 - frontend supports protocol/flow/on/send/request/reply semantics (experimental),
-- runtime has managed scheduler primitives (`runtime/machine_runtime.*`),
-- backend/elaboration do not yet bridge typestate handlers/effects into runtime
-  execution.
+- runtime has managed scheduler primitives (`runtime/machine/runtime.*`),
+- compiler/runtime bridge exists end-to-end, but still needs execution-path
+  hardening and DX cleanup.
 
-As a result, managed execution works but source-level usage is still low-level:
-explicit runtime setup, manual stepping, and plumbing-heavy examples.
+As a result, managed execution is viable today, but we still need to polish:
+better defaults, clearer API contracts, and stronger execution diagnostics.
 
 ## Goal
 
@@ -208,11 +208,12 @@ Direct mode APIs remain unchanged.
 `spawn` returns typed handle, not direct typestate value. This enforces managed
 exclusivity via existing move semantics.
 
-### Fallible Send/Request
+### Fallible Spawn/Send/Request
 
-Managed send/request APIs are fallible:
-- `send(...) -> SendResult`
-- `request(...) -> RequestResult<()>` in default implicit-correlation form
+Managed spawn/send/request APIs are fallible:
+- `Typestate::spawn(...) -> Machine<T> | MachineError`
+- `send(...) -> () | MachineError`
+- `request(...) -> u64 | MachineError` in default implicit-correlation form
 - explicit advanced forms may expose `Pending<T>` where source code opts in
 
 No silent drop at source API boundary.
@@ -258,11 +259,12 @@ For binaries using managed machines:
 ## Source-Level API Sketch (Ergonomic Target)
 
 ```mc
-fn main() {
-    let auth = AuthService::spawn();
-    let gate = GatewayClient::spawn(auth);
+@machines
+fn main() -> () | MachineError {
+    let auth = AuthService::spawn()?;
+    let gate = GatewayClient::spawn(auth)?;
 
-    gate.send(AuthorizeReq { user: "alice" });
+    gate.send(AuthorizeReq { user: "alice" })?;
 }
 ```
 
@@ -270,6 +272,8 @@ This keeps asynchrony at machine boundaries without infecting function types or
 forcing explicit runtime wiring in app code.
 
 ### Explicit Runtime API Sketch (Advanced/Test Path)
+
+Illustrative pseudocode (exact std wrapper names may differ as runtime APIs evolve):
 
 ```mc
 requires {

@@ -234,6 +234,10 @@ Proposed primitives:
 - `request(to: Machine<T>, Req { ... })`
 - `reply(Resp { ... })`
 
+For app-facing managed handles, ergonomic wrappers are also part of v1:
+- `handle.send(payload) -> () | MachineError`
+- `handle.request(payload) -> u64 | MachineError` (default implicit-correlation form)
+
 Canonical lower-level forms (`emit Send(...)`, `emit Request(...)`,
 `reply(cap, ...)`) remain available for advanced/internal usage.
 
