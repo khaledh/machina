@@ -58,6 +58,10 @@ fn test_lower_emit_send_and_request_runtime_calls() {
         text.contains("__mc_machine_emit_request"),
         "expected request runtime ABI call in lowered IR: {text}"
     );
+    assert!(
+        text.contains("__rt_alloc"),
+        "expected payload boxing alloc in lowered emit IR: {text}"
+    );
 }
 
 #[test]
@@ -116,6 +120,10 @@ fn test_lower_typestate_handler_reply_runtime_call() {
     assert!(
         handler.contains("__mc_machine_emit_reply"),
         "expected reply runtime ABI call in typestate handler IR: {handler}"
+    );
+    assert!(
+        handler.contains("__rt_alloc"),
+        "expected payload boxing alloc in typestate handler IR: {handler}"
     );
 }
 

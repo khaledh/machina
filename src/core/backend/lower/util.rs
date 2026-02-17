@@ -831,6 +831,49 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
         self.builder.memcopy(dst, src_slot.addr, len);
     }
 
+    /// Packs a typed payload value into machine-envelope ABI words.
+    ///
+    /// Returns:
+    /// - `payload0`: pointer word to a heap-allocated payload box
+    /// - `payload1`: payload layout id used by descriptor/thunk metadata
+    pub(super) fn pack_machine_payload_words(
+        &mut self,
+        payload_value: ValueId,
+        payload_ty: &Type,
+    ) -> (ValueId, ValueId) {
+        let payload_ir_ty = self.type_lowerer.lower_type(payload_ty);
+        let layout = self.type_lowerer.ir_type_cache.layout(payload_ir_ty);
+        let u64_ty = self.type_lowerer.lower_type(&Type::uint(64));
+        let u8_ty = self.type_lowerer.lower_type(&Type::uint(8));
+        let u8_ptr_ty = self.type_lowerer.ptr_to(u8_ty);
+        let payload_ptr_ty = self.type_lowerer.ptr_to(payload_ir_ty);
+
+        let size =
+            self.builder
+                .const_int(std::cmp::max(layout.size(), 1) as i128, false, 64, u64_ty);
+        let align = self
+            .builder
+            .const_int(layout.align() as i128, false, 64, u64_ty);
+        let payload_ptr_u8 = self.builder.call(
+            Callee::Runtime(RuntimeFn::Alloc),
+            vec![size, align],
+            u8_ptr_ty,
+        );
+        let payload_ptr = self
+            .builder
+            .cast(CastKind::PtrToPtr, payload_ptr_u8, payload_ptr_ty);
+        self.store_value_into_addr(payload_ptr, payload_value, payload_ty, payload_ir_ty);
+        let payload0 = self
+            .builder
+            .cast(CastKind::PtrToInt, payload_ptr_u8, u64_ty);
+
+        let payload_layout_id = self.machine_payload_layout_id(payload_ty).unwrap_or(0);
+        let payload1 = self
+            .builder
+            .const_int(payload_layout_id as i128, false, 64, u64_ty);
+        (payload0, payload1)
+    }
+
     /// Extracts ptr+len from a string/slice value for runtime argument lowering.
     pub(super) fn lower_ptr_len_from_value(
         &mut self,
