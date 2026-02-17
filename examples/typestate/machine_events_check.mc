@@ -8,10 +8,9 @@ requires {
 //   cargo mcr --experimental typestate examples/typestate/machine_events_check.mc
 //
 // Expected output:
-//   tick
+//   tick 1
 
-type Kick = {}
-type Tick = {}
+type Kick = { n: u64 }
 
 typestate Timer {
     fn new() -> Running {
@@ -20,11 +19,7 @@ typestate Timer {
 
     state Running {
         on Kick(e) -> stay {
-            send(1, Tick {});
-        }
-
-        on Tick(t) {
-            println("tick");
+            println(f"tick {e.n}");
         }
     }
 }
@@ -39,5 +34,5 @@ fn main() -> ()
     | MachineNotRunning
     | MailboxFull {
     let timer = Timer::spawn()?;
-    timer.send(Kick {})?;
+    timer.send(Kick { n: 1 })?;
 }

@@ -94,6 +94,11 @@ impl<'a> Elaborator<'a> {
                 .def_table
                 .lookup_def(def_id)
                 .unwrap_or_else(|| panic!("compiler bug: missing def for call {call_id:?}"));
+            // Typestate managed handles use this compiler-provided helper to
+            // lower arbitrary payload values into `(payload0_ptr, layout_id)`.
+            if def.name == "__mc_machine_payload_pack" {
+                target = sem::CallTarget::Intrinsic(sem::IntrinsicCall::MachinePayloadPack);
+            }
             // Intrinsics override the normal direct-call target with a lowering intent.
             if def.is_intrinsic() {
                 let intrinsic_name = def.link_name().unwrap_or(def.name.as_str());
@@ -299,6 +304,18 @@ impl<'a> Elaborator<'a> {
                     );
                 }
                 vec![sem::ArgLowering::Direct(sem::CallInput::Receiver)]
+            }
+            sem::CallTarget::Intrinsic(sem::IntrinsicCall::MachinePayloadPack) => {
+                if has_receiver {
+                    panic!("compiler bug: payload-pack intrinsic has receiver");
+                }
+                if call_sig.params.len() != 1 {
+                    panic!(
+                        "compiler bug: payload-pack intrinsic expects 1 arg, got {}",
+                        call_sig.params.len()
+                    );
+                }
+                vec![sem::ArgLowering::Direct(sem::CallInput::Arg(0))]
             }
             sem::CallTarget::Intrinsic(sem::IntrinsicCall::DynArrayAppend) => {
                 if !has_receiver {

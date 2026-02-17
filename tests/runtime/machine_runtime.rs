@@ -317,6 +317,62 @@ fn main() {
 }
 
 #[test]
+fn test_typestate_machine_handle_typed_send_with_non_empty_payload_executes_handler() {
+    let source = r#"
+requires {
+    std::io::println
+}
+
+type Ping = { id: u64 }
+
+typestate M {
+    fn new() -> S {
+        S {}
+    }
+
+    state S {
+        on Ping(p) -> stay {
+            println(f"handled {p.id}");
+        }
+    }
+}
+
+@machines
+fn main() -> ()
+    | MachineSpawnFailed
+    | MachineBindFailed
+    | MachineStartFailed
+    | ManagedRuntimeUnavailable
+    | MachineUnknown
+    | MachineNotRunning
+    | MailboxFull {
+    let m = M::spawn()?;
+    m.send(Ping { id: 7 })?;
+}
+"#;
+
+    let run = run_program_with_opts(
+        "typestate_machine_runtime_typed_send_payload",
+        source,
+        CompileOptions {
+            dump: None,
+            emit_ir: false,
+            verify_ir: false,
+            trace_alloc: false,
+            trace_drops: false,
+            inject_prelude: true,
+            experimental_typestate: true,
+        },
+    );
+    assert_eq!(run.status.code(), Some(0));
+    let stdout = String::from_utf8_lossy(&run.stdout);
+    assert!(
+        stdout.contains("handled 7"),
+        "expected typed payload handler output, got stdout: {stdout}"
+    );
+}
+
+#[test]
 fn test_typestate_final_state_stops_machine_and_rejects_future_send() {
     let source = r#"
 requires {

@@ -29,6 +29,76 @@ fn drop_def_for_place_expr(place: &sem::PlaceExpr) -> Option<DefId> {
 }
 
 impl<'a, 'g> FuncLowerer<'a, 'g> {
+    fn lower_machine_payload_pack_intrinsic(
+        &mut self,
+        expr: &sem::ValueExpr,
+        args: &[sem::CallArg],
+        call_plan: &sem::CallPlan,
+    ) -> Result<Option<LinearValue>, LowerToIrError> {
+        let Some(mut arg_values) = self.lower_call_arg_values(args)? else {
+            return Ok(None);
+        };
+        if arg_values.len() != 1 {
+            panic!(
+                "backend payload-pack intrinsic expects exactly one arg, got {}",
+                arg_values.len()
+            );
+        }
+
+        let payload_arg = &mut arg_values[0];
+        if payload_arg.is_addr {
+            let payload_ir_ty = self.type_lowerer.lower_type(&payload_arg.ty);
+            payload_arg.value = self.builder.load(payload_arg.value, payload_ir_ty);
+            payload_arg.is_addr = false;
+        }
+        let payload_ty = payload_arg.ty.clone();
+        let payload_ir_ty = self.type_lowerer.lower_type(&payload_ty);
+
+        // Allocate a heap box that survives until envelope dispatch.
+        let layout = self.type_lowerer.ir_type_cache.layout(payload_ir_ty);
+        let u64_ty = self.type_lowerer.lower_type(&Type::uint(64));
+        let u8_ty = self.type_lowerer.lower_type(&Type::uint(8));
+        let u8_ptr_ty = self.type_lowerer.ptr_to(u8_ty);
+        let payload_ptr_ty = self.type_lowerer.ptr_to(payload_ir_ty);
+        let size =
+            self.builder
+                .const_int(std::cmp::max(layout.size(), 1) as i128, false, 64, u64_ty);
+        let align = self
+            .builder
+            .const_int(layout.align() as i128, false, 64, u64_ty);
+        let payload_ptr_u8 = self.builder.call(
+            Callee::Runtime(RuntimeFn::Alloc),
+            vec![size, align],
+            u8_ptr_ty,
+        );
+        let payload_ptr = self.builder.cast(
+            crate::core::ir::CastKind::PtrToPtr,
+            payload_ptr_u8,
+            payload_ptr_ty,
+        );
+        self.store_value_into_addr(payload_ptr, payload_arg.value, &payload_ty, payload_ir_ty);
+        let payload_word =
+            self.builder
+                .cast(crate::core::ir::CastKind::PtrToInt, payload_ptr_u8, u64_ty);
+
+        let payload_layout_id = self.machine_payload_layout_id(&payload_ty).unwrap_or(0);
+        let layout_word = self
+            .builder
+            .const_int(payload_layout_id as i128, false, 64, u64_ty);
+
+        // Materialize `(payload0, payload1)` tuple return.
+        let ret_ty = self.type_lowerer.lower_type_id(expr.ty);
+        let ret_slot = self.alloc_value_slot(ret_ty);
+        let field0_ty = self.lower_tuple_field_ty(expr.ty, 0);
+        let field1_ty = self.lower_tuple_field_ty(expr.ty, 1);
+        self.store_field(ret_slot.addr, 0, field0_ty, payload_word);
+        self.store_field(ret_slot.addr, 1, field1_ty, layout_word);
+        let packed = self.load_slot(&ret_slot);
+
+        self.apply_call_drop_effects(call_plan, args, None, &arg_values)?;
+        Ok(Some(packed))
+    }
+
     fn call_input_from_value_expr(
         &mut self,
         expr: &sem::ValueExpr,
@@ -183,6 +253,9 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
                 sem::IntrinsicCall::StringLen => {
                     panic!("backend call expr cannot lower string len without a receiver");
                 }
+                sem::IntrinsicCall::MachinePayloadPack => {
+                    return self.lower_machine_payload_pack_intrinsic(expr, args, &call_plan);
+                }
                 sem::IntrinsicCall::DynArrayAppend => {
                     panic!("backend call expr cannot lower dyn-array intrinsic without a receiver");
                 }
@@ -313,6 +386,9 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
         intrinsic: &sem::IntrinsicCall,
     ) -> Result<Option<LinearValue>, LowerToIrError> {
         match intrinsic {
+            sem::IntrinsicCall::MachinePayloadPack => {
+                panic!("backend method intrinsic cannot lower payload-pack with receiver")
+            }
             sem::IntrinsicCall::StringLen => {
                 // String length is a field load; avoid emitting a runtime call.
                 self.lower_string_len_method(expr.span, receiver, receiver_value)

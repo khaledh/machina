@@ -1299,7 +1299,7 @@ fn main() -> ()
 }
 
 #[test]
-fn compile_typestate_machine_handle_typed_send_requires_zero_payload_selectors() {
+fn compile_typestate_machine_handle_typed_send_supports_non_empty_payload_selectors() {
     let source = r#"
 type Msg = { x: u64 }
 
@@ -1312,25 +1312,21 @@ typestate Worker {
 }
 
 @machines
-fn main() {
-    let worker = match Worker::spawn() {
-        m: Machine<Worker> => m,
-        _ => { return; },
-    };
-    let ignored = worker.send(Msg { x: 7 });
-    ignored;
+fn main() -> ()
+    | MachineSpawnFailed
+    | MachineBindFailed
+    | MachineStartFailed
+    | ManagedRuntimeUnavailable
+    | MachineUnknown
+    | MachineNotRunning
+    | MailboxFull {
+    let worker = Worker::spawn()?;
+    worker.send(Msg { x: 7 })?;
 }
 "#;
 
-    let errs = match compile(source, &typestate_compile_opts()) {
-        Ok(_) => panic!("expected typed send overload to be unavailable for non-zero payload"),
-        Err(errs) => errs,
-    };
-    assert!(
-        errs.iter()
-            .any(|err| matches!(err, crate::core::diag::CompileError::TypeCheck(_))),
-        "expected typecheck error for unsupported typed send payload, got {errs:?}"
-    );
+    compile(source, &typestate_compile_opts())
+        .expect("typed send should support non-empty payload selectors");
 }
 
 #[test]

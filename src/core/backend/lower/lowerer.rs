@@ -422,6 +422,31 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
         selected
     }
 
+    /// Resolves a payload layout-id for boxed machine payload transport.
+    ///
+    /// Layout ids are emitted into envelope `payload1` and map to descriptor
+    /// metadata. If multiple descriptors disagree for the same payload type,
+    /// lookup is treated as ambiguous.
+    pub(super) fn machine_payload_layout_id(&self, payload_ty: &Type) -> Option<u64> {
+        let plans = self.machine_plans?;
+        let mut selected = None;
+        for descriptor in plans.descriptors.values() {
+            for event in &descriptor.event_kinds {
+                if let sem::MachineEventKeyPlan::Payload { payload_ty: ty } = &event.key
+                    && ty == payload_ty
+                {
+                    let layout_id = event.payload_layout_ty.index() as u64;
+                    match selected {
+                        None => selected = Some(layout_id),
+                        Some(existing) if existing == layout_id => {}
+                        Some(_) => return None,
+                    }
+                }
+            }
+        }
+        selected
+    }
+
     /// Resolves an event kind for response reply emits.
     ///
     /// Response emits only carry the concrete response payload, so this lookup

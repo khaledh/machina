@@ -9,6 +9,7 @@ use crate::core::tree::ParamMode;
 #[derive(Clone, Debug)]
 pub enum IntrinsicCall {
     StringLen,
+    MachinePayloadPack,
     DynArrayAppend,
     SetInsert,
     SetContains,
