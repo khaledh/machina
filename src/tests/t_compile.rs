@@ -1258,6 +1258,41 @@ fn main() -> ()
 }
 
 #[test]
+fn compile_typestate_machine_handle_typed_send_requires_zero_payload_selectors() {
+    let source = r#"
+type Msg = { x: u64 }
+
+typestate Worker {
+    fn new() -> Idle { Idle {} }
+
+    state Idle {
+        on Msg(m) -> stay { m; }
+    }
+}
+
+@machines
+fn main() {
+    let worker = match Worker::spawn() {
+        m: Machine<Worker> => m,
+        _ => { return; },
+    };
+    let ignored = worker.send(Msg { x: 7 });
+    ignored;
+}
+"#;
+
+    let errs = match compile(source, &typestate_compile_opts()) {
+        Ok(_) => panic!("expected typed send overload to be unavailable for non-zero payload"),
+        Err(errs) => errs,
+    };
+    assert!(
+        errs.iter()
+            .any(|err| matches!(err, crate::core::diag::CompileError::TypeCheck(_))),
+        "expected typecheck error for unsupported typed send payload, got {errs:?}"
+    );
+}
+
+#[test]
 fn compile_typestate_spawn_mirrors_new_param_arity() {
     let source = r#"
 typestate Worker {

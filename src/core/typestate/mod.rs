@@ -78,6 +78,11 @@ pub fn desugar_module(module: &mut Module, node_id_gen: &mut NodeIdGen) -> Vec<R
     let mut generated_state_names = HashSet::new();
     let mut errors = Vec::new();
     let mut saw_typestate = false;
+    // Typed `Machine<T>::send(payload)` currently lowers through payload words.
+    // Until full boxed payload transport is implemented, only zero-payload
+    // nominal selector types are surfaced through the ergonomic typed-send
+    // overloads to avoid runtime null-payload dispatch faults.
+    let zero_payload_selector_types = collect_zero_payload_selector_type_names(module);
 
     for item in module.top_level_items.drain(..) {
         match item {
@@ -90,6 +95,7 @@ pub fn desugar_module(module: &mut Module, node_id_gen: &mut NodeIdGen) -> Vec<R
                     &mut ctor_by_typestate,
                     &mut spawn_by_typestate,
                     &mut handle_by_typestate,
+                    &zero_payload_selector_types,
                 );
                 out.extend(lowered.items);
                 source_state_names.extend(lowered.source_state_names);
@@ -216,6 +222,7 @@ fn desugar_typestate(
     ctor_by_typestate: &mut HashMap<String, String>,
     spawn_by_typestate: &mut HashMap<String, String>,
     handle_by_typestate: &mut HashMap<String, String>,
+    zero_payload_selector_types: &HashSet<String>,
 ) -> TypestateDesugarOutput {
     let ts_name = typestate.name.clone();
     let ctor_name = format!("__ts_ctor_{}", ts_name);
@@ -238,7 +245,11 @@ fn desugar_typestate(
     let states = analysis.states;
     let typestate_handlers = analysis.handlers;
     let final_state_names = analysis.final_state_names;
-    let typed_send_specs = collect_typed_send_specs(&typestate_handlers, &states);
+    let typed_send_specs = collect_typed_send_specs(
+        &typestate_handlers,
+        &states,
+        zero_payload_selector_types,
+    );
     let state_name_map = build_state_name_map(&ts_name, &states);
     let generated_state_names: HashSet<String> = state_name_map.values().cloned().collect();
     // Local fields are used by shorthand transition rewriting (`State`) to know
@@ -444,6 +455,30 @@ struct TypestateDesugarOutput {
 struct TypedSendSpec {
     selector_ty: TypeExpr,
     kind: u64,
+}
+
+fn collect_zero_payload_selector_type_names(module: &Module) -> HashSet<String> {
+    module
+        .top_level_items
+        .iter()
+        .filter_map(|item| match item {
+            TopLevelItem::TypeDef(type_def) if type_def.type_params.is_empty() => {
+                let is_zero_payload = match &type_def.kind {
+                    TypeDefKind::Struct { fields } => fields.is_empty(),
+                    TypeDefKind::Enum { variants } => {
+                        variants.iter().all(|variant| variant.payload.is_empty())
+                    }
+                    TypeDefKind::Alias { .. } => false,
+                };
+                if is_zero_payload {
+                    Some(type_def.name.clone())
+                } else {
+                    None
+                }
+            }
+            _ => None,
+        })
+        .collect()
 }
 
 fn rewrite_machines_entrypoint(module: &mut Module, node_id_gen: &mut NodeIdGen) -> bool {
@@ -1520,6 +1555,7 @@ fn build_state_name_map(ts_name: &str, states: &[TypestateState]) -> HashMap<Str
 fn collect_typed_send_specs(
     typestate_handlers: &[TypestateOnHandler],
     states: &[TypestateState],
+    zero_payload_selector_types: &HashSet<String>,
 ) -> Vec<TypedSendSpec> {
     use std::collections::BTreeMap;
 
@@ -1529,6 +1565,9 @@ fn collect_typed_send_specs(
         // (`for RequestType(...)`) keep request/reply routing semantics and are
         // intentionally excluded from this surface.
         if handler.provenance.is_some() {
+            return;
+        }
+        if !selector_ty_supports_typed_send(&handler.selector_ty, zero_payload_selector_types) {
             return;
         }
         let key = payload_selector_stable_key(&handler.selector_ty);
@@ -1556,6 +1595,19 @@ fn collect_typed_send_specs(
             kind: idx as u64 + 1,
         })
         .collect()
+}
+
+fn selector_ty_supports_typed_send(
+    selector_ty: &TypeExpr,
+    zero_payload_selector_types: &HashSet<String>,
+) -> bool {
+    let TypeExprKind::Named {
+        ident, type_args, ..
+    } = &selector_ty.kind
+    else {
+        return false;
+    };
+    type_args.is_empty() && zero_payload_selector_types.contains(ident)
 }
 
 fn payload_selector_stable_key(ty: &TypeExpr) -> String {
