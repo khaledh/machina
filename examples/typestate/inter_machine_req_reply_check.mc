@@ -70,26 +70,20 @@ typestate AuthServer {
 }
 
 @machines
-fn main() {
+fn main() -> ()
+    | MachineSpawnFailed
+    | MachineBindFailed
+    | MachineStartFailed
+    | ManagedRuntimeUnavailable
+    | MachineUnknown
+    | MachineNotRunning
+    | MailboxFull {
     // Spawn server first so its machine id is 1 (used by client Request `to:`).
-    match AuthServer::spawn() {
-        m: Machine<AuthServer> => { m; }
-        _ => { return; },
-    };
-    match AuthClient::spawn() {
-        client: Machine<AuthClient> => {
-            // Queue two concurrent same-type requests.
-            match client.send(1, 0, 0) {
-                ok: () => { ok; }
-                _ => { return; },
-            };
-            match client.send(2, 0, 0) {
-                ok: () => { ok; }
-                _ => { return; },
-            };
-        }
-        _ => { return; },
-    };
+    let _server = AuthServer::spawn()?;
+    let client = AuthClient::spawn()?;
+    // Queue two concurrent same-type requests.
+    client.send(KickApprove {})?;
+    client.send(KickDeny {})?;
 
     // `@machines` auto-drives the managed runtime until it reaches idle.
 }
