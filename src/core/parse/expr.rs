@@ -590,64 +590,52 @@ impl<'a> Parser<'a> {
             }
             TK::Ident(name) => {
                 self.advance();
-                if self.curr_token.kind == TK::LParen {
-                    self.advance();
-                    let args =
-                        self.parse_list(TK::Comma, TK::RParen, |parser| parser.parse_call_arg())?;
-                    self.consume(&TK::RParen)?;
-                    Ok(Expr {
-                        id: self.id_gen.new_id(),
-                        kind: ExprKind::MethodCall {
-                            callee: Box::new(expr),
-                            method_name: name.clone(),
-                            args,
-                        },
-                        ty: (),
-                        span: self.close(marker),
-                    })
-                } else {
-                    Ok(Expr {
-                        id: self.id_gen.new_id(),
-                        kind: ExprKind::StructField {
-                            target: Box::new(expr),
-                            field: name.clone(),
-                        },
-                        ty: (),
-                        span: self.close(marker),
-                    })
-                }
+                self.parse_dot_named_postfix(expr, marker, name.clone())
             }
             TK::KwGet => {
                 self.advance();
-                let name = "get".to_string();
-                if self.curr_token.kind == TK::LParen {
-                    self.advance();
-                    let args =
-                        self.parse_list(TK::Comma, TK::RParen, |parser| parser.parse_call_arg())?;
-                    self.consume(&TK::RParen)?;
-                    Ok(Expr {
-                        id: self.id_gen.new_id(),
-                        kind: ExprKind::MethodCall {
-                            callee: Box::new(expr),
-                            method_name: name,
-                            args,
-                        },
-                        ty: (),
-                        span: self.close(marker),
-                    })
-                } else {
-                    Ok(Expr {
-                        id: self.id_gen.new_id(),
-                        kind: ExprKind::StructField {
-                            target: Box::new(expr),
-                            field: name,
-                        },
-                        ty: (),
-                        span: self.close(marker),
-                    })
-                }
+                self.parse_dot_named_postfix(expr, marker, "get".to_string())
+            }
+            TK::KwReply => {
+                // Allow capability-style method syntax like `cap.reply(payload)`
+                // while keeping `reply(...)` as a keyword expression.
+                self.advance();
+                self.parse_dot_named_postfix(expr, marker, "reply".to_string())
             }
             _ => Err(ParseError::ExpectedStructField(self.curr_token.clone())),
+        }
+    }
+
+    fn parse_dot_named_postfix(
+        &mut self,
+        expr: Expr,
+        marker: Marker,
+        name: String,
+    ) -> Result<Expr, ParseError> {
+        if self.curr_token.kind == TK::LParen {
+            self.advance();
+            let args = self.parse_list(TK::Comma, TK::RParen, |parser| parser.parse_call_arg())?;
+            self.consume(&TK::RParen)?;
+            Ok(Expr {
+                id: self.id_gen.new_id(),
+                kind: ExprKind::MethodCall {
+                    callee: Box::new(expr),
+                    method_name: name,
+                    args,
+                },
+                ty: (),
+                span: self.close(marker),
+            })
+        } else {
+            Ok(Expr {
+                id: self.id_gen.new_id(),
+                kind: ExprKind::StructField {
+                    target: Box::new(expr),
+                    field: name,
+                },
+                ty: (),
+                span: self.close(marker),
+            })
         }
     }
 

@@ -170,6 +170,69 @@ fn typestate_machine_handle_request_example_runs_in_experimental_mode() {
 }
 
 #[test]
+fn typestate_cross_machine_typed_handle_request_runs_in_experimental_mode() {
+    let source = r#"
+requires {
+    std::io::println
+}
+
+type AuthCheck = { token: u64 }
+type AuthReply = { accepted: u64 }
+
+typestate AuthServer {
+    fn new() -> Ready { Ready {} }
+
+    state Ready {
+        on AuthCheck(req: AuthCheck, cap: ReplyCap<AuthReply>) -> stay {
+            println(f"server {req.token}");
+            cap.reply(AuthReply { accepted: req.token + 1 });
+        }
+    }
+}
+
+typestate Client {
+    fn new() -> Ready { Ready {} }
+
+    state Ready {
+        on AuthReply(resp) for AuthCheck(req) -> stay {
+            println(f"client {resp.accepted}");
+            req;
+        }
+    }
+}
+
+@machines
+fn main() -> ()
+    | MachineSpawnFailed
+    | MachineBindFailed
+    | MachineStartFailed
+    | ManagedRuntimeUnavailable
+    | RequestFailed {
+    let auth = AuthServer::spawn()?;
+    let client = Client::spawn()?;
+    let p: Pending<AuthReply> = client.request(auth, AuthCheck { token: 41 })?;
+    p;
+}
+"#;
+
+    let run = run_program_with_opts(
+        "typestate_cross_machine_typed_request",
+        source,
+        typestate_opts(true),
+    );
+    assert_eq!(run.status.code(), Some(0));
+    let stdout = String::from_utf8_lossy(&run.stdout);
+    assert!(
+        stdout.contains("server 41"),
+        "expected server handler output, got: {stdout}"
+    );
+    assert!(
+        stdout.contains("client 42"),
+        "expected client response handler output, got: {stdout}"
+    );
+}
+
+#[test]
 fn typestate_managed_examples_are_rejected_without_experimental_flag() {
     for path in managed_check_examples() {
         let errors = check_example(&path, false)

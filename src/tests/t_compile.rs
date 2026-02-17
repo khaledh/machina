@@ -1350,7 +1350,8 @@ fn main() -> ()
     | ManagedRuntimeUnavailable
     | RequestFailed {
     let worker = Worker::spawn()?;
-    worker.request(1, Msg { x: 7 })?;
+    let peer = Worker::spawn()?;
+    worker.request(peer, Msg { x: 7 })?;
 }
 "#;
 
@@ -1371,7 +1372,7 @@ typestate AuthServer {
     state Ready {
         on AuthCheck(req: AuthCheck, cap: ReplyCap<AuthReply>) -> stay {
             req;
-            reply(cap, AuthReply {});
+            cap.reply(AuthReply {});
         }
     }
 }
@@ -1416,6 +1417,80 @@ fn main() -> ()
 
     compile(source, &typestate_compile_opts())
         .expect("handler request should accept typed machine handle destinations");
+}
+
+#[test]
+fn compile_typestate_machine_handle_request_accepts_cross_typestate_destination() {
+    let source = r#"
+type AuthCheck = {}
+type AuthReply = {}
+
+typestate AuthServer {
+    fn new() -> Ready { Ready {} }
+
+    state Ready {
+        on AuthCheck(req: AuthCheck, cap: ReplyCap<AuthReply>) -> stay {
+            req;
+            cap.reply(AuthReply {});
+        }
+    }
+}
+
+typestate Client {
+    fn new() -> Ready { Ready {} }
+
+    state Ready {
+        on AuthReply(resp) for AuthCheck(req) -> stay {
+            resp;
+            req;
+        }
+    }
+}
+
+@machines
+fn main() -> ()
+    | MachineSpawnFailed
+    | MachineBindFailed
+    | MachineStartFailed
+    | ManagedRuntimeUnavailable
+    | RequestFailed {
+    let auth = AuthServer::spawn()?;
+    let client = Client::spawn()?;
+    let p: Pending<AuthReply> = client.request(auth, AuthCheck {})?;
+    p;
+}
+"#;
+
+    compile(source, &typestate_compile_opts())
+        .expect("typed handle request should accept cross-typestate destinations");
+}
+
+#[test]
+fn compile_typestate_request_rewrite_skips_non_machine_receiver_methods() {
+    let source = r#"
+type Obj = {}
+
+Obj :: {
+    fn request(self, dst: u64, payload: u64) -> u64 {
+        self;
+        dst + payload
+    }
+}
+
+typestate Worker {
+    fn new() -> S { S {} }
+    state S {}
+}
+
+fn main() {
+    let obj = Obj {};
+    let v = obj.request(1, 2);
+    v;
+}
+"#;
+
+    compile(source, &typestate_compile_opts())
+        .expect("request destination rewrite should not touch non-machine receiver methods");
 }
 
 #[test]

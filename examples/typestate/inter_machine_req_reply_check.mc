@@ -64,7 +64,7 @@ typestate AuthServer {
     state Ready {
         on AuthCheck(req: AuthCheck, cap: ReplyCap<AuthReply>) -> stay {
             req;
-            reply(cap, AuthReply {});
+            cap.reply(AuthReply {});
         }
     }
 }

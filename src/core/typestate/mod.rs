@@ -79,6 +79,9 @@ pub fn desugar_module(module: &mut Module, node_id_gen: &mut NodeIdGen) -> Vec<R
     let mut generated_state_names = HashSet::new();
     let mut errors = Vec::new();
     let mut saw_typestate = false;
+    for ts in module.typestate_defs() {
+        handle_by_typestate.insert(ts.name.clone(), format!("__mc_machine_handle_{}", ts.name));
+    }
 
     for item in module.top_level_items.drain(..) {
         match item {
@@ -119,6 +122,9 @@ pub fn desugar_module(module: &mut Module, node_id_gen: &mut NodeIdGen) -> Vec<R
     // Rewrite source typed handles into concrete typestate-specific handle
     // types so the distinction survives in core typing (non-erased model).
     rewrite_typed_machine_handle_refs(module, &handle_by_typestate);
+    // Allow typed-handle destinations at request callsites by normalizing the
+    // first request argument to a numeric machine id.
+    rewrite_machine_request_method_destinations(module, node_id_gen);
     if let Some(span) = first_spawn_call_span
         && !machines_opted_in
     {
@@ -209,6 +215,240 @@ fn rewrite_typed_machine_handle_refs(
         handle_by_typestate,
     };
     rewriter.visit_module(module);
+}
+
+fn rewrite_machine_request_method_destinations(module: &mut Module, node_id_gen: &mut NodeIdGen) {
+    use std::collections::HashSet;
+
+    fn is_machine_handle_type_expr(ty: &TypeExpr) -> bool {
+        matches!(
+            &ty.kind,
+            TypeExprKind::Named {
+                ident,
+                type_args,
+                ..
+            } if type_args.is_empty()
+                && (ident == MACHINE_HANDLE_TYPE_NAME || ident.starts_with("__mc_machine_handle_"))
+        )
+    }
+
+    fn expr_is_spawn_handle(expr: &Expr) -> bool {
+        match &expr.kind {
+            ExprKind::UnaryOp {
+                op: crate::core::tree::UnaryOp::Try,
+                expr,
+            } => expr_is_spawn_handle(expr),
+            ExprKind::Call { callee, .. } => matches!(
+                &callee.kind,
+                ExprKind::Var { ident, .. } if ident.starts_with("__ts_spawn_")
+            ),
+            ExprKind::EnumVariant {
+                enum_name, variant, ..
+            } => !enum_name.is_empty() && variant == "spawn",
+            _ => false,
+        }
+    }
+
+    fn collect_machine_bindings_from_stmt(stmt: &StmtExpr, out: &mut HashSet<String>) {
+        match &stmt.kind {
+            StmtExprKind::LetBind {
+                pattern,
+                decl_ty,
+                value,
+            }
+            | StmtExprKind::VarBind {
+                pattern,
+                decl_ty,
+                value,
+            } => {
+                collect_machine_bindings_from_expr(value, out);
+                let BindPatternKind::Name { ident, .. } = &pattern.kind else {
+                    return;
+                };
+                let typed_machine = decl_ty.as_ref().is_some_and(is_machine_handle_type_expr);
+                if typed_machine || expr_is_spawn_handle(value) {
+                    out.insert(ident.clone());
+                }
+            }
+            StmtExprKind::VarDecl { ident, decl_ty, .. } => {
+                if is_machine_handle_type_expr(decl_ty) {
+                    out.insert(ident.clone());
+                }
+            }
+            StmtExprKind::Assign {
+                assignee, value, ..
+            } => {
+                collect_machine_bindings_from_expr(assignee, out);
+                collect_machine_bindings_from_expr(value, out);
+            }
+            StmtExprKind::While { cond, body } => {
+                collect_machine_bindings_from_expr(cond, out);
+                collect_machine_bindings_from_expr(body, out);
+            }
+            StmtExprKind::For { iter, body, .. } => {
+                collect_machine_bindings_from_expr(iter, out);
+                collect_machine_bindings_from_expr(body, out);
+            }
+            StmtExprKind::Return { value } => {
+                if let Some(value) = value {
+                    collect_machine_bindings_from_expr(value, out);
+                }
+            }
+            StmtExprKind::Break | StmtExprKind::Continue => {}
+        }
+    }
+
+    fn collect_machine_bindings_from_expr(expr: &Expr, out: &mut HashSet<String>) {
+        match &expr.kind {
+            ExprKind::Block { items, tail } => {
+                for item in items {
+                    match item {
+                        parsed::BlockItem::Stmt(stmt) => {
+                            collect_machine_bindings_from_stmt(stmt, out)
+                        }
+                        parsed::BlockItem::Expr(inner) => {
+                            collect_machine_bindings_from_expr(inner, out)
+                        }
+                    }
+                }
+                if let Some(tail) = tail {
+                    collect_machine_bindings_from_expr(tail, out);
+                }
+            }
+            ExprKind::If {
+                then_body,
+                else_body,
+                ..
+            } => {
+                collect_machine_bindings_from_expr(then_body, out);
+                collect_machine_bindings_from_expr(else_body, out);
+            }
+            ExprKind::Match { arms, .. } => {
+                for arm in arms {
+                    collect_machine_bindings_from_expr(&arm.body, out);
+                }
+            }
+            _ => {}
+        }
+    }
+
+    struct RequestDstExprRewriter<'a> {
+        node_id_gen: &'a mut NodeIdGen,
+        machine_locals: &'a HashSet<String>,
+    }
+
+    impl RequestDstExprRewriter<'_> {
+        fn wrap_target_id(&mut self, target: Expr) -> Expr {
+            let span = target.span;
+            Expr {
+                id: self.node_id_gen.new_id(),
+                kind: ExprKind::Call {
+                    callee: Box::new(Expr {
+                        id: self.node_id_gen.new_id(),
+                        kind: ExprKind::Var {
+                            ident: MACHINE_TARGET_ID_HELPER_FN.to_string(),
+                            def_id: (),
+                        },
+                        ty: (),
+                        span,
+                    }),
+                    args: vec![CallArg {
+                        mode: CallArgMode::Default,
+                        expr: target,
+                        init: InitInfo::default(),
+                        span,
+                    }],
+                },
+                ty: (),
+                span,
+            }
+        }
+    }
+
+    impl VisitorMut<()> for RequestDstExprRewriter<'_> {
+        fn visit_expr(&mut self, expr: &mut Expr) {
+            visit_mut::walk_expr(self, expr);
+
+            let ExprKind::MethodCall {
+                callee,
+                method_name,
+                args,
+            } = &mut expr.kind
+            else {
+                return;
+            };
+            if method_name != "request" || (args.len() != 2 && args.len() != 4) {
+                return;
+            }
+            let ExprKind::Var { ident, .. } = &callee.kind else {
+                return;
+            };
+            if !self.machine_locals.contains(ident) {
+                return;
+            }
+            let Some(first_arg) = args.first_mut() else {
+                return;
+            };
+            if first_arg.mode != CallArgMode::Default {
+                return;
+            }
+            if matches!(
+                &first_arg.expr.kind,
+                ExprKind::Call { callee, .. }
+                    if matches!(
+                        callee.kind,
+                        ExprKind::Var {
+                            ref ident,
+                            ..
+                        } if ident == MACHINE_TARGET_ID_HELPER_FN
+                    )
+            ) {
+                return;
+            }
+
+            let original = std::mem::replace(
+                &mut first_arg.expr,
+                Expr {
+                    id: self.node_id_gen.new_id(),
+                    kind: ExprKind::UnitLit,
+                    ty: (),
+                    span: first_arg.span,
+                },
+            );
+            first_arg.expr = self.wrap_target_id(original);
+        }
+    }
+
+    fn rewrite_body_expr(body: &mut Expr, params: &[parsed::Param], node_id_gen: &mut NodeIdGen) {
+        let mut machine_locals = HashSet::new();
+        for param in params {
+            if is_machine_handle_type_expr(&param.typ) {
+                machine_locals.insert(param.ident.clone());
+            }
+        }
+        collect_machine_bindings_from_expr(body, &mut machine_locals);
+        let mut rewriter = RequestDstExprRewriter {
+            node_id_gen,
+            machine_locals: &machine_locals,
+        };
+        rewriter.visit_expr(body);
+    }
+
+    for item in &mut module.top_level_items {
+        match item {
+            TopLevelItem::FuncDef(def) => {
+                rewrite_body_expr(&mut def.body, &def.sig.params, node_id_gen)
+            }
+            TopLevelItem::MethodBlock(block) => {
+                for item in &mut block.method_items {
+                    if let MethodItem::Def(def) = item {
+                        rewrite_body_expr(&mut def.body, &def.sig.params, node_id_gen);
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
 }
 
 fn desugar_typestate(
@@ -785,6 +1025,16 @@ fn ensure_machine_support_types(module: &mut Module, node_id_gen: &mut NodeIdGen
     }
     if !module_has_callable_param_type(module, MACHINE_TARGET_ID_HELPER_FN, "u64") {
         prepend.push(machine_target_id_u64_helper_def(node_id_gen));
+    }
+    if !module_has_callable_param_type(
+        module,
+        MACHINE_TARGET_ID_HELPER_FN,
+        MACHINE_HANDLE_TYPE_NAME,
+    ) {
+        prepend.push(machine_target_id_handle_helper_def(
+            MACHINE_HANDLE_TYPE_NAME,
+            node_id_gen,
+        ));
     }
 
     let has_machine_methods = module.top_level_items.iter().any(|item| {
@@ -1592,6 +1842,105 @@ fn machine_handle_method_block(
         })
         .collect();
 
+    let request_method = MethodDef {
+        id: node_id_gen.new_id(),
+        def_id: (),
+        attrs: Vec::new(),
+        sig: MethodSig {
+            name: "request".to_string(),
+            type_params: Vec::new(),
+            self_param: SelfParam {
+                id: node_id_gen.new_id(),
+                def_id: (),
+                mode: ParamMode::In,
+                span,
+            },
+            params: vec![
+                parsed::Param {
+                    id: node_id_gen.new_id(),
+                    ident: "dst".to_string(),
+                    def_id: (),
+                    typ: u64_type_expr(node_id_gen, span),
+                    mode: ParamMode::In,
+                    span,
+                },
+                parsed::Param {
+                    id: node_id_gen.new_id(),
+                    ident: "kind".to_string(),
+                    def_id: (),
+                    typ: u64_type_expr(node_id_gen, span),
+                    mode: ParamMode::In,
+                    span,
+                },
+                parsed::Param {
+                    id: node_id_gen.new_id(),
+                    ident: "payload0".to_string(),
+                    def_id: (),
+                    typ: u64_type_expr(node_id_gen, span),
+                    mode: ParamMode::In,
+                    span,
+                },
+                parsed::Param {
+                    id: node_id_gen.new_id(),
+                    ident: "payload1".to_string(),
+                    def_id: (),
+                    typ: u64_type_expr(node_id_gen, span),
+                    mode: ParamMode::In,
+                    span,
+                },
+            ],
+            ret_ty_expr: machine_request_result_union_type(node_id_gen, span),
+            span,
+        },
+        body: Expr {
+            id: node_id_gen.new_id(),
+            kind: ExprKind::Block {
+                items: vec![
+                    parsed::BlockItem::Stmt(let_bind_stmt(
+                        "__mc_rt",
+                        call_expr(MANAGED_RUNTIME_CURRENT_FN, Vec::new(), node_id_gen, span),
+                        node_id_gen,
+                        span,
+                    )),
+                    parsed::BlockItem::Expr(return_if_eq_zero(
+                        "__mc_rt",
+                        MACHINE_MANAGED_RUNTIME_UNAVAILABLE_TYPE_NAME,
+                        node_id_gen,
+                        span,
+                    )),
+                    parsed::BlockItem::Stmt(let_bind_stmt(
+                        "__mc_pending_id",
+                        call_expr(
+                            "__mc_machine_runtime_request_u64",
+                            vec![
+                                var_expr("__mc_rt", node_id_gen, span),
+                                self_field_expr("_id", node_id_gen, span),
+                                var_expr("dst", node_id_gen, span),
+                                var_expr("kind", node_id_gen, span),
+                                var_expr("payload0", node_id_gen, span),
+                                var_expr("payload1", node_id_gen, span),
+                            ],
+                            node_id_gen,
+                            span,
+                        ),
+                        node_id_gen,
+                        span,
+                    )),
+                    parsed::BlockItem::Expr(return_if_eq_zero(
+                        "__mc_pending_id",
+                        MACHINE_REQUEST_FAILED_TYPE_NAME,
+                        node_id_gen,
+                        span,
+                    )),
+                ],
+                tail: Some(Box::new(var_expr("__mc_pending_id", node_id_gen, span))),
+            },
+            ty: (),
+            span,
+        },
+        span,
+    };
+
     let typed_request_methods: Vec<MethodItem> = typed_request_specs
         .iter()
         .map(|spec| {
@@ -1708,105 +2057,6 @@ fn machine_handle_method_block(
             })
         })
         .collect();
-
-    let request_method = MethodDef {
-        id: node_id_gen.new_id(),
-        def_id: (),
-        attrs: Vec::new(),
-        sig: MethodSig {
-            name: "request".to_string(),
-            type_params: Vec::new(),
-            self_param: SelfParam {
-                id: node_id_gen.new_id(),
-                def_id: (),
-                mode: ParamMode::In,
-                span,
-            },
-            params: vec![
-                parsed::Param {
-                    id: node_id_gen.new_id(),
-                    ident: "dst".to_string(),
-                    def_id: (),
-                    typ: u64_type_expr(node_id_gen, span),
-                    mode: ParamMode::In,
-                    span,
-                },
-                parsed::Param {
-                    id: node_id_gen.new_id(),
-                    ident: "kind".to_string(),
-                    def_id: (),
-                    typ: u64_type_expr(node_id_gen, span),
-                    mode: ParamMode::In,
-                    span,
-                },
-                parsed::Param {
-                    id: node_id_gen.new_id(),
-                    ident: "payload0".to_string(),
-                    def_id: (),
-                    typ: u64_type_expr(node_id_gen, span),
-                    mode: ParamMode::In,
-                    span,
-                },
-                parsed::Param {
-                    id: node_id_gen.new_id(),
-                    ident: "payload1".to_string(),
-                    def_id: (),
-                    typ: u64_type_expr(node_id_gen, span),
-                    mode: ParamMode::In,
-                    span,
-                },
-            ],
-            ret_ty_expr: machine_request_result_union_type(node_id_gen, span),
-            span,
-        },
-        body: Expr {
-            id: node_id_gen.new_id(),
-            kind: ExprKind::Block {
-                items: vec![
-                    parsed::BlockItem::Stmt(let_bind_stmt(
-                        "__mc_rt",
-                        call_expr(MANAGED_RUNTIME_CURRENT_FN, Vec::new(), node_id_gen, span),
-                        node_id_gen,
-                        span,
-                    )),
-                    parsed::BlockItem::Expr(return_if_eq_zero(
-                        "__mc_rt",
-                        MACHINE_MANAGED_RUNTIME_UNAVAILABLE_TYPE_NAME,
-                        node_id_gen,
-                        span,
-                    )),
-                    parsed::BlockItem::Stmt(let_bind_stmt(
-                        "__mc_pending_id",
-                        call_expr(
-                            "__mc_machine_runtime_request_u64",
-                            vec![
-                                var_expr("__mc_rt", node_id_gen, span),
-                                self_field_expr("_id", node_id_gen, span),
-                                var_expr("dst", node_id_gen, span),
-                                var_expr("kind", node_id_gen, span),
-                                var_expr("payload0", node_id_gen, span),
-                                var_expr("payload1", node_id_gen, span),
-                            ],
-                            node_id_gen,
-                            span,
-                        ),
-                        node_id_gen,
-                        span,
-                    )),
-                    parsed::BlockItem::Expr(return_if_eq_zero(
-                        "__mc_pending_id",
-                        MACHINE_REQUEST_FAILED_TYPE_NAME,
-                        node_id_gen,
-                        span,
-                    )),
-                ],
-                tail: Some(Box::new(var_expr("__mc_pending_id", node_id_gen, span))),
-            },
-            ty: (),
-            span,
-        },
-        span,
-    };
 
     let mut method_items = vec![MethodItem::Def(send_method)];
     method_items.extend(typed_send_methods);
@@ -3150,6 +3400,32 @@ impl HandlerCommandSugarRewriter<'_> {
 impl VisitorMut<()> for HandlerCommandSugarRewriter<'_> {
     fn visit_expr(&mut self, expr: &mut Expr) {
         visit_mut::walk_expr(self, expr);
+
+        if let ExprKind::MethodCall {
+            callee,
+            method_name,
+            args,
+        } = &mut expr.kind
+        {
+            // Capability-style sugar inside handlers:
+            //   cap.reply(payload)  ==>  reply(cap, payload)
+            if method_name == "reply"
+                && args.len() == 1
+                && args.iter().all(|arg| arg.mode == CallArgMode::Default)
+            {
+                let value = std::mem::take(args)
+                    .pop()
+                    .expect("reply method arg shape checked by typestate handler sugar rewrite")
+                    .expr;
+                let cap =
+                    std::mem::replace(callee, Box::new(unit_expr(self.node_id_gen, expr.span)));
+                expr.kind = ExprKind::Reply {
+                    cap,
+                    value: Box::new(value),
+                };
+            }
+            return;
+        }
 
         let ExprKind::Call { callee, args } = &mut expr.kind else {
             return;

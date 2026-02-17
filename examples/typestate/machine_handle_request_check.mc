@@ -6,7 +6,7 @@ requires {
 // - app sends a start message to Client
 // - Client issues a request to AuthServer from inside a handler
 // - request reaches server handler
-// - server replies via `reply(cap, payload)`
+// - server replies via capability-style `cap.reply(payload)`
 // - response is delivered back to the requester machine and handled by
 //   `on ResponseType(...) for RequestType(...)`.
 //
@@ -49,7 +49,7 @@ typestate AuthServer {
 
     state Ready {
         on AuthCheck(req: AuthCheck, cap: ReplyCap<AuthReply>) -> stay {
-            reply(cap, AuthReply { accepted: req.token + 1 });
+            cap.reply(AuthReply { accepted: req.token + 1 });
         }
     }
 }
