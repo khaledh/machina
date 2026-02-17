@@ -8,6 +8,9 @@ requires {
 
 type Start = {}
 
+// This example intentionally uses the low-level managed runtime API
+// (`managed_runtime` + `step`) to demonstrate final-state shutdown behavior
+// deterministically in one place.
 typestate OneShot {
     fn new() -> Idle {
         Idle {}

@@ -57,7 +57,7 @@ fn valid_examples() -> Vec<PathBuf> {
     ]
 }
 
-fn managed_check_examples() -> Vec<PathBuf> {
+fn managed_examples() -> Vec<PathBuf> {
     let root = repo_root();
     vec![
         root.join("tests/fixtures/typestate/managed_state_transitions.mc"),
@@ -149,7 +149,7 @@ fn typestate_example_runs_in_experimental_mode() {
 
 #[test]
 fn typestate_managed_examples_typecheck_with_experimental_flag() {
-    for path in managed_check_examples() {
+    for path in managed_examples() {
         check_example(&path, true)
             .unwrap_or_else(|errs| panic!("expected success for {}: {errs:?}", path.display()));
     }
@@ -251,7 +251,7 @@ fn main() -> () | MachineError {
 
 #[test]
 fn typestate_managed_examples_are_rejected_without_experimental_flag() {
-    for path in managed_check_examples() {
+    for path in managed_examples() {
         let errors = check_example(&path, false)
             .expect_err("typestate managed examples should fail without experimental flag");
         assert!(errors.iter().any(|err| {
@@ -283,7 +283,7 @@ fn typestate_example_lists_cover_all_typestate_fixtures() {
 
     let mut covered: HashSet<PathBuf> = HashSet::new();
     covered.extend(valid_examples());
-    covered.extend(managed_check_examples());
+    covered.extend(managed_examples());
     covered.extend(invalid_example_cases().into_iter().map(|(path, _)| path));
 
     assert_eq!(

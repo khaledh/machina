@@ -27,11 +27,13 @@ use crate::core::tree::{CallArgMode, InitInfo, ParamMode};
 mod ast_build;
 mod managed_api;
 mod managed_entrypoint;
+mod names;
 mod rewrite_handles;
 
 use managed_api::{lower_spawn_func, machine_handle_method_block};
 
 use managed_entrypoint::rewrite_machines_entrypoint;
+use names::*;
 use rewrite_handles::{
     rewrite_machine_request_method_destinations, rewrite_typed_machine_handle_refs,
 };
@@ -46,32 +48,6 @@ use support_types::{
     ensure_machine_runtime_intrinsics, ensure_machine_support_types, machine_handle_named_type_def,
     machine_target_id_handle_helper_def,
 };
-
-const MACHINE_HANDLE_TYPE_NAME: &str = "Machine";
-const MACHINE_ERROR_TYPE_NAME: &str = "MachineError";
-const MACHINE_SPAWN_FAILED_TYPE_NAME: &str = "MachineSpawnFailed";
-const MACHINE_BIND_FAILED_TYPE_NAME: &str = "MachineBindFailed";
-const MACHINE_START_FAILED_TYPE_NAME: &str = "MachineStartFailed";
-const MACHINE_UNKNOWN_TYPE_NAME: &str = "MachineUnknown";
-const MACHINE_NOT_RUNNING_TYPE_NAME: &str = "MachineNotRunning";
-const MACHINE_MAILBOX_FULL_TYPE_NAME: &str = "MailboxFull";
-const MACHINE_REQUEST_FAILED_TYPE_NAME: &str = "RequestFailed";
-const MACHINE_MANAGED_RUNTIME_UNAVAILABLE_TYPE_NAME: &str = "ManagedRuntimeUnavailable";
-const MACHINE_TARGET_ID_HELPER_FN: &str = "__mc_machine_target_id";
-const MANAGED_RUNTIME_DEFAULT_MAILBOX_CAP: u64 = 8;
-const MANAGED_RUNTIME_BOOTSTRAP_FN: &str = "__mc_machine_runtime_managed_bootstrap_u64";
-const MANAGED_RUNTIME_CURRENT_FN: &str = "__mc_machine_runtime_managed_current_u64";
-const MANAGED_RUNTIME_SHUTDOWN_FN: &str = "__mc_machine_runtime_managed_shutdown_u64";
-const MANAGED_RUNTIME_STEP_FN: &str = "__mc_machine_runtime_step_u64";
-
-const MACHINE_ERROR_VARIANT_SPAWN_FAILED: &str = "SpawnFailed";
-const MACHINE_ERROR_VARIANT_BIND_FAILED: &str = "BindFailed";
-const MACHINE_ERROR_VARIANT_START_FAILED: &str = "StartFailed";
-const MACHINE_ERROR_VARIANT_MANAGED_RUNTIME_UNAVAILABLE: &str = "RuntimeUnavailable";
-const MACHINE_ERROR_VARIANT_UNKNOWN: &str = "Unknown";
-const MACHINE_ERROR_VARIANT_NOT_RUNNING: &str = "NotRunning";
-const MACHINE_ERROR_VARIANT_MAILBOX_FULL: &str = "MailboxFull";
-const MACHINE_ERROR_VARIANT_REQUEST_FAILED: &str = "RequestFailed";
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct TypestateRoleImplRef {

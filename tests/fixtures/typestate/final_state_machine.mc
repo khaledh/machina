@@ -8,6 +8,9 @@ requires {
 
 type Start = {}
 
+// This fixture intentionally uses the low-level managed runtime API
+// (`managed_runtime` + `step`) so tests can assert final-state behavior with
+// deterministic stepping.
 typestate OneShot {
     fn new() -> Idle {
         Idle {}
