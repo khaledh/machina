@@ -211,6 +211,20 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
                 union_ty
             );
         };
+        let try_result_ty = self.type_map.type_table().get(expr.ty).clone();
+        // Some statement-level `expr?;` forms can reach lowering with an
+        // unresolved try-result type variable even though the operand's ok type
+        // is concrete. Fall back to the operand ok type so lowering remains
+        // deterministic instead of panicking on unresolved backend type ids.
+        let join_expr_ty = if try_result_ty.contains_unresolved() {
+            self.type_map
+                .type_table()
+                .lookup_id(ok_ty)
+                .unwrap_or(expr.ty)
+        } else {
+            expr.ty
+        };
+
         // Fast path: when operand and function return unions are identical,
         // propagation can return the original union value directly.
         let return_union_matches_operand = union_ty == self.ret_ty;
@@ -266,7 +280,11 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
 
         let ok_bb = self.builder.add_block();
         let err_dispatch_bb = self.builder.add_block();
-        let join = self.begin_join(expr);
+        let join_expr = sem::ValueExpr {
+            ty: join_expr_ty,
+            ..expr.clone()
+        };
+        let join = self.begin_join(&join_expr);
 
         self.builder.terminate(Terminator::CondBr {
             cond: is_ok,
@@ -279,7 +297,7 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
         self.builder.select_block(ok_bb);
         let ok_value =
             self.load_union_payload(union_slot.addr, blob_ty, ok_payload_ty, ok_payload_offset);
-        let try_sem_ty = self.type_map.type_table().get(expr.ty).clone();
+        let try_sem_ty = self.type_map.type_table().get(join_expr_ty).clone();
         let ok_coerced = self.coerce_value(ok_value, ok_ty, &try_sem_ty);
         join.emit_branch(self, ok_coerced, expr.span)?;
 

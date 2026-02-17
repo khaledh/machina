@@ -238,6 +238,7 @@ fn desugar_typestate(
     let states = analysis.states;
     let typestate_handlers = analysis.handlers;
     let final_state_names = analysis.final_state_names;
+    let typed_send_specs = collect_typed_send_specs(&typestate_handlers, &states);
     let state_name_map = build_state_name_map(&ts_name, &states);
     let generated_state_names: HashSet<String> = state_name_map.values().cloned().collect();
     // Local fields are used by shorthand transition rewriting (`State`) to know
@@ -258,7 +259,11 @@ fn desugar_typestate(
         &handle_type_name,
         node_id_gen,
     ));
-    lowered.push(machine_handle_method_block(&handle_type_name, node_id_gen));
+    lowered.push(machine_handle_method_block(
+        &handle_type_name,
+        &typed_send_specs,
+        node_id_gen,
+    ));
 
     for state in states {
         let is_final_state = final_state_names.contains(&state.name);
@@ -433,6 +438,12 @@ struct TypestateDesugarOutput {
     generated_state_names: HashSet<String>,
     // Validation diagnostics gathered while lowering this typestate.
     errors: Vec<ResolveError>,
+}
+
+#[derive(Clone)]
+struct TypedSendSpec {
+    selector_ty: TypeExpr,
+    kind: u64,
 }
 
 fn rewrite_machines_entrypoint(module: &mut Module, node_id_gen: &mut NodeIdGen) -> bool {
@@ -766,6 +777,7 @@ fn ensure_machine_support_types(module: &mut Module, node_id_gen: &mut NodeIdGen
     if !has_machine_methods {
         prepend.push(machine_handle_method_block(
             MACHINE_HANDLE_TYPE_NAME,
+            &[],
             node_id_gen,
         ));
     }
@@ -892,6 +904,7 @@ fn empty_struct_type_def(name: &str, node_id_gen: &mut NodeIdGen) -> TopLevelIte
 
 fn machine_handle_method_block(
     handle_type_name: &str,
+    typed_send_specs: &[TypedSendSpec],
     node_id_gen: &mut NodeIdGen,
 ) -> TopLevelItem {
     let span = Span::default();
@@ -1107,6 +1120,26 @@ fn machine_handle_method_block(
         }
     }
 
+    fn machine_send_result_union_type(node_id_gen: &mut NodeIdGen, span: Span) -> TypeExpr {
+        TypeExpr {
+            id: node_id_gen.new_id(),
+            kind: TypeExprKind::Union {
+                variants: vec![
+                    named_type_expr("()", node_id_gen, span),
+                    named_type_expr(
+                        MACHINE_MANAGED_RUNTIME_UNAVAILABLE_TYPE_NAME,
+                        node_id_gen,
+                        span,
+                    ),
+                    named_type_expr(MACHINE_UNKNOWN_TYPE_NAME, node_id_gen, span),
+                    named_type_expr(MACHINE_NOT_RUNNING_TYPE_NAME, node_id_gen, span),
+                    named_type_expr(MACHINE_MAILBOX_FULL_TYPE_NAME, node_id_gen, span),
+                ],
+            },
+            span,
+        }
+    }
+
     let send_method = MethodDef {
         id: node_id_gen.new_id(),
         def_id: (),
@@ -1146,23 +1179,7 @@ fn machine_handle_method_block(
                     span,
                 },
             ],
-            ret_ty_expr: TypeExpr {
-                id: node_id_gen.new_id(),
-                kind: TypeExprKind::Union {
-                    variants: vec![
-                        named_type_expr("()", node_id_gen, span),
-                        named_type_expr(
-                            MACHINE_MANAGED_RUNTIME_UNAVAILABLE_TYPE_NAME,
-                            node_id_gen,
-                            span,
-                        ),
-                        named_type_expr(MACHINE_UNKNOWN_TYPE_NAME, node_id_gen, span),
-                        named_type_expr(MACHINE_NOT_RUNNING_TYPE_NAME, node_id_gen, span),
-                        named_type_expr(MACHINE_MAILBOX_FULL_TYPE_NAME, node_id_gen, span),
-                    ],
-                },
-                span,
-            },
+            ret_ty_expr: machine_send_result_union_type(node_id_gen, span),
             span,
         },
         body: Expr {
@@ -1227,6 +1244,106 @@ fn machine_handle_method_block(
         },
         span,
     };
+
+    let typed_send_methods: Vec<MethodItem> = typed_send_specs
+        .iter()
+        .map(|spec| {
+            MethodItem::Def(MethodDef {
+                id: node_id_gen.new_id(),
+                def_id: (),
+                attrs: Vec::new(),
+                sig: MethodSig {
+                    name: "send".to_string(),
+                    type_params: Vec::new(),
+                    self_param: SelfParam {
+                        id: node_id_gen.new_id(),
+                        def_id: (),
+                        mode: ParamMode::In,
+                        span,
+                    },
+                    params: vec![parsed::Param {
+                        id: node_id_gen.new_id(),
+                        ident: "payload".to_string(),
+                        def_id: (),
+                        typ: clone_type_expr_with_new_ids(&spec.selector_ty, node_id_gen),
+                        mode: ParamMode::In,
+                        span,
+                    }],
+                    ret_ty_expr: machine_send_result_union_type(node_id_gen, span),
+                    span,
+                },
+                body: Expr {
+                    id: node_id_gen.new_id(),
+                    kind: ExprKind::Block {
+                        items: vec![
+                            parsed::BlockItem::Stmt(let_bind_stmt(
+                                "__mc_rt",
+                                call_expr(
+                                    MANAGED_RUNTIME_CURRENT_FN,
+                                    Vec::new(),
+                                    node_id_gen,
+                                    span,
+                                ),
+                                node_id_gen,
+                                span,
+                            )),
+                            parsed::BlockItem::Expr(return_if_eq_zero(
+                                "__mc_rt",
+                                MACHINE_MANAGED_RUNTIME_UNAVAILABLE_TYPE_NAME,
+                                node_id_gen,
+                                span,
+                            )),
+                            // Current managed-runtime bridge only carries two u64
+                            // words; typed send currently targets marker-style
+                            // payload events and forwards zero payload words.
+                            parsed::BlockItem::Stmt(let_bind_stmt(
+                                "__mc_status",
+                                call_expr(
+                                    "__mc_machine_runtime_send_u64",
+                                    vec![
+                                        var_expr("__mc_rt", node_id_gen, span),
+                                        self_field_expr("_id", node_id_gen, span),
+                                        int_expr(spec.kind, node_id_gen, span),
+                                        int_expr(0, node_id_gen, span),
+                                        int_expr(0, node_id_gen, span),
+                                    ],
+                                    node_id_gen,
+                                    span,
+                                ),
+                                node_id_gen,
+                                span,
+                            )),
+                            parsed::BlockItem::Expr(return_if_eq(
+                                "__mc_status",
+                                1,
+                                MACHINE_UNKNOWN_TYPE_NAME,
+                                node_id_gen,
+                                span,
+                            )),
+                            parsed::BlockItem::Expr(return_if_eq(
+                                "__mc_status",
+                                2,
+                                MACHINE_NOT_RUNNING_TYPE_NAME,
+                                node_id_gen,
+                                span,
+                            )),
+                            parsed::BlockItem::Expr(return_if_eq(
+                                "__mc_status",
+                                3,
+                                MACHINE_MAILBOX_FULL_TYPE_NAME,
+                                node_id_gen,
+                                span,
+                            )),
+                        ],
+                        tail: Some(Box::new(unit_expr(node_id_gen, span))),
+                    },
+                    ty: (),
+                    span,
+                },
+                span,
+            })
+        })
+        .collect();
 
     let request_method = MethodDef {
         id: node_id_gen.new_id(),
@@ -1341,14 +1458,15 @@ fn machine_handle_method_block(
         span,
     };
 
+    let mut method_items = vec![MethodItem::Def(send_method)];
+    method_items.extend(typed_send_methods);
+    method_items.push(MethodItem::Def(request_method));
+
     TopLevelItem::MethodBlock(MethodBlock {
         id: node_id_gen.new_id(),
         type_name: handle_type_name.to_string(),
         trait_name: None,
-        method_items: vec![
-            MethodItem::Def(send_method),
-            MethodItem::Def(request_method),
-        ],
+        method_items,
         span,
     })
 }
@@ -1397,6 +1515,137 @@ fn build_state_name_map(ts_name: &str, states: &[TypestateState]) -> HashMap<Str
             )
         })
         .collect()
+}
+
+fn collect_typed_send_specs(
+    typestate_handlers: &[TypestateOnHandler],
+    states: &[TypestateState],
+) -> Vec<TypedSendSpec> {
+    use std::collections::BTreeMap;
+
+    let mut selectors = BTreeMap::<String, TypeExpr>::new();
+    let mut maybe_insert = |handler: &TypestateOnHandler| {
+        // `send(payload)` targets ordinary payload handlers. Response handlers
+        // (`for RequestType(...)`) keep request/reply routing semantics and are
+        // intentionally excluded from this surface.
+        if handler.provenance.is_some() {
+            return;
+        }
+        let key = payload_selector_stable_key(&handler.selector_ty);
+        selectors
+            .entry(key)
+            .or_insert_with(|| handler.selector_ty.clone());
+    };
+
+    for handler in typestate_handlers {
+        maybe_insert(handler);
+    }
+    for state in states {
+        for item in &state.items {
+            if let TypestateStateItem::Handler(handler) = item {
+                maybe_insert(handler);
+            }
+        }
+    }
+
+    selectors
+        .into_values()
+        .enumerate()
+        .map(|(idx, selector_ty)| TypedSendSpec {
+            selector_ty,
+            kind: idx as u64 + 1,
+        })
+        .collect()
+}
+
+fn payload_selector_stable_key(ty: &TypeExpr) -> String {
+    format!("payload:{}", type_expr_stable_name(ty))
+}
+
+fn type_expr_stable_name(ty: &TypeExpr) -> String {
+    match &ty.kind {
+        TypeExprKind::Infer => "_".to_string(),
+        TypeExprKind::Union { variants } => variants
+            .iter()
+            .map(type_expr_stable_name)
+            .collect::<Vec<_>>()
+            .join(" | "),
+        TypeExprKind::Named {
+            ident, type_args, ..
+        } => {
+            if type_args.is_empty() {
+                ident.clone()
+            } else {
+                format!(
+                    "{}<{}>",
+                    ident,
+                    type_args
+                        .iter()
+                        .map(type_expr_stable_name)
+                        .collect::<Vec<_>>()
+                        .join(", ")
+                )
+            }
+        }
+        TypeExprKind::Refined {
+            base_ty_expr,
+            refinements,
+        } => format!(
+            "{} where {}",
+            type_expr_stable_name(base_ty_expr),
+            refinements
+                .iter()
+                .map(|r| format!("{r:?}"))
+                .collect::<Vec<_>>()
+                .join(", ")
+        ),
+        TypeExprKind::Array { elem_ty_expr, dims } => {
+            let mut out = type_expr_stable_name(elem_ty_expr);
+            for dim in dims {
+                out.push('[');
+                out.push_str(&dim.to_string());
+                out.push(']');
+            }
+            out
+        }
+        TypeExprKind::DynArray { elem_ty_expr } => {
+            format!("{}[*]", type_expr_stable_name(elem_ty_expr))
+        }
+        TypeExprKind::Tuple { field_ty_exprs } => format!(
+            "({})",
+            field_ty_exprs
+                .iter()
+                .map(type_expr_stable_name)
+                .collect::<Vec<_>>()
+                .join(", ")
+        ),
+        TypeExprKind::Slice { elem_ty_expr } => {
+            format!("{}[]", type_expr_stable_name(elem_ty_expr))
+        }
+        TypeExprKind::Heap { elem_ty_expr } => format!("{}^", type_expr_stable_name(elem_ty_expr)),
+        TypeExprKind::Ref {
+            mutable,
+            elem_ty_expr,
+        } => {
+            if *mutable {
+                format!("&mut {}", type_expr_stable_name(elem_ty_expr))
+            } else {
+                format!("&{}", type_expr_stable_name(elem_ty_expr))
+            }
+        }
+        TypeExprKind::Fn {
+            params,
+            ret_ty_expr,
+        } => format!(
+            "fn({}) -> {}",
+            params
+                .iter()
+                .map(|p| type_expr_stable_name(&p.ty_expr))
+                .collect::<Vec<_>>()
+                .join(", "),
+            type_expr_stable_name(ret_ty_expr)
+        ),
+    }
 }
 
 struct TypestateAnalysis {

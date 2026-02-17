@@ -20,26 +20,24 @@ typestate Timer {
 
     state Running {
         on Kick(e) -> stay {
-            e;
             send(1, Tick {});
         }
 
         on Tick(t) {
-            t;
             println("tick");
         }
     }
 }
 
 @machines
-fn main() {
-    match Timer::spawn() {
-        timer: Machine<Timer> => {
-            match timer.send(1, 0, 0) {
-                ok: () => { ok; }
-                _ => { return; },
-            };
-        }
-        _ => { return; },
-    };
+fn main() -> ()
+    | MachineSpawnFailed
+    | MachineBindFailed
+    | MachineStartFailed
+    | ManagedRuntimeUnavailable
+    | MachineUnknown
+    | MachineNotRunning
+    | MailboxFull {
+    let timer = Timer::spawn()?;
+    timer.send(Kick {})?;
 }

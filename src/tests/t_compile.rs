@@ -1227,6 +1227,37 @@ fn main() {
 }
 
 #[test]
+fn compile_typestate_machine_handle_typed_send_is_linear_with_error_unions() {
+    let source = r#"
+type Kick = {}
+
+typestate Worker {
+    fn new() -> Idle { Idle {} }
+
+    state Idle {
+        on Kick(k) -> stay { k; }
+    }
+}
+
+@machines
+fn main() -> ()
+    | MachineSpawnFailed
+    | MachineBindFailed
+    | MachineStartFailed
+    | ManagedRuntimeUnavailable
+    | MachineUnknown
+    | MachineNotRunning
+    | MailboxFull {
+    let worker = Worker::spawn()?;
+    worker.send(Kick {})?;
+}
+"#;
+
+    compile(source, &typestate_compile_opts())
+        .expect("typed send + ? should compile for managed machine handles");
+}
+
+#[test]
 fn compile_typestate_spawn_mirrors_new_param_arity() {
     let source = r#"
 typestate Worker {
