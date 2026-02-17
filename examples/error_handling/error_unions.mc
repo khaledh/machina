@@ -7,6 +7,14 @@ type IoError = {
     code: u64,
 }
 
+type ParseError = {
+    line: u64,
+}
+
+type AppError
+  = Io(IoError)
+  | Parse(ParseError)
+
 fn ok(value: u64) -> u64 | IoError {
     value
 }
@@ -43,6 +51,25 @@ fn choose_match_lift(flag: bool, value: u64) -> u64 | IoError {
 fn add_one(flag: bool, value: u64) -> u64 | IoError {
     let base = choose(flag, value)?;
     base + 1
+}
+
+fn read_io() -> u64 | IoError {
+    IoError { code: 10 }
+}
+
+fn read_parse() -> u64 | ParseError {
+    ParseError { line: 20 }
+}
+
+// Demonstrates wrapped propagation through `?`:
+// - callee returns `u64 | IoError` / `u64 | ParseError`
+// - caller returns `u64 | AppError` where AppError wraps both.
+fn read_with_wrapped_errors(flag: bool) -> u64 | AppError {
+    if flag {
+        read_io()?
+    } else {
+        read_parse()?
+    }
 }
 
 fn main() {
@@ -86,4 +113,14 @@ fn main() {
     };
     println(f"match_lift_ok: {match_left}");
     println(f"match_lift_err: {match_right}");
+
+    let wrapped_err = read_with_wrapped_errors(true);
+    let wrapped_msg = match wrapped_err {
+        value: u64 => f"wrapped_ok: {value}",
+        app_err: AppError => match app_err {
+            AppError::Io(io) => f"wrapped_err_io: {io.code}",
+            AppError::Parse(parse) => f"wrapped_err_parse: {parse.line}",
+        },
+    };
+    println(wrapped_msg);
 }

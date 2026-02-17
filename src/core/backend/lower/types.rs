@@ -268,12 +268,9 @@ impl<'a> TypeLowerer<'a> {
                 placeholder
             }
             Type::Enum { name, .. } => {
-                let ty_id = self.type_map.type_table().lookup_id(ty).unwrap_or_else(|| {
-                    panic!("backend type lowering: missing enum type id for {name}")
-                });
                 let placeholder = self.ir_type_cache.add_placeholder_named(name.clone());
                 self.by_type.insert(ty.clone(), placeholder);
-                let layout = self.enum_layout(ty_id);
+                let layout = self.enum_layout_for_type(ty);
                 let fields = vec![
                     IrStructField {
                         name: "tag".to_string(),
@@ -289,13 +286,10 @@ impl<'a> TypeLowerer<'a> {
                 placeholder
             }
             Type::ErrorUnion { .. } => {
-                let ty_id = self.type_map.type_table().lookup_id(ty).unwrap_or_else(|| {
-                    panic!("backend type lowering: missing type id for {:?}", ty)
-                });
                 let name = format!("error_union$h{:016x}", stable_type_hash(ty));
                 let placeholder = self.ir_type_cache.add_placeholder_named(name);
                 self.by_type.insert(ty.clone(), placeholder);
-                let layout = self.enum_layout(ty_id);
+                let layout = self.enum_layout_for_type(ty);
                 let fields = vec![
                     IrStructField {
                         name: "tag".to_string(),
@@ -389,9 +383,27 @@ impl<'a> TypeLowerer<'a> {
         }
 
         let enum_ty = self.type_map.type_table().get(ty_id).clone();
-        let variants = match &enum_ty {
+        let variants = self.enum_variants_for_type(&enum_ty);
+        let layout = self.build_enum_layout_from_variants(&variants);
+        self.enum_layouts.insert(ty_id, layout);
+        self.enum_layouts.get(&ty_id).unwrap()
+    }
+
+    /// Returns enum-like layout for a semantic type, even when that type does
+    /// not have a canonical `TypeId` entry in the type table.
+    pub(super) fn enum_layout_for_type(&mut self, enum_ty: &Type) -> EnumLayout {
+        if let Some(ty_id) = self.type_map.type_table().lookup_id(enum_ty) {
+            return self.enum_layout(ty_id).clone();
+        }
+
+        let variants = self.enum_variants_for_type(enum_ty);
+        self.build_enum_layout_from_variants(&variants)
+    }
+
+    fn enum_variants_for_type(&mut self, enum_ty: &Type) -> Vec<EnumVariant> {
+        match enum_ty {
             Type::Enum { variants, .. } => self
-                .enum_variants_from_view(&enum_ty)
+                .enum_variants_from_view(enum_ty)
                 .unwrap_or_else(|| variants.clone()),
             Type::ErrorUnion { ok_ty, err_tys } => {
                 let mut variants = Vec::with_capacity(err_tys.len() + 1);
@@ -413,8 +425,10 @@ impl<'a> TypeLowerer<'a> {
                     enum_ty
                 );
             }
-        };
+        }
+    }
 
+    fn build_enum_layout_from_variants(&mut self, variants: &[EnumVariant]) -> EnumLayout {
         let tag_ty = self.lower_type(&Type::Int {
             signed: false,
             bits: 32,
@@ -429,7 +443,6 @@ impl<'a> TypeLowerer<'a> {
         for (i, variant) in variants.iter().enumerate() {
             let tag_value = i as u32;
             if variant.payload.is_empty() {
-                // No payload, just a scalar tag.
                 variant_layouts.push(EnumVariantLayout {
                     name: variant.name.clone(),
                     tag: tag_value,
@@ -441,7 +454,6 @@ impl<'a> TypeLowerer<'a> {
                 continue;
             }
             if variant.payload.len() == 1 {
-                // Single payload element, use the element's layout directly.
                 let payload_ty = self.lower_type(&variant.payload[0]);
                 let payload_layout = self.ir_type_cache.layout(payload_ty);
                 let payload_size = payload_layout.size();
@@ -490,13 +502,11 @@ impl<'a> TypeLowerer<'a> {
             size: max_payload_size,
             align: max_payload_align,
         });
-        let layout = EnumLayout {
+        EnumLayout {
             tag_ty,
             blob_ty,
             variants: variant_layouts,
-        };
-        self.enum_layouts.insert(ty_id, layout);
-        self.enum_layouts.get(&ty_id).unwrap()
+        }
     }
 
     fn struct_fields_from_view(&mut self, ty: &Type) -> Option<Vec<StructField>> {

@@ -51,6 +51,7 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
             Type::ErrorUnion { ok_ty, err_tys } => {
                 self.coerce_to_error_union(value, from_ty, to_ty, ok_ty, err_tys)
             }
+            Type::Enum { .. } => self.coerce_to_enum_payload_wrapper(value, from_ty, to_ty),
             _ => value,
         }
     }
@@ -91,8 +92,13 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
                     from_ty, union_ty
                 )
             });
-
-        self.build_error_union_value(union_ty, variant_index, value)
+        let target_variant_ty = if variant_index == 0 {
+            ok_ty
+        } else {
+            &err_tys[variant_index - 1]
+        };
+        let coerced_payload = self.coerce_value_to_type(value, from_ty, target_variant_ty);
+        self.build_error_union_value(union_ty, variant_index, coerced_payload)
     }
 
     fn error_union_variant_index(
@@ -106,12 +112,103 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
         }
 
         for (idx, err_ty) in err_tys.iter().enumerate() {
-            if type_assignable(from_ty, err_ty) != TypeAssignability::Incompatible {
+            if self.error_payload_assignable_to_variant(from_ty, err_ty) {
                 return Some(idx + 1);
             }
         }
 
         None
+    }
+
+    fn error_payload_assignable_to_variant(&self, from_ty: &Type, variant_ty: &Type) -> bool {
+        if type_assignable(from_ty, variant_ty) != TypeAssignability::Incompatible {
+            return true;
+        }
+
+        self.enum_payload_variant_index(from_ty, variant_ty)
+            .is_some()
+    }
+
+    fn enum_payload_variant_index(&self, from_ty: &Type, enum_ty: &Type) -> Option<usize> {
+        let Type::Enum { variants, .. } = enum_ty else {
+            return None;
+        };
+
+        variants.iter().position(|variant| {
+            variant.payload.len() == 1
+                && type_assignable(from_ty, &variant.payload[0]) != TypeAssignability::Incompatible
+        })
+    }
+
+    fn coerce_to_enum_payload_wrapper(
+        &mut self,
+        value: ValueId,
+        from_ty: &Type,
+        enum_ty: &Type,
+    ) -> ValueId {
+        let Some(variant_index) = self.enum_payload_variant_index(from_ty, enum_ty) else {
+            return value;
+        };
+        let Type::Enum { variants, .. } = enum_ty else {
+            return value;
+        };
+        let payload_ty = variants
+            .get(variant_index)
+            .and_then(|variant| variant.payload.first())
+            .unwrap_or_else(|| {
+                panic!(
+                    "backend enum payload wrapper missing payload for variant {} in {:?}",
+                    variant_index, enum_ty
+                )
+            });
+        let wrapped_payload = self.coerce_value_to_type(value, from_ty, payload_ty);
+        self.build_enum_variant_value(enum_ty, variant_index, wrapped_payload)
+    }
+
+    fn build_enum_variant_value(
+        &mut self,
+        enum_ty: &Type,
+        variant_index: usize,
+        payload_value: ValueId,
+    ) -> ValueId {
+        let (tag_ty, blob_ty, variant_tag, payload_offset, payload_ty) = {
+            let layout = self.type_lowerer.enum_layout_for_type(enum_ty);
+            let variant = layout.variants.get(variant_index).unwrap_or_else(|| {
+                panic!(
+                    "backend enum variant index out of range: {} of {}",
+                    variant_index,
+                    layout.variants.len()
+                )
+            });
+            if variant.field_offsets.len() > 1 || variant.field_tys.len() > 1 {
+                panic!(
+                    "backend enum variant wrapper must carry at most one payload field, found {}",
+                    variant.field_tys.len()
+                );
+            }
+            (
+                layout.tag_ty,
+                layout.blob_ty,
+                variant.tag,
+                variant.field_offsets.first().copied(),
+                variant.field_tys.first().copied(),
+            )
+        };
+
+        let enum_ir_ty = self.type_lowerer.lower_type(enum_ty);
+        let slot = self.alloc_value_slot(enum_ir_ty);
+
+        let tag_val = self
+            .builder
+            .const_int(variant_tag as i128, false, 32, tag_ty);
+        self.store_field(slot.addr, 0, tag_ty, tag_val);
+
+        if let (Some(offset), Some(payload_ty)) = (payload_offset, payload_ty) {
+            let payload_ptr = self.field_addr_typed(slot.addr, 1, blob_ty);
+            self.store_into_blob(payload_ptr, offset, payload_value, payload_ty);
+        }
+
+        self.load_slot(&slot)
     }
 
     fn build_error_union_value(

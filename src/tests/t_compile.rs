@@ -854,6 +854,47 @@ fn main() -> () {
 }
 
 #[test]
+fn compile_try_can_wrap_propagated_errors_into_return_enum_variant() {
+    let source = r#"
+type IoError = {
+    code: u64,
+}
+
+type ParseError = {
+    line: u64,
+}
+
+type AppError
+  = Io(IoError)
+  | Parse(ParseError)
+
+fn read_io() -> u64 | IoError {
+    IoError { code: 10 }
+}
+
+fn read_parse() -> u64 | ParseError {
+    ParseError { line: 20 }
+}
+
+fn run(flag: bool) -> u64 | AppError {
+    if flag {
+        read_io()?
+    } else {
+        read_parse()?
+    }
+}
+
+fn main() -> () | AppError {
+    let _x = run(true)?;
+    ()
+}
+"#;
+
+    let opts = deterministic_compile_opts();
+    compile(source, &opts).expect("compile should support wrapped try propagation");
+}
+
+#[test]
 fn compile_asm_dump_is_deterministic() {
     let source = r#"
 fn sum10(a0: u64, a1: u64, a2: u64, a3: u64, a4: u64, a5: u64, a6: u64, a7: u64, a8: u64, a9: u64) -> u64 {

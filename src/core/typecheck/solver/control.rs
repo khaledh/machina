@@ -12,6 +12,29 @@ use crate::core::typecheck::errors::{TypeCheckError, TypeCheckErrorKind};
 use crate::core::typecheck::unify::TcUnifier;
 use crate::core::types::{Type, TypeAssignability, type_assignable};
 
+fn try_error_variant_accepted(err_ty: &Type, return_err_ty: &Type) -> bool {
+    if !matches!(
+        type_assignable(err_ty, return_err_ty),
+        TypeAssignability::Incompatible
+    ) {
+        return true;
+    }
+
+    // Allow `?` to propagate into wrapper enum errors (for example,
+    // `() | AppError` where `AppError = Io(IoError) | Parse(ParseError)`).
+    let Type::Enum { variants, .. } = return_err_ty else {
+        return false;
+    };
+
+    variants.iter().any(|variant| {
+        variant.payload.len() == 1
+            && !matches!(
+                type_assignable(err_ty, &variant.payload[0]),
+                TypeAssignability::Incompatible
+            )
+    })
+}
+
 pub(super) fn try_check_expr_obligation_control(
     obligation: &ExprObligation,
     def_terms: &HashMap<DefId, Type>,
@@ -161,12 +184,9 @@ pub(super) fn try_check_expr_obligation_control(
                 } => {
                     let mut missing = Vec::new();
                     for err_ty in err_tys {
-                        let present = return_err_tys.iter().any(|return_err_ty| {
-                            !matches!(
-                                type_assignable(err_ty, return_err_ty),
-                                TypeAssignability::Incompatible
-                            )
-                        });
+                        let present = return_err_tys
+                            .iter()
+                            .any(|return_err_ty| try_error_variant_accepted(err_ty, return_err_ty));
                         if !present
                             && !super::term_utils::is_unresolved(err_ty)
                             && !missing.iter().any(|seen| seen == err_ty)

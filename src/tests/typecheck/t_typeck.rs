@@ -2084,6 +2084,33 @@ fn test_try_operator_reports_all_missing_error_variants() {
 }
 
 #[test]
+fn test_try_operator_allows_wrapped_error_enum_return_variants() {
+    let source = r#"
+        type IoError = { code: u64 }
+        type ParseError = { line: u64 }
+        type AppError = Io(IoError) | Parse(ParseError)
+
+        fn read_io() -> u64 | IoError {
+            IoError { code: 10 }
+        }
+
+        fn read_parse() -> u64 | ParseError {
+            ParseError { line: 20 }
+        }
+
+        fn run(flag: bool) -> u64 | AppError {
+            if flag {
+                read_io()?
+            } else {
+                read_parse()?
+            }
+        }
+    "#;
+
+    let _ctx = type_check_source(source).expect("Failed to type check");
+}
+
+#[test]
 fn test_return_union_mismatch_reports_union_variants() {
     let source = r#"
         type IoError = { code: u64 }
