@@ -1330,6 +1330,35 @@ fn main() -> ()
 }
 
 #[test]
+fn compile_typestate_machine_handle_typed_request_supports_non_empty_payload_selectors() {
+    let source = r#"
+type Msg = { x: u64 }
+
+typestate Worker {
+    fn new() -> Idle { Idle {} }
+
+    state Idle {
+        on Msg(m) -> stay { m; }
+    }
+}
+
+@machines
+fn main() -> ()
+    | MachineSpawnFailed
+    | MachineBindFailed
+    | MachineStartFailed
+    | ManagedRuntimeUnavailable
+    | RequestFailed {
+    let worker = Worker::spawn()?;
+    worker.request(1, Msg { x: 7 })?;
+}
+"#;
+
+    compile(source, &typestate_compile_opts())
+        .expect("typed request should support non-empty payload selectors");
+}
+
+#[test]
 fn compile_typestate_spawn_mirrors_new_param_arity() {
     let source = r#"
 typestate Worker {

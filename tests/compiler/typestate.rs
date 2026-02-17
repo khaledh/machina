@@ -62,6 +62,7 @@ fn managed_check_examples() -> Vec<PathBuf> {
     vec![
         root.join("examples/typestate/machine_events_check.mc"),
         root.join("examples/typestate/inter_machine_req_reply_check.mc"),
+        root.join("examples/typestate/machine_handle_request_check.mc"),
         root.join("examples/typestate/final_state_machine.mc"),
     ]
 }
@@ -148,6 +149,24 @@ fn typestate_managed_examples_typecheck_with_experimental_flag() {
         check_example(&path, true)
             .unwrap_or_else(|errs| panic!("expected success for {}: {errs:?}", path.display()));
     }
+}
+
+#[test]
+fn typestate_machine_handle_request_example_runs_in_experimental_mode() {
+    let path = repo_root().join("examples/typestate/machine_handle_request_check.mc");
+    let source = std::fs::read_to_string(&path)
+        .expect("failed to read typestate machine-handle request fixture");
+    let run = run_program_with_opts(
+        "typestate_machine_handle_request",
+        &source,
+        typestate_opts(true),
+    );
+    assert_eq!(run.status.code(), Some(0));
+    let stdout = String::from_utf8_lossy(&run.stdout);
+    assert!(
+        stdout.contains("got 42"),
+        "expected typed handle request/reply output, got: {stdout}"
+    );
 }
 
 #[test]

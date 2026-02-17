@@ -239,6 +239,7 @@ fn desugar_typestate(
     let typestate_handlers = analysis.handlers;
     let final_state_names = analysis.final_state_names;
     let typed_send_specs = collect_typed_send_specs(&typestate_handlers, &states);
+    let typed_request_specs = collect_typed_request_specs(&typestate_handlers, &states);
     let state_name_map = build_state_name_map(&ts_name, &states);
     let generated_state_names: HashSet<String> = state_name_map.values().cloned().collect();
     // Local fields are used by shorthand transition rewriting (`State`) to know
@@ -262,6 +263,7 @@ fn desugar_typestate(
     lowered.push(machine_handle_method_block(
         &handle_type_name,
         &typed_send_specs,
+        &typed_request_specs,
         node_id_gen,
     ));
 
@@ -443,6 +445,12 @@ struct TypestateDesugarOutput {
 #[derive(Clone)]
 struct TypedSendSpec {
     selector_ty: TypeExpr,
+    kind: u64,
+}
+
+#[derive(Clone)]
+struct TypedRequestSpec {
+    payload_ty: TypeExpr,
     kind: u64,
 }
 
@@ -778,6 +786,7 @@ fn ensure_machine_support_types(module: &mut Module, node_id_gen: &mut NodeIdGen
         prepend.push(machine_handle_method_block(
             MACHINE_HANDLE_TYPE_NAME,
             &[],
+            &[],
             node_id_gen,
         ));
     }
@@ -951,6 +960,7 @@ fn empty_struct_type_def(name: &str, node_id_gen: &mut NodeIdGen) -> TopLevelIte
 fn machine_handle_method_block(
     handle_type_name: &str,
     typed_send_specs: &[TypedSendSpec],
+    typed_request_specs: &[TypedRequestSpec],
     node_id_gen: &mut NodeIdGen,
 ) -> TopLevelItem {
     let span = Span::default();
@@ -1203,6 +1213,24 @@ fn machine_handle_method_block(
         }
     }
 
+    fn machine_request_result_union_type(node_id_gen: &mut NodeIdGen, span: Span) -> TypeExpr {
+        TypeExpr {
+            id: node_id_gen.new_id(),
+            kind: TypeExprKind::Union {
+                variants: vec![
+                    named_type_expr("u64", node_id_gen, span),
+                    named_type_expr(
+                        MACHINE_MANAGED_RUNTIME_UNAVAILABLE_TYPE_NAME,
+                        node_id_gen,
+                        span,
+                    ),
+                    named_type_expr(MACHINE_REQUEST_FAILED_TYPE_NAME, node_id_gen, span),
+                ],
+            },
+            span,
+        }
+    }
+
     let send_method = MethodDef {
         id: node_id_gen.new_id(),
         def_id: (),
@@ -1429,6 +1457,123 @@ fn machine_handle_method_block(
         })
         .collect();
 
+    let typed_request_methods: Vec<MethodItem> = typed_request_specs
+        .iter()
+        .map(|spec| {
+            MethodItem::Def(MethodDef {
+                id: node_id_gen.new_id(),
+                def_id: (),
+                attrs: Vec::new(),
+                sig: MethodSig {
+                    name: "request".to_string(),
+                    type_params: Vec::new(),
+                    self_param: SelfParam {
+                        id: node_id_gen.new_id(),
+                        def_id: (),
+                        mode: ParamMode::In,
+                        span,
+                    },
+                    params: vec![
+                        parsed::Param {
+                            id: node_id_gen.new_id(),
+                            ident: "dst".to_string(),
+                            def_id: (),
+                            typ: u64_type_expr(node_id_gen, span),
+                            mode: ParamMode::In,
+                            span,
+                        },
+                        parsed::Param {
+                            id: node_id_gen.new_id(),
+                            ident: "payload".to_string(),
+                            def_id: (),
+                            typ: clone_type_expr_with_new_ids(&spec.payload_ty, node_id_gen),
+                            mode: ParamMode::In,
+                            span,
+                        },
+                    ],
+                    ret_ty_expr: machine_request_result_union_type(node_id_gen, span),
+                    span,
+                },
+                body: Expr {
+                    id: node_id_gen.new_id(),
+                    kind: ExprKind::Block {
+                        items: vec![
+                            parsed::BlockItem::Stmt(let_bind_stmt(
+                                "__mc_rt",
+                                call_expr(
+                                    MANAGED_RUNTIME_CURRENT_FN,
+                                    Vec::new(),
+                                    node_id_gen,
+                                    span,
+                                ),
+                                node_id_gen,
+                                span,
+                            )),
+                            parsed::BlockItem::Expr(return_if_eq_zero(
+                                "__mc_rt",
+                                MACHINE_MANAGED_RUNTIME_UNAVAILABLE_TYPE_NAME,
+                                node_id_gen,
+                                span,
+                            )),
+                            // Pack typed payload into runtime ABI words:
+                            // - payload0: heap box pointer
+                            // - payload1: payload layout id
+                            parsed::BlockItem::Stmt(let_bind_stmt(
+                                "__mc_packed",
+                                call_expr(
+                                    "__mc_machine_payload_pack",
+                                    vec![var_expr("payload", node_id_gen, span)],
+                                    node_id_gen,
+                                    span,
+                                ),
+                                node_id_gen,
+                                span,
+                            )),
+                            parsed::BlockItem::Stmt(let_bind_stmt(
+                                "__mc_pending_id",
+                                call_expr(
+                                    "__mc_machine_runtime_request_u64",
+                                    vec![
+                                        var_expr("__mc_rt", node_id_gen, span),
+                                        self_field_expr("_id", node_id_gen, span),
+                                        var_expr("dst", node_id_gen, span),
+                                        int_expr(spec.kind, node_id_gen, span),
+                                        tuple_field_expr(
+                                            var_expr("__mc_packed", node_id_gen, span),
+                                            0,
+                                            node_id_gen,
+                                            span,
+                                        ),
+                                        tuple_field_expr(
+                                            var_expr("__mc_packed", node_id_gen, span),
+                                            1,
+                                            node_id_gen,
+                                            span,
+                                        ),
+                                    ],
+                                    node_id_gen,
+                                    span,
+                                ),
+                                node_id_gen,
+                                span,
+                            )),
+                            parsed::BlockItem::Expr(return_if_eq_zero(
+                                "__mc_pending_id",
+                                MACHINE_REQUEST_FAILED_TYPE_NAME,
+                                node_id_gen,
+                                span,
+                            )),
+                        ],
+                        tail: Some(Box::new(var_expr("__mc_pending_id", node_id_gen, span))),
+                    },
+                    ty: (),
+                    span,
+                },
+                span,
+            })
+        })
+        .collect();
+
     let request_method = MethodDef {
         id: node_id_gen.new_id(),
         def_id: (),
@@ -1476,21 +1621,7 @@ fn machine_handle_method_block(
                     span,
                 },
             ],
-            ret_ty_expr: TypeExpr {
-                id: node_id_gen.new_id(),
-                kind: TypeExprKind::Union {
-                    variants: vec![
-                        named_type_expr("u64", node_id_gen, span),
-                        named_type_expr(
-                            MACHINE_MANAGED_RUNTIME_UNAVAILABLE_TYPE_NAME,
-                            node_id_gen,
-                            span,
-                        ),
-                        named_type_expr(MACHINE_REQUEST_FAILED_TYPE_NAME, node_id_gen, span),
-                    ],
-                },
-                span,
-            },
+            ret_ty_expr: machine_request_result_union_type(node_id_gen, span),
             span,
         },
         body: Expr {
@@ -1545,6 +1676,7 @@ fn machine_handle_method_block(
     let mut method_items = vec![MethodItem::Def(send_method)];
     method_items.extend(typed_send_methods);
     method_items.push(MethodItem::Def(request_method));
+    method_items.extend(typed_request_methods);
 
     TopLevelItem::MethodBlock(MethodBlock {
         id: node_id_gen.new_id(),
@@ -1637,6 +1769,47 @@ fn collect_typed_send_specs(
         .enumerate()
         .map(|(idx, selector_ty)| TypedSendSpec {
             selector_ty,
+            kind: idx as u64 + 1,
+        })
+        .collect()
+}
+
+fn collect_typed_request_specs(
+    typestate_handlers: &[TypestateOnHandler],
+    states: &[TypestateState],
+) -> Vec<TypedRequestSpec> {
+    use std::collections::BTreeMap;
+
+    let mut payloads = BTreeMap::<String, TypeExpr>::new();
+    let mut maybe_insert = |handler: &TypestateOnHandler| {
+        // `request(dst, payload)` accepts:
+        // - direct request handlers: `on RequestTy(...)`
+        // - provenance response handlers: `on ResponseTy(...) for RequestTy(origin)`
+        let payload_ty = handler
+            .provenance
+            .as_ref()
+            .map(|provenance| provenance.param.typ.clone())
+            .unwrap_or_else(|| handler.selector_ty.clone());
+        let key = payload_selector_stable_key(&payload_ty);
+        payloads.entry(key).or_insert(payload_ty);
+    };
+
+    for handler in typestate_handlers {
+        maybe_insert(handler);
+    }
+    for state in states {
+        for item in &state.items {
+            if let TypestateStateItem::Handler(handler) = item {
+                maybe_insert(handler);
+            }
+        }
+    }
+
+    payloads
+        .into_values()
+        .enumerate()
+        .map(|(idx, payload_ty)| TypedRequestSpec {
+            payload_ty,
             kind: idx as u64 + 1,
         })
         .collect()
