@@ -53,6 +53,7 @@ typedef enum mc_machine_lifecycle {
     // Machine encountered a fault during dispatch and is quarantined.
     MC_MACHINE_FAULTED = 2,
     // Machine is deliberately stopped and does not accept new work.
+    // Runtime eagerly releases per-machine mailbox/dispatch resources.
     MC_MACHINE_STOPPED = 3,
 } mc_machine_lifecycle_t;
 
@@ -392,6 +393,9 @@ typedef struct mc_machine_runtime {
     // Pending lifecycle counters for observability/tests.
     uint64_t pending_created_count;
     uint64_t pending_cleanup_counts[5];
+    // Number of times a machine transitioned to STOPPED and its per-machine
+    // resources were eagerly released.
+    uint64_t stopped_cleanup_count;
 } mc_machine_runtime_t;
 
 // Initialize runtime state to empty.
@@ -667,6 +671,11 @@ uint64_t __mc_machine_runtime_pending_created_count(
 uint64_t __mc_machine_runtime_pending_cleanup_count(
     const mc_machine_runtime_t *rt,
     mc_pending_cleanup_reason_t reason
+);
+
+// Number of machine stop-cleanup transitions observed by this runtime.
+uint64_t __mc_machine_runtime_stopped_cleanup_count(
+    const mc_machine_runtime_t *rt
 );
 
 // Note: integer-handle bridge wrappers (`*_u64`) live in `machine/bridge.h`.

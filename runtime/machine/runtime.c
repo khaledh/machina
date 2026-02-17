@@ -284,6 +284,77 @@ void mc_subscription_remove(
     subs->len = write;
 }
 
+// Remove all subscriptions registered by one machine.
+static void mc_subscription_remove_machine(
+    mc_subscription_registry_t *subs,
+    mc_machine_id_t machine_id
+) {
+    uint32_t write = 0;
+    for (uint32_t read = 0; read < subs->len; read++) {
+        if (subs->entries[read].machine_id == machine_id) {
+            continue;
+        }
+        if (write != read) {
+            subs->entries[write] = subs->entries[read];
+        }
+        write += 1;
+    }
+    subs->len = write;
+}
+
+// Transition one machine into STOPPED and eagerly release per-machine runtime
+// resources. The machine id remains reserved, so stale handles consistently
+// observe NotRunning instead of Unknown.
+static void mc_stop_machine_and_cleanup_slot(
+    mc_machine_runtime_t *rt,
+    mc_machine_id_t machine_id,
+    mc_machine_slot_t *slot
+) {
+    if (!rt || !slot) {
+        return;
+    }
+
+    slot->lifecycle = MC_MACHINE_STOPPED;
+    (void)mc_pending_cleanup_requester(rt, machine_id, MC_PENDING_CLEANUP_REQUESTER_STOPPED);
+    mc_subscription_remove_machine(&rt->subscriptions, machine_id);
+
+    mc_machine_mailbox_t *mailbox = &slot->mailbox;
+    for (uint32_t j = 0; j < mailbox->len; j++) {
+        uint32_t idx = (mailbox->head + j) % (mailbox->cap == 0 ? 1u : mailbox->cap);
+        mc_machine_envelope_t *env = &mailbox->items[idx];
+        const uint8_t release_payload = !mc_envelope_is_request(env);
+        const uint8_t release_origin = mc_envelope_is_response(env);
+        mc_release_envelope_payloads(env, release_payload, release_origin);
+    }
+    __mc_free(mailbox->items);
+    mailbox->items = NULL;
+    // Preserve configured capacity so explicit lifecycle overrides can
+    // reactivate the slot for test/diagnostic scenarios.
+    mailbox->len = 0;
+    mailbox->head = 0;
+    mailbox->in_ready_queue = 0;
+
+    slot->state_word = 0;
+    slot->state_tag = 0;
+    slot->descriptor = NULL;
+    slot->dispatch = NULL;
+    slot->dispatch_ctx = NULL;
+
+    rt->stopped_cleanup_count += 1;
+}
+
+// Re-initialize mailbox storage when a previously-stopped slot is explicitly
+// transitioned back to CREATED/RUNNING via lifecycle override.
+static uint8_t mc_restore_mailbox_if_needed(mc_machine_slot_t *slot) {
+    if (!slot) {
+        return 0;
+    }
+    if (slot->mailbox.items != NULL) {
+        return 1;
+    }
+    return mc_mailbox_init(&slot->mailbox, slot->mailbox.cap);
+}
+
 // Hook emitters ---------------------------------------------------------------
 
 // Best-effort dead-letter callback.
@@ -313,12 +384,17 @@ void mc_apply_fault_policy(
     uint64_t fault_code
 ) {
     if (rt->fault_policy == MC_FAULT_POLICY_MARK_STOPPED) {
-        slot->lifecycle = MC_MACHINE_STOPPED;
+        // MARK_STOPPED faults follow the same cleanup path as explicit stop.
+        mc_stop_machine_and_cleanup_slot(rt, machine_id, slot);
     } else {
         slot->lifecycle = MC_MACHINE_FAULTED;
+        // Faulting requester invalidates all outstanding inflight correlations.
+        (void)mc_pending_cleanup_requester(
+            rt,
+            machine_id,
+            MC_PENDING_CLEANUP_REQUESTER_FAULTED
+        );
     }
-    // Faulting requester invalidates all outstanding inflight correlations.
-    (void)mc_pending_cleanup_requester(rt, machine_id, MC_PENDING_CLEANUP_REQUESTER_FAULTED);
     mc_emit_fault(rt, machine_id, fault_code);
 }
 
@@ -719,6 +795,7 @@ void __mc_machine_runtime_init(mc_machine_runtime_t *rt) {
     rt->pending_timeout_steps = 0;
     rt->pending_created_count = 0;
     memset(rt->pending_cleanup_counts, 0, sizeof(rt->pending_cleanup_counts));
+    rt->stopped_cleanup_count = 0;
 }
 
 // Public API: free all runtime-owned buffers and reset state.
@@ -859,11 +936,16 @@ void __mc_machine_runtime_set_lifecycle(
     if (slot->lifecycle == lifecycle) {
         return;
     }
-    slot->lifecycle = lifecycle;
     if (lifecycle == MC_MACHINE_STOPPED) {
-        (void)mc_pending_cleanup_requester(rt, machine_id, MC_PENDING_CLEANUP_REQUESTER_STOPPED);
+        mc_stop_machine_and_cleanup_slot(rt, machine_id, slot);
     } else if (lifecycle == MC_MACHINE_FAULTED) {
+        slot->lifecycle = lifecycle;
         (void)mc_pending_cleanup_requester(rt, machine_id, MC_PENDING_CLEANUP_REQUESTER_FAULTED);
+    } else {
+        if (slot->lifecycle == MC_MACHINE_STOPPED && !mc_restore_mailbox_if_needed(slot)) {
+            return;
+        }
+        slot->lifecycle = lifecycle;
     }
 }
 
@@ -1237,12 +1319,7 @@ uint8_t mc_machine_runtime_dispatch_one_txn_impl(
                 *out_fault_code = fault_code;
             }
         } else if (result == MC_DISPATCH_STOP) {
-            slot->lifecycle = MC_MACHINE_STOPPED;
-            (void)mc_pending_cleanup_requester(
-                rt,
-                machine_id,
-                MC_PENDING_CLEANUP_REQUESTER_STOPPED
-            );
+            mc_stop_machine_and_cleanup_slot(rt, machine_id, slot);
         }
 
         if (slot->lifecycle == MC_MACHINE_RUNNING && slot->mailbox.len > 0) {
@@ -1376,4 +1453,10 @@ uint64_t __mc_machine_runtime_pending_cleanup_count(
         return 0;
     }
     return rt->pending_cleanup_counts[(uint32_t)reason];
+}
+
+uint64_t __mc_machine_runtime_stopped_cleanup_count(
+    const mc_machine_runtime_t *rt
+) {
+    return rt ? rt->stopped_cleanup_count : 0;
 }
