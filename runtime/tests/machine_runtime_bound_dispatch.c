@@ -1,7 +1,7 @@
 #include <stdint.h>
 #include <stddef.h>
 
-#include "machine/runtime.h"
+#include "machine/bridge.h"
 
 // Minimal dispatch callback used to validate per-machine dispatch binding.
 static mc_dispatch_result_t test_dispatch(

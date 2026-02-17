@@ -1,6 +1,6 @@
 #include <stdint.h>
 
-#include "machine/runtime.h"
+#include "machine/bridge.h"
 
 // Validates opaque-handle bridge helpers used by `std::machine`.
 int main(void) {

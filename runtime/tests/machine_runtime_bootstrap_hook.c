@@ -1,6 +1,6 @@
 #include <stdint.h>
 
-#include "machine/runtime.h"
+#include "machine/bridge.h"
 
 static uint64_t g_bootstrap_calls = 0;
 

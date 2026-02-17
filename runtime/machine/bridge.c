@@ -1,3 +1,4 @@
+#include "bridge.h"
 #include "internal.h"
 
 #include <stdlib.h>
@@ -12,7 +13,7 @@
 // Runtime calls this once lazily on first `__mc_machine_runtime_new()`.
 MC_WEAK void __mc_machine_bootstrap(void) {}
 
-// Optional process-global managed runtime used by `@[machines]` entrypoint
+// Optional process-global managed runtime used by `@machines` entrypoint
 // bootstrap. This keeps runtime ownership explicit at source level while
 // removing runtime-handle plumbing from machine-centric app code.
 static uint64_t g_managed_runtime_handle = 0;
@@ -23,6 +24,29 @@ static mc_machine_runtime_t *mc_runtime_from_handle(uint64_t runtime) {
         return NULL;
     }
     return (mc_machine_runtime_t *)(uintptr_t)runtime;
+}
+
+static uint8_t mc_machine_id_from_u64(uint64_t machine_id, mc_machine_id_t *out_id) {
+    if (!out_id || machine_id == 0 || machine_id > UINT32_MAX) {
+        return 0;
+    }
+    *out_id = (mc_machine_id_t)machine_id;
+    return 1;
+}
+
+static mc_machine_envelope_t mc_make_payload_envelope(
+    uint64_t kind,
+    uint64_t payload0,
+    uint64_t payload1
+) {
+    return (mc_machine_envelope_t){
+        .kind = kind,
+        .src = 0,
+        .reply_cap_id = 0,
+        .pending_id = 0,
+        .payload0 = payload0,
+        .payload1 = payload1,
+    };
 }
 
 static void mc_machine_runtime_managed_atexit_cleanup(void) {
@@ -107,10 +131,11 @@ uint64_t __mc_machine_runtime_spawn_u64(uint64_t runtime, uint64_t mailbox_cap) 
 
 uint64_t __mc_machine_runtime_start_u64(uint64_t runtime, uint64_t machine_id) {
     mc_machine_runtime_t *rt = mc_runtime_from_handle(runtime);
-    if (!rt || machine_id > UINT32_MAX) {
+    mc_machine_id_t id = 0;
+    if (!rt || !mc_machine_id_from_u64(machine_id, &id)) {
         return 0;
     }
-    return __mc_machine_runtime_start(rt, (mc_machine_id_t)machine_id) ? 1 : 0;
+    return __mc_machine_runtime_start(rt, id) ? 1 : 0;
 }
 
 uint64_t __mc_machine_runtime_set_state_u64(
@@ -119,10 +144,11 @@ uint64_t __mc_machine_runtime_set_state_u64(
     uint64_t state_word
 ) {
     mc_machine_runtime_t *rt = mc_runtime_from_handle(runtime);
-    if (!rt || machine_id > UINT32_MAX) {
+    mc_machine_id_t id = 0;
+    if (!rt || !mc_machine_id_from_u64(machine_id, &id)) {
         return 0;
     }
-    __mc_machine_runtime_set_state(rt, (mc_machine_id_t)machine_id, state_word);
+    __mc_machine_runtime_set_state(rt, id, state_word);
     return 1;
 }
 
@@ -134,18 +160,12 @@ uint64_t __mc_machine_runtime_send_u64(
     uint64_t payload1
 ) {
     mc_machine_runtime_t *rt = mc_runtime_from_handle(runtime);
-    if (!rt || dst > UINT32_MAX) {
+    mc_machine_id_t dst_id = 0;
+    if (!rt || !mc_machine_id_from_u64(dst, &dst_id)) {
         return (uint64_t)MC_MAILBOX_ENQUEUE_MACHINE_UNKNOWN;
     }
-    mc_machine_envelope_t env = {
-        .kind = kind,
-        .src = 0,
-        .reply_cap_id = 0,
-        .pending_id = 0,
-        .payload0 = payload0,
-        .payload1 = payload1,
-    };
-    return (uint64_t)__mc_machine_runtime_enqueue(rt, (mc_machine_id_t)dst, &env);
+    mc_machine_envelope_t env = mc_make_payload_envelope(kind, payload0, payload1);
+    return (uint64_t)__mc_machine_runtime_enqueue(rt, dst_id, &env);
 }
 
 uint64_t __mc_machine_runtime_request_u64(
@@ -157,22 +177,17 @@ uint64_t __mc_machine_runtime_request_u64(
     uint64_t payload1
 ) {
     mc_machine_runtime_t *rt = mc_runtime_from_handle(runtime);
-    if (!rt || src > UINT32_MAX || dst > UINT32_MAX) {
+    mc_machine_id_t src_id = 0;
+    mc_machine_id_t dst_id = 0;
+    if (!rt || !mc_machine_id_from_u64(src, &src_id) || !mc_machine_id_from_u64(dst, &dst_id)) {
         return 0;
     }
-    mc_machine_envelope_t env = {
-        .kind = kind,
-        .src = 0,
-        .reply_cap_id = 0,
-        .pending_id = 0,
-        .payload0 = payload0,
-        .payload1 = payload1,
-    };
+    mc_machine_envelope_t env = mc_make_payload_envelope(kind, payload0, payload1);
     uint64_t pending_id = 0;
     if (__mc_machine_runtime_request(
             rt,
-            (mc_machine_id_t)src,
-            (mc_machine_id_t)dst,
+            src_id,
+            dst_id,
             &env,
             &pending_id
         ) != MC_MAILBOX_ENQUEUE_OK) {
@@ -190,18 +205,12 @@ uint64_t __mc_machine_runtime_reply_u64(
     uint64_t payload1
 ) {
     mc_machine_runtime_t *rt = mc_runtime_from_handle(runtime);
-    if (!rt || src > UINT32_MAX) {
+    mc_machine_id_t src_id = 0;
+    if (!rt || !mc_machine_id_from_u64(src, &src_id)) {
         return (uint64_t)MC_REPLY_CAP_UNKNOWN;
     }
-    mc_machine_envelope_t env = {
-        .kind = kind,
-        .src = 0,
-        .reply_cap_id = 0,
-        .pending_id = 0,
-        .payload0 = payload0,
-        .payload1 = payload1,
-    };
-    return (uint64_t)__mc_machine_runtime_reply(rt, (mc_machine_id_t)src, reply_cap_id, &env);
+    mc_machine_envelope_t env = mc_make_payload_envelope(kind, payload0, payload1);
+    return (uint64_t)__mc_machine_runtime_reply(rt, src_id, reply_cap_id, &env);
 }
 
 uint64_t __mc_machine_runtime_bind_dispatch_u64(
@@ -211,10 +220,11 @@ uint64_t __mc_machine_runtime_bind_dispatch_u64(
     uint64_t dispatch_ctx
 ) {
     mc_machine_runtime_t *rt = mc_runtime_from_handle(runtime);
-    if (!rt || machine_id == 0 || machine_id > UINT32_MAX) {
+    mc_machine_id_t id = 0;
+    if (!rt || !mc_machine_id_from_u64(machine_id, &id)) {
         return 0;
     }
-    mc_machine_slot_t *slot = mc_get_slot(rt, (mc_machine_id_t)machine_id);
+    mc_machine_slot_t *slot = mc_get_slot(rt, id);
     if (!slot) {
         return 0;
     }
@@ -223,7 +233,7 @@ uint64_t __mc_machine_runtime_bind_dispatch_u64(
         (mc_machine_dispatch_txn_fn)(uintptr_t)dispatch_fn;
     __mc_machine_runtime_bind_dispatch(
         rt,
-        (mc_machine_id_t)machine_id,
+        id,
         typed_dispatch,
         (void *)(uintptr_t)dispatch_ctx
     );
@@ -277,12 +287,13 @@ uint64_t __mc_machine_runtime_bind_dispatch_thunk_u64(
     uint64_t dispatch_ctx
 ) {
     mc_machine_runtime_t *rt = mc_runtime_from_handle(runtime);
-    if (!rt || machine_id == 0 || machine_id > UINT32_MAX) {
+    mc_machine_id_t id = 0;
+    if (!rt || !mc_machine_id_from_u64(machine_id, &id)) {
         return 0;
     }
     return __mc_machine_runtime_bind_dispatch_thunk(
                rt,
-               (mc_machine_id_t)machine_id,
+               id,
                thunk_id,
                (void *)(uintptr_t)dispatch_ctx
            )
@@ -297,12 +308,13 @@ uint64_t __mc_machine_runtime_bind_descriptor_u64(
     uint64_t initial_state_tag
 ) {
     mc_machine_runtime_t *rt = mc_runtime_from_handle(runtime);
-    if (!rt || machine_id == 0 || machine_id > UINT32_MAX) {
+    mc_machine_id_t id = 0;
+    if (!rt || !mc_machine_id_from_u64(machine_id, &id)) {
         return 0;
     }
     return __mc_machine_runtime_bind_descriptor(
                rt,
-               (mc_machine_id_t)machine_id,
+               id,
                descriptor_id,
                initial_state_tag
            )

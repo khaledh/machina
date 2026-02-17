@@ -1,7 +1,7 @@
 #include <stdint.h>
 #include <stddef.h>
 
-#include "machine/runtime.h"
+#include "machine/bridge.h"
 
 typedef struct byte_buf {
     uint8_t bytes[512];
