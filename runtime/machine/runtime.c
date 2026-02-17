@@ -10,6 +10,11 @@ static void mc_release_payload_word(uint64_t payload0, mc_payload_layout_id_t pa
     if (payload0 == 0 || !mc_payload_layout_is_owned(payload1)) {
         return;
     }
+    mc_payload_layout_id_t layout_id = mc_payload_layout_id(payload1);
+    mc_payload_drop_fn drop_fn = __mc_machine_runtime_lookup_payload_drop(layout_id);
+    if (drop_fn) {
+        drop_fn((void *)(uintptr_t)payload0);
+    }
     __mc_free((void *)(uintptr_t)payload0);
 }
 

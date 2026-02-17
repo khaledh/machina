@@ -225,6 +225,13 @@ void __mc_machine_runtime_register_thunk_u64(uint64_t thunk_id, uint64_t dispatc
     );
 }
 
+void __mc_machine_runtime_register_payload_drop_u64(uint64_t layout_id, uint64_t drop_fn) {
+    __mc_machine_runtime_register_payload_drop(
+        (mc_payload_layout_id_t)layout_id,
+        (mc_payload_drop_fn)(uintptr_t)drop_fn
+    );
+}
+
 void __mc_machine_runtime_register_thunk_meta_u64(
     uint64_t thunk_id,
     uint64_t dispatch_fn,

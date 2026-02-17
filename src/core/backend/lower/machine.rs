@@ -7,6 +7,7 @@
 
 use std::collections::HashMap;
 
+use crate::core::backend::lower::drop_glue::DropGlueRegistry;
 use crate::core::backend::lower::types::TypeLowerer;
 use crate::core::backend::lower::{GlobalArena, LoweredFunction};
 use crate::core::ir::{
@@ -18,6 +19,32 @@ use crate::core::tree::semantic as sem;
 use crate::core::typecheck::type_map::TypeMap;
 use crate::core::types::{FnParam, Type};
 
+pub(super) type PayloadDropRegistrations = Vec<(u64, DefId)>;
+
+/// Collects payload layout-id -> drop-glue registrations needed by machine
+/// envelope cleanup paths.
+pub(super) fn collect_machine_payload_drop_registrations(
+    machine_plans: &sem::MachinePlanMap,
+    type_map: &TypeMap,
+    drop_glue: &mut DropGlueRegistry,
+) -> PayloadDropRegistrations {
+    let mut pairs: Vec<(u64, DefId)> = Vec::new();
+    for descriptor in machine_plans.descriptors.values() {
+        for event in &descriptor.event_kinds {
+            let ty = type_map.type_table().get(event.payload_layout_ty);
+            if !ty.needs_drop() {
+                continue;
+            }
+            let layout_id = event.payload_layout_ty.index() as u64;
+            let drop_def = drop_glue.def_id_for(ty, type_map);
+            pairs.push((layout_id, drop_def));
+        }
+    }
+    pairs.sort_by_key(|(layout_id, def_id)| (*layout_id, def_id.0));
+    pairs.dedup_by_key(|(layout_id, _)| *layout_id);
+    pairs
+}
+
 /// Appends machine runtime artifacts derived from semantic machine plans.
 ///
 /// The generated dispatch thunks are intentionally conservative in v1:
@@ -25,12 +52,16 @@ use crate::core::types::{FnParam, Type};
 /// wiring is connected in the runtime bootstrap path.
 pub(super) fn append_machine_runtime_artifacts(
     machine_plans: &sem::MachinePlanMap,
+    payload_drop_regs: &PayloadDropRegistrations,
     def_table: &DefTable,
     type_map: &TypeMap,
     funcs: &mut Vec<LoweredFunction>,
     globals: &mut GlobalArena,
 ) {
-    if machine_plans.descriptors.is_empty() && machine_plans.thunks.is_empty() {
+    if machine_plans.descriptors.is_empty()
+        && machine_plans.thunks.is_empty()
+        && payload_drop_regs.is_empty()
+    {
         return;
     }
 
@@ -46,6 +77,7 @@ pub(super) fn append_machine_runtime_artifacts(
     );
     append_bootstrap_registration_fn(
         machine_plans,
+        payload_drop_regs,
         type_map,
         def_table.next_def_id(),
         &thunk_ids,
@@ -109,13 +141,14 @@ fn append_dispatch_thunks(
 
 fn append_bootstrap_registration_fn(
     machine_plans: &sem::MachinePlanMap,
+    payload_drop_regs: &PayloadDropRegistrations,
     type_map: &TypeMap,
     first_def_id: DefId,
     thunk_ids: &HashMap<DefId, DefId>,
     descriptor_globals: &HashMap<String, (GlobalId, usize)>,
     funcs: &mut Vec<LoweredFunction>,
 ) {
-    if thunk_ids.is_empty() && descriptor_globals.is_empty() {
+    if thunk_ids.is_empty() && descriptor_globals.is_empty() && payload_drop_regs.is_empty() {
         return;
     }
 
@@ -159,6 +192,21 @@ fn append_bootstrap_registration_fn(
         builder.call(
             Callee::Runtime(RuntimeFn::MachineRegisterThunkWithTag),
             vec![thunk_id_word, thunk_addr_word, next_state_tag_word],
+            unit_ty,
+        );
+    }
+
+    let payload_drop_fn_ty = lowerer.ir_type_cache.add(IrTypeKind::Fn {
+        params: vec![u8_ptr_ty],
+        ret: unit_ty,
+    });
+    for (layout_id, drop_def) in payload_drop_regs {
+        let layout_id_word = builder.const_int(*layout_id as i128, false, 64, u64_ty);
+        let drop_addr = builder.const_func_addr(*drop_def, payload_drop_fn_ty);
+        let drop_addr_word = builder.cast(CastKind::PtrToInt, drop_addr, u64_ty);
+        builder.call(
+            Callee::Runtime(RuntimeFn::MachineRegisterPayloadDrop),
+            vec![layout_id_word, drop_addr_word],
             unit_ty,
         );
     }

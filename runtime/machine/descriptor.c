@@ -9,6 +9,16 @@ static mc_thunk_registry_entry_t *g_thunk_registry = NULL;
 static uint32_t g_thunk_registry_len = 0;
 static uint32_t g_thunk_registry_cap = 0;
 
+typedef struct mc_payload_drop_registry_entry {
+    mc_payload_layout_id_t layout_id;
+    mc_payload_drop_fn drop;
+} mc_payload_drop_registry_entry_t;
+
+// Process-global payload-drop registry keyed by payload layout id.
+static mc_payload_drop_registry_entry_t *g_payload_drop_registry = NULL;
+static uint32_t g_payload_drop_registry_len = 0;
+static uint32_t g_payload_drop_registry_cap = 0;
+
 // Parsed descriptor registry (global for process lifetime).
 static mc_machine_descriptor_t *g_descriptor_registry = NULL;
 static uint32_t g_descriptor_registry_len = 0;
@@ -38,6 +48,41 @@ uint8_t mc_thunk_registry_ensure_cap(uint32_t min_cap) {
     g_thunk_registry = new_entries;
     g_thunk_registry_cap = new_cap;
     return 1;
+}
+
+static uint8_t mc_payload_drop_registry_ensure_cap(uint32_t min_cap) {
+    if (g_payload_drop_registry_cap >= min_cap) {
+        return 1;
+    }
+    uint32_t new_cap = g_payload_drop_registry_cap == 0 ? 16u : g_payload_drop_registry_cap;
+    while (new_cap < min_cap) {
+        uint32_t grown = new_cap * 2u;
+        if (grown < new_cap) {
+            return 0;
+        }
+        new_cap = grown;
+    }
+    mc_payload_drop_registry_entry_t *new_entries =
+        (mc_payload_drop_registry_entry_t *)__mc_realloc(
+            g_payload_drop_registry,
+            (size_t)new_cap * sizeof(mc_payload_drop_registry_entry_t),
+            _Alignof(mc_payload_drop_registry_entry_t)
+        );
+    if (!new_entries) {
+        return 0;
+    }
+    g_payload_drop_registry = new_entries;
+    g_payload_drop_registry_cap = new_cap;
+    return 1;
+}
+
+static int32_t mc_payload_drop_registry_find(mc_payload_layout_id_t layout_id) {
+    for (uint32_t i = 0; i < g_payload_drop_registry_len; i++) {
+        if (g_payload_drop_registry[i].layout_id == layout_id) {
+            return (int32_t)i;
+        }
+    }
+    return -1;
 }
 
 int32_t mc_thunk_registry_find(uint64_t thunk_id) {
@@ -277,6 +322,36 @@ void __mc_machine_runtime_register_thunk_meta(
 mc_machine_dispatch_txn_fn __mc_machine_runtime_lookup_thunk(uint64_t thunk_id) {
     const mc_thunk_registry_entry_t *entry = mc_lookup_thunk_entry(thunk_id);
     return entry ? entry->dispatch : NULL;
+}
+
+void __mc_machine_runtime_register_payload_drop(
+    mc_payload_layout_id_t layout_id,
+    mc_payload_drop_fn drop_fn
+) {
+    if (layout_id == 0 || !drop_fn) {
+        return;
+    }
+    int32_t idx = mc_payload_drop_registry_find(layout_id);
+    if (idx >= 0) {
+        g_payload_drop_registry[(uint32_t)idx].drop = drop_fn;
+        return;
+    }
+    if (!mc_payload_drop_registry_ensure_cap(g_payload_drop_registry_len + 1)) {
+        return;
+    }
+    g_payload_drop_registry[g_payload_drop_registry_len].layout_id = layout_id;
+    g_payload_drop_registry[g_payload_drop_registry_len].drop = drop_fn;
+    g_payload_drop_registry_len += 1;
+}
+
+mc_payload_drop_fn __mc_machine_runtime_lookup_payload_drop(
+    mc_payload_layout_id_t layout_id
+) {
+    int32_t idx = mc_payload_drop_registry_find(layout_id);
+    if (idx < 0) {
+        return NULL;
+    }
+    return g_payload_drop_registry[(uint32_t)idx].drop;
 }
 
 uint8_t __mc_machine_runtime_bind_dispatch_thunk(

@@ -159,6 +159,11 @@ void mc_pending_release_request_payload(mc_pending_reply_entry_t *entry) {
         return;
     }
     if (entry->request_payload0 != 0 && mc_payload_layout_is_owned(entry->request_payload1)) {
+        mc_payload_layout_id_t layout_id = mc_payload_layout_id(entry->request_payload1);
+        mc_payload_drop_fn drop_fn = __mc_machine_runtime_lookup_payload_drop(layout_id);
+        if (drop_fn) {
+            drop_fn((void *)(uintptr_t)entry->request_payload0);
+        }
         __mc_free((void *)(uintptr_t)entry->request_payload0);
     }
     entry->request_payload0 = 0;

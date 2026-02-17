@@ -149,6 +149,11 @@ fn lower_module_impl(
     let mut globals = GlobalArena::new();
     let mut funcs = Vec::new();
     let mut drop_glue = DropGlueRegistry::from_module(def_table, module);
+    let payload_drop_regs = machine::collect_machine_payload_drop_registrations(
+        machine_plans,
+        type_map,
+        &mut drop_glue,
+    );
 
     for func_def in module.func_defs() {
         let lowered = lower_func_with_globals(
@@ -198,6 +203,7 @@ fn lower_module_impl(
     // artifacts. Full runtime bootstrap wiring will consume these.
     machine::append_machine_runtime_artifacts(
         machine_plans,
+        &payload_drop_regs,
         def_table,
         type_map,
         &mut funcs,

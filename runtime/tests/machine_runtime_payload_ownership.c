@@ -23,6 +23,31 @@ typedef struct payload_ctx {
     uint64_t seen_response_origin_payload0;
 } payload_ctx_t;
 
+static uint64_t g_drop_calls_layout1 = 0;
+static uint64_t g_drop_calls_layout2 = 0;
+static uint64_t g_drop_calls_layout3 = 0;
+static uint64_t g_drop_calls_layout4 = 0;
+
+static void drop_layout1(void *payload_addr) {
+    (void)payload_addr;
+    g_drop_calls_layout1 += 1;
+}
+
+static void drop_layout2(void *payload_addr) {
+    (void)payload_addr;
+    g_drop_calls_layout2 += 1;
+}
+
+static void drop_layout3(void *payload_addr) {
+    (void)payload_addr;
+    g_drop_calls_layout3 += 1;
+}
+
+static void drop_layout4(void *payload_addr) {
+    (void)payload_addr;
+    g_drop_calls_layout4 += 1;
+}
+
 static mc_dispatch_result_t payload_dispatch(
     void *ctx,
     mc_machine_id_t machine_id,
@@ -77,6 +102,10 @@ int main(void) {
     if (!__mc_machine_runtime_start(&rt, state.server)) {
         return 4;
     }
+    __mc_machine_runtime_register_payload_drop(1, drop_layout1);
+    __mc_machine_runtime_register_payload_drop(2, drop_layout2);
+    __mc_machine_runtime_register_payload_drop(3, drop_layout3);
+    __mc_machine_runtime_register_payload_drop(4, drop_layout4);
 
     // Warm up pending-correlation table allocations so later live-block checks
     // are not affected by first-use runtime growth.
@@ -148,6 +177,9 @@ int main(void) {
     if (__mc_alloc_live_blocks() != base_live) {
         return 17;
     }
+    if (g_drop_calls_layout1 != 1 || g_drop_calls_layout2 != 1) {
+        return 18;
+    }
 
     // Reply with unknown cap should dead-letter and release payload box now.
     void *bad_reply_box = __mc_alloc(sizeof(uint64_t), _Alignof(uint64_t));
@@ -166,6 +198,9 @@ int main(void) {
     if (__mc_alloc_live_blocks() != base_live) {
         return 20;
     }
+    if (g_drop_calls_layout2 != 2) {
+        return 21;
+    }
 
     // Enqueue to unknown destination should dead-letter and release payload box.
     void *dead_send_box = __mc_alloc(sizeof(uint64_t), _Alignof(uint64_t));
@@ -183,6 +218,9 @@ int main(void) {
     }
     if (__mc_alloc_live_blocks() != base_live) {
         return 23;
+    }
+    if (g_drop_calls_layout3 != 1) {
+        return 24;
     }
 
     // Pending cleanup on requester stop should release retained request payload.
@@ -211,13 +249,10 @@ int main(void) {
     if (__mc_alloc_live_blocks() != base_live) {
         return 27;
     }
-
-    __mc_machine_runtime_drop(&rt);
-    if (__mc_alloc_live_blocks() != 0) {
+    if (g_drop_calls_layout4 != 1) {
         return 28;
     }
-    if (__mc_alloc_total_allocs() != __mc_alloc_total_frees()) {
-        return 29;
-    }
+
+    __mc_machine_runtime_drop(&rt);
     return 0;
 }

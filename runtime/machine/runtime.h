@@ -250,6 +250,10 @@ typedef mc_dispatch_result_t (*mc_machine_dispatch_txn_fn)(
     uint64_t *fault_code
 );
 
+// Drop callback for one boxed payload layout id.
+// Runtime passes the payload box address as opaque pointer.
+typedef void (*mc_payload_drop_fn)(void *payload_addr);
+
 // Ring buffer mailbox for one machine.
 typedef struct mc_machine_mailbox {
     // Ring buffer storage.
@@ -481,6 +485,15 @@ void __mc_machine_runtime_register_thunk_meta(
 );
 mc_machine_dispatch_txn_fn __mc_machine_runtime_lookup_thunk(uint64_t thunk_id);
 
+// Register and resolve payload-drop callbacks by payload layout id.
+void __mc_machine_runtime_register_payload_drop(
+    mc_payload_layout_id_t layout_id,
+    mc_payload_drop_fn drop_fn
+);
+mc_payload_drop_fn __mc_machine_runtime_lookup_payload_drop(
+    mc_payload_layout_id_t layout_id
+);
+
 // Resolve a previously-registered thunk id and bind it to a machine slot.
 // Returns 1 on success, 0 on unknown machine id or missing thunk id.
 uint8_t __mc_machine_runtime_bind_dispatch_thunk(
@@ -711,6 +724,10 @@ uint64_t __mc_machine_runtime_bind_dispatch_u64(
 );
 // Register thunk id -> dispatch function pointer in process-global registry.
 void __mc_machine_runtime_register_thunk_u64(uint64_t thunk_id, uint64_t dispatch_fn);
+void __mc_machine_runtime_register_payload_drop_u64(
+    uint64_t layout_id,
+    uint64_t drop_fn
+);
 // Register thunk metadata through opaque-handle bridge.
 void __mc_machine_runtime_register_thunk_meta_u64(
     uint64_t thunk_id,
