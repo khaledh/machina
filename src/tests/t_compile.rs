@@ -1359,6 +1359,66 @@ fn main() -> ()
 }
 
 #[test]
+fn compile_typestate_handler_request_accepts_machine_handle_destination() {
+    let source = r#"
+type Start = {}
+type AuthCheck = {}
+type AuthReply = {}
+
+typestate AuthServer {
+    fn new() -> Ready { Ready {} }
+
+    state Ready {
+        on AuthCheck(req: AuthCheck, cap: ReplyCap<AuthReply>) -> stay {
+            req;
+            reply(cap, AuthReply {});
+        }
+    }
+}
+
+typestate Client {
+    fields {
+        auth: Machine<AuthServer>,
+    }
+
+    fn new(auth: Machine<AuthServer>) -> Ready {
+        Ready { auth: auth }
+    }
+
+    state Ready {
+        on Start(s) -> stay {
+            s;
+            let p: Pending<AuthReply> = request(self.auth, AuthCheck {});
+            p;
+        }
+
+        on AuthReply(resp) for AuthCheck(req) -> stay {
+            resp;
+            req;
+        }
+    }
+}
+
+@machines
+fn main() -> ()
+    | MachineSpawnFailed
+    | MachineBindFailed
+    | MachineStartFailed
+    | ManagedRuntimeUnavailable
+    | MachineUnknown
+    | MachineNotRunning
+    | MailboxFull {
+    let auth = AuthServer::spawn()?;
+    let client = Client::spawn(auth)?;
+    client.send(Start {})?;
+}
+"#;
+
+    compile(source, &typestate_compile_opts())
+        .expect("handler request should accept typed machine handle destinations");
+}
+
+#[test]
 fn compile_typestate_spawn_mirrors_new_param_arity() {
     let source = r#"
 typestate Worker {

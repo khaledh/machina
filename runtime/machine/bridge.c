@@ -113,6 +113,19 @@ uint64_t __mc_machine_runtime_start_u64(uint64_t runtime, uint64_t machine_id) {
     return __mc_machine_runtime_start(rt, (mc_machine_id_t)machine_id) ? 1 : 0;
 }
 
+uint64_t __mc_machine_runtime_set_state_u64(
+    uint64_t runtime,
+    uint64_t machine_id,
+    uint64_t state_word
+) {
+    mc_machine_runtime_t *rt = mc_runtime_from_handle(runtime);
+    if (!rt || machine_id > UINT32_MAX) {
+        return 0;
+    }
+    __mc_machine_runtime_set_state(rt, (mc_machine_id_t)machine_id, state_word);
+    return 1;
+}
+
 uint64_t __mc_machine_runtime_send_u64(
     uint64_t runtime,
     uint64_t dst,

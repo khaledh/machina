@@ -33,6 +33,7 @@ const MACHINE_NOT_RUNNING_TYPE_NAME: &str = "MachineNotRunning";
 const MACHINE_MAILBOX_FULL_TYPE_NAME: &str = "MailboxFull";
 const MACHINE_REQUEST_FAILED_TYPE_NAME: &str = "RequestFailed";
 const MACHINE_MANAGED_RUNTIME_UNAVAILABLE_TYPE_NAME: &str = "ManagedRuntimeUnavailable";
+const MACHINE_TARGET_ID_HELPER_FN: &str = "__mc_machine_target_id";
 const MANAGED_RUNTIME_DEFAULT_MAILBOX_CAP: u64 = 8;
 const MANAGED_RUNTIME_BOOTSTRAP_FN: &str = "__mc_machine_runtime_managed_bootstrap_u64";
 const MANAGED_RUNTIME_CURRENT_FN: &str = "__mc_machine_runtime_managed_current_u64";
@@ -257,6 +258,10 @@ fn desugar_typestate(
 
     let mut lowered = Vec::new();
     lowered.push(machine_handle_named_type_def(
+        &handle_type_name,
+        node_id_gen,
+    ));
+    lowered.push(machine_target_id_handle_helper_def(
         &handle_type_name,
         node_id_gen,
     ));
@@ -778,6 +783,9 @@ fn ensure_machine_support_types(module: &mut Module, node_id_gen: &mut NodeIdGen
             node_id_gen,
         ));
     }
+    if !module_has_callable_param_type(module, MACHINE_TARGET_ID_HELPER_FN, "u64") {
+        prepend.push(machine_target_id_u64_helper_def(node_id_gen));
+    }
 
     let has_machine_methods = module.top_level_items.iter().any(|item| {
         matches!(item, TopLevelItem::MethodBlock(block) if block.type_name == MACHINE_HANDLE_TYPE_NAME)
@@ -863,6 +871,10 @@ fn ensure_machine_runtime_intrinsics(module: &mut Module, node_id_gen: &mut Node
         ],
     );
     push_decl("__mc_machine_runtime_start_u64", &["runtime", "machine_id"]);
+    push_decl(
+        "__mc_machine_runtime_set_state_u64",
+        &["runtime", "machine_id", "state_word"],
+    );
     push_decl("__mc_machine_runtime_step_u64", &["runtime"]);
     push_decl(
         "__mc_machine_runtime_send_u64",
@@ -954,6 +966,129 @@ fn empty_struct_type_def(name: &str, node_id_gen: &mut NodeIdGen) -> TopLevelIte
         type_params: Vec::new(),
         kind: TypeDefKind::Struct { fields: Vec::new() },
         span: Span::default(),
+    })
+}
+
+fn machine_target_id_u64_helper_def(node_id_gen: &mut NodeIdGen) -> TopLevelItem {
+    let span = Span::default();
+    TopLevelItem::FuncDef(FuncDef {
+        id: node_id_gen.new_id(),
+        def_id: (),
+        attrs: Vec::new(),
+        sig: parsed::FunctionSig {
+            name: MACHINE_TARGET_ID_HELPER_FN.to_string(),
+            type_params: Vec::new(),
+            params: vec![parsed::Param {
+                id: node_id_gen.new_id(),
+                ident: "dst".to_string(),
+                def_id: (),
+                typ: u64_type_expr(node_id_gen, span),
+                mode: ParamMode::In,
+                span,
+            }],
+            ret_ty_expr: u64_type_expr(node_id_gen, span),
+            span,
+        },
+        body: Expr {
+            id: node_id_gen.new_id(),
+            kind: ExprKind::Block {
+                items: Vec::new(),
+                tail: Some(Box::new(Expr {
+                    id: node_id_gen.new_id(),
+                    kind: ExprKind::Var {
+                        ident: "dst".to_string(),
+                        def_id: (),
+                    },
+                    ty: (),
+                    span,
+                })),
+            },
+            ty: (),
+            span,
+        },
+        span,
+    })
+}
+
+fn machine_target_id_handle_helper_def(
+    handle_type_name: &str,
+    node_id_gen: &mut NodeIdGen,
+) -> TopLevelItem {
+    let span = Span::default();
+    TopLevelItem::FuncDef(FuncDef {
+        id: node_id_gen.new_id(),
+        def_id: (),
+        attrs: Vec::new(),
+        sig: parsed::FunctionSig {
+            name: MACHINE_TARGET_ID_HELPER_FN.to_string(),
+            type_params: Vec::new(),
+            params: vec![parsed::Param {
+                id: node_id_gen.new_id(),
+                ident: "dst".to_string(),
+                def_id: (),
+                typ: TypeExpr {
+                    id: node_id_gen.new_id(),
+                    kind: TypeExprKind::Named {
+                        ident: handle_type_name.to_string(),
+                        def_id: (),
+                        type_args: Vec::new(),
+                    },
+                    span,
+                },
+                mode: ParamMode::In,
+                span,
+            }],
+            ret_ty_expr: u64_type_expr(node_id_gen, span),
+            span,
+        },
+        body: Expr {
+            id: node_id_gen.new_id(),
+            kind: ExprKind::Block {
+                items: Vec::new(),
+                tail: Some(Box::new(Expr {
+                    id: node_id_gen.new_id(),
+                    kind: ExprKind::StructField {
+                        target: Box::new(Expr {
+                            id: node_id_gen.new_id(),
+                            kind: ExprKind::Var {
+                                ident: "dst".to_string(),
+                                def_id: (),
+                            },
+                            ty: (),
+                            span,
+                        }),
+                        field: "_id".to_string(),
+                    },
+                    ty: (),
+                    span,
+                })),
+            },
+            ty: (),
+            span,
+        },
+        span,
+    })
+}
+
+fn module_has_callable_param_type(module: &Module, name: &str, first_param_ty_name: &str) -> bool {
+    let matches_sig = |sig: &parsed::FunctionSig| {
+        sig.name == name
+            && sig.params.first().is_some_and(|param| {
+                matches!(
+                    &param.typ.kind,
+                    TypeExprKind::Named {
+                        ident,
+                        type_args,
+                        ..
+                    } if ident == first_param_ty_name && type_args.is_empty()
+                )
+            })
+    };
+
+    module.top_level_items.iter().any(|item| match item {
+        TopLevelItem::FuncDecl(decl) => matches_sig(&decl.sig),
+        TopLevelItem::FuncDef(def) => matches_sig(&def.sig),
+        _ => false,
     })
 }
 
@@ -2655,6 +2790,30 @@ fn lower_spawn_func(
         node_id_gen,
         span,
     );
+    let pack_initial_state_call = call_expr(
+        "__mc_machine_payload_pack",
+        vec![var_expr("__mc_initial_state", node_id_gen, span)],
+        node_id_gen,
+        span,
+    );
+    let set_state_call = call_expr(
+        "__mc_machine_runtime_set_state_u64",
+        vec![
+            var_expr("__mc_rt", node_id_gen, span),
+            var_expr("__mc_machine_id", node_id_gen, span),
+            Expr {
+                id: node_id_gen.new_id(),
+                kind: ExprKind::TupleField {
+                    target: Box::new(var_expr("__mc_initial_state_packed", node_id_gen, span)),
+                    index: 0,
+                },
+                ty: (),
+                span,
+            },
+        ],
+        node_id_gen,
+        span,
+    );
     let start_call = call_expr(
         "__mc_machine_runtime_start_u64",
         vec![
@@ -2715,6 +2874,24 @@ fn lower_spawn_func(
                 )),
                 parsed::BlockItem::Expr(make_error_return_if_zero(
                     "__mc_bind_status",
+                    MACHINE_BIND_FAILED_TYPE_NAME,
+                    node_id_gen,
+                    span,
+                )),
+                parsed::BlockItem::Stmt(let_bind_stmt(
+                    "__mc_initial_state_packed",
+                    pack_initial_state_call,
+                    node_id_gen,
+                    span,
+                )),
+                parsed::BlockItem::Stmt(let_bind_stmt(
+                    "__mc_set_state_status",
+                    set_state_call,
+                    node_id_gen,
+                    span,
+                )),
+                parsed::BlockItem::Expr(make_error_return_if_zero(
+                    "__mc_set_state_status",
                     MACHINE_BIND_FAILED_TYPE_NAME,
                     node_id_gen,
                     span,
@@ -2830,7 +3007,7 @@ fn lower_handler_to_method_source(
     }
     params.extend(handler.params.clone());
     let mut body = handler.body.clone();
-    rewrite_handler_command_sugar(&mut body);
+    rewrite_handler_command_sugar(&mut body, node_id_gen);
     let mut ret_ty_expr =
         rewrite_handler_return_type(&handler.ret_ty_expr, state_name, node_id_gen);
     if handler_return_uses_stay(&handler.ret_ty_expr) {
@@ -2933,14 +3110,44 @@ fn inject_self_tail_for_stay(body: &mut Expr, node_id_gen: &mut NodeIdGen) {
     }
 }
 
-fn rewrite_handler_command_sugar(body: &mut Expr) {
-    let mut rewriter = HandlerCommandSugarRewriter;
+fn rewrite_handler_command_sugar(body: &mut Expr, node_id_gen: &mut NodeIdGen) {
+    let mut rewriter = HandlerCommandSugarRewriter { node_id_gen };
     rewriter.visit_expr(body);
 }
 
-struct HandlerCommandSugarRewriter;
+struct HandlerCommandSugarRewriter<'a> {
+    node_id_gen: &'a mut NodeIdGen,
+}
 
-impl VisitorMut<()> for HandlerCommandSugarRewriter {
+impl HandlerCommandSugarRewriter<'_> {
+    fn wrap_machine_target_id(&mut self, target: Expr) -> Expr {
+        let span = target.span;
+        Expr {
+            id: self.node_id_gen.new_id(),
+            kind: ExprKind::Call {
+                callee: Box::new(Expr {
+                    id: self.node_id_gen.new_id(),
+                    kind: ExprKind::Var {
+                        ident: MACHINE_TARGET_ID_HELPER_FN.to_string(),
+                        def_id: (),
+                    },
+                    ty: (),
+                    span,
+                }),
+                args: vec![CallArg {
+                    mode: CallArgMode::Default,
+                    expr: target,
+                    init: InitInfo::default(),
+                    span,
+                }],
+            },
+            ty: (),
+            span,
+        }
+    }
+}
+
+impl VisitorMut<()> for HandlerCommandSugarRewriter<'_> {
     fn visit_expr(&mut self, expr: &mut Expr) {
         visit_mut::walk_expr(self, expr);
 
@@ -2966,6 +3173,7 @@ impl VisitorMut<()> for HandlerCommandSugarRewriter {
             .pop()
             .expect("call arg shape checked by typestate handler sugar rewrite")
             .expr;
+        let to = self.wrap_machine_target_id(to);
         let kind = if command == "send" {
             parsed::EmitKind::Send {
                 to: Box::new(to),

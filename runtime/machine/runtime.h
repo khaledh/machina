@@ -689,6 +689,12 @@ uint64_t __mc_machine_runtime_managed_current_u64(void);
 uint64_t __mc_machine_runtime_managed_shutdown_u64(void);
 uint64_t __mc_machine_runtime_spawn_u64(uint64_t runtime, uint64_t mailbox_cap);
 uint64_t __mc_machine_runtime_start_u64(uint64_t runtime, uint64_t machine_id);
+// Seed current machine state token for managed typestate runtime dispatch.
+uint64_t __mc_machine_runtime_set_state_u64(
+    uint64_t runtime,
+    uint64_t machine_id,
+    uint64_t state_word
+);
 uint64_t __mc_machine_runtime_send_u64(
     uint64_t runtime,
     uint64_t dst,

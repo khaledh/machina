@@ -21,13 +21,17 @@ type AuthCheck = { token: u64 }
 type AuthReply = { accepted: u64 }
 
 typestate Client {
-    fn new() -> Ready {
-        Ready {}
+    fields {
+        auth: Machine<AuthServer>,
+    }
+
+    fn new(auth: Machine<AuthServer>) -> Ready {
+        Ready { auth: auth }
     }
 
     state Ready {
         on StartAuth(cmd) -> stay {
-            let p: Pending<AuthReply> = request(1, AuthCheck { token: cmd.token });
+            let p: Pending<AuthReply> = request(self.auth, AuthCheck { token: cmd.token });
             p;
         }
 
@@ -59,9 +63,8 @@ fn main() -> ()
     | MachineUnknown
     | MachineNotRunning
     | MailboxFull {
-    // Spawn server first so its machine id is 1 (used by client request `to:`).
-    let _server = AuthServer::spawn()?;
-    let client = Client::spawn()?;
+    let auth = AuthServer::spawn()?;
+    let client = Client::spawn(auth)?;
     client.send(StartAuth { token: 41 })?;
 
     // `@machines` auto-drives the managed runtime until it reaches idle.
