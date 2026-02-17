@@ -39,56 +39,68 @@ requires {
     std::io::println
 }
 
-typestate Connection {
-    fields {
-        retries: u64,
+type OpenPressed = { id: u64 }
+type OpenCmd = {}
+type Opened = {}
+
+typestate DoorActuator {
+    fn new() -> Ready {
+        Ready {}
     }
 
-    fn new() -> Disconnected {
-        Disconnected { retries: 0 }
-    }
-
-    state Disconnected {
-        fn connect(addr: string) -> Connected {
-            Connected { fd: 7 }
-        }
-    }
-
-    state Connected {
-        fields {
-            fd: u64,
-        }
-
-        fn send(payload: string) -> u64 {
-            payload.len
-        }
-
-        fn disconnect() -> Disconnected {
-            Disconnected
+    state Ready {
+        on OpenCmd(cmd: OpenCmd, cap: ReplyCap<Opened>) -> stay {
+            cap.reply(Opened {});
         }
     }
 }
 
-fn main() {
-    let c0 = Connection::new();
-    // c0.send("ping"); // compile error: send only exists in Connected
+typestate DoorController {
+    fields {
+        door: Machine<DoorActuator>,
+    }
 
-    let c1 = c0.connect("localhost");
-    let sent = c1.send("ping");
-    let c2 = c1.disconnect();
+    fn new(door: Machine<DoorActuator>) -> Closed {
+        Closed { door: door }
+    }
 
-    println(f"sent={sent}, retries={c2.retries}");
+    state Closed {
+        on OpenPressed(evt) -> Waiting {
+            println(f"open event {evt.id}");
+            let _pending: Pending<Opened> = request(self.door, OpenCmd {});
+            Waiting
+        }
+    }
+
+    state Waiting {
+        on Opened(_evt) for OpenCmd(_origin) -> Open {
+            println("door transitioned: Closed -> Waiting -> Open");
+            Open
+        }
+    }
+
+    @final
+    state Open {}
+}
+
+@machines
+fn main() -> () | MachineError {
+    let actuator = DoorActuator::spawn()?;
+    let controller = DoorController::spawn(actuator)?;
+
+    controller.send(OpenPressed { id: 1 })?;
 }
 ```
 
 Try it:
 
 ```sh
-cargo mcc run --experimental typestate examples/typestate/connection.mc
+cargo mcc run --experimental typestate examples/typestate/managed_state_transitions.mc
 ```
 
-Typestate is where Machina is heading: APIs that encode lifecycle/state
-constraints directly in types.
+Typestate in managed mode lets us model interacting machines directly in code:
+typed handles, typed messages, state transitions, and request/reply correlation
+without manual ids.
 
 ## Also Nice Today
 
