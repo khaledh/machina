@@ -380,6 +380,11 @@ pub enum TypeCheckErrorKind {
     ProtocolRequestContractMissing(String, String, Type, String, Span),
 
     #[error(
+        "Typestate {0} implementing role {1} issues request payload {2} to peer role `{3}` with ambiguous request contracts"
+    )]
+    ProtocolRequestContractAmbiguous(String, String, Type, String, Span),
+
+    #[error(
         "Typestate {0} implementing role {1} request payload {2} to peer role `{3}` expects response {4} outside contract responses"
     )]
     ProtocolRequestResponseNotInContract(String, String, Type, String, Type, Span),
@@ -549,6 +554,7 @@ impl TypeCheckError {
                 *span
             }
             TypeCheckErrorKind::ProtocolRequestContractMissing(_, _, _, _, span) => *span,
+            TypeCheckErrorKind::ProtocolRequestContractAmbiguous(_, _, _, _, span) => *span,
             TypeCheckErrorKind::ProtocolRequestResponseNotInContract(_, _, _, _, _, span) => *span,
             TypeCheckErrorKind::TypestateOverlappingOnHandlers(_, _, _, _, span) => *span,
             TypeCheckErrorKind::TypestateAmbiguousResponseProvenance(_, _, _, _, span) => *span,

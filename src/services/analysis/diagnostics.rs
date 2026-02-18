@@ -875,6 +875,27 @@ fn populate_typecheck_metadata(kind: &TypeCheckErrorKind, metadata: &mut Diagnos
                 DiagnosticValue::String(to_role.clone()),
             );
         }
+        TypeCheckErrorKind::ProtocolRequestContractAmbiguous(
+            typestate,
+            role,
+            request,
+            to_role,
+            _,
+        ) => {
+            metadata.insert(
+                "typestate".to_string(),
+                DiagnosticValue::String(typestate.clone()),
+            );
+            metadata.insert("role".to_string(), DiagnosticValue::String(role.clone()));
+            metadata.insert(
+                "request".to_string(),
+                DiagnosticValue::String(request.to_string()),
+            );
+            metadata.insert(
+                "toRole".to_string(),
+                DiagnosticValue::String(to_role.clone()),
+            );
+        }
         TypeCheckErrorKind::ProtocolRequestResponseNotInContract(
             typestate,
             role,
@@ -1135,6 +1156,7 @@ macro_rules! with_typecheck_variants {
             ProtocolStateEmitDestinationRoleMismatch,
             ProtocolStateEmitDestinationRoleUnbound,
             ProtocolRequestContractMissing,
+            ProtocolRequestContractAmbiguous,
             ProtocolRequestResponseNotInContract,
             TypestateOverlappingOnHandlers,
             TypestateAmbiguousResponseProvenance,

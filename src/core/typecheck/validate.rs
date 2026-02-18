@@ -109,19 +109,6 @@ fn check_protocol_shape_conformance(engine: &TypecheckEngine) -> Vec<TypeCheckEr
             .iter()
             .map(|peer| (peer.field_name.as_str(), peer.role_name.as_str()))
             .collect();
-        let contract_responses_by_request_to = protocol_fact
-            .request_contracts
-            .iter()
-            .filter(|c| c.from_role == *role_name)
-            .filter_map(|contract| {
-                contract.request_ty.as_ref().map(|request_ty| {
-                    (
-                        (request_ty.clone(), contract.to_role.as_str()),
-                        contract.response_tys.clone(),
-                    )
-                })
-            })
-            .collect::<HashMap<(Type, &str), Vec<Type>>>();
 
         if !role_fact.states.is_empty() {
             for state_fact in role_fact.states.values() {
@@ -164,8 +151,17 @@ fn check_protocol_shape_conformance(engine: &TypecheckEngine) -> Vec<TypeCheckEr
                             continue;
                         }
 
-                        let expected_roles =
+                        let mut expected_roles =
                             state_expected_roles_for_payload(state_fact, &emit.payload_ty);
+                        if emit.is_request {
+                            expected_roles.extend(request_contract_to_roles_for_payload(
+                                protocol_fact,
+                                role_name,
+                                &emit.payload_ty,
+                            ));
+                            expected_roles.sort();
+                            expected_roles.dedup();
+                        }
                         if expected_roles.is_empty() {
                             continue;
                         }
@@ -199,6 +195,7 @@ fn check_protocol_shape_conformance(engine: &TypecheckEngine) -> Vec<TypeCheckEr
                                 )
                                 .into(),
                             );
+                            continue;
                         }
 
                         if !emit.is_request {
@@ -209,9 +206,13 @@ fn check_protocol_shape_conformance(engine: &TypecheckEngine) -> Vec<TypeCheckEr
                         else {
                             continue;
                         };
-                        let Some(contract_responses) = contract_responses_by_request_to
-                            .get(&(emit.payload_ty.clone(), to_role_name))
-                        else {
+                        let matching_contracts = matching_request_contracts(
+                            protocol_fact,
+                            role_name,
+                            to_role_name,
+                            &emit.payload_ty,
+                        );
+                        if matching_contracts.is_empty() {
                             errors.push(
                                 TypeCheckErrorKind::ProtocolRequestContractMissing(
                                     binding.typestate_name.clone(),
@@ -223,7 +224,21 @@ fn check_protocol_shape_conformance(engine: &TypecheckEngine) -> Vec<TypeCheckEr
                                 .into(),
                             );
                             continue;
-                        };
+                        }
+                        if matching_contracts.len() > 1 {
+                            errors.push(
+                                TypeCheckErrorKind::ProtocolRequestContractAmbiguous(
+                                    binding.typestate_name.clone(),
+                                    role_label.clone(),
+                                    emit.payload_ty.clone(),
+                                    to_role_name.to_string(),
+                                    emit.span,
+                                )
+                                .into(),
+                            );
+                            continue;
+                        }
+                        let contract_responses = &matching_contracts[0].response_tys;
                         let response_tys = emit.request_response_tys.as_deref().unwrap_or_default();
                         for response_ty in response_tys {
                             if !contract_responses.contains(response_ty) {
@@ -1183,6 +1198,41 @@ fn state_expected_roles_for_payload(
     }
     roles.sort();
     roles
+}
+
+fn request_contract_to_roles_for_payload(
+    protocol_fact: &crate::core::protocol::ProtocolFact,
+    from_role: &str,
+    request_ty: &Type,
+) -> Vec<String> {
+    let mut roles = Vec::new();
+    for contract in &protocol_fact.request_contracts {
+        if contract.from_role == from_role
+            && contract.request_ty.as_ref() == Some(request_ty)
+            && !roles.contains(&contract.to_role)
+        {
+            roles.push(contract.to_role.clone());
+        }
+    }
+    roles.sort();
+    roles
+}
+
+fn matching_request_contracts<'a>(
+    protocol_fact: &'a crate::core::protocol::ProtocolFact,
+    from_role: &str,
+    to_role: &str,
+    request_ty: &Type,
+) -> Vec<&'a crate::core::protocol::ProtocolRequestContractFact> {
+    protocol_fact
+        .request_contracts
+        .iter()
+        .filter(|contract| {
+            contract.from_role == from_role
+                && contract.to_role == to_role
+                && contract.request_ty.as_ref() == Some(request_ty)
+        })
+        .collect()
 }
 
 fn resolve_emit_destination_role<'a>(
