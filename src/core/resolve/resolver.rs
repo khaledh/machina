@@ -1388,18 +1388,20 @@ impl Visitor<()> for SymbolResolver {
 
         for contract in &protocol_def.request_contracts {
             if !local_roles.contains(contract.from_role.as_str()) {
-                self.errors.push(ResolveError::ProtocolFlowRoleUndefined(
-                    protocol_def.name.clone(),
-                    contract.from_role.clone(),
-                    contract.span,
-                ));
+                self.errors
+                    .push(ResolveError::ProtocolRequestContractRoleUndefined(
+                        protocol_def.name.clone(),
+                        contract.from_role.clone(),
+                        contract.span,
+                    ));
             }
             if !local_roles.contains(contract.to_role.as_str()) {
-                self.errors.push(ResolveError::ProtocolFlowRoleUndefined(
-                    protocol_def.name.clone(),
-                    contract.to_role.clone(),
-                    contract.span,
-                ));
+                self.errors
+                    .push(ResolveError::ProtocolRequestContractRoleUndefined(
+                        protocol_def.name.clone(),
+                        contract.to_role.clone(),
+                        contract.span,
+                    ));
             }
             self.visit_type_expr(&contract.request_ty);
             for response_ty in &contract.response_tys {
@@ -1408,25 +1410,71 @@ impl Visitor<()> for SymbolResolver {
         }
 
         for role in &protocol_def.roles {
+            let local_states: HashSet<&str> = role
+                .states
+                .iter()
+                .map(|state| state.name.as_str())
+                .collect();
             for state in &role.states {
+                let mut seen_triggers = HashSet::new();
                 for transition in &state.transitions {
                     self.visit_type_expr(&transition.trigger.selector_ty);
                     if let Some(from_role) = &transition.trigger.from_role
                         && !local_roles.contains(from_role.as_str())
                     {
-                        self.errors.push(ResolveError::ProtocolFlowRoleUndefined(
-                            protocol_def.name.clone(),
-                            from_role.clone(),
-                            transition.span,
-                        ));
+                        self.errors
+                            .push(ResolveError::ProtocolTransitionSourceRoleUndefined(
+                                protocol_def.name.clone(),
+                                role.name.clone(),
+                                state.name.clone(),
+                                from_role.clone(),
+                                transition.span,
+                            ));
                     }
+
+                    let trigger_key = (
+                        format!("{:?}", transition.trigger.selector_ty.kind),
+                        transition.trigger.from_role.clone().unwrap_or_default(),
+                    );
+                    if !seen_triggers.insert(trigger_key.clone()) {
+                        let trigger_label = transition.trigger.selector_ty.to_string();
+                        let source_role = transition
+                            .trigger
+                            .from_role
+                            .clone()
+                            .unwrap_or_else(|| "Start".to_string());
+                        self.errors
+                            .push(ResolveError::ProtocolTransitionTriggerConflict(
+                                protocol_def.name.clone(),
+                                role.name.clone(),
+                                state.name.clone(),
+                                trigger_label,
+                                source_role,
+                                transition.span,
+                            ));
+                    }
+
+                    if !local_states.contains(transition.next_state.as_str()) {
+                        self.errors
+                            .push(ResolveError::ProtocolTransitionNextStateUndefined(
+                                protocol_def.name.clone(),
+                                role.name.clone(),
+                                state.name.clone(),
+                                transition.next_state.clone(),
+                                transition.span,
+                            ));
+                    }
+
                     for effect in &transition.effects {
                         if !local_roles.contains(effect.to_role.as_str()) {
-                            self.errors.push(ResolveError::ProtocolFlowRoleUndefined(
-                                protocol_def.name.clone(),
-                                effect.to_role.clone(),
-                                effect.span,
-                            ));
+                            self.errors
+                                .push(ResolveError::ProtocolTransitionEffectRoleUndefined(
+                                    protocol_def.name.clone(),
+                                    role.name.clone(),
+                                    state.name.clone(),
+                                    effect.to_role.clone(),
+                                    effect.span,
+                                ));
                         }
                         self.visit_type_expr(&effect.payload_ty);
                     }

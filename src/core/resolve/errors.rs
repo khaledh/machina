@@ -84,8 +84,22 @@ pub enum ResolveError {
     #[error("Expected '{0}' to be a protocol role, found {1}")]
     ExpectedProtocolRole(String, SymbolKind, Span),
 
-    #[error("Protocol `{0}` flow references undefined role `{1}`")]
-    ProtocolFlowRoleUndefined(String, String, Span),
+    #[error("Undefined protocol role `{1}` in request contract of protocol `{0}`")]
+    ProtocolRequestContractRoleUndefined(String, String, Span),
+
+    #[error(
+        "Undefined trigger source role `{3}` in protocol `{0}` role `{1}` state `{2}` transition"
+    )]
+    ProtocolTransitionSourceRoleUndefined(String, String, String, String, Span),
+
+    #[error("Undefined effect destination role `{3}` in protocol `{0}` role `{1}` state `{2}`")]
+    ProtocolTransitionEffectRoleUndefined(String, String, String, String, Span),
+
+    #[error("Undefined next state `{3}` in protocol `{0}` role `{1}` state `{2}` transition")]
+    ProtocolTransitionNextStateUndefined(String, String, String, String, Span),
+
+    #[error("Ambiguous transition trigger `{3}@{4}` in protocol `{0}` role `{1}` state `{2}`")]
+    ProtocolTransitionTriggerConflict(String, String, String, String, String, Span),
 
     #[error("Typestate `{0}` role implementation path must be `<Protocol>::<Role>`, found `{1}`")]
     TypestateRoleImplMalformedPath(String, String, Span),
@@ -200,7 +214,11 @@ impl ResolveError {
             ResolveError::ModuleMemberUndefined(_, _, span) => *span,
             ResolveError::ProtocolRoleUndefined(_, span) => *span,
             ResolveError::ExpectedProtocolRole(_, _, span) => *span,
-            ResolveError::ProtocolFlowRoleUndefined(_, _, span) => *span,
+            ResolveError::ProtocolRequestContractRoleUndefined(_, _, span) => *span,
+            ResolveError::ProtocolTransitionSourceRoleUndefined(_, _, _, _, span) => *span,
+            ResolveError::ProtocolTransitionEffectRoleUndefined(_, _, _, _, span) => *span,
+            ResolveError::ProtocolTransitionNextStateUndefined(_, _, _, _, span) => *span,
+            ResolveError::ProtocolTransitionTriggerConflict(_, _, _, _, _, span) => *span,
             ResolveError::TypestateRoleImplMalformedPath(_, _, span) => *span,
             ResolveError::TypestateRoleImplRoleUndefined(_, _, span) => *span,
             ResolveError::TypestateRoleImplExpectedRole(_, _, _, span) => *span,

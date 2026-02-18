@@ -311,13 +311,94 @@ impl Diagnostic {
                 );
                 "MC-RESOLVE-EXPECTED-PROTOCOL-ROLE"
             }
-            ResolveError::ProtocolFlowRoleUndefined(protocol, role, _) => {
+            ResolveError::ProtocolRequestContractRoleUndefined(protocol, role, _) => {
                 metadata.insert(
                     "protocol".to_string(),
                     DiagnosticValue::String(protocol.clone()),
                 );
                 metadata.insert("role".to_string(), DiagnosticValue::String(role.clone()));
-                "MC-RESOLVE-PROTOCOL-FLOW-ROLE-UNDEFINED"
+                "MC-RESOLVE-PROTOCOL-REQUEST-CONTRACT-ROLE-UNDEFINED"
+            }
+            ResolveError::ProtocolTransitionSourceRoleUndefined(
+                protocol,
+                role,
+                state,
+                source_role,
+                _,
+            ) => {
+                metadata.insert(
+                    "protocol".to_string(),
+                    DiagnosticValue::String(protocol.clone()),
+                );
+                metadata.insert("role".to_string(), DiagnosticValue::String(role.clone()));
+                metadata.insert("state".to_string(), DiagnosticValue::String(state.clone()));
+                metadata.insert(
+                    "source_role".to_string(),
+                    DiagnosticValue::String(source_role.clone()),
+                );
+                "MC-RESOLVE-PROTOCOL-TRANSITION-SOURCE-ROLE-UNDEFINED"
+            }
+            ResolveError::ProtocolTransitionEffectRoleUndefined(
+                protocol,
+                role,
+                state,
+                effect_role,
+                _,
+            ) => {
+                metadata.insert(
+                    "protocol".to_string(),
+                    DiagnosticValue::String(protocol.clone()),
+                );
+                metadata.insert("role".to_string(), DiagnosticValue::String(role.clone()));
+                metadata.insert("state".to_string(), DiagnosticValue::String(state.clone()));
+                metadata.insert(
+                    "effect_role".to_string(),
+                    DiagnosticValue::String(effect_role.clone()),
+                );
+                "MC-RESOLVE-PROTOCOL-TRANSITION-EFFECT-ROLE-UNDEFINED"
+            }
+            ResolveError::ProtocolTransitionNextStateUndefined(
+                protocol,
+                role,
+                state,
+                next_state,
+                _,
+            ) => {
+                metadata.insert(
+                    "protocol".to_string(),
+                    DiagnosticValue::String(protocol.clone()),
+                );
+                metadata.insert("role".to_string(), DiagnosticValue::String(role.clone()));
+                metadata.insert("state".to_string(), DiagnosticValue::String(state.clone()));
+                metadata.insert(
+                    "next_state".to_string(),
+                    DiagnosticValue::String(next_state.clone()),
+                );
+                "MC-RESOLVE-PROTOCOL-TRANSITION-NEXT-STATE-UNDEFINED"
+            }
+            ResolveError::ProtocolTransitionTriggerConflict(
+                protocol,
+                role,
+                state,
+                trigger_ty,
+                source_role,
+                _,
+            ) => {
+                metadata.insert(
+                    "protocol".to_string(),
+                    DiagnosticValue::String(protocol.clone()),
+                );
+                metadata.insert("role".to_string(), DiagnosticValue::String(role.clone()));
+                metadata.insert("state".to_string(), DiagnosticValue::String(state.clone()));
+                metadata.insert(
+                    "trigger_ty".to_string(),
+                    DiagnosticValue::String(trigger_ty.clone()),
+                );
+                metadata.insert(
+                    "source_role".to_string(),
+                    DiagnosticValue::String(source_role.clone()),
+                );
+                "MC-RESOLVE-PROTOCOL-TRANSITION-TRIGGER-CONFLICT"
             }
             ResolveError::TypestateRoleImplMalformedPath(typestate, path, _) => {
                 metadata.insert(

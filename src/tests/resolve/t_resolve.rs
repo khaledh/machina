@@ -366,7 +366,7 @@ fn test_resolve_program_builds_import_env_from_export_facts() {
 }
 
 #[test]
-fn test_resolve_protocol_flow_reports_undefined_roles() {
+fn test_resolve_protocol_request_contract_reports_undefined_roles() {
     let source = r#"
         type Ping = {}
 
@@ -388,9 +388,9 @@ fn test_resolve_protocol_flow_reports_undefined_roles() {
     assert!(result.context.is_none(), "strict resolve should fail");
     assert!(
         result.errors.iter().any(
-            |e| matches!(e, ResolveError::ProtocolFlowRoleUndefined(protocol, role, _) if protocol == "Net" && role == "Missing")
+            |e| matches!(e, ResolveError::ProtocolRequestContractRoleUndefined(protocol, role, _) if protocol == "Net" && role == "Missing")
         ),
-        "expected undefined protocol flow role error, got {:?}",
+        "expected undefined protocol request-contract role error, got {:?}",
         result.errors
     );
 }
@@ -423,9 +423,91 @@ fn test_resolve_protocol_transition_reports_undefined_roles() {
     assert!(result.context.is_none(), "strict resolve should fail");
     assert!(
         result.errors.iter().any(
-            |e| matches!(e, ResolveError::ProtocolFlowRoleUndefined(protocol, role, _) if protocol == "Net" && role == "Missing")
+            |e| matches!(e, ResolveError::ProtocolTransitionSourceRoleUndefined(protocol, role, state, source_role, _)
+                if protocol == "Net" && role == "Client" && state == "Ready" && source_role == "Missing")
         ),
-        "expected undefined protocol transition role error, got {:?}",
+        "expected undefined protocol transition source role error, got {:?}",
+        result.errors
+    );
+    assert!(
+        result.errors.iter().any(
+            |e| matches!(e, ResolveError::ProtocolTransitionEffectRoleUndefined(protocol, role, state, effect_role, _)
+                if protocol == "Net" && role == "Client" && state == "Ready" && effect_role == "Missing")
+        ),
+        "expected undefined protocol transition effect role error, got {:?}",
+        result.errors
+    );
+}
+
+#[test]
+fn test_resolve_protocol_transition_reports_unknown_next_state() {
+    let source = r#"
+        protocol Net {
+            msg Ping;
+
+            role Client {
+                state Ready {
+                    on Start -> Unknown;
+                }
+            }
+        }
+    "#;
+
+    let parsed = parse_source_with_options(
+        source,
+        ParserOptions {
+            experimental_typestate: true,
+        },
+    );
+    let result =
+        resolve_stage_with_policy(parsed, ResolveInputs::default(), FrontendPolicy::Strict);
+    assert!(result.context.is_none(), "strict resolve should fail");
+    assert!(
+        result.errors.iter().any(
+            |e| matches!(e, ResolveError::ProtocolTransitionNextStateUndefined(protocol, role, state, next_state, _)
+                if protocol == "Net" && role == "Client" && state == "Ready" && next_state == "Unknown")
+        ),
+        "expected undefined next-state error, got {:?}",
+        result.errors
+    );
+}
+
+#[test]
+fn test_resolve_protocol_transition_reports_trigger_conflict() {
+    let source = r#"
+        type Ping = {}
+
+        protocol Net {
+            msg Ping;
+
+            role Client {
+                state Ready {
+                    on Ping@Client -> Ready;
+                    on Ping@Client -> Ready;
+                }
+            }
+        }
+    "#;
+
+    let parsed = parse_source_with_options(
+        source,
+        ParserOptions {
+            experimental_typestate: true,
+        },
+    );
+    let result =
+        resolve_stage_with_policy(parsed, ResolveInputs::default(), FrontendPolicy::Strict);
+    assert!(result.context.is_none(), "strict resolve should fail");
+    assert!(
+        result.errors.iter().any(
+            |e| matches!(e, ResolveError::ProtocolTransitionTriggerConflict(protocol, role, state, trigger_ty, source_role, _)
+                if protocol == "Net"
+                    && role == "Client"
+                    && state == "Ready"
+                    && trigger_ty.contains("Ping")
+                    && source_role == "Client")
+        ),
+        "expected transition trigger conflict error, got {:?}",
         result.errors
     );
 }
