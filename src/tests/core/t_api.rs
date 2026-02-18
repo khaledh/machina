@@ -677,7 +677,7 @@ typestate Gateway : Auth::Client {
 
     state Idle {
         on Start() -> Awaiting {
-            emit Send(to: 0, AuthReq {});
+            emit Send(to: self.server, AuthReq {});
             Awaiting { server: self.server }
         }
     }
@@ -700,6 +700,178 @@ typestate Gateway : Auth::Client {
         !out.has_errors(),
         "expected valid state-local protocol conformance, got resolve={:?} type={:?}",
         out.resolve_errors,
+        out.type_errors
+    );
+}
+
+#[test]
+fn typestate_protocol_emit_destination_role_mismatch_reports_type_error() {
+    let source = r#"
+type Start = {}
+type AuthReq = {}
+type AuthOk = {}
+
+protocol Auth {
+    msg Start;
+    msg AuthReq;
+    msg AuthOk;
+
+    role Client {
+        state Idle {
+            on Start -> Awaiting {
+                effects: [ AuthReq ~> Server ]
+            }
+        }
+        state Awaiting {
+            on AuthOk@Server -> Idle;
+        }
+    }
+    role Server {
+        state Ready {
+            on AuthReq@Client -> Ready {
+                effects: [ AuthOk ~> Client ]
+            }
+        }
+    }
+    role Audit {
+        state Sink {}
+    }
+}
+
+typestate AuthServer { fn new() -> Ready { Ready {} } state Ready {} }
+typestate AuditSink { fn new() -> Sink { Sink {} } state Sink {} }
+
+typestate Gateway : Auth::Client {
+    fields {
+        server: Machine<AuthServer> as Server,
+        audit: Machine<AuditSink> as Audit,
+    }
+
+    fn new(server: Machine<AuthServer>, audit: Machine<AuditSink>) -> Idle {
+        Idle { server: server, audit: audit }
+    }
+
+    state Idle {
+        on Start() -> Awaiting {
+            emit Send(to: self.audit, AuthReq {});
+            Awaiting { server: self.server, audit: self.audit }
+        }
+    }
+
+    state Awaiting {
+        on AuthOk() -> Idle {
+            Idle { server: self.server, audit: self.audit }
+        }
+    }
+}
+"#;
+    let parsed = parsed_context_typestate(source);
+    let out = resolve_typecheck_pipeline_with_policy(
+        parsed,
+        ResolveInputs::default(),
+        None,
+        FrontendPolicy::Strict,
+    );
+    assert!(
+        out.type_errors.iter().any(|e| {
+            matches!(
+                e.kind(),
+                TypeCheckErrorKind::ProtocolStateEmitDestinationRoleMismatch(
+                    ts, role, state, _, expected, field, bound, _
+                )
+                    if ts == "Gateway"
+                        && role == "Auth::Client"
+                        && state == "Idle"
+                        && expected == "Server"
+                        && field == "audit"
+                        && bound == "Audit"
+            )
+        }),
+        "expected destination role mismatch diagnostic, got {:?}",
+        out.type_errors
+    );
+}
+
+#[test]
+fn typestate_protocol_request_contract_rejects_extra_response_variant() {
+    let source = r#"
+type Start = {}
+type AuthReq = {}
+type AuthOk = {}
+type AuthErr = {}
+
+protocol Auth {
+    msg Start;
+    msg AuthReq;
+    msg AuthOk;
+    msg AuthErr;
+    req Client -> Server: AuthReq => AuthOk;
+
+    role Client {
+        state Idle {
+            on Start -> Awaiting {
+                effects: [ AuthReq ~> Server ]
+            }
+        }
+        state Awaiting {
+            on AuthOk@Server -> Idle;
+            on AuthErr@Server -> Idle;
+        }
+    }
+    role Server {
+        state Ready {
+            on AuthReq@Client -> Ready {
+                effects: [ AuthOk ~> Client ]
+            }
+        }
+    }
+}
+
+typestate AuthServer { fn new() -> Ready { Ready {} } state Ready {} }
+
+typestate Gateway : Auth::Client {
+    fields {
+        server: Machine<AuthServer> as Server,
+    }
+
+    fn new(server: Machine<AuthServer>) -> Idle {
+        Idle { server: server }
+    }
+
+    state Idle {
+        on Start() -> Awaiting {
+            let p: Pending<AuthOk | AuthErr> = emit Request(to: self.server, AuthReq {});
+            p;
+            Awaiting { server: self.server }
+        }
+    }
+
+    state Awaiting {
+        on AuthOk() -> Idle {
+            Idle { server: self.server }
+        }
+        on AuthErr() -> Idle {
+            Idle { server: self.server }
+        }
+    }
+}
+"#;
+    let parsed = parsed_context_typestate(source);
+    let out = resolve_typecheck_pipeline_with_policy(
+        parsed,
+        ResolveInputs::default(),
+        None,
+        FrontendPolicy::Strict,
+    );
+    assert!(
+        out.type_errors.iter().any(|e| {
+            matches!(
+                e.kind(),
+                TypeCheckErrorKind::ProtocolRequestResponseNotInContract(ts, role, _, to_role, _, _)
+                    if ts == "Gateway" && role == "Auth::Client" && to_role == "Server"
+            )
+        }),
+        "expected contract response-set violation diagnostic, got {:?}",
         out.type_errors
     );
 }

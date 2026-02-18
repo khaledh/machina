@@ -356,6 +356,35 @@ pub enum TypeCheckErrorKind {
     ProtocolStateOutgoingPayloadNotAllowed(String, String, String, Type, Span),
 
     #[error(
+        "Typestate {0} implementing role {1} state {2} emits payload {3} to `{6}` (bound role `{7}`), expected peer role `{4}`"
+    )]
+    ProtocolStateEmitDestinationRoleMismatch(
+        String,
+        String,
+        String,
+        Type,
+        String,
+        String,
+        String,
+        Span,
+    ),
+
+    #[error(
+        "Typestate {0} implementing role {1} state {2} emits payload {3} to an unbound destination; expected peer role `{4}`"
+    )]
+    ProtocolStateEmitDestinationRoleUnbound(String, String, String, Type, String, Span),
+
+    #[error(
+        "Typestate {0} implementing role {1} issues request payload {2} to peer role `{3}` without a matching request contract"
+    )]
+    ProtocolRequestContractMissing(String, String, Type, String, Span),
+
+    #[error(
+        "Typestate {0} implementing role {1} request payload {2} to peer role `{3}` expects response {4} outside contract responses"
+    )]
+    ProtocolRequestResponseNotInContract(String, String, Type, String, Type, Span),
+
+    #[error(
         "Typestate {0} state {1} has overlapping `on` handlers for selector {2} on response variants {3:?}"
     )]
     TypestateOverlappingOnHandlers(String, String, Type, Vec<Type>, Span),
@@ -506,6 +535,21 @@ impl TypeCheckError {
             TypeCheckErrorKind::ProtocolOutgoingPayloadNotAllowed(_, _, _, span) => *span,
             TypeCheckErrorKind::ProtocolStateHandlerMissing(_, _, _, _, span) => *span,
             TypeCheckErrorKind::ProtocolStateOutgoingPayloadNotAllowed(_, _, _, _, span) => *span,
+            TypeCheckErrorKind::ProtocolStateEmitDestinationRoleMismatch(
+                _,
+                _,
+                _,
+                _,
+                _,
+                _,
+                _,
+                span,
+            ) => *span,
+            TypeCheckErrorKind::ProtocolStateEmitDestinationRoleUnbound(_, _, _, _, _, span) => {
+                *span
+            }
+            TypeCheckErrorKind::ProtocolRequestContractMissing(_, _, _, _, span) => *span,
+            TypeCheckErrorKind::ProtocolRequestResponseNotInContract(_, _, _, _, _, span) => *span,
             TypeCheckErrorKind::TypestateOverlappingOnHandlers(_, _, _, _, span) => *span,
             TypeCheckErrorKind::TypestateAmbiguousResponseProvenance(_, _, _, _, span) => *span,
             TypeCheckErrorKind::TypestateRequestMissingResponseHandler(_, _, _, _, span) => *span,

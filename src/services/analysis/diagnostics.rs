@@ -801,6 +801,106 @@ fn populate_typecheck_metadata(kind: &TypeCheckErrorKind, metadata: &mut Diagnos
                 DiagnosticValue::String(payload.to_string()),
             );
         }
+        TypeCheckErrorKind::ProtocolStateEmitDestinationRoleMismatch(
+            typestate,
+            role,
+            state,
+            payload,
+            expected_role,
+            field,
+            bound_role,
+            _,
+        ) => {
+            metadata.insert(
+                "typestate".to_string(),
+                DiagnosticValue::String(typestate.clone()),
+            );
+            metadata.insert("role".to_string(), DiagnosticValue::String(role.clone()));
+            metadata.insert("state".to_string(), DiagnosticValue::String(state.clone()));
+            metadata.insert(
+                "payload".to_string(),
+                DiagnosticValue::String(payload.to_string()),
+            );
+            metadata.insert(
+                "expectedRole".to_string(),
+                DiagnosticValue::String(expected_role.clone()),
+            );
+            metadata.insert("field".to_string(), DiagnosticValue::String(field.clone()));
+            metadata.insert(
+                "boundRole".to_string(),
+                DiagnosticValue::String(bound_role.clone()),
+            );
+        }
+        TypeCheckErrorKind::ProtocolStateEmitDestinationRoleUnbound(
+            typestate,
+            role,
+            state,
+            payload,
+            expected_role,
+            _,
+        ) => {
+            metadata.insert(
+                "typestate".to_string(),
+                DiagnosticValue::String(typestate.clone()),
+            );
+            metadata.insert("role".to_string(), DiagnosticValue::String(role.clone()));
+            metadata.insert("state".to_string(), DiagnosticValue::String(state.clone()));
+            metadata.insert(
+                "payload".to_string(),
+                DiagnosticValue::String(payload.to_string()),
+            );
+            metadata.insert(
+                "expectedRole".to_string(),
+                DiagnosticValue::String(expected_role.clone()),
+            );
+        }
+        TypeCheckErrorKind::ProtocolRequestContractMissing(
+            typestate,
+            role,
+            request,
+            to_role,
+            _,
+        ) => {
+            metadata.insert(
+                "typestate".to_string(),
+                DiagnosticValue::String(typestate.clone()),
+            );
+            metadata.insert("role".to_string(), DiagnosticValue::String(role.clone()));
+            metadata.insert(
+                "request".to_string(),
+                DiagnosticValue::String(request.to_string()),
+            );
+            metadata.insert(
+                "toRole".to_string(),
+                DiagnosticValue::String(to_role.clone()),
+            );
+        }
+        TypeCheckErrorKind::ProtocolRequestResponseNotInContract(
+            typestate,
+            role,
+            request,
+            to_role,
+            response,
+            _,
+        ) => {
+            metadata.insert(
+                "typestate".to_string(),
+                DiagnosticValue::String(typestate.clone()),
+            );
+            metadata.insert("role".to_string(), DiagnosticValue::String(role.clone()));
+            metadata.insert(
+                "request".to_string(),
+                DiagnosticValue::String(request.to_string()),
+            );
+            metadata.insert(
+                "toRole".to_string(),
+                DiagnosticValue::String(to_role.clone()),
+            );
+            metadata.insert(
+                "response".to_string(),
+                DiagnosticValue::String(response.to_string()),
+            );
+        }
         _ => {}
     }
 }
@@ -1032,6 +1132,10 @@ macro_rules! with_typecheck_variants {
             ProtocolOutgoingPayloadNotAllowed,
             ProtocolStateHandlerMissing,
             ProtocolStateOutgoingPayloadNotAllowed,
+            ProtocolStateEmitDestinationRoleMismatch,
+            ProtocolStateEmitDestinationRoleUnbound,
+            ProtocolRequestContractMissing,
+            ProtocolRequestResponseNotInContract,
             TypestateOverlappingOnHandlers,
             TypestateAmbiguousResponseProvenance,
             TypestateRequestMissingResponseHandler,

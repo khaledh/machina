@@ -82,10 +82,10 @@ fn check_protocol_shape_conformance(engine: &TypecheckEngine) -> Vec<TypeCheckEr
         .collect();
     let handler_payloads_by_state =
         collect_typestate_handler_payloads_by_state(engine, &typestate_names);
-    let outgoing_payloads_by_state =
+    let outgoing_emits_by_state =
         collect_typestate_outgoing_payloads_by_state(engine, &typestate_names);
     let handler_payloads = collect_typestate_handler_payloads(&handler_payloads_by_state);
-    let outgoing_payloads = collect_typestate_outgoing_payloads(&outgoing_payloads_by_state);
+    let outgoing_payloads = collect_typestate_outgoing_payloads(&outgoing_emits_by_state);
 
     let mut errors = Vec::new();
     for binding in &resolved.typestate_role_impls {
@@ -104,6 +104,24 @@ fn check_protocol_shape_conformance(engine: &TypecheckEngine) -> Vec<TypeCheckEr
         let Some(role_fact) = protocol_fact.roles.get(role_name) else {
             continue;
         };
+        let peer_role_by_field: HashMap<&str, &str> = binding
+            .peer_role_bindings
+            .iter()
+            .map(|peer| (peer.field_name.as_str(), peer.role_name.as_str()))
+            .collect();
+        let contract_responses_by_request_to = protocol_fact
+            .request_contracts
+            .iter()
+            .filter(|c| c.from_role == *role_name)
+            .filter_map(|contract| {
+                contract.request_ty.as_ref().map(|request_ty| {
+                    (
+                        (request_ty.clone(), contract.to_role.as_str()),
+                        contract.response_tys.clone(),
+                    )
+                })
+            })
+            .collect::<HashMap<(Type, &str), Vec<Type>>>();
 
         if !role_fact.states.is_empty() {
             for state_fact in role_fact.states.values() {
@@ -130,7 +148,7 @@ fn check_protocol_shape_conformance(engine: &TypecheckEngine) -> Vec<TypeCheckEr
                     }
                 }
 
-                if let Some(emits) = outgoing_payloads_by_state.get(&key) {
+                if let Some(emits) = outgoing_emits_by_state.get(&key) {
                     for emit in emits {
                         if !state_fact.shape.allowed_outgoing.contains(&emit.payload_ty) {
                             errors.push(
@@ -143,6 +161,84 @@ fn check_protocol_shape_conformance(engine: &TypecheckEngine) -> Vec<TypeCheckEr
                                 )
                                 .into(),
                             );
+                            continue;
+                        }
+
+                        let expected_roles =
+                            state_expected_roles_for_payload(state_fact, &emit.payload_ty);
+                        if expected_roles.is_empty() {
+                            continue;
+                        }
+                        let Some((field_name, bound_role_name)) =
+                            resolve_emit_destination_role(emit, &peer_role_by_field)
+                        else {
+                            errors.push(
+                                TypeCheckErrorKind::ProtocolStateEmitDestinationRoleUnbound(
+                                    binding.typestate_name.clone(),
+                                    role_label.clone(),
+                                    state_fact.name.clone(),
+                                    emit.payload_ty.clone(),
+                                    expected_roles.join(" | "),
+                                    emit.span,
+                                )
+                                .into(),
+                            );
+                            continue;
+                        };
+                        if !expected_roles.iter().any(|role| role == bound_role_name) {
+                            errors.push(
+                                TypeCheckErrorKind::ProtocolStateEmitDestinationRoleMismatch(
+                                    binding.typestate_name.clone(),
+                                    role_label.clone(),
+                                    state_fact.name.clone(),
+                                    emit.payload_ty.clone(),
+                                    expected_roles.join(" | "),
+                                    field_name.to_string(),
+                                    bound_role_name.to_string(),
+                                    emit.span,
+                                )
+                                .into(),
+                            );
+                        }
+
+                        if !emit.is_request {
+                            continue;
+                        }
+                        let Some((_, to_role_name)) =
+                            resolve_emit_destination_role(emit, &peer_role_by_field)
+                        else {
+                            continue;
+                        };
+                        let Some(contract_responses) = contract_responses_by_request_to
+                            .get(&(emit.payload_ty.clone(), to_role_name))
+                        else {
+                            errors.push(
+                                TypeCheckErrorKind::ProtocolRequestContractMissing(
+                                    binding.typestate_name.clone(),
+                                    role_label.clone(),
+                                    emit.payload_ty.clone(),
+                                    to_role_name.to_string(),
+                                    emit.span,
+                                )
+                                .into(),
+                            );
+                            continue;
+                        };
+                        let response_tys = emit.request_response_tys.as_deref().unwrap_or_default();
+                        for response_ty in response_tys {
+                            if !contract_responses.contains(response_ty) {
+                                errors.push(
+                                    TypeCheckErrorKind::ProtocolRequestResponseNotInContract(
+                                        binding.typestate_name.clone(),
+                                        role_label.clone(),
+                                        emit.payload_ty.clone(),
+                                        to_role_name.to_string(),
+                                        response_ty.clone(),
+                                        emit.span,
+                                    )
+                                    .into(),
+                                );
+                            }
                         }
                     }
                 }
@@ -599,6 +695,9 @@ fn collect_typestate_handler_payloads(
 #[derive(Clone, Debug)]
 struct EmitPayload {
     payload_ty: Type,
+    to_field_name: Option<String>,
+    is_request: bool,
+    request_response_tys: Option<Vec<Type>>,
     span: crate::core::diag::Span,
 }
 
@@ -659,16 +758,27 @@ impl Visitor<DefId, ()> for TypestateEmitCollector<'_> {
         if let Some(state_key) = &self.current_state
             && let ExprKind::Emit { kind } = &expr.kind
         {
-            let payload = match kind {
-                crate::core::tree::EmitKind::Send { payload, .. }
-                | crate::core::tree::EmitKind::Request { payload, .. } => payload,
+            let (payload, to, is_request) = match kind {
+                crate::core::tree::EmitKind::Send { to, payload } => (payload, to, false),
+                crate::core::tree::EmitKind::Request { to, payload, .. } => (payload, to, true),
             };
             if let Some(payload_ty) = self.node_types.get(&payload.id) {
+                let request_response_tys = if is_request {
+                    match self.node_types.get(&expr.id) {
+                        Some(Type::Pending { response_tys }) => Some(response_tys.clone()),
+                        _ => None,
+                    }
+                } else {
+                    None
+                };
                 self.emits_by_state
                     .entry(state_key.clone())
                     .or_default()
                     .push(EmitPayload {
                         payload_ty: payload_ty.clone(),
+                        to_field_name: emit_destination_field_name(to),
+                        is_request,
+                        request_response_tys,
                         span: payload.span,
                     });
             }
@@ -1043,6 +1153,45 @@ fn parse_typestate_and_state_from_generated_state(type_name: &str) -> Option<(St
     let rest = type_name.strip_prefix("__ts_")?;
     let (typestate_name, state_name) = rest.rsplit_once('_')?;
     Some((typestate_name.to_string(), state_name.to_string()))
+}
+
+fn emit_destination_field_name(expr: &crate::core::tree::resolved::Expr) -> Option<String> {
+    let ExprKind::StructField { target, field } = &expr.kind else {
+        return None;
+    };
+    let ExprKind::Var { ident, .. } = &target.kind else {
+        return None;
+    };
+    if ident == "self" {
+        Some(field.clone())
+    } else {
+        None
+    }
+}
+
+fn state_expected_roles_for_payload(
+    state_fact: &crate::core::protocol::ProtocolStateFact,
+    payload_ty: &Type,
+) -> Vec<String> {
+    let mut roles = Vec::new();
+    for transition in &state_fact.transitions {
+        for effect in &transition.effects {
+            if effect.payload_ty.as_ref() == Some(payload_ty) && !roles.contains(&effect.to_role) {
+                roles.push(effect.to_role.clone());
+            }
+        }
+    }
+    roles.sort();
+    roles
+}
+
+fn resolve_emit_destination_role<'a>(
+    emit: &'a EmitPayload,
+    peer_role_by_field: &'a HashMap<&str, &str>,
+) -> Option<(&'a str, &'a str)> {
+    let field_name = emit.to_field_name.as_deref()?;
+    let role_name = peer_role_by_field.get(field_name).copied()?;
+    Some((field_name, role_name))
 }
 
 #[cfg(test)]
