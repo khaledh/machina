@@ -7,6 +7,7 @@ mod lvalue_overlap;
 mod match_check;
 mod move_check;
 mod normalize;
+mod protocol_progression;
 mod slice_borrow;
 mod slice_escape;
 mod structural;
@@ -57,6 +58,7 @@ fn sem_check_partial_normalized(
                 HashSet::new(),
                 HashSet::new(),
                 std::collections::HashMap::new(),
+                crate::core::context::ProtocolProgressionFacts::default(),
             ),
             errors: Vec::new(),
             poisoned_nodes: upstream_poisoned_nodes.clone(),
@@ -69,6 +71,7 @@ fn sem_check_partial_normalized(
     let def_init_result = def_init::check(&ctx);
     let capture_result = closure::capture::check(&ctx);
     let closure_borrow_errors = closure::borrow::check(&ctx, &capture_result.captures);
+    let progression_facts = protocol_progression::extract(&ctx);
 
     errors.extend(value::check(&ctx));
     errors.extend(structural::check(&ctx));
@@ -91,6 +94,7 @@ fn sem_check_partial_normalized(
             def_init_result.init_assigns,
             def_init_result.full_init_assigns,
             capture_result.captures,
+            progression_facts,
         ),
         errors,
         poisoned_nodes,
@@ -115,3 +119,7 @@ mod move_tests;
 #[cfg(test)]
 #[path = "../../tests/semck/t_partial.rs"]
 mod partial_tests;
+
+#[cfg(test)]
+#[path = "../../tests/semck/t_protocol_progression.rs"]
+mod protocol_progression_tests;

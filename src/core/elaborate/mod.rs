@@ -63,6 +63,7 @@ pub fn elaborate(ctx: ElaborateStageInput) -> ElaborateStageOutput {
         init_assigns,
         full_init_assigns,
         closure_captures,
+        protocol_progression: _,
     } = payload;
     let crate::core::context::TypedTables {
         resolved,
