@@ -80,8 +80,12 @@ fn check_protocol_shape_conformance(engine: &TypecheckEngine) -> Vec<TypeCheckEr
         .iter()
         .map(|binding| binding.typestate_name.clone())
         .collect();
-    let handler_payloads = collect_typestate_handler_payloads(engine, &typestate_names);
-    let outgoing_payloads = collect_typestate_outgoing_payloads(engine, &typestate_names);
+    let handler_payloads_by_state =
+        collect_typestate_handler_payloads_by_state(engine, &typestate_names);
+    let outgoing_payloads_by_state =
+        collect_typestate_outgoing_payloads_by_state(engine, &typestate_names);
+    let handler_payloads = collect_typestate_handler_payloads(&handler_payloads_by_state);
+    let outgoing_payloads = collect_typestate_outgoing_payloads(&outgoing_payloads_by_state);
 
     let mut errors = Vec::new();
     for binding in &resolved.typestate_role_impls {
@@ -94,18 +98,70 @@ fn check_protocol_shape_conformance(engine: &TypecheckEngine) -> Vec<TypeCheckEr
         let protocol_name = &binding.path[0];
         let role_name = &binding.path[1];
         let role_label = binding.path.join("::");
-        let Some(role_shape) = resolved.protocol_index.role_shape(protocol_name, role_name) else {
+        let Some(protocol_fact) = resolved.protocol_index.protocols.get(protocol_name) else {
             continue;
         };
-        let required_incoming = &role_shape.required_incoming;
-        let allowed_outgoing = &role_shape.allowed_outgoing;
+        let Some(role_fact) = protocol_fact.roles.get(role_name) else {
+            continue;
+        };
+
+        if !role_fact.states.is_empty() {
+            for state_fact in role_fact.states.values() {
+                let key = TypestateStateKey {
+                    typestate_name: binding.typestate_name.clone(),
+                    state_name: state_fact.name.clone(),
+                };
+                let seen_handlers = handler_payloads_by_state
+                    .get(&key)
+                    .cloned()
+                    .unwrap_or_default();
+                for required in &state_fact.shape.required_incoming {
+                    if !seen_handlers.contains(required) {
+                        errors.push(
+                            TypeCheckErrorKind::ProtocolStateHandlerMissing(
+                                binding.typestate_name.clone(),
+                                role_label.clone(),
+                                state_fact.name.clone(),
+                                required.clone(),
+                                binding.span,
+                            )
+                            .into(),
+                        );
+                    }
+                }
+
+                if let Some(emits) = outgoing_payloads_by_state.get(&key) {
+                    for emit in emits {
+                        if !state_fact.shape.allowed_outgoing.contains(&emit.payload_ty) {
+                            errors.push(
+                                TypeCheckErrorKind::ProtocolStateOutgoingPayloadNotAllowed(
+                                    binding.typestate_name.clone(),
+                                    role_label.clone(),
+                                    state_fact.name.clone(),
+                                    emit.payload_ty.clone(),
+                                    emit.span,
+                                )
+                                .into(),
+                            );
+                        }
+                    }
+                }
+            }
+
+            // State-oriented protocols are validated state-by-state only.
+            // Role-wide flow checks are reserved for legacy flow-only roles.
+            continue;
+        }
+
+        let required_incoming = &role_fact.shape.required_incoming;
+        let allowed_outgoing = &role_fact.shape.allowed_outgoing;
 
         let seen_handlers = handler_payloads
             .get(&binding.typestate_name)
             .cloned()
             .unwrap_or_default();
-        for required in required_incoming.iter() {
-            if !seen_handlers.contains(&required) {
+        for required in required_incoming {
+            if !seen_handlers.contains(required) {
                 errors.push(
                     TypeCheckErrorKind::ProtocolFlowHandlerMissing(
                         binding.typestate_name.clone(),
@@ -481,16 +537,29 @@ fn collect_provenance_handler_shapes(engine: &TypecheckEngine) -> Vec<Provenance
     out
 }
 
-fn collect_typestate_handler_payloads(
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+struct TypestateStateKey {
+    typestate_name: String,
+    state_name: String,
+}
+
+fn collect_typestate_handler_payloads_by_state(
     engine: &TypecheckEngine,
     typestate_names: &HashSet<String>,
-) -> HashMap<String, HashSet<Type>> {
-    let mut out = HashMap::<String, HashSet<Type>>::new();
+) -> HashMap<TypestateStateKey, HashSet<Type>> {
+    let mut out = HashMap::<TypestateStateKey, HashSet<Type>>::new();
     for method_block in engine.context().module.method_blocks() {
-        let Some(typestate_name) =
-            parse_typestate_from_generated_state(&method_block.type_name, typestate_names)
+        let Some((typestate_name, state_name)) =
+            parse_typestate_and_state_from_generated_state(&method_block.type_name)
         else {
             continue;
+        };
+        if !typestate_names.contains(&typestate_name) {
+            continue;
+        }
+        let key = TypestateStateKey {
+            typestate_name,
+            state_name,
         };
         for method_item in &method_block.method_items {
             let MethodItem::Def(method_def) = method_item else {
@@ -509,10 +578,20 @@ fn collect_typestate_handler_payloads(
             ) else {
                 continue;
             };
-            out.entry(typestate_name.clone())
-                .or_default()
-                .insert(handler_ty);
+            out.entry(key.clone()).or_default().insert(handler_ty);
         }
+    }
+    out
+}
+
+fn collect_typestate_handler_payloads(
+    payloads_by_state: &HashMap<TypestateStateKey, HashSet<Type>>,
+) -> HashMap<String, HashSet<Type>> {
+    let mut out = HashMap::<String, HashSet<Type>>::new();
+    for (key, payloads) in payloads_by_state {
+        out.entry(key.typestate_name.clone())
+            .or_default()
+            .extend(payloads.iter().cloned());
     }
     out
 }
@@ -523,38 +602,61 @@ struct EmitPayload {
     span: crate::core::diag::Span,
 }
 
-fn collect_typestate_outgoing_payloads(
+fn collect_typestate_outgoing_payloads_by_state(
     engine: &TypecheckEngine,
     typestate_names: &HashSet<String>,
-) -> HashMap<String, Vec<EmitPayload>> {
+) -> HashMap<TypestateStateKey, Vec<EmitPayload>> {
     let mut collector = TypestateEmitCollector {
         typestate_names,
         node_types: &engine.state().solve.resolved_node_types,
-        current_typestate: None,
-        emits_by_typestate: HashMap::new(),
+        current_state: None,
+        emits_by_state: HashMap::new(),
     };
     collector.visit_module(&engine.context().module);
-    collector.emits_by_typestate
+    collector.emits_by_state
+}
+
+fn collect_typestate_outgoing_payloads(
+    outgoing_by_state: &HashMap<TypestateStateKey, Vec<EmitPayload>>,
+) -> HashMap<String, Vec<EmitPayload>> {
+    let mut out = HashMap::<String, Vec<EmitPayload>>::new();
+    for (key, payloads) in outgoing_by_state {
+        out.entry(key.typestate_name.clone())
+            .or_default()
+            .extend(payloads.iter().cloned());
+    }
+    out
 }
 
 struct TypestateEmitCollector<'a> {
     typestate_names: &'a HashSet<String>,
     node_types: &'a HashMap<NodeId, Type>,
-    current_typestate: Option<String>,
-    emits_by_typestate: HashMap<String, Vec<EmitPayload>>,
+    current_state: Option<TypestateStateKey>,
+    emits_by_state: HashMap<TypestateStateKey, Vec<EmitPayload>>,
 }
 
 impl Visitor<DefId, ()> for TypestateEmitCollector<'_> {
     fn visit_method_block(&mut self, method_block: &crate::core::tree::resolved::MethodBlock) {
-        let prev = self.current_typestate.clone();
-        self.current_typestate =
-            parse_typestate_from_generated_state(&method_block.type_name, self.typestate_names);
+        let prev = self.current_state.clone();
+        self.current_state = parse_typestate_and_state_from_generated_state(
+            &method_block.type_name,
+        )
+        .and_then(|(typestate_name, state_name)| {
+            if self.typestate_names.contains(&typestate_name) {
+                Some(TypestateStateKey {
+                    typestate_name,
+                    state_name,
+                })
+            } else {
+                None
+            }
+        });
         visit::walk_method_block(self, method_block);
-        self.current_typestate = prev;
+        self.current_state = prev;
     }
 
     fn visit_expr(&mut self, expr: &crate::core::tree::resolved::Expr) {
-        if let Some(typestate_name) = &self.current_typestate
+        if let Some(state_key) = &self.current_state
             && let ExprKind::Emit { kind } = &expr.kind
         {
             let payload = match kind {
@@ -562,8 +664,8 @@ impl Visitor<DefId, ()> for TypestateEmitCollector<'_> {
                 | crate::core::tree::EmitKind::Request { payload, .. } => payload,
             };
             if let Some(payload_ty) = self.node_types.get(&payload.id) {
-                self.emits_by_typestate
-                    .entry(typestate_name.clone())
+                self.emits_by_state
+                    .entry(state_key.clone())
                     .or_default()
                     .push(EmitPayload {
                         payload_ty: payload_ty.clone(),
@@ -935,23 +1037,6 @@ impl Visitor<DefId, ()> for ReplySiteCollector<'_> {
         }
         visit::walk_expr(self, expr);
     }
-}
-
-fn parse_typestate_from_generated_state(
-    type_name: &str,
-    typestate_names: &HashSet<String>,
-) -> Option<String> {
-    typestate_names
-        .iter()
-        .filter_map(|ts_name| {
-            let prefix = format!("__ts_{ts_name}_");
-            if type_name.starts_with(&prefix) {
-                Some(ts_name.clone())
-            } else {
-                None
-            }
-        })
-        .max_by_key(|ts_name| ts_name.len())
 }
 
 fn parse_typestate_and_state_from_generated_state(type_name: &str) -> Option<(String, String)> {

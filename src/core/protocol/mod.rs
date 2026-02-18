@@ -8,6 +8,6 @@ pub mod index;
 
 pub use index::{
     ProtocolEffectFact, ProtocolFact, ProtocolIndex, ProtocolRequestContractFact, ProtocolRoleFact,
-    ProtocolRoleShape, ProtocolStateFact, ProtocolTransitionFact, TypestateProtocolBindingFact,
-    TypestateProtocolPeerBindingFact, build_protocol_index,
+    ProtocolRoleShape, ProtocolStateFact, ProtocolStateShape, ProtocolTransitionFact,
+    TypestateProtocolBindingFact, TypestateProtocolPeerBindingFact, build_protocol_index,
 };

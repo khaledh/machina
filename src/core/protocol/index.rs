@@ -51,7 +51,14 @@ pub struct ProtocolRoleShape {
 #[derive(Debug, Clone)]
 pub struct ProtocolStateFact {
     pub name: String,
+    pub shape: ProtocolStateShape,
     pub transitions: Vec<ProtocolTransitionFact>,
+}
+
+#[derive(Debug, Clone, Default)]
+pub struct ProtocolStateShape {
+    pub required_incoming: HashSet<Type>,
+    pub allowed_outgoing: HashSet<Type>,
 }
 
 #[derive(Debug, Clone)]
@@ -160,6 +167,7 @@ fn build_protocol_fact(
         let mut shape = ProtocolRoleShape::default();
         let mut states = HashMap::new();
         for state in &role.states {
+            let mut state_shape = ProtocolStateShape::default();
             let mut transitions = Vec::new();
             for transition in &state.transitions {
                 let trigger_payload_ty =
@@ -168,6 +176,7 @@ fn build_protocol_fact(
                     && let Some(trigger_ty) = &trigger_payload_ty
                 {
                     shape.required_incoming.insert(trigger_ty.clone());
+                    state_shape.required_incoming.insert(trigger_ty.clone());
                 }
 
                 let mut effects = Vec::new();
@@ -175,6 +184,7 @@ fn build_protocol_fact(
                     let payload_ty = resolve_type_expr(def_table, module, &effect.payload_ty).ok();
                     if let Some(payload_ty) = &payload_ty {
                         shape.allowed_outgoing.insert(payload_ty.clone());
+                        state_shape.allowed_outgoing.insert(payload_ty.clone());
                     }
                     effects.push(ProtocolEffectFact {
                         payload_ty,
@@ -194,6 +204,7 @@ fn build_protocol_fact(
                 state.name.clone(),
                 ProtocolStateFact {
                     name: state.name.clone(),
+                    shape: state_shape,
                     transitions,
                 },
             );

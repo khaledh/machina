@@ -771,6 +771,36 @@ fn populate_typecheck_metadata(kind: &TypeCheckErrorKind, metadata: &mut Diagnos
                 DiagnosticValue::String(payload.to_string()),
             );
         }
+        TypeCheckErrorKind::ProtocolStateHandlerMissing(typestate, role, state, payload, _) => {
+            metadata.insert(
+                "typestate".to_string(),
+                DiagnosticValue::String(typestate.clone()),
+            );
+            metadata.insert("role".to_string(), DiagnosticValue::String(role.clone()));
+            metadata.insert("state".to_string(), DiagnosticValue::String(state.clone()));
+            metadata.insert(
+                "payload".to_string(),
+                DiagnosticValue::String(payload.to_string()),
+            );
+        }
+        TypeCheckErrorKind::ProtocolStateOutgoingPayloadNotAllowed(
+            typestate,
+            role,
+            state,
+            payload,
+            _,
+        ) => {
+            metadata.insert(
+                "typestate".to_string(),
+                DiagnosticValue::String(typestate.clone()),
+            );
+            metadata.insert("role".to_string(), DiagnosticValue::String(role.clone()));
+            metadata.insert("state".to_string(), DiagnosticValue::String(state.clone()));
+            metadata.insert(
+                "payload".to_string(),
+                DiagnosticValue::String(payload.to_string()),
+            );
+        }
         _ => {}
     }
 }
@@ -1000,6 +1030,8 @@ macro_rules! with_typecheck_variants {
             OpaquePatternDestructure,
             ProtocolFlowHandlerMissing,
             ProtocolOutgoingPayloadNotAllowed,
+            ProtocolStateHandlerMissing,
+            ProtocolStateOutgoingPayloadNotAllowed,
             TypestateOverlappingOnHandlers,
             TypestateAmbiguousResponseProvenance,
             TypestateRequestMissingResponseHandler,

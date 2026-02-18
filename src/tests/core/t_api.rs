@@ -533,11 +533,173 @@ typestate Gateway : Auth::Client {
         out.type_errors.iter().any(|e| {
             matches!(
                 e.kind(),
-                TypeCheckErrorKind::ProtocolFlowHandlerMissing(ts, role, _, _)
-                    if ts == "Gateway" && role == "Auth::Client"
+                TypeCheckErrorKind::ProtocolStateHandlerMissing(ts, role, state, _, _)
+                    if ts == "Gateway" && role == "Auth::Client" && state == "Awaiting"
             )
         }),
         "expected missing handler conformance error from transition surface, got {:?}",
+        out.type_errors
+    );
+}
+
+#[test]
+fn typestate_protocol_shape_state_local_outgoing_violation_reports_type_error() {
+    let source = r#"
+type Start = {}
+type AuthReq = {}
+type AuthOk = {}
+type Other = {}
+
+protocol Auth {
+    msg Start;
+    msg AuthReq;
+    msg AuthOk;
+
+    role Client {
+        state Idle {
+            on Start -> Awaiting {
+                effects: [ AuthReq ~> Server ]
+            }
+        }
+        state Awaiting {
+            on AuthOk@Server -> Idle;
+        }
+    }
+
+    role Server {
+        state Ready {
+            on AuthReq@Client -> Ready {
+                effects: [ AuthOk ~> Client ]
+            }
+        }
+    }
+}
+
+typestate AuthServer {
+    fn new() -> Ready {
+        Ready {}
+    }
+
+    state Ready {}
+}
+
+typestate Gateway : Auth::Client {
+    fields {
+        server: Machine<AuthServer> as Server,
+    }
+
+    fn new(server: Machine<AuthServer>) -> Idle {
+        Idle { server: server }
+    }
+
+    state Idle {
+        on Start() -> Awaiting {
+            emit Send(to: 0, Other {});
+            Awaiting { server: self.server }
+        }
+    }
+
+    state Awaiting {
+        on AuthOk() -> Idle {
+            Idle { server: self.server }
+        }
+    }
+}
+"#;
+    let parsed = parsed_context_typestate(source);
+    let out = resolve_typecheck_pipeline_with_policy(
+        parsed,
+        ResolveInputs::default(),
+        None,
+        FrontendPolicy::Strict,
+    );
+    assert!(
+        out.type_errors.iter().any(|e| {
+            matches!(
+                e.kind(),
+                TypeCheckErrorKind::ProtocolStateOutgoingPayloadNotAllowed(ts, role, state, _, _)
+                    if ts == "Gateway" && role == "Auth::Client" && state == "Idle"
+            )
+        }),
+        "expected state-local outgoing payload protocol conformance error, got {:?}",
+        out.type_errors
+    );
+}
+
+#[test]
+fn typestate_protocol_shape_accepts_valid_state_local_conformance() {
+    let source = r#"
+type Start = {}
+type AuthReq = {}
+type AuthOk = {}
+
+protocol Auth {
+    msg Start;
+    msg AuthReq;
+    msg AuthOk;
+
+    role Client {
+        state Idle {
+            on Start -> Awaiting {
+                effects: [ AuthReq ~> Server ]
+            }
+        }
+        state Awaiting {
+            on AuthOk@Server -> Idle;
+        }
+    }
+
+    role Server {
+        state Ready {
+            on AuthReq@Client -> Ready {
+                effects: [ AuthOk ~> Client ]
+            }
+        }
+    }
+}
+
+typestate AuthServer {
+    fn new() -> Ready {
+        Ready {}
+    }
+
+    state Ready {}
+}
+
+typestate Gateway : Auth::Client {
+    fields {
+        server: Machine<AuthServer> as Server,
+    }
+
+    fn new(server: Machine<AuthServer>) -> Idle {
+        Idle { server: server }
+    }
+
+    state Idle {
+        on Start() -> Awaiting {
+            emit Send(to: 0, AuthReq {});
+            Awaiting { server: self.server }
+        }
+    }
+
+    state Awaiting {
+        on AuthOk() -> Idle {
+            Idle { server: self.server }
+        }
+    }
+}
+"#;
+    let parsed = parsed_context_typestate(source);
+    let out = resolve_typecheck_pipeline_with_policy(
+        parsed,
+        ResolveInputs::default(),
+        None,
+        FrontendPolicy::Strict,
+    );
+    assert!(
+        !out.has_errors(),
+        "expected valid state-local protocol conformance, got resolve={:?} type={:?}",
+        out.resolve_errors,
         out.type_errors
     );
 }

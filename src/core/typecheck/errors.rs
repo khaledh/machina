@@ -346,6 +346,16 @@ pub enum TypeCheckErrorKind {
     ProtocolOutgoingPayloadNotAllowed(String, String, Type, Span),
 
     #[error(
+        "Typestate {0} implementing role {1} state {2} is missing a handler for incoming payload {3}"
+    )]
+    ProtocolStateHandlerMissing(String, String, String, Type, Span),
+
+    #[error(
+        "Typestate {0} implementing role {1} state {2} emits payload {3} which is not allowed by protocol transitions"
+    )]
+    ProtocolStateOutgoingPayloadNotAllowed(String, String, String, Type, Span),
+
+    #[error(
         "Typestate {0} state {1} has overlapping `on` handlers for selector {2} on response variants {3:?}"
     )]
     TypestateOverlappingOnHandlers(String, String, Type, Vec<Type>, Span),
@@ -494,6 +504,8 @@ impl TypeCheckError {
             TypeCheckErrorKind::OpaquePatternDestructure(_, span) => *span,
             TypeCheckErrorKind::ProtocolFlowHandlerMissing(_, _, _, span) => *span,
             TypeCheckErrorKind::ProtocolOutgoingPayloadNotAllowed(_, _, _, span) => *span,
+            TypeCheckErrorKind::ProtocolStateHandlerMissing(_, _, _, _, span) => *span,
+            TypeCheckErrorKind::ProtocolStateOutgoingPayloadNotAllowed(_, _, _, _, span) => *span,
             TypeCheckErrorKind::TypestateOverlappingOnHandlers(_, _, _, _, span) => *span,
             TypeCheckErrorKind::TypestateAmbiguousResponseProvenance(_, _, _, _, span) => *span,
             TypeCheckErrorKind::TypestateRequestMissingResponseHandler(_, _, _, _, span) => *span,
