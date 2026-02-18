@@ -39,6 +39,7 @@ impl NrvoAnalyzer {
             symbols,
             node_id_gen,
             typestate_role_impls,
+            protocol_index,
         } = resolved;
 
         let mut def_table = def_table;
@@ -57,6 +58,7 @@ impl NrvoAnalyzer {
                         symbols,
                         node_id_gen,
                         typestate_role_impls,
+                        protocol_index,
                     },
                     type_map,
                     call_sigs,

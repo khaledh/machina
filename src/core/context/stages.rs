@@ -23,6 +23,7 @@ pub struct ResolvedTables {
     pub symbols: SymbolTable,
     pub node_id_gen: NodeIdGen,
     pub typestate_role_impls: Vec<TypestateRoleImplBinding>,
+    pub protocol_index: crate::core::protocol::ProtocolIndex,
 }
 
 #[derive(Debug, Clone)]
@@ -189,6 +190,7 @@ impl ParsedContext {
                 symbols,
                 node_id_gen: self.node_id_gen,
                 typestate_role_impls: Vec::new(),
+                protocol_index: crate::core::protocol::ProtocolIndex::default(),
             },
         }
     }

@@ -31,6 +31,7 @@ pub fn normalize(ctx: SemCheckStageInput) -> SemCheckNormalizedContext {
         symbols,
         node_id_gen,
         typestate_role_impls,
+        protocol_index,
     } = resolved;
     // `typed::Module` and `normalized::Module` currently share the same
     // underlying representation (`tree::model::Module<DefId, TypeId>`), so
@@ -49,6 +50,7 @@ pub fn normalize(ctx: SemCheckStageInput) -> SemCheckNormalizedContext {
                 symbols,
                 node_id_gen,
                 typestate_role_impls,
+                protocol_index,
             },
             type_map: type_map.into_inner(),
             call_sigs,

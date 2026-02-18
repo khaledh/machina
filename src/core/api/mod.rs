@@ -254,6 +254,11 @@ pub fn resolve_stage_with_policy(
     let mut context = output.context;
     context.payload.typestate_role_impls =
         build_typestate_role_impl_bindings(&context, &typestate_role_impls);
+    context.payload.protocol_index = crate::core::protocol::build_protocol_index(
+        &context.module,
+        &context.def_table,
+        &context.typestate_role_impls,
+    );
     typestate_errors.extend(output.errors);
     let errors = typestate_errors;
     match policy {

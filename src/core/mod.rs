@@ -13,6 +13,7 @@ pub mod machine;
 pub mod monomorphize;
 pub mod nrvo;
 pub mod parse;
+pub mod protocol;
 pub mod resolve;
 pub mod semck;
 pub mod symtab;

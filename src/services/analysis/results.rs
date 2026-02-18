@@ -45,6 +45,7 @@ pub struct ResolvedModuleResult {
     pub symbols: SymbolTable,
     pub node_id_gen: NodeIdGen,
     pub typestate_role_impls: Vec<crate::core::context::TypestateRoleImplBinding>,
+    pub protocol_index: crate::core::protocol::ProtocolIndex,
 }
 
 impl ResolvedModuleResult {
@@ -59,6 +60,7 @@ impl ResolvedModuleResult {
             symbols,
             node_id_gen,
             typestate_role_impls,
+            protocol_index,
         } = tables;
         Self {
             module_id,
@@ -68,6 +70,7 @@ impl ResolvedModuleResult {
             symbols,
             node_id_gen,
             typestate_role_impls,
+            protocol_index,
         }
     }
 
@@ -80,6 +83,7 @@ impl ResolvedModuleResult {
                 symbols: self.symbols,
                 node_id_gen: self.node_id_gen,
                 typestate_role_impls: self.typestate_role_impls,
+                protocol_index: self.protocol_index,
             },
         }
     }
@@ -97,6 +101,7 @@ pub struct TypedModuleResult {
     pub symbols: SymbolTable,
     pub node_id_gen: NodeIdGen,
     pub typestate_role_impls: Vec<crate::core::context::TypestateRoleImplBinding>,
+    pub protocol_index: crate::core::protocol::ProtocolIndex,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -245,6 +250,7 @@ impl TypedModuleResult {
             symbols,
             node_id_gen,
             typestate_role_impls,
+            protocol_index,
         } = resolved;
         Self {
             module_id,
@@ -257,6 +263,7 @@ impl TypedModuleResult {
             symbols,
             node_id_gen,
             typestate_role_impls,
+            protocol_index,
         }
     }
 
@@ -270,6 +277,7 @@ impl TypedModuleResult {
                     symbols: self.symbols,
                     node_id_gen: self.node_id_gen,
                     typestate_role_impls: self.typestate_role_impls,
+                    protocol_index: self.protocol_index,
                 },
                 type_map: self.type_map,
                 call_sigs: self.call_sigs,

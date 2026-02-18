@@ -6,7 +6,6 @@
 use std::collections::{HashMap, HashSet};
 
 use crate::core::analysis::dataflow::{DataflowGraph, solve_forward};
-use crate::core::context::ResolvedContext;
 use crate::core::machine::naming::parse_generated_handler_site_label;
 use crate::core::resolve::DefId;
 use crate::core::tree::NodeId;
@@ -72,17 +71,12 @@ pub(crate) fn run(engine: &mut TypecheckEngine) -> Result<(), Vec<TypeCheckError
 
 fn check_protocol_shape_conformance(engine: &TypecheckEngine) -> Vec<TypeCheckError> {
     let resolved = engine.context();
-    let role_impls = &resolved.typestate_role_impls;
-    if role_impls.is_empty() {
+    if resolved.typestate_role_impls.is_empty() {
         return Vec::new();
     }
 
-    let mut protocol_by_name = HashMap::new();
-    for protocol in resolved.module.protocol_defs() {
-        protocol_by_name.insert(protocol.name.clone(), protocol);
-    }
-
-    let typestate_names: HashSet<String> = role_impls
+    let typestate_names: HashSet<String> = resolved
+        .typestate_role_impls
         .iter()
         .map(|binding| binding.typestate_name.clone())
         .collect();
@@ -90,7 +84,7 @@ fn check_protocol_shape_conformance(engine: &TypecheckEngine) -> Vec<TypeCheckEr
     let outgoing_payloads = collect_typestate_outgoing_payloads(engine, &typestate_names);
 
     let mut errors = Vec::new();
-    for binding in role_impls {
+    for binding in &resolved.typestate_role_impls {
         // Role path/def validity is resolver's responsibility. Skip malformed
         // entries to avoid duplicate/symptom diagnostics here.
         if binding.path.len() < 2 || binding.role_def_id.is_none() {
@@ -100,24 +94,23 @@ fn check_protocol_shape_conformance(engine: &TypecheckEngine) -> Vec<TypeCheckEr
         let protocol_name = &binding.path[0];
         let role_name = &binding.path[1];
         let role_label = binding.path.join("::");
-        let Some(protocol) = protocol_by_name.get(protocol_name) else {
+        let Some(role_shape) = resolved.protocol_index.role_shape(protocol_name, role_name) else {
             continue;
         };
-
-        let (required_incoming, allowed_outgoing) =
-            protocol_shape_sets(resolved, protocol, role_name);
+        let required_incoming = &role_shape.required_incoming;
+        let allowed_outgoing = &role_shape.allowed_outgoing;
 
         let seen_handlers = handler_payloads
             .get(&binding.typestate_name)
             .cloned()
             .unwrap_or_default();
-        for required in required_incoming {
+        for required in required_incoming.iter() {
             if !seen_handlers.contains(&required) {
                 errors.push(
                     TypeCheckErrorKind::ProtocolFlowHandlerMissing(
                         binding.typestate_name.clone(),
                         role_label.clone(),
-                        required,
+                        required.clone(),
                         binding.span,
                     )
                     .into(),
@@ -143,56 +136,6 @@ fn check_protocol_shape_conformance(engine: &TypecheckEngine) -> Vec<TypeCheckEr
     }
 
     errors
-}
-
-fn protocol_shape_sets(
-    resolved: &ResolvedContext,
-    protocol: &crate::core::tree::resolved::ProtocolDef,
-    role_name: &str,
-) -> (HashSet<Type>, HashSet<Type>) {
-    let mut required_incoming = HashSet::<Type>::new();
-    let mut allowed_outgoing = HashSet::<Type>::new();
-
-    for role in &protocol.roles {
-        if role.name != role_name {
-            continue;
-        }
-        for state in &role.states {
-            for transition in &state.transitions {
-                if transition.trigger.from_role.is_some()
-                    && let Ok(payload_ty) = resolve_type_expr(
-                        &resolved.def_table,
-                        &resolved.module,
-                        &transition.trigger.selector_ty,
-                    )
-                {
-                    required_incoming.insert(payload_ty);
-                }
-                for effect in &transition.effects {
-                    if let Ok(payload_ty) =
-                        resolve_type_expr(&resolved.def_table, &resolved.module, &effect.payload_ty)
-                    {
-                        allowed_outgoing.insert(payload_ty);
-                    }
-                }
-            }
-        }
-    }
-
-    for contract in &protocol.request_contracts {
-        if let Ok(request_ty) =
-            resolve_type_expr(&resolved.def_table, &resolved.module, &contract.request_ty)
-        {
-            if contract.from_role == role_name {
-                allowed_outgoing.insert(request_ty.clone());
-            }
-            if contract.to_role == role_name {
-                required_incoming.insert(request_ty);
-            }
-        }
-    }
-
-    (required_incoming, allowed_outgoing)
 }
 
 #[derive(Clone, Debug)]
