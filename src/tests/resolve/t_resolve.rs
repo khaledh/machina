@@ -396,6 +396,41 @@ fn test_resolve_protocol_flow_reports_undefined_roles() {
 }
 
 #[test]
+fn test_resolve_protocol_transition_reports_undefined_roles() {
+    let source = r#"
+        protocol Net {
+            msg Ping;
+
+            role Client {
+                state Ready {
+                    on Ping@Missing -> Ready;
+                    on Start -> Ready {
+                        effects: [ Ping ~> Missing ]
+                    }
+                }
+            }
+        }
+    "#;
+
+    let parsed = parse_source_with_options(
+        source,
+        ParserOptions {
+            experimental_typestate: true,
+        },
+    );
+    let result =
+        resolve_stage_with_policy(parsed, ResolveInputs::default(), FrontendPolicy::Strict);
+    assert!(result.context.is_none(), "strict resolve should fail");
+    assert!(
+        result.errors.iter().any(
+            |e| matches!(e, ResolveError::ProtocolFlowRoleUndefined(protocol, role, _) if protocol == "Net" && role == "Missing")
+        ),
+        "expected undefined protocol transition role error, got {:?}",
+        result.errors
+    );
+}
+
+#[test]
 fn test_resolve_typestate_role_impl_binds_protocol_role() {
     let source = r#"
         type AuthReq = {}

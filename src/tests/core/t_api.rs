@@ -303,6 +303,12 @@ typestate Gateway : Auth::Client {
         None,
         FrontendPolicy::Strict,
     );
+    let resolved = out
+        .resolved_context
+        .as_ref()
+        .expect("expected resolved context for protocol conformance test");
+    assert_eq!(resolved.typestate_role_impls.len(), 1);
+    assert!(resolved.typestate_role_impls[0].role_def_id.is_some());
     assert!(
         out.type_errors.iter().any(|e| {
             matches!(
@@ -408,6 +414,84 @@ typestate Gateway : Auth::Client {
         !out.has_errors(),
         "expected valid protocol shape conformance, got resolve={:?} type={:?}",
         out.resolve_errors,
+        out.type_errors
+    );
+}
+
+#[test]
+fn typestate_protocol_shape_uses_transition_surface_for_conformance() {
+    let source = r#"
+type Start = {}
+type AuthReq = {}
+type AuthOk = {}
+
+protocol Auth {
+    msg Start;
+    msg AuthReq;
+    msg AuthOk;
+    req Client -> Server: AuthReq => AuthOk;
+
+    role Client {
+        state Idle {
+            on Start -> Awaiting {
+                effects: [ AuthReq ~> Server ]
+            }
+        }
+        state Awaiting {
+            on AuthOk@Server -> Idle;
+        }
+    }
+
+    role Server {
+        state Ready {
+            on AuthReq@Client -> Ready {
+                effects: [ AuthOk ~> Client ]
+            }
+        }
+    }
+}
+
+typestate Gateway : Auth::Client {
+    fn new() -> Idle {
+        Idle {}
+    }
+
+    state Idle {
+        fn request() -> Idle {
+            emit Send(to: 0, AuthReq {});
+            Idle {}
+        }
+    }
+}
+"#;
+    let parsed = parsed_context_typestate(source);
+    let out = resolve_typecheck_pipeline_with_policy(
+        parsed,
+        ResolveInputs::default(),
+        None,
+        FrontendPolicy::Strict,
+    );
+    let resolved = out
+        .resolved_context
+        .as_ref()
+        .expect("expected resolved context for transition-surface protocol test");
+    let protocols = resolved.module.protocol_defs();
+    let protocol = protocols
+        .first()
+        .expect("expected protocol definition");
+    assert_eq!(protocol.messages.len(), 3);
+    assert_eq!(protocol.request_contracts.len(), 1);
+    assert_eq!(protocol.roles.len(), 2);
+    assert!(!protocol.roles[0].states.is_empty());
+    assert!(
+        out.type_errors.iter().any(|e| {
+            matches!(
+                e.kind(),
+                TypeCheckErrorKind::ProtocolFlowHandlerMissing(ts, role, _, _)
+                    if ts == "Gateway" && role == "Auth::Client"
+            )
+        }),
+        "expected missing handler conformance error from transition surface, got {:?}",
         out.type_errors
     );
 }
