@@ -2531,6 +2531,50 @@ fn test_parse_typestate_role_impl_and_on_handlers() {
 }
 
 #[test]
+fn test_parse_typestate_fields_with_role_binding() {
+    let source = r#"
+        typestate Gateway : Auth::Client {
+            fields {
+                auth: Machine<AuthServer> as Server,
+            }
+
+            fn new(auth: Machine<AuthServer>) -> Ready {
+                Ready { auth: auth }
+            }
+
+            state Ready {}
+        }
+    "#;
+
+    let module = parse_module_with_options(
+        source,
+        ParserOptions {
+            experimental_typestate: true,
+        },
+    )
+    .expect("typestate with role-bound fields should parse");
+
+    let typestate = match &module.top_level_items[0] {
+        TopLevelItem::TypestateDef(def) => def,
+        _ => panic!("expected typestate top-level item"),
+    };
+
+    let fields_block = typestate
+        .items
+        .iter()
+        .find_map(|item| match item {
+            TypestateItem::Fields(fields) => Some(fields),
+            _ => None,
+        })
+        .expect("expected typestate fields block");
+
+    assert_eq!(fields_block.fields.len(), 1);
+    assert_eq!(fields_block.role_bindings.len(), 1);
+    assert_eq!(fields_block.role_bindings[0].field_name, "auth");
+    assert_eq!(fields_block.role_bindings[0].role_name, "Server");
+}
+
+#[test]
 fn test_parse_typestate_pattern_on_handler_desugars_to_canonical_params() {
     let source = r#"
         typestate Gateway {

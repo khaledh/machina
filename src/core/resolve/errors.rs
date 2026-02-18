@@ -96,6 +96,18 @@ pub enum ResolveError {
     #[error("Typestate `{0}` expected `{1}` to resolve to a protocol role, found {2}")]
     TypestateRoleImplExpectedRole(String, String, SymbolKind, Span),
 
+    #[error("Typestate `{0}` field `{1}` role binding must use `Machine<...>` type")]
+    TypestateRoleBindingInvalidType(String, String, Span),
+
+    #[error("Typestate `{0}` field `{1}` binds undefined protocol role `{2}`")]
+    TypestateRoleBindingRoleUndefined(String, String, String, Span),
+
+    #[error("Typestate `{0}` binds protocol role `{1}` more than once")]
+    TypestateRoleBindingDuplicateRole(String, String, Span),
+
+    #[error("Typestate `{0}` is missing protocol peer-role binding for `{1}`")]
+    TypestateRoleBindingMissing(String, String, Span),
+
     #[error("Typestate `{0}` must declare at least one state")]
     TypestateMissingState(String, Span),
 
@@ -192,6 +204,10 @@ impl ResolveError {
             ResolveError::TypestateRoleImplMalformedPath(_, _, span) => *span,
             ResolveError::TypestateRoleImplRoleUndefined(_, _, span) => *span,
             ResolveError::TypestateRoleImplExpectedRole(_, _, _, span) => *span,
+            ResolveError::TypestateRoleBindingInvalidType(_, _, span) => *span,
+            ResolveError::TypestateRoleBindingRoleUndefined(_, _, _, span) => *span,
+            ResolveError::TypestateRoleBindingDuplicateRole(_, _, span) => *span,
+            ResolveError::TypestateRoleBindingMissing(_, _, span) => *span,
             ResolveError::TypestateMissingState(_, span) => *span,
             ResolveError::TypestateDuplicateState(_, _, span) => *span,
             ResolveError::TypestateDuplicateFieldsBlock(_, span) => *span,

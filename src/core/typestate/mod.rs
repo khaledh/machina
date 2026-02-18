@@ -54,17 +54,52 @@ pub struct TypestateRoleImplRef {
     pub id: crate::core::tree::NodeId,
     pub typestate_name: String,
     pub path: Vec<String>,
+    pub peer_role_bindings: Vec<TypestatePeerRoleBindingRef>,
+    pub span: Span,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct TypestatePeerRoleBindingRef {
+    pub id: crate::core::tree::NodeId,
+    pub field_name: String,
+    pub role_name: String,
+    pub field_ty: TypeExpr,
     pub span: Span,
 }
 
 pub fn collect_role_impl_refs(module: &Module) -> Vec<TypestateRoleImplRef> {
     let mut out = Vec::new();
     for typestate in module.typestate_defs() {
+        let peer_role_bindings = typestate
+            .items
+            .iter()
+            .filter_map(|item| match item {
+                TypestateItem::Fields(fields) => Some(fields),
+                _ => None,
+            })
+            .flat_map(|fields| {
+                fields.role_bindings.iter().filter_map(|binding| {
+                    let field_ty = fields
+                        .fields
+                        .iter()
+                        .find(|field| field.name == binding.field_name)
+                        .map(|field| field.ty.clone())?;
+                    Some(TypestatePeerRoleBindingRef {
+                        id: binding.id,
+                        field_name: binding.field_name.clone(),
+                        role_name: binding.role_name.clone(),
+                        field_ty,
+                        span: binding.span,
+                    })
+                })
+            })
+            .collect::<Vec<_>>();
         for role_impl in &typestate.role_impls {
             out.push(TypestateRoleImplRef {
                 id: role_impl.id,
                 typestate_name: typestate.name.clone(),
                 path: role_impl.path.clone(),
+                peer_role_bindings: peer_role_bindings.clone(),
                 span: role_impl.span,
             });
         }

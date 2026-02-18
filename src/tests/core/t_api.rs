@@ -283,9 +283,21 @@ protocol Auth {
     flow Client -> Server: AuthReq;
 }
 
+typestate AuthServer {
+    fn new() -> Ready {
+        Ready {}
+    }
+
+    state Ready {}
+}
+
 typestate Gateway : Auth::Client {
-    fn new() -> Idle {
-        Idle {}
+    fields {
+        server: Machine<AuthServer> as Server,
+    }
+
+    fn new(server: Machine<AuthServer>) -> Idle {
+        Idle { server: server }
     }
 
     state Idle {
@@ -336,9 +348,21 @@ protocol Auth {
     flow Client -> Server: AuthReq;
 }
 
+typestate AuthServer {
+    fn new() -> Ready {
+        Ready {}
+    }
+
+    state Ready {}
+}
+
 typestate Gateway : Auth::Client {
-    fn new() -> Idle {
-        Idle {}
+    fields {
+        server: Machine<AuthServer> as Server,
+    }
+
+    fn new(server: Machine<AuthServer>) -> Idle {
+        Idle { server: server }
     }
 
     state Idle {
@@ -386,9 +410,21 @@ protocol Auth {
     flow Client -> Server: AuthReq;
 }
 
+typestate AuthServer {
+    fn new() -> Ready {
+        Ready {}
+    }
+
+    state Ready {}
+}
+
 typestate Gateway : Auth::Client {
-    fn new() -> Idle {
-        Idle {}
+    fields {
+        server: Machine<AuthServer> as Server,
+    }
+
+    fn new(server: Machine<AuthServer>) -> Idle {
+        Idle { server: server }
     }
 
     state Idle {
@@ -451,9 +487,21 @@ protocol Auth {
     }
 }
 
+typestate AuthServer {
+    fn new() -> Ready {
+        Ready {}
+    }
+
+    state Ready {}
+}
+
 typestate Gateway : Auth::Client {
-    fn new() -> Idle {
-        Idle {}
+    fields {
+        server: Machine<AuthServer> as Server,
+    }
+
+    fn new(server: Machine<AuthServer>) -> Idle {
+        Idle { server: server }
     }
 
     state Idle {
@@ -476,9 +524,7 @@ typestate Gateway : Auth::Client {
         .as_ref()
         .expect("expected resolved context for transition-surface protocol test");
     let protocols = resolved.module.protocol_defs();
-    let protocol = protocols
-        .first()
-        .expect("expected protocol definition");
+    let protocol = protocols.first().expect("expected protocol definition");
     assert_eq!(protocol.messages.len(), 3);
     assert_eq!(protocol.request_contracts.len(), 1);
     assert_eq!(protocol.roles.len(), 2);

@@ -347,6 +347,39 @@ impl Diagnostic {
                 );
                 "MC-TYPESTATE-ROLE-IMPL-EXPECTED-ROLE"
             }
+            ResolveError::TypestateRoleBindingInvalidType(typestate, field, _) => {
+                metadata.insert(
+                    "typestate".to_string(),
+                    DiagnosticValue::String(typestate.clone()),
+                );
+                metadata.insert("field".to_string(), DiagnosticValue::String(field.clone()));
+                "MC-TYPESTATE-ROLE-BINDING-INVALID-TYPE"
+            }
+            ResolveError::TypestateRoleBindingRoleUndefined(typestate, field, role, _) => {
+                metadata.insert(
+                    "typestate".to_string(),
+                    DiagnosticValue::String(typestate.clone()),
+                );
+                metadata.insert("field".to_string(), DiagnosticValue::String(field.clone()));
+                metadata.insert("role".to_string(), DiagnosticValue::String(role.clone()));
+                "MC-TYPESTATE-ROLE-BINDING-ROLE-UNDEFINED"
+            }
+            ResolveError::TypestateRoleBindingDuplicateRole(typestate, role, _) => {
+                metadata.insert(
+                    "typestate".to_string(),
+                    DiagnosticValue::String(typestate.clone()),
+                );
+                metadata.insert("role".to_string(), DiagnosticValue::String(role.clone()));
+                "MC-TYPESTATE-ROLE-BINDING-DUPLICATE-ROLE"
+            }
+            ResolveError::TypestateRoleBindingMissing(typestate, role, _) => {
+                metadata.insert(
+                    "typestate".to_string(),
+                    DiagnosticValue::String(typestate.clone()),
+                );
+                metadata.insert("role".to_string(), DiagnosticValue::String(role.clone()));
+                "MC-TYPESTATE-ROLE-BINDING-MISSING"
+            }
             ResolveError::TypestateMissingState(name, _) => {
                 metadata.insert(
                     "typestate".to_string(),

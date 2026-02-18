@@ -789,15 +789,47 @@ impl<'a> Parser<'a> {
         let marker = self.mark();
         self.consume_contextual_keyword("fields")?;
         self.consume(&TK::LBrace)?;
-        let fields = self.parse_list(TK::Comma, TK::RBrace, |parser| {
-            parser.parse_struct_def_field()
-        })?;
+        let mut fields = Vec::new();
+        let mut role_bindings = Vec::new();
+        while self.curr_token.kind != TK::RBrace {
+            let (field, maybe_binding) = self.parse_typestate_struct_field()?;
+            fields.push(field);
+            if let Some(binding) = maybe_binding {
+                role_bindings.push(binding);
+            }
+            if self.curr_token.kind == TK::Comma {
+                self.advance();
+            }
+        }
         self.consume(&TK::RBrace)?;
         Ok(TypestateFields {
             id: self.id_gen.new_id(),
             fields,
+            role_bindings,
             span: self.close(marker),
         })
+    }
+
+    fn parse_typestate_struct_field(
+        &mut self,
+    ) -> Result<(StructDefField, Option<TypestateFieldRoleBinding>), ParseError> {
+        let field = self.parse_struct_def_field()?;
+        // Typestate fields optionally annotate peer-role intent:
+        // `peer: Machine<PeerType> as Server`.
+        let maybe_binding = if self.is_contextual_keyword("as") {
+            let marker = self.mark();
+            self.consume_contextual_keyword("as")?;
+            let role_name = self.parse_ident()?;
+            Some(TypestateFieldRoleBinding {
+                id: self.id_gen.new_id(),
+                field_name: field.name.clone(),
+                role_name,
+                span: self.close(marker),
+            })
+        } else {
+            None
+        };
+        Ok((field, maybe_binding))
     }
 
     fn parse_typestate_func_def(&mut self, closure_base: String) -> Result<FuncDef, ParseError> {

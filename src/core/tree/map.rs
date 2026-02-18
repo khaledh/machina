@@ -703,6 +703,7 @@ pub fn walk_typestate_fields<M: TreeMapper + ?Sized>(
             .iter()
             .map(|field| mapper.map_struct_def_field(field, ctx))
             .collect(),
+        role_bindings: fields.role_bindings.clone(),
         span: fields.span,
     }
 }

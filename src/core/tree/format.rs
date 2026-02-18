@@ -263,6 +263,19 @@ impl TypestateFields {
         for field in &self.fields {
             field.fmt_with_indent(f, level + 1)?;
         }
+        if !self.role_bindings.is_empty() {
+            writeln!(f, "{}RoleBindings:", indent(level + 1))?;
+            for binding in &self.role_bindings {
+                writeln!(
+                    f,
+                    "{}{} as {} [{}]",
+                    indent(level + 2),
+                    binding.field_name,
+                    binding.role_name,
+                    binding.id
+                )?;
+            }
+        }
         Ok(())
     }
 }

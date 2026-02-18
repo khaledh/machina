@@ -886,7 +886,7 @@ impl SymbolResolver {
             resolver.populate_decls(module);
 
             resolver.visit_module(module);
-            resolver.bind_typestate_role_impls();
+            resolver.bind_typestate_role_impls(module);
         });
 
         let (def_table, node_def_lookup) = std::mem::take(&mut self.def_table_builder).finish();
@@ -894,7 +894,16 @@ impl SymbolResolver {
         (def_table, node_def_lookup, errors)
     }
 
-    fn bind_typestate_role_impls(&mut self) {
+    fn bind_typestate_role_impls(&mut self, module: &Module) {
+        // Local protocol defs are enough for v1 role-binding validation.
+        // Cross-module protocol shape checks can be layered later once
+        // protocol facts are exported through capsule metadata.
+        let protocol_by_name: HashMap<&str, &ProtocolDef> = module
+            .protocol_defs()
+            .into_iter()
+            .map(|protocol| (protocol.name.as_str(), protocol))
+            .collect();
+
         for role_impl in &self.typestate_role_impls {
             let joined_path = role_impl.path.join("::");
             if role_impl.path.len() < 2 {
@@ -930,7 +939,112 @@ impl SymbolResolver {
                         role_impl.span,
                     )),
             }
+
+            let protocol_name = &role_impl.path[0];
+            let role_name = &role_impl.path[1];
+            let Some(protocol_def) = protocol_by_name.get(protocol_name.as_str()) else {
+                continue;
+            };
+
+            // Validate `field: Machine<...> as Role` bindings declared in the
+            // typestate `fields` block and connect them to protocol-role defs.
+            let mut bound_roles = HashSet::new();
+            for binding in &role_impl.peer_role_bindings {
+                if !Self::is_machine_handle_type(&binding.field_ty) {
+                    self.errors
+                        .push(ResolveError::TypestateRoleBindingInvalidType(
+                            role_impl.typestate_name.clone(),
+                            binding.field_name.clone(),
+                            binding.span,
+                        ));
+                }
+
+                let qualified_binding_role = format!("{protocol_name}::{}", binding.role_name);
+                match self.lookup_symbol(&qualified_binding_role) {
+                    Some(symbol) => match symbol.kind {
+                        SymbolKind::ProtocolRole { .. } => {
+                            self.def_table_builder
+                                .record_use(binding.id, symbol.def_id());
+                        }
+                        _ => self
+                            .errors
+                            .push(ResolveError::TypestateRoleBindingRoleUndefined(
+                                role_impl.typestate_name.clone(),
+                                binding.field_name.clone(),
+                                binding.role_name.clone(),
+                                binding.span,
+                            )),
+                    },
+                    None => self
+                        .errors
+                        .push(ResolveError::TypestateRoleBindingRoleUndefined(
+                            role_impl.typestate_name.clone(),
+                            binding.field_name.clone(),
+                            binding.role_name.clone(),
+                            binding.span,
+                        )),
+                }
+
+                if !bound_roles.insert(binding.role_name.clone()) {
+                    self.errors
+                        .push(ResolveError::TypestateRoleBindingDuplicateRole(
+                            role_impl.typestate_name.clone(),
+                            binding.role_name.clone(),
+                            binding.span,
+                        ));
+                }
+            }
+
+            // Enforce that every peer role referenced by protocol transitions
+            // (or request contracts) from this role is explicitly bound.
+            let required_peer_roles =
+                Self::required_peer_roles_for_protocol_role(protocol_def, role_name);
+            for peer_role in required_peer_roles {
+                if peer_role.as_str() != role_name.as_str() && !bound_roles.contains(&peer_role) {
+                    self.errors.push(ResolveError::TypestateRoleBindingMissing(
+                        role_impl.typestate_name.clone(),
+                        peer_role,
+                        role_impl.span,
+                    ));
+                }
+            }
         }
+    }
+
+    fn is_machine_handle_type(ty: &TypeExpr) -> bool {
+        matches!(
+            &ty.kind,
+            TypeExprKind::Named {
+                ident,
+                type_args,
+                def_id: _,
+            } if ident == "Machine" && type_args.len() == 1
+        )
+    }
+
+    fn required_peer_roles_for_protocol_role(
+        protocol: &ProtocolDef,
+        role_name: &str,
+    ) -> HashSet<String> {
+        let mut peers = HashSet::new();
+        for role in &protocol.roles {
+            if role.name != role_name {
+                continue;
+            }
+            for state in &role.states {
+                for transition in &state.transitions {
+                    for effect in &transition.effects {
+                        peers.insert(effect.to_role.clone());
+                    }
+                }
+            }
+        }
+        for contract in &protocol.request_contracts {
+            if contract.from_role == role_name {
+                peers.insert(contract.to_role.clone());
+            }
+        }
+        peers
     }
 
     pub fn resolve(

@@ -280,6 +280,18 @@ fn build_typestate_role_impl_bindings(
             typestate_name: role_impl.typestate_name.clone(),
             path: role_impl.path.clone(),
             role_def_id: resolved.def_table.lookup_node_def_id(role_impl.id),
+            peer_role_bindings: role_impl
+                .peer_role_bindings
+                .iter()
+                .map(|binding| crate::core::context::TypestatePeerRoleBinding {
+                    node_id: binding.id,
+                    field_name: binding.field_name.clone(),
+                    role_name: binding.role_name.clone(),
+                    role_def_id: resolved.def_table.lookup_node_def_id(binding.id),
+                    field_ty: binding.field_ty.clone(),
+                    span: binding.span,
+                })
+                .collect(),
             span: role_impl.span,
         })
         .collect()

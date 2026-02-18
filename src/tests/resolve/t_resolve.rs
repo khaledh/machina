@@ -442,9 +442,21 @@ fn test_resolve_typestate_role_impl_binds_protocol_role() {
             flow Client -> Server: AuthReq -> AuthOk;
         }
 
+        typestate AuthServer {
+            fn new() -> Ready {
+                Ready {}
+            }
+
+            state Ready {}
+        }
+
         typestate Gateway : Auth::Client {
-            fn new() -> Disconnected {
-                Disconnected {}
+            fields {
+                server: Machine<AuthServer> as Server,
+            }
+
+            fn new(server: Machine<AuthServer>) -> Disconnected {
+                Disconnected { server: server }
             }
 
             state Disconnected {
@@ -465,8 +477,9 @@ fn test_resolve_typestate_role_impl_binds_protocol_role() {
     let role_impl_node_id = parsed
         .module
         .typestate_defs()
-        .first()
-        .expect("expected typestate")
+        .iter()
+        .find(|typestate| typestate.name == "Gateway")
+        .expect("expected Gateway typestate")
         .role_impls
         .first()
         .expect("expected role impl")
@@ -545,6 +558,281 @@ fn test_resolve_typestate_role_impl_reports_unknown_role() {
                 if typestate == "Gateway" && path == "Auth::Unknown"
         )),
         "expected unknown role impl error, got {:?}",
+        result.errors
+    );
+}
+
+#[test]
+fn test_resolve_typestate_role_binding_binds_protocol_role() {
+    let source = r#"
+        type AuthReq = {}
+        type AuthOk = {}
+
+        protocol Auth {
+            role Client;
+            role Server;
+            flow Client -> Server: AuthReq -> AuthOk;
+        }
+
+        typestate AuthServer {
+            fn new() -> Ready {
+                Ready {}
+            }
+
+            state Ready {}
+        }
+
+        typestate Gateway : Auth::Client {
+            fields {
+                server: Machine<AuthServer> as Server,
+            }
+
+            fn new(server: Machine<AuthServer>) -> Ready {
+                Ready { server: server }
+            }
+
+            state Ready {}
+        }
+    "#;
+
+    let parsed = parse_source_with_options(
+        source,
+        ParserOptions {
+            experimental_typestate: true,
+        },
+    );
+
+    let result =
+        resolve_stage_with_policy(parsed, ResolveInputs::default(), FrontendPolicy::Strict);
+    assert!(
+        result.errors.is_empty(),
+        "expected clean resolve, got {:?}",
+        result.errors
+    );
+    let resolved = result
+        .context
+        .expect("strict resolve should return context on success");
+    let role_impl = resolved
+        .typestate_role_impls
+        .iter()
+        .find(|binding| binding.typestate_name == "Gateway")
+        .expect("expected typestate role impl binding for Gateway");
+    assert_eq!(role_impl.peer_role_bindings.len(), 1);
+    let peer_binding = &role_impl.peer_role_bindings[0];
+    assert_eq!(peer_binding.field_name, "server");
+    assert_eq!(peer_binding.role_name, "Server");
+    let role_def_id = peer_binding
+        .role_def_id
+        .expect("expected peer role binding to resolve");
+    let role_def = resolved
+        .def_table
+        .lookup_def(role_def_id)
+        .expect("resolved peer role def should exist");
+    assert_eq!(role_def.name, "Auth::Server");
+    assert!(matches!(role_def.kind, DefKind::ProtocolRole));
+}
+
+#[test]
+fn test_resolve_typestate_role_binding_reports_invalid_type() {
+    let source = r#"
+        type AuthReq = {}
+        type AuthOk = {}
+
+        protocol Auth {
+            role Client;
+            role Server;
+            flow Client -> Server: AuthReq -> AuthOk;
+        }
+
+        typestate AuthServer {
+            fn new() -> Ready {
+                Ready {}
+            }
+
+            state Ready {}
+        }
+
+        typestate Gateway : Auth::Client {
+            fields {
+                server: AuthServer as Server,
+            }
+
+            fn new(server: AuthServer) -> Ready {
+                Ready { server: server }
+            }
+
+            state Ready {}
+        }
+    "#;
+
+    let parsed = parse_source_with_options(
+        source,
+        ParserOptions {
+            experimental_typestate: true,
+        },
+    );
+
+    let result =
+        resolve_stage_with_policy(parsed, ResolveInputs::default(), FrontendPolicy::Strict);
+    assert!(result.context.is_none(), "strict resolve should fail");
+    assert!(
+        result.errors.iter().any(|e| matches!(
+            e,
+            ResolveError::TypestateRoleBindingInvalidType(typestate, field, _)
+                if typestate == "Gateway" && field == "server"
+        )),
+        "expected invalid role-binding field type error, got {:?}",
+        result.errors
+    );
+}
+
+#[test]
+fn test_resolve_typestate_role_binding_reports_unknown_role() {
+    let source = r#"
+        type AuthReq = {}
+        type AuthOk = {}
+
+        protocol Auth {
+            role Client;
+            role Server;
+            flow Client -> Server: AuthReq -> AuthOk;
+        }
+
+        typestate AuthServer {
+            fn new() -> Ready {
+                Ready {}
+            }
+
+            state Ready {}
+        }
+
+        typestate Gateway : Auth::Client {
+            fields {
+                server: Machine<AuthServer> as Unknown,
+            }
+
+            fn new(server: Machine<AuthServer>) -> Ready {
+                Ready { server: server }
+            }
+
+            state Ready {}
+        }
+    "#;
+
+    let parsed = parse_source_with_options(
+        source,
+        ParserOptions {
+            experimental_typestate: true,
+        },
+    );
+
+    let result =
+        resolve_stage_with_policy(parsed, ResolveInputs::default(), FrontendPolicy::Strict);
+    assert!(result.context.is_none(), "strict resolve should fail");
+    assert!(
+        result.errors.iter().any(|e| matches!(
+            e,
+            ResolveError::TypestateRoleBindingRoleUndefined(typestate, field, role, _)
+                if typestate == "Gateway" && field == "server" && role == "Unknown"
+        )),
+        "expected unknown bound-role error, got {:?}",
+        result.errors
+    );
+}
+
+#[test]
+fn test_resolve_typestate_role_binding_reports_duplicate_role() {
+    let source = r#"
+        type AuthReq = {}
+        type AuthOk = {}
+
+        protocol Auth {
+            role Client;
+            role Server;
+            flow Client -> Server: AuthReq -> AuthOk;
+        }
+
+        typestate AuthServer {
+            fn new() -> Ready {
+                Ready {}
+            }
+
+            state Ready {}
+        }
+
+        typestate Gateway : Auth::Client {
+            fields {
+                primary: Machine<AuthServer> as Server,
+                secondary: Machine<AuthServer> as Server,
+            }
+
+            fn new(server: Machine<AuthServer>) -> Ready {
+                Ready { primary: server, secondary: server }
+            }
+
+            state Ready {}
+        }
+    "#;
+
+    let parsed = parse_source_with_options(
+        source,
+        ParserOptions {
+            experimental_typestate: true,
+        },
+    );
+
+    let result =
+        resolve_stage_with_policy(parsed, ResolveInputs::default(), FrontendPolicy::Strict);
+    assert!(result.context.is_none(), "strict resolve should fail");
+    assert!(
+        result.errors.iter().any(|e| matches!(
+            e,
+            ResolveError::TypestateRoleBindingDuplicateRole(typestate, role, _)
+                if typestate == "Gateway" && role == "Server"
+        )),
+        "expected duplicate peer-role binding error, got {:?}",
+        result.errors
+    );
+}
+
+#[test]
+fn test_resolve_typestate_role_binding_reports_missing_required_peer_role() {
+    let source = r#"
+        type AuthReq = {}
+        type AuthOk = {}
+
+        protocol Auth {
+            role Client;
+            role Server;
+            flow Client -> Server: AuthReq -> AuthOk;
+        }
+
+        typestate Gateway : Auth::Client {
+            fn new() -> Ready {
+                Ready {}
+            }
+
+            state Ready {}
+        }
+    "#;
+
+    let parsed = parse_source_with_options(
+        source,
+        ParserOptions {
+            experimental_typestate: true,
+        },
+    );
+
+    let result =
+        resolve_stage_with_policy(parsed, ResolveInputs::default(), FrontendPolicy::Strict);
+    assert!(result.context.is_none(), "strict resolve should fail");
+    assert!(
+        result.errors.iter().any(|e| matches!(
+            e,
+            ResolveError::TypestateRoleBindingMissing(typestate, role, _)
+                if typestate == "Gateway" && role == "Server"
+        )),
+        "expected missing peer-role binding error, got {:?}",
         result.errors
     );
 }

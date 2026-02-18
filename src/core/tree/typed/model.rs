@@ -43,6 +43,7 @@ pub type TypestateDef = model::TypestateDef<DefId, TypeId>;
 pub type TypestateRoleImpl = model::TypestateRoleImpl<DefId>;
 pub type TypestateItem = model::TypestateItem<DefId, TypeId>;
 pub type TypestateFields = model::TypestateFields<DefId>;
+pub type TypestateFieldRoleBinding = model::TypestateFieldRoleBinding;
 pub type TypestateState = model::TypestateState<DefId, TypeId>;
 pub type TypestateStateItem = model::TypestateStateItem<DefId, TypeId>;
 pub type TypestateOnHandler = model::TypestateOnHandler<DefId, TypeId>;

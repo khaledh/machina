@@ -1901,9 +1901,21 @@ protocol Auth {
     flow Client -> Server: AuthReq;
 }
 
-typestate Gateway : Auth::Client {
+typestate AuthServer {
     fn new() -> Ready {
         Ready {}
+    }
+
+    state Ready {}
+}
+
+typestate Gateway : Auth::Client {
+    fields {
+        server: Machine<AuthServer> as Server,
+    }
+
+    fn new(server: Machine<AuthServer>) -> Ready {
+        Ready { server: server }
     }
 
     state Ready {}
@@ -1943,9 +1955,21 @@ protocol Auth {
     flow Client -> Server: AuthReq;
 }
 
-typestate Gateway : Auth::Client {
+typestate AuthServer {
     fn new() -> Ready {
         Ready {}
+    }
+
+    state Ready {}
+}
+
+typestate Gateway : Auth::Client {
+    fields {
+        server: Machine<AuthServer> as Server,
+    }
+
+    fn new(server: Machine<AuthServer>) -> Ready {
+        Ready { server: server }
     }
 
     state Ready {}
@@ -1966,6 +1990,113 @@ typestate Gateway : Auth::Client {
         .expect("expected hover information for protocol role binding");
 
     assert_eq!(hover.def_name.as_deref(), Some("Auth::Client"));
+}
+
+#[test]
+fn def_location_at_file_points_typestate_field_role_binding_to_protocol_role() {
+    let mut db = AnalysisDb::new();
+    db.set_experimental_typestate(true);
+
+    let source = r#"
+type AuthReq = {}
+type AuthOk = {}
+
+protocol Auth {
+    role Client;
+    role Server;
+    flow Client -> Server: AuthReq -> AuthOk;
+}
+
+typestate AuthServer {
+    fn new() -> Ready {
+        Ready {}
+    }
+
+    state Ready {}
+}
+
+typestate Gateway : Auth::Client {
+    fields {
+        server: Machine<AuthServer> as Server,
+    }
+
+    fn new(server: Machine<AuthServer>) -> Ready {
+        Ready { server: server }
+    }
+
+    state Ready {}
+}
+"#;
+    let file_id = db.upsert_disk_text(
+        PathBuf::from("examples/analysis_protocol_field_role_defloc.mc"),
+        source,
+    );
+
+    let role_decl = span_for_substring(source, "role Server");
+    let binding_span = span_for_substring(source, "as Server");
+    let mut query_span = binding_span;
+    query_span.start = position_at(source, binding_span.start.offset + "as ".len());
+    query_span.end = position_at(source, query_span.start.offset + "Server".len());
+
+    let location = db
+        .def_location_at_file(file_id, query_span)
+        .expect("definition location query should succeed")
+        .expect("expected definition location for protocol field role binding");
+
+    assert_eq!(location.file_id, file_id);
+    assert_eq!(location.span.start, role_decl.start);
+}
+
+#[test]
+fn hover_at_file_resolves_typestate_field_role_binding_symbol() {
+    let mut db = AnalysisDb::new();
+    db.set_experimental_typestate(true);
+
+    let source = r#"
+type AuthReq = {}
+type AuthOk = {}
+
+protocol Auth {
+    role Client;
+    role Server;
+    flow Client -> Server: AuthReq -> AuthOk;
+}
+
+typestate AuthServer {
+    fn new() -> Ready {
+        Ready {}
+    }
+
+    state Ready {}
+}
+
+typestate Gateway : Auth::Client {
+    fields {
+        server: Machine<AuthServer> as Server,
+    }
+
+    fn new(server: Machine<AuthServer>) -> Ready {
+        Ready { server: server }
+    }
+
+    state Ready {}
+}
+"#;
+    let file_id = db.upsert_disk_text(
+        PathBuf::from("examples/analysis_protocol_field_role_hover.mc"),
+        source,
+    );
+    let binding_span = span_for_substring(source, "as Server");
+    let mut query_span = binding_span;
+    query_span.start = position_at(source, binding_span.start.offset + "as ".len());
+    query_span.end = position_at(source, query_span.start.offset + "Server".len());
+
+    let hover = db
+        .hover_at_file(file_id, query_span)
+        .expect("hover query should succeed")
+        .expect("expected hover information for protocol field role binding");
+
+    assert_eq!(hover.def_name.as_deref(), Some("Auth::Server"));
 }
 
 #[test]

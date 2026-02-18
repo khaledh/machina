@@ -116,40 +116,49 @@ fn best_def_use_at_span<D, T>(
     None
 }
 
-/// Resolve a typestate role binding (e.g. `impl Server for Connection`)
-/// under the cursor. Uses the same narrowest-span heuristic as
-/// `best_def_use_at_span`.
+/// Resolve a typestate protocol-role reference under the cursor.
+///
+/// This covers:
+/// - typestate role impl paths (`typestate X : Proto::Role { ... }`)
+/// - explicit peer field bindings (`peer: Machine<Y> as Role`)
+///
+/// Uses the same narrowest-span heuristic as `best_def_use_at_span`.
 pub(super) fn typestate_role_def_at_span(
     role_impls: &[crate::core::context::TypestateRoleImplBinding],
     def_table: &DefTable,
     query_span: Span,
 ) -> Option<DefId> {
     let mut best: Option<(usize, usize, DefId)> = None;
-    for role_impl in role_impls {
-        let Some(def_id) = role_impl.role_def_id else {
-            continue;
-        };
+
+    let mut consider = |span: Span, def_id: DefId| {
         if def_id == UNKNOWN_DEF_ID {
-            continue;
+            return;
         }
-        if !span_contains_span(role_impl.span, query_span) {
-            continue;
+        if !span_contains_span(span, query_span) {
+            return;
         }
         if def_table.lookup_def(def_id).is_none() {
-            continue;
+            return;
         }
 
-        let width = role_impl
-            .span
-            .end
-            .offset
-            .saturating_sub(role_impl.span.start.offset);
-        let start = role_impl.span.start.offset;
+        let width = span.end.offset.saturating_sub(span.start.offset);
+        let start = span.start.offset;
         let replace = best.as_ref().is_none_or(|(best_width, best_start, _)| {
             width < *best_width || (width == *best_width && start > *best_start)
         });
         if replace {
             best = Some((width, start, def_id));
+        }
+    };
+
+    for role_impl in role_impls {
+        if let Some(def_id) = role_impl.role_def_id {
+            consider(role_impl.span, def_id);
+        }
+        for peer_binding in &role_impl.peer_role_bindings {
+            if let Some(def_id) = peer_binding.role_def_id {
+                consider(peer_binding.span, def_id);
+            }
         }
     }
     best.map(|(_, _, def_id)| def_id)

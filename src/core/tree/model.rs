@@ -197,6 +197,15 @@ pub enum TypestateItem<D, T = ()> {
 pub struct TypestateFields<D> {
     pub id: NodeId,
     pub fields: Vec<StructDefField<D>>,
+    pub role_bindings: Vec<TypestateFieldRoleBinding>,
+    pub span: Span,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct TypestateFieldRoleBinding {
+    pub id: NodeId,
+    pub field_name: String,
+    pub role_name: String,
     pub span: Span,
 }
 

@@ -31,6 +31,17 @@ pub struct TypestateRoleImplBinding {
     pub typestate_name: String,
     pub path: Vec<String>,
     pub role_def_id: Option<DefId>,
+    pub peer_role_bindings: Vec<TypestatePeerRoleBinding>,
+    pub span: Span,
+}
+
+#[derive(Debug, Clone)]
+pub struct TypestatePeerRoleBinding {
+    pub node_id: NodeId,
+    pub field_name: String,
+    pub role_name: String,
+    pub role_def_id: Option<DefId>,
+    pub field_ty: crate::core::tree::parsed::TypeExpr,
     pub span: Span,
 }
 

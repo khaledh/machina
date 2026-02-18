@@ -67,7 +67,9 @@ TypestateItem      ::= TypestateFields
                      | TypestateNew
                      | TypestateOnHandler
                      | (AttributeList TypestateState)
-TypestateFields    ::= "fields" "{" StructFieldList? "}"
+TypestateFields    ::= "fields" "{" TypestateFieldList? "}"
+TypestateFieldList ::= TypestateField ("," TypestateField)* ","?
+TypestateField     ::= StructField ( "as" Identifier )?
 TypestateNew       ::= "fn" "new" TypeParamList? "(" ParamList? ")" ( "->" TypeExpr )? Block
 TypestateOnHandler ::= "on" TypeExpr TypestateHandlerParams? TypestateHandlerProvenance? TypestateHandlerReturn? Block
 TypestateHandlerParams ::= "(" TypestateHandlerParamList? ")"
