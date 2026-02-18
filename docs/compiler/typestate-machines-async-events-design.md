@@ -1,4 +1,4 @@
-# Typestate Machines: Async Events + Protocol Flows (Draft)
+# Typestate Machines: Async Events + Protocol Transitions (Draft)
 
 ## Status
 
@@ -13,7 +13,7 @@ avoiding function-coloring (`async fn`/`await`).
 - `machine`: runtime instance of a typestate.
 - `protocol`: abstract interaction contract.
 - `role`: one side of a protocol.
-- `flow`: directional protocol rule.
+- `transition`: directional protocol rule inside a protocol role/state.
 
 ## Review-Driven Decisions
 
@@ -109,7 +109,7 @@ where transition result includes next state, emitted effects, or error.
 
 ### Payloads remain regular types
 
-No new `message` keyword in v1.
+No heavyweight `message` feature in v1. Protocols use lightweight `msg` entries.
 
 ```machina
 type AuthorizeReq = { user: string }
@@ -117,17 +117,38 @@ type AuthApproved = {}
 type AuthDenied = {}
 ```
 
-### Protocols use roles + flows
+### Protocols use roles + state transitions
 
-Flows are declared once at protocol scope and reference named roles.
+Protocols use role-local states with explicit incoming triggers and outgoing
+effects.
 
 ```machina
 protocol Auth {
-    role Client;
-    role Server;
+    msg Start
+    msg AuthorizeReq = { user: string }
+    msg AuthApproved
+    msg AuthDenied
+    req Client -> Server: AuthorizeReq => AuthApproved | AuthDenied
 
-    flow Client -> Server: AuthorizeReq -> AuthApproved | AuthDenied;
-    flow Server -> Client: SessionRevoked;
+    role Client {
+        state Idle {
+            on Start -> Awaiting {
+                effects: [ AuthorizeReq ~> Server ]
+            }
+        }
+        state Awaiting {
+            on AuthApproved@Server -> Ready;
+            on AuthDenied@Server -> Idle;
+        }
+    }
+
+    role Server {
+        state Ready {
+            on AuthorizeReq@Client -> Ready {
+                effects: [ AuthApproved ~> Client ]
+            }
+        }
+    }
 }
 ```
 
@@ -141,8 +162,8 @@ typestate AuthService : Auth::Server { ... }
 ## Conformance Scope (V1)
 
 V1 checks **Shape conformance** only:
-- required incoming flow payloads have handlers,
-- outgoing `Send`/`Request`/`Reply` obey protocol flow payload types.
+- required incoming transition triggers have handlers,
+- outgoing `Send`/`Request`/`Reply` obey protocol transition message contracts.
 
 Not in v1:
 - coverage/exhaustiveness across all reachable states for all async conditions,
@@ -247,7 +268,7 @@ To avoid raw `corr: u64` bugs, request/reply uses compiler/runtime-managed
 correlation and capabilities:
 
 - responders get an implicit reply capability in request handlers.
-- `reply(x)` requires `type(x)` in the allowed response set for that flow.
+- `reply(x)` requires `type(x)` in the allowed response set for that request contract.
 - when explicit `ReplyCap<RespSet>` is bound, `reply(cap, x)` is also valid.
 - reply capability must be consumed exactly once on all successful paths.
 - source-level code does not manually construct/compare correlation ids.
@@ -348,14 +369,35 @@ type AuthApproved = {}
 type AuthDenied = {}
 
 protocol Auth {
-    role Client;
-    role Server;
+    msg Start
+    msg IncomingRequest = { user: string }
+    msg AuthorizeReq = { user: string }
+    msg AuthApproved
+    msg AuthDenied
+    req Client -> Server: AuthorizeReq => AuthApproved | AuthDenied
 
-    flow Client -> Server: AuthorizeReq -> AuthApproved | AuthDenied;
+    role Client {
+        state Running {
+            on IncomingRequest@System -> Running {
+                effects: [ AuthorizeReq ~> Server ]
+            }
+            on AuthApproved@Server -> Running;
+            on AuthDenied@Server -> Closing;
+        }
+        state Closing;
+    }
+
+    role Server {
+        state Ready {
+            on AuthorizeReq@Client -> Ready {
+                effects: [ AuthApproved ~> Client ]
+            }
+        }
+    }
 }
 
 typestate Connection : Auth::Client {
-    fields { auth: Machine<AuthService> }
+    fields { auth: Machine<AuthService> as Server }
 
     fn new(auth: Machine<AuthService>) -> Running {
         Running { auth: auth }
@@ -457,7 +499,7 @@ The concrete phased implementation plan is defined in
 **V1 Implementation Plan (Actionable)** below. This section stays as an
 architecture summary:
 
-1. Extend frontend surface (`protocol`/`role`/`flow`, `on`, `Request`, `reply`).
+1. Extend frontend surface (`protocol`/`msg`/`role`/`state`/`req`, `on`, `Request`, `reply`).
 2. Enforce shape conformance and capability linearity in typecheck/semck.
 3. Lower managed machine operations to explicit runtime-facing operations.
 4. Integrate managed runtime dispatch, envelopes, and effect execution.
@@ -468,9 +510,9 @@ architecture summary:
 - duplicate `on` for same `(state, payload)`
 - overlapping pattern-form `on` handlers for same selector
 - ambiguous response provenance requiring explicit `for RequestType(binding)`
-- missing required flow handler for role conformance
+- missing required protocol transition handler for role conformance
 - invalid `Send/Request` target role or payload type
-- invalid `reply(...)` payload for flow response set
+- invalid `reply(...)` payload for request response set
 - `reply` capability not consumed on all paths
 - `reply` capability consumed multiple times
 - managed machine used via direct call path
@@ -482,7 +524,7 @@ The following are intentionally deferred and non-blocking for v1:
 
 1. Should optional request-site labels be added when multiple same-type inflight
    requests become difficult to disambiguate with `for` alone?
-2. Should minimal sequential flow syntax be introduced in v1.1?
+2. Should minimal sequential protocol progression syntax be introduced in v1.1?
 3. What is the exact migration path from capabilities to typed channels?
 
 ## Future Direction: Typed Channels
@@ -501,7 +543,7 @@ Output of this milestone is the **Semantic Freeze (V1 Source of Truth)** section
 above. All later milestones must conform to it.
 
 1. Lock source surface included in v1:
-   - `protocol`, `role`, `flow`
+   - `protocol`, `msg`, `role`, `state`, `req`
    - typestate `on` handlers
    - handler shorthand (`on Ping(p)`, `on Ping`)
    - implicit same-state handlers (omitted `-> ...`)
@@ -519,22 +561,22 @@ above. All later milestones must conform to it.
 ### Milestone 1: Frontend + Static Rules (No Runtime Yet)
 
 1. Parser/AST:
-   - add protocol/role/flow nodes
+   - add protocol/msg/role/state/transition nodes
    - add `on` handler nodes
    - add pattern-form `on` response handlers and desugar to canonical handler form
    - add `Send/Request/reply` expression/statement nodes
 2. Resolver:
    - resolve role paths (`Auth::Client`)
-   - bind flow payload types and response sets
+   - bind transition trigger/effect message contracts and request contracts
    - bind typestate-role implementations
 3. Typecheck/Semck:
-   - shape conformance checks for required incoming flows
-   - `Send/Request` payload legality checks by role flow
+   - shape conformance checks for required incoming protocol transitions
+   - `Send/Request` payload legality checks by role/state transition contracts
    - `reply` payload type-in-response-set checks
    - linear capability checks (`ReplyCap` single-consume, all paths)
    - provenance disambiguation checks for `for` response handlers
 4. Diagnostics:
-   - add dedicated error codes for flow mismatch, reply misuse, linearity errors.
+   - add dedicated error codes for transition mismatch, reply misuse, linearity errors.
 5. Tests:
    - parser golden tests
    - resolve/typecheck conformance tests
@@ -582,7 +624,7 @@ above. All later milestones must conform to it.
 2. Dump/trace support for machine transitions, queue depth, effect outcomes.
 3. Documentation:
    - user-facing typestate async/protocol guide
-   - examples for direct mode vs managed mode and inter-machine flow.
+   - examples for direct mode vs managed mode and inter-machine protocol transitions.
 4. Regression suite:
    - compile-only protocol fixtures
    - runtime integration fixtures for mailbox and reply capability semantics.
@@ -598,7 +640,8 @@ above. All later milestones must conform to it.
 
 ### Definition of Done for V1
 
-1. Compiler accepts valid role/flow/handler/reply programs and rejects invalid ones with specific diagnostics.
+1. Compiler accepts valid role/state-transition/handler/reply programs and rejects invalid ones with specific diagnostics.
+   (using role/state transition protocol contracts + directional request contracts)
 2. Managed machines run with deterministic per-mailbox FIFO dispatch and bounded queues.
 3. Request/reply correlation is enforced structurally via capabilities, not user-managed ids.
    - default source model is implicit correlation with optional explicit `for`

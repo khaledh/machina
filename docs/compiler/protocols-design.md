@@ -6,7 +6,7 @@ This document defines the protocol subsystem as it exists today, identifies the
 remaining gaps, and proposes a concrete implementation plan to close those gaps
 without over-complicating the typechecker/runtime boundary.
 
-Scope: typestate-managed machines and protocol/role/flow conformance.
+Scope: typestate-managed machines and protocol/role/state-transition conformance.
 
 ---
 
@@ -18,6 +18,92 @@ Implemented source constructs:
 - `protocol <Name> { role <Role>; flow <From> -> <To>: <Payload> [-> <Resp...>]; }`
 - `typestate <T> : { <Protocol>::<Role>, ... } { ... }`
 - managed handlers with request/reply forms used by flow checks.
+
+### 2.1.1 Target source surface (design update)
+
+To reduce verbosity and remove trigger ambiguity, we standardize on a
+role/state-centric protocol surface that mirrors typestate shape:
+- `msg <Name> [= <TypeExpr>]`
+- `role <Role> { state <State> { on <Msg>@<Role> -> <Next> { effects: [ <Msg> ~> <Role>, ... ] } } }`
+- `req <FromRole> -> <ToRole>: <RequestMsg> => <ReplyMsg> | <ReplyMsg> ...` for request/reply contracts
+
+Key syntax decisions:
+- triggers are message arrivals only (including startup)
+- startup is modeled uniformly as `Start@System`
+- `on Start` is sugar for `on Start@System`
+- no `recv`/`send` keywords in protocol transitions
+- no `?`/`!` symbolic receive/send forms
+- no `Role::Msg` trigger form (avoids namespacing confusion)
+- `effects: [ ... ]` is an ordered, must-emit list
+- final states use `@final` for consistency with language-wide attribute style
+
+### 2.1.2 Core semantics for protocol transitions
+
+To avoid ambiguity, protocol transition semantics are explicit:
+
+- Trigger model:
+  - `on Msg@Role` means this role must be able to receive `Msg` from `Role`.
+  - `on Start` is equivalent to `on Start@System`.
+- Determinism:
+  - within one protocol role state, triggers must be unambiguous
+  - duplicate trigger keys (`Msg@Role`) in the same state are rejected.
+- Effects semantics:
+  - `effects: [A ~> X, B ~> Y]` is ordered and mandatory
+  - all listed effects are part of the transition obligation.
+- Failure model:
+  - a transition that cannot satisfy mandatory effects is considered failed
+  - runtime commit/rollback policy governs visibility, but protocol conformance
+    assumes transition obligations are not silently dropped.
+- Conformance stance:
+  - protocol checks treat effect declarations as the contract surface
+  - implementation sends outside the allowed protocol transition surface are
+    rejected by protocol conformance checks.
+- Request contracts:
+  - `req FromRole -> ToRole: Req => RepA | RepB` declares directional request
+    semantics and allowable response families
+  - multiple in-flight requests are allowed; correlation is resolved through
+    existing request provenance labels in typestate handlers.
+
+Example (target):
+
+```mc
+protocol TcpHandshake {
+    msg Start
+    msg Syn
+    msg SynAck
+    msg Ack
+    msg Timeout
+
+    role Client {
+        state Closed {
+            on Start -> SynSent {
+                effects: [ Syn ~> Server ]
+            }
+        }
+
+        state SynSent {
+            on SynAck@Server -> Established {
+                effects: [ Ack ~> Server ]
+            }
+            on Timeout@System -> Closed;
+        }
+
+        @final state Established;
+    }
+
+    role Server {
+        state Listen {
+            on Syn@Client -> AwaitAck {
+                effects: [ SynAck ~> Client ]
+            }
+        }
+
+        state AwaitAck {
+            on Ack@Client -> Listen;
+        }
+    }
+}
+```
 
 Evidence:
 - parser: `src/core/parse/decl.rs` (`parse_protocol_def`, typestate role impl parsing)
@@ -85,6 +171,15 @@ Current checks are typestate-wide set checks. They do not verify:
 Impact: we can accept implementations that are globally shape-valid but
 state-locally incorrect.
 
+## 3.1.1 Protocol surface is still flow-centric
+
+Current surface is compact for simple message families, but weak for:
+- readable state-local contracts per role,
+- explicit trigger source readability,
+- direct alignment with typestate state implementations.
+
+Impact: conformance logic must infer more than source syntax directly conveys.
+
 ## 3.2 Destination role compatibility is not fully enforced
 
 We validate payload legality against flows, but we do not fully enforce that
@@ -92,6 +187,15 @@ the destination machine (typed handle) is compatible with the required peer role
 for each `send/request`.
 
 Impact: payload shape can pass while peer role intent is under-constrained.
+
+## 3.2.1 Role-to-field binding is implicit
+
+Protocols name abstract peer roles (`Server`), while typestate implementations
+usually hold concrete handles in fields (for example `auth: Machine<AuthSvc>`).
+Today that mapping is mostly implicit.
+
+Impact: diagnostics can identify role mismatch, but often cannot point directly
+to the concrete field/handle that should satisfy that role.
 
 ## 3.3 No protocol-level sequencing/progression checks
 
@@ -117,8 +221,8 @@ is still a gap for defense-in-depth and diagnostics.
 ## 3.6 Tooling/diagnostics can become more protocol-native
 
 We already have strong diagnostics, but we still need:
-- clearer “expected by flow X in role Y” messages,
-- better quick-fix quality for missing handlers/flow mismatches,
+- clearer “expected by transition X in role/state Y” messages,
+- better quick-fix quality for missing handlers/transition mismatches,
 - protocol-focused analysis queries for IDE surfaces.
 
 ---
@@ -132,7 +236,7 @@ To keep complexity under control, we should evolve conformance in tiers.
 - request/reply response-shape + provenance + capability linearity
 
 ### Tier B (next): state-aware projection-lite
-- per-state allowed incoming/outgoing flow sets
+- per-state allowed incoming/outgoing message sets
 - state-local legality checks for handlers and emits
 - destination role compatibility checks for `send/request`
 
@@ -142,6 +246,31 @@ To keep complexity under control, we should evolve conformance in tiers.
 
 Tier B is the practical next milestone.
 
+### 4.1 Explicit guarantees by tier
+
+To avoid over-claiming, each tier has explicit guarantees and non-guarantees.
+
+- Tier A guarantees:
+  - message family shape checks by role
+  - request/reply shape and reply-cap linearity checks.
+- Tier A does not guarantee:
+  - state-local legality
+  - peer handle role compatibility
+  - global protocol progress/deadlock properties.
+
+- Tier B guarantees:
+  - state-local transition legality (handled/emitted families per state)
+  - destination peer-role compatibility using explicit role bindings
+  - directional request contract conformance.
+- Tier B does not guarantee:
+  - full multiparty global compatibility/progress proofs
+  - deadlock freedom across arbitrary protocol topologies.
+
+- Tier C target guarantees:
+  - protocol progression/coherence checks over composed role state machines
+  - stronger communication safety/progress claims under declared runtime
+    delivery assumptions.
+
 ---
 
 ## 5. Design Additions Needed for Tier B
@@ -150,8 +279,10 @@ Tier B is the practical next milestone.
 
 Add a compact internal index (resolve output side-table) that precomputes:
 - protocol -> roles
-- role -> incoming/outgoing flow entries
-- flow payload + response set + source span/identity.
+- role -> states
+- state -> transitions (`trigger`, `next_state`, `effects`)
+- request/reply contracts (`req FromRole -> ToRole: Request => Reply...`)
+- source span/identity per entry.
 
 Why:
 - avoid re-scanning AST repeatedly in typecheck validate,
@@ -167,19 +298,175 @@ From existing elaboration/typecheck info, derive per-state facts:
 Why:
 - enforce conformance at state granularity, not only typestate granularity.
 
-## 5.3 Add peer-role compatibility metadata for handles
+## 5.3 Add explicit role binding syntax in typestate
+
+Add explicit mapping from protocol peer roles to concrete machine handles in
+typestate fields.
+
+Proposed syntax (v1):
+- `fields { auth: Machine<AuthService> as Server }`
+
+Meaning:
+- the `auth` handle fulfills protocol peer role `Server` for this typestate's
+  implemented role(s).
+- role compatibility diagnostics can point to concrete fields directly.
+
+Validation rules:
+- each referenced peer role in protocol transitions must have exactly one bound
+  field
+- bound field type must be `Machine<T>` where `T` implements that peer role
+- duplicate bindings for the same role are rejected in v1.
+
+## 5.4 Add peer-role compatibility metadata for handles
 
 Introduce a lightweight mapping from managed handle types to implemented role
 sets (at least for typestates that declare role impls), and validate callsites:
 - `request(dst, payload)` and `send(dst, payload)` must target a machine that can
-  legally receive that payload per the protocol flow from caller role.
+  legally receive that payload per the protocol transition contract from caller role.
 
 This can start as compile-time metadata only (no runtime role tag needed).
 
-## 5.4 Keep runtime protocol-agnostic for now (explicitly)
+## 5.5 Keep runtime protocol-agnostic for now (explicitly)
 
 Do not add runtime role checks in this phase. Keep runtime generic and move
 correctness burden to compile-time conformance (with clear diagnostics).
+
+## 5.6 Examples of intended Tier B semantics
+
+The additions above are compile-time checks over the target protocol surface.
+The examples below use the standardized concise syntax.
+
+### Example A: state-level conformance (projection-lite)
+
+```mc
+protocol Auth {
+    msg Start
+    msg AuthReq
+    msg AuthOk
+    msg AuthErr
+    req Client -> Server: AuthReq => AuthOk | AuthErr
+
+    role Client {
+        state Idle {
+            on Start -> Awaiting {
+                effects: [ AuthReq ~> Server ]
+            }
+        }
+
+        state Awaiting {
+            on AuthOk@Server -> Ready;
+            on AuthErr@Server -> Idle;
+        }
+
+        state Ready;
+    }
+
+    role Server {
+        state Ready {
+            on AuthReq@Client -> Ready {
+                effects: [ AuthOk ~> Client ]
+            }
+        }
+    }
+}
+
+typestate Gateway : { Auth::Client } {
+    fields { auth: Machine<AuthService> as Server }
+
+    fn new(auth: Machine<AuthService>) -> Idle {
+        Idle { auth: auth }
+    }
+
+    state Idle { /* emits AuthReq to Server */ }
+    state Awaiting { /* handles AuthOk/AuthErr from Server */ }
+    state Ready {}
+}
+```
+
+Intended validation behavior:
+- `Idle` is allowed to emit `AuthReq` to `Server`.
+- `Awaiting` is allowed to handle `AuthOk`/`AuthErr` as responses to `AuthReq`.
+- if `Ready` also declared `on AuthOk(...)` without matching request provenance,
+  that should fail state-level conformance.
+
+### Example B: destination peer-role compatibility
+
+```mc
+protocol Auth {
+    msg Start
+    msg AuthReq = { token: string }
+    msg AuthOk = { user_id: u64 }
+    req Client -> Server: AuthReq => AuthOk
+
+    role Client {
+        state Idle {
+            on Start -> Awaiting {
+                effects: [ AuthReq ~> Server ]
+            }
+        }
+        state Awaiting {
+            on AuthOk@Server -> Idle;
+        }
+    }
+
+    role Server {
+        state Ready {
+            on AuthReq@Client -> Ready {
+                effects: [ AuthOk ~> Client ]
+            }
+        }
+    }
+}
+
+typestate Client : { Auth::Client } { /* ... */ }
+typestate Server : { Auth::Server } { /* ... */ }
+
+@machines
+fn main() -> () | MachineError {
+    let c = Client::spawn()?;
+    let s = Server::spawn()?;
+    c.request(s, AuthReq { token: "t" })?; // OK (destination role = Server)
+
+    let c2 = Client::spawn()?;
+    c.request(c2, AuthReq { token: "t" })?; // ERROR (expected Auth::Server peer)
+}
+```
+
+Intended validation behavior:
+- callsite checks must verify destination handle role compatibility
+  (`Auth::Server` required for `Client -> Server: AuthReq`).
+- diagnostic should include source role, expected peer role, and destination
+  typestate role set.
+
+### Example C: internal `ProtocolIndex` shape (conceptual)
+
+```text
+ProtocolIndex
+  Auth
+    roles:
+      Client:
+        states:
+          Idle:
+            transitions:
+              - trigger: Start
+                next: Awaiting
+                effects: [AuthReq~>Server]
+          Awaiting:
+            transitions:
+              - trigger: AuthOk@Server
+                next: Ready
+              - trigger: AuthErr@Server
+                next: Idle
+      Server: ...
+    req_contracts:
+      AuthReq:
+        from: Client
+        to: Server
+        replies: [AuthOk, AuthErr]
+```
+
+Typecheck validators use this canonical index rather than re-walking protocol
+AST nodes ad-hoc.
 
 ---
 
@@ -189,12 +476,23 @@ correctness burden to compile-time conformance (with clear diagnostics).
 
 1. Add `ProtocolIndex` side-table in resolve/typecheck context boundary.
 2. Build it once from resolved module protocol defs and role impl bindings.
-3. Add unit tests for index correctness (roles, flows, payload/response sets).
+3. Add unit tests for index correctness (roles, states, transitions, request contracts).
+4. Update `grammar.bnf` to include the protocol v1 syntax decisions (`Msg@Role`,
+   `effects: [ ... ]`, directional `req`, `on Start` sugar).
 
 Deliverable: typecheck validate and future analysis can consume stable protocol
 facts without ad-hoc AST traversal.
 
-## Phase 2: State-Level Conformance
+## Phase 2: Explicit Role Binding
+
+1. Add typestate field binding syntax (`field: Machine<T> as Role`).
+2. Validate that every referenced peer role has exactly one binding.
+3. Build and expose role->field binding metadata in typecheck contexts.
+4. Add focused diagnostics for missing/duplicate/incompatible role bindings.
+
+Deliverable: conformance checks and diagnostics can refer to concrete fields.
+
+## Phase 3: State-Level Conformance
 
 1. Collect per-state handler/emit/request facts (reuse existing collectors where
    possible, split into reusable helpers).
@@ -206,19 +504,28 @@ facts without ad-hoc AST traversal.
 
 Deliverable: state-local protocol correctness diagnostics.
 
-## Phase 3: Destination Role Compatibility
+## Phase 4: Destination Role Compatibility
 
 1. Add compile-time mapping from `Machine<T>` destinations to role sets.
-2. Validate `send/request` destination compatibility against protocol flow
+2. Validate `send/request` destination compatibility against protocol transition
    direction and payload.
 3. Add diagnostics that name:
    - source typestate/role,
    - expected peer role,
-   - actual destination typestate roles (or missing role impl).
+   - concrete bound field and its role/type.
 
 Deliverable: peer-role-safe inter-machine messaging.
 
-## Phase 4: Diagnostics + IDE surfacing
+## Phase 4.1: Request Contract Tightening
+
+1. Enforce directional request contracts from
+   `req FromRole -> ToRole: Request => Reply...`.
+2. Validate request/reply conformance against both request message and direction.
+3. Verify that request contracts are realizable by declared transitions.
+
+Deliverable: unambiguous request/reply conformance.
+
+## Phase 5: Diagnostics + IDE surfacing
 
 1. Add protocol-centric diagnostic phrasing and compact type rendering.
 2. Add code-action hooks for:
@@ -228,7 +535,7 @@ Deliverable: peer-role-safe inter-machine messaging.
 
 Deliverable: protocol errors are easier to fix in-editor.
 
-## Phase 5: Sequencing Design Spike (No immediate ship)
+## Phase 6: Sequencing Design Spike (No immediate ship)
 
 1. Prototype progression checks on a narrow subset (single protocol, single role
    implementation, explicit state mapping).
@@ -250,9 +557,10 @@ For each implementation phase:
 
 Key regression groups:
 - valid multi-role typestate conformance
+- explicit role binding validity (missing/duplicate/wrong-type)
 - per-state illegal handler/emit
 - destination role mismatch
-- provenance-labeled concurrent request flows.
+- provenance-labeled concurrent request/reply transitions.
 
 ---
 
@@ -270,7 +578,10 @@ Key regression groups:
 This plan is complete when:
 
 1. Protocol conformance is state-aware (not only typestate-wide).
-2. Destination peer-role compatibility is enforced for `send/request`.
-3. Diagnostics are explicit enough to repair conformance issues quickly.
-4. Existing runtime model remains simple and stable while compile-time protocol
+2. Role-to-field binding is explicit and validated.
+3. Destination peer-role compatibility is enforced for `send/request`.
+4. Tier guarantees/non-guarantees are documented and reflected in diagnostics.
+5. Diagnostics are explicit enough to repair conformance issues quickly.
+6. Existing runtime model remains simple and stable while compile-time protocol
    guarantees become materially stronger.
+7. Request/reply contracts are directional and correlation-safe by construction.
