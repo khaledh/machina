@@ -246,7 +246,10 @@ int main(void) {
     if (__mc_machine_runtime_pending_contains(&rt, pending_stopped)) {
         return 26;
     }
-    if (__mc_alloc_live_blocks() != base_live) {
+    // Stopping a machine now eagerly reclaims its mailbox allocation.
+    // So one runtime-owned block disappears in addition to pending payload
+    // cleanup (which should return request payload ownership to baseline).
+    if (__mc_alloc_live_blocks() != (base_live - 1)) {
         return 27;
     }
     if (g_drop_calls_layout4 != 1) {
