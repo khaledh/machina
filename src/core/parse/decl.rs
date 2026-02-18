@@ -1,4 +1,5 @@
 use super::*;
+use std::collections::HashMap;
 
 impl<'a> Parser<'a> {
     pub(super) fn parse_top_level_item(&mut self) -> Result<TopLevelItem, ParseError> {
@@ -52,50 +53,21 @@ impl<'a> Parser<'a> {
 
         let mut roles = Vec::new();
         let mut flows = Vec::new();
+        let mut messages: HashMap<String, TypeExpr> = HashMap::new();
 
         while self.curr_token.kind != TK::RBrace {
             match self.curr_token.kind {
                 TK::KwRole => {
-                    let role_marker = self.mark();
-                    self.consume_keyword(TK::KwRole)?;
-                    let role_name = self.parse_ident()?;
-                    self.consume(&TK::Semicolon)?;
-                    roles.push(ProtocolRole {
-                        id: self.id_gen.new_id(),
-                        def_id: (),
-                        name: role_name,
-                        span: self.close(role_marker),
-                    });
+                    self.parse_protocol_role_decl_or_block(&mut roles, &mut flows, &messages)?;
                 }
                 TK::KwFlow => {
-                    let flow_marker = self.mark();
-                    self.consume_keyword(TK::KwFlow)?;
-                    let from_role = self.parse_ident()?;
-                    self.consume(&TK::Arrow)?;
-                    let to_role = self.parse_ident()?;
-                    self.consume(&TK::Colon)?;
-                    let payload_ty = self.parse_type_expr()?;
-
-                    let response_tys = if self.curr_token.kind == TK::Arrow {
-                        self.consume(&TK::Arrow)?;
-                        let response_union = self.parse_type_expr()?;
-                        match response_union.kind {
-                            TypeExprKind::Union { variants } => variants,
-                            _ => vec![response_union],
-                        }
-                    } else {
-                        Vec::new()
-                    };
-
-                    self.consume(&TK::Semicolon)?;
-                    flows.push(ProtocolFlow {
-                        id: self.id_gen.new_id(),
-                        from_role,
-                        to_role,
-                        payload_ty,
-                        response_tys,
-                        span: self.close(flow_marker),
-                    });
+                    self.parse_protocol_flow_decl(&mut flows)?;
+                }
+                TK::Ident(_) if self.is_contextual_keyword("msg") => {
+                    self.parse_protocol_msg_decl(&mut messages)?;
+                }
+                TK::Ident(_) if self.is_contextual_keyword("req") => {
+                    self.parse_protocol_req_decl(&mut flows, &messages)?;
                 }
                 _ => {
                     return Err(ParseError::ExpectedToken(
@@ -115,6 +87,278 @@ impl<'a> Parser<'a> {
             flows,
             span: self.close(marker),
         })
+    }
+
+    fn parse_protocol_role_decl_or_block(
+        &mut self,
+        roles: &mut Vec<ProtocolRole>,
+        flows: &mut Vec<ProtocolFlow>,
+        messages: &HashMap<String, TypeExpr>,
+    ) -> Result<(), ParseError> {
+        let role_marker = self.mark();
+        self.consume_keyword(TK::KwRole)?;
+        let role_name = self.parse_ident()?;
+        let role_span = self.close(role_marker);
+        Self::push_protocol_role(roles, &role_name, role_span, self.id_gen.new_id());
+
+        if self.curr_token.kind == TK::Semicolon {
+            self.consume(&TK::Semicolon)?;
+            return Ok(());
+        }
+
+        self.consume(&TK::LBrace)?;
+        while self.curr_token.kind != TK::RBrace {
+            self.parse_protocol_state_block(&role_name, flows, messages)?;
+        }
+        self.consume(&TK::RBrace)?;
+        Ok(())
+    }
+
+    fn parse_protocol_state_block(
+        &mut self,
+        role_name: &str,
+        flows: &mut Vec<ProtocolFlow>,
+        messages: &HashMap<String, TypeExpr>,
+    ) -> Result<(), ParseError> {
+        self.consume_contextual_keyword("state")?;
+        let _state_name = self.parse_ident()?;
+
+        if self.curr_token.kind == TK::Semicolon {
+            self.consume(&TK::Semicolon)?;
+            return Ok(());
+        }
+
+        self.consume(&TK::LBrace)?;
+        while self.curr_token.kind != TK::RBrace {
+            self.parse_protocol_transition(role_name, flows, messages)?;
+        }
+        self.consume(&TK::RBrace)?;
+        Ok(())
+    }
+
+    fn parse_protocol_transition(
+        &mut self,
+        role_name: &str,
+        flows: &mut Vec<ProtocolFlow>,
+        messages: &HashMap<String, TypeExpr>,
+    ) -> Result<(), ParseError> {
+        let transition_marker = self.mark();
+        self.consume_keyword(TK::KwOn)?;
+        let trigger_ty = self.parse_type_expr()?;
+        let trigger_from_role = if self.curr_token.kind == TK::At {
+            self.consume(&TK::At)?;
+            Some(self.parse_ident()?)
+        } else {
+            None
+        };
+        if trigger_from_role.is_none() && !Self::is_protocol_start_trigger(&trigger_ty) {
+            return Err(ParseError::ExpectedToken(TK::At, self.curr_token.clone()));
+        }
+
+        self.consume(&TK::Arrow)?;
+        let _next_state = self.parse_ident()?;
+        let effects = self.parse_protocol_transition_body(messages)?;
+
+        if let Some(from_role) = trigger_from_role {
+            let payload_ty = self.resolve_protocol_message_ty(&trigger_ty, messages);
+            flows.push(ProtocolFlow {
+                id: self.id_gen.new_id(),
+                from_role,
+                to_role: role_name.to_string(),
+                payload_ty,
+                response_tys: Vec::new(),
+                span: self.close(transition_marker),
+            });
+        }
+
+        for (effect_ty, to_role, effect_span) in effects {
+            flows.push(ProtocolFlow {
+                id: self.id_gen.new_id(),
+                from_role: role_name.to_string(),
+                to_role,
+                payload_ty: effect_ty,
+                response_tys: Vec::new(),
+                span: effect_span,
+            });
+        }
+
+        Ok(())
+    }
+
+    fn parse_protocol_transition_body(
+        &mut self,
+        messages: &HashMap<String, TypeExpr>,
+    ) -> Result<Vec<(TypeExpr, String, Span)>, ParseError> {
+        if self.curr_token.kind == TK::Semicolon {
+            self.consume(&TK::Semicolon)?;
+            return Ok(Vec::new());
+        }
+
+        self.consume(&TK::LBrace)?;
+        let mut effects = Vec::new();
+        while self.curr_token.kind != TK::RBrace {
+            self.consume_contextual_keyword("effects")?;
+            self.consume(&TK::Colon)?;
+            self.consume(&TK::LBracket)?;
+            let parsed_effects = self.parse_list(TK::Comma, TK::RBracket, |parser| {
+                let effect_marker = parser.mark();
+                let effect_ty = parser.parse_type_expr()?;
+                parser.consume(&TK::Tilde)?;
+                parser.consume(&TK::GreaterThan)?;
+                let to_role = parser.parse_ident()?;
+                Ok((
+                    parser.resolve_protocol_message_ty(&effect_ty, messages),
+                    to_role,
+                    parser.close(effect_marker),
+                ))
+            })?;
+            self.consume(&TK::RBracket)?;
+            effects.extend(parsed_effects);
+            if matches!(self.curr_token.kind, TK::Comma | TK::Semicolon) {
+                self.advance();
+            }
+        }
+        self.consume(&TK::RBrace)?;
+        Ok(effects)
+    }
+
+    fn parse_protocol_flow_decl(
+        &mut self,
+        flows: &mut Vec<ProtocolFlow>,
+    ) -> Result<(), ParseError> {
+        let flow_marker = self.mark();
+        self.consume_keyword(TK::KwFlow)?;
+        let from_role = self.parse_ident()?;
+        self.consume(&TK::Arrow)?;
+        let to_role = self.parse_ident()?;
+        self.consume(&TK::Colon)?;
+        let payload_ty = self.parse_type_expr()?;
+
+        let response_tys = if self.curr_token.kind == TK::Arrow {
+            self.consume(&TK::Arrow)?;
+            let response_union = self.parse_type_expr()?;
+            match response_union.kind {
+                TypeExprKind::Union { variants } => variants,
+                _ => vec![response_union],
+            }
+        } else {
+            Vec::new()
+        };
+
+        self.consume(&TK::Semicolon)?;
+        flows.push(ProtocolFlow {
+            id: self.id_gen.new_id(),
+            from_role,
+            to_role,
+            payload_ty,
+            response_tys,
+            span: self.close(flow_marker),
+        });
+        Ok(())
+    }
+
+    fn parse_protocol_msg_decl(
+        &mut self,
+        messages: &mut HashMap<String, TypeExpr>,
+    ) -> Result<(), ParseError> {
+        self.consume_contextual_keyword("msg")?;
+        let marker = self.mark();
+        let msg_name = self.parse_ident()?;
+        let msg_span = self.close(marker);
+        let msg_ty = if self.curr_token.kind == TK::Equals {
+            self.consume(&TK::Equals)?;
+            self.parse_type_expr()?
+        } else {
+            TypeExpr {
+                id: self.id_gen.new_id(),
+                kind: TypeExprKind::Named {
+                    ident: msg_name.clone(),
+                    def_id: (),
+                    type_args: Vec::new(),
+                },
+                span: msg_span,
+            }
+        };
+        messages.insert(msg_name, msg_ty);
+        if self.curr_token.kind == TK::Semicolon {
+            self.consume(&TK::Semicolon)?;
+        }
+        Ok(())
+    }
+
+    fn parse_protocol_req_decl(
+        &mut self,
+        flows: &mut Vec<ProtocolFlow>,
+        messages: &HashMap<String, TypeExpr>,
+    ) -> Result<(), ParseError> {
+        let marker = self.mark();
+        self.consume_contextual_keyword("req")?;
+        let from_role = self.parse_ident()?;
+        self.consume(&TK::Arrow)?;
+        let to_role = self.parse_ident()?;
+        self.consume(&TK::Colon)?;
+        let request_ty = self.parse_type_expr()?;
+        self.consume(&TK::FatArrow)?;
+        let response_union = self.parse_type_expr()?;
+        let response_tys = match response_union.kind {
+            TypeExprKind::Union { variants } => variants
+                .iter()
+                .map(|variant| self.resolve_protocol_message_ty(variant, messages))
+                .collect(),
+            _ => vec![self.resolve_protocol_message_ty(&response_union, messages)],
+        };
+
+        if self.curr_token.kind == TK::Semicolon {
+            self.consume(&TK::Semicolon)?;
+        }
+
+        flows.push(ProtocolFlow {
+            id: self.id_gen.new_id(),
+            from_role,
+            to_role,
+            payload_ty: self.resolve_protocol_message_ty(&request_ty, messages),
+            response_tys,
+            span: self.close(marker),
+        });
+        Ok(())
+    }
+
+    fn resolve_protocol_message_ty(
+        &mut self,
+        ty: &TypeExpr,
+        messages: &HashMap<String, TypeExpr>,
+    ) -> TypeExpr {
+        if let TypeExprKind::Named {
+            ident,
+            type_args,
+            def_id: _,
+        } = &ty.kind
+            && type_args.is_empty()
+            && let Some(alias) = messages.get(ident)
+        {
+            return self.clone_type_expr_with_new_ids(alias);
+        }
+        self.clone_type_expr_with_new_ids(ty)
+    }
+
+    fn is_protocol_start_trigger(ty: &TypeExpr) -> bool {
+        matches!(
+            &ty.kind,
+            TypeExprKind::Named { ident, type_args, .. }
+                if ident == "Start" && type_args.is_empty()
+        )
+    }
+
+    fn push_protocol_role(roles: &mut Vec<ProtocolRole>, role_name: &str, span: Span, id: NodeId) {
+        if roles.iter().any(|role| role.name == role_name) {
+            return;
+        }
+        roles.push(ProtocolRole {
+            id,
+            def_id: (),
+            name: role_name.to_string(),
+            span,
+        });
     }
 
     fn parse_type_def(&mut self, attrs: Vec<Attribute>) -> Result<TypeDef, ParseError> {

@@ -1,5 +1,5 @@
 use super::*;
-use crate::core::lexer::{LexError, Lexer, Token};
+use crate::core::lexer::{LexError, Lexer, Token, TokenKind as TK};
 use crate::core::parse::ParserOptions;
 use crate::core::tree::RefinementKind;
 
@@ -2331,14 +2331,37 @@ fn test_parse_typestate_with_experimental_flag() {
 }
 
 #[test]
-fn test_parse_protocol_roles_and_flows_with_experimental_flag() {
+fn test_parse_protocol_transition_syntax_with_experimental_flag() {
     let source = r#"
         protocol Auth {
-            role Client;
-            role Server;
+            msg Start;
+            msg AuthorizeReq;
+            msg AuthApproved;
+            msg AuthDenied;
+            msg SessionRevoked;
 
-            flow Client -> Server: AuthorizeReq -> AuthApproved | AuthDenied;
-            flow Server -> Client: SessionRevoked;
+            req Client -> Server: AuthorizeReq => AuthApproved | AuthDenied;
+
+            role Client {
+                state Idle {
+                    on Start -> Awaiting {
+                        effects: [ AuthorizeReq ~> Server ]
+                    }
+                }
+
+                state Awaiting {
+                    on AuthApproved@Server -> Idle;
+                    on AuthDenied@Server -> Idle;
+                }
+            }
+
+            role Server {
+                state Ready {
+                    on AuthorizeReq@Client -> Ready {
+                        effects: [ SessionRevoked ~> Client ]
+                    }
+                }
+            }
         }
     "#;
 
@@ -2360,11 +2383,34 @@ fn test_parse_protocol_roles_and_flows_with_experimental_flag() {
     assert_eq!(protocol.roles.len(), 2);
     assert_eq!(protocol.roles[0].name, "Client");
     assert_eq!(protocol.roles[1].name, "Server");
-    assert_eq!(protocol.flows.len(), 2);
+    assert_eq!(protocol.flows.len(), 6);
     assert_eq!(protocol.flows[0].from_role, "Client");
     assert_eq!(protocol.flows[0].to_role, "Server");
     assert_eq!(protocol.flows[0].response_tys.len(), 2);
     assert_eq!(protocol.flows[1].response_tys.len(), 0);
+}
+
+#[test]
+fn test_parse_protocol_non_start_trigger_requires_explicit_source_role() {
+    let source = r#"
+        protocol Auth {
+            role Client {
+                state Idle {
+                    on Ping -> Idle;
+                }
+            }
+        }
+    "#;
+
+    let err = parse_module_with_options(
+        source,
+        ParserOptions {
+            experimental_typestate: true,
+        },
+    )
+    .expect_err("non-start trigger without source role should fail");
+
+    assert!(matches!(err, ParseError::ExpectedToken(TK::At, _)));
 }
 
 #[test]

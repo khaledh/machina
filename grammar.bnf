@@ -41,8 +41,22 @@ TraitPropertyAccessor ::= "get" ";" | "set" ";"
 
 # Protocols
 ProtocolDef        ::= "protocol" Identifier "{" ProtocolItem* "}"
-ProtocolItem       ::= ProtocolRoleDecl | ProtocolFlowDecl
-ProtocolRoleDecl   ::= "role" Identifier ";"
+ProtocolItem       ::= ProtocolMsgDecl
+                     | ProtocolReqDecl
+                     | ProtocolRoleDecl
+                     | ProtocolFlowDecl
+ProtocolMsgDecl    ::= "msg" Identifier ( "=" TypeExpr )? ";"?
+ProtocolReqDecl    ::= "req" Identifier "->" Identifier ":" TypeExpr "=>" TypeExpr ";"?
+ProtocolRoleDecl   ::= "role" Identifier ( ";" | ProtocolRoleBlock )
+ProtocolRoleBlock  ::= "{" ProtocolStateDecl* "}"
+ProtocolStateDecl  ::= "state" Identifier ( ";" | "{" ProtocolTransition* "}" )
+ProtocolTransition ::= "on" ProtocolTrigger "->" Identifier ProtocolTransitionBody
+ProtocolTrigger    ::= TypeExpr ( "@" Identifier )?
+ProtocolTransitionBody ::= ";" | "{" ProtocolTransitionItem* "}"
+ProtocolTransitionItem ::= ProtocolEffectsDecl
+ProtocolEffectsDecl ::= "effects" ":" "[" ProtocolEffectList? "]" ("," | ";")?
+ProtocolEffectList ::= ProtocolEffect ( "," ProtocolEffect )* ","?
+ProtocolEffect     ::= TypeExpr "~" ">" Identifier
 ProtocolFlowDecl   ::= "flow" Identifier "->" Identifier ":" TypeExpr ( "->" TypeExpr )? ";"
 
 # Typestates
