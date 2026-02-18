@@ -23,6 +23,8 @@ pub struct ResolvedTables {
     pub symbols: SymbolTable,
     pub node_id_gen: NodeIdGen,
     pub typestate_role_impls: Vec<TypestateRoleImplBinding>,
+    /// Canonical protocol facts extracted from resolved protocol definitions
+    /// and typestate role bindings.
     pub protocol_index: crate::core::protocol::ProtocolIndex,
 }
 
