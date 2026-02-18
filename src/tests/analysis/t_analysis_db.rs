@@ -1898,7 +1898,7 @@ type AuthReq = {}
 protocol Auth {
     role Client;
     role Server;
-    flow Client -> Server: AuthReq;
+    req Client -> Server: AuthReq => AuthReq;
 }
 
 typestate AuthServer {
@@ -1952,7 +1952,7 @@ type AuthReq = {}
 protocol Auth {
     role Client;
     role Server;
-    flow Client -> Server: AuthReq;
+    req Client -> Server: AuthReq => AuthReq;
 }
 
 typestate AuthServer {
@@ -2004,7 +2004,7 @@ type AuthOk = {}
 protocol Auth {
     role Client;
     role Server;
-    flow Client -> Server: AuthReq -> AuthOk;
+    req Client -> Server: AuthReq => AuthOk;
 }
 
 typestate AuthServer {
@@ -2059,7 +2059,7 @@ type AuthOk = {}
 protocol Auth {
     role Client;
     role Server;
-    flow Client -> Server: AuthReq -> AuthOk;
+    req Client -> Server: AuthReq => AuthOk;
 }
 
 typestate AuthServer {
@@ -2108,7 +2108,7 @@ fn completions_at_file_include_protocol_roles_for_typestate_binding_paths() {
 protocol Auth {
     role Client;
     role Server;
-    flow Client -> Server: u64;
+    req Client -> Server: u64 => u64;
 }
 
 typestate Gateway : Auth::Cl {

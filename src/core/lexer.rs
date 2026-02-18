@@ -95,8 +95,6 @@ pub enum TokenKind {
     KwRequires,
     #[display("role")]
     KwRole,
-    #[display("flow")]
-    KwFlow,
     #[display("on")]
     KwOn,
     #[display("emit")]
@@ -577,7 +575,6 @@ impl<'a> Lexer<'a> {
                         "map" => TokenKind::KwMap,
                         "requires" => TokenKind::KwRequires,
                         "role" => TokenKind::KwRole,
-                        "flow" => TokenKind::KwFlow,
                         "on" => TokenKind::KwOn,
                         "emit" => TokenKind::KwEmit,
                         "reply" => TokenKind::KwReply,

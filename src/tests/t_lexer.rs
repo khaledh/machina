@@ -19,7 +19,7 @@ fn test_lex_identifier() {
 #[test]
 fn test_lex_keywords_and_bools() {
     let mut lexer = Lexer::new(
-        "fn let var if else match while for in inout out sink move self requires protocol role flow on emit reply true false",
+        "fn let var if else match while for in inout out sink move self requires protocol role on emit reply true false",
     );
 
     let expected = [
@@ -40,7 +40,6 @@ fn test_lex_keywords_and_bools() {
         TokenKind::KwRequires,
         TokenKind::KwProtocol,
         TokenKind::KwRole,
-        TokenKind::KwFlow,
         TokenKind::KwOn,
         TokenKind::KwEmit,
         TokenKind::KwReply,

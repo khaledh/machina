@@ -151,7 +151,7 @@ type AuthOk = {}
 protocol Auth {
     role Client;
     role Server;
-    flow Client -> Server: AuthReq -> AuthOk;
+    req Client -> Server: AuthReq => AuthOk;
 }
 
 typestate AuthServer {

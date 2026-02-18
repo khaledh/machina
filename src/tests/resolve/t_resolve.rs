@@ -373,7 +373,7 @@ fn test_resolve_protocol_request_contract_reports_undefined_roles() {
         protocol Net {
             role Client;
             role Server;
-            flow Missing -> Server: Ping;
+            req Missing -> Server: Ping => Ping;
         }
     "#;
 
@@ -521,7 +521,7 @@ fn test_resolve_typestate_role_impl_binds_protocol_role() {
         protocol Auth {
             role Client;
             role Server;
-            flow Client -> Server: AuthReq -> AuthOk;
+            req Client -> Server: AuthReq => AuthOk;
         }
 
         typestate AuthServer {
@@ -608,7 +608,7 @@ fn test_resolve_typestate_role_impl_reports_unknown_role() {
         protocol Auth {
             role Client;
             role Server;
-            flow Client -> Server: AuthReq -> AuthOk;
+            req Client -> Server: AuthReq => AuthOk;
         }
 
         typestate Gateway : Auth::Unknown {
@@ -653,7 +653,7 @@ fn test_resolve_typestate_role_binding_binds_protocol_role() {
         protocol Auth {
             role Client;
             role Server;
-            flow Client -> Server: AuthReq -> AuthOk;
+            req Client -> Server: AuthReq => AuthOk;
         }
 
         typestate AuthServer {
@@ -723,7 +723,7 @@ fn test_resolve_typestate_role_binding_reports_invalid_type() {
         protocol Auth {
             role Client;
             role Server;
-            flow Client -> Server: AuthReq -> AuthOk;
+            req Client -> Server: AuthReq => AuthOk;
         }
 
         typestate AuthServer {
@@ -777,7 +777,7 @@ fn test_resolve_typestate_role_binding_reports_unknown_role() {
         protocol Auth {
             role Client;
             role Server;
-            flow Client -> Server: AuthReq -> AuthOk;
+            req Client -> Server: AuthReq => AuthOk;
         }
 
         typestate AuthServer {
@@ -831,7 +831,7 @@ fn test_resolve_typestate_role_binding_reports_duplicate_role() {
         protocol Auth {
             role Client;
             role Server;
-            flow Client -> Server: AuthReq -> AuthOk;
+            req Client -> Server: AuthReq => AuthOk;
         }
 
         typestate AuthServer {
@@ -886,7 +886,7 @@ fn test_resolve_typestate_role_binding_reports_missing_required_peer_role() {
         protocol Auth {
             role Client;
             role Server;
-            flow Client -> Server: AuthReq -> AuthOk;
+            req Client -> Server: AuthReq => AuthOk;
         }
 
         typestate Gateway : Auth::Client {

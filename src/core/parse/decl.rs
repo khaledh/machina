@@ -61,9 +61,6 @@ impl<'a> Parser<'a> {
                 TK::KwRole => {
                     self.parse_protocol_role_decl_or_block(&mut roles, &message_aliases)?;
                 }
-                TK::KwFlow => {
-                    self.parse_protocol_flow_decl(&mut request_contracts, &message_aliases)?;
-                }
                 TK::Ident(_) if self.is_contextual_keyword("msg") => {
                     self.parse_protocol_msg_decl(&mut messages, &mut message_aliases)?;
                 }
@@ -218,45 +215,6 @@ impl<'a> Parser<'a> {
         }
         self.consume(&TK::RBrace)?;
         Ok(effects)
-    }
-
-    fn parse_protocol_flow_decl(
-        &mut self,
-        request_contracts: &mut Vec<ProtocolRequestContract>,
-        messages: &HashMap<String, TypeExpr>,
-    ) -> Result<(), ParseError> {
-        let marker = self.mark();
-        self.consume_keyword(TK::KwFlow)?;
-        let from_role = self.parse_ident()?;
-        self.consume(&TK::Arrow)?;
-        let to_role = self.parse_ident()?;
-        self.consume(&TK::Colon)?;
-        let request_ty = self.parse_type_expr()?;
-
-        let response_tys = if self.curr_token.kind == TK::Arrow {
-            self.consume(&TK::Arrow)?;
-            let response_union = self.parse_type_expr()?;
-            match response_union.kind {
-                TypeExprKind::Union { variants } => variants,
-                _ => vec![response_union],
-            }
-        } else {
-            Vec::new()
-        };
-
-        self.consume(&TK::Semicolon)?;
-        request_contracts.push(ProtocolRequestContract {
-            id: self.id_gen.new_id(),
-            from_role,
-            to_role,
-            request_ty: self.resolve_protocol_message_ty(&request_ty, messages),
-            response_tys: response_tys
-                .iter()
-                .map(|ty| self.resolve_protocol_message_ty(ty, messages))
-                .collect(),
-            span: self.close(marker),
-        });
-        Ok(())
     }
 
     fn parse_protocol_msg_decl(

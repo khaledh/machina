@@ -84,8 +84,6 @@ fn check_protocol_shape_conformance(engine: &TypecheckEngine) -> Vec<TypeCheckEr
         collect_typestate_handler_payloads_by_state(engine, &typestate_names);
     let outgoing_emits_by_state =
         collect_typestate_outgoing_payloads_by_state(engine, &typestate_names);
-    let handler_payloads = collect_typestate_handler_payloads(&handler_payloads_by_state);
-    let outgoing_payloads = collect_typestate_outgoing_payloads(&outgoing_emits_by_state);
 
     let mut errors = Vec::new();
     for binding in &resolved.typestate_role_impls {
@@ -110,193 +108,150 @@ fn check_protocol_shape_conformance(engine: &TypecheckEngine) -> Vec<TypeCheckEr
             .map(|peer| (peer.field_name.as_str(), peer.role_name.as_str()))
             .collect();
 
-        if !role_fact.states.is_empty() {
-            for state_fact in role_fact.states.values() {
-                let key = TypestateStateKey {
-                    typestate_name: binding.typestate_name.clone(),
-                    state_name: state_fact.name.clone(),
-                };
-                let seen_handlers = handler_payloads_by_state
-                    .get(&key)
-                    .cloned()
-                    .unwrap_or_default();
-                for required in &state_fact.shape.required_incoming {
-                    if !seen_handlers.contains(required) {
-                        errors.push(
-                            TypeCheckErrorKind::ProtocolStateHandlerMissing(
-                                binding.typestate_name.clone(),
-                                role_label.clone(),
-                                state_fact.name.clone(),
-                                required.clone(),
-                                binding.span,
-                            )
-                            .into(),
-                        );
-                    }
-                }
-
-                if let Some(emits) = outgoing_emits_by_state.get(&key) {
-                    for emit in emits {
-                        if !state_fact.shape.allowed_outgoing.contains(&emit.payload_ty) {
-                            errors.push(
-                                TypeCheckErrorKind::ProtocolStateOutgoingPayloadNotAllowed(
-                                    binding.typestate_name.clone(),
-                                    role_label.clone(),
-                                    state_fact.name.clone(),
-                                    emit.payload_ty.clone(),
-                                    emit.span,
-                                )
-                                .into(),
-                            );
-                            continue;
-                        }
-
-                        let mut expected_roles =
-                            state_expected_roles_for_payload(state_fact, &emit.payload_ty);
-                        if emit.is_request {
-                            expected_roles.extend(request_contract_to_roles_for_payload(
-                                protocol_fact,
-                                role_name,
-                                &emit.payload_ty,
-                            ));
-                            expected_roles.sort();
-                            expected_roles.dedup();
-                        }
-                        if expected_roles.is_empty() {
-                            continue;
-                        }
-                        let Some((field_name, bound_role_name)) =
-                            resolve_emit_destination_role(emit, &peer_role_by_field)
-                        else {
-                            errors.push(
-                                TypeCheckErrorKind::ProtocolStateEmitDestinationRoleUnbound(
-                                    binding.typestate_name.clone(),
-                                    role_label.clone(),
-                                    state_fact.name.clone(),
-                                    emit.payload_ty.clone(),
-                                    expected_roles.join(" | "),
-                                    emit.span,
-                                )
-                                .into(),
-                            );
-                            continue;
-                        };
-                        if !expected_roles.iter().any(|role| role == bound_role_name) {
-                            errors.push(
-                                TypeCheckErrorKind::ProtocolStateEmitDestinationRoleMismatch(
-                                    binding.typestate_name.clone(),
-                                    role_label.clone(),
-                                    state_fact.name.clone(),
-                                    emit.payload_ty.clone(),
-                                    expected_roles.join(" | "),
-                                    field_name.to_string(),
-                                    bound_role_name.to_string(),
-                                    emit.span,
-                                )
-                                .into(),
-                            );
-                            continue;
-                        }
-
-                        if !emit.is_request {
-                            continue;
-                        }
-                        let Some((_, to_role_name)) =
-                            resolve_emit_destination_role(emit, &peer_role_by_field)
-                        else {
-                            continue;
-                        };
-                        let matching_contracts = matching_request_contracts(
-                            protocol_fact,
-                            role_name,
-                            to_role_name,
-                            &emit.payload_ty,
-                        );
-                        if matching_contracts.is_empty() {
-                            errors.push(
-                                TypeCheckErrorKind::ProtocolRequestContractMissing(
-                                    binding.typestate_name.clone(),
-                                    role_label.clone(),
-                                    emit.payload_ty.clone(),
-                                    to_role_name.to_string(),
-                                    emit.span,
-                                )
-                                .into(),
-                            );
-                            continue;
-                        }
-                        if matching_contracts.len() > 1 {
-                            errors.push(
-                                TypeCheckErrorKind::ProtocolRequestContractAmbiguous(
-                                    binding.typestate_name.clone(),
-                                    role_label.clone(),
-                                    emit.payload_ty.clone(),
-                                    to_role_name.to_string(),
-                                    emit.span,
-                                )
-                                .into(),
-                            );
-                            continue;
-                        }
-                        let contract_responses = &matching_contracts[0].response_tys;
-                        let response_tys = emit.request_response_tys.as_deref().unwrap_or_default();
-                        for response_ty in response_tys {
-                            if !contract_responses.contains(response_ty) {
-                                errors.push(
-                                    TypeCheckErrorKind::ProtocolRequestResponseNotInContract(
-                                        binding.typestate_name.clone(),
-                                        role_label.clone(),
-                                        emit.payload_ty.clone(),
-                                        to_role_name.to_string(),
-                                        response_ty.clone(),
-                                        emit.span,
-                                    )
-                                    .into(),
-                                );
-                            }
-                        }
-                    }
-                }
-            }
-
-            // State-oriented protocols are validated state-by-state only.
-            // Role-wide flow checks are reserved for legacy flow-only roles.
-            continue;
-        }
-
-        let required_incoming = &role_fact.shape.required_incoming;
-        let allowed_outgoing = &role_fact.shape.allowed_outgoing;
-
-        let seen_handlers = handler_payloads
-            .get(&binding.typestate_name)
-            .cloned()
-            .unwrap_or_default();
-        for required in required_incoming {
-            if !seen_handlers.contains(required) {
-                errors.push(
-                    TypeCheckErrorKind::ProtocolFlowHandlerMissing(
-                        binding.typestate_name.clone(),
-                        role_label.clone(),
-                        required.clone(),
-                        binding.span,
-                    )
-                    .into(),
-                );
-            }
-        }
-
-        if let Some(emits) = outgoing_payloads.get(&binding.typestate_name) {
-            for emit in emits {
-                if !allowed_outgoing.contains(&emit.payload_ty) {
+        for state_fact in role_fact.states.values() {
+            let key = TypestateStateKey {
+                typestate_name: binding.typestate_name.clone(),
+                state_name: state_fact.name.clone(),
+            };
+            let seen_handlers = handler_payloads_by_state
+                .get(&key)
+                .cloned()
+                .unwrap_or_default();
+            for required in &state_fact.shape.required_incoming {
+                if !seen_handlers.contains(required) {
                     errors.push(
-                        TypeCheckErrorKind::ProtocolOutgoingPayloadNotAllowed(
+                        TypeCheckErrorKind::ProtocolStateHandlerMissing(
                             binding.typestate_name.clone(),
                             role_label.clone(),
-                            emit.payload_ty.clone(),
-                            emit.span,
+                            state_fact.name.clone(),
+                            required.clone(),
+                            binding.span,
                         )
                         .into(),
                     );
+                }
+            }
+
+            if let Some(emits) = outgoing_emits_by_state.get(&key) {
+                for emit in emits {
+                    if !state_fact.shape.allowed_outgoing.contains(&emit.payload_ty) {
+                        errors.push(
+                            TypeCheckErrorKind::ProtocolStateOutgoingPayloadNotAllowed(
+                                binding.typestate_name.clone(),
+                                role_label.clone(),
+                                state_fact.name.clone(),
+                                emit.payload_ty.clone(),
+                                emit.span,
+                            )
+                            .into(),
+                        );
+                        continue;
+                    }
+
+                    let mut expected_roles =
+                        state_expected_roles_for_payload(state_fact, &emit.payload_ty);
+                    if emit.is_request {
+                        expected_roles.extend(request_contract_to_roles_for_payload(
+                            protocol_fact,
+                            role_name,
+                            &emit.payload_ty,
+                        ));
+                        expected_roles.sort();
+                        expected_roles.dedup();
+                    }
+                    if expected_roles.is_empty() {
+                        continue;
+                    }
+                    let Some((field_name, bound_role_name)) =
+                        resolve_emit_destination_role(emit, &peer_role_by_field)
+                    else {
+                        errors.push(
+                            TypeCheckErrorKind::ProtocolStateEmitDestinationRoleUnbound(
+                                binding.typestate_name.clone(),
+                                role_label.clone(),
+                                state_fact.name.clone(),
+                                emit.payload_ty.clone(),
+                                expected_roles.join(" | "),
+                                emit.span,
+                            )
+                            .into(),
+                        );
+                        continue;
+                    };
+                    if !expected_roles.iter().any(|role| role == bound_role_name) {
+                        errors.push(
+                            TypeCheckErrorKind::ProtocolStateEmitDestinationRoleMismatch(
+                                binding.typestate_name.clone(),
+                                role_label.clone(),
+                                state_fact.name.clone(),
+                                emit.payload_ty.clone(),
+                                expected_roles.join(" | "),
+                                field_name.to_string(),
+                                bound_role_name.to_string(),
+                                emit.span,
+                            )
+                            .into(),
+                        );
+                        continue;
+                    }
+
+                    if !emit.is_request {
+                        continue;
+                    }
+                    let Some((_, to_role_name)) =
+                        resolve_emit_destination_role(emit, &peer_role_by_field)
+                    else {
+                        continue;
+                    };
+                    let matching_contracts = matching_request_contracts(
+                        protocol_fact,
+                        role_name,
+                        to_role_name,
+                        &emit.payload_ty,
+                    );
+                    if matching_contracts.is_empty() {
+                        errors.push(
+                            TypeCheckErrorKind::ProtocolRequestContractMissing(
+                                binding.typestate_name.clone(),
+                                role_label.clone(),
+                                emit.payload_ty.clone(),
+                                to_role_name.to_string(),
+                                emit.span,
+                            )
+                            .into(),
+                        );
+                        continue;
+                    }
+                    if matching_contracts.len() > 1 {
+                        errors.push(
+                            TypeCheckErrorKind::ProtocolRequestContractAmbiguous(
+                                binding.typestate_name.clone(),
+                                role_label.clone(),
+                                emit.payload_ty.clone(),
+                                to_role_name.to_string(),
+                                emit.span,
+                            )
+                            .into(),
+                        );
+                        continue;
+                    }
+                    let contract_responses = &matching_contracts[0].response_tys;
+                    let response_tys = emit.request_response_tys.as_deref().unwrap_or_default();
+                    for response_ty in response_tys {
+                        if !contract_responses.contains(response_ty) {
+                            errors.push(
+                                TypeCheckErrorKind::ProtocolRequestResponseNotInContract(
+                                    binding.typestate_name.clone(),
+                                    role_label.clone(),
+                                    emit.payload_ty.clone(),
+                                    to_role_name.to_string(),
+                                    response_ty.clone(),
+                                    emit.span,
+                                )
+                                .into(),
+                            );
+                        }
+                    }
                 }
             }
         }
@@ -695,18 +650,6 @@ fn collect_typestate_handler_payloads_by_state(
     out
 }
 
-fn collect_typestate_handler_payloads(
-    payloads_by_state: &HashMap<TypestateStateKey, HashSet<Type>>,
-) -> HashMap<String, HashSet<Type>> {
-    let mut out = HashMap::<String, HashSet<Type>>::new();
-    for (key, payloads) in payloads_by_state {
-        out.entry(key.typestate_name.clone())
-            .or_default()
-            .extend(payloads.iter().cloned());
-    }
-    out
-}
-
 #[derive(Clone, Debug)]
 struct EmitPayload {
     payload_ty: Type,
@@ -728,18 +671,6 @@ fn collect_typestate_outgoing_payloads_by_state(
     };
     collector.visit_module(&engine.context().module);
     collector.emits_by_state
-}
-
-fn collect_typestate_outgoing_payloads(
-    outgoing_by_state: &HashMap<TypestateStateKey, Vec<EmitPayload>>,
-) -> HashMap<String, Vec<EmitPayload>> {
-    let mut out = HashMap::<String, Vec<EmitPayload>>::new();
-    for (key, payloads) in outgoing_by_state {
-        out.entry(key.typestate_name.clone())
-            .or_default()
-            .extend(payloads.iter().cloned());
-    }
-    out
 }
 
 struct TypestateEmitCollector<'a> {

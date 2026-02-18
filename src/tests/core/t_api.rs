@@ -275,12 +275,30 @@ fn typestate_protocol_shape_missing_handler_reports_type_error() {
     let source = r#"
 type AuthReq = {}
 type AuthOk = {}
+type Start = {}
 
 protocol Auth {
-    role Client;
-    role Server;
-    flow Server -> Client: AuthOk;
-    flow Client -> Server: AuthReq;
+    msg Start;
+    msg AuthReq;
+    msg AuthOk;
+
+    role Client {
+        state Idle {
+            on Start -> Awaiting {
+                effects: [ AuthReq ~> Server ]
+            }
+        }
+        state Awaiting {
+            on AuthOk@Server -> Idle;
+        }
+    }
+    role Server {
+        state Ready {
+            on AuthReq@Client -> Ready {
+                effects: [ AuthOk ~> Client ]
+            }
+        }
+    }
 }
 
 typestate AuthServer {
@@ -301,11 +319,13 @@ typestate Gateway : Auth::Client {
     }
 
     state Idle {
-        fn request() -> Idle {
-            emit Send(to: 0, AuthReq {});
-            Idle {}
+        on Start() -> Awaiting {
+            emit Send(to: self.server, AuthReq {});
+            Awaiting { server: self.server }
         }
     }
+
+    state Awaiting {}
 }
 "#;
     let parsed = parsed_context_typestate(source);
@@ -325,8 +345,8 @@ typestate Gateway : Auth::Client {
         out.type_errors.iter().any(|e| {
             matches!(
                 e.kind(),
-                TypeCheckErrorKind::ProtocolFlowHandlerMissing(ts, role, _, _)
-                    if ts == "Gateway" && role == "Auth::Client"
+                TypeCheckErrorKind::ProtocolStateHandlerMissing(ts, role, state, _, _)
+                    if ts == "Gateway" && role == "Auth::Client" && state == "Awaiting"
             )
         }),
         "expected missing handler protocol conformance error, got {:?}",
@@ -340,12 +360,30 @@ fn typestate_protocol_shape_outgoing_payload_violation_reports_type_error() {
 type AuthReq = {}
 type AuthOk = {}
 type Other = {}
+type Start = {}
 
 protocol Auth {
-    role Client;
-    role Server;
-    flow Server -> Client: AuthOk;
-    flow Client -> Server: AuthReq;
+    msg Start;
+    msg AuthReq;
+    msg AuthOk;
+
+    role Client {
+        state Idle {
+            on Start -> Awaiting {
+                effects: [ AuthReq ~> Server ]
+            }
+        }
+        state Awaiting {
+            on AuthOk@Server -> Idle;
+        }
+    }
+    role Server {
+        state Ready {
+            on AuthReq@Client -> Ready {
+                effects: [ AuthOk ~> Client ]
+            }
+        }
+    }
 }
 
 typestate AuthServer {
@@ -366,13 +404,15 @@ typestate Gateway : Auth::Client {
     }
 
     state Idle {
-        on AuthOk() -> Idle {
-            Idle {}
+        on Start() -> Awaiting {
+            emit Send(to: self.server, Other {});
+            Awaiting { server: self.server }
         }
+    }
 
-        fn request() -> Idle {
-            emit Send(to: 0, Other {});
-            Idle {}
+    state Awaiting {
+        on AuthOk() -> Idle {
+            Idle { server: self.server }
         }
     }
 }
@@ -388,8 +428,10 @@ typestate Gateway : Auth::Client {
         out.type_errors.iter().any(|e| {
             matches!(
                 e.kind(),
-                TypeCheckErrorKind::ProtocolOutgoingPayloadNotAllowed(ts, role, _, _)
-                    if ts == "Gateway" && role == "Auth::Client"
+                TypeCheckErrorKind::ProtocolStateOutgoingPayloadNotAllowed(
+                    ts, role, state, _, _
+                )
+                    if ts == "Gateway" && role == "Auth::Client" && state == "Idle"
             )
         }),
         "expected outgoing payload protocol conformance error, got {:?}",
@@ -402,12 +444,30 @@ fn typestate_protocol_shape_accepts_valid_handler_and_outgoing_payload() {
     let source = r#"
 type AuthReq = {}
 type AuthOk = {}
+type Start = {}
 
 protocol Auth {
-    role Client;
-    role Server;
-    flow Server -> Client: AuthOk;
-    flow Client -> Server: AuthReq;
+    msg Start;
+    msg AuthReq;
+    msg AuthOk;
+
+    role Client {
+        state Idle {
+            on Start -> Awaiting {
+                effects: [ AuthReq ~> Server ]
+            }
+        }
+        state Awaiting {
+            on AuthOk@Server -> Idle;
+        }
+    }
+    role Server {
+        state Ready {
+            on AuthReq@Client -> Ready {
+                effects: [ AuthOk ~> Client ]
+            }
+        }
+    }
 }
 
 typestate AuthServer {
@@ -428,13 +488,15 @@ typestate Gateway : Auth::Client {
     }
 
     state Idle {
-        on AuthOk() -> Idle {
-            Idle {}
+        on Start() -> Awaiting {
+            emit Send(to: self.server, AuthReq {});
+            Awaiting { server: self.server }
         }
+    }
 
-        fn request() -> Idle {
-            emit Send(to: 0, AuthReq {});
-            Idle {}
+    state Awaiting {
+        on AuthOk() -> Idle {
+            Idle { server: self.server }
         }
     }
 }
@@ -975,9 +1037,22 @@ type AuthReq = {}
 type AuthOk = {}
 
 protocol Auth {
-    role Client;
-    role Server;
-    flow Client -> Server: AuthReq;
+    msg Start;
+    msg AuthReq;
+    msg AuthOk;
+
+    role Client {
+        state Idle {
+            on Start -> Idle {
+                effects: [ AuthReq ~> Server ]
+            }
+        }
+    }
+    role Server {
+        state Ready {
+            on AuthReq@Client -> Ready;
+        }
+    }
 }
 
 typestate Gateway : Auth::Server {
@@ -1020,9 +1095,22 @@ type AuthReq = { allow: bool }
 type AuthOk = {}
 
 protocol Auth {
-    role Client;
-    role Server;
-    flow Client -> Server: AuthReq;
+    msg Start;
+    msg AuthReq;
+    msg AuthOk;
+
+    role Client {
+        state Idle {
+            on Start -> Idle {
+                effects: [ AuthReq ~> Server ]
+            }
+        }
+    }
+    role Server {
+        state Ready {
+            on AuthReq@Client -> Ready;
+        }
+    }
 }
 
 typestate Gateway : Auth::Server {
@@ -1069,9 +1157,23 @@ type AuthOk = {}
 type AuthErr = {}
 
 protocol Auth {
-    role Client;
-    role Server;
-    flow Client -> Server: AuthReq;
+    msg Start;
+    msg AuthReq;
+    msg AuthOk;
+    msg AuthErr;
+
+    role Client {
+        state Idle {
+            on Start -> Idle {
+                effects: [ AuthReq ~> Server ]
+            }
+        }
+    }
+    role Server {
+        state Ready {
+            on AuthReq@Client -> Ready;
+        }
+    }
 }
 
 typestate Gateway : Auth::Server {
@@ -1146,9 +1248,23 @@ type AuthOk = {}
 type AuthErr = {}
 
 protocol Auth {
-    role Client;
-    role Server;
-    flow Client -> Server: AuthReq;
+    msg Start;
+    msg AuthReq;
+    msg AuthOk;
+    msg AuthErr;
+
+    role Client {
+        state Idle {
+            on Start -> Idle {
+                effects: [ AuthReq ~> Server ]
+            }
+        }
+    }
+    role Server {
+        state Ready {
+            on AuthReq@Client -> Ready;
+        }
+    }
 }
 
 typestate Gateway : Auth::Server {
