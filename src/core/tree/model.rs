@@ -248,8 +248,29 @@ pub struct ProtocolDef<D> {
     pub id: NodeId,
     pub def_id: D,
     pub name: String,
+    pub messages: Vec<ProtocolMessage<D>>,
+    pub request_contracts: Vec<ProtocolRequestContract<D>>,
     pub roles: Vec<ProtocolRole<D>>,
     pub flows: Vec<ProtocolFlow<D>>,
+    pub span: Span,
+}
+
+#[derive(Clone, Debug)]
+pub struct ProtocolMessage<D> {
+    pub id: NodeId,
+    pub def_id: D,
+    pub name: String,
+    pub ty: TypeExpr<D>,
+    pub span: Span,
+}
+
+#[derive(Clone, Debug)]
+pub struct ProtocolRequestContract<D> {
+    pub id: NodeId,
+    pub from_role: String,
+    pub to_role: String,
+    pub request_ty: TypeExpr<D>,
+    pub response_tys: Vec<TypeExpr<D>>,
     pub span: Span,
 }
 
@@ -258,6 +279,37 @@ pub struct ProtocolRole<D> {
     pub id: NodeId,
     pub def_id: D,
     pub name: String,
+    pub states: Vec<ProtocolState<D>>,
+    pub span: Span,
+}
+
+#[derive(Clone, Debug)]
+pub struct ProtocolState<D> {
+    pub id: NodeId,
+    pub name: String,
+    pub transitions: Vec<ProtocolTransition<D>>,
+    pub span: Span,
+}
+
+#[derive(Clone, Debug)]
+pub struct ProtocolTransition<D> {
+    pub id: NodeId,
+    pub trigger: ProtocolTrigger<D>,
+    pub next_state: String,
+    pub effects: Vec<ProtocolEffect<D>>,
+    pub span: Span,
+}
+
+#[derive(Clone, Debug)]
+pub struct ProtocolTrigger<D> {
+    pub selector_ty: TypeExpr<D>,
+    pub from_role: Option<String>,
+}
+
+#[derive(Clone, Debug)]
+pub struct ProtocolEffect<D> {
+    pub payload_ty: TypeExpr<D>,
+    pub to_role: String,
     pub span: Span,
 }
 

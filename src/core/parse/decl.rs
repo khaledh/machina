@@ -51,23 +51,33 @@ impl<'a> Parser<'a> {
         let name = self.parse_ident()?;
         self.consume(&TK::LBrace)?;
 
+        let mut messages = Vec::new();
+        let mut request_contracts = Vec::new();
         let mut roles = Vec::new();
         let mut flows = Vec::new();
-        let mut messages: HashMap<String, TypeExpr> = HashMap::new();
+        let mut message_aliases: HashMap<String, TypeExpr> = HashMap::new();
 
         while self.curr_token.kind != TK::RBrace {
             match self.curr_token.kind {
                 TK::KwRole => {
-                    self.parse_protocol_role_decl_or_block(&mut roles, &mut flows, &messages)?;
+                    self.parse_protocol_role_decl_or_block(
+                        &mut roles,
+                        &mut flows,
+                        &message_aliases,
+                    )?;
                 }
                 TK::KwFlow => {
                     self.parse_protocol_flow_decl(&mut flows)?;
                 }
                 TK::Ident(_) if self.is_contextual_keyword("msg") => {
-                    self.parse_protocol_msg_decl(&mut messages)?;
+                    self.parse_protocol_msg_decl(&mut messages, &mut message_aliases)?;
                 }
                 TK::Ident(_) if self.is_contextual_keyword("req") => {
-                    self.parse_protocol_req_decl(&mut flows, &messages)?;
+                    self.parse_protocol_req_decl(
+                        &mut flows,
+                        &mut request_contracts,
+                        &message_aliases,
+                    )?;
                 }
                 _ => {
                     return Err(ParseError::ExpectedToken(
@@ -83,6 +93,8 @@ impl<'a> Parser<'a> {
             id: self.id_gen.new_id(),
             def_id: (),
             name,
+            messages,
+            request_contracts,
             roles,
             flows,
             span: self.close(marker),
@@ -99,7 +111,8 @@ impl<'a> Parser<'a> {
         self.consume_keyword(TK::KwRole)?;
         let role_name = self.parse_ident()?;
         let role_span = self.close(role_marker);
-        Self::push_protocol_role(roles, &role_name, role_span, self.id_gen.new_id());
+        let role_index =
+            Self::ensure_protocol_role(roles, &role_name, role_span, self.id_gen.new_id());
 
         if self.curr_token.kind == TK::Semicolon {
             self.consume(&TK::Semicolon)?;
@@ -108,7 +121,8 @@ impl<'a> Parser<'a> {
 
         self.consume(&TK::LBrace)?;
         while self.curr_token.kind != TK::RBrace {
-            self.parse_protocol_state_block(&role_name, flows, messages)?;
+            let state = self.parse_protocol_state_block(&role_name, flows, messages)?;
+            roles[role_index].states.push(state);
         }
         self.consume(&TK::RBrace)?;
         Ok(())
@@ -119,21 +133,33 @@ impl<'a> Parser<'a> {
         role_name: &str,
         flows: &mut Vec<ProtocolFlow>,
         messages: &HashMap<String, TypeExpr>,
-    ) -> Result<(), ParseError> {
+    ) -> Result<ProtocolState, ParseError> {
+        let marker = self.mark();
         self.consume_contextual_keyword("state")?;
-        let _state_name = self.parse_ident()?;
+        let state_name = self.parse_ident()?;
 
         if self.curr_token.kind == TK::Semicolon {
             self.consume(&TK::Semicolon)?;
-            return Ok(());
+            return Ok(ProtocolState {
+                id: self.id_gen.new_id(),
+                name: state_name,
+                transitions: Vec::new(),
+                span: self.close(marker),
+            });
         }
 
         self.consume(&TK::LBrace)?;
+        let mut transitions = Vec::new();
         while self.curr_token.kind != TK::RBrace {
-            self.parse_protocol_transition(role_name, flows, messages)?;
+            transitions.push(self.parse_protocol_transition(role_name, flows, messages)?);
         }
         self.consume(&TK::RBrace)?;
-        Ok(())
+        Ok(ProtocolState {
+            id: self.id_gen.new_id(),
+            name: state_name,
+            transitions,
+            span: self.close(marker),
+        })
     }
 
     fn parse_protocol_transition(
@@ -141,7 +167,7 @@ impl<'a> Parser<'a> {
         role_name: &str,
         flows: &mut Vec<ProtocolFlow>,
         messages: &HashMap<String, TypeExpr>,
-    ) -> Result<(), ParseError> {
+    ) -> Result<ProtocolTransition, ParseError> {
         let transition_marker = self.mark();
         self.consume_keyword(TK::KwOn)?;
         let trigger_ty = self.parse_type_expr()?;
@@ -156,39 +182,48 @@ impl<'a> Parser<'a> {
         }
 
         self.consume(&TK::Arrow)?;
-        let _next_state = self.parse_ident()?;
+        let next_state = self.parse_ident()?;
         let effects = self.parse_protocol_transition_body(messages)?;
+        let trigger_payload_ty = self.resolve_protocol_message_ty(&trigger_ty, messages);
 
-        if let Some(from_role) = trigger_from_role {
-            let payload_ty = self.resolve_protocol_message_ty(&trigger_ty, messages);
+        if let Some(from_role) = &trigger_from_role {
             flows.push(ProtocolFlow {
                 id: self.id_gen.new_id(),
-                from_role,
+                from_role: from_role.clone(),
                 to_role: role_name.to_string(),
-                payload_ty,
+                payload_ty: self.clone_type_expr_with_new_ids(&trigger_payload_ty),
                 response_tys: Vec::new(),
                 span: self.close(transition_marker),
             });
         }
 
-        for (effect_ty, to_role, effect_span) in effects {
+        for effect in &effects {
             flows.push(ProtocolFlow {
                 id: self.id_gen.new_id(),
                 from_role: role_name.to_string(),
-                to_role,
-                payload_ty: effect_ty,
+                to_role: effect.to_role.clone(),
+                payload_ty: self.clone_type_expr_with_new_ids(&effect.payload_ty),
                 response_tys: Vec::new(),
-                span: effect_span,
+                span: effect.span,
             });
         }
 
-        Ok(())
+        Ok(ProtocolTransition {
+            id: self.id_gen.new_id(),
+            trigger: ProtocolTrigger {
+                selector_ty: self.clone_type_expr_with_new_ids(&trigger_payload_ty),
+                from_role: trigger_from_role,
+            },
+            next_state,
+            effects,
+            span: self.close(transition_marker),
+        })
     }
 
     fn parse_protocol_transition_body(
         &mut self,
         messages: &HashMap<String, TypeExpr>,
-    ) -> Result<Vec<(TypeExpr, String, Span)>, ParseError> {
+    ) -> Result<Vec<ProtocolEffect>, ParseError> {
         if self.curr_token.kind == TK::Semicolon {
             self.consume(&TK::Semicolon)?;
             return Ok(Vec::new());
@@ -206,11 +241,11 @@ impl<'a> Parser<'a> {
                 parser.consume(&TK::Tilde)?;
                 parser.consume(&TK::GreaterThan)?;
                 let to_role = parser.parse_ident()?;
-                Ok((
-                    parser.resolve_protocol_message_ty(&effect_ty, messages),
+                Ok(ProtocolEffect {
+                    payload_ty: parser.resolve_protocol_message_ty(&effect_ty, messages),
                     to_role,
-                    parser.close(effect_marker),
-                ))
+                    span: parser.close(effect_marker),
+                })
             })?;
             self.consume(&TK::RBracket)?;
             effects.extend(parsed_effects);
@@ -259,7 +294,8 @@ impl<'a> Parser<'a> {
 
     fn parse_protocol_msg_decl(
         &mut self,
-        messages: &mut HashMap<String, TypeExpr>,
+        messages: &mut Vec<ProtocolMessage>,
+        message_aliases: &mut HashMap<String, TypeExpr>,
     ) -> Result<(), ParseError> {
         self.consume_contextual_keyword("msg")?;
         let marker = self.mark();
@@ -279,7 +315,14 @@ impl<'a> Parser<'a> {
                 span: msg_span,
             }
         };
-        messages.insert(msg_name, msg_ty);
+        message_aliases.insert(msg_name.clone(), self.clone_type_expr_with_new_ids(&msg_ty));
+        messages.push(ProtocolMessage {
+            id: self.id_gen.new_id(),
+            def_id: (),
+            name: msg_name,
+            ty: msg_ty,
+            span: msg_span,
+        });
         if self.curr_token.kind == TK::Semicolon {
             self.consume(&TK::Semicolon)?;
         }
@@ -289,6 +332,7 @@ impl<'a> Parser<'a> {
     fn parse_protocol_req_decl(
         &mut self,
         flows: &mut Vec<ProtocolFlow>,
+        request_contracts: &mut Vec<ProtocolRequestContract>,
         messages: &HashMap<String, TypeExpr>,
     ) -> Result<(), ParseError> {
         let marker = self.mark();
@@ -312,12 +356,30 @@ impl<'a> Parser<'a> {
             self.consume(&TK::Semicolon)?;
         }
 
+        let resolved_request_ty = self.resolve_protocol_message_ty(&request_ty, messages);
+        let resolved_response_tys: Vec<TypeExpr> = response_tys
+            .iter()
+            .map(|ty| self.clone_type_expr_with_new_ids(ty))
+            .collect();
+
         flows.push(ProtocolFlow {
+            id: self.id_gen.new_id(),
+            from_role: from_role.clone(),
+            to_role: to_role.clone(),
+            payload_ty: self.clone_type_expr_with_new_ids(&resolved_request_ty),
+            response_tys: resolved_response_tys
+                .iter()
+                .map(|ty| self.clone_type_expr_with_new_ids(ty))
+                .collect(),
+            span: self.close(marker),
+        });
+
+        request_contracts.push(ProtocolRequestContract {
             id: self.id_gen.new_id(),
             from_role,
             to_role,
-            payload_ty: self.resolve_protocol_message_ty(&request_ty, messages),
-            response_tys,
+            request_ty: resolved_request_ty,
+            response_tys: resolved_response_tys,
             span: self.close(marker),
         });
         Ok(())
@@ -349,16 +411,23 @@ impl<'a> Parser<'a> {
         )
     }
 
-    fn push_protocol_role(roles: &mut Vec<ProtocolRole>, role_name: &str, span: Span, id: NodeId) {
-        if roles.iter().any(|role| role.name == role_name) {
-            return;
+    fn ensure_protocol_role(
+        roles: &mut Vec<ProtocolRole>,
+        role_name: &str,
+        span: Span,
+        id: NodeId,
+    ) -> usize {
+        if let Some(idx) = roles.iter().position(|role| role.name == role_name) {
+            return idx;
         }
         roles.push(ProtocolRole {
             id,
             def_id: (),
             name: role_name.to_string(),
+            states: Vec::new(),
             span,
         });
+        roles.len() - 1
     }
 
     fn parse_type_def(&mut self, attrs: Vec<Attribute>) -> Result<TypeDef, ParseError> {

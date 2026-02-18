@@ -2380,9 +2380,16 @@ fn test_parse_protocol_transition_syntax_with_experimental_flag() {
     };
 
     assert_eq!(protocol.name, "Auth");
+    assert_eq!(protocol.messages.len(), 5);
+    assert_eq!(protocol.request_contracts.len(), 1);
     assert_eq!(protocol.roles.len(), 2);
     assert_eq!(protocol.roles[0].name, "Client");
     assert_eq!(protocol.roles[1].name, "Server");
+    assert_eq!(protocol.roles[0].states.len(), 2);
+    assert_eq!(protocol.roles[1].states.len(), 1);
+    assert_eq!(protocol.roles[0].states[0].transitions.len(), 1);
+    assert_eq!(protocol.roles[0].states[1].transitions.len(), 2);
+    assert_eq!(protocol.roles[1].states[0].transitions.len(), 1);
     assert_eq!(protocol.flows.len(), 6);
     assert_eq!(protocol.flows[0].from_role, "Client");
     assert_eq!(protocol.flows[0].to_role, "Server");

@@ -718,8 +718,29 @@ fn reseed_ids_in_item(item: &mut res::TopLevelItem, node_id_gen: &mut NodeIdGen)
 }
 
 fn reseed_protocol_def(protocol_def: &mut res::ProtocolDef, node_id_gen: &mut NodeIdGen) {
+    for message in &mut protocol_def.messages {
+        message.id = node_id_gen.new_id();
+        reseed_type_expr(&mut message.ty, node_id_gen);
+    }
+    for contract in &mut protocol_def.request_contracts {
+        contract.id = node_id_gen.new_id();
+        reseed_type_expr(&mut contract.request_ty, node_id_gen);
+        for response_ty in &mut contract.response_tys {
+            reseed_type_expr(response_ty, node_id_gen);
+        }
+    }
     for role in &mut protocol_def.roles {
         role.id = node_id_gen.new_id();
+        for state in &mut role.states {
+            state.id = node_id_gen.new_id();
+            for transition in &mut state.transitions {
+                transition.id = node_id_gen.new_id();
+                reseed_type_expr(&mut transition.trigger.selector_ty, node_id_gen);
+                for effect in &mut transition.effects {
+                    reseed_type_expr(&mut effect.payload_ty, node_id_gen);
+                }
+            }
+        }
     }
     for flow in &mut protocol_def.flows {
         flow.id = node_id_gen.new_id();

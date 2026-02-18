@@ -57,6 +57,54 @@ pub trait TreeMapper {
         walk_protocol_role(self, role, ctx)
     }
 
+    fn map_protocol_message(
+        &mut self,
+        message: &ProtocolMessage<Self::InD>,
+        ctx: &mut Self::Context,
+    ) -> ProtocolMessage<Self::OutD> {
+        walk_protocol_message(self, message, ctx)
+    }
+
+    fn map_protocol_request_contract(
+        &mut self,
+        contract: &ProtocolRequestContract<Self::InD>,
+        ctx: &mut Self::Context,
+    ) -> ProtocolRequestContract<Self::OutD> {
+        walk_protocol_request_contract(self, contract, ctx)
+    }
+
+    fn map_protocol_state(
+        &mut self,
+        state: &ProtocolState<Self::InD>,
+        ctx: &mut Self::Context,
+    ) -> ProtocolState<Self::OutD> {
+        walk_protocol_state(self, state, ctx)
+    }
+
+    fn map_protocol_transition(
+        &mut self,
+        transition: &ProtocolTransition<Self::InD>,
+        ctx: &mut Self::Context,
+    ) -> ProtocolTransition<Self::OutD> {
+        walk_protocol_transition(self, transition, ctx)
+    }
+
+    fn map_protocol_trigger(
+        &mut self,
+        trigger: &ProtocolTrigger<Self::InD>,
+        ctx: &mut Self::Context,
+    ) -> ProtocolTrigger<Self::OutD> {
+        walk_protocol_trigger(self, trigger, ctx)
+    }
+
+    fn map_protocol_effect(
+        &mut self,
+        effect: &ProtocolEffect<Self::InD>,
+        ctx: &mut Self::Context,
+    ) -> ProtocolEffect<Self::OutD> {
+        walk_protocol_effect(self, effect, ctx)
+    }
+
     fn map_protocol_flow(
         &mut self,
         flow: &ProtocolFlow<Self::InD>,
@@ -468,6 +516,16 @@ pub fn walk_protocol_def<M: TreeMapper + ?Sized>(
         id: protocol_def.id,
         def_id: mapper.map_def_id(protocol_def.id, &protocol_def.def_id, ctx),
         name: protocol_def.name.clone(),
+        messages: protocol_def
+            .messages
+            .iter()
+            .map(|message| mapper.map_protocol_message(message, ctx))
+            .collect(),
+        request_contracts: protocol_def
+            .request_contracts
+            .iter()
+            .map(|contract| mapper.map_protocol_request_contract(contract, ctx))
+            .collect(),
         roles: protocol_def
             .roles
             .iter()
@@ -491,7 +549,103 @@ pub fn walk_protocol_role<M: TreeMapper + ?Sized>(
         id: role.id,
         def_id: mapper.map_def_id(role.id, &role.def_id, ctx),
         name: role.name.clone(),
+        states: role
+            .states
+            .iter()
+            .map(|state| mapper.map_protocol_state(state, ctx))
+            .collect(),
         span: role.span,
+    }
+}
+
+pub fn walk_protocol_message<M: TreeMapper + ?Sized>(
+    mapper: &mut M,
+    message: &ProtocolMessage<M::InD>,
+    ctx: &mut M::Context,
+) -> ProtocolMessage<M::OutD> {
+    ProtocolMessage {
+        id: message.id,
+        def_id: mapper.map_def_id(message.id, &message.def_id, ctx),
+        name: message.name.clone(),
+        ty: mapper.map_type_expr(&message.ty, ctx),
+        span: message.span,
+    }
+}
+
+pub fn walk_protocol_request_contract<M: TreeMapper + ?Sized>(
+    mapper: &mut M,
+    contract: &ProtocolRequestContract<M::InD>,
+    ctx: &mut M::Context,
+) -> ProtocolRequestContract<M::OutD> {
+    ProtocolRequestContract {
+        id: contract.id,
+        from_role: contract.from_role.clone(),
+        to_role: contract.to_role.clone(),
+        request_ty: mapper.map_type_expr(&contract.request_ty, ctx),
+        response_tys: contract
+            .response_tys
+            .iter()
+            .map(|ty| mapper.map_type_expr(ty, ctx))
+            .collect(),
+        span: contract.span,
+    }
+}
+
+pub fn walk_protocol_state<M: TreeMapper + ?Sized>(
+    mapper: &mut M,
+    state: &ProtocolState<M::InD>,
+    ctx: &mut M::Context,
+) -> ProtocolState<M::OutD> {
+    ProtocolState {
+        id: state.id,
+        name: state.name.clone(),
+        transitions: state
+            .transitions
+            .iter()
+            .map(|transition| mapper.map_protocol_transition(transition, ctx))
+            .collect(),
+        span: state.span,
+    }
+}
+
+pub fn walk_protocol_transition<M: TreeMapper + ?Sized>(
+    mapper: &mut M,
+    transition: &ProtocolTransition<M::InD>,
+    ctx: &mut M::Context,
+) -> ProtocolTransition<M::OutD> {
+    ProtocolTransition {
+        id: transition.id,
+        trigger: mapper.map_protocol_trigger(&transition.trigger, ctx),
+        next_state: transition.next_state.clone(),
+        effects: transition
+            .effects
+            .iter()
+            .map(|effect| mapper.map_protocol_effect(effect, ctx))
+            .collect(),
+        span: transition.span,
+    }
+}
+
+pub fn walk_protocol_trigger<M: TreeMapper + ?Sized>(
+    mapper: &mut M,
+    trigger: &ProtocolTrigger<M::InD>,
+    ctx: &mut M::Context,
+) -> ProtocolTrigger<M::OutD> {
+    ProtocolTrigger {
+        selector_ty: mapper.map_type_expr(&trigger.selector_ty, ctx),
+        from_role: trigger.from_role.clone(),
+    }
+}
+
+pub fn walk_protocol_effect<M: TreeMapper + ?Sized>(
+    mapper: &mut M,
+    effect: &ProtocolEffect<M::InD>,
+    ctx: &mut M::Context,
+) -> ProtocolEffect<M::OutD> {
+    ProtocolEffect {
+        payload_ty: mapper.map_type_expr(&effect.payload_ty, ctx),
+        to_role: effect.to_role.clone(),
+        span: effect.span,
     }
 }
 
