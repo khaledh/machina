@@ -49,10 +49,6 @@ pub trait VisitorMut<D = String, T = ()> {
         walk_protocol_effect(self, effect)
     }
 
-    fn visit_protocol_flow(&mut self, flow: &mut ProtocolFlow<D>) {
-        walk_protocol_flow(self, flow)
-    }
-
     fn visit_trait_def(&mut self, trait_def: &mut TraitDef<D>) {
         walk_trait_def(self, trait_def)
     }
@@ -244,9 +240,6 @@ pub fn walk_protocol_def<V: VisitorMut<D, T> + ?Sized, D, T>(
     for role in &mut protocol_def.roles {
         v.visit_protocol_role(role);
     }
-    for flow in &mut protocol_def.flows {
-        v.visit_protocol_flow(flow);
-    }
 }
 
 pub fn walk_protocol_role<V: VisitorMut<D, T> + ?Sized, D, T>(
@@ -306,16 +299,6 @@ pub fn walk_protocol_effect<V: VisitorMut<D, T> + ?Sized, D, T>(
     effect: &mut ProtocolEffect<D>,
 ) {
     v.visit_type_expr(&mut effect.payload_ty);
-}
-
-pub fn walk_protocol_flow<V: VisitorMut<D, T> + ?Sized, D, T>(
-    v: &mut V,
-    flow: &mut ProtocolFlow<D>,
-) {
-    v.visit_type_expr(&mut flow.payload_ty);
-    for response_ty in &mut flow.response_tys {
-        v.visit_type_expr(response_ty);
-    }
 }
 
 pub fn walk_trait_def<V: VisitorMut<D, T> + ?Sized, D, T>(v: &mut V, trait_def: &mut TraitDef<D>) {

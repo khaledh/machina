@@ -113,10 +113,6 @@ impl ProtocolDef {
         for role in &self.roles {
             role.fmt_with_indent(f, level + 2)?;
         }
-        writeln!(f, "{}Flows:", pad1)?;
-        for flow in &self.flows {
-            flow.fmt_with_indent(f, level + 2)?;
-        }
         Ok(())
     }
 }
@@ -213,27 +209,6 @@ impl ProtocolEffect {
             self.payload_ty,
             self.to_role
         )
-    }
-}
-
-impl ProtocolFlow {
-    fn fmt_with_indent(&self, f: &mut fmt::Formatter<'_>, level: usize) -> fmt::Result {
-        let pad = indent(level);
-        writeln!(
-            f,
-            "{}Flow {} -> {} [{}]",
-            pad, self.from_role, self.to_role, self.id
-        )?;
-        writeln!(f, "{}Payload: {}", indent(level + 1), self.payload_ty)?;
-        if self.response_tys.is_empty() {
-            writeln!(f, "{}Responses: <none>", indent(level + 1))
-        } else {
-            writeln!(f, "{}Responses:", indent(level + 1))?;
-            for ty in &self.response_tys {
-                writeln!(f, "{}{}", indent(level + 2), ty)?;
-            }
-            Ok(())
-        }
     }
 }
 

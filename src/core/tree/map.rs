@@ -105,14 +105,6 @@ pub trait TreeMapper {
         walk_protocol_effect(self, effect, ctx)
     }
 
-    fn map_protocol_flow(
-        &mut self,
-        flow: &ProtocolFlow<Self::InD>,
-        ctx: &mut Self::Context,
-    ) -> ProtocolFlow<Self::OutD> {
-        walk_protocol_flow(self, flow, ctx)
-    }
-
     fn map_typestate_def(
         &mut self,
         typestate_def: &TypestateDef<Self::InD, Self::InT>,
@@ -531,11 +523,6 @@ pub fn walk_protocol_def<M: TreeMapper + ?Sized>(
             .iter()
             .map(|role| mapper.map_protocol_role(role, ctx))
             .collect(),
-        flows: protocol_def
-            .flows
-            .iter()
-            .map(|flow| mapper.map_protocol_flow(flow, ctx))
-            .collect(),
         span: protocol_def.span,
     }
 }
@@ -646,25 +633,6 @@ pub fn walk_protocol_effect<M: TreeMapper + ?Sized>(
         payload_ty: mapper.map_type_expr(&effect.payload_ty, ctx),
         to_role: effect.to_role.clone(),
         span: effect.span,
-    }
-}
-
-pub fn walk_protocol_flow<M: TreeMapper + ?Sized>(
-    mapper: &mut M,
-    flow: &ProtocolFlow<M::InD>,
-    ctx: &mut M::Context,
-) -> ProtocolFlow<M::OutD> {
-    ProtocolFlow {
-        id: flow.id,
-        from_role: flow.from_role.clone(),
-        to_role: flow.to_role.clone(),
-        payload_ty: mapper.map_type_expr(&flow.payload_ty, ctx),
-        response_tys: flow
-            .response_tys
-            .iter()
-            .map(|ty| mapper.map_type_expr(ty, ctx))
-            .collect(),
-        span: flow.span,
     }
 }
 

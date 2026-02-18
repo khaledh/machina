@@ -1268,86 +1268,55 @@ impl Visitor<()> for SymbolResolver {
             local_roles.insert(role.name.as_str());
         }
 
-        // New protocol surface is role/state-transition based. Keep legacy
-        // flow-based handling only when no transition-shaped data is present.
-        let has_transition_surface = !protocol_def.messages.is_empty()
-            || !protocol_def.request_contracts.is_empty()
-            || protocol_def.roles.iter().any(|role| !role.states.is_empty());
-
-        if has_transition_surface {
-            for message in &protocol_def.messages {
-                self.visit_type_expr(&message.ty);
-            }
-
-            for contract in &protocol_def.request_contracts {
-                if !local_roles.contains(contract.from_role.as_str()) {
-                    self.errors.push(ResolveError::ProtocolFlowRoleUndefined(
-                        protocol_def.name.clone(),
-                        contract.from_role.clone(),
-                        contract.span,
-                    ));
-                }
-                if !local_roles.contains(contract.to_role.as_str()) {
-                    self.errors.push(ResolveError::ProtocolFlowRoleUndefined(
-                        protocol_def.name.clone(),
-                        contract.to_role.clone(),
-                        contract.span,
-                    ));
-                }
-                self.visit_type_expr(&contract.request_ty);
-                for response_ty in &contract.response_tys {
-                    self.visit_type_expr(response_ty);
-                }
-            }
-
-            for role in &protocol_def.roles {
-                for state in &role.states {
-                    for transition in &state.transitions {
-                        self.visit_type_expr(&transition.trigger.selector_ty);
-                        if let Some(from_role) = &transition.trigger.from_role
-                            && !local_roles.contains(from_role.as_str())
-                        {
-                            self.errors.push(ResolveError::ProtocolFlowRoleUndefined(
-                                protocol_def.name.clone(),
-                                from_role.clone(),
-                                transition.span,
-                            ));
-                        }
-                        for effect in &transition.effects {
-                            if !local_roles.contains(effect.to_role.as_str()) {
-                                self.errors.push(ResolveError::ProtocolFlowRoleUndefined(
-                                    protocol_def.name.clone(),
-                                    effect.to_role.clone(),
-                                    effect.span,
-                                ));
-                            }
-                            self.visit_type_expr(&effect.payload_ty);
-                        }
-                    }
-                }
-            }
-            return;
+        for message in &protocol_def.messages {
+            self.visit_type_expr(&message.ty);
         }
 
-        for flow in &protocol_def.flows {
-            if !local_roles.contains(flow.from_role.as_str()) {
+        for contract in &protocol_def.request_contracts {
+            if !local_roles.contains(contract.from_role.as_str()) {
                 self.errors.push(ResolveError::ProtocolFlowRoleUndefined(
                     protocol_def.name.clone(),
-                    flow.from_role.clone(),
-                    flow.span,
+                    contract.from_role.clone(),
+                    contract.span,
                 ));
             }
-            if !local_roles.contains(flow.to_role.as_str()) {
+            if !local_roles.contains(contract.to_role.as_str()) {
                 self.errors.push(ResolveError::ProtocolFlowRoleUndefined(
                     protocol_def.name.clone(),
-                    flow.to_role.clone(),
-                    flow.span,
+                    contract.to_role.clone(),
+                    contract.span,
                 ));
             }
-
-            self.visit_type_expr(&flow.payload_ty);
-            for response_ty in &flow.response_tys {
+            self.visit_type_expr(&contract.request_ty);
+            for response_ty in &contract.response_tys {
                 self.visit_type_expr(response_ty);
+            }
+        }
+
+        for role in &protocol_def.roles {
+            for state in &role.states {
+                for transition in &state.transitions {
+                    self.visit_type_expr(&transition.trigger.selector_ty);
+                    if let Some(from_role) = &transition.trigger.from_role
+                        && !local_roles.contains(from_role.as_str())
+                    {
+                        self.errors.push(ResolveError::ProtocolFlowRoleUndefined(
+                            protocol_def.name.clone(),
+                            from_role.clone(),
+                            transition.span,
+                        ));
+                    }
+                    for effect in &transition.effects {
+                        if !local_roles.contains(effect.to_role.as_str()) {
+                            self.errors.push(ResolveError::ProtocolFlowRoleUndefined(
+                                protocol_def.name.clone(),
+                                effect.to_role.clone(),
+                                effect.span,
+                            ));
+                        }
+                        self.visit_type_expr(&effect.payload_ty);
+                    }
+                }
             }
         }
     }

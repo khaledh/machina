@@ -742,13 +742,6 @@ fn reseed_protocol_def(protocol_def: &mut res::ProtocolDef, node_id_gen: &mut No
             }
         }
     }
-    for flow in &mut protocol_def.flows {
-        flow.id = node_id_gen.new_id();
-        reseed_type_expr(&mut flow.payload_ty, node_id_gen);
-        for response_ty in &mut flow.response_tys {
-            reseed_type_expr(response_ty, node_id_gen);
-        }
-    }
 }
 
 fn reseed_trait_def(trait_def: &mut res::TraitDef, node_id_gen: &mut NodeIdGen) {

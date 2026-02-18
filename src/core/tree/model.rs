@@ -251,7 +251,6 @@ pub struct ProtocolDef<D> {
     pub messages: Vec<ProtocolMessage<D>>,
     pub request_contracts: Vec<ProtocolRequestContract<D>>,
     pub roles: Vec<ProtocolRole<D>>,
-    pub flows: Vec<ProtocolFlow<D>>,
     pub span: Span,
 }
 
@@ -310,16 +309,6 @@ pub struct ProtocolTrigger<D> {
 pub struct ProtocolEffect<D> {
     pub payload_ty: TypeExpr<D>,
     pub to_role: String,
-    pub span: Span,
-}
-
-#[derive(Clone, Debug)]
-pub struct ProtocolFlow<D> {
-    pub id: NodeId,
-    pub from_role: String,
-    pub to_role: String,
-    pub payload_ty: TypeExpr<D>,
-    pub response_tys: Vec<TypeExpr<D>>,
     pub span: Span,
 }
 

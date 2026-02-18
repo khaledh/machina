@@ -54,30 +54,21 @@ impl<'a> Parser<'a> {
         let mut messages = Vec::new();
         let mut request_contracts = Vec::new();
         let mut roles = Vec::new();
-        let mut flows = Vec::new();
         let mut message_aliases: HashMap<String, TypeExpr> = HashMap::new();
 
         while self.curr_token.kind != TK::RBrace {
             match self.curr_token.kind {
                 TK::KwRole => {
-                    self.parse_protocol_role_decl_or_block(
-                        &mut roles,
-                        &mut flows,
-                        &message_aliases,
-                    )?;
+                    self.parse_protocol_role_decl_or_block(&mut roles, &message_aliases)?;
                 }
                 TK::KwFlow => {
-                    self.parse_protocol_flow_decl(&mut flows)?;
+                    self.parse_protocol_flow_decl(&mut request_contracts, &message_aliases)?;
                 }
                 TK::Ident(_) if self.is_contextual_keyword("msg") => {
                     self.parse_protocol_msg_decl(&mut messages, &mut message_aliases)?;
                 }
                 TK::Ident(_) if self.is_contextual_keyword("req") => {
-                    self.parse_protocol_req_decl(
-                        &mut flows,
-                        &mut request_contracts,
-                        &message_aliases,
-                    )?;
+                    self.parse_protocol_req_decl(&mut request_contracts, &message_aliases)?;
                 }
                 _ => {
                     return Err(ParseError::ExpectedToken(
@@ -96,7 +87,6 @@ impl<'a> Parser<'a> {
             messages,
             request_contracts,
             roles,
-            flows,
             span: self.close(marker),
         })
     }
@@ -104,7 +94,6 @@ impl<'a> Parser<'a> {
     fn parse_protocol_role_decl_or_block(
         &mut self,
         roles: &mut Vec<ProtocolRole>,
-        flows: &mut Vec<ProtocolFlow>,
         messages: &HashMap<String, TypeExpr>,
     ) -> Result<(), ParseError> {
         let role_marker = self.mark();
@@ -121,7 +110,7 @@ impl<'a> Parser<'a> {
 
         self.consume(&TK::LBrace)?;
         while self.curr_token.kind != TK::RBrace {
-            let state = self.parse_protocol_state_block(&role_name, flows, messages)?;
+            let state = self.parse_protocol_state_block(messages)?;
             roles[role_index].states.push(state);
         }
         self.consume(&TK::RBrace)?;
@@ -130,8 +119,6 @@ impl<'a> Parser<'a> {
 
     fn parse_protocol_state_block(
         &mut self,
-        role_name: &str,
-        flows: &mut Vec<ProtocolFlow>,
         messages: &HashMap<String, TypeExpr>,
     ) -> Result<ProtocolState, ParseError> {
         let marker = self.mark();
@@ -151,7 +138,7 @@ impl<'a> Parser<'a> {
         self.consume(&TK::LBrace)?;
         let mut transitions = Vec::new();
         while self.curr_token.kind != TK::RBrace {
-            transitions.push(self.parse_protocol_transition(role_name, flows, messages)?);
+            transitions.push(self.parse_protocol_transition(messages)?);
         }
         self.consume(&TK::RBrace)?;
         Ok(ProtocolState {
@@ -164,8 +151,6 @@ impl<'a> Parser<'a> {
 
     fn parse_protocol_transition(
         &mut self,
-        role_name: &str,
-        flows: &mut Vec<ProtocolFlow>,
         messages: &HashMap<String, TypeExpr>,
     ) -> Result<ProtocolTransition, ParseError> {
         let transition_marker = self.mark();
@@ -185,28 +170,6 @@ impl<'a> Parser<'a> {
         let next_state = self.parse_ident()?;
         let effects = self.parse_protocol_transition_body(messages)?;
         let trigger_payload_ty = self.resolve_protocol_message_ty(&trigger_ty, messages);
-
-        if let Some(from_role) = &trigger_from_role {
-            flows.push(ProtocolFlow {
-                id: self.id_gen.new_id(),
-                from_role: from_role.clone(),
-                to_role: role_name.to_string(),
-                payload_ty: self.clone_type_expr_with_new_ids(&trigger_payload_ty),
-                response_tys: Vec::new(),
-                span: self.close(transition_marker),
-            });
-        }
-
-        for effect in &effects {
-            flows.push(ProtocolFlow {
-                id: self.id_gen.new_id(),
-                from_role: role_name.to_string(),
-                to_role: effect.to_role.clone(),
-                payload_ty: self.clone_type_expr_with_new_ids(&effect.payload_ty),
-                response_tys: Vec::new(),
-                span: effect.span,
-            });
-        }
 
         Ok(ProtocolTransition {
             id: self.id_gen.new_id(),
@@ -259,15 +222,16 @@ impl<'a> Parser<'a> {
 
     fn parse_protocol_flow_decl(
         &mut self,
-        flows: &mut Vec<ProtocolFlow>,
+        request_contracts: &mut Vec<ProtocolRequestContract>,
+        messages: &HashMap<String, TypeExpr>,
     ) -> Result<(), ParseError> {
-        let flow_marker = self.mark();
+        let marker = self.mark();
         self.consume_keyword(TK::KwFlow)?;
         let from_role = self.parse_ident()?;
         self.consume(&TK::Arrow)?;
         let to_role = self.parse_ident()?;
         self.consume(&TK::Colon)?;
-        let payload_ty = self.parse_type_expr()?;
+        let request_ty = self.parse_type_expr()?;
 
         let response_tys = if self.curr_token.kind == TK::Arrow {
             self.consume(&TK::Arrow)?;
@@ -281,13 +245,16 @@ impl<'a> Parser<'a> {
         };
 
         self.consume(&TK::Semicolon)?;
-        flows.push(ProtocolFlow {
+        request_contracts.push(ProtocolRequestContract {
             id: self.id_gen.new_id(),
             from_role,
             to_role,
-            payload_ty,
-            response_tys,
-            span: self.close(flow_marker),
+            request_ty: self.resolve_protocol_message_ty(&request_ty, messages),
+            response_tys: response_tys
+                .iter()
+                .map(|ty| self.resolve_protocol_message_ty(ty, messages))
+                .collect(),
+            span: self.close(marker),
         });
         Ok(())
     }
@@ -331,7 +298,6 @@ impl<'a> Parser<'a> {
 
     fn parse_protocol_req_decl(
         &mut self,
-        flows: &mut Vec<ProtocolFlow>,
         request_contracts: &mut Vec<ProtocolRequestContract>,
         messages: &HashMap<String, TypeExpr>,
     ) -> Result<(), ParseError> {
@@ -361,18 +327,6 @@ impl<'a> Parser<'a> {
             .iter()
             .map(|ty| self.clone_type_expr_with_new_ids(ty))
             .collect();
-
-        flows.push(ProtocolFlow {
-            id: self.id_gen.new_id(),
-            from_role: from_role.clone(),
-            to_role: to_role.clone(),
-            payload_ty: self.clone_type_expr_with_new_ids(&resolved_request_ty),
-            response_tys: resolved_response_tys
-                .iter()
-                .map(|ty| self.clone_type_expr_with_new_ids(ty))
-                .collect(),
-            span: self.close(marker),
-        });
 
         request_contracts.push(ProtocolRequestContract {
             id: self.id_gen.new_id(),

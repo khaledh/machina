@@ -153,63 +153,42 @@ fn protocol_shape_sets(
     let mut required_incoming = HashSet::<Type>::new();
     let mut allowed_outgoing = HashSet::<Type>::new();
 
-    let has_transition_surface = !protocol.messages.is_empty()
-        || !protocol.request_contracts.is_empty()
-        || protocol.roles.iter().any(|role| !role.states.is_empty());
-
-    if has_transition_surface {
-        for role in &protocol.roles {
-            if role.name != role_name {
-                continue;
-            }
-            for state in &role.states {
-                for transition in &state.transitions {
-                    if transition.trigger.from_role.is_some()
-                        && let Ok(payload_ty) = resolve_type_expr(
-                            &resolved.def_table,
-                            &resolved.module,
-                            &transition.trigger.selector_ty,
-                        )
+    for role in &protocol.roles {
+        if role.name != role_name {
+            continue;
+        }
+        for state in &role.states {
+            for transition in &state.transitions {
+                if transition.trigger.from_role.is_some()
+                    && let Ok(payload_ty) = resolve_type_expr(
+                        &resolved.def_table,
+                        &resolved.module,
+                        &transition.trigger.selector_ty,
+                    )
+                {
+                    required_incoming.insert(payload_ty);
+                }
+                for effect in &transition.effects {
+                    if let Ok(payload_ty) =
+                        resolve_type_expr(&resolved.def_table, &resolved.module, &effect.payload_ty)
                     {
-                        required_incoming.insert(payload_ty);
-                    }
-                    for effect in &transition.effects {
-                        if let Ok(payload_ty) =
-                            resolve_type_expr(&resolved.def_table, &resolved.module, &effect.payload_ty)
-                        {
-                            allowed_outgoing.insert(payload_ty);
-                        }
+                        allowed_outgoing.insert(payload_ty);
                     }
                 }
             }
         }
-
-        for contract in &protocol.request_contracts {
-            if let Ok(request_ty) =
-                resolve_type_expr(&resolved.def_table, &resolved.module, &contract.request_ty)
-            {
-                if contract.from_role == role_name {
-                    allowed_outgoing.insert(request_ty.clone());
-                }
-                if contract.to_role == role_name {
-                    required_incoming.insert(request_ty);
-                }
-            }
-        }
-        return (required_incoming, allowed_outgoing);
     }
 
-    // Legacy flow-only protocol model fallback.
-    for flow in &protocol.flows {
-        let Ok(payload_ty) = resolve_type_expr(&resolved.def_table, &resolved.module, &flow.payload_ty)
-        else {
-            continue;
-        };
-        if flow.to_role == role_name {
-            required_incoming.insert(payload_ty.clone());
-        }
-        if flow.from_role == role_name {
-            allowed_outgoing.insert(payload_ty);
+    for contract in &protocol.request_contracts {
+        if let Ok(request_ty) =
+            resolve_type_expr(&resolved.def_table, &resolved.module, &contract.request_ty)
+        {
+            if contract.from_role == role_name {
+                allowed_outgoing.insert(request_ty.clone());
+            }
+            if contract.to_role == role_name {
+                required_incoming.insert(request_ty);
+            }
         }
     }
 

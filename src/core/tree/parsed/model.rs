@@ -32,7 +32,6 @@ pub type ProtocolState = model::ProtocolState<()>;
 pub type ProtocolTransition = model::ProtocolTransition<()>;
 pub type ProtocolTrigger = model::ProtocolTrigger<()>;
 pub type ProtocolEffect = model::ProtocolEffect<()>;
-pub type ProtocolFlow = model::ProtocolFlow<()>;
 pub type TypestateDef = model::TypestateDef<()>;
 pub type TypestateRoleImpl = model::TypestateRoleImpl<()>;
 pub type TypestateItem = model::TypestateItem<()>;
