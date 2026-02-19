@@ -116,7 +116,7 @@ fn collect_stmt_defs_uses(
             collect_pattern_defs(pattern, ctx, defs);
         }
         StmtExprKind::VarDecl { .. } => {}
-        StmtExprKind::Assign { assignee, .. } => {
+        StmtExprKind::Assign { assignee, .. } | StmtExprKind::CompoundAssign { assignee, .. } => {
             collect_assignee_defs(assignee, ctx, defs);
         }
         StmtExprKind::While { .. }
@@ -174,6 +174,9 @@ fn collect_stmt_uses<A: HeapUseAccumulator>(stmt: &StmtExpr, ctx: &NormalizedCon
         }
         StmtExprKind::VarDecl { .. } => {}
         StmtExprKind::Assign {
+            assignee, value, ..
+        }
+        | StmtExprKind::CompoundAssign {
             assignee, value, ..
         } => {
             collect_expr_uses(value, ctx, acc);

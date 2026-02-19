@@ -9,7 +9,7 @@ fn main() {
     var c = cfg::make("worker-a", 3);
 
     // Public property access on an opaque type is allowed.
-    c.tick_count = c.tick_count + 4;
+    c.tick_count += 4;
 
     // Trait-bounded cross-module call.
     let ran = rt::execute(c);

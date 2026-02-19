@@ -73,6 +73,9 @@ impl<'a> Elaborator<'a> {
                     init: self.init_info_for_id(place.id),
                 }
             }
+            norm::StmtExprKind::CompoundAssign { .. } => {
+                panic!("normalize must desugar compound assignment before elaborate");
+            }
             norm::StmtExprKind::While { cond, body } => sem::StmtExprKind::While {
                 cond: Box::new(self.elab_value(cond)),
                 body: Box::new(self.elab_value(body)),

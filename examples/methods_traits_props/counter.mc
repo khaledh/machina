@@ -8,7 +8,7 @@ type Event = Add(u64) | Reset
 
 Counter :: {
     fn add(inout self, value: u64) {
-        self.total = self.total + value;
+        self.total += value;
         self.last = value;
     }
 

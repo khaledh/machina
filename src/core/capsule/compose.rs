@@ -803,6 +803,12 @@ impl VisitorMut<()> for PrivateSymbolRenamer {
                 self.visit_expr(assignee);
                 self.visit_expr(value);
             }
+            parsed::StmtExprKind::CompoundAssign {
+                assignee, value, ..
+            } => {
+                self.visit_expr(assignee);
+                self.visit_expr(value);
+            }
             parsed::StmtExprKind::While { cond, body } => {
                 self.visit_expr(cond);
                 self.push_value_scope();

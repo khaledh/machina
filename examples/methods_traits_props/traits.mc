@@ -48,7 +48,7 @@ fn accept_runnable<T: Runnable>(value: T) -> u64 {
 }
 
 fn add_ticks<T: HasTickCount>(inout p: T, delta: u64) {
-    p.tick_count = p.tick_count + delta;
+    p.tick_count += delta;
 }
 
 fn main() {

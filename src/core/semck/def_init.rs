@@ -356,6 +356,9 @@ impl<'a> DefCollector<'a> {
             }
             StmtExprKind::Assign {
                 assignee, value, ..
+            }
+            | StmtExprKind::CompoundAssign {
+                assignee, value, ..
             } => {
                 self.collect_expr(assignee);
                 self.collect_expr(value);
@@ -483,6 +486,9 @@ impl<'a> DefSpanCollector<'a> {
                 self.spans.entry(*def_id).or_insert(stmt.span);
             }
             StmtExprKind::Assign {
+                assignee, value, ..
+            }
+            | StmtExprKind::CompoundAssign {
                 assignee, value, ..
             } => {
                 self.collect_expr(assignee);
@@ -624,6 +630,14 @@ impl<'a> DefInitChecker<'a> {
             StmtExprKind::Assign {
                 assignee, value, ..
             } => {
+                self.check_expr(value);
+                self.check_assignment(assignee);
+            }
+            StmtExprKind::CompoundAssign {
+                assignee, value, ..
+            } => {
+                // Compound assignment reads and then writes the assignee.
+                self.check_expr(assignee);
                 self.check_expr(value);
                 self.check_assignment(assignee);
             }

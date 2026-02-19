@@ -150,7 +150,9 @@ VarBind            ::= "var" Pattern ( ":" TypeExpr )? "=" Expr ";"
 VarDecl            ::= "var" Identifier ":" TypeExpr ";"
 
 # Assignment
-Assign             ::= PostfixExpr "=" Expr ";"
+Assign             ::= PostfixExpr AssignOp Expr ";"
+AssignOp           ::= "=" | "+=" | "-=" | "*=" | "/=" | "%="
+                     | "&=" | "|=" | "^=" | "<<=" | ">>="
 
 # Loops
 While              ::= "while" Expr Block

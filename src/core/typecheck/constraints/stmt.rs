@@ -98,6 +98,60 @@ impl<'a> ConstraintCollector<'a> {
                     );
                 }
             }
+            StmtExprKind::CompoundAssign {
+                assignee,
+                op,
+                value,
+                ..
+            } => {
+                // Compound assignment is typed as a read-modify-write:
+                // 1) read assignee,
+                // 2) apply binary op with rhs,
+                // 3) assign op result back into assignee.
+                let lhs_ty = self.collect_expr(assignee, None);
+                let rhs_ty = self.collect_expr(value, Some(lhs_ty.clone()));
+                let result_ty = self.fresh_var_term();
+                self.out.expr_obligations.push(ExprObligation::BinOp {
+                    expr_id: stmt.id,
+                    op: *op,
+                    left: lhs_ty.clone(),
+                    right: rhs_ty,
+                    result: result_ty.clone(),
+                    span: stmt.span,
+                });
+
+                if let ExprKind::StructField { target, field } = &assignee.kind {
+                    let target_ty = self.collect_expr(target, None);
+                    let assignee_ty = self.node_term(assignee.id);
+                    self.out
+                        .expr_obligations
+                        .push(ExprObligation::StructFieldAssign {
+                            stmt_id: stmt.id,
+                            assignee_expr_id: assignee.id,
+                            target: target_ty,
+                            field: field.clone(),
+                            assignee: assignee_ty,
+                            value: result_ty.clone(),
+                            caller_def_id: self.current_callable_def_id(),
+                            span: stmt.span,
+                        });
+                } else if let ExprKind::ArrayIndex { target, .. } = &assignee.kind {
+                    let target_ty = self.collect_expr(target, None);
+                    self.out
+                        .expr_obligations
+                        .push(ExprObligation::MapIndexAssign {
+                            stmt_id: stmt.id,
+                            target: target_ty,
+                            span: stmt.span,
+                        });
+                }
+
+                self.push_assignable(
+                    result_ty,
+                    lhs_ty,
+                    ConstraintReason::Stmt(stmt.id, stmt.span),
+                );
+            }
             StmtExprKind::While { cond, body } => {
                 self.collect_expr(cond, Some(Type::Bool));
                 self.enter_loop();
@@ -181,7 +235,8 @@ impl<'a> ConstraintCollector<'a> {
             }
             StmtExprKind::LetBind { value, .. }
             | StmtExprKind::VarBind { value, .. }
-            | StmtExprKind::Assign { value, .. } => self.expr_has_return(value),
+            | StmtExprKind::Assign { value, .. }
+            | StmtExprKind::CompoundAssign { value, .. } => self.expr_has_return(value),
             _ => false,
         }
     }

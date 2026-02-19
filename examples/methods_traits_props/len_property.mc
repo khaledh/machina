@@ -15,7 +15,7 @@ fn main() {
     var i = 0;
     while i < arr.len {
         println(f"[while] arr[{i}]: {arr[i]}");
-        i = i + 1;
+        i += 1;
     }
 
     for i in 0..arr.len {

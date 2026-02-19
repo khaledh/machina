@@ -6,8 +6,8 @@ fn sum(xs: u64[]) -> u64 {
     var i = 0;
     var acc = 0;
     while i < xs.len {
-        acc = acc + xs[i];
-        i = i + 1;
+        acc += xs[i];
+        i += 1;
     }
     acc
 }

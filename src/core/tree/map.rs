@@ -1403,6 +1403,17 @@ pub fn walk_stmt_expr<M: TreeMapper + ?Sized>(
                 value: Box::new(mapper.map_expr(value, ctx)),
                 init: *init,
             },
+            StmtExprKind::CompoundAssign {
+                assignee,
+                op,
+                value,
+                init,
+            } => StmtExprKind::CompoundAssign {
+                assignee: Box::new(mapper.map_expr(assignee, ctx)),
+                op: *op,
+                value: Box::new(mapper.map_expr(value, ctx)),
+                init: *init,
+            },
             StmtExprKind::While { cond, body } => StmtExprKind::While {
                 cond: Box::new(mapper.map_expr(cond, ctx)),
                 body: Box::new(mapper.map_expr(body, ctx)),

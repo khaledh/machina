@@ -48,6 +48,9 @@ pub(super) fn collect_stmt_var_uses(stmt: &StmtExpr, uses: &mut HashSet<DefId>) 
         StmtExprKind::VarDecl { .. } => {}
         StmtExprKind::Assign {
             assignee, value, ..
+        }
+        | StmtExprKind::CompoundAssign {
+            assignee, value, ..
         } => {
             collect_expr_var_uses(value, uses);
             collect_assignee_uses(assignee, uses);

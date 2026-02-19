@@ -664,6 +664,12 @@ pub fn walk_stmt_expr<V: Visitor<D, T> + ?Sized, D, T>(v: &mut V, stmt: &StmtExp
             v.visit_expr(assignee);
             v.visit_expr(value);
         }
+        StmtExprKind::CompoundAssign {
+            assignee, value, ..
+        } => {
+            v.visit_expr(assignee);
+            v.visit_expr(value);
+        }
         StmtExprKind::While { cond, body } => {
             v.visit_expr(cond);
             v.visit_expr(body);

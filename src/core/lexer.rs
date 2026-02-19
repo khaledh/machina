@@ -175,6 +175,26 @@ pub enum TokenKind {
     // Assignment operator
     #[display("=")]
     Equals,
+    #[display("+=")]
+    PlusEquals,
+    #[display("-=")]
+    MinusEquals,
+    #[display("*=")]
+    StarEquals,
+    #[display("/=")]
+    SlashEquals,
+    #[display("%=")]
+    PercentEquals,
+    #[display("&=")]
+    AmpersandEquals,
+    #[display("|=")]
+    PipeEquals,
+    #[display("^=")]
+    CaretEquals,
+    #[display("<<=")]
+    ShiftLeftEquals,
+    #[display(">>=")]
+    ShiftRightEquals,
 
     // Comparison operators
     #[display("==")]
@@ -577,25 +597,48 @@ impl<'a> Lexer<'a> {
                 if matches!(self.source.peek(), Some(&'>')) {
                     self.advance();
                     Ok(TokenKind::Arrow)
+                } else if matches!(self.source.peek(), Some(&'=')) {
+                    self.advance();
+                    Ok(TokenKind::MinusEquals)
                 } else {
                     Ok(TokenKind::Minus)
                 }
             }
             Some(&'+') => {
                 self.advance();
-                Ok(TokenKind::Plus)
+                if matches!(self.source.peek(), Some(&'=')) {
+                    self.advance();
+                    Ok(TokenKind::PlusEquals)
+                } else {
+                    Ok(TokenKind::Plus)
+                }
             }
             Some(&'*') => {
                 self.advance();
-                Ok(TokenKind::Star)
+                if matches!(self.source.peek(), Some(&'=')) {
+                    self.advance();
+                    Ok(TokenKind::StarEquals)
+                } else {
+                    Ok(TokenKind::Star)
+                }
             }
             Some(&'/') => {
                 self.advance();
-                Ok(TokenKind::Slash)
+                if matches!(self.source.peek(), Some(&'=')) {
+                    self.advance();
+                    Ok(TokenKind::SlashEquals)
+                } else {
+                    Ok(TokenKind::Slash)
+                }
             }
             Some(&'%') => {
                 self.advance();
-                Ok(TokenKind::Percent)
+                if matches!(self.source.peek(), Some(&'=')) {
+                    self.advance();
+                    Ok(TokenKind::PercentEquals)
+                } else {
+                    Ok(TokenKind::Percent)
+                }
             }
             Some(&'(') => {
                 self.advance();
@@ -618,6 +661,9 @@ impl<'a> Lexer<'a> {
                 if matches!(self.source.peek(), Some(&'|')) {
                     self.advance();
                     Ok(TokenKind::LogicalOr)
+                } else if matches!(self.source.peek(), Some(&'=')) {
+                    self.advance();
+                    Ok(TokenKind::PipeEquals)
                 } else {
                     Ok(TokenKind::Pipe)
                 }
@@ -696,7 +742,12 @@ impl<'a> Lexer<'a> {
                 match self.source.peek() {
                     Some(&'<') => {
                         self.advance();
-                        Ok(TokenKind::ShiftLeft)
+                        if matches!(self.source.peek(), Some(&'=')) {
+                            self.advance();
+                            Ok(TokenKind::ShiftLeftEquals)
+                        } else {
+                            Ok(TokenKind::ShiftLeft)
+                        }
                     }
                     Some(&'=') => {
                         self.advance();
@@ -710,7 +761,12 @@ impl<'a> Lexer<'a> {
                 match self.source.peek() {
                     Some(&'>') => {
                         self.advance();
-                        Ok(TokenKind::ShiftRight)
+                        if matches!(self.source.peek(), Some(&'=')) {
+                            self.advance();
+                            Ok(TokenKind::ShiftRightEquals)
+                        } else {
+                            Ok(TokenKind::ShiftRight)
+                        }
                     }
                     Some(&'=') => {
                         self.advance();
@@ -724,13 +780,21 @@ impl<'a> Lexer<'a> {
                 if matches!(self.source.peek(), Some(&'&')) {
                     self.advance();
                     Ok(TokenKind::LogicalAnd)
+                } else if matches!(self.source.peek(), Some(&'=')) {
+                    self.advance();
+                    Ok(TokenKind::AmpersandEquals)
                 } else {
                     Ok(TokenKind::Ampersand)
                 }
             }
             Some(&'^') => {
                 self.advance();
-                Ok(TokenKind::Caret)
+                if matches!(self.source.peek(), Some(&'=')) {
+                    self.advance();
+                    Ok(TokenKind::CaretEquals)
+                } else {
+                    Ok(TokenKind::Caret)
+                }
             }
             Some(&'~') => {
                 self.advance();

@@ -6,7 +6,7 @@ requires {
 fn sum(xs: u64[]) -> u64 {
     var acc = 0;
     for x in xs {
-        acc = acc + x;
+        acc += x;
     }
     acc
 }

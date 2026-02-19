@@ -868,6 +868,20 @@ impl StmtExpr {
                 writeln!(f, "{}Value:", pad1)?;
                 value.fmt_with_indent(f, level + 2)?;
             }
+            StmtExprKind::CompoundAssign {
+                assignee,
+                op,
+                value,
+                ..
+            } => {
+                let pad1 = indent(level + 1);
+                writeln!(f, "{}CompoundAssign [{}]", pad, self.id)?;
+                writeln!(f, "{}Op: {:?}", pad1, op)?;
+                writeln!(f, "{}Assignee:", pad1)?;
+                assignee.fmt_with_indent(f, level + 2)?;
+                writeln!(f, "{}Value:", pad1)?;
+                value.fmt_with_indent(f, level + 2)?;
+            }
             StmtExprKind::While { cond, body } => {
                 let pad1 = indent(level + 1);
                 writeln!(f, "{}While [{}]", pad, self.id)?;

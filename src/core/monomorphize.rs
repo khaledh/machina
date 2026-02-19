@@ -988,6 +988,12 @@ fn reseed_stmt_expr(stmt: &mut res::StmtExpr, node_id_gen: &mut NodeIdGen) {
             reseed_expr(assignee, node_id_gen);
             reseed_expr(value, node_id_gen);
         }
+        res::StmtExprKind::CompoundAssign {
+            assignee, value, ..
+        } => {
+            reseed_expr(assignee, node_id_gen);
+            reseed_expr(value, node_id_gen);
+        }
         res::StmtExprKind::While { cond, body } => {
             reseed_expr(cond, node_id_gen);
             reseed_expr(body, node_id_gen);

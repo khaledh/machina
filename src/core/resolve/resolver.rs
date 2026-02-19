@@ -1702,6 +1702,12 @@ impl Visitor<()> for SymbolResolver {
                 self.check_lvalue_mutability(assignee);
                 self.visit_expr(value);
             }
+            StmtExprKind::CompoundAssign {
+                assignee, value, ..
+            } => {
+                self.check_lvalue_mutability(assignee);
+                self.visit_expr(value);
+            }
 
             StmtExprKind::While { cond, body } => {
                 self.visit_expr(cond);

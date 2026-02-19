@@ -118,6 +118,35 @@ fn test_lex_bitwise_operators() {
 }
 
 #[test]
+fn test_lex_compound_assignment_operators() {
+    let mut lexer = Lexer::new("+= -= *= /= %= &= |= ^= <<= >>=");
+
+    let t1 = lexer.next_token().unwrap();
+    let t2 = lexer.next_token().unwrap();
+    let t3 = lexer.next_token().unwrap();
+    let t4 = lexer.next_token().unwrap();
+    let t5 = lexer.next_token().unwrap();
+    let t6 = lexer.next_token().unwrap();
+    let t7 = lexer.next_token().unwrap();
+    let t8 = lexer.next_token().unwrap();
+    let t9 = lexer.next_token().unwrap();
+    let t10 = lexer.next_token().unwrap();
+    let t11 = lexer.next_token().unwrap();
+
+    assert_eq!(t1.kind, TokenKind::PlusEquals);
+    assert_eq!(t2.kind, TokenKind::MinusEquals);
+    assert_eq!(t3.kind, TokenKind::StarEquals);
+    assert_eq!(t4.kind, TokenKind::SlashEquals);
+    assert_eq!(t5.kind, TokenKind::PercentEquals);
+    assert_eq!(t6.kind, TokenKind::AmpersandEquals);
+    assert_eq!(t7.kind, TokenKind::PipeEquals);
+    assert_eq!(t8.kind, TokenKind::CaretEquals);
+    assert_eq!(t9.kind, TokenKind::ShiftLeftEquals);
+    assert_eq!(t10.kind, TokenKind::ShiftRightEquals);
+    assert_eq!(t11.kind, TokenKind::Eof);
+}
+
+#[test]
 fn test_lex_unexpected_character() {
     let mut lexer = Lexer::new("#");
     let result = lexer.next_token();

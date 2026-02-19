@@ -165,6 +165,9 @@ fn check_item_for_conflicts(
                 StmtExprKind::VarDecl { .. } => {}
                 StmtExprKind::Assign {
                     assignee, value, ..
+                }
+                | StmtExprKind::CompoundAssign {
+                    assignee, value, ..
                 } => {
                     visitor.visit_expr(assignee);
                     visitor.visit_expr(value);
@@ -198,6 +201,9 @@ fn check_item_for_conflicts(
                 }
                 StmtExprKind::VarDecl { .. } => {}
                 StmtExprKind::Assign {
+                    assignee, value, ..
+                }
+                | StmtExprKind::CompoundAssign {
                     assignee, value, ..
                 } => {
                     check_write_target(ctx, assignee, &borrowed_imm, errors);
@@ -396,6 +402,9 @@ fn check_item_for_escapes(
             }
             StmtExprKind::VarDecl { .. } => {}
             StmtExprKind::Assign {
+                assignee, value, ..
+            }
+            | StmtExprKind::CompoundAssign {
                 assignee, value, ..
             } => {
                 if !matches!(assignee.kind, ExprKind::Var { .. })

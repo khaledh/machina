@@ -54,7 +54,7 @@ fn collect_stmt_defs_uses(stmt: &StmtExpr, defs: &mut HashSet<DefId>, uses: &mut
             collect_bind_pattern_defs(pattern, defs);
         }
         StmtExprKind::VarDecl { .. } => {}
-        StmtExprKind::Assign { assignee, .. } => {
+        StmtExprKind::Assign { assignee, .. } | StmtExprKind::CompoundAssign { assignee, .. } => {
             collect_assignee_defs(assignee, defs);
         }
         StmtExprKind::While { .. } => {}

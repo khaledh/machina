@@ -13,8 +13,8 @@ Boxed :: {
     }
 
     fn shift(inout self, dx: u64, dy: u64) {
-        self.p.x = self.p.x + dx;
-        self.p.y = self.p.y + dy;
+        self.p.x += dx;
+        self.p.y += dy;
     }
 
     fn consume(sink self) -> u64 {

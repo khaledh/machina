@@ -372,6 +372,16 @@ impl<'a> Visitor<DefId, TypeId> for MoveVisitor<'a> {
                     self.visit_expr(assignee);
                 }
             }
+            StmtExprKind::CompoundAssign {
+                assignee, value, ..
+            } => {
+                // Compound assignment reads assignee before writing it back.
+                self.visit_expr(assignee);
+                self.visit_expr(value);
+                if let ExprKind::Var { def_id, .. } = assignee.kind {
+                    self.moved.remove(&def_id);
+                }
+            }
             StmtExprKind::While { cond, .. } => {
                 self.visit_expr(cond);
             }

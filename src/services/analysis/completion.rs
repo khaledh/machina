@@ -961,6 +961,9 @@ fn collect_defs_at_cursor_in_stmt(
         }
         StmtExprKind::Assign {
             assignee, value, ..
+        }
+        | StmtExprKind::CompoundAssign {
+            assignee, value, ..
         } => {
             if span_contains_pos(assignee.span, cursor) {
                 collect_defs_before_cursor_in_expr(assignee, cursor, def_table, scopes);

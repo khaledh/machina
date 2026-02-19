@@ -1,5 +1,11 @@
 use super::*;
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum AssignOp {
+    Simple,
+    Compound(BinaryOp),
+}
+
 impl<'a> Parser<'a> {
     pub(super) fn parse_block(&mut self) -> Result<Expr, ParseError> {
         let marker = self.mark();
@@ -41,18 +47,19 @@ impl<'a> Parser<'a> {
                 }
                 _ => {
                     let expr = self.parse_expr(0)?;
-                    match self.curr_token.kind {
-                        TK::Equals => {
-                            let stmt = self.parse_assign(expr)?;
-                            items.push(BlockItem::Stmt(stmt));
-                        }
-                        TK::Semicolon => {
-                            self.advance();
-                            items.push(BlockItem::Expr(expr));
-                        }
-                        _ => {
-                            tail = Some(Box::new(expr));
-                            break;
+                    if let Some(assign_op) = self.current_assign_op() {
+                        let stmt = self.parse_assign(expr, assign_op)?;
+                        items.push(BlockItem::Stmt(stmt));
+                    } else {
+                        match self.curr_token.kind {
+                            TK::Semicolon => {
+                                self.advance();
+                                items.push(BlockItem::Expr(expr));
+                            }
+                            _ => {
+                                tail = Some(Box::new(expr));
+                                break;
+                            }
                         }
                     }
                 }
@@ -67,6 +74,23 @@ impl<'a> Parser<'a> {
             ty: (),
             span: self.close(marker),
         })
+    }
+
+    fn current_assign_op(&self) -> Option<AssignOp> {
+        match self.curr_token.kind {
+            TK::Equals => Some(AssignOp::Simple),
+            TK::PlusEquals => Some(AssignOp::Compound(BinaryOp::Add)),
+            TK::MinusEquals => Some(AssignOp::Compound(BinaryOp::Sub)),
+            TK::StarEquals => Some(AssignOp::Compound(BinaryOp::Mul)),
+            TK::SlashEquals => Some(AssignOp::Compound(BinaryOp::Div)),
+            TK::PercentEquals => Some(AssignOp::Compound(BinaryOp::Mod)),
+            TK::AmpersandEquals => Some(AssignOp::Compound(BinaryOp::BitAnd)),
+            TK::PipeEquals => Some(AssignOp::Compound(BinaryOp::BitOr)),
+            TK::CaretEquals => Some(AssignOp::Compound(BinaryOp::BitXor)),
+            TK::ShiftLeftEquals => Some(AssignOp::Compound(BinaryOp::Shl)),
+            TK::ShiftRightEquals => Some(AssignOp::Compound(BinaryOp::Shr)),
+            _ => None,
+        }
     }
 
     pub(super) fn parse_let(&mut self) -> Result<StmtExpr, ParseError> {
@@ -155,22 +179,36 @@ impl<'a> Parser<'a> {
         }
     }
 
-    pub(super) fn parse_assign(&mut self, assignee: Expr) -> Result<StmtExpr, ParseError> {
+    fn parse_assign(
+        &mut self,
+        assignee: Expr,
+        assign_op: AssignOp,
+    ) -> Result<StmtExpr, ParseError> {
         let marker = self.mark();
 
-        self.consume(&TK::Equals)?;
+        self.advance();
 
         let value = self.parse_expr(0)?;
 
         self.consume(&TK::Semicolon)?;
 
-        Ok(StmtExpr {
-            id: self.id_gen.new_id(),
-            kind: StmtExprKind::Assign {
+        let kind = match assign_op {
+            AssignOp::Simple => StmtExprKind::Assign {
                 assignee: Box::new(assignee),
                 value: Box::new(value),
                 init: InitInfo::default(),
             },
+            AssignOp::Compound(op) => StmtExprKind::CompoundAssign {
+                assignee: Box::new(assignee),
+                op,
+                value: Box::new(value),
+                init: InitInfo::default(),
+            },
+        };
+
+        Ok(StmtExpr {
+            id: self.id_gen.new_id(),
+            kind,
             ty: (),
             span: self.close(marker),
         })

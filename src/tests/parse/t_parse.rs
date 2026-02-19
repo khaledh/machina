@@ -2829,3 +2829,54 @@ fn test_parse_typestate_handler_shorthand_and_stay_forms() {
         TypeExprKind::Named { ref ident, .. } if ident == "stay"
     ));
 }
+
+#[test]
+fn test_parse_compound_assignment_stmt_variant() {
+    let source = r#"
+        fn test() -> u64 {
+            var x = 1;
+            x += 2;
+            x
+        }
+    "#;
+
+    let funcs = parse_source(source).expect("Failed to parse");
+    let func = &funcs[0];
+    let (items, tail) = block_parts(&func.body);
+
+    let stmt = block_stmt_at(items, 1);
+    let StmtExprKind::CompoundAssign {
+        assignee,
+        op,
+        value,
+        ..
+    } = &stmt.kind
+    else {
+        panic!("Expected compound assignment statement");
+    };
+    assert_eq!(*op, BinaryOp::Add);
+    assert!(matches!(assignee.kind, ExprKind::Var { .. }));
+    assert!(matches!(value.kind, ExprKind::IntLit(2)));
+    assert!(tail.is_some(), "Expected tail expression");
+}
+
+#[test]
+fn test_parse_shift_compound_assignment() {
+    let source = r#"
+        fn test() -> u64 {
+            var x = 1;
+            x <<= 3;
+            x
+        }
+    "#;
+
+    let funcs = parse_source(source).expect("Failed to parse");
+    let func = &funcs[0];
+    let (items, _) = block_parts(&func.body);
+    let stmt = block_stmt_at(items, 1);
+    let StmtExprKind::CompoundAssign { op, value, .. } = &stmt.kind else {
+        panic!("Expected compound assignment statement");
+    };
+    assert_eq!(*op, BinaryOp::Shl);
+    assert!(matches!(value.kind, ExprKind::IntLit(3)));
+}

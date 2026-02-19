@@ -825,6 +825,12 @@ pub enum StmtExprKind<D, T = ()> {
         value: Box<Expr<D, T>>,
         init: InitInfo,
     },
+    CompoundAssign {
+        assignee: Box<Expr<D, T>>,
+        op: BinaryOp,
+        value: Box<Expr<D, T>>,
+        init: InitInfo,
+    },
     While {
         cond: Box<Expr<D, T>>,
         body: Box<Expr<D, T>>,

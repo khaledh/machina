@@ -140,6 +140,9 @@ pub(super) fn rewrite_machine_request_method_destinations(
             }
             StmtExprKind::Assign {
                 assignee, value, ..
+            }
+            | StmtExprKind::CompoundAssign {
+                assignee, value, ..
             } => {
                 collect_machine_bindings_from_expr(assignee, out);
                 collect_machine_bindings_from_expr(value, out);

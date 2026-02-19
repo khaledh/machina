@@ -56,12 +56,12 @@ fn borrow_mut() {
     // Borrow-capturing a mutable local (no capture list).
     var counter = 0;
     let bump = || -> u64 {
-        counter = counter + 1;
+        counter += 1;
         counter
     };
     let c1 = bump();
     let c2 = bump();
-    counter = counter + 1;
+    counter += 1;
 
     println(f"c1={c1}, c2={c2}, counter={counter}");
 }
@@ -71,7 +71,7 @@ fn borrow_after_last_call() {
     var n = 1;
     let get_n = || -> u64 n;
     let v = get_n();
-    n = n + 1;
+    n += 1;
     println(f"v={v}, n={n}");
 }
 

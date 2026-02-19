@@ -10,11 +10,11 @@ fn last_even_below(limit: u64) -> u64 {
     var last = 0;
     while i < limit {
         if i % 2 == 1 {
-            i = i + 1;
+            i += 1;
             continue;
         } else {
             last = i;
-            i = i + 1;
+            i += 1;
         }
     }
     return last;
@@ -27,8 +27,8 @@ fn sum_until(limit: u64) -> u64 {
         if i == 5 {
             break;
         } else {
-            acc = acc + i;
-            i = i + 1;
+            acc += i;
+            i += 1;
         }
     }
     acc
