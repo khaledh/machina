@@ -2,6 +2,7 @@
 #include <stddef.h>
 
 #include "machine/runtime.h"
+#include "machine_test_helpers.h"
 
 // Transactional dispatch behavior test.
 //
@@ -45,17 +46,7 @@ static mc_dispatch_result_t txn_dispatch(
 ) {
     txn_test_ctx_t *state = (txn_test_ctx_t *)ctx;
 
-    // Default: no staged outputs.
-    txn->has_next_state = 0;
-    txn->next_state = 0;
-    txn->outbox = NULL;
-    txn->outbox_len = 0;
-    txn->subscriptions = NULL;
-    txn->subscriptions_len = 0;
-    txn->requests = NULL;
-    txn->requests_len = 0;
-    txn->replies = NULL;
-    txn->replies_len = 0;
+    MC_TEST_TXN_INIT(txn);
 
     if (env->kind == 1) {
         // Successful staged transition.

@@ -388,33 +388,29 @@ void mc_apply_fault_policy(
 
 // Preflight / commit helpers -------------------------------------------------
 
-// Validate that outbox commit can succeed fully before any state mutation.
-// This gives all-or-nothing commit behavior for outbox delivery.
-static uint8_t mc_preflight_outbox(
-    mc_machine_runtime_t *rt,
-    const mc_machine_outbox_effect_t *outbox,
-    uint32_t outbox_len
-) {
-    // Validate destination existence/lifecycle first.
-    for (uint32_t i = 0; i < outbox_len; i++) {
-        const mc_machine_outbox_effect_t *eff = &outbox[i];
-        mc_machine_slot_t *dst = mc_get_slot(rt, eff->dst);
-        if (!dst) {
-            return 0;
-        }
-        if (dst->lifecycle != MC_MACHINE_RUNNING && dst->lifecycle != MC_MACHINE_CREATED) {
-            return 0;
-        }
-    }
+// Shared: validate destination lifecycle is acceptable for delivery.
+static uint8_t mc_validate_dst_lifecycle(mc_machine_slot_t *dst) {
+    return dst && (dst->lifecycle == MC_MACHINE_RUNNING || dst->lifecycle == MC_MACHINE_CREATED);
+}
 
-    // For each unique destination, ensure cumulative mailbox capacity exists.
+// Shared: preflight unique-destination mailbox capacity for an array of
+// destination ids.  `get_dst` extracts the destination from element `i`.
+// Returns 0 on failure (insufficient capacity or bad destinations).
+typedef mc_machine_id_t (*mc_dst_getter_fn)(const void *array, uint32_t i);
+
+static uint8_t mc_preflight_dest_capacity(
+    mc_machine_runtime_t *rt,
+    const void *array,
+    uint32_t len,
+    mc_dst_getter_fn get_dst
+) {
     uint32_t additional_ready = 0;
-    for (uint32_t i = 0; i < outbox_len; i++) {
-        mc_machine_id_t dst_id = outbox[i].dst;
+    for (uint32_t i = 0; i < len; i++) {
+        mc_machine_id_t dst_id = get_dst(array, i);
 
         uint8_t seen = 0;
         for (uint32_t k = 0; k < i; k++) {
-            if (outbox[k].dst == dst_id) {
+            if (get_dst(array, k) == dst_id) {
                 seen = 1;
                 break;
             }
@@ -424,9 +420,12 @@ static uint8_t mc_preflight_outbox(
         }
 
         mc_machine_slot_t *dst = mc_get_slot(rt, dst_id);
+        if (!mc_validate_dst_lifecycle(dst)) {
+            return 0;
+        }
         uint32_t needed = 0;
-        for (uint32_t j = i; j < outbox_len; j++) {
-            if (outbox[j].dst == dst_id) {
+        for (uint32_t j = i; j < len; j++) {
+            if (get_dst(array, j) == dst_id) {
                 needed += 1;
             }
         }
@@ -443,8 +442,47 @@ static uint8_t mc_preflight_outbox(
         }
     }
 
-    // Ensure ready queue can accommodate all newly-ready destinations.
     return mc_ready_ensure_cap(&rt->ready, rt->ready.len + additional_ready);
+}
+
+// Shared: enqueue envelope into destination mailbox and schedule on ready queue.
+static uint8_t mc_enqueue_and_schedule(
+    mc_machine_runtime_t *rt,
+    mc_machine_id_t dst_id,
+    const mc_machine_envelope_t *env
+) {
+    mc_machine_slot_t *dst = mc_get_slot(rt, dst_id);
+    if (!dst) {
+        return 0;
+    }
+    if (!mc_mailbox_push(&dst->mailbox, env)) {
+        return 0;
+    }
+    if (dst->lifecycle == MC_MACHINE_RUNNING && !dst->mailbox.in_ready_queue) {
+        if (!mc_ready_push(&rt->ready, dst_id)) {
+            return 0;
+        }
+        dst->mailbox.in_ready_queue = 1;
+    }
+    return 1;
+}
+
+// Destination accessors for mc_preflight_dest_capacity.
+static mc_machine_id_t mc_outbox_dst(const void *array, uint32_t i) {
+    return ((const mc_machine_outbox_effect_t *)array)[i].dst;
+}
+
+static mc_machine_id_t mc_request_dst(const void *array, uint32_t i) {
+    return ((const mc_machine_request_effect_t *)array)[i].dst;
+}
+
+// Validate that outbox commit can succeed fully before any state mutation.
+static uint8_t mc_preflight_outbox(
+    mc_machine_runtime_t *rt,
+    const mc_machine_outbox_effect_t *outbox,
+    uint32_t outbox_len
+) {
+    return mc_preflight_dest_capacity(rt, outbox, outbox_len, mc_outbox_dst);
 }
 
 // Commit staged outbox after successful preflight.
@@ -454,20 +492,8 @@ static uint8_t mc_commit_outbox(
     uint32_t outbox_len
 ) {
     for (uint32_t i = 0; i < outbox_len; i++) {
-        const mc_machine_outbox_effect_t *eff = &outbox[i];
-        mc_machine_slot_t *dst = mc_get_slot(rt, eff->dst);
-        if (!dst) {
+        if (!mc_enqueue_and_schedule(rt, outbox[i].dst, &outbox[i].env)) {
             return 0;
-        }
-        if (!mc_mailbox_push(&dst->mailbox, &eff->env)) {
-            return 0;
-        }
-
-        if (dst->lifecycle == MC_MACHINE_RUNNING && !dst->mailbox.in_ready_queue) {
-            if (!mc_ready_push(&rt->ready, eff->dst)) {
-                return 0;
-            }
-            dst->mailbox.in_ready_queue = 1;
         }
     }
     return 1;
@@ -502,50 +528,7 @@ static uint8_t mc_preflight_requests(
         return 0;
     }
 
-    // Validate destinations and cumulative mailbox capacity.
-    for (uint32_t i = 0; i < requests_len; i++) {
-        mc_machine_slot_t *dst = mc_get_slot(rt, requests[i].dst);
-        if (!dst) {
-            return 0;
-        }
-        if (dst->lifecycle != MC_MACHINE_RUNNING && dst->lifecycle != MC_MACHINE_CREATED) {
-            return 0;
-        }
-    }
-
-    uint32_t additional_ready = 0;
-    for (uint32_t i = 0; i < requests_len; i++) {
-        mc_machine_id_t dst_id = requests[i].dst;
-        uint8_t seen = 0;
-        for (uint32_t k = 0; k < i; k++) {
-            if (requests[k].dst == dst_id) {
-                seen = 1;
-                break;
-            }
-        }
-        if (seen) {
-            continue;
-        }
-
-        mc_machine_slot_t *dst = mc_get_slot(rt, dst_id);
-        uint32_t needed = 0;
-        for (uint32_t j = i; j < requests_len; j++) {
-            if (requests[j].dst == dst_id) {
-                needed += 1;
-            }
-        }
-        uint32_t free_slots = dst->mailbox.cap - dst->mailbox.len;
-        if (needed > free_slots) {
-            return 0;
-        }
-        if (dst->lifecycle == MC_MACHINE_RUNNING
-            && dst->mailbox.len == 0
-            && !dst->mailbox.in_ready_queue) {
-            additional_ready += 1;
-        }
-    }
-
-    return mc_ready_ensure_cap(&rt->ready, rt->ready.len + additional_ready);
+    return mc_preflight_dest_capacity(rt, requests, requests_len, mc_request_dst);
 }
 
 // Commit staged requests after successful preflight.
@@ -557,10 +540,6 @@ static uint8_t mc_commit_requests(
 ) {
     for (uint32_t i = 0; i < requests_len; i++) {
         const mc_machine_request_effect_t *req = &requests[i];
-        mc_machine_slot_t *dst = mc_get_slot(rt, req->dst);
-        if (!dst) {
-            return 0;
-        }
 
         mc_machine_envelope_t request_env = req->env;
         request_env.src = src;
@@ -570,14 +549,8 @@ static uint8_t mc_commit_requests(
         request_env.origin_payload1 = 0;
         request_env.origin_request_site_key = 0;
 
-        if (!mc_mailbox_push(&dst->mailbox, &request_env)) {
+        if (!mc_enqueue_and_schedule(rt, req->dst, &request_env)) {
             return 0;
-        }
-        if (dst->lifecycle == MC_MACHINE_RUNNING && !dst->mailbox.in_ready_queue) {
-            if (!mc_ready_push(&rt->ready, req->dst)) {
-                return 0;
-            }
-            dst->mailbox.in_ready_queue = 1;
         }
         mc_pending_correlation_id_t correlation = {
             .pending_id = req->pending_id,
@@ -618,6 +591,8 @@ static uint8_t mc_preflight_replies(
     }
 
     // Validate requester destinations and mailbox capacity.
+    // Replies resolve destinations through pending table, so we can't use
+    // mc_preflight_dest_capacity directly.
     uint32_t additional_ready = 0;
     for (uint32_t i = 0; i < replies_len; i++) {
         int32_t idx = mc_pending_find_active(&rt->pending, replies[i].reply_cap_id);
@@ -626,10 +601,7 @@ static uint8_t mc_preflight_replies(
         }
         mc_machine_id_t requester = rt->pending.entries[(uint32_t)idx].requester;
         mc_machine_slot_t *dst = mc_get_slot(rt, requester);
-        if (!dst) {
-            return 0;
-        }
-        if (dst->lifecycle != MC_MACHINE_RUNNING && dst->lifecycle != MC_MACHINE_CREATED) {
+        if (!mc_validate_dst_lifecycle(dst)) {
             return 0;
         }
 
@@ -681,10 +653,6 @@ static uint8_t mc_commit_replies(
             return 0;
         }
         mc_machine_id_t requester = rt->pending.entries[(uint32_t)idx].requester;
-        mc_machine_slot_t *dst = mc_get_slot(rt, requester);
-        if (!dst) {
-            return 0;
-        }
 
         mc_machine_envelope_t response_env = reply->env;
         response_env.src = src;
@@ -695,14 +663,8 @@ static uint8_t mc_commit_replies(
         response_env.origin_request_site_key =
             rt->pending.entries[(uint32_t)idx].correlation.request_site_key;
 
-        if (!mc_mailbox_push(&dst->mailbox, &response_env)) {
+        if (!mc_enqueue_and_schedule(rt, requester, &response_env)) {
             return 0;
-        }
-        if (dst->lifecycle == MC_MACHINE_RUNNING && !dst->mailbox.in_ready_queue) {
-            if (!mc_ready_push(&rt->ready, requester)) {
-                return 0;
-            }
-            dst->mailbox.in_ready_queue = 1;
         }
 
         // Consume capability only after successful delivery.

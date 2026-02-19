@@ -2,6 +2,7 @@
 #include <stdio.h>
 
 #include "machine/runtime.h"
+#include "machine_test_helpers.h"
 
 // End-to-end test for compiler ABI shims:
 // - __mc_machine_emit_send
@@ -61,16 +62,7 @@ static mc_dispatch_result_t emit_dispatch(
 ) {
     emit_test_ctx_t *state = (emit_test_ctx_t *)ctx;
     (void)current_state;
-    txn->has_next_state = 0;
-    txn->next_state = 0;
-    txn->outbox = NULL;
-    txn->outbox_len = 0;
-    txn->subscriptions = NULL;
-    txn->subscriptions_len = 0;
-    txn->requests = NULL;
-    txn->requests_len = 0;
-    txn->replies = NULL;
-    txn->replies_len = 0;
+    MC_TEST_TXN_INIT(txn);
 
     if (machine_id == state->src_send && env->kind == 1) {
         if (!__mc_machine_emit_send(state->dst_send, 10, 11, 22)) {

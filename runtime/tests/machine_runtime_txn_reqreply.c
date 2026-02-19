@@ -2,6 +2,7 @@
 #include <stddef.h>
 
 #include "machine/runtime.h"
+#include "machine_test_helpers.h"
 
 // Transactional request/reply staging test.
 //
@@ -46,16 +47,7 @@ static mc_dispatch_result_t txn_reqreply_dispatch(
     (void)fault_code;
     txn_reqreply_ctx_t *state = (txn_reqreply_ctx_t *)ctx;
 
-    txn->has_next_state = 0;
-    txn->next_state = 0;
-    txn->outbox = NULL;
-    txn->outbox_len = 0;
-    txn->subscriptions = NULL;
-    txn->subscriptions_len = 0;
-    txn->requests = NULL;
-    txn->requests_len = 0;
-    txn->replies = NULL;
-    txn->replies_len = 0;
+    MC_TEST_TXN_INIT(txn);
 
     // Successful staged request commit.
     if (machine_id == state->src_req_ok && env->kind == 1) {

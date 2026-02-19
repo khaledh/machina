@@ -58,6 +58,30 @@ static void mc_machine_runtime_managed_atexit_cleanup(void) {
     __mc_machine_runtime_free(runtime);
 }
 
+// ---------------------------------------------------------------------------
+// Bridge macros for repetitive rt / rt+id wrapper patterns.
+// ---------------------------------------------------------------------------
+
+// Wrapper that validates runtime handle and machine_id, binds `rt` and `id`,
+// then executes `body` which should return uint64_t.
+#define MC_BRIDGE_RT_ID(fn_name, body)                                         \
+    uint64_t fn_name(uint64_t runtime, uint64_t machine_id) {                  \
+        mc_machine_runtime_t *rt = mc_runtime_from_handle(runtime);            \
+        mc_machine_id_t id = 0;                                                \
+        if (!rt || !mc_machine_id_from_u64(machine_id, &id)) {                 \
+            return 0;                                                          \
+        }                                                                      \
+        body                                                                   \
+    }
+
+MC_BRIDGE_RT_ID(__mc_machine_runtime_start_u64, {
+    return __mc_machine_runtime_start(rt, id) ? 1 : 0;
+})
+
+// ---------------------------------------------------------------------------
+// Non-macro wrappers (varying signatures or complex logic).
+// ---------------------------------------------------------------------------
+
 uint64_t __mc_machine_runtime_new(void) {
     static uint8_t bootstrap_done = 0;
     if (!bootstrap_done) {
@@ -127,15 +151,6 @@ uint64_t __mc_machine_runtime_spawn_u64(uint64_t runtime, uint64_t mailbox_cap) 
         return 0;
     }
     return (uint64_t)id;
-}
-
-uint64_t __mc_machine_runtime_start_u64(uint64_t runtime, uint64_t machine_id) {
-    mc_machine_runtime_t *rt = mc_runtime_from_handle(runtime);
-    mc_machine_id_t id = 0;
-    if (!rt || !mc_machine_id_from_u64(machine_id, &id)) {
-        return 0;
-    }
-    return __mc_machine_runtime_start(rt, id) ? 1 : 0;
 }
 
 uint64_t __mc_machine_runtime_set_state_u64(

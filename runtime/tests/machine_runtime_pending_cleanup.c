@@ -2,6 +2,7 @@
 #include <stdint.h>
 
 #include "machine/runtime.h"
+#include "machine_test_helpers.h"
 
 // Covers pending lifecycle cleanup paths and metrics hooks:
 // - completed reply consumption
@@ -44,17 +45,7 @@ static mc_dispatch_result_t noop_dispatch(
     pending_cleanup_ctx_t *state = (pending_cleanup_ctx_t *)ctx;
     (void)current_state;
     (void)fault_code;
-    txn->has_next_state = 0;
-    txn->next_state = 0;
-    txn->next_state_tag = 0;
-    txn->outbox = NULL;
-    txn->outbox_len = 0;
-    txn->subscriptions = NULL;
-    txn->subscriptions_len = 0;
-    txn->requests = NULL;
-    txn->requests_len = 0;
-    txn->replies = NULL;
-    txn->replies_len = 0;
+    MC_TEST_TXN_INIT(txn);
     if (machine_id == state->fault_machine && env->kind == state->fault_kind) {
         return MC_DISPATCH_FAULT;
     }

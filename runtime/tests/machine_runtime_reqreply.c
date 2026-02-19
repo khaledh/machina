@@ -2,6 +2,7 @@
 #include <stddef.h>
 
 #include "machine/runtime.h"
+#include "machine_test_helpers.h"
 
 typedef struct reqreply_ctx {
     mc_machine_runtime_t *rt;
@@ -51,16 +52,7 @@ static mc_dispatch_result_t reqreply_dispatch(
     (void)fault_code;
 
     reqreply_ctx_t *state = (reqreply_ctx_t *)ctx;
-    txn->has_next_state = 0;
-    txn->next_state = 0;
-    txn->outbox = NULL;
-    txn->outbox_len = 0;
-    txn->subscriptions = NULL;
-    txn->subscriptions_len = 0;
-    txn->requests = NULL;
-    txn->requests_len = 0;
-    txn->replies = NULL;
-    txn->replies_len = 0;
+    MC_TEST_TXN_INIT(txn);
 
     if (machine_id == state->server && env->kind == 100) {
         state->server_dispatch_count += 1;

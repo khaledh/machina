@@ -2,6 +2,7 @@
 #include <stdint.h>
 
 #include "machine/runtime.h"
+#include "machine_test_helpers.h"
 
 // Verifies stop-path eager cleanup semantics:
 // - MC_DISPATCH_STOP transitions lifecycle to STOPPED
@@ -21,15 +22,7 @@ static mc_dispatch_result_t stop_dispatch(
     (void)current_state;
     (void)fault_code;
 
-    txn->has_next_state = 0;
-    txn->next_state = 0;
-    txn->next_state_tag = 0;
-    txn->outbox = NULL;
-    txn->outbox_len = 0;
-    txn->requests = NULL;
-    txn->requests_len = 0;
-    txn->replies = NULL;
-    txn->replies_len = 0;
+    MC_TEST_TXN_INIT(txn);
 
     static mc_subscription_update_t sub_add = {
         .op = MC_SUBSCRIPTION_ADD,

@@ -2,6 +2,7 @@
 #include <stddef.h>
 
 #include "machine/runtime.h"
+#include "machine_test_helpers.h"
 #include "machine/internal.h"
 #include "types.h"
 
@@ -60,17 +61,7 @@ static mc_dispatch_result_t payload_dispatch(
     (void)fault_code;
 
     payload_ctx_t *state = (payload_ctx_t *)ctx;
-    txn->has_next_state = 0;
-    txn->next_state = 0;
-    txn->next_state_tag = 0;
-    txn->outbox = NULL;
-    txn->outbox_len = 0;
-    txn->subscriptions = NULL;
-    txn->subscriptions_len = 0;
-    txn->requests = NULL;
-    txn->requests_len = 0;
-    txn->replies = NULL;
-    txn->replies_len = 0;
+    MC_TEST_TXN_INIT(txn);
 
     if (machine_id == state->server && env->kind == 100) {
         state->seen_reply_cap_id = env->reply_cap_id;

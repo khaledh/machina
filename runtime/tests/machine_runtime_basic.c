@@ -2,6 +2,7 @@
 #include <stddef.h>
 
 #include "machine/runtime.h"
+#include "machine_test_helpers.h"
 
 // Baseline managed-runtime behavior test.
 //
@@ -62,17 +63,7 @@ static mc_dispatch_result_t dispatch(
 ) {
     (void)current_state;
     test_ctx_t *state = (test_ctx_t *)ctx;
-    // Explicitly clear staged txn outputs for this non-mutating baseline.
-    txn->has_next_state = 0;
-    txn->next_state = 0;
-    txn->outbox = NULL;
-    txn->outbox_len = 0;
-    txn->subscriptions = NULL;
-    txn->subscriptions_len = 0;
-    txn->requests = NULL;
-    txn->requests_len = 0;
-    txn->replies = NULL;
-    txn->replies_len = 0;
+    MC_TEST_TXN_INIT(txn);
     uint32_t i = state->dispatch_count++;
     state->seen_machine[i] = machine_id;
     state->seen_kind[i] = env->kind;

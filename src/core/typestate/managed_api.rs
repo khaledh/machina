@@ -3,6 +3,280 @@ use super::ast_build::{
 };
 use super::*;
 
+// Descriptor for generating a handle method (send or request variant).
+struct HandleMethodSpec<'a> {
+    name: &'a str,
+    params: Vec<parsed::Param>,
+    ret_ty_expr: TypeExpr,
+    // Items to insert before the runtime call (e.g. payload pack).
+    pre_call_items: Vec<parsed::BlockItem>,
+    // The runtime function to call.
+    runtime_fn: &'a str,
+    // Arguments to pass to the runtime function.
+    runtime_args: Vec<Expr>,
+    // Name of the variable bound to the runtime call result.
+    result_var: &'a str,
+    // Items to insert after the runtime call (status/error checks).
+    post_call_items: Vec<parsed::BlockItem>,
+    // Tail expression of the method body block.
+    tail: Expr,
+}
+
+fn build_handle_method(
+    spec: HandleMethodSpec<'_>,
+    node_id_gen: &mut NodeIdGen,
+) -> MethodDef {
+    let span = Span::default();
+
+    let mut items = runtime_current_or_error_items(node_id_gen, span);
+    items.extend(spec.pre_call_items);
+    items.push(parsed::BlockItem::Stmt(let_bind_stmt(
+        spec.result_var,
+        call_expr(spec.runtime_fn, spec.runtime_args, node_id_gen, span),
+        node_id_gen,
+        span,
+    )));
+    items.extend(spec.post_call_items);
+
+    MethodDef {
+        id: node_id_gen.new_id(),
+        def_id: (),
+        attrs: Vec::new(),
+        sig: MethodSig {
+            name: spec.name.to_string(),
+            type_params: Vec::new(),
+            self_param: SelfParam {
+                id: node_id_gen.new_id(),
+                def_id: (),
+                mode: ParamMode::In,
+                span,
+            },
+            params: spec.params,
+            ret_ty_expr: spec.ret_ty_expr,
+            span,
+        },
+        body: Expr {
+            id: node_id_gen.new_id(),
+            kind: ExprKind::Block {
+                items,
+                tail: Some(Box::new(spec.tail)),
+            },
+            ty: (),
+            span,
+        },
+        span,
+    }
+}
+
+fn runtime_current_or_error_items(
+    node_id_gen: &mut NodeIdGen,
+    span: Span,
+) -> Vec<parsed::BlockItem> {
+    vec![
+        parsed::BlockItem::Stmt(let_bind_stmt(
+            "__mc_rt",
+            call_expr(MANAGED_RUNTIME_CURRENT_FN, Vec::new(), node_id_gen, span),
+            node_id_gen,
+            span,
+        )),
+        parsed::BlockItem::Expr(return_machine_error_if_zero(
+            "__mc_rt",
+            MachineErrorKind::RuntimeUnavailable,
+            node_id_gen,
+            span,
+        )),
+    ]
+}
+
+fn machine_send_result_union_type(node_id_gen: &mut NodeIdGen, span: Span) -> TypeExpr {
+    TypeExpr {
+        id: node_id_gen.new_id(),
+        kind: TypeExprKind::Union {
+            variants: vec![
+                named_type_expr("()", node_id_gen, span),
+                named_type_expr(MACHINE_ERROR_TYPE_NAME, node_id_gen, span),
+            ],
+        },
+        span,
+    }
+}
+
+fn machine_request_result_union_type(node_id_gen: &mut NodeIdGen, span: Span) -> TypeExpr {
+    TypeExpr {
+        id: node_id_gen.new_id(),
+        kind: TypeExprKind::Union {
+            variants: vec![
+                named_type_expr("u64", node_id_gen, span),
+                named_type_expr(MACHINE_ERROR_TYPE_NAME, node_id_gen, span),
+            ],
+        },
+        span,
+    }
+}
+
+fn u64_param(name: &str, node_id_gen: &mut NodeIdGen, span: Span) -> parsed::Param {
+    parsed::Param {
+        id: node_id_gen.new_id(),
+        ident: name.to_string(),
+        def_id: (),
+        typ: u64_type_expr(node_id_gen, span),
+        mode: ParamMode::In,
+        span,
+    }
+}
+
+fn typed_payload_pack_items(node_id_gen: &mut NodeIdGen, span: Span) -> Vec<parsed::BlockItem> {
+    vec![parsed::BlockItem::Stmt(let_bind_stmt(
+        "__mc_packed",
+        call_expr(
+            "__mc_machine_payload_pack",
+            vec![var_expr("payload", node_id_gen, span)],
+            node_id_gen,
+            span,
+        ),
+        node_id_gen,
+        span,
+    ))]
+}
+
+fn packed_field(index: usize, node_id_gen: &mut NodeIdGen, span: Span) -> Expr {
+    tuple_field_expr(var_expr("__mc_packed", node_id_gen, span), index, node_id_gen, span)
+}
+
+fn build_generic_send_method(node_id_gen: &mut NodeIdGen) -> MethodDef {
+    let span = Span::default();
+    build_handle_method(
+        HandleMethodSpec {
+            name: "send",
+            params: vec![
+                u64_param("kind", node_id_gen, span),
+                u64_param("payload0", node_id_gen, span),
+                u64_param("payload1", node_id_gen, span),
+            ],
+            ret_ty_expr: machine_send_result_union_type(node_id_gen, span),
+            pre_call_items: Vec::new(),
+            runtime_fn: "__mc_machine_runtime_send_u64",
+            runtime_args: vec![
+                var_expr("__mc_rt", node_id_gen, span),
+                self_field_expr("_id", node_id_gen, span),
+                var_expr("kind", node_id_gen, span),
+                var_expr("payload0", node_id_gen, span),
+                var_expr("payload1", node_id_gen, span),
+            ],
+            result_var: "__mc_status",
+            post_call_items: send_status_error_items("__mc_status", node_id_gen, span),
+            tail: unit_expr(node_id_gen, span),
+        },
+        node_id_gen,
+    )
+}
+
+fn build_typed_send_method(spec: &TypedSendSpec, node_id_gen: &mut NodeIdGen) -> MethodDef {
+    let span = Span::default();
+    build_handle_method(
+        HandleMethodSpec {
+            name: "send",
+            params: vec![parsed::Param {
+                id: node_id_gen.new_id(),
+                ident: "payload".to_string(),
+                def_id: (),
+                typ: clone_type_expr_with_new_ids(&spec.selector_ty, node_id_gen),
+                mode: ParamMode::In,
+                span,
+            }],
+            ret_ty_expr: machine_send_result_union_type(node_id_gen, span),
+            pre_call_items: typed_payload_pack_items(node_id_gen, span),
+            runtime_fn: "__mc_machine_runtime_send_u64",
+            runtime_args: vec![
+                var_expr("__mc_rt", node_id_gen, span),
+                self_field_expr("_id", node_id_gen, span),
+                int_expr(spec.kind, node_id_gen, span),
+                packed_field(0, node_id_gen, span),
+                packed_field(1, node_id_gen, span),
+            ],
+            result_var: "__mc_status",
+            post_call_items: send_status_error_items("__mc_status", node_id_gen, span),
+            tail: unit_expr(node_id_gen, span),
+        },
+        node_id_gen,
+    )
+}
+
+fn build_generic_request_method(node_id_gen: &mut NodeIdGen) -> MethodDef {
+    let span = Span::default();
+    build_handle_method(
+        HandleMethodSpec {
+            name: "request",
+            params: vec![
+                u64_param("dst", node_id_gen, span),
+                u64_param("kind", node_id_gen, span),
+                u64_param("payload0", node_id_gen, span),
+                u64_param("payload1", node_id_gen, span),
+            ],
+            ret_ty_expr: machine_request_result_union_type(node_id_gen, span),
+            pre_call_items: Vec::new(),
+            runtime_fn: "__mc_machine_runtime_request_u64",
+            runtime_args: vec![
+                var_expr("__mc_rt", node_id_gen, span),
+                self_field_expr("_id", node_id_gen, span),
+                var_expr("dst", node_id_gen, span),
+                var_expr("kind", node_id_gen, span),
+                var_expr("payload0", node_id_gen, span),
+                var_expr("payload1", node_id_gen, span),
+            ],
+            result_var: "__mc_pending_id",
+            post_call_items: vec![parsed::BlockItem::Expr(return_machine_error_if_zero(
+                "__mc_pending_id",
+                MachineErrorKind::RequestFailed,
+                node_id_gen,
+                span,
+            ))],
+            tail: var_expr("__mc_pending_id", node_id_gen, span),
+        },
+        node_id_gen,
+    )
+}
+
+fn build_typed_request_method(spec: &TypedRequestSpec, node_id_gen: &mut NodeIdGen) -> MethodDef {
+    let span = Span::default();
+    build_handle_method(
+        HandleMethodSpec {
+            name: "request",
+            params: vec![
+                u64_param("dst", node_id_gen, span),
+                parsed::Param {
+                    id: node_id_gen.new_id(),
+                    ident: "payload".to_string(),
+                    def_id: (),
+                    typ: clone_type_expr_with_new_ids(&spec.payload_ty, node_id_gen),
+                    mode: ParamMode::In,
+                    span,
+                },
+            ],
+            ret_ty_expr: machine_request_result_union_type(node_id_gen, span),
+            pre_call_items: typed_payload_pack_items(node_id_gen, span),
+            runtime_fn: "__mc_machine_runtime_request_u64",
+            runtime_args: vec![
+                var_expr("__mc_rt", node_id_gen, span),
+                self_field_expr("_id", node_id_gen, span),
+                var_expr("dst", node_id_gen, span),
+                int_expr(spec.kind, node_id_gen, span),
+                packed_field(0, node_id_gen, span),
+                packed_field(1, node_id_gen, span),
+            ],
+            result_var: "__mc_pending_id",
+            post_call_items: vec![parsed::BlockItem::Expr(return_machine_error_if_zero(
+                "__mc_pending_id",
+                MachineErrorKind::RequestFailed,
+                node_id_gen,
+                span,
+            ))],
+            tail: var_expr("__mc_pending_id", node_id_gen, span),
+        },
+        node_id_gen,
+    )
+}
+
 pub(super) fn machine_handle_method_block(
     handle_type_name: &str,
     typed_send_specs: &[TypedSendSpec],
@@ -11,402 +285,18 @@ pub(super) fn machine_handle_method_block(
 ) -> TopLevelItem {
     let span = Span::default();
 
-    fn machine_send_result_union_type(node_id_gen: &mut NodeIdGen, span: Span) -> TypeExpr {
-        TypeExpr {
-            id: node_id_gen.new_id(),
-            kind: TypeExprKind::Union {
-                variants: vec![
-                    named_type_expr("()", node_id_gen, span),
-                    named_type_expr(MACHINE_ERROR_TYPE_NAME, node_id_gen, span),
-                ],
-            },
-            span,
-        }
-    }
-
-    fn machine_request_result_union_type(node_id_gen: &mut NodeIdGen, span: Span) -> TypeExpr {
-        TypeExpr {
-            id: node_id_gen.new_id(),
-            kind: TypeExprKind::Union {
-                variants: vec![
-                    named_type_expr("u64", node_id_gen, span),
-                    named_type_expr(MACHINE_ERROR_TYPE_NAME, node_id_gen, span),
-                ],
-            },
-            span,
-        }
-    }
-
-    fn runtime_current_or_error_items(
-        node_id_gen: &mut NodeIdGen,
-        span: Span,
-    ) -> Vec<parsed::BlockItem> {
-        vec![
-            parsed::BlockItem::Stmt(let_bind_stmt(
-                "__mc_rt",
-                call_expr(MANAGED_RUNTIME_CURRENT_FN, Vec::new(), node_id_gen, span),
-                node_id_gen,
-                span,
-            )),
-            parsed::BlockItem::Expr(return_machine_error_if_zero(
-                "__mc_rt",
-                MachineErrorKind::RuntimeUnavailable,
-                node_id_gen,
-                span,
-            )),
-        ]
-    }
-
-    fn typed_payload_pack_item(node_id_gen: &mut NodeIdGen, span: Span) -> parsed::BlockItem {
-        // Pack typed payload into runtime ABI words:
-        // - payload0: heap box pointer
-        // - payload1: payload layout id
-        parsed::BlockItem::Stmt(let_bind_stmt(
-            "__mc_packed",
-            call_expr(
-                "__mc_machine_payload_pack",
-                vec![var_expr("payload", node_id_gen, span)],
-                node_id_gen,
-                span,
-            ),
-            node_id_gen,
-            span,
-        ))
-    }
-
-    fn request_failed_item(
-        pending_var: &str,
-        node_id_gen: &mut NodeIdGen,
-        span: Span,
-    ) -> parsed::BlockItem {
-        parsed::BlockItem::Expr(return_machine_error_if_zero(
-            pending_var,
-            MachineErrorKind::RequestFailed,
-            node_id_gen,
-            span,
-        ))
-    }
-
-    let send_method = MethodDef {
-        id: node_id_gen.new_id(),
-        def_id: (),
-        attrs: Vec::new(),
-        sig: MethodSig {
-            name: "send".to_string(),
-            type_params: Vec::new(),
-            self_param: SelfParam {
-                id: node_id_gen.new_id(),
-                def_id: (),
-                mode: ParamMode::In,
-                span,
-            },
-            params: vec![
-                parsed::Param {
-                    id: node_id_gen.new_id(),
-                    ident: "kind".to_string(),
-                    def_id: (),
-                    typ: u64_type_expr(node_id_gen, span),
-                    mode: ParamMode::In,
-                    span,
-                },
-                parsed::Param {
-                    id: node_id_gen.new_id(),
-                    ident: "payload0".to_string(),
-                    def_id: (),
-                    typ: u64_type_expr(node_id_gen, span),
-                    mode: ParamMode::In,
-                    span,
-                },
-                parsed::Param {
-                    id: node_id_gen.new_id(),
-                    ident: "payload1".to_string(),
-                    def_id: (),
-                    typ: u64_type_expr(node_id_gen, span),
-                    mode: ParamMode::In,
-                    span,
-                },
-            ],
-            ret_ty_expr: machine_send_result_union_type(node_id_gen, span),
-            span,
-        },
-        body: Expr {
-            id: node_id_gen.new_id(),
-            kind: ExprKind::Block {
-                items: {
-                    let mut items = runtime_current_or_error_items(node_id_gen, span);
-                    items.push(parsed::BlockItem::Stmt(let_bind_stmt(
-                        "__mc_status",
-                        call_expr(
-                            "__mc_machine_runtime_send_u64",
-                            vec![
-                                var_expr("__mc_rt", node_id_gen, span),
-                                self_field_expr("_id", node_id_gen, span),
-                                var_expr("kind", node_id_gen, span),
-                                var_expr("payload0", node_id_gen, span),
-                                var_expr("payload1", node_id_gen, span),
-                            ],
-                            node_id_gen,
-                            span,
-                        ),
-                        node_id_gen,
-                        span,
-                    )));
-                    items.extend(send_status_error_items("__mc_status", node_id_gen, span));
-                    items
-                },
-                tail: Some(Box::new(unit_expr(node_id_gen, span))),
-            },
-            ty: (),
-            span,
-        },
-        span,
-    };
-
-    let typed_send_methods: Vec<MethodItem> = typed_send_specs
-        .iter()
-        .map(|spec| {
-            MethodItem::Def(MethodDef {
-                id: node_id_gen.new_id(),
-                def_id: (),
-                attrs: Vec::new(),
-                sig: MethodSig {
-                    name: "send".to_string(),
-                    type_params: Vec::new(),
-                    self_param: SelfParam {
-                        id: node_id_gen.new_id(),
-                        def_id: (),
-                        mode: ParamMode::In,
-                        span,
-                    },
-                    params: vec![parsed::Param {
-                        id: node_id_gen.new_id(),
-                        ident: "payload".to_string(),
-                        def_id: (),
-                        typ: clone_type_expr_with_new_ids(&spec.selector_ty, node_id_gen),
-                        mode: ParamMode::In,
-                        span,
-                    }],
-                    ret_ty_expr: machine_send_result_union_type(node_id_gen, span),
-                    span,
-                },
-                body: Expr {
-                    id: node_id_gen.new_id(),
-                    kind: ExprKind::Block {
-                        items: {
-                            let mut items = runtime_current_or_error_items(node_id_gen, span);
-                            items.push(typed_payload_pack_item(node_id_gen, span));
-                            items.push(parsed::BlockItem::Stmt(let_bind_stmt(
-                                "__mc_status",
-                                call_expr(
-                                    "__mc_machine_runtime_send_u64",
-                                    vec![
-                                        var_expr("__mc_rt", node_id_gen, span),
-                                        self_field_expr("_id", node_id_gen, span),
-                                        int_expr(spec.kind, node_id_gen, span),
-                                        tuple_field_expr(
-                                            var_expr("__mc_packed", node_id_gen, span),
-                                            0,
-                                            node_id_gen,
-                                            span,
-                                        ),
-                                        tuple_field_expr(
-                                            var_expr("__mc_packed", node_id_gen, span),
-                                            1,
-                                            node_id_gen,
-                                            span,
-                                        ),
-                                    ],
-                                    node_id_gen,
-                                    span,
-                                ),
-                                node_id_gen,
-                                span,
-                            )));
-                            items.extend(send_status_error_items("__mc_status", node_id_gen, span));
-                            items
-                        },
-                        tail: Some(Box::new(unit_expr(node_id_gen, span))),
-                    },
-                    ty: (),
-                    span,
-                },
-                span,
-            })
-        })
-        .collect();
-
-    let request_method = MethodDef {
-        id: node_id_gen.new_id(),
-        def_id: (),
-        attrs: Vec::new(),
-        sig: MethodSig {
-            name: "request".to_string(),
-            type_params: Vec::new(),
-            self_param: SelfParam {
-                id: node_id_gen.new_id(),
-                def_id: (),
-                mode: ParamMode::In,
-                span,
-            },
-            params: vec![
-                parsed::Param {
-                    id: node_id_gen.new_id(),
-                    ident: "dst".to_string(),
-                    def_id: (),
-                    typ: u64_type_expr(node_id_gen, span),
-                    mode: ParamMode::In,
-                    span,
-                },
-                parsed::Param {
-                    id: node_id_gen.new_id(),
-                    ident: "kind".to_string(),
-                    def_id: (),
-                    typ: u64_type_expr(node_id_gen, span),
-                    mode: ParamMode::In,
-                    span,
-                },
-                parsed::Param {
-                    id: node_id_gen.new_id(),
-                    ident: "payload0".to_string(),
-                    def_id: (),
-                    typ: u64_type_expr(node_id_gen, span),
-                    mode: ParamMode::In,
-                    span,
-                },
-                parsed::Param {
-                    id: node_id_gen.new_id(),
-                    ident: "payload1".to_string(),
-                    def_id: (),
-                    typ: u64_type_expr(node_id_gen, span),
-                    mode: ParamMode::In,
-                    span,
-                },
-            ],
-            ret_ty_expr: machine_request_result_union_type(node_id_gen, span),
-            span,
-        },
-        body: Expr {
-            id: node_id_gen.new_id(),
-            kind: ExprKind::Block {
-                items: {
-                    let mut items = runtime_current_or_error_items(node_id_gen, span);
-                    items.push(parsed::BlockItem::Stmt(let_bind_stmt(
-                        "__mc_pending_id",
-                        call_expr(
-                            "__mc_machine_runtime_request_u64",
-                            vec![
-                                var_expr("__mc_rt", node_id_gen, span),
-                                self_field_expr("_id", node_id_gen, span),
-                                var_expr("dst", node_id_gen, span),
-                                var_expr("kind", node_id_gen, span),
-                                var_expr("payload0", node_id_gen, span),
-                                var_expr("payload1", node_id_gen, span),
-                            ],
-                            node_id_gen,
-                            span,
-                        ),
-                        node_id_gen,
-                        span,
-                    )));
-                    items.push(request_failed_item("__mc_pending_id", node_id_gen, span));
-                    items
-                },
-                tail: Some(Box::new(var_expr("__mc_pending_id", node_id_gen, span))),
-            },
-            ty: (),
-            span,
-        },
-        span,
-    };
-
-    let typed_request_methods: Vec<MethodItem> = typed_request_specs
-        .iter()
-        .map(|spec| {
-            MethodItem::Def(MethodDef {
-                id: node_id_gen.new_id(),
-                def_id: (),
-                attrs: Vec::new(),
-                sig: MethodSig {
-                    name: "request".to_string(),
-                    type_params: Vec::new(),
-                    self_param: SelfParam {
-                        id: node_id_gen.new_id(),
-                        def_id: (),
-                        mode: ParamMode::In,
-                        span,
-                    },
-                    params: vec![
-                        parsed::Param {
-                            id: node_id_gen.new_id(),
-                            ident: "dst".to_string(),
-                            def_id: (),
-                            typ: u64_type_expr(node_id_gen, span),
-                            mode: ParamMode::In,
-                            span,
-                        },
-                        parsed::Param {
-                            id: node_id_gen.new_id(),
-                            ident: "payload".to_string(),
-                            def_id: (),
-                            typ: clone_type_expr_with_new_ids(&spec.payload_ty, node_id_gen),
-                            mode: ParamMode::In,
-                            span,
-                        },
-                    ],
-                    ret_ty_expr: machine_request_result_union_type(node_id_gen, span),
-                    span,
-                },
-                body: Expr {
-                    id: node_id_gen.new_id(),
-                    kind: ExprKind::Block {
-                        items: {
-                            let mut items = runtime_current_or_error_items(node_id_gen, span);
-                            items.push(typed_payload_pack_item(node_id_gen, span));
-                            items.push(parsed::BlockItem::Stmt(let_bind_stmt(
-                                "__mc_pending_id",
-                                call_expr(
-                                    "__mc_machine_runtime_request_u64",
-                                    vec![
-                                        var_expr("__mc_rt", node_id_gen, span),
-                                        self_field_expr("_id", node_id_gen, span),
-                                        var_expr("dst", node_id_gen, span),
-                                        int_expr(spec.kind, node_id_gen, span),
-                                        tuple_field_expr(
-                                            var_expr("__mc_packed", node_id_gen, span),
-                                            0,
-                                            node_id_gen,
-                                            span,
-                                        ),
-                                        tuple_field_expr(
-                                            var_expr("__mc_packed", node_id_gen, span),
-                                            1,
-                                            node_id_gen,
-                                            span,
-                                        ),
-                                    ],
-                                    node_id_gen,
-                                    span,
-                                ),
-                                node_id_gen,
-                                span,
-                            )));
-                            items.push(request_failed_item("__mc_pending_id", node_id_gen, span));
-                            items
-                        },
-                        tail: Some(Box::new(var_expr("__mc_pending_id", node_id_gen, span))),
-                    },
-                    ty: (),
-                    span,
-                },
-                span,
-            })
-        })
-        .collect();
-
-    let mut method_items = vec![MethodItem::Def(send_method)];
-    method_items.extend(typed_send_methods);
-    method_items.push(MethodItem::Def(request_method));
-    method_items.extend(typed_request_methods);
+    let mut method_items = vec![MethodItem::Def(build_generic_send_method(node_id_gen))];
+    method_items.extend(
+        typed_send_specs
+            .iter()
+            .map(|spec| MethodItem::Def(build_typed_send_method(spec, node_id_gen))),
+    );
+    method_items.push(MethodItem::Def(build_generic_request_method(node_id_gen)));
+    method_items.extend(
+        typed_request_specs
+            .iter()
+            .map(|spec| MethodItem::Def(build_typed_request_method(spec, node_id_gen))),
+    );
 
     TopLevelItem::MethodBlock(MethodBlock {
         id: node_id_gen.new_id(),
@@ -417,6 +307,22 @@ pub(super) fn machine_handle_method_block(
     })
 }
 
+// Helper: let-bind + error-check pattern used repeatedly in lower_spawn_func.
+fn let_bind_with_error_check(
+    var_name: &str,
+    value: Expr,
+    error_kind: MachineErrorKind,
+    node_id_gen: &mut NodeIdGen,
+    span: Span,
+) -> [parsed::BlockItem; 2] {
+    [
+        parsed::BlockItem::Stmt(let_bind_stmt(var_name, value, node_id_gen, span)),
+        parsed::BlockItem::Expr(return_machine_error_if_zero(
+            var_name, error_kind, node_id_gen, span,
+        )),
+    ]
+}
+
 pub(super) fn lower_spawn_func(
     spawn_name: &str,
     handle_type_name: &str,
@@ -425,18 +331,13 @@ pub(super) fn lower_spawn_func(
     state_name_map: &HashMap<String, String>,
     node_id_gen: &mut NodeIdGen,
 ) -> FuncDef {
-    // V1 managed constructor flow:
-    // 1) evaluate `new(...)` to enforce mirror-forward constructor contract,
-    // 2) allocate/bind/start a runtime machine slot,
-    // 3) return a machine handle wrapper on success.
     let span = ctor.span;
-    let mut params = Vec::new();
-    params.extend(
-        ctor.sig
-            .params
-            .iter()
-            .map(|param| clone_param_with_new_ids(param, node_id_gen)),
-    );
+    let params: Vec<_> = ctor
+        .sig
+        .params
+        .iter()
+        .map(|param| clone_param_with_new_ids(param, node_id_gen))
+        .collect();
 
     let mut state_names: Vec<String> = state_name_map.values().cloned().collect();
     state_names.sort();
@@ -463,158 +364,140 @@ pub(super) fn lower_spawn_func(
         .iter()
         .map(|param| var_expr(&param.ident, node_id_gen, span))
         .collect();
-    let ctor_call = call_expr(&ctor.sig.name, ctor_call_args, node_id_gen, span);
-    let runtime_current_call = call_expr(MANAGED_RUNTIME_CURRENT_FN, Vec::new(), node_id_gen, span);
-    let spawn_call = call_expr(
-        "__mc_machine_runtime_spawn_u64",
-        vec![
-            var_expr("__mc_rt", node_id_gen, span),
-            Expr {
-                id: node_id_gen.new_id(),
-                kind: ExprKind::IntLit(MANAGED_RUNTIME_DEFAULT_MAILBOX_CAP),
-                ty: (),
-                span,
-            },
-        ],
+
+    let mut items = Vec::new();
+
+    // Runtime acquisition + error check.
+    items.extend(let_bind_with_error_check(
+        "__mc_rt",
+        call_expr(MANAGED_RUNTIME_CURRENT_FN, Vec::new(), node_id_gen, span),
+        MachineErrorKind::RuntimeUnavailable,
         node_id_gen,
         span,
-    );
-    let descriptor_id_call = call_expr(descriptor_id_helper_name, Vec::new(), node_id_gen, span);
-    let bind_call = call_expr(
-        "__mc_machine_runtime_bind_descriptor_u64",
-        vec![
-            var_expr("__mc_rt", node_id_gen, span),
-            var_expr("__mc_machine_id", node_id_gen, span),
-            var_expr("__mc_descriptor_id", node_id_gen, span),
-            Expr {
-                id: node_id_gen.new_id(),
-                kind: ExprKind::IntLit(initial_state_tag),
-                ty: (),
-                span,
-            },
-        ],
+    ));
+
+    // Constructor call (keep value live for side effects).
+    items.push(parsed::BlockItem::Stmt(let_bind_stmt(
+        "__mc_initial_state",
+        call_expr(&ctor.sig.name, ctor_call_args, node_id_gen, span),
         node_id_gen,
         span,
-    );
-    let pack_initial_state_call = call_expr(
-        "__mc_machine_payload_pack",
-        vec![var_expr("__mc_initial_state", node_id_gen, span)],
-        node_id_gen,
-        span,
-    );
-    let set_state_call = call_expr(
-        "__mc_machine_runtime_set_state_u64",
-        vec![
-            var_expr("__mc_rt", node_id_gen, span),
-            var_expr("__mc_machine_id", node_id_gen, span),
-            Expr {
-                id: node_id_gen.new_id(),
-                kind: ExprKind::TupleField {
-                    target: Box::new(var_expr("__mc_initial_state_packed", node_id_gen, span)),
-                    index: 0,
+    )));
+
+    // Spawn + error check.
+    items.extend(let_bind_with_error_check(
+        "__mc_machine_id",
+        call_expr(
+            "__mc_machine_runtime_spawn_u64",
+            vec![
+                var_expr("__mc_rt", node_id_gen, span),
+                Expr {
+                    id: node_id_gen.new_id(),
+                    kind: ExprKind::IntLit(MANAGED_RUNTIME_DEFAULT_MAILBOX_CAP),
+                    ty: (),
+                    span,
                 },
-                ty: (),
-                span,
-            },
-        ],
+            ],
+            node_id_gen,
+            span,
+        ),
+        MachineErrorKind::SpawnFailed,
         node_id_gen,
         span,
-    );
-    let start_call = call_expr(
-        "__mc_machine_runtime_start_u64",
-        vec![
-            var_expr("__mc_rt", node_id_gen, span),
-            var_expr("__mc_machine_id", node_id_gen, span),
-        ],
+    ));
+
+    // Descriptor bind + error check.
+    items.push(parsed::BlockItem::Stmt(let_bind_stmt(
+        "__mc_descriptor_id",
+        call_expr(descriptor_id_helper_name, Vec::new(), node_id_gen, span),
         node_id_gen,
         span,
-    );
+    )));
+    items.extend(let_bind_with_error_check(
+        "__mc_bind_status",
+        call_expr(
+            "__mc_machine_runtime_bind_descriptor_u64",
+            vec![
+                var_expr("__mc_rt", node_id_gen, span),
+                var_expr("__mc_machine_id", node_id_gen, span),
+                var_expr("__mc_descriptor_id", node_id_gen, span),
+                Expr {
+                    id: node_id_gen.new_id(),
+                    kind: ExprKind::IntLit(initial_state_tag),
+                    ty: (),
+                    span,
+                },
+            ],
+            node_id_gen,
+            span,
+        ),
+        MachineErrorKind::BindFailed,
+        node_id_gen,
+        span,
+    ));
+
+    // Pack + set state + error check.
+    items.push(parsed::BlockItem::Stmt(let_bind_stmt(
+        "__mc_initial_state_packed",
+        call_expr(
+            "__mc_machine_payload_pack",
+            vec![var_expr("__mc_initial_state", node_id_gen, span)],
+            node_id_gen,
+            span,
+        ),
+        node_id_gen,
+        span,
+    )));
+    items.extend(let_bind_with_error_check(
+        "__mc_set_state_status",
+        call_expr(
+            "__mc_machine_runtime_set_state_u64",
+            vec![
+                var_expr("__mc_rt", node_id_gen, span),
+                var_expr("__mc_machine_id", node_id_gen, span),
+                Expr {
+                    id: node_id_gen.new_id(),
+                    kind: ExprKind::TupleField {
+                        target: Box::new(var_expr(
+                            "__mc_initial_state_packed",
+                            node_id_gen,
+                            span,
+                        )),
+                        index: 0,
+                    },
+                    ty: (),
+                    span,
+                },
+            ],
+            node_id_gen,
+            span,
+        ),
+        MachineErrorKind::BindFailed,
+        node_id_gen,
+        span,
+    ));
+
+    // Start + error check.
+    items.extend(let_bind_with_error_check(
+        "__mc_start_status",
+        call_expr(
+            "__mc_machine_runtime_start_u64",
+            vec![
+                var_expr("__mc_rt", node_id_gen, span),
+                var_expr("__mc_machine_id", node_id_gen, span),
+            ],
+            node_id_gen,
+            span,
+        ),
+        MachineErrorKind::StartFailed,
+        node_id_gen,
+        span,
+    ));
 
     let body = Expr {
         id: node_id_gen.new_id(),
         kind: ExprKind::Block {
-            items: vec![
-                parsed::BlockItem::Stmt(let_bind_stmt(
-                    "__mc_rt",
-                    runtime_current_call,
-                    node_id_gen,
-                    span,
-                )),
-                parsed::BlockItem::Expr(return_machine_error_if_zero(
-                    "__mc_rt",
-                    MachineErrorKind::RuntimeUnavailable,
-                    node_id_gen,
-                    span,
-                )),
-                parsed::BlockItem::Stmt(let_bind_stmt(
-                    "__mc_initial_state",
-                    ctor_call,
-                    node_id_gen,
-                    span,
-                )),
-                // Keep the constructor value live so side effects and argument
-                // evaluation semantics match direct `new(...)` usage.
-                parsed::BlockItem::Stmt(let_bind_stmt(
-                    "__mc_machine_id",
-                    spawn_call,
-                    node_id_gen,
-                    span,
-                )),
-                parsed::BlockItem::Expr(return_machine_error_if_zero(
-                    "__mc_machine_id",
-                    MachineErrorKind::SpawnFailed,
-                    node_id_gen,
-                    span,
-                )),
-                parsed::BlockItem::Stmt(let_bind_stmt(
-                    "__mc_descriptor_id",
-                    descriptor_id_call,
-                    node_id_gen,
-                    span,
-                )),
-                parsed::BlockItem::Stmt(let_bind_stmt(
-                    "__mc_bind_status",
-                    bind_call,
-                    node_id_gen,
-                    span,
-                )),
-                parsed::BlockItem::Expr(return_machine_error_if_zero(
-                    "__mc_bind_status",
-                    MachineErrorKind::BindFailed,
-                    node_id_gen,
-                    span,
-                )),
-                parsed::BlockItem::Stmt(let_bind_stmt(
-                    "__mc_initial_state_packed",
-                    pack_initial_state_call,
-                    node_id_gen,
-                    span,
-                )),
-                parsed::BlockItem::Stmt(let_bind_stmt(
-                    "__mc_set_state_status",
-                    set_state_call,
-                    node_id_gen,
-                    span,
-                )),
-                parsed::BlockItem::Expr(return_machine_error_if_zero(
-                    "__mc_set_state_status",
-                    MachineErrorKind::BindFailed,
-                    node_id_gen,
-                    span,
-                )),
-                parsed::BlockItem::Stmt(let_bind_stmt(
-                    "__mc_start_status",
-                    start_call,
-                    node_id_gen,
-                    span,
-                )),
-                parsed::BlockItem::Expr(return_machine_error_if_zero(
-                    "__mc_start_status",
-                    MachineErrorKind::StartFailed,
-                    node_id_gen,
-                    span,
-                )),
-            ],
+            items,
             tail: Some(Box::new(Expr {
                 id: node_id_gen.new_id(),
                 kind: ExprKind::StructLit {

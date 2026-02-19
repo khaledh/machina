@@ -23,19 +23,24 @@ ROOT = pathlib.Path(__file__).resolve().parents[2]
 # File-level guardrails (line count upper bounds).
 FILE_LIMITS: dict[str, int] = {
     "src/core/typestate/mod.rs": 900,
-    "src/core/typestate/managed_api.rs": 700,
+    "src/core/typestate/managed_api.rs": 600,
+    "src/core/typestate/support_types.rs": 400,
     "src/core/typestate/handlers.rs": 450,
     "src/core/protocol/index.rs": 450,
-    "runtime/machine/runtime.c": 1550,
+    "src/core/typecheck/validate/protocol.rs": 820,
+    "runtime/machine/runtime.c": 1500,
     "runtime/machine/runtime.h": 750,
+    "runtime/machine/emit.c": 260,
+    "runtime/machine/bridge.c": 400,
 }
 
 # Function-level guardrails for known hotspots.
 FUNCTION_LIMITS: dict[tuple[str, str], int] = {
-    ("src/core/typestate/managed_api.rs", "machine_handle_method_block"): 450,
-    ("src/core/typestate/managed_api.rs", "lower_spawn_func"): 260,
+    ("src/core/typestate/managed_api.rs", "machine_handle_method_block"): 50,
+    ("src/core/typestate/managed_api.rs", "lower_spawn_func"): 240,
     ("src/core/typestate/mod.rs", "desugar_typestate"): 240,
     ("src/core/protocol/index.rs", "build_protocol_fact"): 120,
+    ("src/core/typecheck/validate/protocol.rs", "check_protocol_shape_conformance"): 100,
 }
 
 FUNC_RE = re.compile(r"^\s*(?:pub\([^)]*\)\s+)?(?:pub\s+)?fn\s+([A-Za-z0-9_]+)\b")

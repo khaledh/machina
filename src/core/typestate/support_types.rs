@@ -1,5 +1,17 @@
 use super::*;
 
+// Empty-struct error variant type names injected when not already present.
+const ERROR_VARIANT_NAMES: &[&str] = &[
+    MACHINE_SPAWN_FAILED_TYPE_NAME,
+    MACHINE_BIND_FAILED_TYPE_NAME,
+    MACHINE_START_FAILED_TYPE_NAME,
+    MACHINE_UNKNOWN_TYPE_NAME,
+    MACHINE_NOT_RUNNING_TYPE_NAME,
+    MACHINE_MAILBOX_FULL_TYPE_NAME,
+    MACHINE_REQUEST_FAILED_TYPE_NAME,
+    MACHINE_MANAGED_RUNTIME_UNAVAILABLE_TYPE_NAME,
+];
+
 pub(super) fn ensure_machine_support_types(module: &mut Module, node_id_gen: &mut NodeIdGen) {
     let existing: HashSet<String> = module
         .top_level_items
@@ -17,53 +29,10 @@ pub(super) fn ensure_machine_support_types(module: &mut Module, node_id_gen: &mu
     if !existing.contains(MACHINE_ERROR_TYPE_NAME) {
         prepend.push(machine_error_type_def(node_id_gen));
     }
-    if !existing.contains(MACHINE_SPAWN_FAILED_TYPE_NAME) {
-        prepend.push(empty_struct_type_def(
-            MACHINE_SPAWN_FAILED_TYPE_NAME,
-            node_id_gen,
-        ));
-    }
-    if !existing.contains(MACHINE_BIND_FAILED_TYPE_NAME) {
-        prepend.push(empty_struct_type_def(
-            MACHINE_BIND_FAILED_TYPE_NAME,
-            node_id_gen,
-        ));
-    }
-    if !existing.contains(MACHINE_START_FAILED_TYPE_NAME) {
-        prepend.push(empty_struct_type_def(
-            MACHINE_START_FAILED_TYPE_NAME,
-            node_id_gen,
-        ));
-    }
-    if !existing.contains(MACHINE_UNKNOWN_TYPE_NAME) {
-        prepend.push(empty_struct_type_def(
-            MACHINE_UNKNOWN_TYPE_NAME,
-            node_id_gen,
-        ));
-    }
-    if !existing.contains(MACHINE_NOT_RUNNING_TYPE_NAME) {
-        prepend.push(empty_struct_type_def(
-            MACHINE_NOT_RUNNING_TYPE_NAME,
-            node_id_gen,
-        ));
-    }
-    if !existing.contains(MACHINE_MAILBOX_FULL_TYPE_NAME) {
-        prepend.push(empty_struct_type_def(
-            MACHINE_MAILBOX_FULL_TYPE_NAME,
-            node_id_gen,
-        ));
-    }
-    if !existing.contains(MACHINE_REQUEST_FAILED_TYPE_NAME) {
-        prepend.push(empty_struct_type_def(
-            MACHINE_REQUEST_FAILED_TYPE_NAME,
-            node_id_gen,
-        ));
-    }
-    if !existing.contains(MACHINE_MANAGED_RUNTIME_UNAVAILABLE_TYPE_NAME) {
-        prepend.push(empty_struct_type_def(
-            MACHINE_MANAGED_RUNTIME_UNAVAILABLE_TYPE_NAME,
-            node_id_gen,
-        ));
+    for &name in ERROR_VARIANT_NAMES {
+        if !existing.contains(name) {
+            prepend.push(empty_struct_type_def(name, node_id_gen));
+        }
     }
     if !module_has_callable_param_type(module, MACHINE_TARGET_ID_HELPER_FN, "u64") {
         prepend.push(machine_target_id_u64_helper_def(node_id_gen));
@@ -101,6 +70,33 @@ pub(super) fn ensure_machine_support_types(module: &mut Module, node_id_gen: &mu
     module.top_level_items = items;
 }
 
+// Runtime intrinsic declarations: (name, param_names, ret_type_is_u64).
+// All use u64 param/return types.
+const INTRINSICS: &[(&str, &[&str])] = &[
+    (MANAGED_RUNTIME_BOOTSTRAP_FN, &[]),
+    (MANAGED_RUNTIME_CURRENT_FN, &[]),
+    (MANAGED_RUNTIME_SHUTDOWN_FN, &[]),
+    ("__mc_machine_runtime_spawn_u64", &["runtime", "mailbox_cap"]),
+    (
+        "__mc_machine_runtime_bind_descriptor_u64",
+        &["runtime", "machine_id", "descriptor_id", "initial_state_tag"],
+    ),
+    ("__mc_machine_runtime_start_u64", &["runtime", "machine_id"]),
+    (
+        "__mc_machine_runtime_set_state_u64",
+        &["runtime", "machine_id", "state_word"],
+    ),
+    ("__mc_machine_runtime_step_u64", &["runtime"]),
+    (
+        "__mc_machine_runtime_send_u64",
+        &["runtime", "dst", "kind", "payload0", "payload1"],
+    ),
+    (
+        "__mc_machine_runtime_request_u64",
+        &["runtime", "src", "dst", "kind", "payload0", "payload1"],
+    ),
+];
+
 pub(super) fn ensure_machine_runtime_intrinsics(module: &mut Module, node_id_gen: &mut NodeIdGen) {
     let existing_callables: HashSet<String> = module
         .top_level_items
@@ -114,13 +110,11 @@ pub(super) fn ensure_machine_runtime_intrinsics(module: &mut Module, node_id_gen
 
     let span = Span::default();
     let mut append = Vec::new();
-    let mut push_decl = |name: &str, param_names: &[&str]| {
+
+    for &(name, param_names) in INTRINSICS {
         if existing_callables.contains(name) {
-            return;
+            continue;
         }
-        // These declarations keep typestate-managed spawn lowering self-contained
-        // even when prelude runtime declarations are not present in the source
-        // module under test.
         append.push(TopLevelItem::FuncDecl(FuncDecl {
             id: node_id_gen.new_id(),
             def_id: (),
@@ -144,38 +138,8 @@ pub(super) fn ensure_machine_runtime_intrinsics(module: &mut Module, node_id_gen
             },
             span,
         }));
-    };
+    }
 
-    push_decl(MANAGED_RUNTIME_BOOTSTRAP_FN, &[]);
-    push_decl(MANAGED_RUNTIME_CURRENT_FN, &[]);
-    push_decl(MANAGED_RUNTIME_SHUTDOWN_FN, &[]);
-    push_decl(
-        "__mc_machine_runtime_spawn_u64",
-        &["runtime", "mailbox_cap"],
-    );
-    push_decl(
-        "__mc_machine_runtime_bind_descriptor_u64",
-        &[
-            "runtime",
-            "machine_id",
-            "descriptor_id",
-            "initial_state_tag",
-        ],
-    );
-    push_decl("__mc_machine_runtime_start_u64", &["runtime", "machine_id"]);
-    push_decl(
-        "__mc_machine_runtime_set_state_u64",
-        &["runtime", "machine_id", "state_word"],
-    );
-    push_decl("__mc_machine_runtime_step_u64", &["runtime"]);
-    push_decl(
-        "__mc_machine_runtime_send_u64",
-        &["runtime", "dst", "kind", "payload0", "payload1"],
-    );
-    push_decl(
-        "__mc_machine_runtime_request_u64",
-        &["runtime", "src", "dst", "kind", "payload0", "payload1"],
-    );
     if !existing_callables.contains("__mc_machine_payload_pack") {
         append.push(TopLevelItem::FuncDecl(FuncDecl {
             id: node_id_gen.new_id(),
