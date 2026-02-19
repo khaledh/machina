@@ -9,28 +9,28 @@ impl<'a> Parser<'a> {
             TK::KwTrait => self.parse_trait_def(attrs).map(TopLevelItem::TraitDef),
             TK::KwProtocol => {
                 if !self.options.experimental_typestate {
-                    return Err(ParseError::FeatureDisabled {
+                    return Err(ParseErrorKind::FeatureDisabled {
                         feature: "typestate",
-                        span: self.curr_token.span,
-                    });
+                    }
+                    .at(self.curr_token.span));
                 }
                 if attrs.is_empty() {
                     self.parse_protocol_def().map(TopLevelItem::ProtocolDef)
                 } else {
-                    Err(ParseError::AttributeNotAllowed(attrs[0].span))
+                    Err(ParseErrorKind::AttributeNotAllowed.at(attrs[0].span))
                 }
             }
             TK::KwTypestate => {
                 if !self.options.experimental_typestate {
-                    return Err(ParseError::FeatureDisabled {
+                    return Err(ParseErrorKind::FeatureDisabled {
                         feature: "typestate",
-                        span: self.curr_token.span,
-                    });
+                    }
+                    .at(self.curr_token.span));
                 }
                 if attrs.is_empty() {
                     self.parse_typestate_def().map(TopLevelItem::TypestateDef)
                 } else {
-                    Err(ParseError::AttributeNotAllowed(attrs[0].span))
+                    Err(ParseErrorKind::AttributeNotAllowed.at(attrs[0].span))
                 }
             }
             TK::KwFn => self.parse_func(attrs),
@@ -38,10 +38,12 @@ impl<'a> Parser<'a> {
                 if attrs.is_empty() {
                     self.parse_method_block()
                 } else {
-                    Err(ParseError::AttributeNotAllowed(attrs[0].span))
+                    Err(ParseErrorKind::AttributeNotAllowed.at(attrs[0].span))
                 }
             }
-            _ => Err(ParseError::ExpectedDecl(self.curr_token.clone())),
+            _ => {
+                Err(ParseErrorKind::ExpectedDecl(self.curr_token.clone()).at(self.curr_token.span))
+            }
         }
     }
 
@@ -68,10 +70,10 @@ impl<'a> Parser<'a> {
                     self.parse_protocol_req_decl(&mut request_contracts, &message_aliases)?;
                 }
                 _ => {
-                    return Err(ParseError::ExpectedToken(
-                        TK::RBrace,
-                        self.curr_token.clone(),
-                    ));
+                    return Err(
+                        ParseErrorKind::ExpectedToken(TK::RBrace, self.curr_token.clone())
+                            .at(self.curr_token.span),
+                    );
                 }
             }
         }
@@ -160,7 +162,10 @@ impl<'a> Parser<'a> {
             None
         };
         if trigger_from_role.is_none() && !Self::is_protocol_start_trigger(&trigger_ty) {
-            return Err(ParseError::ExpectedToken(TK::At, self.curr_token.clone()));
+            return Err(
+                ParseErrorKind::ExpectedToken(TK::At, self.curr_token.clone())
+                    .at(self.curr_token.span),
+            );
         }
 
         self.consume(&TK::Arrow)?;
@@ -424,10 +429,11 @@ impl<'a> Parser<'a> {
                                 self.consume(&TK::Semicolon)?;
                             }
                             _ => {
-                                return Err(ParseError::ExpectedToken(
+                                return Err(ParseErrorKind::ExpectedToken(
                                     TK::RBrace,
                                     self.curr_token.clone(),
-                                ));
+                                )
+                                .at(self.curr_token.span));
                             }
                         }
                     }
@@ -443,10 +449,10 @@ impl<'a> Parser<'a> {
                     });
                 }
                 _ => {
-                    return Err(ParseError::ExpectedToken(
-                        TK::RBrace,
-                        self.curr_token.clone(),
-                    ));
+                    return Err(
+                        ParseErrorKind::ExpectedToken(TK::RBrace, self.curr_token.clone())
+                            .at(self.curr_token.span),
+                    );
                 }
             }
         }
@@ -480,14 +486,14 @@ impl<'a> Parser<'a> {
             let attrs = self.parse_attribute_list()?;
             if self.is_contextual_keyword("fields") {
                 if !attrs.is_empty() {
-                    return Err(ParseError::AttributeNotAllowed(attrs[0].span));
+                    return Err(ParseErrorKind::AttributeNotAllowed.at(attrs[0].span));
                 }
                 items.push(TypestateItem::Fields(self.parse_typestate_fields_block()?));
                 continue;
             }
             if self.curr_token.kind == TK::KwFn {
                 if !attrs.is_empty() {
-                    return Err(ParseError::AttributeNotAllowed(attrs[0].span));
+                    return Err(ParseErrorKind::AttributeNotAllowed.at(attrs[0].span));
                 }
                 let func = self.parse_typestate_func_def(format!("{name}$new"))?;
                 items.push(TypestateItem::Constructor(func));
@@ -495,7 +501,7 @@ impl<'a> Parser<'a> {
             }
             if self.curr_token.kind == TK::KwOn {
                 if !attrs.is_empty() {
-                    return Err(ParseError::AttributeNotAllowed(attrs[0].span));
+                    return Err(ParseErrorKind::AttributeNotAllowed.at(attrs[0].span));
                 }
                 items.push(TypestateItem::Handler(self.parse_typestate_on_handler()?));
                 continue;
@@ -506,10 +512,10 @@ impl<'a> Parser<'a> {
                 ));
                 continue;
             }
-            return Err(ParseError::ExpectedToken(
-                TK::RBrace,
-                self.curr_token.clone(),
-            ));
+            return Err(
+                ParseErrorKind::ExpectedToken(TK::RBrace, self.curr_token.clone())
+                    .at(self.curr_token.span),
+            );
         }
 
         self.consume(&TK::RBrace)?;
@@ -570,10 +576,10 @@ impl<'a> Parser<'a> {
                 ));
                 continue;
             }
-            return Err(ParseError::ExpectedToken(
-                TK::RBrace,
-                self.curr_token.clone(),
-            ));
+            return Err(
+                ParseErrorKind::ExpectedToken(TK::RBrace, self.curr_token.clone())
+                    .at(self.curr_token.span),
+            );
         }
 
         self.consume(&TK::RBrace)?;
@@ -794,10 +800,10 @@ impl<'a> Parser<'a> {
         let marker = self.mark();
         let sig = self.parse_func_sig()?;
         if self.curr_token.kind == TK::Semicolon {
-            return Err(ParseError::ExpectedToken(
-                TK::LBrace,
-                self.curr_token.clone(),
-            ));
+            return Err(
+                ParseErrorKind::ExpectedToken(TK::LBrace, self.curr_token.clone())
+                    .at(self.curr_token.span),
+            );
         }
 
         let prev_base = self.closure_base.clone();

@@ -11,7 +11,7 @@ use std::collections::{HashMap, HashSet};
 
 use crate::core::diag::Span;
 use crate::core::machine::naming::GENERATED_FINAL_STATE_MARKER;
-use crate::core::resolve::ResolveError;
+use crate::core::resolve::{ResolveError, ResolveErrorKind};
 use crate::core::tree::NodeIdGen;
 use crate::core::tree::parsed::{
     self, BindPattern, BindPatternKind, CallArg, EnumDefVariant, Expr, ExprKind, FuncDecl, FuncDef,
@@ -182,7 +182,7 @@ pub fn desugar_module(module: &mut Module, node_id_gen: &mut NodeIdGen) -> Vec<R
     if let Some(span) = first_spawn_call_span
         && !machines_opted_in
     {
-        errors.push(ResolveError::TypestateSpawnRequiresMachinesOptIn(span));
+        errors.push(ResolveErrorKind::TypestateSpawnRequiresMachinesOptIn.at(span));
     }
     // Enforce constructor-only entry: reject state literals outside typestate
     // constructor/transition bodies.
@@ -821,11 +821,9 @@ impl Visitor<()> for ExternalStateLiteralChecker<'_> {
             && let ExprKind::StructLit { name, .. } = &expr.kind
             && self.is_state_name(name)
         {
-            self.errors
-                .push(ResolveError::TypestateStateLiteralOutsideTypestate(
-                    name.clone(),
-                    expr.span,
-                ));
+            self.errors.push(
+                ResolveErrorKind::TypestateStateLiteralOutsideTypestate(name.clone()).at(expr.span),
+            );
         }
         visit::walk_expr(self, expr);
     }

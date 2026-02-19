@@ -50,8 +50,8 @@ pub(super) fn check_call_obligations(
                                 "<fn>".to_string(),
                                 params.len(),
                                 obligation.arg_terms.len(),
-                                obligation.span,
                             )
+                            .at(obligation.span)
                             .into(),
                         );
                         continue;
@@ -69,8 +69,8 @@ pub(super) fn check_call_obligations(
                                     index + 1,
                                     super::term_utils::canonicalize_type(unifier.apply(&param.ty)),
                                     super::term_utils::canonicalize_type(unifier.apply(&arg_ty)),
-                                    obligation.span,
                                 )
+                                .at(obligation.span)
                                 .into(),
                             );
                             arg_failed = true;
@@ -93,11 +93,9 @@ pub(super) fn check_call_obligations(
                     deferred.push(obligation.clone());
                 } else {
                     errors.push(
-                        TypeCheckErrorKind::OverloadNoMatch(
-                            format!("<dynamic:{expr_id}>"),
-                            obligation.span,
-                        )
-                        .into(),
+                        TypeCheckErrorKind::OverloadNoMatch(format!("<dynamic:{expr_id}>"))
+                            .at(obligation.span)
+                            .into(),
                     );
                 }
             } else {
@@ -183,10 +181,17 @@ pub(super) fn check_call_obligations(
                 CallCallee::Dynamic { expr_id, .. } => format!("<dynamic:{expr_id}>"),
             };
             if inaccessible_count > 0 {
-                errors
-                    .push(TypeCheckErrorKind::CallableNotAccessible(name, obligation.span).into());
+                errors.push(
+                    TypeCheckErrorKind::CallableNotAccessible(name)
+                        .at(obligation.span)
+                        .into(),
+                );
             } else {
-                errors.push(TypeCheckErrorKind::OverloadNoMatch(name, obligation.span).into());
+                errors.push(
+                    TypeCheckErrorKind::OverloadNoMatch(name)
+                        .at(obligation.span)
+                        .into(),
+                );
             }
             continue;
         }
@@ -215,8 +220,8 @@ pub(super) fn check_call_obligations(
                             index + 1,
                             super::term_utils::canonicalize_type(trial.apply(param_ty)),
                             super::term_utils::canonicalize_type(trial.apply(&arg_ty)),
-                            obligation.span,
                         )
+                        .at(obligation.span)
                         .into()
                     });
                     failed = true;
@@ -244,7 +249,8 @@ pub(super) fn check_call_obligations(
                 unsatisfied_trait_bound(&instantiated.bound_terms, &trial, trait_impls)
             {
                 first_error.get_or_insert_with(|| {
-                    TypeCheckErrorKind::TraitBoundNotSatisfied(trait_name, ty, obligation.span)
+                    TypeCheckErrorKind::TraitBoundNotSatisfied(trait_name, ty)
+                        .at(obligation.span)
                         .into()
                 });
                 continue;
@@ -276,7 +282,11 @@ pub(super) fn check_call_obligations(
                     CallCallee::Method { name } => name.clone(),
                     CallCallee::Dynamic { expr_id, .. } => format!("<dynamic:{expr_id}>"),
                 };
-                errors.push(TypeCheckErrorKind::OverloadAmbiguous(name, obligation.span).into());
+                errors.push(
+                    TypeCheckErrorKind::OverloadAmbiguous(name)
+                        .at(obligation.span)
+                        .into(),
+                );
                 continue;
             }
             if let Some(prop_name) = called_property_name(obligation, def_id, property_sigs, &next)
@@ -285,7 +295,9 @@ pub(super) fn check_call_obligations(
                 // reject property accessor call syntax in source.
                 *unifier = next;
                 errors.push(
-                    TypeCheckErrorKind::PropertyCalledAsMethod(prop_name, obligation.span).into(),
+                    TypeCheckErrorKind::PropertyCalledAsMethod(prop_name)
+                        .at(obligation.span)
+                        .into(),
                 );
                 continue;
             }
@@ -307,7 +319,11 @@ pub(super) fn check_call_obligations(
                 CallCallee::Method { name } => name.clone(),
                 CallCallee::Dynamic { expr_id, .. } => format!("<dynamic:{expr_id}>"),
             };
-            errors.push(TypeCheckErrorKind::OverloadNoMatch(name, obligation.span).into());
+            errors.push(
+                TypeCheckErrorKind::OverloadNoMatch(name)
+                    .at(obligation.span)
+                    .into(),
+            );
         }
     }
     (errors, resolved_call_defs, deferred)
@@ -430,8 +446,8 @@ fn try_solve_builtin_method(
     if builtin_methods::resolve_builtin_property(&receiver_ty, method_name).is_some() {
         return Some(Err(TypeCheckErrorKind::PropertyCalledAsMethod(
             method_name.to_string(),
-            obligation.span,
         )
+        .at(obligation.span)
         .into()));
     }
 
@@ -444,8 +460,8 @@ fn try_solve_builtin_method(
             hashable_ty.clone(),
             failure.path,
             failure.failing_ty,
-            obligation.span,
         )
+        .at(obligation.span)
         .into()));
     }
     let params = builtin.params();
@@ -457,8 +473,8 @@ fn try_solve_builtin_method(
             method_name.to_string(),
             params.len(),
             arity,
-            obligation.span,
         )
+        .at(obligation.span)
         .into()));
     }
     for (index, (arg_term, expected_ty)) in
@@ -470,8 +486,8 @@ fn try_solve_builtin_method(
                 index + 1,
                 expected_ty.ty.clone(),
                 arg_ty,
-                obligation.span,
             )
+            .at(obligation.span)
             .into()));
         }
     }
@@ -481,11 +497,9 @@ fn try_solve_builtin_method(
         BuiltinMethodRet::Bool => Type::Bool,
         BuiltinMethodRet::MapGet { value_ty } => {
             if value_ty.needs_drop() && !super::term_utils::is_unresolved(&value_ty) {
-                return Some(Err(TypeCheckErrorKind::MapIndexValueNotCopySafe(
-                    value_ty,
-                    obligation.span,
-                )
-                .into()));
+                return Some(Err(TypeCheckErrorKind::MapIndexValueNotCopySafe(value_ty)
+                    .at(obligation.span)
+                    .into()));
             }
             Type::ErrorUnion {
                 ok_ty: Box::new(value_ty),

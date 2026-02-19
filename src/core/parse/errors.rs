@@ -1,11 +1,11 @@
 use thiserror::Error;
 
-use crate::core::diag::Span;
+use crate::core::diag::{Span, SpannedError};
 use crate::core::lexer::{Token, TokenKind};
 
 #[derive(Debug, Error)]
 #[allow(clippy::enum_variant_names)]
-pub enum ParseError {
+pub enum ParseErrorKind {
     #[error("Expected declaration, found: {0}")]
     ExpectedDecl(Token),
 
@@ -55,53 +55,31 @@ pub enum ParseError {
     ExpectedRefinement(Token),
 
     #[error("Unknown attribute `{0}`")]
-    UnknownAttribute(String, Span),
+    UnknownAttribute(String),
 
     #[error("Attribute not allowed here")]
-    AttributeNotAllowed(Span),
+    AttributeNotAllowed,
 
     #[error("Feature `{feature}` is not enabled; pass `--experimental {feature}`")]
-    FeatureDisabled { feature: &'static str, span: Span },
+    FeatureDisabled { feature: &'static str },
 
-    #[error("Unmatched format brace at {0}")]
-    UnmatchedFormatBrace(Span),
+    #[error("Unmatched format brace")]
+    UnmatchedFormatBrace,
 
-    #[error("Invalid format expression at {0}")]
-    InvalidFormatExpr(Span),
+    #[error("Invalid format expression")]
+    InvalidFormatExpr,
 
-    #[error("Empty format expression: {0}")]
-    EmptyFormatExpr(Span),
+    #[error("Empty format expression")]
+    EmptyFormatExpr,
 
-    #[error("Unterminated format expression: {0}")]
-    UnterminatedFormatExpr(Span),
+    #[error("Unterminated format expression")]
+    UnterminatedFormatExpr,
 }
 
-impl ParseError {
-    pub fn span(&self) -> Span {
-        match self {
-            ParseError::ExpectedDecl(token) => token.span,
-            ParseError::ExpectedToken(_, token) => token.span,
-            ParseError::ExpectedIdent(token) => token.span,
-            ParseError::ExpectedSelf(token) => token.span,
-            ParseError::ExpectedType(token) => token.span,
-            ParseError::ExpectedPrimary(token) => token.span,
-            ParseError::ExpectedIntLit(token) => token.span,
-            ParseError::ExpectedStringLit(token) => token.span,
-            ParseError::ExpectedPattern(token) => token.span,
-            ParseError::SingleFieldTupleMissingComma(token) => token.span,
-            ParseError::SingleElementSetMissingComma(token) => token.span,
-            ParseError::ExpectedStructField(token) => token.span,
-            ParseError::ExpectedMatchArm(token) => token.span,
-            ParseError::ExpectedMatchPattern(token) => token.span,
-            ParseError::ExpectedArrayIndexOrRange(token) => token.span,
-            ParseError::ExpectedRefinement(token) => token.span,
-            ParseError::UnknownAttribute(_, span) => *span,
-            ParseError::AttributeNotAllowed(span) => *span,
-            ParseError::FeatureDisabled { span, .. } => *span,
-            ParseError::UnmatchedFormatBrace(span) => *span,
-            ParseError::InvalidFormatExpr(span) => *span,
-            ParseError::EmptyFormatExpr(span) => *span,
-            ParseError::UnterminatedFormatExpr(span) => *span,
-        }
+pub type ParseError = SpannedError<ParseErrorKind>;
+
+impl ParseErrorKind {
+    pub fn at(self, span: Span) -> ParseError {
+        ParseError::new(self, span)
     }
 }

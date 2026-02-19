@@ -72,7 +72,7 @@ impl Visitor<DefId, ()> for ReplyOutsideHandlerCollector {
     fn visit_expr(&mut self, expr: &crate::core::tree::resolved::Expr) {
         if matches!(expr.kind, ExprKind::Reply { .. }) && !self.in_typestate_handler {
             self.errors
-                .push(TypeCheckErrorKind::ReplyOutsideHandler(expr.span).into());
+                .push(TypeCheckErrorKind::ReplyOutsideHandler.at(expr.span).into());
         }
         visit::walk_expr(self, expr);
     }
@@ -133,16 +133,28 @@ fn check_handler_reply_calls(
             continue;
         };
         let Type::ReplyCap { .. } = cap_ty else {
-            errors.push(TypeCheckErrorKind::ReplyCapExpected(cap_ty.clone(), site.cap_span).into());
+            errors.push(
+                TypeCheckErrorKind::ReplyCapExpected(cap_ty.clone())
+                    .at(site.cap_span)
+                    .into(),
+            );
             continue;
         };
 
         let Some(cap_def_id) = site.cap_def_id else {
-            errors.push(TypeCheckErrorKind::ReplyCapParamRequired(site.cap_span).into());
+            errors.push(
+                TypeCheckErrorKind::ReplyCapParamRequired
+                    .at(site.cap_span)
+                    .into(),
+            );
             continue;
         };
         let Some(cap_param) = cap_params_by_id.get(&cap_def_id).copied() else {
-            errors.push(TypeCheckErrorKind::ReplyCapParamRequired(site.cap_span).into());
+            errors.push(
+                TypeCheckErrorKind::ReplyCapParamRequired
+                    .at(site.cap_span)
+                    .into(),
+            );
             continue;
         };
 
@@ -158,8 +170,8 @@ fn check_handler_reply_calls(
                 TypeCheckErrorKind::ReplyPayloadNotAllowed(
                     value_ty.clone(),
                     cap_param.response_tys.clone(),
-                    site.span,
                 )
+                .at(site.span)
                 .into(),
             );
         }
@@ -226,7 +238,8 @@ fn check_handler_reply_cap_linearity(
                         | ReplyCapFlowState::InvalidDoubleConsume
                 ) {
                     errors.push(
-                        TypeCheckErrorKind::ReplyCapConsumedMultipleTimes(cap.name.clone(), *span)
+                        TypeCheckErrorKind::ReplyCapConsumedMultipleTimes(cap.name.clone())
+                            .at(*span)
                             .into(),
                     );
                     state = ReplyCapFlowState::InvalidDoubleConsume;
@@ -255,7 +268,9 @@ fn check_handler_reply_cap_linearity(
         }
         if missing_on_some_path {
             errors.push(
-                TypeCheckErrorKind::ReplyCapMustBeConsumed(cap.name.clone(), cap.span).into(),
+                TypeCheckErrorKind::ReplyCapMustBeConsumed(cap.name.clone())
+                    .at(cap.span)
+                    .into(),
             );
         }
     }

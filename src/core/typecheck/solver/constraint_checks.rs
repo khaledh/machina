@@ -54,10 +54,18 @@ pub(super) fn remap_index_unify_error(err: &TcUnifyError, span: Span) -> Option<
     match err {
         TcUnifyError::Mismatch(left, right) => {
             if !super::term_utils::is_int_like(left) && !super::term_utils::is_unresolved(left) {
-                return Some(TypeCheckErrorKind::IndexTypeNotInt(left.clone(), span).into());
+                return Some(
+                    TypeCheckErrorKind::IndexTypeNotInt(left.clone())
+                        .at(span)
+                        .into(),
+                );
             }
             if !super::term_utils::is_int_like(right) && !super::term_utils::is_unresolved(right) {
-                return Some(TypeCheckErrorKind::IndexTypeNotInt(right.clone(), span).into());
+                return Some(
+                    TypeCheckErrorKind::IndexTypeNotInt(right.clone())
+                        .at(span)
+                        .into(),
+                );
             }
             None
         }
@@ -65,7 +73,11 @@ pub(super) fn remap_index_unify_error(err: &TcUnifyError, span: Span) -> Option<
             if !super::term_utils::is_int_like(found)
                 && !super::term_utils::is_unresolved(found) =>
         {
-            Some(TypeCheckErrorKind::IndexTypeNotInt(found.clone(), span).into())
+            Some(
+                TypeCheckErrorKind::IndexTypeNotInt(found.clone())
+                    .at(span)
+                    .into(),
+            )
         }
         _ => None,
     }
@@ -88,8 +100,8 @@ pub(super) fn remap_enum_payload_unify_error(
                     index,
                     expected.clone(),
                     found.clone(),
-                    span,
                 )
+                .at(span)
                 .into(),
             )
         }
@@ -100,12 +112,16 @@ pub(super) fn remap_enum_payload_unify_error(
 pub(super) fn unify_error_to_diag(err: TcUnifyError, span: Span) -> TypeCheckError {
     match err {
         TcUnifyError::Mismatch(expected, found) => {
-            TypeCheckErrorKind::DeclTypeMismatch(expected, found, span).into()
+            TypeCheckErrorKind::DeclTypeMismatch(expected, found)
+                .at(span)
+                .into()
         }
         TcUnifyError::CannotBindRigid(var, found) => {
-            TypeCheckErrorKind::DeclTypeMismatch(Type::Var(var), found, span).into()
+            TypeCheckErrorKind::DeclTypeMismatch(Type::Var(var), found)
+                .at(span)
+                .into()
         }
-        TcUnifyError::OccursCheckFailed(_, _) => TypeCheckErrorKind::UnknownType(span).into(),
+        TcUnifyError::OccursCheckFailed(_, _) => TypeCheckErrorKind::UnknownType.at(span).into(),
     }
 }
 
@@ -130,14 +146,20 @@ fn return_unify_error_to_diag(err: TcUnifyError, span: Span) -> TypeCheckError {
                     .collect::<Vec<_>>();
                 variants.sort();
                 variants.dedup();
-                return TypeCheckErrorKind::ReturnNotInErrorUnion(variants, found, span).into();
+                return TypeCheckErrorKind::ReturnNotInErrorUnion(variants, found)
+                    .at(span)
+                    .into();
             }
-            TypeCheckErrorKind::ReturnTypeMismatch(expected, found, span).into()
+            TypeCheckErrorKind::ReturnTypeMismatch(expected, found)
+                .at(span)
+                .into()
         }
         TcUnifyError::CannotBindRigid(var, found) => {
-            TypeCheckErrorKind::ReturnTypeMismatch(Type::Var(var), found, span).into()
+            TypeCheckErrorKind::ReturnTypeMismatch(Type::Var(var), found)
+                .at(span)
+                .into()
         }
-        TcUnifyError::OccursCheckFailed(_, _) => TypeCheckErrorKind::UnknownType(span).into(),
+        TcUnifyError::OccursCheckFailed(_, _) => TypeCheckErrorKind::UnknownType.at(span).into(),
     }
 }
 

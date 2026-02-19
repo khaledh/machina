@@ -4,7 +4,7 @@ use crate::core::context::{ParsedContext, TypeCheckedContext};
 use crate::core::lexer::{LexError, Lexer, Token};
 use crate::core::parse::Parser;
 use crate::core::resolve::resolve;
-use crate::core::semck::{SemCheckError, sem_check_partial};
+use crate::core::semck::{SemCheckErrorKind, sem_check_partial};
 use crate::core::tree::NodeId;
 use crate::core::typecheck::type_check;
 
@@ -61,7 +61,10 @@ fn sem_check_partial_reports_errors_without_upstream_poison() {
 
     assert!(!output.errors.is_empty(), "expected semantic errors");
     assert!(
-        matches!(output.errors[0], SemCheckError::InvalidRangeBounds(_, _, _)),
+        matches!(
+            output.errors[0].kind(),
+            SemCheckErrorKind::InvalidRangeBounds(..)
+        ),
         "expected InvalidRangeBounds, got {:?}",
         output.errors
     );

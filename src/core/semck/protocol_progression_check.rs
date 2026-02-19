@@ -15,7 +15,7 @@ use crate::core::context::{
     ProtocolProgressionEvent, ProtocolProgressionFacts, SemCheckNormalizedContext,
 };
 use crate::core::protocol::{ProtocolStateFact, ProtocolTransitionFact};
-use crate::core::semck::SemCheckError;
+use crate::core::semck::{SemCheckError, SemCheckErrorKind};
 use crate::core::types::Type;
 
 pub(super) fn check(
@@ -38,14 +38,16 @@ pub(super) fn check(
 
         let candidates = matching_trigger_transitions(state_fact, &fact.selector_ty);
         if candidates.is_empty() {
-            errors.push(SemCheckError::ProtocolProgressionMissingTriggerTransition(
-                fact.typestate_name.clone(),
-                fact.entry_state.protocol_name.clone(),
-                fact.entry_state.role_name.clone(),
-                fact.entry_state.state_name.clone(),
-                fact.selector_ty.clone(),
-                fact.span,
-            ));
+            errors.push(
+                SemCheckErrorKind::ProtocolProgressionMissingTriggerTransition(
+                    fact.typestate_name.clone(),
+                    fact.entry_state.protocol_name.clone(),
+                    fact.entry_state.role_name.clone(),
+                    fact.entry_state.state_name.clone(),
+                    fact.selector_ty.clone(),
+                )
+                .at(fact.span),
+            );
             // Follow-on emit/return diagnostics would only be symptoms.
             continue;
         }
@@ -72,16 +74,18 @@ pub(super) fn check(
                             && seen_impossible_emits
                                 .insert((emit.payload_ty.clone(), to_role_name.to_string()))
                         {
-                            errors.push(SemCheckError::ProtocolProgressionImpossibleEmit(
-                                fact.typestate_name.clone(),
-                                fact.entry_state.protocol_name.clone(),
-                                fact.entry_state.role_name.clone(),
-                                fact.entry_state.state_name.clone(),
-                                fact.selector_ty.clone(),
-                                emit.payload_ty.clone(),
-                                to_role_name.to_string(),
-                                emit.span,
-                            ));
+                            errors.push(
+                                SemCheckErrorKind::ProtocolProgressionImpossibleEmit(
+                                    fact.typestate_name.clone(),
+                                    fact.entry_state.protocol_name.clone(),
+                                    fact.entry_state.role_name.clone(),
+                                    fact.entry_state.state_name.clone(),
+                                    fact.selector_ty.clone(),
+                                    emit.payload_ty.clone(),
+                                    to_role_name.to_string(),
+                                )
+                                .at(emit.span),
+                            );
                         }
                     }
                     ProtocolProgressionEvent::ReturnState(ret) => {
@@ -93,15 +97,17 @@ pub(super) fn check(
                             .contains(to_state_name)
                             && seen_impossible_returns.insert(to_state_name.to_string())
                         {
-                            errors.push(SemCheckError::ProtocolProgressionImpossibleReturnState(
-                                fact.typestate_name.clone(),
-                                fact.entry_state.protocol_name.clone(),
-                                fact.entry_state.role_name.clone(),
-                                fact.entry_state.state_name.clone(),
-                                fact.selector_ty.clone(),
-                                to_state_name.to_string(),
-                                ret.span,
-                            ));
+                            errors.push(
+                                SemCheckErrorKind::ProtocolProgressionImpossibleReturnState(
+                                    fact.typestate_name.clone(),
+                                    fact.entry_state.protocol_name.clone(),
+                                    fact.entry_state.role_name.clone(),
+                                    fact.entry_state.state_name.clone(),
+                                    fact.selector_ty.clone(),
+                                    to_state_name.to_string(),
+                                )
+                                .at(ret.span),
+                            );
                         }
                     }
                 }

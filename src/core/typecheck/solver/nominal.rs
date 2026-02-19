@@ -51,8 +51,8 @@ pub(super) fn try_check_expr_obligation_nominal(
                         variant.clone(),
                         expected_variant.payload.len(),
                         payload.len(),
-                        *span,
                     )
+                    .at(*span)
                     .into(),
                 );
                 covered_exprs.insert(*expr_id);
@@ -76,8 +76,8 @@ pub(super) fn try_check_expr_obligation_nominal(
                             idx,
                             expected_ty.clone(),
                             found_ty,
-                            *span,
                         )
+                        .at(*span)
                         .into(),
                     );
                     covered_exprs.insert(*expr_id);
@@ -105,7 +105,11 @@ pub(super) fn try_check_expr_obligation_nominal(
                     .lookup_def(type_def_id)
                     .map(|def| def.name.clone())
                     .unwrap_or_else(|| super::diag_utils::compact_nominal_name(type_name));
-                errors.push(TypeCheckErrorKind::OpaqueTypeConstruction(diag_name, *span).into());
+                errors.push(
+                    TypeCheckErrorKind::OpaqueTypeConstruction(diag_name)
+                        .at(*span)
+                        .into(),
+                );
                 covered_exprs.insert(*expr_id);
             }
             true
@@ -146,7 +150,8 @@ pub(super) fn try_check_expr_obligation_nominal(
                             .map(|(field, _)| field.clone())
                             .unwrap_or_else(|| "<update>".to_string());
                         errors.push(
-                            TypeCheckErrorKind::OpaqueFieldAccess(diag_name, field_name, *span)
+                            TypeCheckErrorKind::OpaqueFieldAccess(diag_name, field_name)
+                                .at(*span)
                                 .into(),
                         );
                         covered_exprs.insert(*expr_id);
@@ -174,8 +179,8 @@ pub(super) fn try_check_expr_obligation_nominal(
                                     field_name.clone(),
                                     expected_field.ty.clone(),
                                     found_ty,
-                                    *span,
                                 )
+                                .at(*span)
                                 .into(),
                             );
                             covered_exprs.insert(*expr_id);
@@ -187,7 +192,8 @@ pub(super) fn try_check_expr_obligation_nominal(
                 ty if super::term_utils::is_unresolved(ty) => {}
                 _ => {
                     errors.push(
-                        TypeCheckErrorKind::InvalidStructUpdateTarget(target_ty_for_diag, *span)
+                        TypeCheckErrorKind::InvalidStructUpdateTarget(target_ty_for_diag)
+                            .at(*span)
                             .into(),
                     );
                     covered_exprs.insert(*expr_id);
@@ -208,12 +214,9 @@ pub(super) fn try_check_expr_obligation_nominal(
                 Type::Tuple { field_tys } => {
                     if *index >= field_tys.len() {
                         errors.push(
-                            TypeCheckErrorKind::TupleFieldOutOfBounds(
-                                field_tys.len(),
-                                *index,
-                                *span,
-                            )
-                            .into(),
+                            TypeCheckErrorKind::TupleFieldOutOfBounds(field_tys.len(), *index)
+                                .at(*span)
+                                .into(),
                         );
                         covered_exprs.insert(*expr_id);
                         return true;
@@ -223,7 +226,9 @@ pub(super) fn try_check_expr_obligation_nominal(
                 ty if super::term_utils::is_unresolved(ty) => {}
                 _ => {
                     errors.push(
-                        TypeCheckErrorKind::InvalidTupleFieldTarget(tuple_target_ty, *span).into(),
+                        TypeCheckErrorKind::InvalidTupleFieldTarget(tuple_target_ty)
+                            .at(*span)
+                            .into(),
                     );
                     covered_exprs.insert(*expr_id);
                 }
@@ -253,7 +258,9 @@ pub(super) fn try_check_expr_obligation_nominal(
                 Ok(prop) => {
                     if !prop.readable {
                         errors.push(
-                            TypeCheckErrorKind::PropertyNotReadable(field.clone(), *span).into(),
+                            TypeCheckErrorKind::PropertyNotReadable(field.clone())
+                                .at(*span)
+                                .into(),
                         );
                         covered_exprs.insert(*expr_id);
                         return true;
@@ -262,13 +269,19 @@ pub(super) fn try_check_expr_obligation_nominal(
                     return true;
                 }
                 Err(super::PropertyResolution::Ambiguous) => {
-                    errors.push(TypeCheckErrorKind::OverloadAmbiguous(field.clone(), *span).into());
+                    errors.push(
+                        TypeCheckErrorKind::OverloadAmbiguous(field.clone())
+                            .at(*span)
+                            .into(),
+                    );
                     covered_exprs.insert(*expr_id);
                     return true;
                 }
                 Err(super::PropertyResolution::Private) => {
                     errors.push(
-                        TypeCheckErrorKind::PropertyNotAccessible(field.clone(), *span).into(),
+                        TypeCheckErrorKind::PropertyNotAccessible(field.clone())
+                            .at(*span)
+                            .into(),
                     );
                     covered_exprs.insert(*expr_id);
                     return true;
@@ -277,8 +290,11 @@ pub(super) fn try_check_expr_obligation_nominal(
             }
             if let Some(prop) = builtin_methods::resolve_builtin_property(&owner_ty, field) {
                 if !prop.readable {
-                    errors
-                        .push(TypeCheckErrorKind::PropertyNotReadable(field.clone(), *span).into());
+                    errors.push(
+                        TypeCheckErrorKind::PropertyNotReadable(field.clone())
+                            .at(*span)
+                            .into(),
+                    );
                     covered_exprs.insert(*expr_id);
                     return true;
                 }
@@ -301,7 +317,8 @@ pub(super) fn try_check_expr_obligation_nominal(
                             .map(|def| def.name.clone())
                             .unwrap_or_else(|| super::diag_utils::compact_nominal_name(name));
                         errors.push(
-                            TypeCheckErrorKind::OpaqueFieldAccess(diag_name, field.clone(), *span)
+                            TypeCheckErrorKind::OpaqueFieldAccess(diag_name, field.clone())
+                                .at(*span)
                                 .into(),
                         );
                         covered_exprs.insert(*expr_id);
@@ -315,8 +332,11 @@ pub(super) fn try_check_expr_obligation_nominal(
                 }
                 ty if super::term_utils::is_unresolved(ty) => {}
                 _ => {
-                    errors
-                        .push(TypeCheckErrorKind::InvalidStructFieldTarget(owner_ty, *span).into());
+                    errors.push(
+                        TypeCheckErrorKind::InvalidStructFieldTarget(owner_ty)
+                            .at(*span)
+                            .into(),
+                    );
                     covered_exprs.insert(*expr_id);
                 }
             }
@@ -349,7 +369,9 @@ pub(super) fn try_check_expr_obligation_nominal(
                 Ok(prop) => {
                     if !prop.writable {
                         errors.push(
-                            TypeCheckErrorKind::PropertyNotWritable(field.clone(), *span).into(),
+                            TypeCheckErrorKind::PropertyNotWritable(field.clone())
+                                .at(*span)
+                                .into(),
                         );
                         covered_exprs.insert(*stmt_id);
                         return true;
@@ -364,20 +386,28 @@ pub(super) fn try_check_expr_obligation_nominal(
                             return true;
                         }
                         errors.push(
-                            TypeCheckErrorKind::AssignTypeMismatch(prop.ty, value_ty, *span).into(),
+                            TypeCheckErrorKind::AssignTypeMismatch(prop.ty, value_ty)
+                                .at(*span)
+                                .into(),
                         );
                         covered_exprs.insert(*stmt_id);
                     }
                     return true;
                 }
                 Err(super::PropertyResolution::Ambiguous) => {
-                    errors.push(TypeCheckErrorKind::OverloadAmbiguous(field.clone(), *span).into());
+                    errors.push(
+                        TypeCheckErrorKind::OverloadAmbiguous(field.clone())
+                            .at(*span)
+                            .into(),
+                    );
                     covered_exprs.insert(*stmt_id);
                     return true;
                 }
                 Err(super::PropertyResolution::Private) => {
                     errors.push(
-                        TypeCheckErrorKind::PropertyNotAccessible(field.clone(), *span).into(),
+                        TypeCheckErrorKind::PropertyNotAccessible(field.clone())
+                            .at(*span)
+                            .into(),
                     );
                     covered_exprs.insert(*stmt_id);
                     return true;
@@ -387,8 +417,11 @@ pub(super) fn try_check_expr_obligation_nominal(
 
             if let Some(prop) = builtin_methods::resolve_builtin_property(&owner_ty, field) {
                 if !prop.writable {
-                    errors
-                        .push(TypeCheckErrorKind::PropertyNotWritable(field.clone(), *span).into());
+                    errors.push(
+                        TypeCheckErrorKind::PropertyNotWritable(field.clone())
+                            .at(*span)
+                            .into(),
+                    );
                     covered_exprs.insert(*stmt_id);
                     return true;
                 }
@@ -400,7 +433,9 @@ pub(super) fn try_check_expr_obligation_nominal(
                         return true;
                     }
                     errors.push(
-                        TypeCheckErrorKind::AssignTypeMismatch(prop.ty, value_ty, *span).into(),
+                        TypeCheckErrorKind::AssignTypeMismatch(prop.ty, value_ty)
+                            .at(*span)
+                            .into(),
                     );
                     covered_exprs.insert(*stmt_id);
                 }
@@ -423,7 +458,8 @@ pub(super) fn try_check_expr_obligation_nominal(
                             .map(|def| def.name.clone())
                             .unwrap_or_else(|| super::diag_utils::compact_nominal_name(name));
                         errors.push(
-                            TypeCheckErrorKind::OpaqueFieldAccess(diag_name, field.clone(), *span)
+                            TypeCheckErrorKind::OpaqueFieldAccess(diag_name, field.clone())
+                                .at(*span)
                                 .into(),
                         );
                         covered_exprs.insert(*stmt_id);
@@ -445,8 +481,8 @@ pub(super) fn try_check_expr_obligation_nominal(
                                 TypeCheckErrorKind::AssignTypeMismatch(
                                     struct_field.ty.clone(),
                                     value_ty,
-                                    *span,
                                 )
+                                .at(*span)
                                 .into(),
                             );
                             covered_exprs.insert(*stmt_id);
@@ -457,8 +493,11 @@ pub(super) fn try_check_expr_obligation_nominal(
                 }
                 ty if super::term_utils::is_unresolved(ty) => {}
                 _ => {
-                    errors
-                        .push(TypeCheckErrorKind::InvalidStructFieldTarget(owner_ty, *span).into());
+                    errors.push(
+                        TypeCheckErrorKind::InvalidStructFieldTarget(owner_ty)
+                            .at(*span)
+                            .into(),
+                    );
                     covered_exprs.insert(*stmt_id);
                 }
             }

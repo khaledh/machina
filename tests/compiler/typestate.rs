@@ -1,8 +1,8 @@
 use crate::common::run_program_with_opts;
 use machina::core::capsule::CapsuleError;
 use machina::core::diag::CompileError;
-use machina::core::parse::ParseError;
-use machina::core::resolve::ResolveError;
+use machina::core::parse::ParseErrorKind;
+use machina::core::resolve::{ResolveError, ResolveErrorKind};
 use machina::core::typecheck::TypeCheckErrorKind;
 use machina::driver::compile::{CompileOptions, check_with_path, compile_with_path};
 use std::path::{Path, PathBuf};
@@ -73,28 +73,43 @@ fn invalid_example_cases() -> Vec<(PathBuf, fn(&ResolveError) -> bool)> {
     vec![
         (
             root.join("tests/fixtures/typestate/connection_invalid.mc"),
-            |err| matches!(err, ResolveError::TypestateStateLiteralOutsideTypestate(..)),
+            |err| {
+                matches!(
+                    err.kind(),
+                    ResolveErrorKind::TypestateStateLiteralOutsideTypestate(..)
+                )
+            },
         ),
         (
             root.join("tests/fixtures/typestate/file_handle_invalid.mc"),
-            |err| matches!(err, ResolveError::TypestateInvalidTransitionReturn(..)),
+            |err| {
+                matches!(
+                    err.kind(),
+                    ResolveErrorKind::TypestateInvalidTransitionReturn(..)
+                )
+            },
         ),
         (
             root.join("tests/fixtures/typestate/job_invalid.mc"),
-            |err| matches!(err, ResolveError::TypestateMissingNew(..)),
+            |err| matches!(err.kind(), ResolveErrorKind::TypestateMissingNew(..)),
         ),
         (
             root.join("tests/fixtures/typestate/request_builder_invalid.mc"),
             |err| {
                 matches!(
-                    err,
-                    ResolveError::TypestateStateFieldShadowsCarriedField(..)
+                    err.kind(),
+                    ResolveErrorKind::TypestateStateFieldShadowsCarriedField(..)
                 )
             },
         ),
         (
             root.join("tests/fixtures/typestate/service_lifecycle_invalid.mc"),
-            |err| matches!(err, ResolveError::TypestateDuplicateTransition(..)),
+            |err| {
+                matches!(
+                    err.kind(),
+                    ResolveErrorKind::TypestateDuplicateTransition(..)
+                )
+            },
         ),
     ]
 }
@@ -115,14 +130,20 @@ fn typestate_examples_are_rejected_without_experimental_flag() {
         assert!(errors.iter().any(|err| {
             matches!(
                 err,
-                CompileError::Parse(ParseError::FeatureDisabled { feature, .. })
-                    if *feature == "typestate"
+                CompileError::Parse(parse_err)
+                    if matches!(
+                        parse_err.kind(),
+                        ParseErrorKind::FeatureDisabled { feature } if *feature == "typestate"
+                    )
             ) || matches!(
                 err,
                 CompileError::Capsule(CapsuleError::Parse {
-                    error: ParseError::FeatureDisabled { feature, .. },
+                    error,
                     ..
-                }) if *feature == "typestate"
+                }) if matches!(
+                    error.kind(),
+                    ParseErrorKind::FeatureDisabled { feature } if *feature == "typestate"
+                )
             )
         }));
     }
@@ -257,14 +278,20 @@ fn typestate_managed_examples_are_rejected_without_experimental_flag() {
         assert!(errors.iter().any(|err| {
             matches!(
                 err,
-                CompileError::Parse(ParseError::FeatureDisabled { feature, .. })
-                    if *feature == "typestate"
+                CompileError::Parse(parse_err)
+                    if matches!(
+                        parse_err.kind(),
+                        ParseErrorKind::FeatureDisabled { feature } if *feature == "typestate"
+                    )
             ) || matches!(
                 err,
                 CompileError::Capsule(CapsuleError::Parse {
-                    error: ParseError::FeatureDisabled { feature, .. },
+                    error,
                     ..
-                }) if *feature == "typestate"
+                }) if matches!(
+                    error.kind(),
+                    ParseErrorKind::FeatureDisabled { feature } if *feature == "typestate"
+                )
             )
         }));
     }

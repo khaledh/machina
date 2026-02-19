@@ -134,7 +134,7 @@ fn test_modules_opaque_field_access_rejected() {
                         CompileError::TypeCheck(type_err)
                             if matches!(
                                 type_err.kind(),
-                                TypeCheckErrorKind::OpaqueFieldAccess(type_name, field, _)
+                                TypeCheckErrorKind::OpaqueFieldAccess(type_name, field, ..)
                                     if type_name == "Secret" && field == "x"
                             )
                     )
@@ -184,7 +184,7 @@ fn test_modules_opaque_construction_rejected() {
                         CompileError::TypeCheck(type_err)
                             if matches!(
                                 type_err.kind(),
-                                TypeCheckErrorKind::OpaqueTypeConstruction(type_name, _)
+                                TypeCheckErrorKind::OpaqueTypeConstruction(type_name, ..)
                                     if type_name == "Secret"
                             )
                     )
@@ -236,7 +236,7 @@ fn test_modules_private_method_call_rejected() {
                         CompileError::TypeCheck(type_err)
                             if matches!(
                                 type_err.kind(),
-                                TypeCheckErrorKind::CallableNotAccessible(name, _)
+                                TypeCheckErrorKind::CallableNotAccessible(name, ..)
                                     if name == "inc"
                             )
                     )
@@ -287,7 +287,7 @@ fn test_modules_private_property_access_rejected() {
                         CompileError::TypeCheck(type_err)
                             if matches!(
                                 type_err.kind(),
-                                TypeCheckErrorKind::PropertyNotAccessible(name, _)
+                                TypeCheckErrorKind::PropertyNotAccessible(name, ..)
                                     if name == "tick_count"
                             )
                     )
@@ -364,7 +364,7 @@ fn test_strict_compile_rejects_mixed_region_type_fixture() {
                     matches!(
                         err,
                         CompileError::TypeCheck(type_err)
-                            if matches!(type_err.kind(), TypeCheckErrorKind::DeclTypeMismatch(_, _, _))
+                            if matches!(type_err.kind(), TypeCheckErrorKind::DeclTypeMismatch(_, _, ..))
                     )
                 }));
             }
@@ -499,7 +499,7 @@ fn test_modules_opaque_pattern_destructure_rejected() {
                         CompileError::TypeCheck(type_err)
                             if matches!(
                                 type_err.kind(),
-                                TypeCheckErrorKind::OpaquePatternDestructure(type_name, _)
+                                TypeCheckErrorKind::OpaquePatternDestructure(type_name, ..)
                                     if type_name == "Token"
                             )
                     )

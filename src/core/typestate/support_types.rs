@@ -76,10 +76,18 @@ const INTRINSICS: &[(&str, &[&str])] = &[
     (MANAGED_RUNTIME_BOOTSTRAP_FN, &[]),
     (MANAGED_RUNTIME_CURRENT_FN, &[]),
     (MANAGED_RUNTIME_SHUTDOWN_FN, &[]),
-    ("__mc_machine_runtime_spawn_u64", &["runtime", "mailbox_cap"]),
+    (
+        "__mc_machine_runtime_spawn_u64",
+        &["runtime", "mailbox_cap"],
+    ),
     (
         "__mc_machine_runtime_bind_descriptor_u64",
-        &["runtime", "machine_id", "descriptor_id", "initial_state_tag"],
+        &[
+            "runtime",
+            "machine_id",
+            "descriptor_id",
+            "initial_state_tag",
+        ],
     ),
     ("__mc_machine_runtime_start_u64", &["runtime", "machine_id"]),
     (

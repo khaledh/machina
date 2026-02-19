@@ -9,7 +9,9 @@ use crate::core::capsule::{
 use crate::core::context::{CapsuleParsedContext, ParsedContext, ResolvedContext};
 use crate::core::lexer::{LexError, Lexer, Token};
 use crate::core::parse::{Parser, ParserOptions};
-use crate::core::resolve::{DefKind, Visibility, resolve, resolve_partial, resolve_program};
+use crate::core::resolve::{
+    DefKind, ResolveError, ResolveErrorKind, Visibility, resolve, resolve_partial, resolve_program,
+};
 use crate::core::tree::NodeIdGen;
 
 struct MockLoader {
@@ -388,7 +390,7 @@ fn test_resolve_protocol_request_contract_reports_undefined_roles() {
     assert!(result.context.is_none(), "strict resolve should fail");
     assert!(
         result.errors.iter().any(
-            |e| matches!(e, ResolveError::ProtocolRequestContractRoleUndefined(protocol, role, _) if protocol == "Net" && role == "Missing")
+            |e| matches!(e.kind(), ResolveErrorKind::ProtocolRequestContractRoleUndefined(protocol, role) if protocol == "Net" && role == "Missing")
         ),
         "expected undefined protocol request-contract role error, got {:?}",
         result.errors
@@ -423,7 +425,7 @@ fn test_resolve_protocol_transition_reports_undefined_roles() {
     assert!(result.context.is_none(), "strict resolve should fail");
     assert!(
         result.errors.iter().any(
-            |e| matches!(e, ResolveError::ProtocolTransitionSourceRoleUndefined(protocol, role, state, source_role, _)
+            |e| matches!(e.kind(), ResolveErrorKind::ProtocolTransitionSourceRoleUndefined(protocol, role, state, source_role)
                 if protocol == "Net" && role == "Client" && state == "Ready" && source_role == "Missing")
         ),
         "expected undefined protocol transition source role error, got {:?}",
@@ -431,7 +433,7 @@ fn test_resolve_protocol_transition_reports_undefined_roles() {
     );
     assert!(
         result.errors.iter().any(
-            |e| matches!(e, ResolveError::ProtocolTransitionEffectRoleUndefined(protocol, role, state, effect_role, _)
+            |e| matches!(e.kind(), ResolveErrorKind::ProtocolTransitionEffectRoleUndefined(protocol, role, state, effect_role)
                 if protocol == "Net" && role == "Client" && state == "Ready" && effect_role == "Missing")
         ),
         "expected undefined protocol transition effect role error, got {:?}",
@@ -464,7 +466,7 @@ fn test_resolve_protocol_transition_reports_unknown_next_state() {
     assert!(result.context.is_none(), "strict resolve should fail");
     assert!(
         result.errors.iter().any(
-            |e| matches!(e, ResolveError::ProtocolTransitionNextStateUndefined(protocol, role, state, next_state, _)
+            |e| matches!(e.kind(), ResolveErrorKind::ProtocolTransitionNextStateUndefined(protocol, role, state, next_state)
                 if protocol == "Net" && role == "Client" && state == "Ready" && next_state == "Unknown")
         ),
         "expected undefined next-state error, got {:?}",
@@ -500,7 +502,7 @@ fn test_resolve_protocol_transition_reports_trigger_conflict() {
     assert!(result.context.is_none(), "strict resolve should fail");
     assert!(
         result.errors.iter().any(
-            |e| matches!(e, ResolveError::ProtocolTransitionTriggerConflict(protocol, role, state, trigger_ty, source_role, _)
+            |e| matches!(e.kind(), ResolveErrorKind::ProtocolTransitionTriggerConflict(protocol, role, state, trigger_ty, source_role)
                 if protocol == "Net"
                     && role == "Client"
                     && state == "Ready"
@@ -634,11 +636,11 @@ fn test_resolve_typestate_role_impl_reports_unknown_role() {
         resolve_stage_with_policy(parsed, ResolveInputs::default(), FrontendPolicy::Strict);
     assert!(result.context.is_none(), "strict resolve should fail");
     assert!(
-        result.errors.iter().any(|e| matches!(
-            e,
-            ResolveError::TypestateRoleImplRoleUndefined(typestate, path, _)
-                if typestate == "Gateway" && path == "Auth::Unknown"
-        )),
+        result.errors.iter().any(
+            |e| matches!(e.kind(), ResolveErrorKind::TypestateRoleImplRoleUndefined(typestate, path)
+                    if typestate == "Gateway" && path == "Auth::Unknown"
+            )
+        ),
         "expected unknown role impl error, got {:?}",
         result.errors
     );
@@ -758,9 +760,7 @@ fn test_resolve_typestate_role_binding_reports_invalid_type() {
         resolve_stage_with_policy(parsed, ResolveInputs::default(), FrontendPolicy::Strict);
     assert!(result.context.is_none(), "strict resolve should fail");
     assert!(
-        result.errors.iter().any(|e| matches!(
-            e,
-            ResolveError::TypestateRoleBindingInvalidType(typestate, field, _)
+        result.errors.iter().any(|e| matches!(e.kind(), ResolveErrorKind::TypestateRoleBindingInvalidType(typestate, field)
                 if typestate == "Gateway" && field == "server"
         )),
         "expected invalid role-binding field type error, got {:?}",
@@ -812,9 +812,7 @@ fn test_resolve_typestate_role_binding_reports_unknown_role() {
         resolve_stage_with_policy(parsed, ResolveInputs::default(), FrontendPolicy::Strict);
     assert!(result.context.is_none(), "strict resolve should fail");
     assert!(
-        result.errors.iter().any(|e| matches!(
-            e,
-            ResolveError::TypestateRoleBindingRoleUndefined(typestate, field, role, _)
+        result.errors.iter().any(|e| matches!(e.kind(), ResolveErrorKind::TypestateRoleBindingRoleUndefined(typestate, field, role)
                 if typestate == "Gateway" && field == "server" && role == "Unknown"
         )),
         "expected unknown bound-role error, got {:?}",
@@ -867,9 +865,7 @@ fn test_resolve_typestate_role_binding_reports_duplicate_role() {
         resolve_stage_with_policy(parsed, ResolveInputs::default(), FrontendPolicy::Strict);
     assert!(result.context.is_none(), "strict resolve should fail");
     assert!(
-        result.errors.iter().any(|e| matches!(
-            e,
-            ResolveError::TypestateRoleBindingDuplicateRole(typestate, role, _)
+        result.errors.iter().any(|e| matches!(e.kind(), ResolveErrorKind::TypestateRoleBindingDuplicateRole(typestate, role)
                 if typestate == "Gateway" && role == "Server"
         )),
         "expected duplicate peer-role binding error, got {:?}",
@@ -909,11 +905,11 @@ fn test_resolve_typestate_role_binding_reports_missing_required_peer_role() {
         resolve_stage_with_policy(parsed, ResolveInputs::default(), FrontendPolicy::Strict);
     assert!(result.context.is_none(), "strict resolve should fail");
     assert!(
-        result.errors.iter().any(|e| matches!(
-            e,
-            ResolveError::TypestateRoleBindingMissing(typestate, role, _)
-                if typestate == "Gateway" && role == "Server"
-        )),
+        result.errors.iter().any(
+            |e| matches!(e.kind(), ResolveErrorKind::TypestateRoleBindingMissing(typestate, role)
+                    if typestate == "Gateway" && role == "Server"
+            )
+        ),
         "expected missing peer-role binding error, got {:?}",
         result.errors
     );
@@ -933,8 +929,8 @@ fn test_resolve_enum_undefined() {
 
     if let Err(errors) = result {
         assert!(!errors.is_empty(), "Expected at least one error");
-        match &errors[0] {
-            ResolveError::EnumUndefined(name, _) => {
+        match errors[0].kind() {
+            ResolveErrorKind::EnumUndefined(name) => {
                 assert_eq!(name, "Color");
             }
             e => panic!("Expected EnumUndefined, got {:?}", e),
@@ -985,8 +981,8 @@ fn test_resolve_enum_variant_undefined() {
 
     if let Err(errors) = result {
         assert!(!errors.is_empty(), "Expected at least one error");
-        match &errors[0] {
-            ResolveError::EnumVariantUndefined(enum_name, variant, _) => {
+        match errors[0].kind() {
+            ResolveErrorKind::EnumVariantUndefined(enum_name, variant) => {
                 assert_eq!(enum_name, "Color");
                 assert_eq!(variant, "Blue");
             }
@@ -1012,7 +1008,7 @@ fn test_resolve_function_decl_conflicts_with_def() {
         assert!(
             errors
                 .iter()
-                .any(|e| matches!(e, ResolveError::SymbolAlreadyDefined(_, _))),
+                .any(|e| matches!(e.kind(), ResolveErrorKind::SymbolAlreadyDefined(..))),
             "Expected SymbolAlreadyDefined, got {errors:?}"
         );
     }
@@ -1025,10 +1021,10 @@ fn test_resolve_unknown_attribute() {
     assert!(result.is_err());
 
     if let Err(errors) = result {
-        assert!(errors.iter().any(|e| matches!(
-            e,
-            ResolveError::UnknownAttribute(name, _) if name == "nope"
-        )));
+        assert!(errors.iter().any(
+            |e| matches!(e.kind(), ResolveErrorKind::UnknownAttribute(name) if name == "nope"
+            )
+        ));
     }
 }
 
@@ -1039,9 +1035,7 @@ fn test_resolve_attr_wrong_args_intrinsic() {
     assert!(result.is_err());
 
     if let Err(errors) = result {
-        assert!(errors.iter().any(|e| matches!(
-            e,
-            ResolveError::AttrWrongArgCount(name, 0, 1, _) if name == "intrinsic"
+        assert!(errors.iter().any(|e| matches!(e.kind(), ResolveErrorKind::AttrWrongArgCount(name, 0, 1) if name == "intrinsic"
         )));
     }
 }
@@ -1053,9 +1047,7 @@ fn test_resolve_attr_wrong_args_link_name() {
     assert!(result.is_err());
 
     if let Err(errors) = result {
-        assert!(errors.iter().any(|e| matches!(
-            e,
-            ResolveError::AttrWrongArgCount(name, 1, 0, _) if name == "link_name"
+        assert!(errors.iter().any(|e| matches!(e.kind(), ResolveErrorKind::AttrWrongArgCount(name, 1, 0) if name == "link_name"
         )));
     }
 }
@@ -1067,10 +1059,10 @@ fn test_resolve_attr_not_allowed_on_type() {
     assert!(result.is_err());
 
     if let Err(errors) = result {
-        assert!(errors.iter().any(|e| matches!(
-            e,
-            ResolveError::AttrNotAllowed(name, _, _) if name == "link_name"
-        )));
+        assert!(errors.iter().any(
+            |e| matches!(e.kind(), ResolveErrorKind::AttrNotAllowed(name, _) if name == "link_name"
+            )
+        ));
     }
 }
 
@@ -1081,10 +1073,10 @@ fn test_resolve_attr_duplicate() {
     assert!(result.is_err());
 
     if let Err(errors) = result {
-        assert!(errors.iter().any(|e| matches!(
-            e,
-            ResolveError::AttrDuplicate(name, _) if name == "intrinsic"
-        )));
+        assert!(errors.iter().any(
+            |e| matches!(e.kind(), ResolveErrorKind::AttrDuplicate(name) if name == "intrinsic"
+            )
+        ));
     }
 }
 
@@ -1105,7 +1097,7 @@ fn test_resolve_attr_machines_requires_main() {
         assert!(
             errors
                 .iter()
-                .any(|e| matches!(e, ResolveError::AttrMachinesRequiresMain(_)))
+                .any(|e| matches!(e.kind(), ResolveErrorKind::AttrMachinesRequiresMain))
         );
     }
 }
@@ -1126,10 +1118,10 @@ fn test_resolve_trait_undefined_in_method_block() {
     assert!(result.is_err());
 
     if let Err(errors) = result {
-        assert!(errors.iter().any(|e| matches!(
-            e,
-            ResolveError::TraitUndefined(name, _) if name == "Runnable"
-        )));
+        assert!(errors.iter().any(
+            |e| matches!(e.kind(), ResolveErrorKind::TraitUndefined(name) if name == "Runnable"
+            )
+        ));
     }
 }
 
@@ -1150,10 +1142,10 @@ fn test_resolve_expected_trait_in_method_block() {
     assert!(result.is_err());
 
     if let Err(errors) = result {
-        assert!(errors.iter().any(|e| matches!(
-            e,
-            ResolveError::ExpectedTrait(name, _, _) if name == "Runnable"
-        )));
+        assert!(errors.iter().any(
+            |e| matches!(e.kind(), ResolveErrorKind::ExpectedTrait(name, _) if name == "Runnable"
+            )
+        ));
     }
 }
 
@@ -1169,10 +1161,10 @@ fn test_resolve_trait_bound_undefined() {
     assert!(result.is_err());
 
     if let Err(errors) = result {
-        assert!(errors.iter().any(|e| matches!(
-            e,
-            ResolveError::TraitUndefined(name, _) if name == "Runnable"
-        )));
+        assert!(errors.iter().any(
+            |e| matches!(e.kind(), ResolveErrorKind::TraitUndefined(name) if name == "Runnable"
+            )
+        ));
     }
 }
 
@@ -1190,10 +1182,10 @@ fn test_resolve_trait_bound_expected_trait() {
     assert!(result.is_err());
 
     if let Err(errors) = result {
-        assert!(errors.iter().any(|e| matches!(
-            e,
-            ResolveError::ExpectedTrait(name, _, _) if name == "Runnable"
-        )));
+        assert!(errors.iter().any(
+            |e| matches!(e.kind(), ResolveErrorKind::ExpectedTrait(name, _) if name == "Runnable"
+            )
+        ));
     }
 }
 
@@ -1212,10 +1204,10 @@ fn test_resolve_requires_duplicate_alias_default() {
     assert!(result.is_err());
 
     if let Err(errors) = result {
-        assert!(errors.iter().any(|e| matches!(
-            e,
-            ResolveError::DuplicateRequireAlias(alias, _) if alias == "io"
-        )));
+        assert!(errors.iter().any(
+            |e| matches!(e.kind(), ResolveErrorKind::DuplicateRequireAlias(alias) if alias == "io"
+            )
+        ));
     }
 }
 
@@ -1234,10 +1226,10 @@ fn test_resolve_requires_duplicate_alias_explicit() {
     assert!(result.is_err());
 
     if let Err(errors) = result {
-        assert!(errors.iter().any(|e| matches!(
-            e,
-            ResolveError::DuplicateRequireAlias(alias, _) if alias == "net"
-        )));
+        assert!(errors.iter().any(
+            |e| matches!(e.kind(), ResolveErrorKind::DuplicateRequireAlias(alias) if alias == "net"
+            )
+        ));
     }
 }
 
@@ -1258,15 +1250,15 @@ fn test_resolve_module_qualified_access_reports_specific_error() {
     assert!(result.is_err());
 
     if let Err(errors) = result {
-        assert!(errors.iter().any(|e| matches!(
-            e,
-            ResolveError::ModuleQualifiedAccessUnsupported(alias, member, _)
-                if alias == "io" && member == "read_file"
-        )));
-        assert!(!errors.iter().any(|e| matches!(
-            e,
-            ResolveError::VarUndefined(name, _) if name == "io"
-        )));
+        assert!(errors.iter().any(
+            |e| matches!(e.kind(), ResolveErrorKind::ModuleQualifiedAccessUnsupported(alias, member)
+                    if alias == "io" && member == "read_file"
+            )
+        ));
+        assert!(!errors.iter().any(
+            |e| matches!(e.kind(), ResolveErrorKind::VarUndefined(name) if name == "io"
+            )
+        ));
     }
 }
 
@@ -1302,11 +1294,11 @@ fn test_resolve_program_module_member_undefined() {
     assert!(resolved.is_err());
 
     if let Err(errors) = resolved {
-        assert!(errors.iter().any(|e| matches!(
-            e,
-            ResolveError::ModuleMemberUndefined(module, member, _)
-                if module == "app.util" && member == "missing"
-        )));
+        assert!(errors.iter().any(
+            |e| matches!(e.kind(), ResolveErrorKind::ModuleMemberUndefined(module, member)
+                    if module == "app.util" && member == "missing"
+            )
+        ));
     }
 }
 
@@ -1395,10 +1387,10 @@ fn test_resolve_opaque_attr_not_allowed_on_function() {
     assert!(result.is_err());
 
     if let Err(errors) = result {
-        assert!(errors.iter().any(|e| matches!(
-            e,
-            ResolveError::AttrNotAllowed(name, where_, _)
-                if name == "opaque" && *where_ == "function"
-        )));
+        assert!(errors.iter().any(
+            |e| matches!(e.kind(), ResolveErrorKind::AttrNotAllowed(name, where_)
+                    if name == "opaque" && *where_ == "function"
+            )
+        ));
     }
 }

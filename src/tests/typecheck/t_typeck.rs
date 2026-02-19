@@ -137,13 +137,13 @@ fn test_function_call_arg_errors_in_stmt_position() {
         assert!(
             errors
                 .iter()
-                .any(|e| matches!(e.kind(), TypeCheckErrorKind::ArgTypeMismatch(_, _, _, _)))
+                .any(|e| matches!(e.kind(), TypeCheckErrorKind::ArgTypeMismatch(_, _, _, ..)))
         );
         assert!(errors.iter().any(|e| {
             matches!(
                 e.kind(),
-                TypeCheckErrorKind::ArgCountMismatch(_, _, _, _)
-                    | TypeCheckErrorKind::OverloadNoMatch(_, _)
+                TypeCheckErrorKind::ArgCountMismatch(_, _, _, ..)
+                    | TypeCheckErrorKind::OverloadNoMatch(_, ..)
             )
         }));
     }
@@ -220,7 +220,7 @@ fn test_set_unsupported_element_type_rejected() {
         assert!(
             errors
                 .iter()
-                .any(|e| matches!(e.kind(), TypeCheckErrorKind::TypeNotHashable(_, _, _, _)))
+                .any(|e| matches!(e.kind(), TypeCheckErrorKind::TypeNotHashable(_, _, _, ..)))
         );
     }
 }
@@ -298,7 +298,7 @@ fn test_map_unsupported_key_type_rejected() {
         assert!(
             errors
                 .iter()
-                .any(|e| matches!(e.kind(), TypeCheckErrorKind::TypeNotHashable(_, _, _, _)))
+                .any(|e| matches!(e.kind(), TypeCheckErrorKind::TypeNotHashable(_, _, _, ..)))
         );
     }
 }
@@ -337,7 +337,7 @@ fn test_map_index_key_type_mismatch_rejected() {
         assert!(
             errors
                 .iter()
-                .any(|e| matches!(e.kind(), TypeCheckErrorKind::MapKeyTypeMismatch(_, _, _)))
+                .any(|e| matches!(e.kind(), TypeCheckErrorKind::MapKeyTypeMismatch(_, _, ..)))
         );
     }
 }
@@ -376,7 +376,7 @@ fn test_map_method_get_key_type_mismatch_rejected() {
         assert!(
             errors
                 .iter()
-                .any(|e| matches!(e.kind(), TypeCheckErrorKind::ArgTypeMismatch(_, _, _, _)))
+                .any(|e| matches!(e.kind(), TypeCheckErrorKind::ArgTypeMismatch(_, _, _, ..)))
         );
     }
 }
@@ -448,7 +448,7 @@ fn test_equality_non_equatable_operand_rejected() {
         assert!(
             errors
                 .iter()
-                .any(|e| matches!(e.kind(), TypeCheckErrorKind::TypeNotEquatable(_, _, _, _)))
+                .any(|e| matches!(e.kind(), TypeCheckErrorKind::TypeNotEquatable(_, _, _, ..)))
         );
     }
 }
@@ -469,7 +469,7 @@ fn test_set_non_hashable_reports_root_path() {
     assert!(result.is_err());
     if let Err(errors) = result {
         assert!(errors.iter().any(|e| match e.kind() {
-            TypeCheckErrorKind::TypeNotHashable(_, path, _, _) => path == "value",
+            TypeCheckErrorKind::TypeNotHashable(_, path, _, ..) => path == "value",
             _ => false,
         }));
     }
@@ -533,7 +533,7 @@ fn test_opaque_struct_construction_cross_module_rejected() {
     if let Err(errors) = result {
         assert!(errors.iter().any(|e| matches!(
             e.kind(),
-            TypeCheckErrorKind::OpaqueTypeConstruction(name, _) if name == "Secret"
+            TypeCheckErrorKind::OpaqueTypeConstruction(name, ..) if name == "Secret"
         )));
     }
 }
@@ -557,7 +557,7 @@ fn test_opaque_struct_field_access_cross_module_rejected() {
     if let Err(errors) = result {
         assert!(errors.iter().any(|e| matches!(
             e.kind(),
-            TypeCheckErrorKind::OpaqueFieldAccess(type_name, field, _)
+            TypeCheckErrorKind::OpaqueFieldAccess(type_name, field, ..)
                 if type_name == "Secret" && field == "x"
         )));
     }
@@ -1048,7 +1048,7 @@ fn test_too_many_indices_error() {
         assert!(!errors.is_empty(), "Expected at least one error");
 
         match errors[0].kind() {
-            TypeCheckErrorKind::TooManyIndices(expected, got, _) => {
+            TypeCheckErrorKind::TooManyIndices(expected, got, ..) => {
                 assert_eq!(*expected, 2);
                 assert_eq!(*got, 3);
             }
@@ -1073,7 +1073,7 @@ fn test_array_dimension_mismatch() {
         assert!(!errors.is_empty(), "Expected at least one error");
 
         match errors[0].kind() {
-            TypeCheckErrorKind::DeclTypeMismatch(_, _, _) => {
+            TypeCheckErrorKind::DeclTypeMismatch(_, _, ..) => {
                 // Expected error
             }
             e => panic!("Expected DeclTypeMismatch error, got {:?}", e),
@@ -1097,7 +1097,7 @@ fn test_index_type_must_be_u64() {
         assert!(!errors.is_empty(), "Expected at least one error");
 
         match errors[0].kind() {
-            TypeCheckErrorKind::IndexTypeNotInt(ty, _) => {
+            TypeCheckErrorKind::IndexTypeNotInt(ty, ..) => {
                 assert_eq!(*ty, Type::Bool);
             }
             e => panic!("Expected IndexTypeNotInt error, got {:?}", e),
@@ -1238,7 +1238,7 @@ fn test_tuple_pattern_length_mismatch() {
         assert!(!errors.is_empty(), "Expected at least one error");
 
         match errors[0].kind() {
-            TypeCheckErrorKind::TuplePatternLengthMismatch(expected, got, _) => {
+            TypeCheckErrorKind::TuplePatternLengthMismatch(expected, got, ..) => {
                 assert_eq!(*expected, 2);
                 assert_eq!(*got, 3);
             }
@@ -1263,7 +1263,7 @@ fn test_tuple_pattern_type_mismatch() {
         assert!(!errors.is_empty(), "Expected at least one error");
 
         match errors[0].kind() {
-            TypeCheckErrorKind::PatternTypeMismatch(_, _, _) => {
+            TypeCheckErrorKind::PatternTypeMismatch(_, _, ..) => {
                 // Expected error
             }
             e => panic!("Expected PatternTypeMismatch error, got {:?}", e),
@@ -1333,7 +1333,7 @@ fn test_struct_update_field_type_mismatch() {
         assert!(!errors.is_empty(), "Expected at least one error");
 
         match errors[0].kind() {
-            TypeCheckErrorKind::StructFieldTypeMismatch(_, _, _, _) => {
+            TypeCheckErrorKind::StructFieldTypeMismatch(_, _, _, ..) => {
                 // Expected error
             }
             e => panic!("Expected StructFieldTypeMismatch error, got {:?}", e),
@@ -1357,7 +1357,7 @@ fn test_struct_update_invalid_target() {
         assert!(!errors.is_empty(), "Expected at least one error");
 
         match errors[0].kind() {
-            TypeCheckErrorKind::InvalidStructUpdateTarget(_, _) => {
+            TypeCheckErrorKind::InvalidStructUpdateTarget(_, ..) => {
                 // Expected error
             }
             e => panic!("Expected InvalidStructUpdateTarget error, got {:?}", e),
@@ -1407,7 +1407,7 @@ fn test_method_return_mismatch() {
         assert!(!errors.is_empty(), "Expected at least one error");
 
         match errors[0].kind() {
-            TypeCheckErrorKind::DeclTypeMismatch(_, _, _) => {
+            TypeCheckErrorKind::DeclTypeMismatch(_, _, ..) => {
                 // Expected error
             }
             e => panic!("Expected DeclTypeMismatch error, got {:?}", e),
@@ -1504,7 +1504,7 @@ fn test_method_call_arg_type_mismatch() {
     if let Err(errors) = result {
         assert!(!errors.is_empty(), "Expected at least one error");
         match errors[0].kind() {
-            TypeCheckErrorKind::ArgTypeMismatch(_, _, _, _) => {}
+            TypeCheckErrorKind::ArgTypeMismatch(_, _, _, ..) => {}
             e => panic!("Expected ArgTypeMismatch error, got {:?}", e),
         }
     }
@@ -1557,7 +1557,7 @@ fn test_trait_method_missing_impl_errors() {
     if let Err(errors) = result {
         assert!(errors.iter().any(|e| matches!(
             e.kind(),
-            TypeCheckErrorKind::TraitMethodMissingImpl(type_name, trait_name, method, _)
+            TypeCheckErrorKind::TraitMethodMissingImpl(type_name, trait_name, method, ..)
                 if type_name == "Process" && trait_name == "Runnable" && method == "stop"
         )));
     }
@@ -1589,7 +1589,7 @@ fn test_trait_method_not_in_trait_errors() {
     if let Err(errors) = result {
         assert!(errors.iter().any(|e| matches!(
             e.kind(),
-            TypeCheckErrorKind::TraitMethodNotInTrait(type_name, trait_name, method, _)
+            TypeCheckErrorKind::TraitMethodNotInTrait(type_name, trait_name, method, ..)
                 if type_name == "Process" && trait_name == "Runnable" && method == "stop"
         )));
     }
@@ -1617,7 +1617,7 @@ fn test_trait_method_signature_mismatch_errors() {
     if let Err(errors) = result {
         assert!(errors.iter().any(|e| matches!(
             e.kind(),
-            TypeCheckErrorKind::TraitMethodSignatureMismatch(type_name, trait_name, method, _)
+            TypeCheckErrorKind::TraitMethodSignatureMismatch(type_name, trait_name, method, ..)
                 if type_name == "Process" && trait_name == "Runnable" && method == "run"
         )));
     }
@@ -1651,7 +1651,7 @@ fn test_duplicate_trait_impl_block_errors() {
     if let Err(errors) = result {
         assert!(errors.iter().any(|e| matches!(
             e.kind(),
-            TypeCheckErrorKind::TraitImplDuplicate(type_name, trait_name, _)
+            TypeCheckErrorKind::TraitImplDuplicate(type_name, trait_name, ..)
                 if type_name == "Process" && trait_name == "Runnable"
         )));
     }
@@ -1704,7 +1704,7 @@ fn test_trait_property_contract_missing_setter_errors() {
     if let Err(errors) = result {
         assert!(errors.iter().any(|e| matches!(
             e.kind(),
-            TypeCheckErrorKind::TraitPropertyMissingSetter(type_name, trait_name, prop, _)
+            TypeCheckErrorKind::TraitPropertyMissingSetter(type_name, trait_name, prop, ..)
                 if type_name == "Buffer" && trait_name == "HasValue" && prop == "value"
         )));
     }
@@ -1733,7 +1733,7 @@ fn test_property_getter_call_syntax_errors() {
     if let Err(errors) = result {
         assert!(errors.iter().any(|e| matches!(
             e.kind(),
-            TypeCheckErrorKind::PropertyCalledAsMethod(prop, _) if prop == "value_prop"
+            TypeCheckErrorKind::PropertyCalledAsMethod(prop, ..) if prop == "value_prop"
         )));
     }
 }
@@ -1762,7 +1762,7 @@ fn test_property_setter_call_syntax_errors() {
     if let Err(errors) = result {
         assert!(errors.iter().any(|e| matches!(
             e.kind(),
-            TypeCheckErrorKind::PropertyCalledAsMethod(prop, _) if prop == "value_prop"
+            TypeCheckErrorKind::PropertyCalledAsMethod(prop, ..) if prop == "value_prop"
         )));
     }
 }
@@ -1825,14 +1825,14 @@ fn test_trait_bound_rejects_non_implementing_argument() {
     if let Err(errors) = result {
         assert!(errors.iter().any(|e| matches!(
             e.kind(),
-            TypeCheckErrorKind::TraitBoundNotSatisfied(trait_name, ty, _)
+            TypeCheckErrorKind::TraitBoundNotSatisfied(trait_name, ty, ..)
                 if trait_name == "Runnable"
                     && matches!(ty, Type::Struct { name, .. } if name == "Task")
         )));
         assert!(
             !errors
                 .iter()
-                .any(|e| matches!(e.kind(), TypeCheckErrorKind::UnknownType(_))),
+                .any(|e| matches!(e.kind(), TypeCheckErrorKind::UnknownType)),
             "unexpected cascaded UnknownType diagnostic: {errors:?}"
         );
     }
@@ -1890,7 +1890,7 @@ fn test_higher_order_typeless_closure_propagates_return_mismatch() {
     if let Err(errors) = result {
         assert!(!errors.is_empty(), "Expected at least one error");
         match errors[0].kind() {
-            TypeCheckErrorKind::DeclTypeMismatch(_, _, _) => {}
+            TypeCheckErrorKind::DeclTypeMismatch(_, _, ..) => {}
             e => panic!("Expected DeclTypeMismatch error, got {:?}", e),
         }
     }
@@ -1973,7 +1973,7 @@ fn test_try_operator_rejects_non_union_operand() {
         assert!(
             errors
                 .iter()
-                .any(|e| matches!(e.kind(), TypeCheckErrorKind::TryOperandNotErrorUnion(_, _)))
+                .any(|e| matches!(e.kind(), TypeCheckErrorKind::TryOperandNotErrorUnion(_, ..)))
         );
     }
 }
@@ -1999,7 +1999,7 @@ fn test_try_operator_rejects_non_union_return_type() {
     if let Err(errors) = result {
         assert!(errors.iter().any(|e| matches!(
             e.kind(),
-            TypeCheckErrorKind::TryReturnTypeNotErrorUnion(_, _)
+            TypeCheckErrorKind::TryReturnTypeNotErrorUnion(_, ..)
         )));
     }
 }
@@ -2027,7 +2027,7 @@ fn test_try_operator_rejects_error_not_in_return_set() {
         let mismatch = errors
             .iter()
             .find_map(|e| match e.kind() {
-                TypeCheckErrorKind::TryErrorNotInReturn(missing, _, _) => Some(missing),
+                TypeCheckErrorKind::TryErrorNotInReturn(missing, _, ..) => Some(missing),
                 _ => None,
             })
             .expect("expected TryErrorNotInReturn");
@@ -2059,10 +2059,10 @@ fn test_try_operator_reports_all_missing_error_variants() {
     if let Err(errors) = result {
         let err = errors
             .iter()
-            .find(|e| matches!(e.kind(), TypeCheckErrorKind::TryErrorNotInReturn(_, _, _)))
+            .find(|e| matches!(e.kind(), TypeCheckErrorKind::TryErrorNotInReturn(_, _, ..)))
             .expect("expected TryErrorNotInReturn");
         match err.kind() {
-            TypeCheckErrorKind::TryErrorNotInReturn(missing, _, _) => {
+            TypeCheckErrorKind::TryErrorNotInReturn(missing, _, ..) => {
                 assert_eq!(missing.len(), 2);
                 assert!(missing.iter().any(|name| name == "IoError"));
                 assert!(missing.iter().any(|name| name == "ParseError"));
@@ -2126,10 +2126,15 @@ fn test_return_union_mismatch_reports_union_variants() {
     if let Err(errors) = result {
         let err = errors
             .iter()
-            .find(|e| matches!(e.kind(), TypeCheckErrorKind::ReturnNotInErrorUnion(_, _, _)))
+            .find(|e| {
+                matches!(
+                    e.kind(),
+                    TypeCheckErrorKind::ReturnNotInErrorUnion(_, _, ..)
+                )
+            })
             .expect("expected ReturnNotInErrorUnion");
         match err.kind() {
-            TypeCheckErrorKind::ReturnNotInErrorUnion(variants, found, _) => {
+            TypeCheckErrorKind::ReturnNotInErrorUnion(variants, found, ..) => {
                 assert!(variants.iter().any(|name| name == "u64"));
                 assert!(variants.iter().any(|name| name == "IoError"));
                 assert_eq!(*found, Type::Bool);
@@ -2166,12 +2171,12 @@ fn test_match_typed_binding_rejects_non_union_variant_type() {
             .find(|e| {
                 matches!(
                     e.kind(),
-                    TypeCheckErrorKind::MatchTypedBindingTypeMismatch(_, _, _)
+                    TypeCheckErrorKind::MatchTypedBindingTypeMismatch(_, _, ..)
                 )
             })
             .expect("expected MatchTypedBindingTypeMismatch");
         match err.kind() {
-            TypeCheckErrorKind::MatchTypedBindingTypeMismatch(expected, found, _) => {
+            TypeCheckErrorKind::MatchTypedBindingTypeMismatch(expected, found, ..) => {
                 assert!(matches!(found, Type::String));
                 assert_eq!(expected.len(), 2);
                 assert!(expected.iter().any(|name| name == "u64"));
@@ -2199,7 +2204,13 @@ fn test_enum_variant_payload_type_mismatch() {
         assert!(!errors.is_empty(), "Expected at least one error");
 
         match errors[0].kind() {
-            TypeCheckErrorKind::EnumVariantPayloadTypeMismatch(name, index, expected, found, _) => {
+            TypeCheckErrorKind::EnumVariantPayloadTypeMismatch(
+                name,
+                index,
+                expected,
+                found,
+                ..,
+            ) => {
                 assert_eq!(name, "A");
                 assert_eq!(*index, 0);
                 assert_eq!(*expected, Type::uint(64));
@@ -2283,7 +2294,7 @@ fn test_for_non_iterable_rejected() {
     if let Err(errors) = result {
         assert!(!errors.is_empty(), "Expected at least one error");
         match errors[0].kind() {
-            TypeCheckErrorKind::ForIterNotIterable(ty, _) => {
+            TypeCheckErrorKind::ForIterNotIterable(ty, ..) => {
                 assert_eq!(*ty, Type::sint(32));
             }
             e => panic!("Expected ForIterNotIterable error, got {:?}", e),
@@ -2305,7 +2316,7 @@ fn test_logical_and_requires_bool() {
     if let Err(errors) = result {
         assert!(!errors.is_empty(), "Expected at least one error");
         match errors[0].kind() {
-            TypeCheckErrorKind::LogicalOperandNotBoolean(ty, _) => {
+            TypeCheckErrorKind::LogicalOperandNotBoolean(ty, ..) => {
                 assert_eq!(*ty, Type::sint(32));
             }
             e => panic!("Expected LogicalOperandNotBoolean error, got {:?}", e),
@@ -2328,7 +2339,7 @@ fn test_logical_not_requires_bool() {
     if let Err(errors) = result {
         assert!(!errors.is_empty(), "Expected at least one error");
         match errors[0].kind() {
-            TypeCheckErrorKind::LogicalOperandNotBoolean(ty, _) => {
+            TypeCheckErrorKind::LogicalOperandNotBoolean(ty, ..) => {
                 assert_eq!(*ty, Type::sint(32));
             }
             e => panic!("Expected LogicalOperandNotBoolean error, got {:?}", e),
@@ -2390,7 +2401,7 @@ fn test_mod_requires_int() {
     if let Err(errors) = result {
         assert!(!errors.is_empty(), "Expected at least one error");
         match errors[0].kind() {
-            TypeCheckErrorKind::ArithOperandNotInt(ty, _) => {
+            TypeCheckErrorKind::ArithOperandNotInt(ty, ..) => {
                 assert_eq!(*ty, Type::Bool);
             }
             e => panic!("Expected ArithOperandNotInt error, got {:?}", e),
@@ -2430,7 +2441,7 @@ fn test_bitwise_ops_require_int() {
     if let Err(errors) = result {
         assert!(!errors.is_empty(), "Expected at least one error");
         match errors[0].kind() {
-            TypeCheckErrorKind::ArithOperandNotInt(ty, _) => {
+            TypeCheckErrorKind::ArithOperandNotInt(ty, ..) => {
                 assert_eq!(*ty, Type::Bool);
             }
             e => panic!("Expected ArithOperandNotInt error, got {:?}", e),
@@ -2453,7 +2464,7 @@ fn test_negation_requires_int() {
     if let Err(errors) = result {
         assert!(!errors.is_empty(), "Expected at least one error");
         match errors[0].kind() {
-            TypeCheckErrorKind::NegationOperandNotInt(ty, _) => {
+            TypeCheckErrorKind::NegationOperandNotInt(ty, ..) => {
                 assert_eq!(*ty, Type::Bool);
             }
             e => panic!("Expected NegationOperandNotInt error, got {:?}", e),
@@ -2495,7 +2506,7 @@ fn test_nonzero_redundant_on_unsigned_bounds() {
     if let Err(errors) = result {
         assert!(!errors.is_empty(), "Expected at least one error");
         match errors[0].kind() {
-            TypeCheckErrorKind::RedundantNonZero(min, max, _) => {
+            TypeCheckErrorKind::RedundantNonZero(min, max, ..) => {
                 assert_eq!(*min, 1);
                 assert_eq!(*max, 10);
             }
@@ -2531,7 +2542,7 @@ fn test_closure_return_mismatch_rejected() {
     if let Err(errors) = result {
         assert!(!errors.is_empty(), "Expected at least one error");
         match errors[0].kind() {
-            TypeCheckErrorKind::DeclTypeMismatch(_, found, _) => {
+            TypeCheckErrorKind::DeclTypeMismatch(_, found, ..) => {
                 assert_eq!(*found, Type::Bool);
             }
             e => panic!("Expected DeclTypeMismatch error, got {:?}", e),
@@ -2605,7 +2616,7 @@ fn test_property_read_only_rejects_assignment() {
     if let Err(errors) = result {
         assert!(!errors.is_empty(), "Expected at least one error");
         match errors[0].kind() {
-            TypeCheckErrorKind::PropertyNotWritable(name, _) => {
+            TypeCheckErrorKind::PropertyNotWritable(name, ..) => {
                 assert_eq!(name, "sum");
             }
             e => panic!("Expected PropertyNotWritable error, got {:?}", e),
@@ -2636,7 +2647,7 @@ fn test_property_write_only_rejects_read() {
     if let Err(errors) = result {
         assert!(!errors.is_empty(), "Expected at least one error");
         match errors[0].kind() {
-            TypeCheckErrorKind::PropertyNotReadable(name, _) => {
+            TypeCheckErrorKind::PropertyNotReadable(name, ..) => {
                 assert_eq!(name, "y_val");
             }
             e => panic!("Expected PropertyNotReadable error, got {:?}", e),
@@ -2667,7 +2678,7 @@ fn test_property_conflicts_with_field() {
     if let Err(errors) = result {
         assert!(!errors.is_empty(), "Expected at least one error");
         match errors[0].kind() {
-            TypeCheckErrorKind::PropertyConflictsWithField(name, field, _) => {
+            TypeCheckErrorKind::PropertyConflictsWithField(name, field, ..) => {
                 assert_eq!(name, "x");
                 assert_eq!(field, "x");
             }
@@ -2717,7 +2728,7 @@ fn test_fn_type_annotation_mismatch_rejected() {
     if let Err(errors) = result {
         assert!(!errors.is_empty(), "Expected at least one error");
         match errors[0].kind() {
-            TypeCheckErrorKind::DeclTypeMismatch(_, _, _) => {
+            TypeCheckErrorKind::DeclTypeMismatch(_, _, ..) => {
                 // Expected error
             }
             e => panic!("Expected DeclTypeMismatch error, got {:?}", e),
@@ -2887,7 +2898,7 @@ fn test_join_arm_mismatch_reports_join_diagnostic() {
         assert!(
             errors
                 .iter()
-                .any(|e| matches!(e.kind(), TypeCheckErrorKind::JoinArmTypeMismatch(_, _, _)))
+                .any(|e| matches!(e.kind(), TypeCheckErrorKind::JoinArmTypeMismatch(_, _, ..)))
         );
     }
 }
@@ -2922,7 +2933,7 @@ fn test_error_union_not_allowed_in_param_type() {
         assert!(
             errors
                 .iter()
-                .any(|e| matches!(e.kind(), TypeCheckErrorKind::UnionNotAllowedHere(_)))
+                .any(|e| matches!(e.kind(), TypeCheckErrorKind::UnionNotAllowedHere))
         );
     }
 }
@@ -2946,7 +2957,7 @@ fn test_error_union_not_allowed_in_struct_field_type() {
         assert!(
             errors
                 .iter()
-                .any(|e| matches!(e.kind(), TypeCheckErrorKind::UnionNotAllowedHere(_)))
+                .any(|e| matches!(e.kind(), TypeCheckErrorKind::UnionNotAllowedHere))
         );
     }
 }
@@ -2970,7 +2981,7 @@ fn test_error_union_not_allowed_in_generic_argument_type() {
         assert!(
             errors
                 .iter()
-                .any(|e| matches!(e.kind(), TypeCheckErrorKind::UnionNotAllowedHere(_)))
+                .any(|e| matches!(e.kind(), TypeCheckErrorKind::UnionNotAllowedHere))
         );
     }
 }

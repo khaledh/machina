@@ -96,20 +96,17 @@ pub(super) fn try_check_expr_obligation_control(
                         super::diag_utils::error_union_variant_names(&result_ty_diag)
                     {
                         errors.push(
-                            TypeCheckErrorKind::JoinArmNotInErrorUnion(
-                                variants,
-                                arm_ty_diag,
-                                *span,
-                            )
-                            .into(),
+                            TypeCheckErrorKind::JoinArmNotInErrorUnion(variants, arm_ty_diag)
+                                .at(*span)
+                                .into(),
                         );
                     } else {
                         errors.push(
                             TypeCheckErrorKind::JoinArmTypeMismatch(
                                 result_ty_diag.clone(),
                                 arm_ty_diag,
-                                *span,
                             )
+                            .at(*span)
                             .into(),
                         );
                     }
@@ -135,7 +132,8 @@ pub(super) fn try_check_expr_obligation_control(
             let Type::ErrorUnion { ok_ty, err_tys } = &operand_ty else {
                 if !super::term_utils::is_unresolved(&operand_ty_for_diag) {
                     errors.push(
-                        TypeCheckErrorKind::TryOperandNotErrorUnion(operand_ty_for_diag, *span)
+                        TypeCheckErrorKind::TryOperandNotErrorUnion(operand_ty_for_diag)
+                            .at(*span)
                             .into(),
                     );
                     covered_exprs.insert(*expr_id);
@@ -172,7 +170,7 @@ pub(super) fn try_check_expr_obligation_control(
             }
 
             if expected_return_ty.is_none() && callable_def_id.is_none() {
-                errors.push(TypeCheckErrorKind::TryOutsideFunction(*span).into());
+                errors.push(TypeCheckErrorKind::TryOutsideFunction.at(*span).into());
                 covered_exprs.insert(*expr_id);
                 return true;
             }
@@ -211,8 +209,8 @@ pub(super) fn try_check_expr_obligation_control(
                             TypeCheckErrorKind::TryErrorNotInReturn(
                                 missing_names,
                                 return_variant_names,
-                                *span,
                             )
+                            .at(*span)
                             .into(),
                         );
                         covered_exprs.insert(*expr_id);
@@ -221,7 +219,8 @@ pub(super) fn try_check_expr_obligation_control(
                 ty if super::term_utils::is_unresolved(ty) => {}
                 _ => {
                     errors.push(
-                        TypeCheckErrorKind::TryReturnTypeNotErrorUnion(return_ty.clone(), *span)
+                        TypeCheckErrorKind::TryReturnTypeNotErrorUnion(return_ty.clone())
+                            .at(*span)
                             .into(),
                     );
                     covered_exprs.insert(*expr_id);
@@ -243,7 +242,11 @@ pub(super) fn try_check_expr_obligation_control(
             if !super::is_iterable(&iter_ty_for_diag)
                 && !super::term_utils::is_unresolved(&iter_ty_for_diag)
             {
-                errors.push(TypeCheckErrorKind::ForIterNotIterable(iter_ty_for_diag, *span).into());
+                errors.push(
+                    TypeCheckErrorKind::ForIterNotIterable(iter_ty_for_diag)
+                        .at(*span)
+                        .into(),
+                );
                 covered_exprs.insert(*stmt_id);
                 return true;
             }
@@ -258,7 +261,9 @@ pub(super) fn try_check_expr_obligation_control(
                     && !super::term_utils::is_unresolved(&elem_ty)
                 {
                     errors.push(
-                        TypeCheckErrorKind::DeclTypeMismatch(pattern_ty, elem_ty, *span).into(),
+                        TypeCheckErrorKind::DeclTypeMismatch(pattern_ty, elem_ty)
+                            .at(*span)
+                            .into(),
                     );
                     covered_exprs.insert(*stmt_id);
                 }

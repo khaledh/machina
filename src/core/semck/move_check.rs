@@ -13,8 +13,8 @@ use crate::core::analysis::dataflow::solve_forward;
 use crate::core::context::NormalizedContext;
 use crate::core::diag::Span;
 use crate::core::resolve::{DefId, DefKind};
-use crate::core::semck::SemCheckError;
 use crate::core::semck::ast_liveness::{self, AstLiveness};
+use crate::core::semck::{SemCheckError, SemCheckErrorKind};
 use crate::core::tree::cfg::{
     AstBlockId, TreeCfgBuilder, TreeCfgItem, TreeCfgNode, TreeCfgTerminator,
 };
@@ -178,7 +178,8 @@ impl<'a> MoveVisitor<'a> {
                 };
                 // Params can only be moved if they're sink params (owned).
                 if matches!(def.kind, DefKind::Param { .. }) && !self.sink_params.contains(def_id) {
-                    self.errors.push(SemCheckError::MoveFromParam(expr.span));
+                    self.errors
+                        .push(SemCheckErrorKind::MoveFromParam.at(expr.span));
                     return;
                 }
                 let ty = self.ctx.type_map.type_table().get(expr.ty);
@@ -190,7 +191,7 @@ impl<'a> MoveVisitor<'a> {
             // `move x.field` or `move arr[i]` not allowed - must move whole variable.
             _ => self
                 .errors
-                .push(SemCheckError::InvalidMoveTarget(expr.span)),
+                .push(SemCheckErrorKind::InvalidMoveTarget.at(expr.span)),
         }
     }
 
@@ -201,7 +202,7 @@ impl<'a> MoveVisitor<'a> {
         };
         // Params can only be moved if they're sink params (owned).
         if matches!(def.kind, DefKind::Param { .. }) && !self.sink_params.contains(&def_id) {
-            self.errors.push(SemCheckError::MoveFromParam(span));
+            self.errors.push(SemCheckErrorKind::MoveFromParam.at(span));
             return;
         }
         let Some(ty_id) = self.ctx.type_map.lookup_def_type_id(def) else {
@@ -229,7 +230,7 @@ impl<'a> MoveVisitor<'a> {
             && self.moved.contains(&def_id)
         {
             self.errors
-                .push(SemCheckError::UseAfterMove(def.name.clone(), expr.span));
+                .push(SemCheckErrorKind::UseAfterMove(def.name.clone()).at(expr.span));
         }
     }
 
@@ -246,13 +247,14 @@ impl<'a> MoveVisitor<'a> {
             if matches!(def.kind, DefKind::Param { .. }) {
                 // Allow moving from sink params only.
                 if !self.sink_params.contains(&def_id) {
-                    self.errors.push(SemCheckError::MoveFromParam(expr.span));
+                    self.errors
+                        .push(SemCheckErrorKind::MoveFromParam.at(expr.span));
                     return;
                 }
             }
             let Some(ref live_after) = self.current_live_after else {
                 self.errors
-                    .push(SemCheckError::OwnedMoveRequired(expr.span));
+                    .push(SemCheckErrorKind::OwnedMoveRequired.at(expr.span));
                 return;
             };
             let use_count = self
@@ -266,7 +268,7 @@ impl<'a> MoveVisitor<'a> {
             // - Live after this item - can't implicitly consume something still needed
             if use_count > 1 || live_after.contains(&def_id) {
                 self.errors
-                    .push(SemCheckError::OwnedMoveRequired(expr.span));
+                    .push(SemCheckErrorKind::OwnedMoveRequired.at(expr.span));
                 return;
             }
 

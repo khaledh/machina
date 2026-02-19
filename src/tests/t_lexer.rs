@@ -1,4 +1,5 @@
 use super::*;
+use crate::core::lexer::LexErrorKind;
 
 fn assert_span_eq(span: Span, expected_left: (usize, usize), expected_right: (usize, usize)) {
     assert_eq!(span.start.line, expected_left.0);
@@ -89,7 +90,10 @@ fn test_lex_invalid_binary_literal() {
     let mut lexer = Lexer::new("0b102");
     let result = lexer.next_token();
 
-    assert!(matches!(result, Err(LexError::InvalidInteger(_, _))));
+    assert!(matches!(
+        result,
+        Err(err) if matches!(err.kind(), LexErrorKind::InvalidInteger(_))
+    ));
 }
 
 #[test]
@@ -118,7 +122,13 @@ fn test_lex_unexpected_character() {
     let mut lexer = Lexer::new("#");
     let result = lexer.next_token();
 
-    assert!(matches!(result, Err(LexError::UnexpectedCharacter('#', _))));
+    assert!(matches!(
+        result,
+        Err(err) if matches!(
+            err.kind(),
+            LexErrorKind::UnexpectedCharacter('#')
+        )
+    ));
 }
 
 #[test]
@@ -199,7 +209,10 @@ fn test_lex_char_literal_empty() {
     let mut lexer = Lexer::new("''");
     let result = lexer.next_token();
 
-    assert!(matches!(result, Err(LexError::InvalidEscapeSequence(_, _))));
+    assert!(matches!(
+        result,
+        Err(err) if matches!(err.kind(), LexErrorKind::InvalidEscapeSequence(_))
+    ));
 }
 
 #[test]
@@ -207,7 +220,10 @@ fn test_lex_char_literal_multi_char() {
     let mut lexer = Lexer::new("'ab'");
     let result = lexer.next_token();
 
-    assert!(matches!(result, Err(LexError::UnexpectedCharacter('b', _))));
+    assert!(matches!(
+        result,
+        Err(err) if matches!(err.kind(), LexErrorKind::UnexpectedCharacter('b'))
+    ));
 }
 
 #[test]
@@ -257,7 +273,10 @@ fn test_lex_string_unterminated() {
     let mut lexer = Lexer::new("\"abc");
     let result = lexer.next_token();
 
-    assert!(matches!(result, Err(LexError::UnterminatedString(_))));
+    assert!(matches!(
+        result,
+        Err(err) if matches!(err.kind(), LexErrorKind::UnterminatedString)
+    ));
 }
 
 #[test]
@@ -265,5 +284,8 @@ fn test_lex_string_bad_escape() {
     let mut lexer = Lexer::new("\"a\\q\"");
     let result = lexer.next_token();
 
-    assert!(matches!(result, Err(LexError::InvalidEscapeSequence(_, _))));
+    assert!(matches!(
+        result,
+        Err(err) if matches!(err.kind(), LexErrorKind::InvalidEscapeSequence(_))
+    ));
 }

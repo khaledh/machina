@@ -13,12 +13,12 @@ pub(super) fn check_control_facts(engine: &TypecheckEngine) -> Vec<TypeCheckErro
             ControlFact::Break {
                 loop_depth, span, ..
             } if *loop_depth == 0 => {
-                errors.push(TypeCheckErrorKind::BreakOutsideLoop(*span).into())
+                errors.push(TypeCheckErrorKind::BreakOutsideLoop.at(*span).into())
             }
             ControlFact::Continue {
                 loop_depth, span, ..
             } if *loop_depth == 0 => {
-                errors.push(TypeCheckErrorKind::ContinueOutsideLoop(*span).into());
+                errors.push(TypeCheckErrorKind::ContinueOutsideLoop.at(*span).into());
             }
             ControlFact::Return {
                 has_value,
@@ -27,15 +27,17 @@ pub(super) fn check_control_facts(engine: &TypecheckEngine) -> Vec<TypeCheckErro
                 ..
             } => match expected_return_ty {
                 None => {
-                    errors.push(TypeCheckErrorKind::ReturnOutsideFunction(*span).into());
+                    errors.push(TypeCheckErrorKind::ReturnOutsideFunction.at(*span).into());
                 }
                 Some(expected_ty) => {
                     let expected_ty = engine.type_vars().apply(expected_ty);
                     if *has_value && expected_ty == Type::Unit {
-                        errors.push(TypeCheckErrorKind::ReturnValueUnexpected(*span).into());
+                        errors.push(TypeCheckErrorKind::ReturnValueUnexpected.at(*span).into());
                     } else if !*has_value && expected_ty != Type::Unit {
                         errors.push(
-                            TypeCheckErrorKind::ReturnValueMissing(expected_ty, *span).into(),
+                            TypeCheckErrorKind::ReturnValueMissing(expected_ty)
+                                .at(*span)
+                                .into(),
                         );
                     }
                 }

@@ -8,8 +8,8 @@ use std::collections::{HashMap, HashSet};
 use crate::core::context::NormalizedContext;
 use crate::core::diag::Span;
 use crate::core::resolve::DefId;
-use crate::core::semck::SemCheckError;
 use crate::core::semck::closure::capture::CaptureMode;
+use crate::core::semck::{SemCheckError, SemCheckErrorKind};
 use crate::core::tree::NodeId;
 use crate::core::tree::cfg::{TreeCfgBuilder, TreeCfgItem, TreeCfgTerminator};
 use crate::core::tree::normalized::ArrayLitInit;
@@ -240,7 +240,7 @@ fn check_write_target(
         && borrowed_imm.contains(&def_id)
     {
         let name = def_name(ctx, def_id);
-        errors.push(SemCheckError::ClosureBorrowConflict(name, expr.span));
+        errors.push(SemCheckErrorKind::ClosureBorrowConflict(name).at(expr.span));
     }
 }
 
@@ -282,7 +282,7 @@ impl<'a> MutBorrowConflictVisitor<'a> {
         // Report once per base to avoid spamming.
         let name = def_name(self.ctx, def_id);
         self.errors
-            .push(SemCheckError::ClosureBorrowConflict(name, span));
+            .push(SemCheckErrorKind::ClosureBorrowConflict(name).at(span));
     }
 }
 
@@ -354,7 +354,7 @@ impl<'a> ImmBorrowConflictVisitor<'a> {
         }
         let name = def_name(self.ctx, def_id);
         self.errors
-            .push(SemCheckError::ClosureBorrowConflict(name, span));
+            .push(SemCheckErrorKind::ClosureBorrowConflict(name).at(span));
     }
 }
 
@@ -403,7 +403,7 @@ fn check_item_for_escapes(
                 if !matches!(assignee.kind, ExprKind::Var { .. })
                     && is_captured_closure_value(value, state, capture_map)
                 {
-                    errors.push(SemCheckError::ClosureEscapeStore(value.span));
+                    errors.push(SemCheckErrorKind::ClosureEscapeStore.at(value.span));
                 }
                 check_expr_for_escapes(value, state, capture_map, errors);
             }
@@ -465,7 +465,7 @@ fn check_return_expr(
         }
         _ => {
             if is_captured_closure_value(expr, state, capture_map) {
-                errors.push(SemCheckError::ClosureEscapeReturn(expr.span));
+                errors.push(SemCheckErrorKind::ClosureEscapeReturn.at(expr.span));
             }
         }
     }
@@ -493,13 +493,14 @@ impl<'a> ClosureEscapeVisitor<'a> {
     fn check_store_value(&mut self, expr: &Expr) {
         if is_captured_closure_value(expr, self.state, self.capture_map) {
             self.errors
-                .push(SemCheckError::ClosureEscapeStore(expr.span));
+                .push(SemCheckErrorKind::ClosureEscapeStore.at(expr.span));
         }
     }
 
     fn check_arg_value(&mut self, expr: &Expr) {
         if is_captured_closure_value(expr, self.state, self.capture_map) {
-            self.errors.push(SemCheckError::ClosureEscapeArg(expr.span));
+            self.errors
+                .push(SemCheckErrorKind::ClosureEscapeArg.at(expr.span));
         }
     }
 }

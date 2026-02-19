@@ -116,7 +116,13 @@ fn resolve_parity_keys(source: &str, policy: FrontendPolicy) -> (BTreeSet<String
     let keys = out
         .errors
         .iter()
-        .map(|err| format!("{:?}@{}", std::mem::discriminant(err), span_key(err.span())))
+        .map(|err| {
+            format!(
+                "{:?}@{}",
+                std::mem::discriminant(err.kind()),
+                span_key(err.span())
+            )
+        })
         .collect::<BTreeSet<_>>();
     (keys, details)
 }
@@ -176,7 +182,13 @@ fn semcheck_parity_keys(source: &str, policy: FrontendPolicy) -> (BTreeSet<Strin
     let keys = out
         .errors
         .iter()
-        .map(|err| format!("{:?}@{}", std::mem::discriminant(err), span_key(err.span())))
+        .map(|err| {
+            format!(
+                "{:?}@{}",
+                std::mem::discriminant(err.kind()),
+                span_key(err.span())
+            )
+        })
         .collect::<BTreeSet<_>>();
     (keys, details)
 }
@@ -284,12 +296,24 @@ fn main() -> u64 {
     let strict_resolve_keys = strict
         .resolve_errors
         .iter()
-        .map(|err| format!("{:?}@{}", std::mem::discriminant(err), span_key(err.span())))
+        .map(|err| {
+            format!(
+                "{:?}@{}",
+                std::mem::discriminant(err.kind()),
+                span_key(err.span())
+            )
+        })
         .collect::<BTreeSet<_>>();
     let partial_resolve_keys = partial
         .resolve_errors
         .iter()
-        .map(|err| format!("{:?}@{}", std::mem::discriminant(err), span_key(err.span())))
+        .map(|err| {
+            format!(
+                "{:?}@{}",
+                std::mem::discriminant(err.kind()),
+                span_key(err.span())
+            )
+        })
         .collect::<BTreeSet<_>>();
     let strict_resolve_details = strict
         .resolve_errors

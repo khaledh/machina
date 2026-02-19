@@ -73,8 +73,8 @@ pub(super) fn check_protocol_shape_conformance(engine: &TypecheckEngine) -> Vec<
                             role_label.clone(),
                             state_fact.name.clone(),
                             required.clone(),
-                            binding.span,
                         )
+                        .at(binding.span)
                         .into(),
                     );
                 }
@@ -112,8 +112,8 @@ fn check_emit_conformance(
                 ctx.role_label.to_string(),
                 state_fact.name.clone(),
                 emit.payload_ty.clone(),
-                emit.span,
             )
+            .at(emit.span)
             .into(),
         );
         return;
@@ -143,8 +143,8 @@ fn check_emit_conformance(
                 state_fact.name.clone(),
                 emit.payload_ty.clone(),
                 expected_roles.join(" | "),
-                emit.span,
             )
+            .at(emit.span)
             .into(),
         );
         return;
@@ -159,8 +159,8 @@ fn check_emit_conformance(
                 expected_roles.join(" | "),
                 field_name.to_string(),
                 bound_role_name.to_string(),
-                emit.span,
             )
+            .at(emit.span)
             .into(),
         );
         return;
@@ -191,8 +191,8 @@ fn check_request_contract(
                 ctx.role_label.to_string(),
                 emit.payload_ty.clone(),
                 to_role_name.to_string(),
-                emit.span,
             )
+            .at(emit.span)
             .into(),
         );
         return;
@@ -204,8 +204,8 @@ fn check_request_contract(
                 ctx.role_label.to_string(),
                 emit.payload_ty.clone(),
                 to_role_name.to_string(),
-                emit.span,
             )
+            .at(emit.span)
             .into(),
         );
         return;
@@ -221,8 +221,8 @@ fn check_request_contract(
                     emit.payload_ty.clone(),
                     to_role_name.to_string(),
                     response_ty.clone(),
-                    emit.span,
                 )
+                .at(emit.span)
                 .into(),
             );
         }
@@ -283,8 +283,8 @@ pub(super) fn check_typestate_handler_overlap(engine: &TypecheckEngine) -> Vec<T
                             state_name.clone(),
                             left.selector_ty.clone(),
                             overlap,
-                            right.span,
                         )
+                        .at(right.span)
                         .into(),
                     );
                 } else {
@@ -294,8 +294,8 @@ pub(super) fn check_typestate_handler_overlap(engine: &TypecheckEngine) -> Vec<T
                             state_name.clone(),
                             left.selector_ty.clone(),
                             overlap,
-                            right.span,
                         )
+                        .at(right.span)
                         .into(),
                     );
                 }
@@ -417,8 +417,8 @@ pub(super) fn check_typestate_request_response_shape(
                         site.request_ty.clone(),
                         label_suffix.clone(),
                         response_ty.clone(),
-                        site.span,
                     )
+                    .at(site.span)
                     .into(),
                 );
             }
@@ -455,8 +455,8 @@ pub(super) fn check_typestate_request_response_shape(
                     handler.request_ty.clone(),
                     label_suffix,
                     handler.response_ty.clone(),
-                    handler.span,
                 )
+                .at(handler.span)
                 .into(),
             );
         }

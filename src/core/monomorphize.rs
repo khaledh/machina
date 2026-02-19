@@ -2,7 +2,7 @@ use std::collections::{HashMap, HashSet};
 
 use crate::core::capsule::ModuleId;
 use crate::core::context::{ResolvedContext, TypeCheckedContext};
-use crate::core::diag::Span;
+use crate::core::diag::{Span, SpannedError};
 use crate::core::resolve::{DefId, DefKind, DefTable, ImportedFacts, attach_def_owners};
 use crate::core::tree::map::TreeMapper;
 use crate::core::tree::resolved as res;
@@ -41,33 +41,29 @@ struct InstKey {
 }
 
 #[derive(Debug, Error)]
-pub enum MonomorphizeError {
+pub enum MonomorphizeErrorKind {
     #[error("generic function `{name}` is used with multiple type arguments")]
-    MultipleInstantiations { name: String, span: Span },
+    MultipleInstantiations { name: String },
 
     #[error("generic function `{name}` expects {expected} type arguments, got {got}")]
     ArityMismatch {
         name: String,
         expected: usize,
         got: usize,
-        span: Span,
     },
 
     #[error("unknown type `{name}`")]
-    UnknownType { name: String, span: Span },
+    UnknownType { name: String },
 
     #[error("unsupported type in monomorphization")]
-    UnsupportedType { span: Span },
+    UnsupportedType,
 }
 
-impl MonomorphizeError {
-    pub fn span(&self) -> Span {
-        match self {
-            MonomorphizeError::MultipleInstantiations { span, .. } => *span,
-            MonomorphizeError::ArityMismatch { span, .. } => *span,
-            MonomorphizeError::UnknownType { span, .. } => *span,
-            MonomorphizeError::UnsupportedType { span, .. } => *span,
-        }
+pub type MonomorphizeError = SpannedError<MonomorphizeErrorKind>;
+
+impl MonomorphizeErrorKind {
+    pub fn at(self, span: Span) -> MonomorphizeError {
+        MonomorphizeError::new(self, span)
     }
 }
 
@@ -185,9 +181,11 @@ pub(crate) fn monomorphize_with_plan(
     for (def_id, insts) in insts_by_def.iter() {
         let def = def_table
             .lookup_def(*def_id)
-            .ok_or_else(|| MonomorphizeError::UnknownType {
-                name: def_name(&def_table, *def_id),
-                span: insts.first().map(|inst| inst.call_span).unwrap_or_default(),
+            .ok_or_else(|| {
+                MonomorphizeErrorKind::UnknownType {
+                    name: def_name(&def_table, *def_id),
+                }
+                .at(insts.first().map(|inst| inst.call_span).unwrap_or_default())
             })?
             .clone();
         for inst in insts {
@@ -1326,12 +1324,12 @@ fn build_subst(
 ) -> Result<HashMap<DefId, Type>, MonomorphizeError> {
     if type_params.len() != inst.type_args.len() {
         let name = def_name(def_table, inst.def_id);
-        return Err(MonomorphizeError::ArityMismatch {
+        return Err(MonomorphizeErrorKind::ArityMismatch {
             name,
             expected: type_params.len(),
             got: inst.type_args.len(),
-            span: inst.call_span,
-        });
+        }
+        .at(inst.call_span));
     }
 
     Ok(type_params
@@ -1422,7 +1420,7 @@ fn type_expr_from_type(
                 (true, 16) => "i16",
                 (true, 32) => "i32",
                 (true, 64) => "i64",
-                _ => return Err(MonomorphizeError::UnsupportedType { span }),
+                _ => return Err(MonomorphizeErrorKind::UnsupportedType.at(span)),
             };
             let mut refinements = Vec::new();
             if let Some(bounds) = bounds {
@@ -1463,7 +1461,7 @@ fn type_expr_from_type(
             ident: "Pending".to_string(),
             def_id: def_table
                 .lookup_type_def_id("Pending")
-                .ok_or(MonomorphizeError::UnsupportedType { span })?,
+                .ok_or(MonomorphizeErrorKind::UnsupportedType.at(span))?,
             type_args: vec![response_set_type_arg_expr(
                 response_tys,
                 def_table,
@@ -1475,7 +1473,7 @@ fn type_expr_from_type(
             ident: "ReplyCap".to_string(),
             def_id: def_table
                 .lookup_type_def_id("ReplyCap")
-                .ok_or(MonomorphizeError::UnsupportedType { span })?,
+                .ok_or(MonomorphizeErrorKind::UnsupportedType.at(span))?,
             type_args: vec![response_set_type_arg_expr(
                 response_tys,
                 def_table,
@@ -1487,14 +1485,14 @@ fn type_expr_from_type(
             ident: "set".to_string(),
             def_id: def_table
                 .lookup_type_def_id("set")
-                .ok_or(MonomorphizeError::UnsupportedType { span })?,
+                .ok_or(MonomorphizeErrorKind::UnsupportedType.at(span))?,
             type_args: vec![type_expr_from_type(elem_ty, def_table, node_id_gen, span)?],
         },
         Type::Map { key_ty, value_ty } => res::TypeExprKind::Named {
             ident: "map".to_string(),
             def_id: def_table
                 .lookup_type_def_id("map")
-                .ok_or(MonomorphizeError::UnsupportedType { span })?,
+                .ok_or(MonomorphizeErrorKind::UnsupportedType.at(span))?,
             type_args: vec![
                 type_expr_from_type(key_ty, def_table, node_id_gen, span)?,
                 type_expr_from_type(value_ty, def_table, node_id_gen, span)?,
@@ -1546,8 +1544,10 @@ fn type_expr_from_type(
         Type::Struct { name, .. } | Type::Enum { name, .. } => {
             return named_type_expr(name, def_table, node_id_gen, span);
         }
-        Type::Range { .. } => return Err(MonomorphizeError::UnsupportedType { span }),
-        Type::Unknown | Type::Var(_) => return Err(MonomorphizeError::UnsupportedType { span }),
+        Type::Range { .. } => return Err(MonomorphizeErrorKind::UnsupportedType.at(span)),
+        Type::Unknown | Type::Var(_) => {
+            return Err(MonomorphizeErrorKind::UnsupportedType.at(span));
+        }
     };
 
     Ok(res::TypeExpr { id, kind, span })
@@ -1563,7 +1563,7 @@ fn response_set_type_arg_expr(
         return type_expr_from_type(
             response_tys
                 .first()
-                .ok_or(MonomorphizeError::UnsupportedType { span })?,
+                .ok_or(MonomorphizeErrorKind::UnsupportedType.at(span))?,
             def_table,
             node_id_gen,
             span,
@@ -1587,13 +1587,12 @@ fn named_type_expr(
     node_id_gen: &mut NodeIdGen,
     span: Span,
 ) -> Result<res::TypeExpr, MonomorphizeError> {
-    let def_id =
-        def_table
-            .lookup_type_def_id(name)
-            .ok_or_else(|| MonomorphizeError::UnknownType {
-                name: name.to_string(),
-                span,
-            })?;
+    let def_id = def_table.lookup_type_def_id(name).ok_or_else(|| {
+        MonomorphizeErrorKind::UnknownType {
+            name: name.to_string(),
+        }
+        .at(span)
+    })?;
     Ok(res::TypeExpr {
         id: node_id_gen.new_id(),
         kind: res::TypeExprKind::Named {

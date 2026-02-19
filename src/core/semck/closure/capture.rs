@@ -9,7 +9,7 @@ use std::collections::{HashMap, HashSet};
 use crate::core::context::NormalizedContext;
 use crate::core::diag::Span;
 use crate::core::resolve::{DefId, DefKind};
-use crate::core::semck::SemCheckError;
+use crate::core::semck::{SemCheckError, SemCheckErrorKind};
 use crate::core::tree::normalized::{
     BindPattern, BindPatternKind, CallArg, CaptureSpec, Expr, ExprKind, MatchPattern,
     MatchPatternBinding, Param, ParamMode, StmtExpr, StmtExprKind,
@@ -111,7 +111,7 @@ impl<'a> ClosureCaptureChecker<'a> {
             if !used.contains(&spec_def_id) {
                 let name = self.def_name(spec_def_id);
                 self.errors
-                    .push(SemCheckError::ClosureCaptureUnused(name, span));
+                    .push(SemCheckErrorKind::ClosureCaptureUnused(name).at(span));
             }
         }
 
@@ -210,7 +210,7 @@ impl<'a> ClosureCaptureChecker<'a> {
             // Moving a captured value would invalidate the outer binding.
             let name = self.def_name(def_id);
             self.errors
-                .push(SemCheckError::ClosureCaptureMove(name, span));
+                .push(SemCheckErrorKind::ClosureCaptureMove(name).at(span));
         }
         Some(def_id)
     }

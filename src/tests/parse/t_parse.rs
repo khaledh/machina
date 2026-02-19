@@ -1,6 +1,6 @@
 use super::*;
 use crate::core::lexer::{LexError, Lexer, Token, TokenKind as TK};
-use crate::core::parse::ParserOptions;
+use crate::core::parse::{ParseErrorKind, ParserOptions};
 use crate::core::tree::RefinementKind;
 
 fn parse_module(source: &str) -> Result<Module, ParseError> {
@@ -2030,7 +2030,10 @@ fn test_parse_attr_on_method_block_rejected() {
     let source = "@intrinsic Foo :: { fn bar(self) { 1 } }";
     let result = parse_module(source);
 
-    assert!(matches!(result, Err(ParseError::AttributeNotAllowed(_))));
+    assert!(matches!(
+        result,
+        Err(err) if matches!(err.kind(), ParseErrorKind::AttributeNotAllowed)
+    ));
 }
 
 #[test]
@@ -2284,10 +2287,9 @@ fn test_parse_typestate_disabled_by_default() {
 
     let err = parse_module(source).expect_err("typestate should require experimental flag");
     assert!(matches!(
-        err,
-        ParseError::FeatureDisabled {
-            feature: "typestate",
-            ..
+        err.kind(),
+        ParseErrorKind::FeatureDisabled {
+            feature: "typestate"
         }
     ));
 }
@@ -2415,7 +2417,10 @@ fn test_parse_protocol_non_start_trigger_requires_explicit_source_role() {
     )
     .expect_err("non-start trigger without source role should fail");
 
-    assert!(matches!(err, ParseError::ExpectedToken(TK::At, _)));
+    assert!(matches!(
+        err.kind(),
+        ParseErrorKind::ExpectedToken(TK::At, _)
+    ));
 }
 
 #[test]

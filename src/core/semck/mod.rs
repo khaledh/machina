@@ -16,7 +16,7 @@ mod value;
 
 use std::collections::HashSet;
 
-pub use errors::SemCheckError;
+pub use errors::{SemCheckError, SemCheckErrorKind};
 
 use crate::core::context::{SemCheckNormalizedContext, SemCheckStageInput, SemCheckStageOutput};
 use crate::core::tree::NodeId;

@@ -1,249 +1,194 @@
 use thiserror::Error;
 
-use crate::core::diag::Span;
+use crate::core::diag::{Span, SpannedError};
 use crate::core::resolve::symbols::SymbolKind;
 use crate::core::tree::parsed::ExprKind;
 
 #[derive(Clone, Debug, Error)]
-pub enum ResolveError {
+pub enum ResolveErrorKind {
     #[error("Symbol already defined in current scope: {0}")]
-    SymbolAlreadyDefined(String, Span),
+    SymbolAlreadyDefined(String),
 
     #[error("Undefined variable: {0}")]
-    VarUndefined(String, Span),
+    VarUndefined(String),
 
     #[error("Cannot assign to immutable variable: {0}")]
-    VarImmutable(String, Span),
+    VarImmutable(String),
 
     #[error("Undefined function: {0}")]
-    FuncUndefined(String, Span),
+    FuncUndefined(String),
 
     #[error("Invalid assignment target. Expected an l-value, found: {0:?}")]
-    InvalidAssignmentTarget(ExprKind, Span),
+    InvalidAssignmentTarget(ExprKind),
 
     #[error("Invalid callee. Expected a function name, found: {0:?}")]
-    InvalidCallee(ExprKind, Span),
+    InvalidCallee(ExprKind),
 
     #[error("Expected '{0}' to be a type, found {1}")]
-    ExpectedType(String, SymbolKind, Span),
+    ExpectedType(String, SymbolKind),
 
     #[error("Expected '{0}' to be a trait, found {1}")]
-    ExpectedTrait(String, SymbolKind, Span),
+    ExpectedTrait(String, SymbolKind),
 
     #[error("Undefined type: {0}")]
-    TypeUndefined(String, Span),
+    TypeUndefined(String),
 
     #[error("Undefined trait: {0}")]
-    TraitUndefined(String, Span),
+    TraitUndefined(String),
 
     #[error("Undefined struct: {0}")]
-    StructUndefined(String, Span),
+    StructUndefined(String),
 
     #[error("Undefined enum: {0}")]
-    EnumUndefined(String, Span),
+    EnumUndefined(String),
 
     #[error("Undefined enum variant: {0}::{1}")]
-    EnumVariantUndefined(String, String, Span),
+    EnumVariantUndefined(String, String),
 
     #[error("Method declarations are only allowed on intrinsic types: {0}")]
-    MethodDeclOnNonIntrinsicType(String, Span),
+    MethodDeclOnNonIntrinsicType(String),
 
     #[error("Method declaration '{0}' must be marked @intrinsic")]
-    MethodDeclMissingIntrinsic(String, Span),
+    MethodDeclMissingIntrinsic(String),
 
     #[error("Unknown attribute `{0}`")]
-    UnknownAttribute(String, Span),
+    UnknownAttribute(String),
 
     #[error("Duplicate attribute `{0}`")]
-    AttrDuplicate(String, Span),
+    AttrDuplicate(String),
 
     #[error("Attribute `{0}` expects {1} args, found {2}")]
-    AttrWrongArgCount(String, usize, usize, Span),
+    AttrWrongArgCount(String, usize, usize),
 
     #[error("Attribute `{0}` has invalid argument type")]
-    AttrWrongArgType(String, Span),
+    AttrWrongArgType(String),
 
     #[error("Attribute `{0}` is not allowed on {1}")]
-    AttrNotAllowed(String, &'static str, Span),
+    AttrNotAllowed(String, &'static str),
 
     #[error("Attribute `machines` is only allowed on top-level `fn main` definitions")]
-    AttrMachinesRequiresMain(Span),
+    AttrMachinesRequiresMain,
 
     #[error("Duplicate requires alias: {0}")]
-    DuplicateRequireAlias(String, Span),
+    DuplicateRequireAlias(String),
 
     #[error("Module-qualified access is not implemented yet: {0}.{1}")]
-    ModuleQualifiedAccessUnsupported(String, String, Span),
+    ModuleQualifiedAccessUnsupported(String, String),
 
     #[error("Module `{0}` has no member `{1}`")]
-    ModuleMemberUndefined(String, String, Span),
+    ModuleMemberUndefined(String, String),
 
     #[error("Undefined protocol role: {0}")]
-    ProtocolRoleUndefined(String, Span),
+    ProtocolRoleUndefined(String),
 
     #[error("Expected '{0}' to be a protocol role, found {1}")]
-    ExpectedProtocolRole(String, SymbolKind, Span),
+    ExpectedProtocolRole(String, SymbolKind),
 
     #[error("Undefined protocol role `{1}` in request contract of protocol `{0}`")]
-    ProtocolRequestContractRoleUndefined(String, String, Span),
+    ProtocolRequestContractRoleUndefined(String, String),
 
     #[error(
         "Undefined trigger source role `{3}` in protocol `{0}` role `{1}` state `{2}` transition"
     )]
-    ProtocolTransitionSourceRoleUndefined(String, String, String, String, Span),
+    ProtocolTransitionSourceRoleUndefined(String, String, String, String),
 
     #[error("Undefined effect destination role `{3}` in protocol `{0}` role `{1}` state `{2}`")]
-    ProtocolTransitionEffectRoleUndefined(String, String, String, String, Span),
+    ProtocolTransitionEffectRoleUndefined(String, String, String, String),
 
     #[error("Undefined next state `{3}` in protocol `{0}` role `{1}` state `{2}` transition")]
-    ProtocolTransitionNextStateUndefined(String, String, String, String, Span),
+    ProtocolTransitionNextStateUndefined(String, String, String, String),
 
     #[error("Ambiguous transition trigger `{3}@{4}` in protocol `{0}` role `{1}` state `{2}`")]
-    ProtocolTransitionTriggerConflict(String, String, String, String, String, Span),
+    ProtocolTransitionTriggerConflict(String, String, String, String, String),
 
     #[error("Typestate `{0}` role implementation path must be `<Protocol>::<Role>`, found `{1}`")]
-    TypestateRoleImplMalformedPath(String, String, Span),
+    TypestateRoleImplMalformedPath(String, String),
 
     #[error("Typestate `{0}` references undefined protocol role `{1}`")]
-    TypestateRoleImplRoleUndefined(String, String, Span),
+    TypestateRoleImplRoleUndefined(String, String),
 
     #[error("Typestate `{0}` expected `{1}` to resolve to a protocol role, found {2}")]
-    TypestateRoleImplExpectedRole(String, String, SymbolKind, Span),
+    TypestateRoleImplExpectedRole(String, String, SymbolKind),
 
     #[error("Typestate `{0}` field `{1}` role binding must use `Machine<...>` type")]
-    TypestateRoleBindingInvalidType(String, String, Span),
+    TypestateRoleBindingInvalidType(String, String),
 
     #[error("Typestate `{0}` field `{1}` binds undefined protocol role `{2}`")]
-    TypestateRoleBindingRoleUndefined(String, String, String, Span),
+    TypestateRoleBindingRoleUndefined(String, String, String),
 
     #[error("Typestate `{0}` binds protocol role `{1}` more than once")]
-    TypestateRoleBindingDuplicateRole(String, String, Span),
+    TypestateRoleBindingDuplicateRole(String, String),
 
     #[error("Typestate `{0}` is missing protocol peer-role binding for `{1}`")]
-    TypestateRoleBindingMissing(String, String, Span),
+    TypestateRoleBindingMissing(String, String),
 
     #[error("Typestate `{0}` must declare at least one state")]
-    TypestateMissingState(String, Span),
+    TypestateMissingState(String),
 
     #[error("Typestate `{0}` has duplicate state `{1}`")]
-    TypestateDuplicateState(String, String, Span),
+    TypestateDuplicateState(String, String),
 
     #[error("Typestate `{0}` has multiple `fields` blocks")]
-    TypestateDuplicateFieldsBlock(String, Span),
+    TypestateDuplicateFieldsBlock(String),
 
     #[error("State `{0}.{1}` has multiple `fields` blocks")]
-    TypestateDuplicateStateFieldsBlock(String, String, Span),
+    TypestateDuplicateStateFieldsBlock(String, String),
 
     #[error("State field `{2}` in `{0}.{1}` shadows a typestate field")]
-    TypestateStateFieldShadowsCarriedField(String, String, String, Span),
+    TypestateStateFieldShadowsCarriedField(String, String, String),
 
     #[error("Typestate `{0}` is missing required `fn new(...)` constructor")]
-    TypestateMissingNew(String, Span),
+    TypestateMissingNew(String),
 
     #[error("Typestate `{0}` has duplicate `new` constructors")]
-    TypestateDuplicateNew(String, Span),
+    TypestateDuplicateNew(String),
 
     #[error(
         "Typestate `{0}` constructor return type must be a declared state (or `State | Error...`)"
     )]
-    TypestateInvalidNewReturn(String, Span),
+    TypestateInvalidNewReturn(String),
 
     #[error("Transition `{0}.{1}::{2}` must not declare explicit `self` parameter")]
-    TypestateExplicitSelfNotAllowed(String, String, String, Span),
+    TypestateExplicitSelfNotAllowed(String, String, String),
 
     #[error(
         "Transition `{0}.{1}::{2}` return type must be a declared state (or `State | Error...`)"
     )]
-    TypestateInvalidTransitionReturn(String, String, String, Span),
+    TypestateInvalidTransitionReturn(String, String, String),
 
     #[error(
         "Typestate `{0}` `on` handler return type must be a declared state, `stay`, or `State | Error...`"
     )]
-    TypestateInvalidOnHandlerReturn(String, Span),
+    TypestateInvalidOnHandlerReturn(String),
 
     #[error(
         "State `{0}.{1}` `on` handler return type must be a declared state, `stay`, or `State | Error...`"
     )]
-    TypestateInvalidStateOnHandlerReturn(String, String, Span),
+    TypestateInvalidStateOnHandlerReturn(String, String),
 
     #[error("State `{0}.{1}` has duplicate transition `{2}`")]
-    TypestateDuplicateTransition(String, String, String, Span),
+    TypestateDuplicateTransition(String, String, String),
 
     #[error("Unknown typestate state attribute: `{2}` on state `{0}.{1}`")]
-    TypestateUnknownStateAttribute(String, String, String, Span),
+    TypestateUnknownStateAttribute(String, String, String),
 
     #[error("Final state `{0}.{1}` must not declare transition methods")]
-    TypestateFinalStateHasTransition(String, String, Span),
+    TypestateFinalStateHasTransition(String, String),
 
     #[error("Final state `{0}.{1}` must not declare `on` handlers")]
-    TypestateFinalStateHasHandler(String, String, Span),
+    TypestateFinalStateHasHandler(String, String),
 
     #[error("State literal `{0}` is only allowed inside typestate constructor/transition methods")]
-    TypestateStateLiteralOutsideTypestate(String, Span),
+    TypestateStateLiteralOutsideTypestate(String),
 
     #[error("Managed typestate spawn requires `@machines fn main(...)` entrypoint opt-in")]
-    TypestateSpawnRequiresMachinesOptIn(Span),
+    TypestateSpawnRequiresMachinesOptIn,
 }
 
-impl ResolveError {
-    pub fn span(&self) -> Span {
-        match self {
-            ResolveError::SymbolAlreadyDefined(_, span) => *span,
-            ResolveError::VarUndefined(_, span) => *span,
-            ResolveError::VarImmutable(_, span) => *span,
-            ResolveError::FuncUndefined(_, span) => *span,
-            ResolveError::InvalidAssignmentTarget(_, span) => *span,
-            ResolveError::InvalidCallee(_, span) => *span,
-            ResolveError::ExpectedType(_, _, span) => *span,
-            ResolveError::ExpectedTrait(_, _, span) => *span,
-            ResolveError::TypeUndefined(_, span) => *span,
-            ResolveError::TraitUndefined(_, span) => *span,
-            ResolveError::StructUndefined(_, span) => *span,
-            ResolveError::EnumUndefined(_, span) => *span,
-            ResolveError::EnumVariantUndefined(_, _, span) => *span,
-            ResolveError::MethodDeclOnNonIntrinsicType(_, span) => *span,
-            ResolveError::MethodDeclMissingIntrinsic(_, span) => *span,
-            ResolveError::UnknownAttribute(_, span) => *span,
-            ResolveError::AttrDuplicate(_, span) => *span,
-            ResolveError::AttrWrongArgCount(_, _, _, span) => *span,
-            ResolveError::AttrWrongArgType(_, span) => *span,
-            ResolveError::AttrNotAllowed(_, _, span) => *span,
-            ResolveError::AttrMachinesRequiresMain(span) => *span,
-            ResolveError::DuplicateRequireAlias(_, span) => *span,
-            ResolveError::ModuleQualifiedAccessUnsupported(_, _, span) => *span,
-            ResolveError::ModuleMemberUndefined(_, _, span) => *span,
-            ResolveError::ProtocolRoleUndefined(_, span) => *span,
-            ResolveError::ExpectedProtocolRole(_, _, span) => *span,
-            ResolveError::ProtocolRequestContractRoleUndefined(_, _, span) => *span,
-            ResolveError::ProtocolTransitionSourceRoleUndefined(_, _, _, _, span) => *span,
-            ResolveError::ProtocolTransitionEffectRoleUndefined(_, _, _, _, span) => *span,
-            ResolveError::ProtocolTransitionNextStateUndefined(_, _, _, _, span) => *span,
-            ResolveError::ProtocolTransitionTriggerConflict(_, _, _, _, _, span) => *span,
-            ResolveError::TypestateRoleImplMalformedPath(_, _, span) => *span,
-            ResolveError::TypestateRoleImplRoleUndefined(_, _, span) => *span,
-            ResolveError::TypestateRoleImplExpectedRole(_, _, _, span) => *span,
-            ResolveError::TypestateRoleBindingInvalidType(_, _, span) => *span,
-            ResolveError::TypestateRoleBindingRoleUndefined(_, _, _, span) => *span,
-            ResolveError::TypestateRoleBindingDuplicateRole(_, _, span) => *span,
-            ResolveError::TypestateRoleBindingMissing(_, _, span) => *span,
-            ResolveError::TypestateMissingState(_, span) => *span,
-            ResolveError::TypestateDuplicateState(_, _, span) => *span,
-            ResolveError::TypestateDuplicateFieldsBlock(_, span) => *span,
-            ResolveError::TypestateDuplicateStateFieldsBlock(_, _, span) => *span,
-            ResolveError::TypestateStateFieldShadowsCarriedField(_, _, _, span) => *span,
-            ResolveError::TypestateMissingNew(_, span) => *span,
-            ResolveError::TypestateDuplicateNew(_, span) => *span,
-            ResolveError::TypestateInvalidNewReturn(_, span) => *span,
-            ResolveError::TypestateExplicitSelfNotAllowed(_, _, _, span) => *span,
-            ResolveError::TypestateInvalidTransitionReturn(_, _, _, span) => *span,
-            ResolveError::TypestateInvalidOnHandlerReturn(_, span) => *span,
-            ResolveError::TypestateInvalidStateOnHandlerReturn(_, _, span) => *span,
-            ResolveError::TypestateDuplicateTransition(_, _, _, span) => *span,
-            ResolveError::TypestateUnknownStateAttribute(_, _, _, span) => *span,
-            ResolveError::TypestateFinalStateHasTransition(_, _, span) => *span,
-            ResolveError::TypestateFinalStateHasHandler(_, _, span) => *span,
-            ResolveError::TypestateStateLiteralOutsideTypestate(_, span) => *span,
-            ResolveError::TypestateSpawnRequiresMachinesOptIn(span) => *span,
-        }
+pub type ResolveError = SpannedError<ResolveErrorKind>;
+
+impl ResolveErrorKind {
+    pub fn at(self, span: Span) -> ResolveError {
+        ResolveError::new(self, span)
     }
 }

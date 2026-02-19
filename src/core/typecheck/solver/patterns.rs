@@ -146,8 +146,8 @@ fn bind_match_pattern_types(
                             TypeCheckErrorKind::MatchTypedBindingTypeMismatch(
                                 variant_names,
                                 pat_ty.clone(),
-                                *span,
                             )
+                            .at(*span)
                             .into(),
                         );
                         covered.insert(*id);
@@ -283,8 +283,8 @@ fn check_bind_pattern(
                         TypeCheckErrorKind::TuplePatternLengthMismatch(
                             field_tys.len(),
                             patterns.len(),
-                            span,
                         )
+                        .at(span)
                         .into(),
                     );
                 }
@@ -305,7 +305,8 @@ fn check_bind_pattern(
             }
             ty if super::term_utils::is_unresolved(ty) => None,
             _ => Some(
-                TypeCheckErrorKind::PatternTypeMismatch(pattern.clone(), value_ty.clone(), span)
+                TypeCheckErrorKind::PatternTypeMismatch(pattern.clone(), value_ty.clone())
+                    .at(span)
                     .into(),
             ),
         },
@@ -317,8 +318,8 @@ fn check_bind_pattern(
                         TypeCheckErrorKind::ArrayPatternLengthMismatch(
                             expected_len,
                             patterns.len(),
-                            span,
                         )
+                        .at(span)
                         .into(),
                     );
                 }
@@ -347,7 +348,8 @@ fn check_bind_pattern(
             }
             ty if super::term_utils::is_unresolved(ty) => None,
             _ => Some(
-                TypeCheckErrorKind::PatternTypeMismatch(pattern.clone(), value_ty.clone(), span)
+                TypeCheckErrorKind::PatternTypeMismatch(pattern.clone(), value_ty.clone())
+                    .at(span)
                     .into(),
             ),
         },
@@ -371,7 +373,9 @@ fn check_bind_pattern(
                         .map(|def| def.name.clone())
                         .unwrap_or_else(|| super::diag_utils::compact_nominal_name(name));
                     return Some(
-                        TypeCheckErrorKind::OpaquePatternDestructure(diag_name, span).into(),
+                        TypeCheckErrorKind::OpaquePatternDestructure(diag_name)
+                            .at(span)
+                            .into(),
                     );
                 }
                 for field in fields {
@@ -395,7 +399,8 @@ fn check_bind_pattern(
             }
             ty if super::term_utils::is_unresolved(ty) => None,
             _ => Some(
-                TypeCheckErrorKind::PatternTypeMismatch(pattern.clone(), value_ty.clone(), span)
+                TypeCheckErrorKind::PatternTypeMismatch(pattern.clone(), value_ty.clone())
+                    .at(span)
                     .into(),
             ),
         },

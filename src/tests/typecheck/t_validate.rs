@@ -42,7 +42,7 @@ fn test_validate_break_outside_loop() {
     assert!(
         errors
             .iter()
-            .any(|err| matches!(err.kind(), TypeCheckErrorKind::BreakOutsideLoop(_)))
+            .any(|err| matches!(err.kind(), TypeCheckErrorKind::BreakOutsideLoop))
     );
 }
 
@@ -60,7 +60,7 @@ fn test_validate_return_value_unexpected() {
     assert!(
         errors
             .iter()
-            .any(|err| matches!(err.kind(), TypeCheckErrorKind::ReturnValueUnexpected(_)))
+            .any(|err| matches!(err.kind(), TypeCheckErrorKind::ReturnValueUnexpected))
     );
 }
 
@@ -78,6 +78,6 @@ fn test_validate_return_value_missing() {
     assert!(
         errors
             .iter()
-            .any(|err| matches!(err.kind(), TypeCheckErrorKind::ReturnValueMissing(_, _)))
+            .any(|err| matches!(err.kind(), TypeCheckErrorKind::ReturnValueMissing(_, ..)))
     );
 }

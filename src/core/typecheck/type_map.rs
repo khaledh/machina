@@ -73,30 +73,30 @@ pub(crate) fn resolve_type_def_with_args(
 ) -> Result<Type, TypeCheckError> {
     let def = def_table
         .lookup_def(def_id)
-        .ok_or(TypeCheckErrorKind::UnknownType(Span::default()))?;
+        .ok_or(TypeCheckErrorKind::UnknownType.at(Span::default()))?;
     if let Some(imported_ty) = module.imported_type_by_id(def_id) {
         if !type_args.is_empty() {
             return Err(TypeCheckErrorKind::TypeArgCountMismatch(
                 def.name.clone(),
                 0,
                 type_args.len(),
-                Span::default(),
             )
+            .at(Span::default())
             .into());
         }
         return Ok(imported_ty.clone());
     }
     let type_def = module
         .type_def_by_id(def_id)
-        .ok_or(TypeCheckErrorKind::UnknownType(Span::default()))?;
+        .ok_or(TypeCheckErrorKind::UnknownType.at(Span::default()))?;
 
     if type_def.type_params.len() != type_args.len() {
         return Err(TypeCheckErrorKind::TypeArgCountMismatch(
             def.name.clone(),
             type_def.type_params.len(),
             type_args.len(),
-            type_def.span,
         )
+        .at(type_def.span)
         .into());
     }
 
@@ -211,10 +211,12 @@ fn resolve_type_expr_impl(
     allow_error_union: bool,
 ) -> Result<Type, TypeCheckError> {
     match &type_expr.kind {
-        res::TypeExprKind::Infer => Err(TypeCheckErrorKind::UnknownType(type_expr.span).into()),
+        res::TypeExprKind::Infer => Err(TypeCheckErrorKind::UnknownType.at(type_expr.span).into()),
         res::TypeExprKind::Union { variants } => {
             if !allow_error_union {
-                return Err(TypeCheckErrorKind::UnionNotAllowedHere(type_expr.span).into());
+                return Err(TypeCheckErrorKind::UnionNotAllowedHere
+                    .at(type_expr.span)
+                    .into());
             }
             let resolved = variants
                 .iter()
@@ -425,7 +427,7 @@ fn apply_refinements(
                     nonzero,
                 } = ty
                 else {
-                    return Err(TypeCheckErrorKind::RefinementBaseNotInt(ty, span).into());
+                    return Err(TypeCheckErrorKind::RefinementBaseNotInt(ty).at(span).into());
                 };
                 let (min_bound, max_bound) = if let Some(bounds) = bounds {
                     (bounds.min, bounds.max_excl)
@@ -434,8 +436,9 @@ fn apply_refinements(
                 };
                 if *min < min_bound || *max > max_bound {
                     return Err(TypeCheckErrorKind::BoundsOutOfRange(
-                        *min, *max, min_bound, max_bound, span,
+                        *min, *max, min_bound, max_bound,
                     )
+                    .at(span)
                     .into());
                 }
                 ty = Type::Int {
@@ -456,7 +459,7 @@ fn apply_refinements(
                     ..
                 } = ty
                 else {
-                    return Err(TypeCheckErrorKind::RefinementBaseNotInt(ty, span).into());
+                    return Err(TypeCheckErrorKind::RefinementBaseNotInt(ty).at(span).into());
                 };
                 ty = Type::Int {
                     signed,
@@ -474,7 +477,11 @@ fn apply_refinements(
     } = ty
         && (bounds.min > 0 || bounds.max_excl <= 0)
     {
-        return Err(TypeCheckErrorKind::RedundantNonZero(bounds.min, bounds.max_excl, span).into());
+        return Err(
+            TypeCheckErrorKind::RedundantNonZero(bounds.min, bounds.max_excl)
+                .at(span)
+                .into(),
+        );
     }
 
     Ok(ty)
@@ -514,7 +521,7 @@ fn resolve_named_type(
 ) -> Result<Type, TypeCheckError> {
     let def = def_table
         .lookup_def(*def_id)
-        .ok_or(TypeCheckErrorKind::UnknownType(type_expr.span))?;
+        .ok_or(TypeCheckErrorKind::UnknownType.at(type_expr.span))?;
 
     if def.name == "set" {
         if type_arg_exprs.len() != 1 {
@@ -522,8 +529,8 @@ fn resolve_named_type(
                 def.name.clone(),
                 1,
                 type_arg_exprs.len(),
-                type_expr.span,
             )
+            .at(type_expr.span)
             .into());
         }
         let elem_ty = resolve_type_expr_impl(
@@ -545,8 +552,8 @@ fn resolve_named_type(
                 def.name.clone(),
                 2,
                 type_arg_exprs.len(),
-                type_expr.span,
             )
+            .at(type_expr.span)
             .into());
         }
         let key_ty = resolve_type_expr_impl(
@@ -578,8 +585,8 @@ fn resolve_named_type(
                 def.name.clone(),
                 1,
                 type_arg_exprs.len(),
-                type_expr.span,
             )
+            .at(type_expr.span)
             .into());
         }
         let response_set_ty = resolve_type_expr_impl(
@@ -608,8 +615,8 @@ fn resolve_named_type(
                 def.name.clone(),
                 0,
                 type_arg_exprs.len(),
-                type_expr.span,
             )
+            .at(type_expr.span)
             .into());
         }
         return Ok(ty);
@@ -627,7 +634,7 @@ fn resolve_named_type(
             {
                 return Ok(Type::Var(*var));
             }
-            Err(TypeCheckErrorKind::UnknownType(type_expr.span).into())
+            Err(TypeCheckErrorKind::UnknownType.at(type_expr.span).into())
         }
         DefKind::TypeDef { .. } => {
             let Some(type_def) = module.type_def_by_id(*def_id) else {
@@ -637,13 +644,13 @@ fn resolve_named_type(
                             def.name.clone(),
                             0,
                             type_arg_exprs.len(),
-                            type_expr.span,
                         )
+                        .at(type_expr.span)
                         .into());
                     }
                     return Ok(imported_ty.clone());
                 }
-                return Err(TypeCheckErrorKind::UnknownType(type_expr.span).into());
+                return Err(TypeCheckErrorKind::UnknownType.at(type_expr.span).into());
             };
             if type_def.type_params.is_empty() {
                 if !type_arg_exprs.is_empty() {
@@ -651,8 +658,8 @@ fn resolve_named_type(
                         def.name.clone(),
                         0,
                         type_arg_exprs.len(),
-                        type_expr.span,
                     )
+                    .at(type_expr.span)
                     .into());
                 }
                 let type_name = def.name.as_str();
@@ -697,8 +704,8 @@ fn resolve_named_type(
                     def.name.clone(),
                     type_def.type_params.len(),
                     type_arg_exprs.len(),
-                    type_expr.span,
                 )
+                .at(type_expr.span)
                 .into());
             }
 
@@ -758,7 +765,7 @@ fn resolve_named_type(
                 ),
             }
         }
-        _ => Err(TypeCheckErrorKind::UnknownType(type_expr.span).into()),
+        _ => Err(TypeCheckErrorKind::UnknownType.at(type_expr.span).into()),
     }
 }
 

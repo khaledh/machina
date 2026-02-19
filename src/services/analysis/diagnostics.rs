@@ -6,10 +6,10 @@
 use std::collections::BTreeMap;
 
 use crate::core::diag::Span;
-use crate::core::lexer::LexError;
-use crate::core::parse::ParseError;
-use crate::core::resolve::ResolveError;
-use crate::core::semck::SemCheckError;
+use crate::core::lexer::{LexError, LexErrorKind};
+use crate::core::parse::{ParseError, ParseErrorKind};
+use crate::core::resolve::{ResolveError, ResolveErrorKind};
+use crate::core::semck::{SemCheckError, SemCheckErrorKind};
 use crate::core::typecheck::{TypeCheckError, TypeCheckErrorKind};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
@@ -60,20 +60,20 @@ pub struct WireDiagnostic {
 impl Diagnostic {
     pub fn from_lex_error(error: &LexError) -> Self {
         let mut metadata = DiagnosticMetadata::new();
-        let code = match error {
-            LexError::UnexpectedCharacter(ch, _) => {
+        let code = match error.kind() {
+            LexErrorKind::UnexpectedCharacter(ch) => {
                 metadata.insert(
                     "character".to_string(),
                     DiagnosticValue::String(ch.to_string()),
                 );
                 "MC-LEX-UNEXPECTED-CHARACTER"
             }
-            LexError::InvalidInteger(_, _) => "MC-LEX-INVALID-INTEGER",
-            LexError::InvalidEscapeSequence(seq, _) => {
+            LexErrorKind::InvalidInteger(_) => "MC-LEX-INVALID-INTEGER",
+            LexErrorKind::InvalidEscapeSequence(seq) => {
                 metadata.insert("escape".to_string(), DiagnosticValue::String(seq.clone()));
                 "MC-LEX-INVALID-ESCAPE-SEQUENCE"
             }
-            LexError::UnterminatedString(_) => "MC-LEX-UNTERMINATED-STRING",
+            LexErrorKind::UnterminatedString => "MC-LEX-UNTERMINATED-STRING",
         };
         Self {
             phase: DiagnosticPhase::Parse,
@@ -102,9 +102,9 @@ impl Diagnostic {
 
     pub fn from_parse_error(error: &ParseError) -> Self {
         let mut metadata = DiagnosticMetadata::new();
-        let code = match error {
-            ParseError::ExpectedDecl(_) => "MC-PARSE-EXPECTED-DECL",
-            ParseError::ExpectedToken(expected, found) => {
+        let code = match error.kind() {
+            ParseErrorKind::ExpectedDecl(_) => "MC-PARSE-EXPECTED-DECL",
+            ParseErrorKind::ExpectedToken(expected, found) => {
                 metadata.insert(
                     "expected".to_string(),
                     DiagnosticValue::String(expected.to_string()),
@@ -115,39 +115,39 @@ impl Diagnostic {
                 );
                 "MC-PARSE-EXPECTED-TOKEN"
             }
-            ParseError::ExpectedIdent(_) => "MC-PARSE-EXPECTED-IDENT",
-            ParseError::ExpectedSelf(_) => "MC-PARSE-EXPECTED-SELF",
-            ParseError::ExpectedType(_) => "MC-PARSE-EXPECTED-TYPE",
-            ParseError::ExpectedPrimary(_) => "MC-PARSE-EXPECTED-PRIMARY",
-            ParseError::ExpectedIntLit(_) => "MC-PARSE-EXPECTED-INT-LIT",
-            ParseError::ExpectedStringLit(_) => "MC-PARSE-EXPECTED-STRING-LIT",
-            ParseError::ExpectedPattern(_) => "MC-PARSE-EXPECTED-PATTERN",
-            ParseError::SingleFieldTupleMissingComma(_) => "MC-PARSE-TUPLE-MISSING-COMMA",
-            ParseError::SingleElementSetMissingComma(_) => "MC-PARSE-SET-MISSING-COMMA",
-            ParseError::ExpectedStructField(_) => "MC-PARSE-EXPECTED-STRUCT-FIELD",
-            ParseError::ExpectedMatchArm(_) => "MC-PARSE-EXPECTED-MATCH-ARM",
-            ParseError::ExpectedMatchPattern(_) => "MC-PARSE-EXPECTED-MATCH-PATTERN",
-            ParseError::ExpectedArrayIndexOrRange(_) => "MC-PARSE-EXPECTED-INDEX-OR-RANGE",
-            ParseError::ExpectedRefinement(_) => "MC-PARSE-EXPECTED-REFINEMENT",
-            ParseError::UnknownAttribute(name, _) => {
+            ParseErrorKind::ExpectedIdent(_) => "MC-PARSE-EXPECTED-IDENT",
+            ParseErrorKind::ExpectedSelf(_) => "MC-PARSE-EXPECTED-SELF",
+            ParseErrorKind::ExpectedType(_) => "MC-PARSE-EXPECTED-TYPE",
+            ParseErrorKind::ExpectedPrimary(_) => "MC-PARSE-EXPECTED-PRIMARY",
+            ParseErrorKind::ExpectedIntLit(_) => "MC-PARSE-EXPECTED-INT-LIT",
+            ParseErrorKind::ExpectedStringLit(_) => "MC-PARSE-EXPECTED-STRING-LIT",
+            ParseErrorKind::ExpectedPattern(_) => "MC-PARSE-EXPECTED-PATTERN",
+            ParseErrorKind::SingleFieldTupleMissingComma(_) => "MC-PARSE-TUPLE-MISSING-COMMA",
+            ParseErrorKind::SingleElementSetMissingComma(_) => "MC-PARSE-SET-MISSING-COMMA",
+            ParseErrorKind::ExpectedStructField(_) => "MC-PARSE-EXPECTED-STRUCT-FIELD",
+            ParseErrorKind::ExpectedMatchArm(_) => "MC-PARSE-EXPECTED-MATCH-ARM",
+            ParseErrorKind::ExpectedMatchPattern(_) => "MC-PARSE-EXPECTED-MATCH-PATTERN",
+            ParseErrorKind::ExpectedArrayIndexOrRange(_) => "MC-PARSE-EXPECTED-INDEX-OR-RANGE",
+            ParseErrorKind::ExpectedRefinement(_) => "MC-PARSE-EXPECTED-REFINEMENT",
+            ParseErrorKind::UnknownAttribute(name) => {
                 metadata.insert(
                     "attribute".to_string(),
                     DiagnosticValue::String(name.clone()),
                 );
                 "MC-PARSE-UNKNOWN-ATTRIBUTE"
             }
-            ParseError::AttributeNotAllowed(_) => "MC-PARSE-ATTRIBUTE-NOT-ALLOWED",
-            ParseError::FeatureDisabled { feature, .. } => {
+            ParseErrorKind::AttributeNotAllowed => "MC-PARSE-ATTRIBUTE-NOT-ALLOWED",
+            ParseErrorKind::FeatureDisabled { feature } => {
                 metadata.insert(
                     "feature".to_string(),
                     DiagnosticValue::String((*feature).to_string()),
                 );
                 "MC-PARSE-FEATURE-DISABLED"
             }
-            ParseError::UnmatchedFormatBrace(_) => "MC-PARSE-UNMATCHED-FORMAT-BRACE",
-            ParseError::InvalidFormatExpr(_) => "MC-PARSE-INVALID-FORMAT-EXPR",
-            ParseError::EmptyFormatExpr(_) => "MC-PARSE-EMPTY-FORMAT-EXPR",
-            ParseError::UnterminatedFormatExpr(_) => "MC-PARSE-UNTERMINATED-FORMAT-EXPR",
+            ParseErrorKind::UnmatchedFormatBrace => "MC-PARSE-UNMATCHED-FORMAT-BRACE",
+            ParseErrorKind::InvalidFormatExpr => "MC-PARSE-INVALID-FORMAT-EXPR",
+            ParseErrorKind::EmptyFormatExpr => "MC-PARSE-EMPTY-FORMAT-EXPR",
+            ParseErrorKind::UnterminatedFormatExpr => "MC-PARSE-UNTERMINATED-FORMAT-EXPR",
         };
         Self {
             phase: DiagnosticPhase::Parse,
@@ -161,26 +161,26 @@ impl Diagnostic {
 
     pub fn from_resolve_error(error: &ResolveError) -> Self {
         let mut metadata = DiagnosticMetadata::new();
-        let code = match error {
-            ResolveError::SymbolAlreadyDefined(name, _) => {
+        let code = match error.kind() {
+            ResolveErrorKind::SymbolAlreadyDefined(name) => {
                 metadata.insert("name".to_string(), DiagnosticValue::String(name.clone()));
                 "MC-RESOLVE-SYMBOL-ALREADY-DEFINED"
             }
-            ResolveError::VarUndefined(name, _) => {
+            ResolveErrorKind::VarUndefined(name) => {
                 metadata.insert("name".to_string(), DiagnosticValue::String(name.clone()));
                 "MC-RESOLVE-VAR-UNDEFINED"
             }
-            ResolveError::VarImmutable(name, _) => {
+            ResolveErrorKind::VarImmutable(name) => {
                 metadata.insert("name".to_string(), DiagnosticValue::String(name.clone()));
                 "MC-RESOLVE-VAR-IMMUTABLE"
             }
-            ResolveError::FuncUndefined(name, _) => {
+            ResolveErrorKind::FuncUndefined(name) => {
                 metadata.insert("name".to_string(), DiagnosticValue::String(name.clone()));
                 "MC-RESOLVE-FUNC-UNDEFINED"
             }
-            ResolveError::InvalidAssignmentTarget(_, _) => "MC-RESOLVE-INVALID-ASSIGNMENT-TARGET",
-            ResolveError::InvalidCallee(_, _) => "MC-RESOLVE-INVALID-CALLEE",
-            ResolveError::ExpectedType(name, kind, _) => {
+            ResolveErrorKind::InvalidAssignmentTarget(_) => "MC-RESOLVE-INVALID-ASSIGNMENT-TARGET",
+            ResolveErrorKind::InvalidCallee(_) => "MC-RESOLVE-INVALID-CALLEE",
+            ResolveErrorKind::ExpectedType(name, kind) => {
                 metadata.insert("name".to_string(), DiagnosticValue::String(name.clone()));
                 metadata.insert(
                     "found_kind".to_string(),
@@ -188,7 +188,7 @@ impl Diagnostic {
                 );
                 "MC-RESOLVE-EXPECTED-TYPE"
             }
-            ResolveError::ExpectedTrait(name, kind, _) => {
+            ResolveErrorKind::ExpectedTrait(name, kind) => {
                 metadata.insert("name".to_string(), DiagnosticValue::String(name.clone()));
                 metadata.insert(
                     "found_kind".to_string(),
@@ -196,23 +196,23 @@ impl Diagnostic {
                 );
                 "MC-RESOLVE-EXPECTED-TRAIT"
             }
-            ResolveError::TypeUndefined(name, _) => {
+            ResolveErrorKind::TypeUndefined(name) => {
                 metadata.insert("name".to_string(), DiagnosticValue::String(name.clone()));
                 "MC-RESOLVE-TYPE-UNDEFINED"
             }
-            ResolveError::TraitUndefined(name, _) => {
+            ResolveErrorKind::TraitUndefined(name) => {
                 metadata.insert("name".to_string(), DiagnosticValue::String(name.clone()));
                 "MC-RESOLVE-TRAIT-UNDEFINED"
             }
-            ResolveError::StructUndefined(name, _) => {
+            ResolveErrorKind::StructUndefined(name) => {
                 metadata.insert("name".to_string(), DiagnosticValue::String(name.clone()));
                 "MC-RESOLVE-STRUCT-UNDEFINED"
             }
-            ResolveError::EnumUndefined(name, _) => {
+            ResolveErrorKind::EnumUndefined(name) => {
                 metadata.insert("name".to_string(), DiagnosticValue::String(name.clone()));
                 "MC-RESOLVE-ENUM-UNDEFINED"
             }
-            ResolveError::EnumVariantUndefined(enum_name, variant_name, _) => {
+            ResolveErrorKind::EnumVariantUndefined(enum_name, variant_name) => {
                 metadata.insert(
                     "enum".to_string(),
                     DiagnosticValue::String(enum_name.clone()),
@@ -223,29 +223,29 @@ impl Diagnostic {
                 );
                 "MC-RESOLVE-ENUM-VARIANT-UNDEFINED"
             }
-            ResolveError::MethodDeclOnNonIntrinsicType(name, _) => {
+            ResolveErrorKind::MethodDeclOnNonIntrinsicType(name) => {
                 metadata.insert("name".to_string(), DiagnosticValue::String(name.clone()));
                 "MC-RESOLVE-METHOD-DECL-NON-INTRINSIC-TYPE"
             }
-            ResolveError::MethodDeclMissingIntrinsic(name, _) => {
+            ResolveErrorKind::MethodDeclMissingIntrinsic(name) => {
                 metadata.insert("name".to_string(), DiagnosticValue::String(name.clone()));
                 "MC-RESOLVE-METHOD-DECL-MISSING-INTRINSIC"
             }
-            ResolveError::UnknownAttribute(name, _) => {
+            ResolveErrorKind::UnknownAttribute(name) => {
                 metadata.insert(
                     "attribute".to_string(),
                     DiagnosticValue::String(name.clone()),
                 );
                 "MC-RESOLVE-UNKNOWN-ATTRIBUTE"
             }
-            ResolveError::AttrDuplicate(name, _) => {
+            ResolveErrorKind::AttrDuplicate(name) => {
                 metadata.insert(
                     "attribute".to_string(),
                     DiagnosticValue::String(name.clone()),
                 );
                 "MC-RESOLVE-ATTRIBUTE-DUPLICATE"
             }
-            ResolveError::AttrWrongArgCount(name, expected, found, _) => {
+            ResolveErrorKind::AttrWrongArgCount(name, expected, found) => {
                 metadata.insert(
                     "attribute".to_string(),
                     DiagnosticValue::String(name.clone()),
@@ -257,14 +257,14 @@ impl Diagnostic {
                 metadata.insert("found".to_string(), DiagnosticValue::Number(*found as i64));
                 "MC-RESOLVE-ATTRIBUTE-WRONG-ARG-COUNT"
             }
-            ResolveError::AttrWrongArgType(name, _) => {
+            ResolveErrorKind::AttrWrongArgType(name) => {
                 metadata.insert(
                     "attribute".to_string(),
                     DiagnosticValue::String(name.clone()),
                 );
                 "MC-RESOLVE-ATTRIBUTE-WRONG-ARG-TYPE"
             }
-            ResolveError::AttrNotAllowed(name, where_, _) => {
+            ResolveErrorKind::AttrNotAllowed(name, where_) => {
                 metadata.insert(
                     "attribute".to_string(),
                     DiagnosticValue::String(name.clone()),
@@ -275,12 +275,12 @@ impl Diagnostic {
                 );
                 "MC-RESOLVE-ATTRIBUTE-NOT-ALLOWED"
             }
-            ResolveError::AttrMachinesRequiresMain(_) => "MC-RESOLVE-ATTRIBUTE-MACHINES-MAIN-ONLY",
-            ResolveError::DuplicateRequireAlias(alias, _) => {
+            ResolveErrorKind::AttrMachinesRequiresMain => "MC-RESOLVE-ATTRIBUTE-MACHINES-MAIN-ONLY",
+            ResolveErrorKind::DuplicateRequireAlias(alias) => {
                 metadata.insert("alias".to_string(), DiagnosticValue::String(alias.clone()));
                 "MC-RESOLVE-DUPLICATE-REQUIRE-ALIAS"
             }
-            ResolveError::ModuleQualifiedAccessUnsupported(alias, member, _) => {
+            ResolveErrorKind::ModuleQualifiedAccessUnsupported(alias, member) => {
                 metadata.insert("alias".to_string(), DiagnosticValue::String(alias.clone()));
                 metadata.insert(
                     "member".to_string(),
@@ -288,7 +288,7 @@ impl Diagnostic {
                 );
                 "MC-RESOLVE-MODULE-QUALIFIED-ACCESS-UNSUPPORTED"
             }
-            ResolveError::ModuleMemberUndefined(module, member, _) => {
+            ResolveErrorKind::ModuleMemberUndefined(module, member) => {
                 metadata.insert(
                     "module".to_string(),
                     DiagnosticValue::String(module.clone()),
@@ -299,11 +299,11 @@ impl Diagnostic {
                 );
                 "MC-RESOLVE-MODULE-MEMBER-UNDEFINED"
             }
-            ResolveError::ProtocolRoleUndefined(path, _) => {
+            ResolveErrorKind::ProtocolRoleUndefined(path) => {
                 metadata.insert("path".to_string(), DiagnosticValue::String(path.clone()));
                 "MC-RESOLVE-PROTOCOL-ROLE-UNDEFINED"
             }
-            ResolveError::ExpectedProtocolRole(path, found, _) => {
+            ResolveErrorKind::ExpectedProtocolRole(path, found) => {
                 metadata.insert("path".to_string(), DiagnosticValue::String(path.clone()));
                 metadata.insert(
                     "found_kind".to_string(),
@@ -311,7 +311,7 @@ impl Diagnostic {
                 );
                 "MC-RESOLVE-EXPECTED-PROTOCOL-ROLE"
             }
-            ResolveError::ProtocolRequestContractRoleUndefined(protocol, role, _) => {
+            ResolveErrorKind::ProtocolRequestContractRoleUndefined(protocol, role) => {
                 metadata.insert(
                     "protocol".to_string(),
                     DiagnosticValue::String(protocol.clone()),
@@ -319,12 +319,11 @@ impl Diagnostic {
                 metadata.insert("role".to_string(), DiagnosticValue::String(role.clone()));
                 "MC-RESOLVE-PROTOCOL-REQUEST-CONTRACT-ROLE-UNDEFINED"
             }
-            ResolveError::ProtocolTransitionSourceRoleUndefined(
+            ResolveErrorKind::ProtocolTransitionSourceRoleUndefined(
                 protocol,
                 role,
                 state,
                 source_role,
-                _,
             ) => {
                 metadata.insert(
                     "protocol".to_string(),
@@ -338,12 +337,11 @@ impl Diagnostic {
                 );
                 "MC-RESOLVE-PROTOCOL-TRANSITION-SOURCE-ROLE-UNDEFINED"
             }
-            ResolveError::ProtocolTransitionEffectRoleUndefined(
+            ResolveErrorKind::ProtocolTransitionEffectRoleUndefined(
                 protocol,
                 role,
                 state,
                 effect_role,
-                _,
             ) => {
                 metadata.insert(
                     "protocol".to_string(),
@@ -357,12 +355,11 @@ impl Diagnostic {
                 );
                 "MC-RESOLVE-PROTOCOL-TRANSITION-EFFECT-ROLE-UNDEFINED"
             }
-            ResolveError::ProtocolTransitionNextStateUndefined(
+            ResolveErrorKind::ProtocolTransitionNextStateUndefined(
                 protocol,
                 role,
                 state,
                 next_state,
-                _,
             ) => {
                 metadata.insert(
                     "protocol".to_string(),
@@ -376,13 +373,12 @@ impl Diagnostic {
                 );
                 "MC-RESOLVE-PROTOCOL-TRANSITION-NEXT-STATE-UNDEFINED"
             }
-            ResolveError::ProtocolTransitionTriggerConflict(
+            ResolveErrorKind::ProtocolTransitionTriggerConflict(
                 protocol,
                 role,
                 state,
                 trigger_ty,
                 source_role,
-                _,
             ) => {
                 metadata.insert(
                     "protocol".to_string(),
@@ -400,7 +396,7 @@ impl Diagnostic {
                 );
                 "MC-RESOLVE-PROTOCOL-TRANSITION-TRIGGER-CONFLICT"
             }
-            ResolveError::TypestateRoleImplMalformedPath(typestate, path, _) => {
+            ResolveErrorKind::TypestateRoleImplMalformedPath(typestate, path) => {
                 metadata.insert(
                     "typestate".to_string(),
                     DiagnosticValue::String(typestate.clone()),
@@ -408,7 +404,7 @@ impl Diagnostic {
                 metadata.insert("path".to_string(), DiagnosticValue::String(path.clone()));
                 "MC-TYPESTATE-ROLE-IMPL-MALFORMED-PATH"
             }
-            ResolveError::TypestateRoleImplRoleUndefined(typestate, path, _) => {
+            ResolveErrorKind::TypestateRoleImplRoleUndefined(typestate, path) => {
                 metadata.insert(
                     "typestate".to_string(),
                     DiagnosticValue::String(typestate.clone()),
@@ -416,7 +412,7 @@ impl Diagnostic {
                 metadata.insert("path".to_string(), DiagnosticValue::String(path.clone()));
                 "MC-TYPESTATE-ROLE-IMPL-UNDEFINED"
             }
-            ResolveError::TypestateRoleImplExpectedRole(typestate, path, found, _) => {
+            ResolveErrorKind::TypestateRoleImplExpectedRole(typestate, path, found) => {
                 metadata.insert(
                     "typestate".to_string(),
                     DiagnosticValue::String(typestate.clone()),
@@ -428,7 +424,7 @@ impl Diagnostic {
                 );
                 "MC-TYPESTATE-ROLE-IMPL-EXPECTED-ROLE"
             }
-            ResolveError::TypestateRoleBindingInvalidType(typestate, field, _) => {
+            ResolveErrorKind::TypestateRoleBindingInvalidType(typestate, field) => {
                 metadata.insert(
                     "typestate".to_string(),
                     DiagnosticValue::String(typestate.clone()),
@@ -436,7 +432,7 @@ impl Diagnostic {
                 metadata.insert("field".to_string(), DiagnosticValue::String(field.clone()));
                 "MC-TYPESTATE-ROLE-BINDING-INVALID-TYPE"
             }
-            ResolveError::TypestateRoleBindingRoleUndefined(typestate, field, role, _) => {
+            ResolveErrorKind::TypestateRoleBindingRoleUndefined(typestate, field, role) => {
                 metadata.insert(
                     "typestate".to_string(),
                     DiagnosticValue::String(typestate.clone()),
@@ -445,7 +441,7 @@ impl Diagnostic {
                 metadata.insert("role".to_string(), DiagnosticValue::String(role.clone()));
                 "MC-TYPESTATE-ROLE-BINDING-ROLE-UNDEFINED"
             }
-            ResolveError::TypestateRoleBindingDuplicateRole(typestate, role, _) => {
+            ResolveErrorKind::TypestateRoleBindingDuplicateRole(typestate, role) => {
                 metadata.insert(
                     "typestate".to_string(),
                     DiagnosticValue::String(typestate.clone()),
@@ -453,7 +449,7 @@ impl Diagnostic {
                 metadata.insert("role".to_string(), DiagnosticValue::String(role.clone()));
                 "MC-TYPESTATE-ROLE-BINDING-DUPLICATE-ROLE"
             }
-            ResolveError::TypestateRoleBindingMissing(typestate, role, _) => {
+            ResolveErrorKind::TypestateRoleBindingMissing(typestate, role) => {
                 metadata.insert(
                     "typestate".to_string(),
                     DiagnosticValue::String(typestate.clone()),
@@ -461,14 +457,14 @@ impl Diagnostic {
                 metadata.insert("role".to_string(), DiagnosticValue::String(role.clone()));
                 "MC-TYPESTATE-ROLE-BINDING-MISSING"
             }
-            ResolveError::TypestateMissingState(name, _) => {
+            ResolveErrorKind::TypestateMissingState(name) => {
                 metadata.insert(
                     "typestate".to_string(),
                     DiagnosticValue::String(name.clone()),
                 );
                 "MC-TYPESTATE-MISSING-STATE"
             }
-            ResolveError::TypestateDuplicateState(name, state, _) => {
+            ResolveErrorKind::TypestateDuplicateState(name, state) => {
                 metadata.insert(
                     "typestate".to_string(),
                     DiagnosticValue::String(name.clone()),
@@ -476,14 +472,14 @@ impl Diagnostic {
                 metadata.insert("state".to_string(), DiagnosticValue::String(state.clone()));
                 "MC-TYPESTATE-DUPLICATE-STATE"
             }
-            ResolveError::TypestateDuplicateFieldsBlock(name, _) => {
+            ResolveErrorKind::TypestateDuplicateFieldsBlock(name) => {
                 metadata.insert(
                     "typestate".to_string(),
                     DiagnosticValue::String(name.clone()),
                 );
                 "MC-TYPESTATE-DUPLICATE-FIELDS-BLOCK"
             }
-            ResolveError::TypestateDuplicateStateFieldsBlock(name, state, _) => {
+            ResolveErrorKind::TypestateDuplicateStateFieldsBlock(name, state) => {
                 metadata.insert(
                     "typestate".to_string(),
                     DiagnosticValue::String(name.clone()),
@@ -491,7 +487,7 @@ impl Diagnostic {
                 metadata.insert("state".to_string(), DiagnosticValue::String(state.clone()));
                 "MC-TYPESTATE-DUPLICATE-STATE-FIELDS-BLOCK"
             }
-            ResolveError::TypestateStateFieldShadowsCarriedField(name, state, field, _) => {
+            ResolveErrorKind::TypestateStateFieldShadowsCarriedField(name, state, field) => {
                 metadata.insert(
                     "typestate".to_string(),
                     DiagnosticValue::String(name.clone()),
@@ -500,28 +496,28 @@ impl Diagnostic {
                 metadata.insert("field".to_string(), DiagnosticValue::String(field.clone()));
                 "MC-TYPESTATE-STATE-FIELD-SHADOWS-CARRIED-FIELD"
             }
-            ResolveError::TypestateMissingNew(name, _) => {
+            ResolveErrorKind::TypestateMissingNew(name) => {
                 metadata.insert(
                     "typestate".to_string(),
                     DiagnosticValue::String(name.clone()),
                 );
                 "MC-TYPESTATE-MISSING-NEW"
             }
-            ResolveError::TypestateDuplicateNew(name, _) => {
+            ResolveErrorKind::TypestateDuplicateNew(name) => {
                 metadata.insert(
                     "typestate".to_string(),
                     DiagnosticValue::String(name.clone()),
                 );
                 "MC-TYPESTATE-DUPLICATE-NEW"
             }
-            ResolveError::TypestateInvalidNewReturn(name, _) => {
+            ResolveErrorKind::TypestateInvalidNewReturn(name) => {
                 metadata.insert(
                     "typestate".to_string(),
                     DiagnosticValue::String(name.clone()),
                 );
                 "MC-TYPESTATE-INVALID-NEW-RETURN"
             }
-            ResolveError::TypestateExplicitSelfNotAllowed(name, state, method, _) => {
+            ResolveErrorKind::TypestateExplicitSelfNotAllowed(name, state, method) => {
                 metadata.insert(
                     "typestate".to_string(),
                     DiagnosticValue::String(name.clone()),
@@ -533,7 +529,7 @@ impl Diagnostic {
                 );
                 "MC-TYPESTATE-EXPLICIT-SELF-NOT-ALLOWED"
             }
-            ResolveError::TypestateInvalidTransitionReturn(name, state, method, _) => {
+            ResolveErrorKind::TypestateInvalidTransitionReturn(name, state, method) => {
                 metadata.insert(
                     "typestate".to_string(),
                     DiagnosticValue::String(name.clone()),
@@ -545,14 +541,14 @@ impl Diagnostic {
                 );
                 "MC-TYPESTATE-TRANSITION-RETURN"
             }
-            ResolveError::TypestateInvalidOnHandlerReturn(name, _) => {
+            ResolveErrorKind::TypestateInvalidOnHandlerReturn(name) => {
                 metadata.insert(
                     "typestate".to_string(),
                     DiagnosticValue::String(name.clone()),
                 );
                 "MC-TYPESTATE-ON-HANDLER-RETURN"
             }
-            ResolveError::TypestateInvalidStateOnHandlerReturn(name, state, _) => {
+            ResolveErrorKind::TypestateInvalidStateOnHandlerReturn(name, state) => {
                 metadata.insert(
                     "typestate".to_string(),
                     DiagnosticValue::String(name.clone()),
@@ -560,7 +556,7 @@ impl Diagnostic {
                 metadata.insert("state".to_string(), DiagnosticValue::String(state.clone()));
                 "MC-TYPESTATE-STATE-ON-HANDLER-RETURN"
             }
-            ResolveError::TypestateDuplicateTransition(name, state, method, _) => {
+            ResolveErrorKind::TypestateDuplicateTransition(name, state, method) => {
                 metadata.insert(
                     "typestate".to_string(),
                     DiagnosticValue::String(name.clone()),
@@ -572,7 +568,7 @@ impl Diagnostic {
                 );
                 "MC-TYPESTATE-DUPLICATE-TRANSITION"
             }
-            ResolveError::TypestateUnknownStateAttribute(name, state, attr, _) => {
+            ResolveErrorKind::TypestateUnknownStateAttribute(name, state, attr) => {
                 metadata.insert(
                     "typestate".to_string(),
                     DiagnosticValue::String(name.clone()),
@@ -584,7 +580,7 @@ impl Diagnostic {
                 );
                 "MC-TYPESTATE-UNKNOWN-STATE-ATTRIBUTE"
             }
-            ResolveError::TypestateFinalStateHasTransition(name, state, _) => {
+            ResolveErrorKind::TypestateFinalStateHasTransition(name, state) => {
                 metadata.insert(
                     "typestate".to_string(),
                     DiagnosticValue::String(name.clone()),
@@ -592,7 +588,7 @@ impl Diagnostic {
                 metadata.insert("state".to_string(), DiagnosticValue::String(state.clone()));
                 "MC-TYPESTATE-FINAL-STATE-HAS-TRANSITION"
             }
-            ResolveError::TypestateFinalStateHasHandler(name, state, _) => {
+            ResolveErrorKind::TypestateFinalStateHasHandler(name, state) => {
                 metadata.insert(
                     "typestate".to_string(),
                     DiagnosticValue::String(name.clone()),
@@ -600,11 +596,11 @@ impl Diagnostic {
                 metadata.insert("state".to_string(), DiagnosticValue::String(state.clone()));
                 "MC-TYPESTATE-FINAL-STATE-HAS-HANDLER"
             }
-            ResolveError::TypestateStateLiteralOutsideTypestate(state, _) => {
+            ResolveErrorKind::TypestateStateLiteralOutsideTypestate(state) => {
                 metadata.insert("state".to_string(), DiagnosticValue::String(state.clone()));
                 "MC-TYPESTATE-STATE-LITERAL-OUTSIDE-TYPESTATE"
             }
-            ResolveError::TypestateSpawnRequiresMachinesOptIn(_) => {
+            ResolveErrorKind::TypestateSpawnRequiresMachinesOptIn => {
                 "MC-TYPESTATE-SPAWN-REQUIRES-MACHINES-OPT-IN"
             }
         };
@@ -689,7 +685,7 @@ pub fn collect_partial_diagnostics(
 
 fn populate_typecheck_metadata(kind: &TypeCheckErrorKind, metadata: &mut DiagnosticMetadata) {
     match kind {
-        TypeCheckErrorKind::ArgCountMismatch(name, expected, found, _) => {
+        TypeCheckErrorKind::ArgCountMismatch(name, expected, found, ..) => {
             metadata.insert(
                 "callable".to_string(),
                 DiagnosticValue::String(name.clone()),
@@ -700,7 +696,7 @@ fn populate_typecheck_metadata(kind: &TypeCheckErrorKind, metadata: &mut Diagnos
             );
             metadata.insert("found".to_string(), DiagnosticValue::Number(*found as i64));
         }
-        TypeCheckErrorKind::ArgTypeMismatch(index, expected, found, _) => {
+        TypeCheckErrorKind::ArgTypeMismatch(index, expected, found, ..) => {
             metadata.insert("index".to_string(), DiagnosticValue::Number(*index as i64));
             metadata.insert(
                 "expected".to_string(),
@@ -711,7 +707,7 @@ fn populate_typecheck_metadata(kind: &TypeCheckErrorKind, metadata: &mut Diagnos
                 DiagnosticValue::String(found.to_string()),
             );
         }
-        TypeCheckErrorKind::DeclTypeMismatch(expected, found, _) => {
+        TypeCheckErrorKind::DeclTypeMismatch(expected, found, ..) => {
             metadata.insert(
                 "expected".to_string(),
                 DiagnosticValue::String(expected.to_string()),
@@ -721,7 +717,7 @@ fn populate_typecheck_metadata(kind: &TypeCheckErrorKind, metadata: &mut Diagnos
                 DiagnosticValue::String(found.to_string()),
             );
         }
-        TypeCheckErrorKind::TryErrorNotInReturn(missing, ret, _) => {
+        TypeCheckErrorKind::TryErrorNotInReturn(missing, ret, ..) => {
             metadata.insert(
                 "missing".to_string(),
                 DiagnosticValue::StringList(missing.clone()),
@@ -732,7 +728,7 @@ fn populate_typecheck_metadata(kind: &TypeCheckErrorKind, metadata: &mut Diagnos
             );
             metadata.insert("quick_fixable".to_string(), DiagnosticValue::Bool(true));
         }
-        TypeCheckErrorKind::ReturnNotInErrorUnion(expected, found, _) => {
+        TypeCheckErrorKind::ReturnNotInErrorUnion(expected, found, ..) => {
             metadata.insert(
                 "expected".to_string(),
                 DiagnosticValue::StringList(expected.clone()),
@@ -742,14 +738,14 @@ fn populate_typecheck_metadata(kind: &TypeCheckErrorKind, metadata: &mut Diagnos
                 DiagnosticValue::String(found.to_string()),
             );
         }
-        TypeCheckErrorKind::TraitBoundNotSatisfied(trait_name, ty, _) => {
+        TypeCheckErrorKind::TraitBoundNotSatisfied(trait_name, ty, ..) => {
             metadata.insert(
                 "trait".to_string(),
                 DiagnosticValue::String(trait_name.clone()),
             );
             metadata.insert("type".to_string(), DiagnosticValue::String(ty.to_string()));
         }
-        TypeCheckErrorKind::ProtocolStateHandlerMissing(typestate, role, state, payload, _) => {
+        TypeCheckErrorKind::ProtocolStateHandlerMissing(typestate, role, state, payload, ..) => {
             metadata.insert(
                 "typestate".to_string(),
                 DiagnosticValue::String(typestate.clone()),
@@ -766,7 +762,7 @@ fn populate_typecheck_metadata(kind: &TypeCheckErrorKind, metadata: &mut Diagnos
             role,
             state,
             payload,
-            _,
+            ..,
         ) => {
             metadata.insert(
                 "typestate".to_string(),
@@ -787,7 +783,7 @@ fn populate_typecheck_metadata(kind: &TypeCheckErrorKind, metadata: &mut Diagnos
             expected_role,
             field,
             bound_role,
-            _,
+            ..,
         ) => {
             metadata.insert(
                 "typestate".to_string(),
@@ -815,7 +811,7 @@ fn populate_typecheck_metadata(kind: &TypeCheckErrorKind, metadata: &mut Diagnos
             state,
             payload,
             expected_role,
-            _,
+            ..,
         ) => {
             metadata.insert(
                 "typestate".to_string(),
@@ -837,7 +833,7 @@ fn populate_typecheck_metadata(kind: &TypeCheckErrorKind, metadata: &mut Diagnos
             role,
             request,
             to_role,
-            _,
+            ..,
         ) => {
             metadata.insert(
                 "typestate".to_string(),
@@ -858,7 +854,7 @@ fn populate_typecheck_metadata(kind: &TypeCheckErrorKind, metadata: &mut Diagnos
             role,
             request,
             to_role,
-            _,
+            ..,
         ) => {
             metadata.insert(
                 "typestate".to_string(),
@@ -880,7 +876,7 @@ fn populate_typecheck_metadata(kind: &TypeCheckErrorKind, metadata: &mut Diagnos
             request,
             to_role,
             response,
-            _,
+            ..,
         ) => {
             metadata.insert(
                 "typestate".to_string(),
@@ -905,92 +901,92 @@ fn populate_typecheck_metadata(kind: &TypeCheckErrorKind, metadata: &mut Diagnos
 }
 
 fn semcheck_code(error: &SemCheckError) -> &'static str {
-    match error {
-        SemCheckError::ValueOutOfRange(..) => "MC-SEMCK-ValueOutOfRange",
-        SemCheckError::ValueNotNonZero(..) => "MC-SEMCK-ValueNotNonZero",
-        SemCheckError::InvalidRangeBounds(..) => "MC-SEMCK-InvalidRangeBounds",
-        SemCheckError::DivisionByZero(..) => "MC-SEMCK-DivisionByZero",
-        SemCheckError::InvalidCallee(..) => "MC-SEMCK-InvalidCallee",
-        SemCheckError::UnknownStructType(..) => "MC-SEMCK-UnknownStructType",
-        SemCheckError::DuplicateStructField(..) => "MC-SEMCK-DuplicateStructField",
-        SemCheckError::UnknownStructField(..) => "MC-SEMCK-UnknownStructField",
-        SemCheckError::StructFieldsMissing(..) => "MC-SEMCK-StructFieldsMissing",
-        SemCheckError::UnknownEnumType(..) => "MC-SEMCK-UnknownEnumType",
-        SemCheckError::UnknownEnumVariant(..) => "MC-SEMCK-UnknownEnumVariant",
-        SemCheckError::EnumVariantPayloadArityMismatch(..) => {
+    match error.kind() {
+        SemCheckErrorKind::ValueOutOfRange(..) => "MC-SEMCK-ValueOutOfRange",
+        SemCheckErrorKind::ValueNotNonZero(..) => "MC-SEMCK-ValueNotNonZero",
+        SemCheckErrorKind::InvalidRangeBounds(..) => "MC-SEMCK-InvalidRangeBounds",
+        SemCheckErrorKind::DivisionByZero => "MC-SEMCK-DivisionByZero",
+        SemCheckErrorKind::InvalidCallee(..) => "MC-SEMCK-InvalidCallee",
+        SemCheckErrorKind::UnknownStructType(..) => "MC-SEMCK-UnknownStructType",
+        SemCheckErrorKind::DuplicateStructField(..) => "MC-SEMCK-DuplicateStructField",
+        SemCheckErrorKind::UnknownStructField(..) => "MC-SEMCK-UnknownStructField",
+        SemCheckErrorKind::StructFieldsMissing(..) => "MC-SEMCK-StructFieldsMissing",
+        SemCheckErrorKind::UnknownEnumType(..) => "MC-SEMCK-UnknownEnumType",
+        SemCheckErrorKind::UnknownEnumVariant(..) => "MC-SEMCK-UnknownEnumVariant",
+        SemCheckErrorKind::EnumVariantPayloadArityMismatch(..) => {
             "MC-SEMCK-EnumVariantPayloadArityMismatch"
         }
-        SemCheckError::MatchTargetNotEnum(..) => "MC-SEMCK-MatchTargetNotEnum",
-        SemCheckError::MatchPatternEnumMismatch(..) => "MC-SEMCK-MatchPatternEnumMismatch",
-        SemCheckError::NonExhaustiveMatch(..) => "MC-SEMCK-NonExhaustiveMatch",
-        SemCheckError::NonExhaustiveUnionMatch(..) => "MC-SEMCK-NonExhaustiveUnionMatch",
-        SemCheckError::DuplicateMatchVariant(..) => "MC-SEMCK-DuplicateMatchVariant",
-        SemCheckError::InvalidMatchPattern(..) => "MC-SEMCK-InvalidMatchPattern",
-        SemCheckError::WildcardArmNotLast(..) => "MC-SEMCK-WildcardArmNotLast",
-        SemCheckError::TupleMatchRequiresSingleArm(..) => "MC-SEMCK-TupleMatchRequiresSingleArm",
-        SemCheckError::TuplePatternArityMismatch(..) => "MC-SEMCK-TuplePatternArityMismatch",
-        SemCheckError::InOutParamNotAggregate(..) => "MC-SEMCK-InOutParamNotAggregate",
-        SemCheckError::InOutArgNotLvalue(..) => "MC-SEMCK-InOutArgNotLvalue",
-        SemCheckError::InOutArgNotMutable(..) => "MC-SEMCK-InOutArgNotMutable",
-        SemCheckError::InOutArgMissingMode(..) => "MC-SEMCK-InOutArgMissingMode",
-        SemCheckError::InOutArgUnexpected(..) => "MC-SEMCK-InOutArgUnexpected",
-        SemCheckError::OutParamNotAggregate(..) => "MC-SEMCK-OutParamNotAggregate",
-        SemCheckError::OutArgNotLvalue(..) => "MC-SEMCK-OutArgNotLvalue",
-        SemCheckError::OutArgNotMutable(..) => "MC-SEMCK-OutArgNotMutable",
-        SemCheckError::OutArgMissingMode(..) => "MC-SEMCK-OutArgMissingMode",
-        SemCheckError::OutArgUnexpected(..) => "MC-SEMCK-OutArgUnexpected",
-        SemCheckError::OutSelfNotAllowed(..) => "MC-SEMCK-OutSelfNotAllowed",
-        SemCheckError::OutParamNotInitialized(..) => "MC-SEMCK-OutParamNotInitialized",
-        SemCheckError::SinkArgMissingMove(..) => "MC-SEMCK-SinkArgMissingMove",
-        SemCheckError::MoveArgUnexpected(..) => "MC-SEMCK-MoveArgUnexpected",
-        SemCheckError::PartialInitNotAllowed(..) => "MC-SEMCK-PartialInitNotAllowed",
-        SemCheckError::OverlappingLvalueArgs(..) => "MC-SEMCK-OverlappingLvalueArgs",
-        SemCheckError::SinkParamNotOwned(..) => "MC-SEMCK-SinkParamNotOwned",
-        SemCheckError::UseBeforeInit(..) => "MC-SEMCK-UseBeforeInit",
-        SemCheckError::UseAfterMove(..) => "MC-SEMCK-UseAfterMove",
-        SemCheckError::InvalidMoveTarget(..) => "MC-SEMCK-InvalidMoveTarget",
-        SemCheckError::MoveFromParam(..) => "MC-SEMCK-MoveFromParam",
-        SemCheckError::OwnedMoveRequired(..) => "MC-SEMCK-OwnedMoveRequired",
-        SemCheckError::SliceEscapeReturn(..) => "MC-SEMCK-SliceEscapeReturn",
-        SemCheckError::SliceEscapeStore(..) => "MC-SEMCK-SliceEscapeStore",
-        SemCheckError::SliceBorrowConflict(..) => "MC-SEMCK-SliceBorrowConflict",
-        SemCheckError::SliceTargetNotLvalue(..) => "MC-SEMCK-SliceTargetNotLvalue",
-        SemCheckError::ClosureCaptureMove(..) => "MC-SEMCK-ClosureCaptureMove",
-        SemCheckError::ClosureCaptureUnused(..) => "MC-SEMCK-ClosureCaptureUnused",
-        SemCheckError::ClosureBorrowConflict(..) => "MC-SEMCK-ClosureBorrowConflict",
-        SemCheckError::ClosureEscapeReturn(..) => "MC-SEMCK-ClosureEscapeReturn",
-        SemCheckError::ClosureEscapeStore(..) => "MC-SEMCK-ClosureEscapeStore",
-        SemCheckError::ClosureEscapeArg(..) => "MC-SEMCK-ClosureEscapeArg",
-        SemCheckError::ProtocolProgressionMissingTriggerTransition(..) => {
+        SemCheckErrorKind::MatchTargetNotEnum(..) => "MC-SEMCK-MatchTargetNotEnum",
+        SemCheckErrorKind::MatchPatternEnumMismatch(..) => "MC-SEMCK-MatchPatternEnumMismatch",
+        SemCheckErrorKind::NonExhaustiveMatch => "MC-SEMCK-NonExhaustiveMatch",
+        SemCheckErrorKind::NonExhaustiveUnionMatch(..) => "MC-SEMCK-NonExhaustiveUnionMatch",
+        SemCheckErrorKind::DuplicateMatchVariant(..) => "MC-SEMCK-DuplicateMatchVariant",
+        SemCheckErrorKind::InvalidMatchPattern(..) => "MC-SEMCK-InvalidMatchPattern",
+        SemCheckErrorKind::WildcardArmNotLast => "MC-SEMCK-WildcardArmNotLast",
+        SemCheckErrorKind::TupleMatchRequiresSingleArm => "MC-SEMCK-TupleMatchRequiresSingleArm",
+        SemCheckErrorKind::TuplePatternArityMismatch(..) => "MC-SEMCK-TuplePatternArityMismatch",
+        SemCheckErrorKind::InOutParamNotAggregate(..) => "MC-SEMCK-InOutParamNotAggregate",
+        SemCheckErrorKind::InOutArgNotLvalue => "MC-SEMCK-InOutArgNotLvalue",
+        SemCheckErrorKind::InOutArgNotMutable => "MC-SEMCK-InOutArgNotMutable",
+        SemCheckErrorKind::InOutArgMissingMode => "MC-SEMCK-InOutArgMissingMode",
+        SemCheckErrorKind::InOutArgUnexpected => "MC-SEMCK-InOutArgUnexpected",
+        SemCheckErrorKind::OutParamNotAggregate(..) => "MC-SEMCK-OutParamNotAggregate",
+        SemCheckErrorKind::OutArgNotLvalue => "MC-SEMCK-OutArgNotLvalue",
+        SemCheckErrorKind::OutArgNotMutable => "MC-SEMCK-OutArgNotMutable",
+        SemCheckErrorKind::OutArgMissingMode => "MC-SEMCK-OutArgMissingMode",
+        SemCheckErrorKind::OutArgUnexpected => "MC-SEMCK-OutArgUnexpected",
+        SemCheckErrorKind::OutSelfNotAllowed => "MC-SEMCK-OutSelfNotAllowed",
+        SemCheckErrorKind::OutParamNotInitialized(..) => "MC-SEMCK-OutParamNotInitialized",
+        SemCheckErrorKind::SinkArgMissingMove => "MC-SEMCK-SinkArgMissingMove",
+        SemCheckErrorKind::MoveArgUnexpected => "MC-SEMCK-MoveArgUnexpected",
+        SemCheckErrorKind::PartialInitNotAllowed(..) => "MC-SEMCK-PartialInitNotAllowed",
+        SemCheckErrorKind::OverlappingLvalueArgs => "MC-SEMCK-OverlappingLvalueArgs",
+        SemCheckErrorKind::SinkParamNotOwned(..) => "MC-SEMCK-SinkParamNotOwned",
+        SemCheckErrorKind::UseBeforeInit(..) => "MC-SEMCK-UseBeforeInit",
+        SemCheckErrorKind::UseAfterMove(..) => "MC-SEMCK-UseAfterMove",
+        SemCheckErrorKind::InvalidMoveTarget => "MC-SEMCK-InvalidMoveTarget",
+        SemCheckErrorKind::MoveFromParam => "MC-SEMCK-MoveFromParam",
+        SemCheckErrorKind::OwnedMoveRequired => "MC-SEMCK-OwnedMoveRequired",
+        SemCheckErrorKind::SliceEscapeReturn => "MC-SEMCK-SliceEscapeReturn",
+        SemCheckErrorKind::SliceEscapeStore => "MC-SEMCK-SliceEscapeStore",
+        SemCheckErrorKind::SliceBorrowConflict => "MC-SEMCK-SliceBorrowConflict",
+        SemCheckErrorKind::SliceTargetNotLvalue => "MC-SEMCK-SliceTargetNotLvalue",
+        SemCheckErrorKind::ClosureCaptureMove(..) => "MC-SEMCK-ClosureCaptureMove",
+        SemCheckErrorKind::ClosureCaptureUnused(..) => "MC-SEMCK-ClosureCaptureUnused",
+        SemCheckErrorKind::ClosureBorrowConflict(..) => "MC-SEMCK-ClosureBorrowConflict",
+        SemCheckErrorKind::ClosureEscapeReturn => "MC-SEMCK-ClosureEscapeReturn",
+        SemCheckErrorKind::ClosureEscapeStore => "MC-SEMCK-ClosureEscapeStore",
+        SemCheckErrorKind::ClosureEscapeArg => "MC-SEMCK-ClosureEscapeArg",
+        SemCheckErrorKind::ProtocolProgressionMissingTriggerTransition(..) => {
             "MC-SEMCK-ProtocolProgressionMissingTriggerTransition"
         }
-        SemCheckError::ProtocolProgressionImpossibleEmit(..) => {
+        SemCheckErrorKind::ProtocolProgressionImpossibleEmit(..) => {
             "MC-SEMCK-ProtocolProgressionImpossibleEmit"
         }
-        SemCheckError::ProtocolProgressionImpossibleReturnState(..) => {
+        SemCheckErrorKind::ProtocolProgressionImpossibleReturnState(..) => {
             "MC-SEMCK-ProtocolProgressionImpossibleReturnState"
         }
     }
 }
 
 fn populate_semcheck_metadata(error: &SemCheckError, metadata: &mut DiagnosticMetadata) {
-    match error {
-        SemCheckError::UnknownStructType(name, _)
-        | SemCheckError::DuplicateStructField(name, _)
-        | SemCheckError::UnknownStructField(name, _)
-        | SemCheckError::StructFieldsMissing(name, _)
-        | SemCheckError::UnknownEnumType(name, _)
-        | SemCheckError::DuplicateMatchVariant(name, _)
-        | SemCheckError::OutParamNotInitialized(name, _)
-        | SemCheckError::UseBeforeInit(name, _)
-        | SemCheckError::UseAfterMove(name, _)
-        | SemCheckError::ClosureCaptureMove(name, _)
-        | SemCheckError::ClosureCaptureUnused(name, _)
-        | SemCheckError::ClosureBorrowConflict(name, _) => {
+    match error.kind() {
+        SemCheckErrorKind::UnknownStructType(name)
+        | SemCheckErrorKind::DuplicateStructField(name)
+        | SemCheckErrorKind::UnknownStructField(name)
+        | SemCheckErrorKind::StructFieldsMissing(name)
+        | SemCheckErrorKind::UnknownEnumType(name)
+        | SemCheckErrorKind::DuplicateMatchVariant(name)
+        | SemCheckErrorKind::OutParamNotInitialized(name)
+        | SemCheckErrorKind::UseBeforeInit(name)
+        | SemCheckErrorKind::UseAfterMove(name)
+        | SemCheckErrorKind::ClosureCaptureMove(name)
+        | SemCheckErrorKind::ClosureCaptureUnused(name)
+        | SemCheckErrorKind::ClosureBorrowConflict(name) => {
             metadata.insert("name".to_string(), DiagnosticValue::String(name.clone()));
         }
-        SemCheckError::UnknownEnumVariant(enum_name, variant_name, _)
-        | SemCheckError::MatchPatternEnumMismatch(enum_name, variant_name, _) => {
+        SemCheckErrorKind::UnknownEnumVariant(enum_name, variant_name)
+        | SemCheckErrorKind::MatchPatternEnumMismatch(enum_name, variant_name) => {
             metadata.insert(
                 "enum".to_string(),
                 DiagnosticValue::String(enum_name.clone()),
@@ -1000,7 +996,7 @@ fn populate_semcheck_metadata(error: &SemCheckError, metadata: &mut DiagnosticMe
                 DiagnosticValue::String(variant_name.clone()),
             );
         }
-        SemCheckError::EnumVariantPayloadArityMismatch(variant, expected, found, _) => {
+        SemCheckErrorKind::EnumVariantPayloadArityMismatch(variant, expected, found) => {
             metadata.insert(
                 "variant".to_string(),
                 DiagnosticValue::String(variant.clone()),
@@ -1011,19 +1007,18 @@ fn populate_semcheck_metadata(error: &SemCheckError, metadata: &mut DiagnosticMe
             );
             metadata.insert("found".to_string(), DiagnosticValue::Number(*found as i64));
         }
-        SemCheckError::NonExhaustiveUnionMatch(missing, _) => {
+        SemCheckErrorKind::NonExhaustiveUnionMatch(missing) => {
             metadata.insert(
                 "missing".to_string(),
                 DiagnosticValue::StringList(missing.clone()),
             );
         }
-        SemCheckError::ProtocolProgressionMissingTriggerTransition(
+        SemCheckErrorKind::ProtocolProgressionMissingTriggerTransition(
             typestate,
             protocol,
             role,
             state,
             selector,
-            _,
         ) => {
             metadata.insert(
                 "typestate".to_string(),
@@ -1040,7 +1035,7 @@ fn populate_semcheck_metadata(error: &SemCheckError, metadata: &mut DiagnosticMe
                 DiagnosticValue::String(selector.to_string()),
             );
         }
-        SemCheckError::ProtocolProgressionImpossibleEmit(
+        SemCheckErrorKind::ProtocolProgressionImpossibleEmit(
             typestate,
             protocol,
             role,
@@ -1048,7 +1043,6 @@ fn populate_semcheck_metadata(error: &SemCheckError, metadata: &mut DiagnosticMe
             selector,
             payload,
             to_role,
-            _,
         ) => {
             metadata.insert(
                 "typestate".to_string(),
@@ -1073,14 +1067,13 @@ fn populate_semcheck_metadata(error: &SemCheckError, metadata: &mut DiagnosticMe
                 DiagnosticValue::String(to_role.clone()),
             );
         }
-        SemCheckError::ProtocolProgressionImpossibleReturnState(
+        SemCheckErrorKind::ProtocolProgressionImpossibleReturnState(
             typestate,
             protocol,
             role,
             state,
             selector,
             to_state,
-            _,
         ) => {
             metadata.insert(
                 "typestate".to_string(),
@@ -1101,11 +1094,11 @@ fn populate_semcheck_metadata(error: &SemCheckError, metadata: &mut DiagnosticMe
                 DiagnosticValue::String(to_state.clone()),
             );
         }
-        SemCheckError::MatchTargetNotEnum(ty, _)
-        | SemCheckError::InvalidMatchPattern(ty, _)
-        | SemCheckError::InOutParamNotAggregate(ty, _)
-        | SemCheckError::OutParamNotAggregate(ty, _)
-        | SemCheckError::SinkParamNotOwned(ty, _) => {
+        SemCheckErrorKind::MatchTargetNotEnum(ty)
+        | SemCheckErrorKind::InvalidMatchPattern(ty)
+        | SemCheckErrorKind::InOutParamNotAggregate(ty)
+        | SemCheckErrorKind::OutParamNotAggregate(ty)
+        | SemCheckErrorKind::SinkParamNotOwned(ty) => {
             metadata.insert("type".to_string(), DiagnosticValue::String(ty.to_string()));
         }
         _ => {}
@@ -1244,7 +1237,7 @@ macro_rules! with_typecheck_variants {
 macro_rules! typecheck_code_match {
     ($kind:expr; $($variant:ident),+ $(,)?) => {
         match $kind {
-            $(TypeCheckErrorKind::$variant(..) => concat!("MC-TYPECHECK-", stringify!($variant)),)+
+            $(TypeCheckErrorKind::$variant { .. } => concat!("MC-TYPECHECK-", stringify!($variant)),)+
         }
     };
 }

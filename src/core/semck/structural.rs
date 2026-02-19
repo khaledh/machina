@@ -2,8 +2,8 @@ use crate::core::context::NormalizedContext;
 use crate::core::diag::Span;
 use crate::core::resolve::DefId;
 use crate::core::resolve::DefKind;
-use crate::core::semck::SemCheckError;
 use crate::core::semck::match_check;
+use crate::core::semck::{SemCheckError, SemCheckErrorKind};
 use crate::core::tree::normalized::{
     BindPattern, BindPatternKind, CallArg, CallArgMode, Expr, ExprKind, FunctionSig, MatchArm,
     MethodSig, Param, ParamMode, StmtExpr, StmtExprKind, StructLitField, StructUpdateField,
@@ -83,24 +83,21 @@ impl<'a> StructuralChecker<'a> {
         // Enforce struct field existence, duplicates, and missing fields.
         let Some(struct_fields) = self.struct_fields.get(name) else {
             self.errors
-                .push(SemCheckError::UnknownStructType(name.to_string(), span));
+                .push(SemCheckErrorKind::UnknownStructType(name.to_string()).at(span));
             return;
         };
 
         let mut seen = HashSet::new();
         for field in fields {
             if !struct_fields.iter().any(|f| f == &field.name) {
-                self.errors.push(SemCheckError::UnknownStructField(
-                    field.name.clone(),
-                    field.span,
-                ));
+                self.errors
+                    .push(SemCheckErrorKind::UnknownStructField(field.name.clone()).at(field.span));
                 continue;
             }
             if !seen.insert(field.name.clone()) {
-                self.errors.push(SemCheckError::DuplicateStructField(
-                    field.name.clone(),
-                    field.span,
-                ));
+                self.errors.push(
+                    SemCheckErrorKind::DuplicateStructField(field.name.clone()).at(field.span),
+                );
             }
         }
 
@@ -111,7 +108,7 @@ impl<'a> StructuralChecker<'a> {
             .collect::<Vec<_>>();
         if !missing.is_empty() {
             self.errors
-                .push(SemCheckError::StructFieldsMissing(missing.join(", "), span));
+                .push(SemCheckErrorKind::StructFieldsMissing(missing.join(", ")).at(span));
         }
     }
 
@@ -129,15 +126,12 @@ impl<'a> StructuralChecker<'a> {
         let mut seen = HashSet::new();
         for field in fields {
             if !struct_fields.iter().any(|f| f.name == field.name) {
-                self.errors.push(SemCheckError::UnknownStructField(
-                    field.name.clone(),
-                    field.span,
-                ));
+                self.errors
+                    .push(SemCheckErrorKind::UnknownStructField(field.name.clone()).at(field.span));
             } else if !seen.insert(field.name.clone()) {
-                self.errors.push(SemCheckError::DuplicateStructField(
-                    field.name.clone(),
-                    field.span,
-                ));
+                self.errors.push(
+                    SemCheckErrorKind::DuplicateStructField(field.name.clone()).at(field.span),
+                );
             }
         }
     }
@@ -154,22 +148,22 @@ impl<'a> StructuralChecker<'a> {
                 // Enforce struct pattern fields and recurse into subpatterns.
                 let Some(struct_fields) = self.struct_fields.get(name).cloned() else {
                     self.errors
-                        .push(SemCheckError::UnknownStructType(name.clone(), pattern.span));
+                        .push(SemCheckErrorKind::UnknownStructType(name.clone()).at(pattern.span));
                     return;
                 };
 
                 let mut seen = HashSet::new();
                 for field in fields {
                     if !struct_fields.iter().any(|f| f == &field.name) {
-                        self.errors.push(SemCheckError::UnknownStructField(
-                            field.name.clone(),
-                            field.span,
-                        ));
+                        self.errors.push(
+                            SemCheckErrorKind::UnknownStructField(field.name.clone())
+                                .at(field.span),
+                        );
                     } else if !seen.insert(field.name.clone()) {
-                        self.errors.push(SemCheckError::DuplicateStructField(
-                            field.name.clone(),
-                            field.span,
-                        ));
+                        self.errors.push(
+                            SemCheckErrorKind::DuplicateStructField(field.name.clone())
+                                .at(field.span),
+                        );
                     }
 
                     self.check_pattern(&field.pattern);
@@ -181,10 +175,9 @@ impl<'a> StructuralChecker<'a> {
                     .cloned()
                     .collect::<Vec<_>>();
                 if !missing.is_empty() {
-                    self.errors.push(SemCheckError::StructFieldsMissing(
-                        missing.join(", "),
-                        pattern.span,
-                    ));
+                    self.errors.push(
+                        SemCheckErrorKind::StructFieldsMissing(missing.join(", ")).at(pattern.span),
+                    );
                 }
             }
         }
@@ -195,20 +188,18 @@ impl<'a> StructuralChecker<'a> {
             if let Ok(ty) = resolve_type_expr(&self.ctx.def_table, &self.ctx.module, &param.typ) {
                 if param.mode == ParamMode::InOut && !(ty.is_compound() || ty.is_heap()) {
                     // Only aggregate or heap types can be inout parameters.
-                    self.errors.push(SemCheckError::InOutParamNotAggregate(
-                        ty.clone(),
-                        param.span,
-                    ));
+                    self.errors
+                        .push(SemCheckErrorKind::InOutParamNotAggregate(ty.clone()).at(param.span));
                 }
                 if param.mode == ParamMode::Out && !ty.is_compound() {
                     // Only aggregate types can be out parameters (for now).
                     self.errors
-                        .push(SemCheckError::OutParamNotAggregate(ty.clone(), param.span));
+                        .push(SemCheckErrorKind::OutParamNotAggregate(ty.clone()).at(param.span));
                 }
                 if param.mode == ParamMode::Sink && !ty.needs_drop() {
                     // Sink params are meant only for heap types.
                     self.errors
-                        .push(SemCheckError::SinkParamNotOwned(ty, param.span));
+                        .push(SemCheckErrorKind::SinkParamNotOwned(ty).at(param.span));
                 }
             }
         }
@@ -224,27 +215,30 @@ impl<'a> StructuralChecker<'a> {
         // Verify enum existence, variant existence, and payload arity.
         let Some(variants) = self.enum_variants.get(enum_name) else {
             self.errors
-                .push(SemCheckError::UnknownEnumType(enum_name.to_string(), span));
+                .push(SemCheckErrorKind::UnknownEnumType(enum_name.to_string()).at(span));
             return;
         };
 
         let Some(variant) = variants.iter().find(|v| v.name == variant_name) else {
-            self.errors.push(SemCheckError::UnknownEnumVariant(
-                enum_name.to_string(),
-                variant_name.to_string(),
-                span,
-            ));
+            self.errors.push(
+                SemCheckErrorKind::UnknownEnumVariant(
+                    enum_name.to_string(),
+                    variant_name.to_string(),
+                )
+                .at(span),
+            );
             return;
         };
 
         if payload_len != variant.payload_len {
-            self.errors
-                .push(SemCheckError::EnumVariantPayloadArityMismatch(
+            self.errors.push(
+                SemCheckErrorKind::EnumVariantPayloadArityMismatch(
                     variant_name.to_string(),
                     variant.payload_len,
                     payload_len,
-                    span,
-                ));
+                )
+                .at(span),
+            );
         }
     }
 
@@ -297,67 +291,74 @@ impl<'a> StructuralChecker<'a> {
                     CallArgMode::Default => {}
                     CallArgMode::InOut => {
                         self.errors
-                            .push(SemCheckError::InOutArgUnexpected(arg.span));
+                            .push(SemCheckErrorKind::InOutArgUnexpected.at(arg.span));
                     }
                     CallArgMode::Out => {
-                        self.errors.push(SemCheckError::OutArgUnexpected(arg.span));
+                        self.errors
+                            .push(SemCheckErrorKind::OutArgUnexpected.at(arg.span));
                     }
                     CallArgMode::Move => {
-                        self.errors.push(SemCheckError::MoveArgUnexpected(arg.span));
+                        self.errors
+                            .push(SemCheckErrorKind::MoveArgUnexpected.at(arg.span));
                     }
                 },
                 ParamMode::InOut => match arg_mode {
                     CallArgMode::InOut => {
                         let err = match self.is_mutable_lvalue(arg_expr) {
                             Some(true) => continue,
-                            Some(false) => SemCheckError::InOutArgNotMutable(arg.span),
-                            None => SemCheckError::InOutArgNotLvalue(arg.span),
+                            Some(false) => SemCheckErrorKind::InOutArgNotMutable.at(arg.span),
+                            None => SemCheckErrorKind::InOutArgNotLvalue.at(arg.span),
                         };
                         self.errors.push(err);
                     }
                     CallArgMode::Default => {
                         self.errors
-                            .push(SemCheckError::InOutArgMissingMode(arg.span));
+                            .push(SemCheckErrorKind::InOutArgMissingMode.at(arg.span));
                     }
                     CallArgMode::Out => {
-                        self.errors.push(SemCheckError::OutArgUnexpected(arg.span));
+                        self.errors
+                            .push(SemCheckErrorKind::OutArgUnexpected.at(arg.span));
                     }
                     CallArgMode::Move => {
-                        self.errors.push(SemCheckError::MoveArgUnexpected(arg.span));
+                        self.errors
+                            .push(SemCheckErrorKind::MoveArgUnexpected.at(arg.span));
                     }
                 },
                 ParamMode::Out => match arg_mode {
                     CallArgMode::Out => {
                         let err = match self.is_mutable_lvalue(arg_expr) {
                             Some(true) => continue,
-                            Some(false) => SemCheckError::OutArgNotMutable(arg.span),
-                            None => SemCheckError::OutArgNotLvalue(arg.span),
+                            Some(false) => SemCheckErrorKind::OutArgNotMutable.at(arg.span),
+                            None => SemCheckErrorKind::OutArgNotLvalue.at(arg.span),
                         };
                         self.errors.push(err);
                     }
                     CallArgMode::Default => {
-                        self.errors.push(SemCheckError::OutArgMissingMode(arg.span));
+                        self.errors
+                            .push(SemCheckErrorKind::OutArgMissingMode.at(arg.span));
                     }
                     CallArgMode::InOut => {
                         self.errors
-                            .push(SemCheckError::InOutArgUnexpected(arg.span));
+                            .push(SemCheckErrorKind::InOutArgUnexpected.at(arg.span));
                     }
                     CallArgMode::Move => {
-                        self.errors.push(SemCheckError::MoveArgUnexpected(arg.span));
+                        self.errors
+                            .push(SemCheckErrorKind::MoveArgUnexpected.at(arg.span));
                     }
                 },
                 ParamMode::Sink => match arg_mode {
                     CallArgMode::Move => {}
                     CallArgMode::Default => {
                         self.errors
-                            .push(SemCheckError::SinkArgMissingMove(arg.span));
+                            .push(SemCheckErrorKind::SinkArgMissingMove.at(arg.span));
                     }
                     CallArgMode::InOut => {
                         self.errors
-                            .push(SemCheckError::InOutArgUnexpected(arg.span));
+                            .push(SemCheckErrorKind::InOutArgUnexpected.at(arg.span));
                     }
                     CallArgMode::Out => {
-                        self.errors.push(SemCheckError::OutArgUnexpected(arg.span));
+                        self.errors
+                            .push(SemCheckErrorKind::OutArgUnexpected.at(arg.span));
                     }
                 },
             }
@@ -374,7 +375,7 @@ impl Visitor<DefId, TypeId> for StructuralChecker<'_> {
     fn visit_method_sig(&mut self, method_sig: &MethodSig) {
         if method_sig.self_param.mode == ParamMode::Out {
             self.errors
-                .push(SemCheckError::OutSelfNotAllowed(method_sig.self_param.span));
+                .push(SemCheckErrorKind::OutSelfNotAllowed.at(method_sig.self_param.span));
         }
         self.check_param_modes(&method_sig.params);
         walk_method_sig(self, method_sig);
@@ -408,13 +409,13 @@ impl Visitor<DefId, TypeId> for StructuralChecker<'_> {
                     && !fields.iter().any(|f| f.name == *field)
                 {
                     self.errors
-                        .push(SemCheckError::UnknownStructField(field.clone(), expr.span));
+                        .push(SemCheckErrorKind::UnknownStructField(field.clone()).at(expr.span));
                 }
             }
             ExprKind::Slice { target, .. } => {
                 if !self.is_lvalue(target) {
                     self.errors
-                        .push(SemCheckError::SliceTargetNotLvalue(expr.span));
+                        .push(SemCheckErrorKind::SliceTargetNotLvalue.at(expr.span));
                 }
             }
             ExprKind::EnumVariant {
@@ -431,10 +432,9 @@ impl Visitor<DefId, TypeId> for StructuralChecker<'_> {
             ExprKind::Call { callee, args } => {
                 // Only plain identifiers are valid callees at the AST level for now.
                 if !matches!(callee.kind, ExprKind::Var { .. }) {
-                    self.errors.push(SemCheckError::InvalidCallee(
-                        callee.kind.clone(),
-                        callee.span,
-                    ));
+                    self.errors.push(
+                        SemCheckErrorKind::InvalidCallee(callee.kind.clone()).at(callee.span),
+                    );
                 }
 
                 // Validate call-site argument modes and lvalue requirements.
@@ -457,9 +457,11 @@ impl Visitor<DefId, TypeId> for StructuralChecker<'_> {
                                 let err = match self.is_mutable_lvalue(callee) {
                                     Some(true) => None,
                                     Some(false) => {
-                                        Some(SemCheckError::InOutArgNotMutable(expr.span))
+                                        Some(SemCheckErrorKind::InOutArgNotMutable.at(expr.span))
                                     }
-                                    None => Some(SemCheckError::InOutArgNotLvalue(expr.span)),
+                                    None => {
+                                        Some(SemCheckErrorKind::InOutArgNotLvalue.at(expr.span))
+                                    }
                                 };
                                 if let Some(err) = err {
                                     self.errors.push(err);

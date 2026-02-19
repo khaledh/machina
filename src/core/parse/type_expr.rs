@@ -215,7 +215,9 @@ impl<'a> Parser<'a> {
                     span: self.close(marker),
                 })
             }
-            _ => Err(ParseError::ExpectedType(self.curr_token.clone())),
+            _ => {
+                Err(ParseErrorKind::ExpectedType(self.curr_token.clone()).at(self.curr_token.span))
+            }
         }
     }
 
@@ -250,9 +252,10 @@ impl<'a> Parser<'a> {
         self.consume(&TK::RParen)?;
 
         if field_ty_exprs.len() == 1 {
-            return Err(ParseError::SingleFieldTupleMissingComma(
-                self.curr_token.clone(),
-            ));
+            return Err(
+                ParseErrorKind::SingleFieldTupleMissingComma(self.curr_token.clone())
+                    .at(self.curr_token.span),
+            );
         }
 
         Ok(TypeExpr {
@@ -358,7 +361,8 @@ impl<'a> Parser<'a> {
                 self.advance();
                 Ok(RefinementKind::NonZero)
             }
-            _ => Err(ParseError::ExpectedRefinement(self.curr_token.clone())),
+            _ => Err(ParseErrorKind::ExpectedRefinement(self.curr_token.clone())
+                .at(self.curr_token.span)),
         }
     }
 }

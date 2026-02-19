@@ -16,7 +16,7 @@ mod func;
 mod match_expr;
 mod type_expr;
 
-pub use errors::ParseError;
+pub use errors::{ParseError, ParseErrorKind};
 
 #[derive(Debug, Clone, Copy)]
 struct Marker {
@@ -150,10 +150,10 @@ impl<'a> Parser<'a> {
             self.advance();
             Ok(())
         } else {
-            Err(ParseError::ExpectedToken(
-                expected.clone(),
-                self.curr_token.clone(),
-            ))
+            Err(
+                ParseErrorKind::ExpectedToken(expected.clone(), self.curr_token.clone())
+                    .at(self.curr_token.span),
+            )
         }
     }
 
@@ -162,7 +162,10 @@ impl<'a> Parser<'a> {
             self.advance();
             Ok(())
         } else {
-            Err(ParseError::ExpectedToken(expected, self.curr_token.clone()))
+            Err(
+                ParseErrorKind::ExpectedToken(expected, self.curr_token.clone())
+                    .at(self.curr_token.span),
+            )
         }
     }
 
@@ -187,7 +190,7 @@ impl<'a> Parser<'a> {
             self.advance();
             Ok(name.clone())
         } else {
-            Err(ParseError::ExpectedIdent(self.curr_token.clone()))
+            Err(ParseErrorKind::ExpectedIdent(self.curr_token.clone()).at(self.curr_token.span))
         }
     }
 
@@ -200,10 +203,11 @@ impl<'a> Parser<'a> {
             self.advance();
             Ok(())
         } else {
-            Err(ParseError::ExpectedToken(
+            Err(ParseErrorKind::ExpectedToken(
                 TK::Ident(keyword.to_string()),
                 self.curr_token.clone(),
-            ))
+            )
+            .at(self.curr_token.span))
         }
     }
 
@@ -212,7 +216,7 @@ impl<'a> Parser<'a> {
             self.advance();
             Ok(*value)
         } else {
-            Err(ParseError::ExpectedIntLit(self.curr_token.clone()))
+            Err(ParseErrorKind::ExpectedIntLit(self.curr_token.clone()).at(self.curr_token.span))
         }
     }
 
@@ -230,7 +234,7 @@ impl<'a> Parser<'a> {
             self.advance();
             Ok(value.clone())
         } else {
-            Err(ParseError::ExpectedStringLit(self.curr_token.clone()))
+            Err(ParseErrorKind::ExpectedStringLit(self.curr_token.clone()).at(self.curr_token.span))
         }
     }
 

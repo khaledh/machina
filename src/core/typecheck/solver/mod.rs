@@ -648,7 +648,7 @@ fn check_unresolved_local_infer_vars(
     let mut errors = Vec::new();
     let blocking_spans = existing_errors
         .iter()
-        .filter(|err| !matches!(err.kind(), TypeCheckErrorKind::UnknownType(_)))
+        .filter(|err| !matches!(err.kind(), TypeCheckErrorKind::UnknownType))
         .map(TypeCheckError::span)
         .collect::<Vec<_>>();
     for (def_id, span) in decl_spans {
@@ -670,7 +670,7 @@ fn check_unresolved_local_infer_vars(
             continue;
         }
         if has_unresolved_infer_var(ty, vars) {
-            errors.push(TypeCheckErrorKind::UnknownType(span).into());
+            errors.push(TypeCheckErrorKind::UnknownType.at(span).into());
         }
     }
     errors

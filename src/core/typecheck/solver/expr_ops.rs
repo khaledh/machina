@@ -94,7 +94,9 @@ pub(super) fn try_check_expr_obligation_ops(
                         && !super::term_utils::is_unresolved(&operand_ty)
                     {
                         errors.push(
-                            TypeCheckErrorKind::NegationOperandNotInt(operand_ty, *span).into(),
+                            TypeCheckErrorKind::NegationOperandNotInt(operand_ty)
+                                .at(*span)
+                                .into(),
                         );
                         covered_exprs.insert(*expr_id);
                     }
@@ -102,7 +104,9 @@ pub(super) fn try_check_expr_obligation_ops(
                 crate::core::tree::resolved::UnaryOp::LogicalNot => {
                     if operand_ty != Type::Bool && !super::term_utils::is_unresolved(&operand_ty) {
                         errors.push(
-                            TypeCheckErrorKind::LogicalOperandNotBoolean(operand_ty, *span).into(),
+                            TypeCheckErrorKind::LogicalOperandNotBoolean(operand_ty)
+                                .at(*span)
+                                .into(),
                         );
                         covered_exprs.insert(*expr_id);
                     }
@@ -124,20 +128,36 @@ fn op_span(obligation: &ExprObligation) -> Span {
 
 fn first_non_int_operand(left: &Type, right: &Type, span: Span) -> Option<TypeCheckError> {
     if !super::term_utils::is_int_like(left) && !super::term_utils::is_unresolved(left) {
-        return Some(TypeCheckErrorKind::ArithOperandNotInt(left.clone(), span).into());
+        return Some(
+            TypeCheckErrorKind::ArithOperandNotInt(left.clone())
+                .at(span)
+                .into(),
+        );
     }
     if !super::term_utils::is_int_like(right) && !super::term_utils::is_unresolved(right) {
-        return Some(TypeCheckErrorKind::ArithOperandNotInt(right.clone(), span).into());
+        return Some(
+            TypeCheckErrorKind::ArithOperandNotInt(right.clone())
+                .at(span)
+                .into(),
+        );
     }
     None
 }
 
 fn first_non_int_cmp_operand(left: &Type, right: &Type, span: Span) -> Option<TypeCheckError> {
     if !super::term_utils::is_int_like(left) && !super::term_utils::is_unresolved(left) {
-        return Some(TypeCheckErrorKind::CmpOperandNotInt(left.clone(), span).into());
+        return Some(
+            TypeCheckErrorKind::CmpOperandNotInt(left.clone())
+                .at(span)
+                .into(),
+        );
     }
     if !super::term_utils::is_int_like(right) && !super::term_utils::is_unresolved(right) {
-        return Some(TypeCheckErrorKind::CmpOperandNotInt(right.clone(), span).into());
+        return Some(
+            TypeCheckErrorKind::CmpOperandNotInt(right.clone())
+                .at(span)
+                .into(),
+        );
     }
     None
 }
@@ -151,26 +171,18 @@ fn first_non_equatable_cmp_operand(
         && let Err(failure) = ensure_equatable(left)
     {
         return Some(
-            TypeCheckErrorKind::TypeNotEquatable(
-                left.clone(),
-                failure.path,
-                failure.failing_ty,
-                span,
-            )
-            .into(),
+            TypeCheckErrorKind::TypeNotEquatable(left.clone(), failure.path, failure.failing_ty)
+                .at(span)
+                .into(),
         );
     }
     if !super::term_utils::is_unresolved(right)
         && let Err(failure) = ensure_equatable(right)
     {
         return Some(
-            TypeCheckErrorKind::TypeNotEquatable(
-                right.clone(),
-                failure.path,
-                failure.failing_ty,
-                span,
-            )
-            .into(),
+            TypeCheckErrorKind::TypeNotEquatable(right.clone(), failure.path, failure.failing_ty)
+                .at(span)
+                .into(),
         );
     }
     None
@@ -178,10 +190,18 @@ fn first_non_equatable_cmp_operand(
 
 fn first_non_bool_operand(left: &Type, right: &Type, span: Span) -> Option<TypeCheckError> {
     if *left != Type::Bool && !super::term_utils::is_unresolved(left) {
-        return Some(TypeCheckErrorKind::LogicalOperandNotBoolean(left.clone(), span).into());
+        return Some(
+            TypeCheckErrorKind::LogicalOperandNotBoolean(left.clone())
+                .at(span)
+                .into(),
+        );
     }
     if *right != Type::Bool && !super::term_utils::is_unresolved(right) {
-        return Some(TypeCheckErrorKind::LogicalOperandNotBoolean(right.clone(), span).into());
+        return Some(
+            TypeCheckErrorKind::LogicalOperandNotBoolean(right.clone())
+                .at(span)
+                .into(),
+        );
     }
     None
 }

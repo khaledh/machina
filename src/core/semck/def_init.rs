@@ -12,7 +12,7 @@ use crate::core::analysis::dataflow::{DataflowGraph, solve_forward};
 use crate::core::context::NormalizedContext;
 use crate::core::diag::Span;
 use crate::core::resolve::{DefId, DefKind};
-use crate::core::semck::SemCheckError;
+use crate::core::semck::{SemCheckError, SemCheckErrorKind};
 use crate::core::tree::cfg::{
     AstBlockId, TreeCfgBuilder, TreeCfgItem, TreeCfgNode, TreeCfgTerminator,
 };
@@ -180,7 +180,7 @@ fn check_func(
             .iter()
             .all(|block| result.out_map[block.0].is_full(def_id));
         if !initialized_on_all_exits {
-            errors.push(SemCheckError::OutParamNotInitialized(name, span));
+            errors.push(SemCheckErrorKind::OutParamNotInitialized(name).at(span));
         }
     }
 
@@ -202,7 +202,7 @@ fn check_func(
         });
         if has_partial_on_any_exit && reported.insert(def_id) {
             let span = def_spans.get(&def_id).cloned().unwrap_or_default();
-            errors.push(SemCheckError::PartialInitNotAllowed(def.name.clone(), span));
+            errors.push(SemCheckErrorKind::PartialInitNotAllowed(def.name.clone()).at(span));
         }
     }
 }
@@ -898,7 +898,7 @@ impl<'a> DefInitChecker<'a> {
             return;
         };
         self.errors
-            .push(SemCheckError::UseBeforeInit(def.name.clone(), span));
+            .push(SemCheckErrorKind::UseBeforeInit(def.name.clone()).at(span));
     }
 
     fn mark_pattern_initialized(&mut self, pattern: &BindPattern) {
@@ -939,7 +939,7 @@ impl<'a> DefInitChecker<'a> {
         }
         if !self.initialized.is_full(def.id) {
             self.errors
-                .push(SemCheckError::UseBeforeInit(def.name.clone(), expr.span));
+                .push(SemCheckErrorKind::UseBeforeInit(def.name.clone()).at(expr.span));
         }
     }
 

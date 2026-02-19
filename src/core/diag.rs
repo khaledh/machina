@@ -118,6 +118,47 @@ impl Display for Span {
     }
 }
 
+/// Generic wrapper for diagnostics that carry source location separately from
+/// their domain-specific error kind.
+///
+/// This keeps error enums focused on semantic payload while preserving a
+/// uniform `span()` accessor used by reporting/analysis paths.
+#[derive(Debug, Clone)]
+pub struct SpannedError<E> {
+    kind: E,
+    span: Span,
+}
+
+impl<E> SpannedError<E> {
+    pub fn new(kind: E, span: Span) -> Self {
+        Self { kind, span }
+    }
+
+    pub fn kind(&self) -> &E {
+        &self.kind
+    }
+
+    pub fn into_kind(self) -> E {
+        self.kind
+    }
+
+    pub fn span(&self) -> Span {
+        self.span
+    }
+}
+
+impl<E: Display> Display for SpannedError<E> {
+    fn fmt(&self, f: &mut Formatter<'_>) -> Result {
+        self.kind.fmt(f)
+    }
+}
+
+impl<E: std::error::Error + 'static> std::error::Error for SpannedError<E> {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        Some(&self.kind)
+    }
+}
+
 fn build_marker(len: usize, single_line: bool) -> String {
     if single_line && len == 1 {
         "^".to_string()

@@ -14,7 +14,9 @@ impl<'a> Parser<'a> {
 
         let arms = self.parse_list(TK::Comma, TK::RBrace, |parser| parser.parse_match_arm())?;
         if arms.is_empty() {
-            return Err(ParseError::ExpectedMatchArm(self.curr_token.clone()));
+            return Err(
+                ParseErrorKind::ExpectedMatchArm(self.curr_token.clone()).at(self.curr_token.span)
+            );
         }
 
         self.consume(&TK::RBrace)?;
@@ -81,7 +83,10 @@ impl<'a> Parser<'a> {
         }
 
         if !matches!(self.curr_token.kind, TK::Ident(_)) {
-            return Err(ParseError::ExpectedMatchPattern(self.curr_token.clone()));
+            return Err(
+                ParseErrorKind::ExpectedMatchPattern(self.curr_token.clone())
+                    .at(self.curr_token.span),
+            );
         }
         let is_typed_binding = matches!(
             self.tokens.get(self.pos + 1).map(|tok| &tok.kind),
@@ -139,7 +144,10 @@ impl<'a> Parser<'a> {
             }
 
             let TK::Ident(_) = &parser.curr_token.kind else {
-                return Err(ParseError::ExpectedMatchPattern(parser.curr_token.clone()));
+                return Err(
+                    ParseErrorKind::ExpectedMatchPattern(parser.curr_token.clone())
+                        .at(parser.curr_token.span),
+                );
             };
 
             let is_enum_variant = matches!(
@@ -174,9 +182,10 @@ impl<'a> Parser<'a> {
         let fields = self.parse_list(TK::Comma, TK::RParen, parse_tuple_pattern_elem)?;
 
         if fields.len() == 1 {
-            return Err(ParseError::SingleFieldTupleMissingComma(
-                self.curr_token.clone(),
-            ));
+            return Err(
+                ParseErrorKind::SingleFieldTupleMissingComma(self.curr_token.clone())
+                    .at(self.curr_token.span),
+            );
         }
 
         self.consume(&TK::RParen)?;

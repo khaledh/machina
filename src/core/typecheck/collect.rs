@@ -237,8 +237,8 @@ fn collect_trait_sigs(
                     TypeCheckErrorKind::TraitMethodDuplicate(
                         trait_def.name.clone(),
                         method.sig.name.clone(),
-                        method.span,
                     )
+                    .at(method.span)
                     .into(),
                 );
             }
@@ -270,8 +270,8 @@ fn collect_trait_sigs(
                     TypeCheckErrorKind::TraitPropertyDuplicate(
                         trait_def.name.clone(),
                         property.name.clone(),
-                        property.span,
                     )
+                    .at(property.span)
                     .into(),
                 );
             }
@@ -447,8 +447,8 @@ fn collect_method_sigs(
                     TypeCheckErrorKind::TraitImplDuplicate(
                         method_block.type_name.clone(),
                         trait_name.clone(),
-                        method_block.span,
                     )
+                    .at(method_block.span)
                     .into(),
                 );
             }
@@ -548,8 +548,8 @@ fn collect_method_sigs(
                             method_block.type_name.clone(),
                             trait_name.clone(),
                             prop_name.clone(),
-                            method_block.span,
                         )
+                        .at(method_block.span)
                         .into(),
                     );
                 }
@@ -562,8 +562,8 @@ fn collect_method_sigs(
                             method_block.type_name.clone(),
                             trait_name.clone(),
                             required.clone(),
-                            method_block.span,
                         )
+                        .at(method_block.span)
                         .into(),
                     );
                 }
@@ -580,8 +580,8 @@ fn collect_method_sigs(
                             method_block.type_name.clone(),
                             trait_name.clone(),
                             prop_name.clone(),
-                            method_block.span,
                         )
+                        .at(method_block.span)
                         .into(),
                     );
                     continue;
@@ -595,8 +595,8 @@ fn collect_method_sigs(
                             prop_name.clone(),
                             required.ty.clone(),
                             impl_prop.ty.clone(),
-                            method_block.span,
                         )
+                        .at(method_block.span)
                         .into(),
                     );
                 }
@@ -606,8 +606,8 @@ fn collect_method_sigs(
                             method_block.type_name.clone(),
                             trait_name.clone(),
                             prop_name.clone(),
-                            method_block.span,
                         )
+                        .at(method_block.span)
                         .into(),
                     );
                 }
@@ -617,8 +617,8 @@ fn collect_method_sigs(
                             method_block.type_name.clone(),
                             trait_name.clone(),
                             prop_name.clone(),
-                            method_block.span,
                         )
+                        .at(method_block.span)
                         .into(),
                     );
                 }
@@ -740,8 +740,8 @@ fn validate_trait_method_impl(
                 type_name.to_string(),
                 trait_name.to_string(),
                 method_name.to_string(),
-                span,
             )
+            .at(span)
             .into(),
         );
         return;
@@ -753,8 +753,8 @@ fn validate_trait_method_impl(
                 type_name.to_string(),
                 trait_name.to_string(),
                 method_name.to_string(),
-                span,
             )
+            .at(span)
             .into(),
         );
         return;
@@ -777,8 +777,8 @@ fn validate_trait_method_impl(
                 type_name.to_string(),
                 trait_name.to_string(),
                 method_name.to_string(),
-                span,
             )
+            .at(span)
             .into(),
         );
     }
@@ -861,7 +861,9 @@ fn record_property_sig(
         PropertyAccessorKind::Get => {
             if !params.is_empty() {
                 errors.push(
-                    TypeCheckErrorKind::PropertyGetterHasParams(prop_name.to_string(), span).into(),
+                    TypeCheckErrorKind::PropertyGetterHasParams(prop_name.to_string())
+                        .at(span)
+                        .into(),
                 );
                 return;
             }
@@ -873,8 +875,8 @@ fn record_property_sig(
                     TypeCheckErrorKind::PropertySetterParamCount(
                         prop_name.to_string(),
                         params.len(),
-                        span,
                     )
+                    .at(span)
                     .into(),
                 );
                 return;
@@ -884,8 +886,8 @@ fn record_property_sig(
                     TypeCheckErrorKind::PropertySetterReturnType(
                         prop_name.to_string(),
                         ret_ty.clone(),
-                        span,
                     )
+                    .at(span)
                     .into(),
                 );
                 return;
@@ -906,8 +908,8 @@ fn record_property_sig(
                         TypeCheckErrorKind::PropertyConflictsWithField(
                             prop_name.to_string(),
                             field.name.clone(),
-                            span,
                         )
+                        .at(span)
                         .into(),
                     );
                 }
@@ -931,8 +933,8 @@ fn record_property_sig(
                 prop_name.to_string(),
                 entry.ty.clone(),
                 prop_ty,
-                span,
             )
+            .at(span)
             .into(),
         );
         return;
@@ -942,7 +944,8 @@ fn record_property_sig(
         PropertyAccessorKind::Get => {
             if entry.getter.is_some() {
                 errors.push(
-                    TypeCheckErrorKind::PropertyAccessorDuplicate(prop_name.to_string(), span)
+                    TypeCheckErrorKind::PropertyAccessorDuplicate(prop_name.to_string())
+                        .at(span)
                         .into(),
                 );
             } else {
@@ -952,7 +955,8 @@ fn record_property_sig(
         PropertyAccessorKind::Set => {
             if entry.setter.is_some() {
                 errors.push(
-                    TypeCheckErrorKind::PropertyAccessorDuplicate(prop_name.to_string(), span)
+                    TypeCheckErrorKind::PropertyAccessorDuplicate(prop_name.to_string())
+                        .at(span)
                         .into(),
                 );
             } else {

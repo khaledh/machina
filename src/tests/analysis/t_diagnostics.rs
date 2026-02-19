@@ -1,10 +1,10 @@
 use crate::core::diag::Span;
-use crate::core::lexer::LexError;
+use crate::core::lexer::LexErrorKind;
 use crate::core::lexer::{Token, TokenKind};
-use crate::core::parse::ParseError;
-use crate::core::resolve::ResolveError;
+use crate::core::parse::ParseErrorKind;
 use crate::core::resolve::symbols::SymbolKind;
-use crate::core::semck::SemCheckError;
+use crate::core::resolve::{ResolveError, ResolveErrorKind};
+use crate::core::semck::SemCheckErrorKind;
 use crate::core::typecheck::{TypeCheckError, TypeCheckErrorKind};
 use crate::core::types::Type;
 use crate::services::analysis::diagnostics::{
@@ -18,7 +18,8 @@ fn token(kind: TokenKind, span: Span) -> Token {
 #[test]
 fn parse_diagnostic_is_phase_tagged_and_stable_coded() {
     let span = Span::default();
-    let err = ParseError::ExpectedToken(TokenKind::KwFn, token(TokenKind::KwType, span));
+    let err =
+        ParseErrorKind::ExpectedToken(TokenKind::KwFn, token(TokenKind::KwType, span)).at(span);
     let diag = Diagnostic::from_parse_error(&err);
 
     assert_eq!(diag.phase, DiagnosticPhase::Parse);
@@ -37,7 +38,7 @@ fn parse_diagnostic_is_phase_tagged_and_stable_coded() {
 #[test]
 fn lex_diagnostic_is_phase_tagged_and_stable_coded() {
     let span = Span::default();
-    let err = LexError::UnexpectedCharacter('@', span);
+    let err = LexErrorKind::UnexpectedCharacter('@').at(span);
     let diag = Diagnostic::from_lex_error(&err);
 
     assert_eq!(diag.phase, DiagnosticPhase::Parse);
@@ -51,13 +52,13 @@ fn lex_diagnostic_is_phase_tagged_and_stable_coded() {
 
 #[test]
 fn resolve_diagnostic_keeps_structured_metadata() {
-    let err = ResolveError::ExpectedType(
+    let err = ResolveErrorKind::ExpectedType(
         "HasTickCount".to_string(),
         SymbolKind::TraitDef {
             def_id: crate::core::resolve::DefId(7),
         },
-        Span::default(),
-    );
+    )
+    .at(Span::default());
     let diag = Diagnostic::from_resolve_error(&err);
 
     assert_eq!(diag.phase, DiagnosticPhase::Resolve);
@@ -77,8 +78,8 @@ fn typecheck_diagnostic_includes_quick_fix_metadata() {
     let err: TypeCheckError = TypeCheckErrorKind::TryErrorNotInReturn(
         vec!["IoError".to_string(), "ParseError".to_string()],
         vec!["Config".to_string(), "ValidationError".to_string()],
-        Span::default(),
     )
+    .at(Span::default())
     .into();
     let diag = Diagnostic::from_typecheck_error(&err);
 
@@ -99,10 +100,9 @@ fn typecheck_diagnostic_includes_quick_fix_metadata() {
 
 #[test]
 fn partial_diagnostics_support_missing_stages() {
-    let parse_errors = vec![ParseError::ExpectedPrimary(token(
-        TokenKind::Eof,
-        Span::default(),
-    ))];
+    let parse_errors = vec![
+        ParseErrorKind::ExpectedPrimary(token(TokenKind::Eof, Span::default())).at(Span::default()),
+    ];
     let resolve_errors: Vec<ResolveError> = Vec::new();
     let typecheck_errors: Vec<TypeCheckError> = Vec::new();
 
@@ -122,8 +122,9 @@ fn partial_diagnostics_support_missing_stages() {
 
 #[test]
 fn wire_conversion_is_deterministic() {
-    let err: TypeCheckError =
-        TypeCheckErrorKind::ArgCountMismatch("run".to_string(), 1, 2, Span::default()).into();
+    let err: TypeCheckError = TypeCheckErrorKind::ArgCountMismatch("run".to_string(), 1, 2)
+        .at(Span::default())
+        .into();
     let diag = Diagnostic::from_typecheck_error(&err);
     let wire = diag.to_wire();
 
@@ -141,12 +142,15 @@ fn wire_conversion_is_deterministic() {
 
 #[test]
 fn typecheck_stable_code_exists_for_newer_variants() {
-    let err: TypeCheckError = TypeCheckErrorKind::MapIndexAssignUnsupported(Span::default()).into();
+    let err: TypeCheckError = TypeCheckErrorKind::MapIndexAssignUnsupported
+        .at(Span::default())
+        .into();
     let diag = Diagnostic::from_typecheck_error(&err);
     assert_eq!(diag.code, "MC-TYPECHECK-MapIndexAssignUnsupported");
 
-    let err: TypeCheckError =
-        TypeCheckErrorKind::StringFmtExprUnsupportedType(Type::Bool, Span::default()).into();
+    let err: TypeCheckError = TypeCheckErrorKind::StringFmtExprUnsupportedType(Type::Bool)
+        .at(Span::default())
+        .into();
     let diag = Diagnostic::from_typecheck_error(&err);
     assert_eq!(diag.code, "MC-TYPECHECK-StringFmtExprUnsupportedType");
 
@@ -161,8 +165,8 @@ fn typecheck_stable_code_exists_for_newer_variants() {
             name: "AuthApproved".to_string(),
             fields: Vec::new(),
         }],
-        Span::default(),
     )
+    .at(Span::default())
     .into();
     let diag = Diagnostic::from_typecheck_error(&err);
     assert_eq!(diag.code, "MC-TYPECHECK-TypestateOverlappingOnHandlers");
@@ -170,7 +174,7 @@ fn typecheck_stable_code_exists_for_newer_variants() {
 
 #[test]
 fn semcheck_diagnostic_is_phase_tagged() {
-    let err = SemCheckError::DivisionByZero(Span::default());
+    let err = SemCheckErrorKind::DivisionByZero.at(Span::default());
     let diag = Diagnostic::from_semcheck_error(&err);
 
     assert_eq!(diag.phase, DiagnosticPhase::Semcheck);
@@ -180,10 +184,11 @@ fn semcheck_diagnostic_is_phase_tagged() {
 
 #[test]
 fn semcheck_diagnostic_keeps_structured_metadata() {
-    let err = SemCheckError::NonExhaustiveUnionMatch(
-        vec!["IoError".to_string(), "ParseError".to_string()],
-        Span::default(),
-    );
+    let err = SemCheckErrorKind::NonExhaustiveUnionMatch(vec![
+        "IoError".to_string(),
+        "ParseError".to_string(),
+    ])
+    .at(Span::default());
     let diag = Diagnostic::from_semcheck_error(&err);
     assert_eq!(diag.code, "MC-SEMCK-NonExhaustiveUnionMatch");
     assert_eq!(
@@ -194,8 +199,8 @@ fn semcheck_diagnostic_keeps_structured_metadata() {
         ]))
     );
 
-    let err =
-        SemCheckError::EnumVariantPayloadArityMismatch("Some".to_string(), 2, 1, Span::default());
+    let err = SemCheckErrorKind::EnumVariantPayloadArityMismatch("Some".to_string(), 2, 1)
+        .at(Span::default());
     let diag = Diagnostic::from_semcheck_error(&err);
     assert_eq!(
         diag.metadata.get("variant"),

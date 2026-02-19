@@ -3,7 +3,7 @@ use crate::core::context::ParsedContext;
 use crate::core::lexer::{LexError, Lexer, Token};
 use crate::core::parse::Parser;
 use crate::core::resolve::resolve;
-use crate::core::semck::{SemCheckError, move_check};
+use crate::core::semck::{SemCheckErrorKind, move_check};
 use crate::core::typecheck::type_check;
 
 fn move_check_source(source: &str) -> move_check::MoveCheckResult {
@@ -38,7 +38,7 @@ fn test_use_after_move() {
     let result = move_check_source(source);
     assert!(!result.errors.is_empty(), "Expected a move-check error");
     assert!(
-        matches!(result.errors[0], SemCheckError::UseAfterMove(_, _)),
+        matches!(result.errors[0].kind(), SemCheckErrorKind::UseAfterMove(..)),
         "Expected UseAfterMove error, got {:?}",
         result.errors
     );
@@ -71,7 +71,10 @@ fn test_invalid_move_target() {
     let result = move_check_source(source);
     assert!(!result.errors.is_empty(), "Expected a move-check error");
     assert!(
-        matches!(result.errors[0], SemCheckError::InvalidMoveTarget(_)),
+        matches!(
+            result.errors[0].kind(),
+            SemCheckErrorKind::InvalidMoveTarget
+        ),
         "Expected InvalidMoveTarget error, got {:?}",
         result.errors
     );
@@ -91,7 +94,10 @@ fn test_heap_move_required() {
     let result = move_check_source(source);
     assert!(!result.errors.is_empty(), "Expected a move-check error");
     assert!(
-        matches!(result.errors[0], SemCheckError::OwnedMoveRequired(_)),
+        matches!(
+            result.errors[0].kind(),
+            SemCheckErrorKind::OwnedMoveRequired
+        ),
         "Expected OwnedMoveRequired error, got {:?}",
         result.errors
     );
@@ -146,7 +152,7 @@ fn test_method_sink_self_moves() {
     let result = move_check_source(source);
     assert!(!result.errors.is_empty(), "Expected a move-check error");
     assert!(
-        matches!(result.errors[0], SemCheckError::UseAfterMove(_, _)),
+        matches!(result.errors[0].kind(), SemCheckErrorKind::UseAfterMove(..)),
         "Expected UseAfterMove error, got {:?}",
         result.errors
     );
@@ -179,7 +185,7 @@ fn test_move_from_param_rejected() {
     let result = move_check_source(source);
     assert!(!result.errors.is_empty(), "Expected a move-check error");
     assert!(
-        matches!(result.errors[0], SemCheckError::MoveFromParam(_)),
+        matches!(result.errors[0].kind(), SemCheckErrorKind::MoveFromParam),
         "Expected MoveFromParam error, got {:?}",
         result.errors
     );
@@ -198,7 +204,7 @@ fn test_move_from_sink_param_marks_moved() {
     let result = move_check_source(source);
     assert!(!result.errors.is_empty(), "Expected a move-check error");
     assert!(
-        matches!(result.errors[0], SemCheckError::UseAfterMove(_, _)),
+        matches!(result.errors[0].kind(), SemCheckErrorKind::UseAfterMove(..)),
         "Expected UseAfterMove error, got {:?}",
         result.errors
     );
@@ -257,7 +263,7 @@ fn test_sink_call_requires_move_on_reuse() {
     let result = move_check_source(source);
     assert!(!result.errors.is_empty(), "Expected a move-check error");
     assert!(
-        matches!(result.errors[0], SemCheckError::UseAfterMove(_, _)),
+        matches!(result.errors[0].kind(), SemCheckErrorKind::UseAfterMove(..)),
         "Expected UseAfterMove error, got {:?}",
         result.errors
     );

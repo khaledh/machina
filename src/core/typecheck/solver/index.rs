@@ -59,7 +59,8 @@ pub(super) fn try_check_expr_obligation_index(
                     }
                     if indices.len() > dims.len() {
                         errors.push(
-                            TypeCheckErrorKind::TooManyIndices(dims.len(), indices.len(), *span)
+                            TypeCheckErrorKind::TooManyIndices(dims.len(), indices.len())
+                                .at(*span)
                                 .into(),
                         );
                         covered_exprs.insert(*expr_id);
@@ -102,7 +103,9 @@ pub(super) fn try_check_expr_obligation_index(
                     }
                     if indices.len() != 1 {
                         errors.push(
-                            TypeCheckErrorKind::TooManyIndices(1, indices.len(), *span).into(),
+                            TypeCheckErrorKind::TooManyIndices(1, indices.len())
+                                .at(*span)
+                                .into(),
                         );
                         covered_exprs.insert(*expr_id);
                         return true;
@@ -136,7 +139,9 @@ pub(super) fn try_check_expr_obligation_index(
                     }
                     if indices.len() != 1 {
                         errors.push(
-                            TypeCheckErrorKind::TooManyIndices(1, indices.len(), *span).into(),
+                            TypeCheckErrorKind::TooManyIndices(1, indices.len())
+                                .at(*span)
+                                .into(),
                         );
                         covered_exprs.insert(*expr_id);
                         return true;
@@ -170,7 +175,9 @@ pub(super) fn try_check_expr_obligation_index(
                     }
                     if indices.len() != 1 {
                         errors.push(
-                            TypeCheckErrorKind::TooManyIndices(1, indices.len(), *span).into(),
+                            TypeCheckErrorKind::TooManyIndices(1, indices.len())
+                                .at(*span)
+                                .into(),
                         );
                         covered_exprs.insert(*expr_id);
                         return true;
@@ -180,7 +187,9 @@ pub(super) fn try_check_expr_obligation_index(
                 Type::Map { key_ty, value_ty } => {
                     if indices.len() != 1 {
                         errors.push(
-                            TypeCheckErrorKind::TooManyIndices(1, indices.len(), *span).into(),
+                            TypeCheckErrorKind::TooManyIndices(1, indices.len())
+                                .at(*span)
+                                .into(),
                         );
                         covered_exprs.insert(*expr_id);
                         return true;
@@ -195,8 +204,8 @@ pub(super) fn try_check_expr_obligation_index(
                                 TypeCheckErrorKind::MapKeyTypeMismatch(
                                     key_ty.as_ref().clone(),
                                     key_index_ty,
-                                    diag_span,
                                 )
+                                .at(diag_span)
                                 .into(),
                             );
                             covered_exprs.insert(*expr_id);
@@ -214,8 +223,8 @@ pub(super) fn try_check_expr_obligation_index(
                                 key_ty.as_ref().clone(),
                                 failure.path,
                                 failure.failing_ty,
-                                *span,
                             )
+                            .at(*span)
                             .into(),
                         );
                         covered_exprs.insert(*expr_id);
@@ -223,11 +232,9 @@ pub(super) fn try_check_expr_obligation_index(
                     }
                     if value_ty.needs_drop() && !super::term_utils::is_unresolved(value_ty) {
                         errors.push(
-                            TypeCheckErrorKind::MapIndexValueNotCopySafe(
-                                value_ty.as_ref().clone(),
-                                *span,
-                            )
-                            .into(),
+                            TypeCheckErrorKind::MapIndexValueNotCopySafe(value_ty.as_ref().clone())
+                                .at(*span)
+                                .into(),
                         );
                         covered_exprs.insert(*expr_id);
                         return true;
@@ -241,7 +248,9 @@ pub(super) fn try_check_expr_obligation_index(
                 ty if super::term_utils::is_unresolved(ty) => {}
                 _ => {
                     errors.push(
-                        TypeCheckErrorKind::InvalidIndexTargetType(indexed_target_ty, *span).into(),
+                        TypeCheckErrorKind::InvalidIndexTargetType(indexed_target_ty)
+                            .at(*span)
+                            .into(),
                     );
                     covered_exprs.insert(*expr_id);
                     return true;
@@ -257,7 +266,11 @@ pub(super) fn try_check_expr_obligation_index(
             let owner_ty =
                 super::term_utils::peel_heap(super::term_utils::resolve_term(target, unifier));
             if matches!(owner_ty, Type::Map { .. }) {
-                errors.push(TypeCheckErrorKind::MapIndexAssignUnsupported(*span).into());
+                errors.push(
+                    TypeCheckErrorKind::MapIndexAssignUnsupported
+                        .at(*span)
+                        .into(),
+                );
                 covered_exprs.insert(*stmt_id);
             }
             true
@@ -291,7 +304,11 @@ pub(super) fn try_check_expr_obligation_index(
                 bad_bound_ty = Some(end_ty);
             }
             if let Some(bound_ty) = bad_bound_ty {
-                errors.push(TypeCheckErrorKind::IndexTypeNotInt(bound_ty, *span).into());
+                errors.push(
+                    TypeCheckErrorKind::IndexTypeNotInt(bound_ty)
+                        .at(*span)
+                        .into(),
+                );
                 covered_exprs.insert(*expr_id);
                 return true;
             }
@@ -300,7 +317,8 @@ pub(super) fn try_check_expr_obligation_index(
                 Type::Array { elem_ty, dims } => {
                     if dims.is_empty() {
                         errors.push(
-                            TypeCheckErrorKind::SliceTargetZeroDimArray(sliced_target_ty, *span)
+                            TypeCheckErrorKind::SliceTargetZeroDimArray(sliced_target_ty)
+                                .at(*span)
                                 .into(),
                         );
                         covered_exprs.insert(*expr_id);
@@ -348,7 +366,8 @@ pub(super) fn try_check_expr_obligation_index(
                 ty if super::term_utils::is_unresolved(ty) => {}
                 _ => {
                     errors.push(
-                        TypeCheckErrorKind::SliceTargetNotArrayOrString(sliced_target_ty, *span)
+                        TypeCheckErrorKind::SliceTargetNotArrayOrString(sliced_target_ty)
+                            .at(*span)
                             .into(),
                     );
                     covered_exprs.insert(*expr_id);
@@ -368,7 +387,11 @@ pub(super) fn try_check_expr_obligation_index(
             if !super::term_utils::is_int_like(&start_ty)
                 && !super::term_utils::is_unresolved(&start_ty)
             {
-                errors.push(TypeCheckErrorKind::IndexTypeNotInt(start_ty, *span).into());
+                errors.push(
+                    TypeCheckErrorKind::IndexTypeNotInt(start_ty)
+                        .at(*span)
+                        .into(),
+                );
                 covered_exprs.insert(*expr_id);
                 return true;
             }
@@ -376,7 +399,7 @@ pub(super) fn try_check_expr_obligation_index(
             if !super::term_utils::is_int_like(&end_ty)
                 && !super::term_utils::is_unresolved(&end_ty)
             {
-                errors.push(TypeCheckErrorKind::IndexTypeNotInt(end_ty, *span).into());
+                errors.push(TypeCheckErrorKind::IndexTypeNotInt(end_ty).at(*span).into());
                 covered_exprs.insert(*expr_id);
                 return true;
             }
@@ -412,7 +435,11 @@ fn emit_bad_int_index(
     bad_idx_ty: Type,
 ) {
     let diag_span = index_spans.get(idx_i).copied().unwrap_or(fallback_span);
-    errors.push(TypeCheckErrorKind::IndexTypeNotInt(bad_idx_ty, diag_span).into());
+    errors.push(
+        TypeCheckErrorKind::IndexTypeNotInt(bad_idx_ty)
+            .at(diag_span)
+            .into(),
+    );
     covered_exprs.insert(expr_id);
     if let Some(node_id) = index_nodes.get(idx_i) {
         covered_exprs.insert(*node_id);

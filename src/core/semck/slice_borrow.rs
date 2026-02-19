@@ -14,8 +14,8 @@ use std::collections::{HashMap, HashSet};
 use crate::core::analysis::dataflow::solve_forward;
 use crate::core::context::NormalizedContext;
 use crate::core::resolve::DefId;
-use crate::core::semck::SemCheckError;
 use crate::core::semck::liveness_util;
+use crate::core::semck::{SemCheckError, SemCheckErrorKind};
 use crate::core::tree::cfg::{
     AstBlockId, TreeCfg, TreeCfgBuilder, TreeCfgItem, TreeCfgNode, TreeCfgTerminator,
 };
@@ -148,7 +148,7 @@ fn check_write_target(
     if let Some(def) = base_def_id(expr, ctx)
         && borrowed_bases.contains(&def)
     {
-        errors.push(SemCheckError::SliceBorrowConflict(expr.span));
+        errors.push(SemCheckErrorKind::SliceBorrowConflict.at(expr.span));
     }
 }
 
@@ -575,7 +575,7 @@ impl<'a> BorrowConflictVisitor<'a> {
             && self.borrowed_bases.contains(&def)
         {
             self.errors
-                .push(SemCheckError::SliceBorrowConflict(receiver.span));
+                .push(SemCheckErrorKind::SliceBorrowConflict.at(receiver.span));
         }
 
         for (param, arg) in sig.params.iter().zip(args) {
@@ -591,7 +591,7 @@ impl<'a> BorrowConflictVisitor<'a> {
                 && self.borrowed_bases.contains(&def)
             {
                 self.errors
-                    .push(SemCheckError::SliceBorrowConflict(arg.span));
+                    .push(SemCheckErrorKind::SliceBorrowConflict.at(arg.span));
             }
         }
     }
@@ -606,7 +606,7 @@ impl Visitor<DefId, TypeId> for BorrowConflictVisitor<'_> {
                     && self.borrowed_bases.contains(&def)
                 {
                     self.errors
-                        .push(SemCheckError::SliceBorrowConflict(expr.span));
+                        .push(SemCheckErrorKind::SliceBorrowConflict.at(expr.span));
                 }
             }
             ExprKind::Call { args, .. } => {

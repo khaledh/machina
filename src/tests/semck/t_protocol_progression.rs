@@ -416,14 +416,13 @@ typestate Gateway : Auth::Client {
     let errors = semcheck_typestate_source_err(source);
     assert!(
         errors.iter().any(|err| matches!(
-            err,
-            crate::core::semck::SemCheckError::ProtocolProgressionMissingTriggerTransition(
+            err.kind(),
+            crate::core::semck::SemCheckErrorKind::ProtocolProgressionMissingTriggerTransition(
                 typestate,
                 protocol,
                 role,
                 state,
-                selector,
-                _
+                selector
             ) if typestate == "Gateway"
                 && protocol == "Auth"
                 && role == "Client"
@@ -508,16 +507,15 @@ typestate Gateway : Auth::Client {
     let errors = semcheck_typestate_source_err(source);
     assert!(
         errors.iter().any(|err| matches!(
-            err,
-            crate::core::semck::SemCheckError::ProtocolProgressionImpossibleEmit(
+            err.kind(),
+            crate::core::semck::SemCheckErrorKind::ProtocolProgressionImpossibleEmit(
                 typestate,
                 protocol,
                 role,
                 state,
                 selector,
                 payload,
-                to_role,
-                _
+                to_role
             ) if typestate == "Gateway"
                 && protocol == "Auth"
                 && role == "Client"
@@ -531,15 +529,14 @@ typestate Gateway : Auth::Client {
     );
     assert!(
         errors.iter().any(|err| matches!(
-            err,
-            crate::core::semck::SemCheckError::ProtocolProgressionImpossibleReturnState(
+            err.kind(),
+            crate::core::semck::SemCheckErrorKind::ProtocolProgressionImpossibleReturnState(
                 typestate,
                 protocol,
                 role,
                 state,
                 selector,
-                to_state,
-                _
+                to_state
             ) if typestate == "Gateway"
                 && protocol == "Auth"
                 && role == "Client"
@@ -672,16 +669,15 @@ typestate Gateway : Auth::Client {
         .iter()
         .filter(|err| {
             matches!(
-                err,
-                crate::core::semck::SemCheckError::ProtocolProgressionImpossibleEmit(
+                err.kind(),
+                crate::core::semck::SemCheckErrorKind::ProtocolProgressionImpossibleEmit(
                     typestate,
                     protocol,
                     role,
                     state,
                     selector,
                     payload,
-                    to_role,
-                    _
+                    to_role
                 ) if typestate == "Gateway"
                     && protocol == "Auth"
                     && role == "Client"

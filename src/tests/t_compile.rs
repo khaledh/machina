@@ -1190,17 +1190,21 @@ fn main() {}
     let has_transition_err = errs.iter().any(|err| {
         matches!(
             err,
-            crate::core::diag::CompileError::Resolve(
-                crate::core::resolve::ResolveError::TypestateFinalStateHasTransition(_, _, _)
-            )
+            crate::core::diag::CompileError::Resolve(res)
+                if matches!(
+                    res.kind(),
+                    crate::core::resolve::ResolveErrorKind::TypestateFinalStateHasTransition(..)
+                )
         )
     });
     let has_handler_err = errs.iter().any(|err| {
         matches!(
             err,
-            crate::core::diag::CompileError::Resolve(
-                crate::core::resolve::ResolveError::TypestateFinalStateHasHandler(_, _, _)
-            )
+            crate::core::diag::CompileError::Resolve(res)
+                if matches!(
+                    res.kind(),
+                    crate::core::resolve::ResolveErrorKind::TypestateFinalStateHasHandler(..)
+                )
         )
     });
     assert!(
@@ -1229,9 +1233,11 @@ fn main() {}
     assert!(
         errs.iter().any(|err| matches!(
             err,
-            crate::core::diag::CompileError::Resolve(
-                crate::core::resolve::ResolveError::TypestateUnknownStateAttribute(_, _, _, _)
-            )
+            crate::core::diag::CompileError::Resolve(res)
+                if matches!(
+                    res.kind(),
+                    crate::core::resolve::ResolveErrorKind::TypestateUnknownStateAttribute(..)
+                )
         )),
         "expected TypestateUnknownStateAttribute diagnostic, got {errs:?}"
     );
@@ -1566,9 +1572,11 @@ fn main() {
     let has_opt_in_error = err.iter().any(|e| {
         matches!(
             e,
-            crate::core::diag::CompileError::Resolve(
-                crate::core::resolve::ResolveError::TypestateSpawnRequiresMachinesOptIn(_)
-            )
+            crate::core::diag::CompileError::Resolve(res)
+                if matches!(
+                    res.kind(),
+                    crate::core::resolve::ResolveErrorKind::TypestateSpawnRequiresMachinesOptIn
+                )
         )
     });
     assert!(

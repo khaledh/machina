@@ -36,8 +36,8 @@ pub(super) fn try_check_expr_obligation_collections(
                         elem_ty_for_diag,
                         failure.path,
                         failure.failing_ty,
-                        *span,
                     )
+                    .at(*span)
                     .into(),
                 );
                 covered_exprs.insert(*expr_id);
@@ -63,8 +63,8 @@ pub(super) fn try_check_expr_obligation_collections(
                         key_ty_for_diag,
                         failure.path,
                         failure.failing_ty,
-                        *span,
                     )
+                    .at(*span)
                     .into(),
                 );
                 covered_exprs.insert(*expr_id);

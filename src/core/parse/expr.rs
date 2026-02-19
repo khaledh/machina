@@ -298,7 +298,8 @@ impl<'a> Parser<'a> {
                     let (_type_name, type_args) = self.parse_type_name_with_args()?;
                     return self.parse_typed_set_lit_with_args(marker, type_args);
                 }
-                Err(ParseError::ExpectedPrimary(self.curr_token.clone()))
+                Err(ParseErrorKind::ExpectedPrimary(self.curr_token.clone())
+                    .at(self.curr_token.span))
             }
             TK::KwMap => {
                 let marker = self.mark();
@@ -308,7 +309,8 @@ impl<'a> Parser<'a> {
                     let (_type_name, type_args) = self.parse_type_name_with_args()?;
                     return self.parse_typed_map_lit_with_args(marker, type_args);
                 }
-                Err(ParseError::ExpectedPrimary(self.curr_token.clone()))
+                Err(ParseErrorKind::ExpectedPrimary(self.curr_token.clone())
+                    .at(self.curr_token.span))
             }
             TK::KwSelf => {
                 let marker = self.mark();
@@ -343,7 +345,10 @@ impl<'a> Parser<'a> {
 
             TK::LBracket => self.parse_array_lit(),
 
-            _ => Err(ParseError::ExpectedPrimary(self.curr_token.clone())),
+            _ => {
+                Err(ParseErrorKind::ExpectedPrimary(self.curr_token.clone())
+                    .at(self.curr_token.span))
+            }
         }
     }
 
@@ -360,10 +365,10 @@ impl<'a> Parser<'a> {
         self.consume(&TK::LParen)?;
         let to_label = self.parse_ident()?;
         if to_label != "to" {
-            return Err(ParseError::ExpectedToken(
-                TK::Colon,
-                self.curr_token.clone(),
-            ));
+            return Err(
+                ParseErrorKind::ExpectedToken(TK::Colon, self.curr_token.clone())
+                    .at(self.curr_token.span),
+            );
         }
         self.consume(&TK::Colon)?;
         let to = self.parse_expr(0)?;
@@ -381,7 +386,10 @@ impl<'a> Parser<'a> {
                 payload: Box::new(payload),
                 request_site_label,
             },
-            _ => return Err(ParseError::ExpectedPrimary(self.curr_token.clone())),
+            _ => {
+                return Err(ParseErrorKind::ExpectedPrimary(self.curr_token.clone())
+                    .at(self.curr_token.span));
+            }
         };
 
         Ok(Expr {
@@ -437,10 +445,10 @@ impl<'a> Parser<'a> {
         // typestate command desugaring can lower it deterministically before
         // resolve/typecheck.
         let ExprKind::Var { ident, .. } = &expr.kind else {
-            return Err(ParseError::ExpectedToken(
-                TK::LParen,
-                self.curr_token.clone(),
-            ));
+            return Err(
+                ParseErrorKind::ExpectedToken(TK::LParen, self.curr_token.clone())
+                    .at(self.curr_token.span),
+            );
         };
 
         self.consume(&TK::Colon)?;
@@ -515,9 +523,10 @@ impl<'a> Parser<'a> {
         self.advance();
 
         if self.curr_token.kind == TK::RBracket {
-            return Err(ParseError::ExpectedArrayIndexOrRange(
-                self.curr_token.clone(),
-            ));
+            return Err(
+                ParseErrorKind::ExpectedArrayIndexOrRange(self.curr_token.clone())
+                    .at(self.curr_token.span),
+            );
         }
 
         if is_slice {
@@ -602,7 +611,8 @@ impl<'a> Parser<'a> {
                 self.advance();
                 self.parse_dot_named_postfix(expr, marker, "reply".to_string())
             }
-            _ => Err(ParseError::ExpectedStructField(self.curr_token.clone())),
+            _ => Err(ParseErrorKind::ExpectedStructField(self.curr_token.clone())
+                .at(self.curr_token.span)),
         }
     }
 
@@ -780,15 +790,18 @@ impl<'a> Parser<'a> {
             if allow_empty {
                 return Ok(Vec::new());
             }
-            return Err(ParseError::ExpectedPrimary(self.curr_token.clone()));
+            return Err(
+                ParseErrorKind::ExpectedPrimary(self.curr_token.clone()).at(self.curr_token.span)
+            );
         }
 
         let first = self.parse_expr(0)?;
         if self.curr_token.kind != TK::Comma {
             if require_singleton_trailing_comma {
-                return Err(ParseError::SingleElementSetMissingComma(
-                    self.curr_token.clone(),
-                ));
+                return Err(
+                    ParseErrorKind::SingleElementSetMissingComma(self.curr_token.clone())
+                        .at(self.curr_token.span),
+                );
             }
             return Ok(vec![first]);
         }
@@ -828,7 +841,9 @@ impl<'a> Parser<'a> {
             if allow_empty {
                 return Ok(Vec::new());
             }
-            return Err(ParseError::ExpectedPrimary(self.curr_token.clone()));
+            return Err(
+                ParseErrorKind::ExpectedPrimary(self.curr_token.clone()).at(self.curr_token.span)
+            );
         }
 
         let first = self.parse_map_lit_entry()?;
@@ -1001,7 +1016,11 @@ impl<'a> Parser<'a> {
                 self.advance();
                 "map".to_string()
             }
-            _ => return Err(ParseError::ExpectedIdent(self.curr_token.clone())),
+            _ => {
+                return Err(
+                    ParseErrorKind::ExpectedIdent(self.curr_token.clone()).at(self.curr_token.span)
+                );
+            }
         };
         let type_args = self.parse_type_args()?;
         Ok((name, type_args))

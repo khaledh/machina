@@ -22,10 +22,7 @@ struct HandleMethodSpec<'a> {
     tail: Expr,
 }
 
-fn build_handle_method(
-    spec: HandleMethodSpec<'_>,
-    node_id_gen: &mut NodeIdGen,
-) -> MethodDef {
+fn build_handle_method(spec: HandleMethodSpec<'_>, node_id_gen: &mut NodeIdGen) -> MethodDef {
     let span = Span::default();
 
     let mut items = runtime_current_or_error_items(node_id_gen, span);
@@ -140,7 +137,12 @@ fn typed_payload_pack_items(node_id_gen: &mut NodeIdGen, span: Span) -> Vec<pars
 }
 
 fn packed_field(index: usize, node_id_gen: &mut NodeIdGen, span: Span) -> Expr {
-    tuple_field_expr(var_expr("__mc_packed", node_id_gen, span), index, node_id_gen, span)
+    tuple_field_expr(
+        var_expr("__mc_packed", node_id_gen, span),
+        index,
+        node_id_gen,
+        span,
+    )
 }
 
 fn build_generic_send_method(node_id_gen: &mut NodeIdGen) -> MethodDef {
@@ -318,7 +320,10 @@ fn let_bind_with_error_check(
     [
         parsed::BlockItem::Stmt(let_bind_stmt(var_name, value, node_id_gen, span)),
         parsed::BlockItem::Expr(return_machine_error_if_zero(
-            var_name, error_kind, node_id_gen, span,
+            var_name,
+            error_kind,
+            node_id_gen,
+            span,
         )),
     ]
 }
@@ -458,11 +463,7 @@ pub(super) fn lower_spawn_func(
                 Expr {
                     id: node_id_gen.new_id(),
                     kind: ExprKind::TupleField {
-                        target: Box::new(var_expr(
-                            "__mc_initial_state_packed",
-                            node_id_gen,
-                            span,
-                        )),
+                        target: Box::new(var_expr("__mc_initial_state_packed", node_id_gen, span)),
                         index: 0,
                     },
                     ty: (),

@@ -5,7 +5,7 @@ use crate::core::api::{
 };
 use crate::core::context::ParsedContext;
 use crate::core::machine::request_site::labeled_request_site_key;
-use crate::core::resolve::ResolveError;
+use crate::core::resolve::ResolveErrorKind;
 use crate::core::tree::NodeIdGen;
 use crate::core::tree::resolved as res;
 use crate::core::tree::semantic as sem;
@@ -67,7 +67,7 @@ typestate Connection {
     let out = resolve_stage_with_policy(parsed, ResolveInputs::default(), FrontendPolicy::Strict);
     assert!(out.context.is_none());
     assert!(out.errors.iter().any(
-        |err| matches!(err, ResolveError::TypestateMissingNew(name, _) if name == "Connection")
+        |err| matches!(err.kind(), ResolveErrorKind::TypestateMissingNew(name) if name == "Connection")
     ));
 }
 
@@ -92,12 +92,10 @@ typestate Connection {
     let out = resolve_stage_with_policy(parsed, ResolveInputs::default(), FrontendPolicy::Strict);
     assert!(out.context.is_none());
     assert!(out.errors.iter().any(
-        |err| matches!(err, ResolveError::TypestateDuplicateState(ts, state, _) if ts == "Connection" && state == "Disconnected")
+        |err| matches!(err.kind(), ResolveErrorKind::TypestateDuplicateState(ts, state) if ts == "Connection" && state == "Disconnected")
     ));
     assert!(out.errors.iter().any(|err| {
-        matches!(
-            err,
-            ResolveError::TypestateInvalidTransitionReturn(ts, state, method, _)
+        matches!(err.kind(), ResolveErrorKind::TypestateInvalidTransitionReturn(ts, state, method)
                 if ts == "Connection" && state == "Disconnected" && method == "connect"
         )
     }));
@@ -124,19 +122,15 @@ typestate Connection {
     let out = resolve_stage_with_policy(parsed, ResolveInputs::default(), FrontendPolicy::Strict);
     assert!(out.context.is_none());
     assert!(out.errors.iter().any(
-        |err| matches!(err, ResolveError::TypestateDuplicateFieldsBlock(name, _) if name == "Connection")
+        |err| matches!(err.kind(), ResolveErrorKind::TypestateDuplicateFieldsBlock(name) if name == "Connection")
     ));
     assert!(out.errors.iter().any(|err| {
-        matches!(
-            err,
-            ResolveError::TypestateDuplicateStateFieldsBlock(ts, state, _)
+        matches!(err.kind(), ResolveErrorKind::TypestateDuplicateStateFieldsBlock(ts, state)
                 if ts == "Connection" && state == "Disconnected"
         )
     }));
     assert!(out.errors.iter().any(|err| {
-        matches!(
-            err,
-            ResolveError::TypestateStateFieldShadowsCarriedField(ts, state, field, _)
+        matches!(err.kind(), ResolveErrorKind::TypestateStateFieldShadowsCarriedField(ts, state, field)
                 if ts == "Connection" && state == "Disconnected" && field == "id"
         )
     }));
@@ -165,12 +159,10 @@ typestate Connection {
     let out = resolve_stage_with_policy(parsed, ResolveInputs::default(), FrontendPolicy::Strict);
     assert!(out.context.is_none());
     assert!(out.errors.iter().any(
-        |err| matches!(err, ResolveError::TypestateInvalidNewReturn(name, _) if name == "Connection")
+        |err| matches!(err.kind(), ResolveErrorKind::TypestateInvalidNewReturn(name) if name == "Connection")
     ));
     assert!(out.errors.iter().any(|err| {
-        matches!(
-            err,
-            ResolveError::TypestateDuplicateTransition(ts, state, method, _)
+        matches!(err.kind(), ResolveErrorKind::TypestateDuplicateTransition(ts, state, method)
                 if ts == "Connection" && state == "Disconnected" && method == "connect"
         )
     }));
@@ -198,9 +190,7 @@ fn main() -> u64 {
     let out = resolve_stage_with_policy(parsed, ResolveInputs::default(), FrontendPolicy::Strict);
     assert!(out.context.is_none());
     assert!(out.errors.iter().any(|err| {
-        matches!(
-            err,
-            ResolveError::TypestateStateLiteralOutsideTypestate(state, _)
+        matches!(err.kind(), ResolveErrorKind::TypestateStateLiteralOutsideTypestate(state)
                 if state == "Disconnected"
         )
     }));
@@ -227,9 +217,7 @@ typestate Connection {
     let out = resolve_stage_with_policy(parsed, ResolveInputs::default(), FrontendPolicy::Strict);
     assert!(out.context.is_none());
     assert!(out.errors.iter().any(|err| {
-        matches!(
-            err,
-            ResolveError::TypestateInvalidStateOnHandlerReturn(ts, state, _)
+        matches!(err.kind(), ResolveErrorKind::TypestateInvalidStateOnHandlerReturn(ts, state)
                 if ts == "Connection" && state == "Disconnected"
         )
     }));
@@ -345,7 +333,7 @@ typestate Gateway : Auth::Client {
         out.type_errors.iter().any(|e| {
             matches!(
                 e.kind(),
-                TypeCheckErrorKind::ProtocolStateHandlerMissing(ts, role, state, _, _)
+                TypeCheckErrorKind::ProtocolStateHandlerMissing(ts, role, state, _, ..)
                     if ts == "Gateway" && role == "Auth::Client" && state == "Awaiting"
             )
         }),
@@ -429,7 +417,7 @@ typestate Gateway : Auth::Client {
             matches!(
                 e.kind(),
                 TypeCheckErrorKind::ProtocolStateOutgoingPayloadNotAllowed(
-                    ts, role, state, _, _
+                    ts, role, state, _, ..
                 )
                     if ts == "Gateway" && role == "Auth::Client" && state == "Idle"
             )
@@ -595,7 +583,7 @@ typestate Gateway : Auth::Client {
         out.type_errors.iter().any(|e| {
             matches!(
                 e.kind(),
-                TypeCheckErrorKind::ProtocolStateHandlerMissing(ts, role, state, _, _)
+                TypeCheckErrorKind::ProtocolStateHandlerMissing(ts, role, state, _, ..)
                     if ts == "Gateway" && role == "Auth::Client" && state == "Awaiting"
             )
         }),
@@ -679,7 +667,7 @@ typestate Gateway : Auth::Client {
         out.type_errors.iter().any(|e| {
             matches!(
                 e.kind(),
-                TypeCheckErrorKind::ProtocolStateOutgoingPayloadNotAllowed(ts, role, state, _, _)
+                TypeCheckErrorKind::ProtocolStateOutgoingPayloadNotAllowed(ts, role, state, _, ..)
                     if ts == "Gateway" && role == "Auth::Client" && state == "Idle"
             )
         }),
@@ -839,7 +827,7 @@ typestate Gateway : Auth::Client {
             matches!(
                 e.kind(),
                 TypeCheckErrorKind::ProtocolStateEmitDestinationRoleMismatch(
-                    ts, role, state, _, expected, field, bound, _
+                    ts, role, state, _, expected, field, bound, ..
                 )
                     if ts == "Gateway"
                         && role == "Auth::Client"
@@ -930,7 +918,7 @@ typestate Gateway : Auth::Client {
             matches!(
                 e.kind(),
                 TypeCheckErrorKind::ProtocolStateEmitDestinationRoleMismatch(
-                    ts, role, state, _, expected, field, bound, _
+                    ts, role, state, _, expected, field, bound, ..
                 )
                     if ts == "Gateway"
                         && role == "Auth::Client"
@@ -1026,7 +1014,7 @@ typestate Gateway : Auth::Client {
                     _,
                     to_role,
                     _,
-                    _
+                    ..
                 )
                     if ts == "Gateway" && role == "Auth::Client" && to_role == "Server"
             )
@@ -1112,7 +1100,7 @@ typestate Gateway : Auth::Client {
         out.type_errors.iter().any(|e| {
             matches!(
                 e.kind(),
-                TypeCheckErrorKind::ProtocolRequestContractAmbiguous(ts, role, _, to_role, _)
+                TypeCheckErrorKind::ProtocolRequestContractAmbiguous(ts, role, _, to_role, ..)
                     if ts == "Gateway" && role == "Auth::Client" && to_role == "Server"
             )
         }),
@@ -1167,7 +1155,7 @@ typestate Gateway : Auth::Server {
             matches!(
                 e.kind(),
                 TypeCheckErrorKind::ProtocolStateOutgoingPayloadNotAllowed(
-                    ts, role, state, _, _
+                    ts, role, state, _, ..
                 ) if ts == "Gateway" && role == "Auth::Server" && state == "Ready"
             )
         }),
@@ -1207,7 +1195,7 @@ typestate Gateway {
         out.type_errors.iter().any(|e| {
             matches!(
                 e.kind(),
-                TypeCheckErrorKind::ReplyCapConsumedMultipleTimes(name, _) if name == "cap"
+                TypeCheckErrorKind::ReplyCapConsumedMultipleTimes(name, ..) if name == "cap"
             )
         }),
         "expected double-consume reply cap error, got {:?}",
@@ -1249,7 +1237,7 @@ typestate Gateway {
         out.type_errors.iter().any(|e| {
             matches!(
                 e.kind(),
-                TypeCheckErrorKind::ReplyCapMustBeConsumed(name, _) if name == "cap"
+                TypeCheckErrorKind::ReplyCapMustBeConsumed(name, ..) if name == "cap"
             )
         }),
         "expected missing-consume reply cap error, got {:?}",
@@ -1287,7 +1275,7 @@ typestate Gateway {
     assert!(
         out.type_errors.iter().any(|e| matches!(
             e.kind(),
-            TypeCheckErrorKind::ReplyPayloadNotAllowed(_, _, _)
+            TypeCheckErrorKind::ReplyPayloadNotAllowed(_, _, ..)
         )),
         "expected invalid reply payload error, got {:?}",
         out.type_errors
@@ -1322,7 +1310,7 @@ typestate Gateway {
     assert!(
         out.type_errors
             .iter()
-            .any(|e| matches!(e.kind(), TypeCheckErrorKind::ReplyOutsideHandler(_))),
+            .any(|e| matches!(e.kind(), TypeCheckErrorKind::ReplyOutsideHandler)),
         "expected reply outside handler error, got {:?}",
         out.type_errors
     );
@@ -1401,7 +1389,7 @@ typestate Connection {
         out.type_errors.iter().any(|e| {
             matches!(
                 e.kind(),
-                TypeCheckErrorKind::TypestateOverlappingOnHandlers(ts, state, _, _, _)
+                TypeCheckErrorKind::TypestateOverlappingOnHandlers(ts, state, _, _, ..)
                     if ts == "Connection" && state == "AwaitAuth"
             )
         }),
@@ -1527,7 +1515,7 @@ typestate Connection {
                     state,
                     _,
                     _,
-                    _
+                    ..
                 ) if ts == "Connection" && state == "AwaitAuth"
             )
         }),
@@ -1574,7 +1562,7 @@ typestate Connection {
         out.type_errors.iter().any(|e| {
             matches!(
                 e.kind(),
-                TypeCheckErrorKind::TypestateRequestMissingResponseHandler(ts, _, _, _, _)
+                TypeCheckErrorKind::TypestateRequestMissingResponseHandler(ts, _, _, _, ..)
                     if ts == "Connection"
             )
         }),
@@ -1621,7 +1609,7 @@ typestate Connection {
         out.type_errors.iter().any(|e| {
             matches!(
                 e.kind(),
-                TypeCheckErrorKind::TypestateHandlerUnsupportedResponseVariant(ts, _, _, _, _)
+                TypeCheckErrorKind::TypestateHandlerUnsupportedResponseVariant(ts, _, _, _, ..)
                     if ts == "Connection"
             )
         }),

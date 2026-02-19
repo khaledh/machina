@@ -2,7 +2,7 @@ use crate::core::context::{ParsedContext, SemanticCheckedContext};
 use crate::core::lexer::{LexError, Lexer, Token};
 use crate::core::parse::Parser;
 use crate::core::resolve::resolve;
-use crate::core::semck::{SemCheckError, sem_check};
+use crate::core::semck::{SemCheckError, SemCheckErrorKind, sem_check};
 use crate::core::typecheck::TypeCheckErrorKind;
 use crate::core::typecheck::type_check;
 use crate::core::types::Type;
@@ -38,8 +38,8 @@ fn test_for_range_invalid_bounds() {
 
     if let Err(errors) = result {
         assert!(!errors.is_empty(), "Expected at least one error");
-        match &errors[0] {
-            SemCheckError::InvalidRangeBounds(min, max, _) => {
+        match errors[0].kind() {
+            SemCheckErrorKind::InvalidRangeBounds(min, max) => {
                 assert_eq!(*min, 5);
                 assert_eq!(*max, 5);
             }
@@ -74,8 +74,8 @@ fn test_range_literal_out_of_bounds() {
 
     if let Err(errors) = result {
         assert!(!errors.is_empty(), "Expected at least one error");
-        match &errors[0] {
-            SemCheckError::ValueOutOfRange(value, min, max, _) => {
+        match errors[0].kind() {
+            SemCheckErrorKind::ValueOutOfRange(value, min, max) => {
                 assert_eq!(*value, 42);
                 assert_eq!(*min, 50);
                 assert_eq!(*max, 100);
@@ -112,8 +112,8 @@ fn test_signed_bounds_rejects_out_of_range_literal() {
 
     if let Err(errors) = result {
         assert!(!errors.is_empty(), "Expected at least one error");
-        match &errors[0] {
-            SemCheckError::ValueOutOfRange(value, min, max, _) => {
+        match errors[0].kind() {
+            SemCheckErrorKind::ValueOutOfRange(value, min, max) => {
                 assert_eq!(*value, -6);
                 assert_eq!(*min, -5);
                 assert_eq!(*max, 5);
@@ -145,7 +145,7 @@ fn test_range_out_of_bounds_via_const_binding() {
         assert!(
             errors
                 .iter()
-                .any(|err| matches!(err, SemCheckError::ValueOutOfRange(42, 50, 100, _))),
+                .any(|err| matches!(err.kind(), SemCheckErrorKind::ValueOutOfRange(42, 50, 100))),
             "Expected ValueOutOfRange(42, 50, 100), got {:?}",
             errors
         );
@@ -166,8 +166,8 @@ fn test_nonzero_literal_rejected() {
 
     if let Err(errors) = result {
         assert!(!errors.is_empty(), "Expected at least one error");
-        match &errors[0] {
-            SemCheckError::ValueNotNonZero(value, _) => {
+        match errors[0].kind() {
+            SemCheckErrorKind::ValueNotNonZero(value) => {
                 assert_eq!(*value, 0);
             }
             e => panic!("Expected ValueNotNonZero error, got {:?}", e),
@@ -196,7 +196,7 @@ fn test_nonzero_out_of_bounds_via_const_binding() {
         assert!(
             errors
                 .iter()
-                .any(|err| matches!(err, SemCheckError::ValueNotNonZero(0, _))),
+                .any(|err| matches!(err.kind(), SemCheckErrorKind::ValueNotNonZero(0))),
             "Expected ValueNotNonZero(0), got {:?}",
             errors
         );
@@ -217,8 +217,8 @@ fn test_mod_by_zero_rejected() {
 
     if let Err(errors) = result {
         assert!(!errors.is_empty(), "Expected at least one error");
-        match &errors[0] {
-            SemCheckError::DivisionByZero(_) => {}
+        match errors[0].kind() {
+            SemCheckErrorKind::DivisionByZero => {}
             e => panic!("Expected DivisionByZero error, got {:?}", e),
         }
     }
@@ -239,8 +239,8 @@ fn test_div_by_zero_via_const_binding() {
 
     if let Err(errors) = result {
         assert!(!errors.is_empty(), "Expected at least one error");
-        match &errors[0] {
-            SemCheckError::DivisionByZero(_) => {}
+        match errors[0].kind() {
+            SemCheckErrorKind::DivisionByZero => {}
             e => panic!("Expected DivisionByZero error, got {:?}", e),
         }
     }
@@ -260,8 +260,8 @@ fn test_range_invalid_bounds() {
 
     if let Err(errors) = result {
         assert!(!errors.is_empty(), "Expected at least one error");
-        match &errors[0] {
-            SemCheckError::InvalidRangeBounds(min, max, _) => {
+        match errors[0].kind() {
+            SemCheckErrorKind::InvalidRangeBounds(min, max) => {
                 assert_eq!(*min, 10);
                 assert_eq!(*max, 10);
             }
@@ -318,7 +318,7 @@ fn test_closure_imm_capture_conflict() {
         assert!(
             errors
                 .iter()
-                .any(|err| matches!(err, SemCheckError::ClosureBorrowConflict(_, _))),
+                .any(|err| matches!(err.kind(), SemCheckErrorKind::ClosureBorrowConflict(..))),
             "Expected ClosureBorrowConflict error, got {:?}",
             errors
         );
@@ -346,7 +346,7 @@ fn test_closure_mut_capture_conflict() {
         assert!(
             errors
                 .iter()
-                .any(|err| matches!(err, SemCheckError::ClosureBorrowConflict(_, _))),
+                .any(|err| matches!(err.kind(), SemCheckErrorKind::ClosureBorrowConflict(..))),
             "Expected ClosureBorrowConflict error, got {:?}",
             errors
         );
@@ -389,7 +389,7 @@ fn test_closure_capture_escape_arg_rejected() {
         assert!(
             errors
                 .iter()
-                .any(|err| matches!(err, SemCheckError::ClosureEscapeArg(_))),
+                .any(|err| matches!(err.kind(), SemCheckErrorKind::ClosureEscapeArg)),
             "Expected ClosureEscapeArg error, got {:?}",
             errors
         );
@@ -416,7 +416,7 @@ fn test_closure_move_capture_use_after_move() {
         assert!(
             errors
                 .iter()
-                .any(|err| matches!(err, SemCheckError::UseAfterMove(_, _))),
+                .any(|err| matches!(err.kind(), SemCheckErrorKind::UseAfterMove(..))),
             "Expected UseAfterMove error, got {:?}",
             errors
         );
@@ -439,8 +439,8 @@ fn test_struct_pattern_missing_field() {
 
     if let Err(errors) = result {
         assert!(!errors.is_empty(), "Expected at least one error");
-        match &errors[0] {
-            SemCheckError::StructFieldsMissing(_, _) => {}
+        match errors[0].kind() {
+            SemCheckErrorKind::StructFieldsMissing(..) => {}
             e => panic!("Expected StructFieldsMissing error, got {:?}", e),
         }
     }
@@ -462,8 +462,8 @@ fn test_struct_pattern_unknown_field() {
 
     if let Err(errors) = result {
         assert!(!errors.is_empty(), "Expected at least one error");
-        match &errors[0] {
-            SemCheckError::UnknownStructField(_, _) => {}
+        match errors[0].kind() {
+            SemCheckErrorKind::UnknownStructField(..) => {}
             e => panic!("Expected UnknownStructField error, got {:?}", e),
         }
     }
@@ -485,8 +485,8 @@ fn test_struct_pattern_duplicate_field() {
 
     if let Err(errors) = result {
         assert!(!errors.is_empty(), "Expected at least one error");
-        match &errors[0] {
-            SemCheckError::DuplicateStructField(_, _) => {}
+        match errors[0].kind() {
+            SemCheckErrorKind::DuplicateStructField(..) => {}
             e => panic!("Expected DuplicateStructField error, got {:?}", e),
         }
     }
@@ -515,8 +515,8 @@ fn test_method_inout_self_requires_mutable() {
 
     if let Err(errors) = result {
         assert!(!errors.is_empty(), "Expected at least one error");
-        match &errors[0] {
-            SemCheckError::InOutArgNotMutable(_) => {}
+        match errors[0].kind() {
+            SemCheckErrorKind::InOutArgNotMutable => {}
             e => panic!("Expected InOutArgNotMutable error, got {:?}", e),
         }
     }
@@ -544,8 +544,8 @@ fn test_method_inout_self_requires_lvalue() {
 
     if let Err(errors) = result {
         assert!(!errors.is_empty(), "Expected at least one error");
-        match &errors[0] {
-            SemCheckError::InOutArgNotLvalue(_) => {}
+        match errors[0].kind() {
+            SemCheckErrorKind::InOutArgNotLvalue => {}
             e => panic!("Expected InOutArgNotLvalue error, got {:?}", e),
         }
     }
@@ -573,8 +573,8 @@ fn test_method_out_self_rejected() {
 
     if let Err(errors) = result {
         assert!(!errors.is_empty(), "Expected at least one error");
-        match &errors[0] {
-            SemCheckError::OutSelfNotAllowed(_) => {}
+        match errors[0].kind() {
+            SemCheckErrorKind::OutSelfNotAllowed => {}
             e => panic!("Expected OutSelfNotAllowed error, got {:?}", e),
         }
     }
@@ -597,8 +597,8 @@ fn test_struct_update_unknown_field() {
 
     if let Err(errors) = result {
         assert!(!errors.is_empty(), "Expected at least one error");
-        match &errors[0] {
-            SemCheckError::UnknownStructField(_, _) => {}
+        match errors[0].kind() {
+            SemCheckErrorKind::UnknownStructField(..) => {}
             e => panic!("Expected UnknownStructField error, got {:?}", e),
         }
     }
@@ -617,8 +617,8 @@ fn test_sink_param_requires_owned_type() {
 
     if let Err(errors) = result {
         assert!(!errors.is_empty(), "Expected at least one error");
-        match &errors[0] {
-            SemCheckError::SinkParamNotOwned(_, _) => {}
+        match errors[0].kind() {
+            SemCheckErrorKind::SinkParamNotOwned(..) => {}
             e => panic!("Expected SinkParamNotOwned error, got {:?}", e),
         }
     }
@@ -653,8 +653,8 @@ fn test_sink_arg_missing_move() {
 
     if let Err(errors) = result {
         assert!(!errors.is_empty(), "Expected at least one error");
-        match &errors[0] {
-            SemCheckError::SinkArgMissingMove(_) => {}
+        match errors[0].kind() {
+            SemCheckErrorKind::SinkArgMissingMove => {}
             e => panic!("Expected SinkArgMissingMove error, got {:?}", e),
         }
     }
@@ -674,8 +674,8 @@ fn test_var_decl_use_before_init_rejected() {
 
     if let Err(errors) = result {
         assert!(!errors.is_empty(), "Expected at least one error");
-        match &errors[0] {
-            SemCheckError::UseBeforeInit(_, _) => {}
+        match errors[0].kind() {
+            SemCheckErrorKind::UseBeforeInit(..) => {}
             e => panic!("Expected UseBeforeInit error, got {:?}", e),
         }
     }
@@ -711,8 +711,8 @@ fn test_var_decl_field_write_rejected() {
 
     if let Err(errors) = result {
         assert!(!errors.is_empty(), "Expected at least one error");
-        match &errors[0] {
-            SemCheckError::UseBeforeInit(_, _) => {}
+        match errors[0].kind() {
+            SemCheckErrorKind::UseBeforeInit(..) => {}
             e => panic!("Expected UseBeforeInit error, got {:?}", e),
         }
     }
@@ -735,8 +735,8 @@ fn test_struct_update_duplicate_field() {
 
     if let Err(errors) = result {
         assert!(!errors.is_empty(), "Expected at least one error");
-        match &errors[0] {
-            SemCheckError::DuplicateStructField(_, _) => {}
+        match errors[0].kind() {
+            SemCheckErrorKind::DuplicateStructField(..) => {}
             e => panic!("Expected DuplicateStructField error, got {:?}", e),
         }
     }
@@ -770,7 +770,7 @@ fn test_enum_variant_payload_arity_mismatch() {
     if let Err(errors) = result {
         assert!(!errors.is_empty(), "Expected at least one error");
         match errors[0].kind() {
-            TypeCheckErrorKind::EnumVariantPayloadArityMismatch(name, expected, got, _) => {
+            TypeCheckErrorKind::EnumVariantPayloadArityMismatch(name, expected, got, ..) => {
                 assert_eq!(name, "A");
                 assert_eq!(*expected, 1);
                 assert_eq!(*got, 2);
@@ -800,8 +800,8 @@ fn test_match_non_exhaustive() {
 
     if let Err(errors) = result {
         assert!(!errors.is_empty(), "Expected at least one error");
-        match &errors[0] {
-            SemCheckError::NonExhaustiveMatch(_) => {}
+        match errors[0].kind() {
+            SemCheckErrorKind::NonExhaustiveMatch => {}
             e => panic!("Expected NonExhaustiveMatch error, got {:?}", e),
         }
     }
@@ -840,10 +840,10 @@ fn test_match_error_union_non_exhaustive_reports_all_missing_variants() {
     if let Err(errors) = result {
         let err = errors
             .iter()
-            .find(|e| matches!(e, SemCheckError::NonExhaustiveUnionMatch(_, _)))
+            .find(|e| matches!(e.kind(), SemCheckErrorKind::NonExhaustiveUnionMatch(..)))
             .expect("Expected NonExhaustiveUnionMatch error");
-        match err {
-            SemCheckError::NonExhaustiveUnionMatch(missing, _) => {
+        match err.kind() {
+            SemCheckErrorKind::NonExhaustiveUnionMatch(missing) => {
                 assert_eq!(missing.len(), 2);
                 assert!(missing.iter().any(|name| name == "IoError"));
                 assert!(missing.iter().any(|name| name == "ParseError"));
@@ -893,8 +893,8 @@ fn test_match_duplicate_variant() {
 
     if let Err(errors) = result {
         assert!(!errors.is_empty(), "Expected at least one error");
-        match &errors[0] {
-            SemCheckError::DuplicateMatchVariant(name, _) => {
+        match errors[0].kind() {
+            SemCheckErrorKind::DuplicateMatchVariant(name) => {
                 assert_eq!(name, "Red");
             }
             e => panic!("Expected DuplicateMatchVariant error, got {:?}", e),
@@ -946,8 +946,8 @@ fn test_match_error_union_non_exhaustive() {
 
     if let Err(errors) = result {
         assert!(!errors.is_empty(), "Expected at least one error");
-        match &errors[0] {
-            SemCheckError::NonExhaustiveUnionMatch(missing, _) => {
+        match errors[0].kind() {
+            SemCheckErrorKind::NonExhaustiveUnionMatch(missing) => {
                 assert_eq!(missing.len(), 1);
                 assert_eq!(missing[0], "IoError");
             }
@@ -985,8 +985,8 @@ fn test_match_bool_non_exhaustive() {
 
     if let Err(errors) = result {
         assert!(!errors.is_empty(), "Expected at least one error");
-        match &errors[0] {
-            SemCheckError::NonExhaustiveMatch(_) => {}
+        match errors[0].kind() {
+            SemCheckErrorKind::NonExhaustiveMatch => {}
             e => panic!("Expected NonExhaustiveMatch error, got {:?}", e),
         }
     }
@@ -1008,8 +1008,8 @@ fn test_match_bool_invalid_pattern() {
 
     if let Err(errors) = result {
         assert!(!errors.is_empty(), "Expected at least one error");
-        match &errors[0] {
-            SemCheckError::InvalidMatchPattern(_, _) => {}
+        match errors[0].kind() {
+            SemCheckErrorKind::InvalidMatchPattern(..) => {}
             e => panic!("Expected InvalidMatchPattern error, got {:?}", e),
         }
     }
@@ -1044,8 +1044,8 @@ fn test_match_int_non_exhaustive() {
 
     if let Err(errors) = result {
         assert!(!errors.is_empty(), "Expected at least one error");
-        match &errors[0] {
-            SemCheckError::NonExhaustiveMatch(_) => {}
+        match errors[0].kind() {
+            SemCheckErrorKind::NonExhaustiveMatch => {}
             e => panic!("Expected NonExhaustiveMatch error, got {:?}", e),
         }
     }
@@ -1067,8 +1067,8 @@ fn test_match_int_invalid_pattern() {
 
     if let Err(errors) = result {
         assert!(!errors.is_empty(), "Expected at least one error");
-        match &errors[0] {
-            SemCheckError::InvalidMatchPattern(_, _) => {}
+        match errors[0].kind() {
+            SemCheckErrorKind::InvalidMatchPattern(..) => {}
             e => panic!("Expected InvalidMatchPattern error, got {:?}", e),
         }
     }
@@ -1091,8 +1091,8 @@ fn test_match_int_duplicate_literal() {
 
     if let Err(errors) = result {
         assert!(!errors.is_empty(), "Expected at least one error");
-        match &errors[0] {
-            SemCheckError::DuplicateMatchVariant(_, _) => {}
+        match errors[0].kind() {
+            SemCheckErrorKind::DuplicateMatchVariant(..) => {}
             e => panic!("Expected DuplicateMatchVariant error, got {:?}", e),
         }
     }
@@ -1153,8 +1153,8 @@ fn test_match_tuple_literals_require_wildcard() {
 
     if let Err(errors) = result {
         assert!(!errors.is_empty(), "Expected at least one error");
-        match &errors[0] {
-            SemCheckError::NonExhaustiveMatch(_) => {}
+        match errors[0].kind() {
+            SemCheckErrorKind::NonExhaustiveMatch => {}
             e => panic!("Expected NonExhaustiveMatch error, got {:?}", e),
         }
     }
@@ -1196,7 +1196,7 @@ fn test_match_wildcard_not_last() {
         assert!(
             errors
                 .iter()
-                .any(|e| matches!(e, SemCheckError::WildcardArmNotLast(_))),
+                .any(|e| matches!(e.kind(), SemCheckErrorKind::WildcardArmNotLast)),
             "Expected WildcardArmNotLast error, got {:?}",
             errors
         );
@@ -1218,8 +1218,8 @@ fn test_match_target_not_enum() {
 
     if let Err(errors) = result {
         assert!(!errors.is_empty(), "Expected at least one error");
-        match &errors[0] {
-            SemCheckError::MatchTargetNotEnum(ty, _) => {
+        match errors[0].kind() {
+            SemCheckErrorKind::MatchTargetNotEnum(ty) => {
                 assert_eq!(*ty, Type::String);
             }
             e => panic!("Expected MatchTargetNotEnum error, got {:?}", e),
@@ -1259,8 +1259,8 @@ fn test_inout_param_scalar_rejected() {
 
     if let Err(errors) = result {
         assert!(!errors.is_empty(), "Expected at least one error");
-        match &errors[0] {
-            SemCheckError::InOutParamNotAggregate(_, _) => {}
+        match errors[0].kind() {
+            SemCheckErrorKind::InOutParamNotAggregate(..) => {}
             e => panic!("Expected InOutParamNotAggregate error, got {:?}", e),
         }
     }
@@ -1299,8 +1299,8 @@ fn test_out_param_scalar_rejected() {
 
     if let Err(errors) = result {
         assert!(!errors.is_empty(), "Expected at least one error");
-        match &errors[0] {
-            SemCheckError::OutParamNotAggregate(_, _) => {}
+        match errors[0].kind() {
+            SemCheckErrorKind::OutParamNotAggregate(..) => {}
             e => panic!("Expected OutParamNotAggregate error, got {:?}", e),
         }
     }
@@ -1323,8 +1323,8 @@ fn test_inout_arg_not_lvalue() {
 
     if let Err(errors) = result {
         assert!(!errors.is_empty(), "Expected at least one error");
-        match &errors[0] {
-            SemCheckError::InOutArgNotLvalue(_) => {}
+        match errors[0].kind() {
+            SemCheckErrorKind::InOutArgNotLvalue => {}
             e => panic!("Expected InOutArgNotLvalue error, got {:?}", e),
         }
     }
@@ -1348,8 +1348,8 @@ fn test_inout_arg_missing_mode() {
 
     if let Err(errors) = result {
         assert!(!errors.is_empty(), "Expected at least one error");
-        match &errors[0] {
-            SemCheckError::InOutArgMissingMode(_) => {}
+        match errors[0].kind() {
+            SemCheckErrorKind::InOutArgMissingMode => {}
             e => panic!("Expected InOutArgMissingMode error, got {:?}", e),
         }
     }
@@ -1372,8 +1372,8 @@ fn test_out_arg_not_lvalue() {
 
     if let Err(errors) = result {
         assert!(!errors.is_empty(), "Expected at least one error");
-        match &errors[0] {
-            SemCheckError::OutArgNotLvalue(_) => {}
+        match errors[0].kind() {
+            SemCheckErrorKind::OutArgNotLvalue => {}
             e => panic!("Expected OutArgNotLvalue error, got {:?}", e),
         }
     }
@@ -1397,8 +1397,8 @@ fn test_out_arg_missing_mode() {
 
     if let Err(errors) = result {
         assert!(!errors.is_empty(), "Expected at least one error");
-        match &errors[0] {
-            SemCheckError::OutArgMissingMode(_) => {}
+        match errors[0].kind() {
+            SemCheckErrorKind::OutArgMissingMode => {}
             e => panic!("Expected OutArgMissingMode error, got {:?}", e),
         }
     }
@@ -1422,8 +1422,8 @@ fn test_inout_arg_not_mutable() {
 
     if let Err(errors) = result {
         assert!(!errors.is_empty(), "Expected at least one error");
-        match &errors[0] {
-            SemCheckError::InOutArgNotMutable(_) => {}
+        match errors[0].kind() {
+            SemCheckErrorKind::InOutArgNotMutable => {}
             e => panic!("Expected InOutArgNotMutable error, got {:?}", e),
         }
     }
@@ -1447,8 +1447,8 @@ fn test_out_arg_not_mutable() {
 
     if let Err(errors) = result {
         assert!(!errors.is_empty(), "Expected at least one error");
-        match &errors[0] {
-            SemCheckError::OutArgNotMutable(_) => {}
+        match errors[0].kind() {
+            SemCheckErrorKind::OutArgNotMutable => {}
             e => panic!("Expected OutArgNotMutable error, got {:?}", e),
         }
     }
@@ -1517,8 +1517,8 @@ fn test_partial_init_local_without_full_init_rejected() {
 
     if let Err(errors) = result {
         assert!(!errors.is_empty(), "Expected at least one error");
-        match &errors[0] {
-            SemCheckError::PartialInitNotAllowed(_, _) => {}
+        match errors[0].kind() {
+            SemCheckErrorKind::PartialInitNotAllowed(..) => {}
             e => panic!("Expected PartialInitNotAllowed error, got {:?}", e),
         }
     }
@@ -1538,8 +1538,8 @@ fn test_out_param_requires_init_on_all_paths() {
 
     if let Err(errors) = result {
         assert!(!errors.is_empty(), "Expected at least one error");
-        match &errors[0] {
-            SemCheckError::OutParamNotInitialized(_, _) => {}
+        match errors[0].kind() {
+            SemCheckErrorKind::OutParamNotInitialized(..) => {}
             e => panic!("Expected OutParamNotInitialized error, got {:?}", e),
         }
     }
@@ -1575,8 +1575,8 @@ fn test_out_param_struct_field_use_before_init_rejected() {
 
     if let Err(errors) = result {
         assert!(!errors.is_empty(), "Expected at least one error");
-        match &errors[0] {
-            SemCheckError::UseBeforeInit(_, _) => {}
+        match errors[0].kind() {
+            SemCheckErrorKind::UseBeforeInit(..) => {}
             e => panic!("Expected UseBeforeInit error, got {:?}", e),
         }
     }
@@ -1616,7 +1616,7 @@ fn test_overlap_inout_same_base_rejected() {
         assert!(
             errors
                 .iter()
-                .any(|e| matches!(e, SemCheckError::OverlappingLvalueArgs(_))),
+                .any(|e| matches!(e.kind(), SemCheckErrorKind::OverlappingLvalueArgs)),
             "Expected OverlappingLvalueArgs error"
         );
     }
@@ -1700,7 +1700,7 @@ fn test_overlap_slices_rejected() {
         assert!(
             errors
                 .iter()
-                .any(|e| matches!(e, SemCheckError::OverlappingLvalueArgs(_))),
+                .any(|e| matches!(e.kind(), SemCheckErrorKind::OverlappingLvalueArgs)),
             "Expected OverlappingLvalueArgs error"
         );
     }
@@ -1728,7 +1728,7 @@ fn test_overlap_borrow_and_sink_move_rejected() {
         assert!(
             errors
                 .iter()
-                .any(|e| matches!(e, SemCheckError::OverlappingLvalueArgs(_))),
+                .any(|e| matches!(e.kind(), SemCheckErrorKind::OverlappingLvalueArgs)),
             "Expected OverlappingLvalueArgs error"
         );
     }
@@ -1753,7 +1753,7 @@ fn test_slice_borrow_blocks_mutation() {
         assert!(
             errors
                 .iter()
-                .any(|e| matches!(e, SemCheckError::SliceBorrowConflict(_))),
+                .any(|e| matches!(e.kind(), SemCheckErrorKind::SliceBorrowConflict)),
             "Expected SliceBorrowConflict error"
         );
     }
@@ -1822,7 +1822,7 @@ fn test_slice_borrow_rebind_not_all_paths_rejected() {
         assert!(
             errors
                 .iter()
-                .any(|e| matches!(e, SemCheckError::SliceBorrowConflict(_)))
+                .any(|e| matches!(e.kind(), SemCheckErrorKind::SliceBorrowConflict))
         );
     }
 }
@@ -1844,7 +1844,7 @@ fn test_slice_return_forbidden() {
         assert!(
             errors
                 .iter()
-                .any(|e| matches!(e, SemCheckError::SliceEscapeReturn(_))),
+                .any(|e| matches!(e.kind(), SemCheckErrorKind::SliceEscapeReturn)),
             "Expected SliceEscapeReturn error"
         );
     }
@@ -1870,7 +1870,7 @@ fn test_slice_store_forbidden_in_struct() {
         assert!(
             errors
                 .iter()
-                .any(|e| matches!(e, SemCheckError::SliceEscapeStore(_))),
+                .any(|e| matches!(e.kind(), SemCheckErrorKind::SliceEscapeStore)),
             "Expected SliceEscapeStore error"
         );
     }
@@ -1892,7 +1892,7 @@ fn test_slice_target_requires_lvalue() {
         assert!(
             errors
                 .iter()
-                .any(|e| matches!(e, SemCheckError::SliceTargetNotLvalue(_))),
+                .any(|e| matches!(e.kind(), SemCheckErrorKind::SliceTargetNotLvalue)),
             "Expected SliceTargetNotLvalue error"
         );
     }
