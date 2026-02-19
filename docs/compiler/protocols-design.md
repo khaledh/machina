@@ -137,7 +137,8 @@ Implemented protocol checks:
 - `ReplyCap` linearity checks (must consume exactly once; no double-consume).
 
 Evidence:
-- `src/core/typecheck/validate.rs`
+- `src/core/typecheck/validate/protocol.rs`
+- `src/core/typecheck/validate/reply_cap.rs`
 - protocol-related diagnostics in `src/core/typecheck/errors.rs`
 - tests:
   - `src/tests/core/t_api.rs`
