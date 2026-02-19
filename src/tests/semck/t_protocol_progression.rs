@@ -461,3 +461,150 @@ typestate Gateway : Auth::Client {
         errors
     );
 }
+
+#[test]
+fn semck_progression_accepts_valid_emit_and_return_for_trigger() {
+    let source = r#"
+type Start = {}
+type AuthReq = {}
+
+protocol Auth {
+    msg Start;
+    msg AuthReq;
+
+    role Client {
+        state Idle {
+            on Start@Server -> Awaiting {
+                effects: [ AuthReq ~> Server ]
+            }
+        }
+        state Awaiting {}
+    }
+
+    role Server {
+        state Ready {}
+    }
+}
+
+typestate AuthServer : Auth::Server {
+    fn new() -> Ready { Ready {} }
+    state Ready {}
+}
+
+typestate Gateway : Auth::Client {
+    fields {
+        server: Machine<AuthServer> as Server,
+    }
+
+    fn new(server: Machine<AuthServer>) -> Idle {
+        Idle { server: server }
+    }
+
+    state Idle {
+        on Start() -> Awaiting {
+            emit Send(to: self.server, AuthReq {});
+            Awaiting { server: self.server }
+        }
+    }
+
+    state Awaiting {}
+}
+"#;
+
+    // This should remain clean: every observed emit/return edge is allowed by
+    // the protocol transition for the handler trigger.
+    let _ = semcheck_typestate_source(source);
+}
+
+#[test]
+fn semck_progression_deduplicates_repeated_impossible_emit() {
+    let source = r#"
+type Start = {}
+type Cancel = {}
+type AuthReq = {}
+type CancelReq = {}
+
+protocol Auth {
+    msg Start;
+    msg Cancel;
+    msg AuthReq;
+    msg CancelReq;
+
+    role Client {
+        state Idle {
+            on Start@Server -> Awaiting {
+                effects: [ AuthReq ~> Server ]
+            }
+            on Cancel@Server -> Idle {
+                effects: [ CancelReq ~> Server ]
+            }
+        }
+        state Awaiting {}
+    }
+
+    role Server {
+        state Ready {}
+    }
+}
+
+typestate AuthServer : Auth::Server {
+    fn new() -> Ready { Ready {} }
+    state Ready {}
+}
+
+typestate Gateway : Auth::Client {
+    fields {
+        server: Machine<AuthServer> as Server,
+    }
+
+    fn new(server: Machine<AuthServer>) -> Idle {
+        Idle { server: server }
+    }
+
+    state Idle {
+        on Start() -> Awaiting {
+            emit Send(to: self.server, CancelReq {});
+            emit Send(to: self.server, CancelReq {});
+            Awaiting { server: self.server }
+        }
+
+        on Cancel() -> Idle {
+            Idle { server: self.server }
+        }
+    }
+
+    state Awaiting {}
+}
+"#;
+
+    let errors = semcheck_typestate_source_err(source);
+    let impossible_emit_count = errors
+        .iter()
+        .filter(|err| {
+            matches!(
+                err,
+                crate::core::semck::SemCheckError::ProtocolProgressionImpossibleEmit(
+                    typestate,
+                    protocol,
+                    role,
+                    state,
+                    selector,
+                    payload,
+                    to_role,
+                    _
+                ) if typestate == "Gateway"
+                    && protocol == "Auth"
+                    && role == "Client"
+                    && state == "Idle"
+                    && selector.to_string().contains("Start")
+                    && payload.to_string().contains("CancelReq")
+                    && to_role == "Server"
+            )
+        })
+        .count();
+    assert_eq!(
+        impossible_emit_count, 1,
+        "expected deduped impossible-emit diagnostic, got {:?}",
+        errors
+    );
+}

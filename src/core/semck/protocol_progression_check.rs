@@ -9,6 +9,8 @@
 //! - no full path theorem checking,
 //! - local transition-coherence checks only.
 
+use std::collections::HashSet;
+
 use crate::core::context::{
     ProtocolProgressionEvent, ProtocolProgressionFacts, SemCheckNormalizedContext,
 };
@@ -48,6 +50,12 @@ pub(super) fn check(
             continue;
         }
 
+        // Build a compact transition-space summary once per handler to avoid
+        // repeated nested scans for each observed event.
+        let transition_summary = summarize_transition_space(&candidates);
+        let mut seen_impossible_emits = HashSet::<(Type, String)>::new();
+        let mut seen_impossible_returns = HashSet::<String>::new();
+
         for events in fact.cfg.node_events.values() {
             for event in events {
                 match event {
@@ -58,14 +66,12 @@ pub(super) fn check(
                             continue;
                         };
 
-                        let matches = candidates.iter().any(|transition| {
-                            transition.effects.iter().any(|effect| {
-                                effect.to_role == to_role_name
-                                    && effect.payload_ty.as_ref() == Some(&emit.payload_ty)
-                            })
-                        });
-
-                        if !matches {
+                        if !transition_summary
+                            .allowed_emits
+                            .contains(&(emit.payload_ty.clone(), to_role_name.to_string()))
+                            && seen_impossible_emits
+                                .insert((emit.payload_ty.clone(), to_role_name.to_string()))
+                        {
                             errors.push(SemCheckError::ProtocolProgressionImpossibleEmit(
                                 fact.typestate_name.clone(),
                                 fact.entry_state.protocol_name.clone(),
@@ -82,10 +88,11 @@ pub(super) fn check(
                         let Some(to_state_name) = ret.to_state_name.as_deref() else {
                             continue;
                         };
-                        let matches = candidates
-                            .iter()
-                            .any(|transition| transition.next_state == to_state_name);
-                        if !matches {
+                        if !transition_summary
+                            .allowed_next_states
+                            .contains(to_state_name)
+                            && seen_impossible_returns.insert(to_state_name.to_string())
+                        {
                             errors.push(SemCheckError::ProtocolProgressionImpossibleReturnState(
                                 fact.typestate_name.clone(),
                                 fact.entry_state.protocol_name.clone(),
@@ -103,6 +110,29 @@ pub(super) fn check(
     }
 
     errors
+}
+
+#[derive(Default)]
+struct TransitionSummary {
+    allowed_emits: HashSet<(Type, String)>,
+    allowed_next_states: HashSet<String>,
+}
+
+fn summarize_transition_space(candidates: &[&ProtocolTransitionFact]) -> TransitionSummary {
+    let mut summary = TransitionSummary::default();
+    for transition in candidates {
+        summary
+            .allowed_next_states
+            .insert(transition.next_state.clone());
+        for effect in &transition.effects {
+            if let Some(payload_ty) = &effect.payload_ty {
+                summary
+                    .allowed_emits
+                    .insert((payload_ty.clone(), effect.to_role.clone()));
+            }
+        }
+    }
+    summary
 }
 
 fn lookup_protocol_state<'a>(

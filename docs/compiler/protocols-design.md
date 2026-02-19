@@ -180,29 +180,24 @@ Current surface is compact for simple message families, but weak for:
 
 Impact: conformance logic must infer more than source syntax directly conveys.
 
-## 3.2 Destination role compatibility is not fully enforced
+## 3.2 Destination role compatibility is now enforced
 
-We validate payload legality against flows, but we do not fully enforce that
-the destination machine (typed handle) is compatible with the required peer role
-for each `send/request`.
+`send/request` destinations are validated against explicit peer-role bindings
+(`Machine<Peer> as Role`) and protocol direction/contracts.
 
-Impact: payload shape can pass while peer role intent is under-constrained.
+Remaining gap: sequencing/progression is still local (per handler/transition)
+rather than a full global protocol proof.
 
-## 3.2.1 Role-to-field binding is implicit
+## 3.3 No global protocol-level progression proof (yet)
 
-Protocols name abstract peer roles (`Server`), while typestate implementations
-usually hold concrete handles in fields (for example `auth: Machine<AuthSvc>`).
-Today that mapping is mostly implicit.
+Semck now performs **starter local progression coherence checks**:
+- handler trigger must map to at least one protocol transition for that state,
+- emitted `(payload, destination-role)` edges must be allowed by that trigger,
+- returned next state must be allowed by that trigger.
 
-Impact: diagnostics can identify role mismatch, but often cannot point directly
-to the concrete field/handle that should satisfy that role.
-
-## 3.3 No protocol-level sequencing/progression checks
-
-We currently do not model temporal ordering constraints within protocols beyond
-payload families (no session/projection progression).
-
-Impact: legal-by-shape sequences can violate intended protocol order.
+What is still out of scope:
+- global multiparty progress/deadlock proofs,
+- theorem-level session conformance across composed machines.
 
 ## 3.4 Multi-role implementation constraints are shallow
 
@@ -235,16 +230,17 @@ To keep complexity under control, we should evolve conformance in tiers.
 - incoming/outgoing payload family checks by role
 - request/reply response-shape + provenance + capability linearity
 
-### Tier B (next): state-aware projection-lite
+### Tier B (implemented): state-aware projection-lite
 - per-state allowed incoming/outgoing message sets
 - state-local legality checks for handlers and emits
 - destination role compatibility checks for `send/request`
 
-### Tier C (later): sequencing/progression
-- protocol progression constraints across transitions/events
-- richer session-like checks where useful
+### Tier C (in progress): sequencing/progression
+- starter local progression coherence checks in semck (implemented)
+- future expansion to stronger cross-machine/global progression claims
 
-Tier B is the practical next milestone.
+Current practical focus is maturing Tier C starter checks without inflating
+typecheck/runtime complexity.
 
 ### 4.1 Explicit guarantees by tier
 
@@ -266,10 +262,13 @@ To avoid over-claiming, each tier has explicit guarantees and non-guarantees.
   - full multiparty global compatibility/progress proofs
   - deadlock freedom across arbitrary protocol topologies.
 
-- Tier C target guarantees:
-  - protocol progression/coherence checks over composed role state machines
-  - stronger communication safety/progress claims under declared runtime
-    delivery assumptions.
+- Tier C current guarantees:
+  - local progression coherence per handler trigger:
+    - trigger must be declared by protocol transition for current role/state
+    - observed emits and next-state edges must be compatible with that trigger.
+- Tier C still does not guarantee:
+  - global protocol progress/deadlock freedom,
+  - full session-type compatibility theorems.
 
 ---
 
