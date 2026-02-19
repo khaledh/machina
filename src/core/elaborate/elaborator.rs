@@ -181,37 +181,42 @@ impl<'a> Elaborator<'a> {
         module
             .top_level_items
             .iter()
-            .map(|item| self.elab_top_level_item(item))
+            .filter_map(|item| self.elab_top_level_item(item))
             .collect()
     }
 
-    fn elab_top_level_item(&mut self, item: &norm::TopLevelItem) -> sem::TopLevelItem {
+    fn elab_top_level_item(&mut self, item: &norm::TopLevelItem) -> Option<sem::TopLevelItem> {
         match item {
             norm::TopLevelItem::ProtocolDef(_) => {
-                panic!("compiler bug: protocol defs should be rejected before elaborate")
+                // Protocol definitions are frontend-only conformance metadata.
+                // They do not participate in semantic IR/codegen, so elaborate
+                // drops them instead of treating them as an internal error.
+                None
             }
-            norm::TopLevelItem::TraitDef(def) => sem::TopLevelItem::TraitDef(def.clone()),
-            norm::TopLevelItem::TypeDef(def) => sem::TopLevelItem::TypeDef(def.clone()),
+            norm::TopLevelItem::TraitDef(def) => Some(sem::TopLevelItem::TraitDef(def.clone())),
+            norm::TopLevelItem::TypeDef(def) => Some(sem::TopLevelItem::TypeDef(def.clone())),
             norm::TopLevelItem::TypestateDef(_) => {
                 panic!("compiler bug: typestate defs should be desugared before elaborate")
             }
-            norm::TopLevelItem::FuncDecl(decl) => sem::TopLevelItem::FuncDecl(sem::FuncDecl {
+            norm::TopLevelItem::FuncDecl(decl) => Some(sem::TopLevelItem::FuncDecl(
+                sem::FuncDecl {
                 id: decl.id,
                 def_id: decl.def_id,
                 attrs: decl.attrs.clone(),
                 sig: decl.sig.clone(),
                 span: decl.span,
-            }),
-            norm::TopLevelItem::FuncDef(def) => sem::TopLevelItem::FuncDef(sem::FuncDef {
+            },
+            )),
+            norm::TopLevelItem::FuncDef(def) => Some(sem::TopLevelItem::FuncDef(sem::FuncDef {
                 id: def.id,
                 def_id: def.def_id,
                 attrs: def.attrs.clone(),
                 sig: def.sig.clone(),
                 body: self.elab_value(&def.body),
                 span: def.span,
-            }),
+            })),
             norm::TopLevelItem::MethodBlock(block) => {
-                sem::TopLevelItem::MethodBlock(sem::MethodBlock {
+                Some(sem::TopLevelItem::MethodBlock(sem::MethodBlock {
                     id: block.id,
                     type_name: block.type_name.clone(),
                     trait_name: block.trait_name.clone(),
@@ -228,7 +233,7 @@ impl<'a> Elaborator<'a> {
                         })
                         .collect(),
                     span: block.span,
-                })
+                }))
             }
             norm::TopLevelItem::ClosureDef(_) => {
                 panic!("compiler bug: closure defs should not exist before elaborate")
