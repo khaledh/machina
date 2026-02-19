@@ -7,6 +7,7 @@ use std::collections::{HashMap, HashSet};
 
 use crate::core::analysis::dataflow::{DataflowGraph, solve_forward};
 use crate::core::machine::naming::parse_generated_handler_site_label;
+use crate::core::protocol::event_extract::extract_emit_from_expr;
 use crate::core::resolve::DefId;
 use crate::core::tree::NodeId;
 use crate::core::tree::cfg::{AstBlockId, TreeCfgBuilder, TreeCfgItem, TreeCfgNode};
@@ -711,135 +712,26 @@ impl Visitor<DefId, ()> for TypestateEmitCollector<'_> {
 
     fn visit_expr(&mut self, expr: &crate::core::tree::resolved::Expr) {
         if let Some(state_key) = &self.current_state
-            && let Some(emit_payload) = collect_emit_payload_from_expr(expr, self.node_types)
+            && let Some(emit) =
+                extract_emit_from_expr(expr, |node_id| self.node_types.get(&node_id).cloned())
         {
             self.emits_by_state
                 .entry(state_key.clone())
                 .or_default()
-                .push(emit_payload);
+                .push(EmitPayload {
+                    payload_ty: emit.payload_ty,
+                    to_field_name: emit.to_field_name,
+                    destination_implicit: emit.destination_implicit,
+                    is_request: emit.is_request,
+                    request_response_tys: if emit.is_request {
+                        Some(emit.request_response_tys)
+                    } else {
+                        None
+                    },
+                    span: emit.span,
+                });
         }
         visit::walk_expr(self, expr);
-    }
-}
-
-fn collect_emit_payload_from_expr(
-    expr: &crate::core::tree::resolved::Expr,
-    node_types: &HashMap<NodeId, Type>,
-) -> Option<EmitPayload> {
-    match &expr.kind {
-        ExprKind::Emit { kind } => {
-            let (payload, to, is_request) = match kind {
-                crate::core::tree::EmitKind::Send { to, payload } => (payload, to, false),
-                crate::core::tree::EmitKind::Request { to, payload, .. } => (payload, to, true),
-            };
-            let payload_ty = node_types.get(&payload.id)?.clone();
-            let request_response_tys = if is_request {
-                match node_types.get(&expr.id) {
-                    Some(Type::Pending { response_tys }) => Some(response_tys.clone()),
-                    _ => None,
-                }
-            } else {
-                None
-            };
-            Some(EmitPayload {
-                payload_ty,
-                to_field_name: emit_destination_field_name(to),
-                destination_implicit: false,
-                is_request,
-                request_response_tys,
-                span: payload.span,
-            })
-        }
-        ExprKind::MethodCall {
-            callee,
-            method_name,
-            args,
-        } => collect_emit_payload_from_machine_method_call(callee, method_name, args, node_types),
-        ExprKind::Reply { value, .. } => {
-            let payload_ty = node_types.get(&value.id)?.clone();
-            Some(EmitPayload {
-                payload_ty,
-                to_field_name: None,
-                destination_implicit: true,
-                is_request: false,
-                request_response_tys: None,
-                span: value.span,
-            })
-        }
-        _ => None,
-    }
-}
-
-fn collect_emit_payload_from_machine_method_call(
-    callee: &crate::core::tree::resolved::Expr,
-    method_name: &str,
-    args: &[crate::core::tree::CallArg<crate::core::resolve::DefId>],
-    node_types: &HashMap<NodeId, Type>,
-) -> Option<EmitPayload> {
-    if !is_machine_handle_receiver(callee, node_types) {
-        return None;
-    }
-    if !args
-        .iter()
-        .all(|arg| arg.mode == crate::core::tree::CallArgMode::Default)
-    {
-        return None;
-    }
-
-    match method_name {
-        // Typed managed surface: `dst.send(payload)`.
-        "send" if args.len() == 1 => {
-            let payload = &args[0].expr;
-            let payload_ty = node_types.get(&payload.id)?.clone();
-            Some(EmitPayload {
-                payload_ty,
-                to_field_name: emit_destination_field_name(callee),
-                destination_implicit: false,
-                is_request: false,
-                request_response_tys: None,
-                span: payload.span,
-            })
-        }
-        // Typed managed surface: `src.request(dst, payload)`.
-        "request" if args.len() == 2 => {
-            let to = &args[0].expr;
-            let payload = &args[1].expr;
-            let payload_ty = node_types.get(&payload.id)?.clone();
-            Some(EmitPayload {
-                payload_ty,
-                to_field_name: emit_destination_field_name(to),
-                destination_implicit: false,
-                is_request: true,
-                request_response_tys: None,
-                span: payload.span,
-            })
-        }
-        // Raw ABI overloads (`send(kind,p0,p1)` / `request(dst,kind,p0,p1)`)
-        // cannot recover payload type at this layer.
-        _ => None,
-    }
-}
-
-fn is_machine_handle_receiver(
-    callee: &crate::core::tree::resolved::Expr,
-    node_types: &HashMap<NodeId, Type>,
-) -> bool {
-    if let Some(receiver_ty) = node_types.get(&callee.id)
-        && type_is_machine_handle(receiver_ty)
-    {
-        return true;
-    }
-    // Fallback for partially-resolved receiver nodes: only treat `self.<field>`
-    // receivers as machine-like for protocol emission extraction.
-    emit_destination_field_name(callee).is_some()
-}
-
-fn type_is_machine_handle(ty: &Type) -> bool {
-    match ty {
-        Type::Struct { name, .. } => name.starts_with("__mc_machine_handle_"),
-        Type::Ref { elem_ty, .. } | Type::Heap { elem_ty } => type_is_machine_handle(elem_ty),
-        Type::ErrorUnion { ok_ty, .. } => type_is_machine_handle(ok_ty),
-        _ => false,
     }
 }
 
@@ -1209,26 +1101,6 @@ fn parse_typestate_and_state_from_generated_state(type_name: &str) -> Option<(St
     let rest = type_name.strip_prefix("__ts_")?;
     let (typestate_name, state_name) = rest.rsplit_once('_')?;
     Some((typestate_name.to_string(), state_name.to_string()))
-}
-
-fn emit_destination_field_name(expr: &crate::core::tree::resolved::Expr) -> Option<String> {
-    // Handler sugar wraps destinations as `__mc_machine_target_id(self.peer)`.
-    if let ExprKind::Call { callee, args } = &expr.kind
-        && let ExprKind::Var { ident, .. } = &callee.kind
-        && ident == "__mc_machine_target_id"
-        && args.len() == 1
-    {
-        return emit_destination_field_name(&args[0].expr);
-    }
-
-    if let ExprKind::StructField { target, field } = &expr.kind
-        && let ExprKind::Var { ident, .. } = &target.kind
-        && ident == "self"
-    {
-        Some(field.clone())
-    } else {
-        None
-    }
 }
 
 fn state_expected_roles_for_payload(
