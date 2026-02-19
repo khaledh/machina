@@ -182,6 +182,96 @@ typestate Gateway : Auth::Client {
 }
 
 #[test]
+fn semck_extracts_protocol_progression_from_machine_send_method_calls() {
+    let source = r#"
+type Start = {}
+type AuthReq = {}
+type AuthOk = {}
+
+protocol Auth {
+    msg Start;
+    msg AuthReq;
+    msg AuthOk;
+    req Client -> Server: AuthReq => AuthOk;
+
+    role Client {
+        state Idle {
+            on Start -> Awaiting {
+                effects: [ AuthReq ~> Server ]
+            }
+        }
+        state Awaiting {
+            on AuthOk@Server -> Idle;
+        }
+    }
+
+    role Server {
+        state Ready {
+            on AuthReq@Client -> Ready {
+                effects: [ AuthOk ~> Client ]
+            }
+        }
+    }
+}
+
+typestate AuthServer {
+    fn new() -> Ready { Ready {} }
+    state Ready {}
+}
+
+typestate Gateway : Auth::Client {
+    fields {
+        server: Machine<AuthServer> as Server,
+    }
+
+    fn new(server: Machine<AuthServer>) -> Idle {
+        Idle { server: server }
+    }
+
+    state Idle {
+        on Start() -> Awaiting {
+            self.server.send(AuthReq {});
+            Awaiting { server: self.server }
+        }
+    }
+
+    state Awaiting {
+        on AuthOk() -> Idle {
+            Idle { server: self.server }
+        }
+    }
+}
+"#;
+
+    let sem = semcheck_typestate_source(source);
+    let facts = &sem.protocol_progression;
+    let idle_start = facts
+        .handlers
+        .iter()
+        .find(|fact| {
+            fact.typestate_name == "Gateway"
+                && fact.entry_state.protocol_name == "Auth"
+                && fact.entry_state.role_name == "Client"
+                && fact.entry_state.state_name == "Idle"
+        })
+        .expect("expected progression fact for Gateway Idle handler");
+
+    let emit = idle_start
+        .cfg
+        .node_events
+        .values()
+        .flat_map(|events| events.iter())
+        .find_map(|event| match event {
+            crate::core::context::ProtocolProgressionEvent::Emit(emit) => Some(emit),
+            _ => None,
+        })
+        .expect("expected emit event from machine send method call");
+    assert_eq!(emit.to_field_name.as_deref(), Some("server"));
+    assert_eq!(emit.to_role_name.as_deref(), Some("Server"));
+    assert!(!emit.is_request);
+}
+
+#[test]
 fn semck_extracts_request_response_sets_for_progression() {
     let source = r#"
 type Start = {}

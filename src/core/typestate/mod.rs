@@ -1402,6 +1402,37 @@ impl VisitorMut<()> for HandlerCommandSugarRewriter<'_> {
                     cap,
                     value: Box::new(value),
                 };
+                return;
+            }
+            // Destination-handle sugar inside handlers:
+            //   dst.send(payload)     ==> emit Send(to: machine_target_id(dst), payload)
+            //   dst.request(payload)  ==> emit Request(to: machine_target_id(dst), payload)
+            if (method_name == "send" || method_name == "request")
+                && args.len() == 1
+                && args.iter().all(|arg| arg.mode == CallArgMode::Default)
+            {
+                let payload = std::mem::take(args)
+                    .pop()
+                    .expect(
+                        "send/request method arg shape checked by typestate handler sugar rewrite",
+                    )
+                    .expr;
+                let dst =
+                    std::mem::replace(callee, Box::new(unit_expr(self.node_id_gen, expr.span)));
+                let to = self.wrap_machine_target_id(*dst);
+                let kind = if method_name == "send" {
+                    parsed::EmitKind::Send {
+                        to: Box::new(to),
+                        payload: Box::new(payload),
+                    }
+                } else {
+                    parsed::EmitKind::Request {
+                        to: Box::new(to),
+                        payload: Box::new(payload),
+                        request_site_label: None,
+                    }
+                };
+                expr.kind = ExprKind::Emit { kind };
             }
             return;
         }

@@ -855,6 +855,97 @@ typestate Gateway : Auth::Client {
 }
 
 #[test]
+fn typestate_protocol_method_send_destination_role_mismatch_reports_type_error() {
+    let source = r#"
+type Start = {}
+type AuthReq = {}
+type AuthOk = {}
+
+protocol Auth {
+    msg Start;
+    msg AuthReq;
+    msg AuthOk;
+
+    role Client {
+        state Idle {
+            on Start -> Awaiting {
+                effects: [ AuthReq ~> Audit ]
+            }
+        }
+        state Awaiting {
+            on AuthOk@Server -> Idle;
+        }
+    }
+    role Server {
+        state Ready {}
+    }
+    role Audit {
+        state Sink {
+            on AuthReq@Client -> Sink;
+        }
+    }
+}
+
+typestate AuthServer {
+    fn new() -> Ready { Ready {} }
+    state Ready {
+        on AuthReq() -> Ready { Ready {} }
+    }
+}
+typestate AuditSink { fn new() -> Sink { Sink {} } state Sink {} }
+
+typestate Gateway : Auth::Client {
+    fields {
+        server: Machine<AuthServer> as Server,
+        audit: Machine<AuditSink> as Audit,
+    }
+
+    fn new(server: Machine<AuthServer>, audit: Machine<AuditSink>) -> Idle {
+        Idle { server: server, audit: audit }
+    }
+
+    state Idle {
+        on Start() -> Awaiting {
+            self.server.send(AuthReq {});
+            Awaiting { server: self.server, audit: self.audit }
+        }
+    }
+
+    state Awaiting {
+        on AuthOk() -> Idle {
+            Idle { server: self.server, audit: self.audit }
+        }
+    }
+}
+"#;
+    let parsed = parsed_context_typestate(source);
+    let out = resolve_typecheck_pipeline_with_policy(
+        parsed,
+        ResolveInputs::default(),
+        None,
+        FrontendPolicy::Strict,
+    );
+    assert!(
+        out.type_errors.iter().any(|e| {
+            matches!(
+                e.kind(),
+                TypeCheckErrorKind::ProtocolStateEmitDestinationRoleMismatch(
+                    ts, role, state, _, expected, field, bound, _
+                )
+                    if ts == "Gateway"
+                        && role == "Auth::Client"
+                        && state == "Idle"
+                        && expected == "Audit"
+                        && field == "server"
+                        && bound == "Server"
+            )
+        }),
+        "expected destination role mismatch diagnostic for handle send, got {:?}",
+        out.type_errors
+    );
+}
+
+#[test]
 fn typestate_protocol_request_contract_rejects_extra_response_variant() {
     let source = r#"
 type Start = {}
@@ -1031,22 +1122,17 @@ typestate Gateway : Auth::Client {
 }
 
 #[test]
-fn typestate_reply_cap_rejects_double_consume() {
+fn typestate_protocol_reply_payload_must_be_allowed_by_state_effects() {
     let source = r#"
 type AuthReq = {}
 type AuthOk = {}
 
 protocol Auth {
-    msg Start;
     msg AuthReq;
     msg AuthOk;
 
     role Client {
-        state Idle {
-            on Start -> Idle {
-                effects: [ AuthReq ~> Server ]
-            }
-        }
+        state Idle {}
     }
     role Server {
         state Ready {
@@ -1056,6 +1142,47 @@ protocol Auth {
 }
 
 typestate Gateway : Auth::Server {
+    fn new() -> Ready {
+        Ready {}
+    }
+
+    state Ready {
+        on AuthReq(req: AuthReq, cap: ReplyCap<AuthOk>) -> Ready {
+            req;
+            reply(cap, AuthOk {});
+            Ready {}
+        }
+    }
+}
+"#;
+    let parsed = parsed_context_typestate(source);
+    let out = resolve_typecheck_pipeline_with_policy(
+        parsed,
+        ResolveInputs::default(),
+        None,
+        FrontendPolicy::Strict,
+    );
+    assert!(
+        out.type_errors.iter().any(|e| {
+            matches!(
+                e.kind(),
+                TypeCheckErrorKind::ProtocolStateOutgoingPayloadNotAllowed(
+                    ts, role, state, _, _
+                ) if ts == "Gateway" && role == "Auth::Server" && state == "Ready"
+            )
+        }),
+        "expected protocol outgoing-payload violation for reply, got {:?}",
+        out.type_errors
+    );
+}
+
+#[test]
+fn typestate_reply_cap_rejects_double_consume() {
+    let source = r#"
+type AuthReq = {}
+type AuthOk = {}
+
+typestate Gateway {
     fn new() -> Ready {
         Ready {}
     }
@@ -1094,26 +1221,7 @@ fn typestate_reply_cap_requires_consumption_on_all_paths() {
 type AuthReq = { allow: bool }
 type AuthOk = {}
 
-protocol Auth {
-    msg Start;
-    msg AuthReq;
-    msg AuthOk;
-
-    role Client {
-        state Idle {
-            on Start -> Idle {
-                effects: [ AuthReq ~> Server ]
-            }
-        }
-    }
-    role Server {
-        state Ready {
-            on AuthReq@Client -> Ready;
-        }
-    }
-}
-
-typestate Gateway : Auth::Server {
+typestate Gateway {
     fn new() -> Ready {
         Ready {}
     }
@@ -1156,27 +1264,7 @@ type AuthReq = {}
 type AuthOk = {}
 type AuthErr = {}
 
-protocol Auth {
-    msg Start;
-    msg AuthReq;
-    msg AuthOk;
-    msg AuthErr;
-
-    role Client {
-        state Idle {
-            on Start -> Idle {
-                effects: [ AuthReq ~> Server ]
-            }
-        }
-    }
-    role Server {
-        state Ready {
-            on AuthReq@Client -> Ready;
-        }
-    }
-}
-
-typestate Gateway : Auth::Server {
+typestate Gateway {
     fn new() -> Ready {
         Ready {}
     }
@@ -1247,27 +1335,7 @@ type AuthReq = { allow: bool }
 type AuthOk = {}
 type AuthErr = {}
 
-protocol Auth {
-    msg Start;
-    msg AuthReq;
-    msg AuthOk;
-    msg AuthErr;
-
-    role Client {
-        state Idle {
-            on Start -> Idle {
-                effects: [ AuthReq ~> Server ]
-            }
-        }
-    }
-    role Server {
-        state Ready {
-            on AuthReq@Client -> Ready;
-        }
-    }
-}
-
-typestate Gateway : Auth::Server {
+typestate Gateway {
     fn new() -> Ready {
         Ready {}
     }

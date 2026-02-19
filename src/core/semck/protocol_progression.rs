@@ -179,31 +179,108 @@ fn collect_item_events(
 }
 
 fn emit_event(ctx: &SemCheckNormalizedContext, expr: &Expr) -> Option<ProtocolProgressionEmit> {
-    let ExprKind::Emit { kind } = &expr.kind else {
-        return None;
-    };
-    let (to, payload, is_request) = match kind {
-        crate::core::tree::EmitKind::Send { to, payload } => (to, payload, false),
-        crate::core::tree::EmitKind::Request { to, payload, .. } => (to, payload, true),
-    };
-    let payload_ty = ctx.type_map.lookup_node_type(payload.id)?;
-    let request_response_tys = if is_request {
-        match ctx.type_map.lookup_node_type(expr.id) {
-            Some(Type::Pending { response_tys }) => response_tys.clone(),
-            _ => Vec::new(),
-        }
-    } else {
-        Vec::new()
-    };
+    match &expr.kind {
+        ExprKind::Emit { kind } => {
+            let (to, payload, is_request) = match kind {
+                crate::core::tree::EmitKind::Send { to, payload } => (to, payload, false),
+                crate::core::tree::EmitKind::Request { to, payload, .. } => (to, payload, true),
+            };
+            let payload_ty = ctx.type_map.lookup_node_type(payload.id)?;
+            let request_response_tys = if is_request {
+                match ctx.type_map.lookup_node_type(expr.id) {
+                    Some(Type::Pending { response_tys }) => response_tys.clone(),
+                    _ => Vec::new(),
+                }
+            } else {
+                Vec::new()
+            };
 
-    Some(ProtocolProgressionEmit {
-        payload_ty,
-        to_field_name: emit_destination_field_name(to),
-        to_role_name: None,
-        is_request,
-        request_response_tys,
-        span: expr.span,
-    })
+            Some(ProtocolProgressionEmit {
+                payload_ty,
+                to_field_name: emit_destination_field_name(to),
+                to_role_name: None,
+                is_request,
+                request_response_tys,
+                span: expr.span,
+            })
+        }
+        ExprKind::MethodCall {
+            callee,
+            method_name,
+            args,
+        } => emit_event_from_machine_method_call(ctx, callee, method_name, args),
+        ExprKind::Reply { value, .. } => Some(ProtocolProgressionEmit {
+            payload_ty: ctx.type_map.lookup_node_type(value.id)?,
+            to_field_name: None,
+            to_role_name: None,
+            is_request: false,
+            request_response_tys: Vec::new(),
+            span: value.span,
+        }),
+        _ => None,
+    }
+}
+
+fn emit_event_from_machine_method_call(
+    ctx: &SemCheckNormalizedContext,
+    callee: &Expr,
+    method_name: &str,
+    args: &[crate::core::tree::CallArg<crate::core::resolve::DefId, crate::core::types::TypeId>],
+) -> Option<ProtocolProgressionEmit> {
+    if !is_machine_handle_receiver(ctx, callee) {
+        return None;
+    }
+    if !args
+        .iter()
+        .all(|arg| arg.mode == crate::core::tree::CallArgMode::Default)
+    {
+        return None;
+    }
+
+    match method_name {
+        "send" if args.len() == 1 => {
+            let payload = &args[0].expr;
+            Some(ProtocolProgressionEmit {
+                payload_ty: ctx.type_map.lookup_node_type(payload.id)?,
+                to_field_name: emit_destination_field_name(callee),
+                to_role_name: None,
+                is_request: false,
+                request_response_tys: Vec::new(),
+                span: payload.span,
+            })
+        }
+        "request" if args.len() == 2 => {
+            let to = &args[0].expr;
+            let payload = &args[1].expr;
+            Some(ProtocolProgressionEmit {
+                payload_ty: ctx.type_map.lookup_node_type(payload.id)?,
+                to_field_name: emit_destination_field_name(to),
+                to_role_name: None,
+                is_request: true,
+                request_response_tys: Vec::new(),
+                span: payload.span,
+            })
+        }
+        _ => None,
+    }
+}
+
+fn is_machine_handle_receiver(ctx: &SemCheckNormalizedContext, callee: &Expr) -> bool {
+    if let Some(receiver_ty) = ctx.type_map.lookup_node_type(callee.id)
+        && type_is_machine_handle(&receiver_ty)
+    {
+        return true;
+    }
+    emit_destination_field_name(callee).is_some()
+}
+
+fn type_is_machine_handle(ty: &Type) -> bool {
+    match ty {
+        Type::Struct { name, .. } => name.starts_with("__mc_machine_handle_"),
+        Type::Ref { elem_ty, .. } | Type::Heap { elem_ty } => type_is_machine_handle(elem_ty),
+        Type::ErrorUnion { ok_ty, .. } => type_is_machine_handle(ok_ty),
+        _ => false,
+    }
 }
 
 fn bind_cfg_roles(
@@ -226,13 +303,18 @@ fn bind_cfg_roles(
 }
 
 fn emit_destination_field_name(expr: &Expr) -> Option<String> {
-    let ExprKind::StructField { target, field } = &expr.kind else {
-        return None;
-    };
-    let ExprKind::Var { ident, .. } = &target.kind else {
-        return None;
-    };
-    if ident == "self" {
+    if let ExprKind::Call { callee, args } = &expr.kind
+        && let ExprKind::Var { ident, .. } = &callee.kind
+        && ident == "__mc_machine_target_id"
+        && args.len() == 1
+    {
+        return emit_destination_field_name(&args[0].expr);
+    }
+
+    if let ExprKind::StructField { target, field } = &expr.kind
+        && let ExprKind::Var { ident, .. } = &target.kind
+        && ident == "self"
+    {
         Some(field.clone())
     } else {
         None

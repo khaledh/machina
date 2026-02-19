@@ -198,15 +198,15 @@ impl<'a> Elaborator<'a> {
             norm::TopLevelItem::TypestateDef(_) => {
                 panic!("compiler bug: typestate defs should be desugared before elaborate")
             }
-            norm::TopLevelItem::FuncDecl(decl) => Some(sem::TopLevelItem::FuncDecl(
-                sem::FuncDecl {
-                id: decl.id,
-                def_id: decl.def_id,
-                attrs: decl.attrs.clone(),
-                sig: decl.sig.clone(),
-                span: decl.span,
-            },
-            )),
+            norm::TopLevelItem::FuncDecl(decl) => {
+                Some(sem::TopLevelItem::FuncDecl(sem::FuncDecl {
+                    id: decl.id,
+                    def_id: decl.def_id,
+                    attrs: decl.attrs.clone(),
+                    sig: decl.sig.clone(),
+                    span: decl.span,
+                }))
+            }
             norm::TopLevelItem::FuncDef(def) => Some(sem::TopLevelItem::FuncDef(sem::FuncDef {
                 id: def.id,
                 def_id: def.def_id,
