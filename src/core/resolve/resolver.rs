@@ -8,7 +8,7 @@ use crate::core::context::{
 };
 use crate::core::diag::Span;
 use crate::core::resolve::def_table::{DefTable, DefTableBuilder, NodeDefLookup};
-use crate::core::resolve::errors::{ResolveError, ResolveErrorKind};
+use crate::core::resolve::errors::{ResolveError, ResolveErrorKind as REK};
 use crate::core::resolve::symbols::{Scope, Symbol, SymbolKind};
 use crate::core::resolve::{
     Def, DefId, DefIdGen, DefKind, FuncAttrs, TraitAttrs, TypeAttrs, Visibility,
@@ -167,6 +167,14 @@ impl SymbolResolver {
         self.exit_scope();
     }
 
+    fn err(&mut self, span: Span, kind: REK) {
+        self.errors.push(kind.at(span));
+    }
+
+    fn push_err(errors: &mut Vec<ResolveError>, span: Span, kind: REK) {
+        errors.push(kind.at(span));
+    }
+
     fn insert_symbol(&mut self, name: &str, symbol: Symbol, span: Span) {
         let scope = self.scopes.last_mut().unwrap();
         match scope.defs.get_mut(name) {
@@ -183,8 +191,7 @@ impl SymbolResolver {
                     overloads.extend(new_overloads);
                 }
                 _ => {
-                    self.errors
-                        .push(ResolveErrorKind::SymbolAlreadyDefined(name.to_string()).at(span));
+                    self.err(span, REK::SymbolAlreadyDefined(name.to_string()));
                 }
             },
         }
@@ -232,14 +239,12 @@ impl SymbolResolver {
                     SymbolKind::TraitDef { .. } => {
                         self.def_table_builder.record_use(bound.id, symbol.def_id());
                     }
-                    other => self.errors.push(
-                        ResolveErrorKind::ExpectedTrait(bound.name.clone(), other.clone())
-                            .at(bound.span),
+                    other => self.err(
+                        bound.span,
+                        REK::ExpectedTrait(bound.name.clone(), other.clone()),
                     ),
                 },
-                None => self
-                    .errors
-                    .push(ResolveErrorKind::TraitUndefined(bound.name.clone()).at(bound.span)),
+                None => self.err(bound.span, REK::TraitUndefined(bound.name.clone())),
             }
         }
     }
@@ -286,20 +291,15 @@ impl SymbolResolver {
 
         for attr in attrs {
             if !seen.insert(attr.name.clone()) {
-                self.errors
-                    .push(ResolveErrorKind::AttrDuplicate(attr.name.clone()).at(attr.span));
+                self.err(attr.span, REK::AttrDuplicate(attr.name.clone()));
                 continue;
             }
             match attr.name.as_str() {
                 "public" => {
                     if !attr.args.is_empty() {
-                        self.errors.push(
-                            ResolveErrorKind::AttrWrongArgCount(
-                                attr.name.clone(),
-                                0,
-                                attr.args.len(),
-                            )
-                            .at(attr.span),
+                        self.err(
+                            attr.span,
+                            REK::AttrWrongArgCount(attr.name.clone(), 0, attr.args.len()),
                         );
                     } else {
                         resolved.visibility = Visibility::Public;
@@ -307,13 +307,9 @@ impl SymbolResolver {
                 }
                 "opaque" => {
                     if !attr.args.is_empty() {
-                        self.errors.push(
-                            ResolveErrorKind::AttrWrongArgCount(
-                                attr.name.clone(),
-                                0,
-                                attr.args.len(),
-                            )
-                            .at(attr.span),
+                        self.err(
+                            attr.span,
+                            REK::AttrWrongArgCount(attr.name.clone(), 0, attr.args.len()),
                         );
                     } else {
                         resolved.visibility = Visibility::Public;
@@ -322,27 +318,21 @@ impl SymbolResolver {
                 }
                 "intrinsic" => {
                     if !attr.args.is_empty() {
-                        self.errors.push(
-                            ResolveErrorKind::AttrWrongArgCount(
-                                attr.name.clone(),
-                                0,
-                                attr.args.len(),
-                            )
-                            .at(attr.span),
+                        self.err(
+                            attr.span,
+                            REK::AttrWrongArgCount(attr.name.clone(), 0, attr.args.len()),
                         );
                     } else {
                         resolved.intrinsic = true;
                     }
                 }
                 "link_name" => {
-                    self.errors.push(
-                        ResolveErrorKind::AttrNotAllowed(attr.name.clone(), "type definition")
-                            .at(attr.span),
+                    self.err(
+                        attr.span,
+                        REK::AttrNotAllowed(attr.name.clone(), "type definition"),
                     );
                 }
-                _ => self
-                    .errors
-                    .push(ResolveErrorKind::UnknownAttribute(attr.name.clone()).at(attr.span)),
+                _ => self.err(attr.span, REK::UnknownAttribute(attr.name.clone())),
             }
         }
 
@@ -355,35 +345,28 @@ impl SymbolResolver {
 
         for attr in attrs {
             if !seen.insert(attr.name.clone()) {
-                self.errors
-                    .push(ResolveErrorKind::AttrDuplicate(attr.name.clone()).at(attr.span));
+                self.err(attr.span, REK::AttrDuplicate(attr.name.clone()));
                 continue;
             }
 
             match attr.name.as_str() {
                 "public" => {
                     if !attr.args.is_empty() {
-                        self.errors.push(
-                            ResolveErrorKind::AttrWrongArgCount(
-                                attr.name.clone(),
-                                0,
-                                attr.args.len(),
-                            )
-                            .at(attr.span),
+                        self.err(
+                            attr.span,
+                            REK::AttrWrongArgCount(attr.name.clone(), 0, attr.args.len()),
                         );
                     } else {
                         resolved.visibility = Visibility::Public;
                     }
                 }
                 "intrinsic" | "runtime" | "link_name" | "opaque" => {
-                    self.errors.push(
-                        ResolveErrorKind::AttrNotAllowed(attr.name.clone(), "trait definition")
-                            .at(attr.span),
+                    self.err(
+                        attr.span,
+                        REK::AttrNotAllowed(attr.name.clone(), "trait definition"),
                     );
                 }
-                _ => self
-                    .errors
-                    .push(ResolveErrorKind::UnknownAttribute(attr.name.clone()).at(attr.span)),
+                _ => self.err(attr.span, REK::UnknownAttribute(attr.name.clone())),
             }
         }
 
@@ -396,20 +379,15 @@ impl SymbolResolver {
 
         for attr in attrs {
             if !seen.insert(attr.name.clone()) {
-                self.errors
-                    .push(ResolveErrorKind::AttrDuplicate(attr.name.clone()).at(attr.span));
+                self.err(attr.span, REK::AttrDuplicate(attr.name.clone()));
                 continue;
             }
             match attr.name.as_str() {
                 "public" => {
                     if !attr.args.is_empty() {
-                        self.errors.push(
-                            ResolveErrorKind::AttrWrongArgCount(
-                                attr.name.clone(),
-                                0,
-                                attr.args.len(),
-                            )
-                            .at(attr.span),
+                        self.err(
+                            attr.span,
+                            REK::AttrWrongArgCount(attr.name.clone(), 0, attr.args.len()),
                         );
                     } else {
                         resolved.visibility = Visibility::Public;
@@ -417,13 +395,9 @@ impl SymbolResolver {
                 }
                 "intrinsic" => {
                     if !attr.args.is_empty() {
-                        self.errors.push(
-                            ResolveErrorKind::AttrWrongArgCount(
-                                attr.name.clone(),
-                                0,
-                                attr.args.len(),
-                            )
-                            .at(attr.span),
+                        self.err(
+                            attr.span,
+                            REK::AttrWrongArgCount(attr.name.clone(), 0, attr.args.len()),
                         );
                     } else {
                         resolved.intrinsic = true;
@@ -431,13 +405,9 @@ impl SymbolResolver {
                 }
                 "runtime" => {
                     if !attr.args.is_empty() {
-                        self.errors.push(
-                            ResolveErrorKind::AttrWrongArgCount(
-                                attr.name.clone(),
-                                0,
-                                attr.args.len(),
-                            )
-                            .at(attr.span),
+                        self.err(
+                            attr.span,
+                            REK::AttrWrongArgCount(attr.name.clone(), 0, attr.args.len()),
                         );
                     } else {
                         resolved.runtime = true;
@@ -445,13 +415,9 @@ impl SymbolResolver {
                 }
                 "machines" => {
                     if !attr.args.is_empty() {
-                        self.errors.push(
-                            ResolveErrorKind::AttrWrongArgCount(
-                                attr.name.clone(),
-                                0,
-                                attr.args.len(),
-                            )
-                            .at(attr.span),
+                        self.err(
+                            attr.span,
+                            REK::AttrWrongArgCount(attr.name.clone(), 0, attr.args.len()),
                         );
                     } else {
                         resolved.machines = true;
@@ -459,20 +425,14 @@ impl SymbolResolver {
                 }
                 "link_name" => {
                     if attr.args.len() != 1 {
-                        self.errors.push(
-                            ResolveErrorKind::AttrWrongArgCount(
-                                attr.name.clone(),
-                                1,
-                                attr.args.len(),
-                            )
-                            .at(attr.span),
+                        self.err(
+                            attr.span,
+                            REK::AttrWrongArgCount(attr.name.clone(), 1, attr.args.len()),
                         );
                         continue;
                     }
                     let Some(AttrArg::String(name)) = attr.args.first() else {
-                        self.errors.push(
-                            ResolveErrorKind::AttrWrongArgType(attr.name.clone()).at(attr.span),
-                        );
+                        self.err(attr.span, REK::AttrWrongArgType(attr.name.clone()));
                         continue;
                     };
                     resolved.link_name = Some(name.clone());
@@ -481,14 +441,12 @@ impl SymbolResolver {
                     // Internal marker attributes emitted by the parser for properties.
                 }
                 "opaque" => {
-                    self.errors.push(
-                        ResolveErrorKind::AttrNotAllowed(attr.name.clone(), "function")
-                            .at(attr.span),
+                    self.err(
+                        attr.span,
+                        REK::AttrNotAllowed(attr.name.clone(), "function"),
                     );
                 }
-                _ => self
-                    .errors
-                    .push(ResolveErrorKind::UnknownAttribute(attr.name.clone()).at(attr.span)),
+                _ => self.err(attr.span, REK::UnknownAttribute(attr.name.clone())),
             }
         }
 
@@ -532,8 +490,7 @@ impl SymbolResolver {
                 .or_else(|| req.path.last().cloned())
                 .unwrap_or_default();
             if !seen.insert(alias.clone()) {
-                self.errors
-                    .push(ResolveErrorKind::DuplicateRequireAlias(alias).at(req.span));
+                self.err(req.span, REK::DuplicateRequireAlias(alias));
             } else {
                 self.require_aliases.insert(alias);
             }
@@ -547,9 +504,9 @@ impl SymbolResolver {
         if imported.members.contains(member) {
             true
         } else {
-            self.errors.push(
-                ResolveErrorKind::ModuleMemberUndefined(imported.path.clone(), member.to_string())
-                    .at(span),
+            self.err(
+                span,
+                REK::ModuleMemberUndefined(imported.path.clone(), member.to_string()),
             );
             false
         }
@@ -754,9 +711,9 @@ impl SymbolResolver {
                 CallableRef::FuncDef(func_def) => {
                     // Check if the function name is already defined as a function decl
                     if self.func_decl_names.contains(&func_def.sig.name) {
-                        self.errors.push(
-                            ResolveErrorKind::SymbolAlreadyDefined(func_def.sig.name.clone())
-                                .at(func_def.span),
+                        self.err(
+                            func_def.span,
+                            REK::SymbolAlreadyDefined(func_def.sig.name.clone()),
                         );
                         continue;
                     }
@@ -786,8 +743,7 @@ impl SymbolResolver {
                 CallableRef::FuncDef(func_def) if func_def.sig.name == "main"
             );
             if !valid_entrypoint {
-                self.errors
-                    .push(ResolveErrorKind::AttrMachinesRequiresMain.at(callable.span()));
+                self.err(callable.span(), REK::AttrMachinesRequiresMain);
                 // Keep downstream def attrs coherent with resolver diagnostics.
                 func_attrs.machines = false;
             }
@@ -921,12 +877,13 @@ impl SymbolResolver {
         for role_impl in &self.typestate_role_impls {
             let joined_path = role_impl.path.join("::");
             if role_impl.path.len() < 2 {
-                self.errors.push(
-                    ResolveErrorKind::TypestateRoleImplMalformedPath(
+                Self::push_err(
+                    &mut self.errors,
+                    role_impl.span,
+                    REK::TypestateRoleImplMalformedPath(
                         role_impl.typestate_name.clone(),
                         joined_path,
-                    )
-                    .at(role_impl.span),
+                    ),
                 );
                 continue;
             }
@@ -938,7 +895,7 @@ impl SymbolResolver {
                             .record_use(role_impl.id, symbol.def_id());
                     }
                     other => self.errors.push(
-                        ResolveErrorKind::TypestateRoleImplExpectedRole(
+                        REK::TypestateRoleImplExpectedRole(
                             role_impl.typestate_name.clone(),
                             joined_path,
                             other.clone(),
@@ -947,7 +904,7 @@ impl SymbolResolver {
                     ),
                 },
                 None => self.errors.push(
-                    ResolveErrorKind::TypestateRoleImplRoleUndefined(
+                    REK::TypestateRoleImplRoleUndefined(
                         role_impl.typestate_name.clone(),
                         joined_path,
                     )
@@ -966,12 +923,13 @@ impl SymbolResolver {
             let mut bound_roles = HashSet::new();
             for binding in &role_impl.peer_role_bindings {
                 if !Self::is_machine_handle_type(&binding.field_ty) {
-                    self.errors.push(
-                        ResolveErrorKind::TypestateRoleBindingInvalidType(
+                    Self::push_err(
+                        &mut self.errors,
+                        binding.span,
+                        REK::TypestateRoleBindingInvalidType(
                             role_impl.typestate_name.clone(),
                             binding.field_name.clone(),
-                        )
-                        .at(binding.span),
+                        ),
                     );
                 }
 
@@ -982,32 +940,35 @@ impl SymbolResolver {
                             self.def_table_builder
                                 .record_use(binding.id, symbol.def_id());
                         }
-                        _ => self.errors.push(
-                            ResolveErrorKind::TypestateRoleBindingRoleUndefined(
+                        _ => Self::push_err(
+                            &mut self.errors,
+                            binding.span,
+                            REK::TypestateRoleBindingRoleUndefined(
                                 role_impl.typestate_name.clone(),
                                 binding.field_name.clone(),
                                 binding.role_name.clone(),
-                            )
-                            .at(binding.span),
+                            ),
                         ),
                     },
-                    None => self.errors.push(
-                        ResolveErrorKind::TypestateRoleBindingRoleUndefined(
+                    None => Self::push_err(
+                        &mut self.errors,
+                        binding.span,
+                        REK::TypestateRoleBindingRoleUndefined(
                             role_impl.typestate_name.clone(),
                             binding.field_name.clone(),
                             binding.role_name.clone(),
-                        )
-                        .at(binding.span),
+                        ),
                     ),
                 }
 
                 if !bound_roles.insert(binding.role_name.clone()) {
-                    self.errors.push(
-                        ResolveErrorKind::TypestateRoleBindingDuplicateRole(
+                    Self::push_err(
+                        &mut self.errors,
+                        binding.span,
+                        REK::TypestateRoleBindingDuplicateRole(
                             role_impl.typestate_name.clone(),
                             binding.role_name.clone(),
-                        )
-                        .at(binding.span),
+                        ),
                     );
                 }
             }
@@ -1018,12 +979,13 @@ impl SymbolResolver {
                 Self::required_peer_roles_for_protocol_role(protocol_def, role_name);
             for peer_role in required_peer_roles {
                 if peer_role.as_str() != role_name.as_str() && !bound_roles.contains(&peer_role) {
-                    self.errors.push(
-                        ResolveErrorKind::TypestateRoleBindingMissing(
+                    Self::push_err(
+                        &mut self.errors,
+                        role_impl.span,
+                        REK::TypestateRoleBindingMissing(
                             role_impl.typestate_name.clone(),
                             peer_role,
-                        )
-                        .at(role_impl.span),
+                        ),
                     );
                 }
             }
@@ -1094,17 +1056,14 @@ impl SymbolResolver {
                         } => {
                             // Immutable: error
                             self.def_table_builder.record_use(expr.id, symbol.def_id());
-                            self.errors
-                                .push(ResolveErrorKind::VarImmutable(name.clone()).at(expr.span));
+                            self.err(expr.span, REK::VarImmutable(name.clone()));
                         }
                         _ => {
-                            self.errors
-                                .push(ResolveErrorKind::VarUndefined(name.clone()).at(expr.span));
+                            self.err(expr.span, REK::VarUndefined(name.clone()));
                         }
                     },
                     None => {
-                        self.errors
-                            .push(ResolveErrorKind::VarUndefined(name.clone()).at(expr.span));
+                        self.err(expr.span, REK::VarUndefined(name.clone()));
                     }
                 }
             }
@@ -1122,9 +1081,7 @@ impl SymbolResolver {
                 self.check_lvalue_mutability(target);
             }
             _ => {
-                self.errors.push(
-                    ResolveErrorKind::InvalidAssignmentTarget(expr.kind.clone()).at(expr.span),
-                );
+                self.err(expr.span, REK::InvalidAssignmentTarget(expr.kind.clone()));
             }
         }
     }
@@ -1179,17 +1136,12 @@ impl SymbolResolver {
                         self.def_table_builder.record_use(pattern.id, *def_id);
                     }
                     Some(symbol) => {
-                        self.errors.push(
-                            ResolveErrorKind::ExpectedType(
-                                struct_name.clone(),
-                                symbol.kind.clone(),
-                            )
-                            .at(pattern.span),
+                        self.err(
+                            pattern.span,
+                            REK::ExpectedType(struct_name.clone(), symbol.kind.clone()),
                         );
                     }
-                    None => self.errors.push(
-                        ResolveErrorKind::StructUndefined(struct_name.clone()).at(pattern.span),
-                    ),
+                    None => self.err(pattern.span, REK::StructUndefined(struct_name.clone())),
                 }
 
                 // Bind each field's sub-pattern
@@ -1243,8 +1195,7 @@ impl SymbolResolver {
                         ..
                     }) = self.lookup_symbol(enum_name)
                     else {
-                        self.errors
-                            .push(ResolveErrorKind::EnumUndefined(enum_name.clone()).at(*span));
+                        self.err(*span, REK::EnumUndefined(enum_name.clone()));
                         return;
                     };
                     self.def_table_builder.record_use(*id, *def_id);
@@ -1300,20 +1251,17 @@ impl SymbolResolver {
                 | SymbolKind::StructDef { def_id, .. }
                 | SymbolKind::EnumDef { def_id, .. } => Some(*def_id),
                 other => {
-                    self.errors.push(
-                        ResolveErrorKind::ExpectedType(
-                            method_block.type_name.clone(),
-                            other.clone(),
-                        )
-                        .at(method_block.span),
+                    self.err(
+                        method_block.span,
+                        REK::ExpectedType(method_block.type_name.clone(), other.clone()),
                     );
                     None
                 }
             },
             None => {
-                self.errors.push(
-                    ResolveErrorKind::TypeUndefined(method_block.type_name.clone())
-                        .at(method_block.span),
+                self.err(
+                    method_block.span,
+                    REK::TypeUndefined(method_block.type_name.clone()),
                 );
                 None
             }
@@ -1327,14 +1275,12 @@ impl SymbolResolver {
         match self.lookup_symbol(trait_name) {
             Some(symbol) => match &symbol.kind {
                 SymbolKind::TraitDef { .. } => {}
-                other => self.errors.push(
-                    ResolveErrorKind::ExpectedTrait(trait_name.clone(), other.clone())
-                        .at(method_block.span),
+                other => self.err(
+                    method_block.span,
+                    REK::ExpectedTrait(trait_name.clone(), other.clone()),
                 ),
             },
-            None => self
-                .errors
-                .push(ResolveErrorKind::TraitUndefined(trait_name.clone()).at(method_block.span)),
+            None => self.err(method_block.span, REK::TraitUndefined(trait_name.clone())),
         }
     }
 
@@ -1345,9 +1291,9 @@ impl SymbolResolver {
         is_intrinsic_type: Option<bool>,
     ) {
         if matches!(is_intrinsic_type, Some(false)) {
-            self.errors.push(
-                ResolveErrorKind::MethodDeclOnNonIntrinsicType(method_block.type_name.clone())
-                    .at(method_decl.span),
+            self.err(
+                method_block.span,
+                REK::MethodDeclOnNonIntrinsicType(method_block.type_name.clone()),
             );
         }
 
@@ -1357,9 +1303,9 @@ impl SymbolResolver {
             .cloned()
             .unwrap_or_default();
         if !func_attrs.intrinsic && !func_attrs.runtime {
-            self.errors.push(
-                ResolveErrorKind::MethodDeclMissingIntrinsic(method_decl.sig.name.clone())
-                    .at(method_decl.span),
+            self.err(
+                method_decl.span,
+                REK::MethodDeclMissingIntrinsic(method_decl.sig.name.clone()),
             );
         }
 
@@ -1407,21 +1353,21 @@ impl Visitor<()> for SymbolResolver {
 
         for contract in &protocol_def.request_contracts {
             if !local_roles.contains(contract.from_role.as_str()) {
-                self.errors.push(
-                    ResolveErrorKind::ProtocolRequestContractRoleUndefined(
+                self.err(
+                    contract.span,
+                    REK::ProtocolRequestContractRoleUndefined(
                         protocol_def.name.clone(),
                         contract.from_role.clone(),
-                    )
-                    .at(contract.span),
+                    ),
                 );
             }
             if !local_roles.contains(contract.to_role.as_str()) {
-                self.errors.push(
-                    ResolveErrorKind::ProtocolRequestContractRoleUndefined(
+                self.err(
+                    contract.span,
+                    REK::ProtocolRequestContractRoleUndefined(
                         protocol_def.name.clone(),
                         contract.to_role.clone(),
-                    )
-                    .at(contract.span),
+                    ),
                 );
             }
             self.visit_type_expr(&contract.request_ty);
@@ -1443,14 +1389,14 @@ impl Visitor<()> for SymbolResolver {
                     if let Some(from_role) = &transition.trigger.from_role
                         && !local_roles.contains(from_role.as_str())
                     {
-                        self.errors.push(
-                            ResolveErrorKind::ProtocolTransitionSourceRoleUndefined(
+                        self.err(
+                            transition.span,
+                            REK::ProtocolTransitionSourceRoleUndefined(
                                 protocol_def.name.clone(),
                                 role.name.clone(),
                                 state.name.clone(),
                                 from_role.clone(),
-                            )
-                            .at(transition.span),
+                            ),
                         );
                     }
 
@@ -1465,40 +1411,40 @@ impl Visitor<()> for SymbolResolver {
                             .from_role
                             .clone()
                             .unwrap_or_else(|| "Start".to_string());
-                        self.errors.push(
-                            ResolveErrorKind::ProtocolTransitionTriggerConflict(
+                        self.err(
+                            transition.span,
+                            REK::ProtocolTransitionTriggerConflict(
                                 protocol_def.name.clone(),
                                 role.name.clone(),
                                 state.name.clone(),
                                 trigger_label,
                                 source_role,
-                            )
-                            .at(transition.span),
+                            ),
                         );
                     }
 
                     if !local_states.contains(transition.next_state.as_str()) {
-                        self.errors.push(
-                            ResolveErrorKind::ProtocolTransitionNextStateUndefined(
+                        self.err(
+                            transition.span,
+                            REK::ProtocolTransitionNextStateUndefined(
                                 protocol_def.name.clone(),
                                 role.name.clone(),
                                 state.name.clone(),
                                 transition.next_state.clone(),
-                            )
-                            .at(transition.span),
+                            ),
                         );
                     }
 
                     for effect in &transition.effects {
                         if !local_roles.contains(effect.to_role.as_str()) {
-                            self.errors.push(
-                                ResolveErrorKind::ProtocolTransitionEffectRoleUndefined(
+                            self.err(
+                                effect.span,
+                                REK::ProtocolTransitionEffectRoleUndefined(
                                     protocol_def.name.clone(),
                                     role.name.clone(),
                                     state.name.clone(),
                                     effect.to_role.clone(),
-                                )
-                                .at(effect.span),
+                                ),
                             );
                         }
                         self.visit_type_expr(&effect.payload_ty);
@@ -1534,14 +1480,12 @@ impl Visitor<()> for SymbolResolver {
                             self.def_table_builder
                                 .record_use(type_expr.id, symbol.def_id());
                         }
-                        other => self.errors.push(
-                            ResolveErrorKind::ExpectedType(name.clone(), other.clone())
-                                .at(type_expr.span),
+                        other => self.err(
+                            type_expr.span,
+                            REK::ExpectedType(name.clone(), other.clone()),
                         ),
                     },
-                    None => self
-                        .errors
-                        .push(ResolveErrorKind::TypeUndefined(name.clone()).at(type_expr.span)),
+                    None => self.err(type_expr.span, REK::TypeUndefined(name.clone())),
                 }
                 for arg in type_args {
                     self.visit_type_expr(arg);
@@ -1825,9 +1769,7 @@ impl Visitor<()> for SymbolResolver {
                     }) => {
                         self.def_table_builder.record_use(expr.id, *def_id);
                     }
-                    _ => self
-                        .errors
-                        .push(ResolveErrorKind::StructUndefined(name.clone()).at(expr.span)),
+                    _ => self.err(expr.span, REK::StructUndefined(name.clone())),
                 }
                 walk_expr(self, expr);
             }
@@ -1839,12 +1781,12 @@ impl Visitor<()> for SymbolResolver {
                         && self.require_aliases.contains(alias)
                     {
                         if self.validate_module_alias_member(alias, member, expr.span) {
-                            self.errors.push(
-                                ResolveErrorKind::ModuleQualifiedAccessUnsupported(
+                            self.err(
+                                expr.span,
+                                REK::ModuleQualifiedAccessUnsupported(
                                     alias.to_string(),
                                     member.to_string(),
-                                )
-                                .at(expr.span),
+                                ),
                             );
                         }
                     } else if self.is_enum_variant_name(name) {
@@ -1861,8 +1803,7 @@ impl Visitor<()> for SymbolResolver {
                             self.variant_placeholders.insert(name.to_string(), def_id);
                         }
                     } else {
-                        self.errors
-                            .push(ResolveErrorKind::VarUndefined(name.to_string()).at(expr.span));
+                        self.err(expr.span, REK::VarUndefined(name.to_string()));
                     }
                 }
             },
@@ -1876,16 +1817,15 @@ impl Visitor<()> for SymbolResolver {
                     ..
                 }) = self.lookup_symbol(enum_name)
                 else {
-                    self.errors
-                        .push(ResolveErrorKind::EnumUndefined(enum_name.clone()).at(expr.span));
+                    self.err(expr.span, REK::EnumUndefined(enum_name.clone()));
                     return;
                 };
 
                 // Ensure the variant is valid
                 if !variants.iter().any(|v| v.name == *variant) {
-                    self.errors.push(
-                        ResolveErrorKind::EnumVariantUndefined(enum_name.clone(), variant.clone())
-                            .at(expr.span),
+                    self.err(
+                        expr.span,
+                        REK::EnumVariantUndefined(enum_name.clone(), variant.clone()),
                     );
                     return;
                 }
@@ -1922,12 +1862,12 @@ impl Visitor<()> for SymbolResolver {
                     && self.require_aliases.contains(alias)
                 {
                     if self.validate_module_alias_member(alias, method_name, expr.span) {
-                        self.errors.push(
-                            ResolveErrorKind::ModuleQualifiedAccessUnsupported(
+                        self.err(
+                            expr.span,
+                            REK::ModuleQualifiedAccessUnsupported(
                                 alias.clone(),
                                 method_name.clone(),
-                            )
-                            .at(expr.span),
+                            ),
                         );
                     }
                     for arg in args {
@@ -1947,12 +1887,9 @@ impl Visitor<()> for SymbolResolver {
                     && self.require_aliases.contains(alias)
                 {
                     if self.validate_module_alias_member(alias, field, expr.span) {
-                        self.errors.push(
-                            ResolveErrorKind::ModuleQualifiedAccessUnsupported(
-                                alias.clone(),
-                                field.clone(),
-                            )
-                            .at(expr.span),
+                        self.err(
+                            expr.span,
+                            REK::ModuleQualifiedAccessUnsupported(alias.clone(), field.clone()),
                         );
                     }
                     return;
@@ -1994,9 +1931,7 @@ impl Visitor<()> for SymbolResolver {
                             Some(symbol) => {
                                 self.def_table_builder.record_use(*cap_id, symbol.def_id());
                             }
-                            None => self.errors.push(
-                                ResolveErrorKind::VarUndefined(cap_name.to_string()).at(*cap_span),
-                            ),
+                            None => self.err(*cap_span, REK::VarUndefined(cap_name.to_string())),
                         }
                     }
                 }
