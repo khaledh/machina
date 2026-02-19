@@ -18,6 +18,7 @@ mod linear;
 mod locals;
 mod lowerer;
 mod machine;
+mod machine_layout;
 mod mapping;
 mod r#match;
 mod place;

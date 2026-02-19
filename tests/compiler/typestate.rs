@@ -195,6 +195,22 @@ fn typestate_machine_handle_request_example_runs_in_experimental_mode() {
 }
 
 #[test]
+fn typestate_machine_lowering_is_deterministic_across_runs() {
+    let path = repo_root().join("tests/fixtures/typestate/typed_handle_request_reply.mc");
+    let source = std::fs::read_to_string(&path)
+        .expect("failed to read typestate machine-handle request fixture");
+    let opts = typestate_opts(true);
+    let out1 = compile_with_path(&source, Some(&path), &opts)
+        .expect("first compile failed for determinism check");
+    let out2 = compile_with_path(&source, Some(&path), &opts)
+        .expect("second compile failed for determinism check");
+    assert_eq!(
+        out1.asm, out2.asm,
+        "typestate asm should be byte-identical across repeated compiles"
+    );
+}
+
+#[test]
 fn typestate_managed_state_transitions_example_runs_in_experimental_mode() {
     let path = repo_root().join("tests/fixtures/typestate/managed_state_transitions.mc");
     let source = std::fs::read_to_string(&path)

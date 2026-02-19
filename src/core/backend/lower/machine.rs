@@ -8,6 +8,9 @@
 use std::collections::HashMap;
 
 use crate::core::backend::lower::drop_glue::DropGlueRegistry;
+use crate::core::backend::lower::machine_layout::{
+    PayloadLayoutIdMap, build_payload_layout_ids, event_payload_type, payload_layout_key,
+};
 use crate::core::backend::lower::types::TypeLowerer;
 use crate::core::backend::lower::{GlobalArena, LoweredFunction};
 use crate::core::ir::{
@@ -28,14 +31,17 @@ pub(super) fn collect_machine_payload_drop_registrations(
     type_map: &TypeMap,
     drop_glue: &mut DropGlueRegistry,
 ) -> PayloadDropRegistrations {
+    let payload_layout_ids = build_payload_layout_ids(machine_plans);
     let mut pairs: Vec<(u64, DefId)> = Vec::new();
     for descriptor in machine_plans.descriptors.values() {
         for event in &descriptor.event_kinds {
-            let ty = type_map.type_table().get(event.payload_layout_ty);
+            let ty = event_payload_type(&event.key);
             if !ty.needs_drop() {
                 continue;
             }
-            let layout_id = event.payload_layout_ty.index() as u64;
+            let Some(layout_id) = payload_layout_ids.get(&payload_layout_key(ty)).copied() else {
+                continue;
+            };
             let drop_def = drop_glue.def_id_for(ty, type_map);
             pairs.push((layout_id, drop_def));
         }
@@ -687,12 +693,13 @@ fn append_descriptor_globals(
     thunk_ids: &HashMap<DefId, DefId>,
     globals: &mut GlobalArena,
 ) -> HashMap<String, (GlobalId, usize)> {
+    let payload_layout_ids = build_payload_layout_ids(machine_plans);
     let mut out = HashMap::new();
     let mut descriptors: Vec<_> = machine_plans.descriptors.values().collect();
     descriptors.sort_by(|a, b| a.typestate_name.cmp(&b.typestate_name));
 
     for desc in descriptors {
-        let bytes = serialize_descriptor(desc, thunk_ids);
+        let bytes = serialize_descriptor(desc, thunk_ids, &payload_layout_ids);
         let byte_len = bytes.len();
         let global_id = globals.add_bytes(bytes);
         out.insert(desc.typestate_name.clone(), (global_id, byte_len));
@@ -703,6 +710,7 @@ fn append_descriptor_globals(
 fn serialize_descriptor(
     desc: &sem::MachineDescriptorPlan,
     thunk_ids: &HashMap<DefId, DefId>,
+    payload_layout_ids: &PayloadLayoutIdMap,
 ) -> Vec<u8> {
     let mut bytes = Vec::new();
 
@@ -721,7 +729,8 @@ fn serialize_descriptor(
     for state in &state_tags {
         push_u64(&mut bytes, state.tag);
         push_u64(&mut bytes, state.state_type_def_id.0 as u64);
-        push_u64(&mut bytes, state.state_layout_ty.index() as u64);
+        // State-layout metadata is currently informational; emit a stable id.
+        push_u64(&mut bytes, state.tag);
         push_string(&mut bytes, &state.state_name);
     }
 
@@ -729,7 +738,9 @@ fn serialize_descriptor(
     event_kinds.sort_by_key(|e| e.kind);
     for event in &event_kinds {
         push_u64(&mut bytes, event.kind);
-        push_u64(&mut bytes, event.payload_layout_ty.index() as u64);
+        let payload_key = payload_layout_key(event_payload_type(&event.key));
+        let payload_layout_id = payload_layout_ids.get(&payload_key).copied().unwrap_or(0);
+        push_u64(&mut bytes, payload_layout_id);
         match &event.key {
             sem::MachineEventKeyPlan::Payload { payload_ty } => {
                 push_u8(&mut bytes, 0);

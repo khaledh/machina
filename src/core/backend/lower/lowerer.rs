@@ -5,6 +5,7 @@ use crate::core::backend::lower::drop_glue::DropGlueRegistry;
 use crate::core::backend::lower::drops::DropManager;
 use crate::core::backend::lower::globals::GlobalArena;
 use crate::core::backend::lower::locals::{LocalMap, LocalValue};
+use crate::core::backend::lower::machine_layout::{build_payload_layout_ids, payload_layout_key};
 use crate::core::backend::lower::types::TypeLowerer;
 use crate::core::ir::builder::FunctionBuilder;
 use crate::core::ir::{BlockId, Function, FunctionSig, GlobalId, IrTypeCache, IrTypeId, ValueId};
@@ -422,29 +423,18 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
         selected
     }
 
-    /// Resolves a payload layout-id for boxed machine payload transport.
+    /// Resolves a deterministic payload layout-id for boxed machine payload
+    /// transport.
     ///
-    /// Layout ids are emitted into envelope `payload1` and map to descriptor
-    /// metadata. If multiple descriptors disagree for the same payload type,
-    /// lookup is treated as ambiguous.
+    /// Layout ids are assigned from a stable sort of payload type keys across
+    /// all machine descriptors in the module. This keeps emitted assembly
+    /// reproducible across process runs.
     pub(super) fn machine_payload_layout_id(&self, payload_ty: &Type) -> Option<u64> {
         let plans = self.machine_plans?;
-        let mut selected = None;
-        for descriptor in plans.descriptors.values() {
-            for event in &descriptor.event_kinds {
-                if let sem::MachineEventKeyPlan::Payload { payload_ty: ty } = &event.key
-                    && ty == payload_ty
-                {
-                    let layout_id = event.payload_layout_ty.index() as u64;
-                    match selected {
-                        None => selected = Some(layout_id),
-                        Some(existing) if existing == layout_id => {}
-                        Some(_) => return None,
-                    }
-                }
-            }
-        }
-        selected
+        let payload_layout_ids = build_payload_layout_ids(plans);
+        payload_layout_ids
+            .get(&payload_layout_key(payload_ty))
+            .copied()
     }
 
     /// Resolves an event kind for response reply emits.
