@@ -1,163 +1,102 @@
 use std::path::PathBuf;
+use std::process::Output;
 
 use machina::driver::compile::CompileOptions;
 
 use crate::common::{run_c_program, run_program, run_program_with_opts};
 
-#[test]
-fn test_machine_runtime_core() {
-    let repo_root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
-    let source_path = repo_root
+fn runtime_c_fixture_path(file_name: &str) -> PathBuf {
+    PathBuf::from(env!("CARGO_MANIFEST_DIR"))
         .join("runtime")
         .join("tests")
-        .join("machine_runtime_basic.c");
+        .join(file_name)
+}
 
-    let run = run_c_program("machine_runtime_basic", &source_path);
+fn assert_runtime_c_fixture_ok(stem: &str) {
+    let source_path = runtime_c_fixture_path(&format!("{stem}.c"));
+    let run = run_c_program(stem, &source_path);
     assert_eq!(run.status.code(), Some(0));
+}
+
+fn typestate_compile_opts() -> CompileOptions {
+    CompileOptions {
+        dump: None,
+        emit_ir: false,
+        verify_ir: false,
+        trace_alloc: false,
+        trace_drops: false,
+        inject_prelude: true,
+        experimental_typestate: true,
+    }
+}
+
+fn run_typestate_program(name: &str, source: &str) -> Output {
+    run_program_with_opts(name, source, typestate_compile_opts())
+}
+
+#[test]
+fn test_machine_runtime_core() {
+    assert_runtime_c_fixture_ok("machine_runtime_basic");
 }
 
 #[test]
 fn test_machine_runtime_transactional_commit_rollback() {
-    let repo_root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
-    let source_path = repo_root
-        .join("runtime")
-        .join("tests")
-        .join("machine_runtime_txn.c");
-
-    let run = run_c_program("machine_runtime_txn", &source_path);
-    assert_eq!(run.status.code(), Some(0));
+    assert_runtime_c_fixture_ok("machine_runtime_txn");
 }
 
 #[test]
 fn test_machine_runtime_request_reply_transport() {
-    let repo_root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
-    let source_path = repo_root
-        .join("runtime")
-        .join("tests")
-        .join("machine_runtime_reqreply.c");
-
-    let run = run_c_program("machine_runtime_reqreply", &source_path);
-    assert_eq!(run.status.code(), Some(0));
+    assert_runtime_c_fixture_ok("machine_runtime_reqreply");
 }
 
 #[test]
 fn test_machine_runtime_transactional_request_reply_staging() {
-    let repo_root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
-    let source_path = repo_root
-        .join("runtime")
-        .join("tests")
-        .join("machine_runtime_txn_reqreply.c");
-
-    let run = run_c_program("machine_runtime_txn_reqreply", &source_path);
-    assert_eq!(run.status.code(), Some(0));
+    assert_runtime_c_fixture_ok("machine_runtime_txn_reqreply");
 }
 
 #[test]
 fn test_machine_runtime_pending_cleanup_and_metrics_hooks() {
-    let repo_root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
-    let source_path = repo_root
-        .join("runtime")
-        .join("tests")
-        .join("machine_runtime_pending_cleanup.c");
-
-    let run = run_c_program("machine_runtime_pending_cleanup", &source_path);
-    assert_eq!(run.status.code(), Some(0));
+    assert_runtime_c_fixture_ok("machine_runtime_pending_cleanup");
 }
 
 #[test]
 fn test_machine_runtime_payload_ownership_cleanup_paths() {
-    let repo_root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
-    let source_path = repo_root
-        .join("runtime")
-        .join("tests")
-        .join("machine_runtime_payload_ownership.c");
-
-    let run = run_c_program("machine_runtime_payload_ownership", &source_path);
-    assert_eq!(run.status.code(), Some(0));
+    assert_runtime_c_fixture_ok("machine_runtime_payload_ownership");
 }
 
 #[test]
 fn test_machine_runtime_emit_shims_stage_transactional_effects() {
-    let repo_root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
-    let source_path = repo_root
-        .join("runtime")
-        .join("tests")
-        .join("machine_runtime_emit_staging.c");
-
-    let run = run_c_program("machine_runtime_emit_staging", &source_path);
-    assert_eq!(run.status.code(), Some(0));
+    assert_runtime_c_fixture_ok("machine_runtime_emit_staging");
 }
 
 #[test]
 fn test_machine_runtime_handle_bridge_helpers() {
-    let repo_root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
-    let source_path = repo_root
-        .join("runtime")
-        .join("tests")
-        .join("machine_runtime_handle_bridge.c");
-
-    let run = run_c_program("machine_runtime_handle_bridge", &source_path);
-    assert_eq!(run.status.code(), Some(0));
+    assert_runtime_c_fixture_ok("machine_runtime_handle_bridge");
 }
 
 #[test]
 fn test_machine_runtime_bound_dispatch_step() {
-    let repo_root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
-    let source_path = repo_root
-        .join("runtime")
-        .join("tests")
-        .join("machine_runtime_bound_dispatch.c");
-
-    let run = run_c_program("machine_runtime_bound_dispatch", &source_path);
-    assert_eq!(run.status.code(), Some(0));
+    assert_runtime_c_fixture_ok("machine_runtime_bound_dispatch");
 }
 
 #[test]
 fn test_machine_runtime_stop_path_eager_cleanup() {
-    let repo_root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
-    let source_path = repo_root
-        .join("runtime")
-        .join("tests")
-        .join("machine_runtime_stop_cleanup.c");
-
-    let run = run_c_program("machine_runtime_stop_cleanup", &source_path);
-    assert_eq!(run.status.code(), Some(0));
+    assert_runtime_c_fixture_ok("machine_runtime_stop_cleanup");
 }
 
 #[test]
 fn test_machine_runtime_bootstrap_hook_called_once() {
-    let repo_root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
-    let source_path = repo_root
-        .join("runtime")
-        .join("tests")
-        .join("machine_runtime_bootstrap_hook.c");
-
-    let run = run_c_program("machine_runtime_bootstrap_hook", &source_path);
-    assert_eq!(run.status.code(), Some(0));
+    assert_runtime_c_fixture_ok("machine_runtime_bootstrap_hook");
 }
 
 #[test]
 fn test_machine_runtime_managed_bootstrap_and_shutdown_bridge() {
-    let repo_root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
-    let source_path = repo_root
-        .join("runtime")
-        .join("tests")
-        .join("machine_runtime_managed.c");
-
-    let run = run_c_program("machine_runtime_managed", &source_path);
-    assert_eq!(run.status.code(), Some(0));
+    assert_runtime_c_fixture_ok("machine_runtime_managed");
 }
 
 #[test]
 fn test_machine_runtime_descriptor_dispatch_selection() {
-    let repo_root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
-    let source_path = repo_root
-        .join("runtime")
-        .join("tests")
-        .join("machine_runtime_descriptor_dispatch.c");
-
-    let run = run_c_program("machine_runtime_descriptor_dispatch", &source_path);
-    assert_eq!(run.status.code(), Some(0));
+    assert_runtime_c_fixture_ok("machine_runtime_descriptor_dispatch");
 }
 
 #[test]
@@ -262,19 +201,7 @@ fn main() -> u64 {
 }
 "#;
 
-    let run = run_program_with_opts(
-        "typestate_machine_runtime_exec",
-        source,
-        CompileOptions {
-            dump: None,
-            emit_ir: false,
-            verify_ir: false,
-            trace_alloc: false,
-            trace_drops: false,
-            inject_prelude: true,
-            experimental_typestate: true,
-        },
-    );
+    let run = run_typestate_program("typestate_machine_runtime_exec", source);
     assert_eq!(run.status.code(), Some(0));
     let stdout = String::from_utf8_lossy(&run.stdout);
     assert!(
@@ -319,19 +246,7 @@ fn main() {
 }
 "#;
 
-    let run = run_program_with_opts(
-        "typestate_machine_runtime_auto_drive",
-        source,
-        CompileOptions {
-            dump: None,
-            emit_ir: false,
-            verify_ir: false,
-            trace_alloc: false,
-            trace_drops: false,
-            inject_prelude: true,
-            experimental_typestate: true,
-        },
-    );
+    let run = run_typestate_program("typestate_machine_runtime_auto_drive", source);
     assert_eq!(run.status.code(), Some(0));
     let stdout = String::from_utf8_lossy(&run.stdout);
     assert!(
@@ -368,19 +283,7 @@ fn main() -> () | MachineError {
 }
 "#;
 
-    let run = run_program_with_opts(
-        "typestate_machine_runtime_typed_send_payload",
-        source,
-        CompileOptions {
-            dump: None,
-            emit_ir: false,
-            verify_ir: false,
-            trace_alloc: false,
-            trace_drops: false,
-            inject_prelude: true,
-            experimental_typestate: true,
-        },
-    );
+    let run = run_typestate_program("typestate_machine_runtime_typed_send_payload", source);
     assert_eq!(run.status.code(), Some(0));
     let stdout = String::from_utf8_lossy(&run.stdout);
     assert!(
@@ -463,19 +366,7 @@ fn main() -> u64 {
 }
 "#;
 
-    let run = run_program_with_opts(
-        "typestate_final_state_stop",
-        source,
-        CompileOptions {
-            dump: None,
-            emit_ir: false,
-            verify_ir: false,
-            trace_alloc: false,
-            trace_drops: false,
-            inject_prelude: true,
-            experimental_typestate: true,
-        },
-    );
+    let run = run_typestate_program("typestate_final_state_stop", source);
     assert_eq!(run.status.code(), Some(0));
 }
 
@@ -583,19 +474,7 @@ fn main() -> u64 {
 }
 "#;
 
-    let run = run_program_with_opts(
-        "typestate_machine_runtime_reqreply",
-        source,
-        CompileOptions {
-            dump: None,
-            emit_ir: false,
-            verify_ir: false,
-            trace_alloc: false,
-            trace_drops: false,
-            inject_prelude: true,
-            experimental_typestate: true,
-        },
-    );
+    let run = run_typestate_program("typestate_machine_runtime_reqreply", source);
     assert_eq!(run.status.code(), Some(0));
     let stdout = String::from_utf8_lossy(&run.stdout);
     assert!(
@@ -662,19 +541,7 @@ fn main() -> u64 {
 }
 "#;
 
-    let run = run_program_with_opts(
-        "typestate_spawn_constructor_args",
-        source,
-        CompileOptions {
-            dump: None,
-            emit_ir: false,
-            verify_ir: false,
-            trace_alloc: false,
-            trace_drops: false,
-            inject_prelude: true,
-            experimental_typestate: true,
-        },
-    );
+    let run = run_typestate_program("typestate_spawn_constructor_args", source);
     assert_eq!(run.status.code(), Some(0));
     let stdout = String::from_utf8_lossy(&run.stdout);
     assert!(
