@@ -667,6 +667,12 @@ static uint8_t mc_commit_replies(
             return 0;
         }
 
+        // Response envelope now owns the original request payload through
+        // origin_payload* provenance fields. Clear pending-table ownership so
+        // runtime teardown/timeout cleanup won't free the same payload again.
+        rt->pending.entries[(uint32_t)idx].request_payload0 = 0;
+        rt->pending.entries[(uint32_t)idx].request_payload1 = 0;
+
         // Consume capability only after successful delivery.
         rt->pending.entries[(uint32_t)idx].active = 0;
         mc_emit_pending_cleanup(
