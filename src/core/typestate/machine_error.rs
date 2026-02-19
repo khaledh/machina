@@ -1,6 +1,18 @@
 use super::ast_build::{int_expr, return_stmt, var_expr};
 use super::*;
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(super) enum MachineErrorKind {
+    SpawnFailed,
+    BindFailed,
+    StartFailed,
+    RuntimeUnavailable,
+    Unknown,
+    NotRunning,
+    MailboxFull,
+    RequestFailed,
+}
+
 pub(super) fn machine_error_type_def(node_id_gen: &mut NodeIdGen) -> TopLevelItem {
     let span = Span::default();
     TopLevelItem::TypeDef(TypeDef {
@@ -65,19 +77,16 @@ pub(super) fn machine_error_type_def(node_id_gen: &mut NodeIdGen) -> TopLevelIte
     })
 }
 
-pub(super) fn machine_error_variant_for_type_name(error_type_name: &str) -> Option<&'static str> {
-    match error_type_name {
-        MACHINE_SPAWN_FAILED_TYPE_NAME => Some(MACHINE_ERROR_VARIANT_SPAWN_FAILED),
-        MACHINE_BIND_FAILED_TYPE_NAME => Some(MACHINE_ERROR_VARIANT_BIND_FAILED),
-        MACHINE_START_FAILED_TYPE_NAME => Some(MACHINE_ERROR_VARIANT_START_FAILED),
-        MACHINE_MANAGED_RUNTIME_UNAVAILABLE_TYPE_NAME => {
-            Some(MACHINE_ERROR_VARIANT_MANAGED_RUNTIME_UNAVAILABLE)
-        }
-        MACHINE_UNKNOWN_TYPE_NAME => Some(MACHINE_ERROR_VARIANT_UNKNOWN),
-        MACHINE_NOT_RUNNING_TYPE_NAME => Some(MACHINE_ERROR_VARIANT_NOT_RUNNING),
-        MACHINE_MAILBOX_FULL_TYPE_NAME => Some(MACHINE_ERROR_VARIANT_MAILBOX_FULL),
-        MACHINE_REQUEST_FAILED_TYPE_NAME => Some(MACHINE_ERROR_VARIANT_REQUEST_FAILED),
-        _ => None,
+fn machine_error_variant_for_kind(kind: MachineErrorKind) -> &'static str {
+    match kind {
+        MachineErrorKind::SpawnFailed => MACHINE_ERROR_VARIANT_SPAWN_FAILED,
+        MachineErrorKind::BindFailed => MACHINE_ERROR_VARIANT_BIND_FAILED,
+        MachineErrorKind::StartFailed => MACHINE_ERROR_VARIANT_START_FAILED,
+        MachineErrorKind::RuntimeUnavailable => MACHINE_ERROR_VARIANT_MANAGED_RUNTIME_UNAVAILABLE,
+        MachineErrorKind::Unknown => MACHINE_ERROR_VARIANT_UNKNOWN,
+        MachineErrorKind::NotRunning => MACHINE_ERROR_VARIANT_NOT_RUNNING,
+        MachineErrorKind::MailboxFull => MACHINE_ERROR_VARIANT_MAILBOX_FULL,
+        MachineErrorKind::RequestFailed => MACHINE_ERROR_VARIANT_REQUEST_FAILED,
     }
 }
 
@@ -102,7 +111,7 @@ pub(super) fn machine_error_variant_expr(
 pub(super) fn return_machine_error_if_eq(
     value_var: &str,
     expected: u64,
-    error_type_name: &str,
+    error_kind: MachineErrorKind,
     node_id_gen: &mut NodeIdGen,
     span: Span,
 ) -> Expr {
@@ -121,8 +130,7 @@ pub(super) fn return_machine_error_if_eq(
         kind: ExprKind::Block {
             items: vec![parsed::BlockItem::Stmt(return_stmt(
                 machine_error_variant_expr(
-                    machine_error_variant_for_type_name(error_type_name)
-                        .expect("machine error mapping should exist"),
+                    machine_error_variant_for_kind(error_kind),
                     node_id_gen,
                     span,
                 ),
@@ -156,9 +164,39 @@ pub(super) fn return_machine_error_if_eq(
 
 pub(super) fn return_machine_error_if_zero(
     value_var: &str,
-    error_type_name: &str,
+    error_kind: MachineErrorKind,
     node_id_gen: &mut NodeIdGen,
     span: Span,
 ) -> Expr {
-    return_machine_error_if_eq(value_var, 0, error_type_name, node_id_gen, span)
+    return_machine_error_if_eq(value_var, 0, error_kind, node_id_gen, span)
+}
+
+pub(super) fn send_status_error_items(
+    status_var: &str,
+    node_id_gen: &mut NodeIdGen,
+    span: Span,
+) -> Vec<parsed::BlockItem> {
+    vec![
+        parsed::BlockItem::Expr(return_machine_error_if_eq(
+            status_var,
+            1,
+            MachineErrorKind::Unknown,
+            node_id_gen,
+            span,
+        )),
+        parsed::BlockItem::Expr(return_machine_error_if_eq(
+            status_var,
+            2,
+            MachineErrorKind::NotRunning,
+            node_id_gen,
+            span,
+        )),
+        parsed::BlockItem::Expr(return_machine_error_if_eq(
+            status_var,
+            3,
+            MachineErrorKind::MailboxFull,
+            node_id_gen,
+            span,
+        )),
+    ]
 }

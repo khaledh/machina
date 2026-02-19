@@ -50,7 +50,7 @@ pub(super) fn machine_handle_method_block(
             )),
             parsed::BlockItem::Expr(return_machine_error_if_zero(
                 "__mc_rt",
-                MACHINE_MANAGED_RUNTIME_UNAVAILABLE_TYPE_NAME,
+                MachineErrorKind::RuntimeUnavailable,
                 node_id_gen,
                 span,
             )),
@@ -74,36 +74,6 @@ pub(super) fn machine_handle_method_block(
         ))
     }
 
-    fn send_status_error_items(
-        status_var: &str,
-        node_id_gen: &mut NodeIdGen,
-        span: Span,
-    ) -> Vec<parsed::BlockItem> {
-        vec![
-            parsed::BlockItem::Expr(return_machine_error_if_eq(
-                status_var,
-                1,
-                MACHINE_UNKNOWN_TYPE_NAME,
-                node_id_gen,
-                span,
-            )),
-            parsed::BlockItem::Expr(return_machine_error_if_eq(
-                status_var,
-                2,
-                MACHINE_NOT_RUNNING_TYPE_NAME,
-                node_id_gen,
-                span,
-            )),
-            parsed::BlockItem::Expr(return_machine_error_if_eq(
-                status_var,
-                3,
-                MACHINE_MAILBOX_FULL_TYPE_NAME,
-                node_id_gen,
-                span,
-            )),
-        ]
-    }
-
     fn request_failed_item(
         pending_var: &str,
         node_id_gen: &mut NodeIdGen,
@@ -111,7 +81,7 @@ pub(super) fn machine_handle_method_block(
     ) -> parsed::BlockItem {
         parsed::BlockItem::Expr(return_machine_error_if_zero(
             pending_var,
-            MACHINE_REQUEST_FAILED_TYPE_NAME,
+            MachineErrorKind::RequestFailed,
             node_id_gen,
             span,
         ))
@@ -572,7 +542,7 @@ pub(super) fn lower_spawn_func(
                 )),
                 parsed::BlockItem::Expr(return_machine_error_if_zero(
                     "__mc_rt",
-                    MACHINE_SPAWN_FAILED_TYPE_NAME,
+                    MachineErrorKind::RuntimeUnavailable,
                     node_id_gen,
                     span,
                 )),
@@ -592,7 +562,7 @@ pub(super) fn lower_spawn_func(
                 )),
                 parsed::BlockItem::Expr(return_machine_error_if_zero(
                     "__mc_machine_id",
-                    MACHINE_SPAWN_FAILED_TYPE_NAME,
+                    MachineErrorKind::SpawnFailed,
                     node_id_gen,
                     span,
                 )),
@@ -610,7 +580,7 @@ pub(super) fn lower_spawn_func(
                 )),
                 parsed::BlockItem::Expr(return_machine_error_if_zero(
                     "__mc_bind_status",
-                    MACHINE_BIND_FAILED_TYPE_NAME,
+                    MachineErrorKind::BindFailed,
                     node_id_gen,
                     span,
                 )),
@@ -628,7 +598,7 @@ pub(super) fn lower_spawn_func(
                 )),
                 parsed::BlockItem::Expr(return_machine_error_if_zero(
                     "__mc_set_state_status",
-                    MACHINE_BIND_FAILED_TYPE_NAME,
+                    MachineErrorKind::BindFailed,
                     node_id_gen,
                     span,
                 )),
@@ -640,7 +610,7 @@ pub(super) fn lower_spawn_func(
                 )),
                 parsed::BlockItem::Expr(return_machine_error_if_zero(
                     "__mc_start_status",
-                    MACHINE_START_FAILED_TYPE_NAME,
+                    MachineErrorKind::StartFailed,
                     node_id_gen,
                     span,
                 )),

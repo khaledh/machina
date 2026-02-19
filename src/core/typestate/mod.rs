@@ -52,7 +52,7 @@ mod machine_error;
 mod support_types;
 
 use machine_error::{
-    machine_error_type_def, return_machine_error_if_eq, return_machine_error_if_zero,
+    MachineErrorKind, machine_error_type_def, return_machine_error_if_zero, send_status_error_items,
 };
 use support_types::{
     ensure_machine_runtime_intrinsics, ensure_machine_support_types, machine_handle_named_type_def,
