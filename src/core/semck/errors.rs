@@ -167,6 +167,21 @@ pub enum SemCheckError {
 
     #[error("Captured closure cannot be passed as an argument")]
     ClosureEscapeArg(Span),
+
+    #[error(
+        "Typestate {0} ({1}::{2} state {3}) has handler trigger {4} with no matching protocol transition"
+    )]
+    ProtocolProgressionMissingTriggerTransition(String, String, String, String, Type, Span),
+
+    #[error(
+        "Typestate {0} ({1}::{2} state {3}) handler trigger {4} emits {5} to role {6}, but no protocol transition edge allows it"
+    )]
+    ProtocolProgressionImpossibleEmit(String, String, String, String, Type, Type, String, Span),
+
+    #[error(
+        "Typestate {0} ({1}::{2} state {3}) handler trigger {4} returns state {5}, but no protocol transition allows it"
+    )]
+    ProtocolProgressionImpossibleReturnState(String, String, String, String, Type, String, Span),
 }
 
 impl SemCheckError {
@@ -225,6 +240,13 @@ impl SemCheckError {
             SemCheckError::ClosureEscapeReturn(span) => *span,
             SemCheckError::ClosureEscapeStore(span) => *span,
             SemCheckError::ClosureEscapeArg(span) => *span,
+            SemCheckError::ProtocolProgressionMissingTriggerTransition(_, _, _, _, _, span) => {
+                *span
+            }
+            SemCheckError::ProtocolProgressionImpossibleEmit(_, _, _, _, _, _, _, span) => *span,
+            SemCheckError::ProtocolProgressionImpossibleReturnState(_, _, _, _, _, _, span) => {
+                *span
+            }
         }
     }
 }

@@ -38,6 +38,37 @@ fn semcheck_typestate_source(source: &str) -> crate::core::context::SemanticChec
     sem_check(typed).expect("semcheck should succeed")
 }
 
+fn semcheck_typestate_source_err(source: &str) -> Vec<crate::core::semck::SemCheckError> {
+    let lexer = Lexer::new(source);
+    let tokens = lexer
+        .tokenize()
+        .collect::<Result<Vec<Token>, LexError>>()
+        .expect("failed to tokenize");
+    let mut parser = Parser::new_with_id_gen_and_options(
+        &tokens,
+        NodeIdGen::new(),
+        ParserOptions {
+            experimental_typestate: true,
+        },
+    );
+    let module = parser.parse().expect("failed to parse");
+    let parsed = ParsedContext::new(module, parser.into_id_gen());
+
+    let resolved_out =
+        resolve_stage_with_policy(parsed, ResolveInputs::default(), FrontendPolicy::Strict);
+    assert!(
+        resolved_out.errors.is_empty(),
+        "expected clean resolve, got {:?}",
+        resolved_out.errors
+    );
+    let resolved = resolved_out
+        .context
+        .expect("strict resolve should produce context");
+    let typed = type_check_with_imported_facts(resolved, ImportedFacts::default())
+        .expect("typecheck should succeed");
+    sem_check(typed).expect_err("semcheck should fail")
+}
+
 #[test]
 fn semck_extracts_protocol_progression_emit_and_transition_facts() {
     let source = r#"
@@ -258,5 +289,175 @@ typestate Gateway : Auth::Client {
     assert!(
         !facts.by_state.is_empty(),
         "expected state index map to be populated"
+    );
+}
+
+#[test]
+fn semck_reports_missing_trigger_transition_for_extra_handler() {
+    let source = r#"
+type Start = {}
+type Local = {}
+
+protocol Auth {
+    msg Start;
+
+    role Client {
+        state Idle {
+            on Start -> Idle;
+        }
+    }
+}
+
+typestate Gateway : Auth::Client {
+    fn new() -> Idle { Idle {} }
+
+    state Idle {
+        on Start() -> Idle {
+            Idle {}
+        }
+
+        on Local() -> Idle {
+            Idle {}
+        }
+    }
+}
+"#;
+
+    let errors = semcheck_typestate_source_err(source);
+    assert!(
+        errors.iter().any(|err| matches!(
+            err,
+            crate::core::semck::SemCheckError::ProtocolProgressionMissingTriggerTransition(
+                typestate,
+                protocol,
+                role,
+                state,
+                selector,
+                _
+            ) if typestate == "Gateway"
+                && protocol == "Auth"
+                && role == "Client"
+                && state == "Idle"
+                && selector.to_string().contains("Local")
+        )),
+        "expected missing-trigger progression diagnostic, got {:?}",
+        errors
+    );
+}
+
+#[test]
+fn semck_reports_impossible_emit_and_return_state_for_trigger() {
+    let source = r#"
+type Start = {}
+type Cancel = {}
+type AuthReq = {}
+type CancelReq = {}
+
+protocol Auth {
+    msg Start;
+    msg Cancel;
+    msg AuthReq;
+    msg CancelReq;
+
+    role Client {
+        state Idle {
+            on Start@Server -> Awaiting {
+                effects: [ AuthReq ~> Server ]
+            }
+            on Cancel@Server -> Idle {
+                effects: [ CancelReq ~> Server ]
+            }
+        }
+        state Awaiting {
+            on Cancel@Server -> Idle {
+                effects: [ CancelReq ~> Server ]
+            }
+        }
+    }
+
+    role Server {
+        state Ready {}
+    }
+}
+
+typestate AuthServer : Auth::Server {
+    fn new() -> Ready { Ready {} }
+    state Ready {}
+}
+
+typestate Gateway : Auth::Client {
+    fields {
+        server: Machine<AuthServer> as Server,
+    }
+
+    fn new(server: Machine<AuthServer>) -> Idle {
+        Idle { server: server }
+    }
+
+    state Idle {
+        on Start() -> Idle {
+            emit Send(to: self.server, CancelReq {});
+            Idle { server: self.server }
+        }
+
+        on Cancel() -> Idle {
+            emit Send(to: self.server, CancelReq {});
+            Idle { server: self.server }
+        }
+    }
+
+    state Awaiting {
+        on Cancel() -> Idle {
+            emit Send(to: self.server, CancelReq {});
+            Idle { server: self.server }
+        }
+    }
+}
+"#;
+
+    let errors = semcheck_typestate_source_err(source);
+    assert!(
+        errors.iter().any(|err| matches!(
+            err,
+            crate::core::semck::SemCheckError::ProtocolProgressionImpossibleEmit(
+                typestate,
+                protocol,
+                role,
+                state,
+                selector,
+                payload,
+                to_role,
+                _
+            ) if typestate == "Gateway"
+                && protocol == "Auth"
+                && role == "Client"
+                && state == "Idle"
+                && selector.to_string().contains("Start")
+                && payload.to_string().contains("CancelReq")
+                && to_role == "Server"
+        )),
+        "expected impossible-emit progression diagnostic, got {:?}",
+        errors
+    );
+    assert!(
+        errors.iter().any(|err| matches!(
+            err,
+            crate::core::semck::SemCheckError::ProtocolProgressionImpossibleReturnState(
+                typestate,
+                protocol,
+                role,
+                state,
+                selector,
+                to_state,
+                _
+            ) if typestate == "Gateway"
+                && protocol == "Auth"
+                && role == "Client"
+                && state == "Idle"
+                && selector.to_string().contains("Start")
+                && to_state == "Idle"
+        )),
+        "expected impossible-return progression diagnostic, got {:?}",
+        errors
     );
 }

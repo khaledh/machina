@@ -8,6 +8,7 @@ mod match_check;
 mod move_check;
 mod normalize;
 mod protocol_progression;
+mod protocol_progression_check;
 mod slice_borrow;
 mod slice_escape;
 mod structural;
@@ -82,6 +83,7 @@ fn sem_check_partial_normalized(
     errors.extend(closure_borrow_errors);
     errors.extend(move_result.errors);
     errors.extend(slice_escape::check(&ctx));
+    errors.extend(protocol_progression_check::check(&ctx, &progression_facts));
 
     let mut poisoned_nodes = upstream_poisoned_nodes.clone();
     if !errors.is_empty() {

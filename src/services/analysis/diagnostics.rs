@@ -961,6 +961,15 @@ fn semcheck_code(error: &SemCheckError) -> &'static str {
         SemCheckError::ClosureEscapeReturn(..) => "MC-SEMCK-ClosureEscapeReturn",
         SemCheckError::ClosureEscapeStore(..) => "MC-SEMCK-ClosureEscapeStore",
         SemCheckError::ClosureEscapeArg(..) => "MC-SEMCK-ClosureEscapeArg",
+        SemCheckError::ProtocolProgressionMissingTriggerTransition(..) => {
+            "MC-SEMCK-ProtocolProgressionMissingTriggerTransition"
+        }
+        SemCheckError::ProtocolProgressionImpossibleEmit(..) => {
+            "MC-SEMCK-ProtocolProgressionImpossibleEmit"
+        }
+        SemCheckError::ProtocolProgressionImpossibleReturnState(..) => {
+            "MC-SEMCK-ProtocolProgressionImpossibleReturnState"
+        }
     }
 }
 
@@ -1006,6 +1015,90 @@ fn populate_semcheck_metadata(error: &SemCheckError, metadata: &mut DiagnosticMe
             metadata.insert(
                 "missing".to_string(),
                 DiagnosticValue::StringList(missing.clone()),
+            );
+        }
+        SemCheckError::ProtocolProgressionMissingTriggerTransition(
+            typestate,
+            protocol,
+            role,
+            state,
+            selector,
+            _,
+        ) => {
+            metadata.insert(
+                "typestate".to_string(),
+                DiagnosticValue::String(typestate.clone()),
+            );
+            metadata.insert(
+                "protocol".to_string(),
+                DiagnosticValue::String(protocol.clone()),
+            );
+            metadata.insert("role".to_string(), DiagnosticValue::String(role.clone()));
+            metadata.insert("state".to_string(), DiagnosticValue::String(state.clone()));
+            metadata.insert(
+                "selector".to_string(),
+                DiagnosticValue::String(selector.to_string()),
+            );
+        }
+        SemCheckError::ProtocolProgressionImpossibleEmit(
+            typestate,
+            protocol,
+            role,
+            state,
+            selector,
+            payload,
+            to_role,
+            _,
+        ) => {
+            metadata.insert(
+                "typestate".to_string(),
+                DiagnosticValue::String(typestate.clone()),
+            );
+            metadata.insert(
+                "protocol".to_string(),
+                DiagnosticValue::String(protocol.clone()),
+            );
+            metadata.insert("role".to_string(), DiagnosticValue::String(role.clone()));
+            metadata.insert("state".to_string(), DiagnosticValue::String(state.clone()));
+            metadata.insert(
+                "selector".to_string(),
+                DiagnosticValue::String(selector.to_string()),
+            );
+            metadata.insert(
+                "payload".to_string(),
+                DiagnosticValue::String(payload.to_string()),
+            );
+            metadata.insert(
+                "to_role".to_string(),
+                DiagnosticValue::String(to_role.clone()),
+            );
+        }
+        SemCheckError::ProtocolProgressionImpossibleReturnState(
+            typestate,
+            protocol,
+            role,
+            state,
+            selector,
+            to_state,
+            _,
+        ) => {
+            metadata.insert(
+                "typestate".to_string(),
+                DiagnosticValue::String(typestate.clone()),
+            );
+            metadata.insert(
+                "protocol".to_string(),
+                DiagnosticValue::String(protocol.clone()),
+            );
+            metadata.insert("role".to_string(), DiagnosticValue::String(role.clone()));
+            metadata.insert("state".to_string(), DiagnosticValue::String(state.clone()));
+            metadata.insert(
+                "selector".to_string(),
+                DiagnosticValue::String(selector.to_string()),
+            );
+            metadata.insert(
+                "to_state".to_string(),
+                DiagnosticValue::String(to_state.clone()),
             );
         }
         SemCheckError::MatchTargetNotEnum(ty, _)
