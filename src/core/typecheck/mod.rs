@@ -27,11 +27,9 @@ use crate::core::resolve::ImportedFacts;
 use crate::core::typecheck::engine::TypecheckEngine;
 
 macro_rules! tc_push_error {
-    ($errors:expr, $span:expr, $kind:expr) => {
-        {
-            $errors.push(($kind).at($span));
-        }
-    };
+    ($errors:expr, $span:expr, $kind:expr) => {{
+        $errors.push(($kind).at($span));
+    }};
 }
 
 pub(crate) use tc_push_error;

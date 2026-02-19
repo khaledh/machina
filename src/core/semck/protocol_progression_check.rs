@@ -15,7 +15,7 @@ use crate::core::context::{
     ProtocolProgressionEvent, ProtocolProgressionFacts, SemCheckNormalizedContext,
 };
 use crate::core::protocol::{ProtocolStateFact, ProtocolTransitionFact};
-use crate::core::semck::{push_error, SemCheckError, SEK};
+use crate::core::semck::{SEK, SemCheckError, push_error};
 use crate::core::types::Type;
 
 pub(super) fn check(
@@ -38,13 +38,17 @@ pub(super) fn check(
 
         let candidates = matching_trigger_transitions(state_fact, &fact.selector_ty);
         if candidates.is_empty() {
-            push_error(&mut errors, fact.span, SEK::ProtocolProgressionMissingTriggerTransition(
+            push_error(
+                &mut errors,
+                fact.span,
+                SEK::ProtocolProgressionMissingTriggerTransition(
                     fact.typestate_name.clone(),
                     fact.entry_state.protocol_name.clone(),
                     fact.entry_state.role_name.clone(),
                     fact.entry_state.state_name.clone(),
                     fact.selector_ty.clone(),
-                ));
+                ),
+            );
             // Follow-on emit/return diagnostics would only be symptoms.
             continue;
         }
@@ -71,7 +75,10 @@ pub(super) fn check(
                             && seen_impossible_emits
                                 .insert((emit.payload_ty.clone(), to_role_name.to_string()))
                         {
-                            push_error(&mut errors, emit.span, SEK::ProtocolProgressionImpossibleEmit(
+                            push_error(
+                                &mut errors,
+                                emit.span,
+                                SEK::ProtocolProgressionImpossibleEmit(
                                     fact.typestate_name.clone(),
                                     fact.entry_state.protocol_name.clone(),
                                     fact.entry_state.role_name.clone(),
@@ -79,7 +86,8 @@ pub(super) fn check(
                                     fact.selector_ty.clone(),
                                     emit.payload_ty.clone(),
                                     to_role_name.to_string(),
-                                ));
+                                ),
+                            );
                         }
                     }
                     ProtocolProgressionEvent::ReturnState(ret) => {
@@ -91,14 +99,18 @@ pub(super) fn check(
                             .contains(to_state_name)
                             && seen_impossible_returns.insert(to_state_name.to_string())
                         {
-                            push_error(&mut errors, ret.span, SEK::ProtocolProgressionImpossibleReturnState(
+                            push_error(
+                                &mut errors,
+                                ret.span,
+                                SEK::ProtocolProgressionImpossibleReturnState(
                                     fact.typestate_name.clone(),
                                     fact.entry_state.protocol_name.clone(),
                                     fact.entry_state.role_name.clone(),
                                     fact.entry_state.state_name.clone(),
                                     fact.selector_ty.clone(),
                                     to_state_name.to_string(),
-                                ));
+                                ),
+                            );
                         }
                     }
                 }

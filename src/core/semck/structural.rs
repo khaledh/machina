@@ -3,7 +3,7 @@ use crate::core::diag::Span;
 use crate::core::resolve::DefId;
 use crate::core::resolve::DefKind;
 use crate::core::semck::match_check;
-use crate::core::semck::{SemCheckError, SEK};
+use crate::core::semck::{SEK, SemCheckError};
 use crate::core::tree::normalized::{
     BindPattern, BindPatternKind, CallArg, CallArgMode, Expr, ExprKind, FunctionSig, MatchArm,
     MethodSig, Param, ParamMode, StmtExpr, StmtExprKind, StructLitField, StructUpdateField,
@@ -90,18 +90,30 @@ impl<'a> StructuralChecker<'a> {
     fn check_struct_lit(&mut self, name: &str, fields: &[StructLitField], span: Span) {
         // Enforce struct field existence, duplicates, and missing fields.
         let Some(struct_fields) = self.struct_fields.get(name) else {
-            Self::push_err(&mut self.errors, span, SEK::UnknownStructType(name.to_string()));
+            Self::push_err(
+                &mut self.errors,
+                span,
+                SEK::UnknownStructType(name.to_string()),
+            );
             return;
         };
 
         let mut seen = HashSet::new();
         for field in fields {
             if !struct_fields.iter().any(|f| f == &field.name) {
-                Self::push_err(&mut self.errors, field.span, SEK::UnknownStructField(field.name.clone()));
+                Self::push_err(
+                    &mut self.errors,
+                    field.span,
+                    SEK::UnknownStructField(field.name.clone()),
+                );
                 continue;
             }
             if !seen.insert(field.name.clone()) {
-                Self::push_err(&mut self.errors, field.span, SEK::DuplicateStructField(field.name.clone()));
+                Self::push_err(
+                    &mut self.errors,
+                    field.span,
+                    SEK::DuplicateStructField(field.name.clone()),
+                );
             }
         }
 
@@ -111,7 +123,11 @@ impl<'a> StructuralChecker<'a> {
             .cloned()
             .collect::<Vec<_>>();
         if !missing.is_empty() {
-            Self::push_err(&mut self.errors, span, SEK::StructFieldsMissing(missing.join(", ")));
+            Self::push_err(
+                &mut self.errors,
+                span,
+                SEK::StructFieldsMissing(missing.join(", ")),
+            );
         }
     }
 
@@ -129,9 +145,17 @@ impl<'a> StructuralChecker<'a> {
         let mut seen = HashSet::new();
         for field in fields {
             if !struct_fields.iter().any(|f| f.name == field.name) {
-                Self::push_err(&mut self.errors, field.span, SEK::UnknownStructField(field.name.clone()));
+                Self::push_err(
+                    &mut self.errors,
+                    field.span,
+                    SEK::UnknownStructField(field.name.clone()),
+                );
             } else if !seen.insert(field.name.clone()) {
-                Self::push_err(&mut self.errors, field.span, SEK::DuplicateStructField(field.name.clone()));
+                Self::push_err(
+                    &mut self.errors,
+                    field.span,
+                    SEK::DuplicateStructField(field.name.clone()),
+                );
             }
         }
     }
@@ -147,16 +171,28 @@ impl<'a> StructuralChecker<'a> {
             BindPatternKind::Struct { name, fields } => {
                 // Enforce struct pattern fields and recurse into subpatterns.
                 let Some(struct_fields) = self.struct_fields.get(name).cloned() else {
-                    Self::push_err(&mut self.errors, pattern.span, SEK::UnknownStructType(name.clone()));
+                    Self::push_err(
+                        &mut self.errors,
+                        pattern.span,
+                        SEK::UnknownStructType(name.clone()),
+                    );
                     return;
                 };
 
                 let mut seen = HashSet::new();
                 for field in fields {
                     if !struct_fields.iter().any(|f| f == &field.name) {
-                        Self::push_err(&mut self.errors, field.span, SEK::UnknownStructField(field.name.clone()));
+                        Self::push_err(
+                            &mut self.errors,
+                            field.span,
+                            SEK::UnknownStructField(field.name.clone()),
+                        );
                     } else if !seen.insert(field.name.clone()) {
-                        Self::push_err(&mut self.errors, field.span, SEK::DuplicateStructField(field.name.clone()));
+                        Self::push_err(
+                            &mut self.errors,
+                            field.span,
+                            SEK::DuplicateStructField(field.name.clone()),
+                        );
                     }
 
                     self.check_pattern(&field.pattern);
@@ -168,7 +204,11 @@ impl<'a> StructuralChecker<'a> {
                     .cloned()
                     .collect::<Vec<_>>();
                 if !missing.is_empty() {
-                    Self::push_err(&mut self.errors, pattern.span, SEK::StructFieldsMissing(missing.join(", ")));
+                    Self::push_err(
+                        &mut self.errors,
+                        pattern.span,
+                        SEK::StructFieldsMissing(missing.join(", ")),
+                    );
                 }
             }
         }
@@ -179,11 +219,19 @@ impl<'a> StructuralChecker<'a> {
             if let Ok(ty) = resolve_type_expr(&self.ctx.def_table, &self.ctx.module, &param.typ) {
                 if param.mode == ParamMode::InOut && !(ty.is_compound() || ty.is_heap()) {
                     // Only aggregate or heap types can be inout parameters.
-                    Self::push_err(&mut self.errors, param.span, SEK::InOutParamNotAggregate(ty.clone()));
+                    Self::push_err(
+                        &mut self.errors,
+                        param.span,
+                        SEK::InOutParamNotAggregate(ty.clone()),
+                    );
                 }
                 if param.mode == ParamMode::Out && !ty.is_compound() {
                     // Only aggregate types can be out parameters (for now).
-                    Self::push_err(&mut self.errors, param.span, SEK::OutParamNotAggregate(ty.clone()));
+                    Self::push_err(
+                        &mut self.errors,
+                        param.span,
+                        SEK::OutParamNotAggregate(ty.clone()),
+                    );
                 }
                 if param.mode == ParamMode::Sink && !ty.needs_drop() {
                     // Sink params are meant only for heap types.
@@ -202,24 +250,33 @@ impl<'a> StructuralChecker<'a> {
     ) {
         // Verify enum existence, variant existence, and payload arity.
         let Some(variants) = self.enum_variants.get(enum_name) else {
-            Self::push_err(&mut self.errors, span, SEK::UnknownEnumType(enum_name.to_string()));
+            Self::push_err(
+                &mut self.errors,
+                span,
+                SEK::UnknownEnumType(enum_name.to_string()),
+            );
             return;
         };
 
         let Some(variant) = variants.iter().find(|v| v.name == variant_name) else {
-            Self::push_err(&mut self.errors, span, SEK::UnknownEnumVariant(
-                    enum_name.to_string(),
-                    variant_name.to_string(),
-                ));
+            Self::push_err(
+                &mut self.errors,
+                span,
+                SEK::UnknownEnumVariant(enum_name.to_string(), variant_name.to_string()),
+            );
             return;
         };
 
         if payload_len != variant.payload_len {
-            Self::push_err(&mut self.errors, span, SEK::EnumVariantPayloadArityMismatch(
+            Self::push_err(
+                &mut self.errors,
+                span,
+                SEK::EnumVariantPayloadArityMismatch(
                     variant_name.to_string(),
                     variant.payload_len,
                     payload_len,
-                ));
+                ),
+            );
         }
     }
 
@@ -343,7 +400,11 @@ impl Visitor<DefId, TypeId> for StructuralChecker<'_> {
 
     fn visit_method_sig(&mut self, method_sig: &MethodSig) {
         if method_sig.self_param.mode == ParamMode::Out {
-            Self::push_err(&mut self.errors, method_sig.self_param.span, SEK::OutSelfNotAllowed);
+            Self::push_err(
+                &mut self.errors,
+                method_sig.self_param.span,
+                SEK::OutSelfNotAllowed,
+            );
         }
         self.check_param_modes(&method_sig.params);
         walk_method_sig(self, method_sig);
@@ -376,7 +437,11 @@ impl Visitor<DefId, TypeId> for StructuralChecker<'_> {
                 if let Type::Struct { fields, .. } = target_ty
                     && !fields.iter().any(|f| f.name == *field)
                 {
-                    Self::push_err(&mut self.errors, expr.span, SEK::UnknownStructField(field.clone()));
+                    Self::push_err(
+                        &mut self.errors,
+                        expr.span,
+                        SEK::UnknownStructField(field.clone()),
+                    );
                 }
             }
             ExprKind::Slice { target, .. } => {
@@ -398,7 +463,11 @@ impl Visitor<DefId, TypeId> for StructuralChecker<'_> {
             ExprKind::Call { callee, args } => {
                 // Only plain identifiers are valid callees at the AST level for now.
                 if !matches!(callee.kind, ExprKind::Var { .. }) {
-                    Self::push_err(&mut self.errors, callee.span, SEK::InvalidCallee(callee.kind.clone()));
+                    Self::push_err(
+                        &mut self.errors,
+                        callee.span,
+                        SEK::InvalidCallee(callee.kind.clone()),
+                    );
                 }
 
                 // Validate call-site argument modes and lvalue requirements.
@@ -420,12 +489,8 @@ impl Visitor<DefId, TypeId> for StructuralChecker<'_> {
                             ParamMode::InOut | ParamMode::Out => {
                                 let err = match self.is_mutable_lvalue(callee) {
                                     Some(true) => None,
-                                    Some(false) => {
-                                        Some(SEK::InOutArgNotMutable.at(expr.span))
-                                    }
-                                    None => {
-                                        Some(SEK::InOutArgNotLvalue.at(expr.span))
-                                    }
+                                    Some(false) => Some(SEK::InOutArgNotMutable.at(expr.span)),
+                                    None => Some(SEK::InOutArgNotLvalue.at(expr.span)),
                                 };
                                 if let Some(err) = err {
                                     self.push(err);

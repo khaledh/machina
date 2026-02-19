@@ -12,7 +12,7 @@ use crate::core::analysis::dataflow::{DataflowGraph, solve_forward};
 use crate::core::context::NormalizedContext;
 use crate::core::diag::Span;
 use crate::core::resolve::{DefId, DefKind};
-use crate::core::semck::{push_error, SemCheckError, SEK};
+use crate::core::semck::{SEK, SemCheckError, push_error};
 use crate::core::tree::cfg::{
     AstBlockId, TreeCfgBuilder, TreeCfgItem, TreeCfgNode, TreeCfgTerminator,
 };

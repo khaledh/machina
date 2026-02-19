@@ -23,7 +23,7 @@ use crate::core::typecheck::engine::{
     CollectedCallableSig, CollectedParamSig, CollectedPropertySig, CollectedTraitMethodSig,
     CollectedTraitPropertySig, CollectedTraitSig, TypecheckEngine,
 };
-use crate::core::typecheck::errors::{TypeCheckError, TEK};
+use crate::core::typecheck::errors::{TEK, TypeCheckError};
 use crate::core::typecheck::type_map::{
     TypeDefLookup, resolve_return_type_expr_with_params, resolve_type_expr,
     resolve_type_expr_with_params,
@@ -233,10 +233,11 @@ fn collect_trait_sigs(
             };
 
             if methods.insert(method.sig.name.clone(), collected).is_some() {
-                crate::core::typecheck::tc_push_error!(errors, method.span, TEK::TraitMethodDuplicate(
-                        trait_def.name.clone(),
-                        method.sig.name.clone(),
-                    ));
+                crate::core::typecheck::tc_push_error!(
+                    errors,
+                    method.span,
+                    TEK::TraitMethodDuplicate(trait_def.name.clone(), method.sig.name.clone(),)
+                );
             }
         }
 
@@ -262,10 +263,11 @@ fn collect_trait_sigs(
                 )
                 .is_some()
             {
-                crate::core::typecheck::tc_push_error!(errors, property.span, TEK::TraitPropertyDuplicate(
-                        trait_def.name.clone(),
-                        property.name.clone(),
-                    ));
+                crate::core::typecheck::tc_push_error!(
+                    errors,
+                    property.span,
+                    TEK::TraitPropertyDuplicate(trait_def.name.clone(), property.name.clone(),)
+                );
             }
         }
 
@@ -435,10 +437,11 @@ fn collect_method_sigs(
         if let Some(trait_name) = &method_block.trait_name {
             let impl_key = (method_block.type_name.clone(), trait_name.clone());
             if !seen_trait_impls.insert(impl_key) {
-                crate::core::typecheck::tc_push_error!(errors, method_block.span, TEK::TraitImplDuplicate(
-                        method_block.type_name.clone(),
-                        trait_name.clone(),
-                    ));
+                crate::core::typecheck::tc_push_error!(
+                    errors,
+                    method_block.span,
+                    TEK::TraitImplDuplicate(method_block.type_name.clone(), trait_name.clone(),)
+                );
             }
             trait_impls
                 .entry(method_block.type_name.clone())
@@ -531,21 +534,29 @@ fn collect_method_sigs(
         {
             for prop_name in &implemented_trait_properties {
                 if !contract.properties.contains_key(prop_name) {
-                    crate::core::typecheck::tc_push_error!(errors, method_block.span, TEK::TraitPropertyNotInTrait(
+                    crate::core::typecheck::tc_push_error!(
+                        errors,
+                        method_block.span,
+                        TEK::TraitPropertyNotInTrait(
                             method_block.type_name.clone(),
                             trait_name.clone(),
                             prop_name.clone(),
-                        ));
+                        )
+                    );
                 }
             }
 
             for required in contract.methods.keys() {
                 if !implemented_trait_methods.contains(required) {
-                    crate::core::typecheck::tc_push_error!(errors, method_block.span, TEK::TraitMethodMissingImpl(
+                    crate::core::typecheck::tc_push_error!(
+                        errors,
+                        method_block.span,
+                        TEK::TraitMethodMissingImpl(
                             method_block.type_name.clone(),
                             trait_name.clone(),
                             required.clone(),
-                        ));
+                        )
+                    );
                 }
             }
 
@@ -555,36 +566,52 @@ fn collect_method_sigs(
                     .and_then(|by_name| by_name.get(prop_name));
 
                 let Some(impl_prop) = impl_prop else {
-                    crate::core::typecheck::tc_push_error!(errors, method_block.span, TEK::TraitPropertyMissingImpl(
+                    crate::core::typecheck::tc_push_error!(
+                        errors,
+                        method_block.span,
+                        TEK::TraitPropertyMissingImpl(
                             method_block.type_name.clone(),
                             trait_name.clone(),
                             prop_name.clone(),
-                        ));
+                        )
+                    );
                     continue;
                 };
 
                 if impl_prop.ty != required.ty {
-                    crate::core::typecheck::tc_push_error!(errors, method_block.span, TEK::TraitPropertyTypeMismatch(
+                    crate::core::typecheck::tc_push_error!(
+                        errors,
+                        method_block.span,
+                        TEK::TraitPropertyTypeMismatch(
                             method_block.type_name.clone(),
                             trait_name.clone(),
                             prop_name.clone(),
                             required.ty.clone(),
                             impl_prop.ty.clone(),
-                        ));
+                        )
+                    );
                 }
                 if required.has_get && impl_prop.getter.is_none() {
-                    crate::core::typecheck::tc_push_error!(errors, method_block.span, TEK::TraitPropertyMissingGetter(
+                    crate::core::typecheck::tc_push_error!(
+                        errors,
+                        method_block.span,
+                        TEK::TraitPropertyMissingGetter(
                             method_block.type_name.clone(),
                             trait_name.clone(),
                             prop_name.clone(),
-                        ));
+                        )
+                    );
                 }
                 if required.has_set && impl_prop.setter.is_none() {
-                    crate::core::typecheck::tc_push_error!(errors, method_block.span, TEK::TraitPropertyMissingSetter(
+                    crate::core::typecheck::tc_push_error!(
+                        errors,
+                        method_block.span,
+                        TEK::TraitPropertyMissingSetter(
                             method_block.type_name.clone(),
                             trait_name.clone(),
                             prop_name.clone(),
-                        ));
+                        )
+                    );
                 }
             }
         }
@@ -699,20 +726,28 @@ fn validate_trait_method_impl(
     errors: &mut Vec<TypeCheckError>,
 ) {
     let Some(expected) = contract.methods.get(method_name) else {
-        crate::core::typecheck::tc_push_error!(errors, span, TEK::TraitMethodNotInTrait(
+        crate::core::typecheck::tc_push_error!(
+            errors,
+            span,
+            TEK::TraitMethodNotInTrait(
                 type_name.to_string(),
                 trait_name.to_string(),
                 method_name.to_string(),
-            ));
+            )
+        );
         return;
     };
 
     if !seen_methods.insert(method_name.to_string()) {
-        crate::core::typecheck::tc_push_error!(errors, span, TEK::TraitMethodImplDuplicate(
+        crate::core::typecheck::tc_push_error!(
+            errors,
+            span,
+            TEK::TraitMethodImplDuplicate(
                 type_name.to_string(),
                 trait_name.to_string(),
                 method_name.to_string(),
-            ));
+            )
+        );
         return;
     }
 
@@ -728,11 +763,15 @@ fn validate_trait_method_impl(
             .all(|(actual, expected)| actual.mode == expected.mode && actual.ty == expected.ty);
 
     if !matches {
-        crate::core::typecheck::tc_push_error!(errors, span, TEK::TraitMethodSignatureMismatch(
+        crate::core::typecheck::tc_push_error!(
+            errors,
+            span,
+            TEK::TraitMethodSignatureMismatch(
                 type_name.to_string(),
                 trait_name.to_string(),
                 method_name.to_string(),
-            ));
+            )
+        );
     }
 }
 
@@ -812,24 +851,30 @@ fn record_property_sig(
     let prop_ty = match kind {
         PropertyAccessorKind::Get => {
             if !params.is_empty() {
-                crate::core::typecheck::tc_push_error!(errors, span, TEK::PropertyGetterHasParams(prop_name.to_string()));
+                crate::core::typecheck::tc_push_error!(
+                    errors,
+                    span,
+                    TEK::PropertyGetterHasParams(prop_name.to_string())
+                );
                 return;
             }
             ret_ty.clone()
         }
         PropertyAccessorKind::Set => {
             if params.len() != 1 {
-                crate::core::typecheck::tc_push_error!(errors, span, TEK::PropertySetterParamCount(
-                        prop_name.to_string(),
-                        params.len(),
-                    ));
+                crate::core::typecheck::tc_push_error!(
+                    errors,
+                    span,
+                    TEK::PropertySetterParamCount(prop_name.to_string(), params.len(),)
+                );
                 return;
             }
             if *ret_ty != Type::Unit {
-                crate::core::typecheck::tc_push_error!(errors, span, TEK::PropertySetterReturnType(
-                        prop_name.to_string(),
-                        ret_ty.clone(),
-                    ));
+                crate::core::typecheck::tc_push_error!(
+                    errors,
+                    span,
+                    TEK::PropertySetterReturnType(prop_name.to_string(), ret_ty.clone(),)
+                );
                 return;
             }
             params[0].ty.clone()
@@ -844,10 +889,11 @@ fn record_property_sig(
         if let Some(Type::Struct { fields, .. }) = type_defs.get(type_name) {
             if let Some(field) = fields.iter().find(|field| field.name == prop_name) {
                 if property_conflicts.insert((type_name.to_string(), prop_name.to_string())) {
-                    crate::core::typecheck::tc_push_error!(errors, span, TEK::PropertyConflictsWithField(
-                            prop_name.to_string(),
-                            field.name.clone(),
-                        ));
+                    crate::core::typecheck::tc_push_error!(
+                        errors,
+                        span,
+                        TEK::PropertyConflictsWithField(prop_name.to_string(), field.name.clone(),)
+                    );
                 }
                 return;
             }
@@ -864,25 +910,33 @@ fn record_property_sig(
         });
 
     if entry.ty != prop_ty {
-        crate::core::typecheck::tc_push_error!(errors, span, TEK::PropertyAccessorTypeMismatch(
-                prop_name.to_string(),
-                entry.ty.clone(),
-                prop_ty,
-            ));
+        crate::core::typecheck::tc_push_error!(
+            errors,
+            span,
+            TEK::PropertyAccessorTypeMismatch(prop_name.to_string(), entry.ty.clone(), prop_ty,)
+        );
         return;
     }
 
     match kind {
         PropertyAccessorKind::Get => {
             if entry.getter.is_some() {
-                crate::core::typecheck::tc_push_error!(errors, span, TEK::PropertyAccessorDuplicate(prop_name.to_string()));
+                crate::core::typecheck::tc_push_error!(
+                    errors,
+                    span,
+                    TEK::PropertyAccessorDuplicate(prop_name.to_string())
+                );
             } else {
                 entry.getter = Some(def_id);
             }
         }
         PropertyAccessorKind::Set => {
             if entry.setter.is_some() {
-                crate::core::typecheck::tc_push_error!(errors, span, TEK::PropertyAccessorDuplicate(prop_name.to_string()));
+                crate::core::typecheck::tc_push_error!(
+                    errors,
+                    span,
+                    TEK::PropertyAccessorDuplicate(prop_name.to_string())
+                );
             } else {
                 entry.setter = Some(def_id);
             }

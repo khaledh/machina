@@ -7,7 +7,7 @@ use std::collections::HashSet;
 
 use crate::core::tree::NodeId;
 use crate::core::typecheck::constraints::ExprObligation;
-use crate::core::typecheck::errors::{TypeCheckError, TEK};
+use crate::core::typecheck::errors::{TEK, TypeCheckError};
 use crate::core::typecheck::typesys::TypeVarKind;
 use crate::core::typecheck::unify::TcUnifier;
 use crate::core::types::Type;
@@ -58,7 +58,11 @@ pub(super) fn try_check_expr_obligation_index(
                         force_unresolved_index_to_u64(index_term, unifier);
                     }
                     if indices.len() > dims.len() {
-                        crate::core::typecheck::tc_push_error!(errors, *span, TEK::TooManyIndices(dims.len(), indices.len()));
+                        crate::core::typecheck::tc_push_error!(
+                            errors,
+                            *span,
+                            TEK::TooManyIndices(dims.len(), indices.len())
+                        );
                         covered_exprs.insert(*expr_id);
                         return true;
                     }
@@ -98,7 +102,11 @@ pub(super) fn try_check_expr_obligation_index(
                         force_unresolved_index_to_u64(index_term, unifier);
                     }
                     if indices.len() != 1 {
-                        crate::core::typecheck::tc_push_error!(errors, *span, TEK::TooManyIndices(1, indices.len()));
+                        crate::core::typecheck::tc_push_error!(
+                            errors,
+                            *span,
+                            TEK::TooManyIndices(1, indices.len())
+                        );
                         covered_exprs.insert(*expr_id);
                         return true;
                     }
@@ -130,7 +138,11 @@ pub(super) fn try_check_expr_obligation_index(
                         force_unresolved_index_to_u64(index_term, unifier);
                     }
                     if indices.len() != 1 {
-                        crate::core::typecheck::tc_push_error!(errors, *span, TEK::TooManyIndices(1, indices.len()));
+                        crate::core::typecheck::tc_push_error!(
+                            errors,
+                            *span,
+                            TEK::TooManyIndices(1, indices.len())
+                        );
                         covered_exprs.insert(*expr_id);
                         return true;
                     }
@@ -162,7 +174,11 @@ pub(super) fn try_check_expr_obligation_index(
                         force_unresolved_index_to_u64(index_term, unifier);
                     }
                     if indices.len() != 1 {
-                        crate::core::typecheck::tc_push_error!(errors, *span, TEK::TooManyIndices(1, indices.len()));
+                        crate::core::typecheck::tc_push_error!(
+                            errors,
+                            *span,
+                            TEK::TooManyIndices(1, indices.len())
+                        );
                         covered_exprs.insert(*expr_id);
                         return true;
                     }
@@ -170,7 +186,11 @@ pub(super) fn try_check_expr_obligation_index(
                 }
                 Type::Map { key_ty, value_ty } => {
                     if indices.len() != 1 {
-                        crate::core::typecheck::tc_push_error!(errors, *span, TEK::TooManyIndices(1, indices.len()));
+                        crate::core::typecheck::tc_push_error!(
+                            errors,
+                            *span,
+                            TEK::TooManyIndices(1, indices.len())
+                        );
                         covered_exprs.insert(*expr_id);
                         return true;
                     }
@@ -180,10 +200,11 @@ pub(super) fn try_check_expr_obligation_index(
                     {
                         if !super::term_utils::is_unresolved(&key_index_ty) {
                             let diag_span = index_spans.first().copied().unwrap_or(*span);
-                            crate::core::typecheck::tc_push_error!(errors, diag_span, TEK::MapKeyTypeMismatch(
-                                    key_ty.as_ref().clone(),
-                                    key_index_ty,
-                                ));
+                            crate::core::typecheck::tc_push_error!(
+                                errors,
+                                diag_span,
+                                TEK::MapKeyTypeMismatch(key_ty.as_ref().clone(), key_index_ty,)
+                            );
                             covered_exprs.insert(*expr_id);
                             if let Some(node_id) = index_nodes.first() {
                                 covered_exprs.insert(*node_id);
@@ -194,16 +215,24 @@ pub(super) fn try_check_expr_obligation_index(
                     if !super::term_utils::is_unresolved(key_ty)
                         && let Err(failure) = super::ensure_hashable(key_ty)
                     {
-                        crate::core::typecheck::tc_push_error!(errors, *span, TEK::TypeNotHashable(
+                        crate::core::typecheck::tc_push_error!(
+                            errors,
+                            *span,
+                            TEK::TypeNotHashable(
                                 key_ty.as_ref().clone(),
                                 failure.path,
                                 failure.failing_ty,
-                            ));
+                            )
+                        );
                         covered_exprs.insert(*expr_id);
                         return true;
                     }
                     if value_ty.needs_drop() && !super::term_utils::is_unresolved(value_ty) {
-                        crate::core::typecheck::tc_push_error!(errors, *span, TEK::MapIndexValueNotCopySafe(value_ty.as_ref().clone()));
+                        crate::core::typecheck::tc_push_error!(
+                            errors,
+                            *span,
+                            TEK::MapIndexValueNotCopySafe(value_ty.as_ref().clone())
+                        );
                         covered_exprs.insert(*expr_id);
                         return true;
                     }
@@ -215,7 +244,11 @@ pub(super) fn try_check_expr_obligation_index(
                 }
                 ty if super::term_utils::is_unresolved(ty) => {}
                 _ => {
-                    crate::core::typecheck::tc_push_error!(errors, *span, TEK::InvalidIndexTargetType(indexed_target_ty));
+                    crate::core::typecheck::tc_push_error!(
+                        errors,
+                        *span,
+                        TEK::InvalidIndexTargetType(indexed_target_ty)
+                    );
                     covered_exprs.insert(*expr_id);
                     return true;
                 }
@@ -230,7 +263,11 @@ pub(super) fn try_check_expr_obligation_index(
             let owner_ty =
                 super::term_utils::peel_heap(super::term_utils::resolve_term(target, unifier));
             if matches!(owner_ty, Type::Map { .. }) {
-                crate::core::typecheck::tc_push_error!(errors, *span, TEK::MapIndexAssignUnsupported);
+                crate::core::typecheck::tc_push_error!(
+                    errors,
+                    *span,
+                    TEK::MapIndexAssignUnsupported
+                );
                 covered_exprs.insert(*stmt_id);
             }
             true
@@ -264,7 +301,11 @@ pub(super) fn try_check_expr_obligation_index(
                 bad_bound_ty = Some(end_ty);
             }
             if let Some(bound_ty) = bad_bound_ty {
-                crate::core::typecheck::tc_push_error!(errors, *span, TEK::IndexTypeNotInt(bound_ty));
+                crate::core::typecheck::tc_push_error!(
+                    errors,
+                    *span,
+                    TEK::IndexTypeNotInt(bound_ty)
+                );
                 covered_exprs.insert(*expr_id);
                 return true;
             }
@@ -272,7 +313,11 @@ pub(super) fn try_check_expr_obligation_index(
             match &sliced_target_ty {
                 Type::Array { elem_ty, dims } => {
                     if dims.is_empty() {
-                        crate::core::typecheck::tc_push_error!(errors, *span, TEK::SliceTargetZeroDimArray(sliced_target_ty));
+                        crate::core::typecheck::tc_push_error!(
+                            errors,
+                            *span,
+                            TEK::SliceTargetZeroDimArray(sliced_target_ty)
+                        );
                         covered_exprs.insert(*expr_id);
                         return true;
                     }
@@ -317,7 +362,11 @@ pub(super) fn try_check_expr_obligation_index(
                 }
                 ty if super::term_utils::is_unresolved(ty) => {}
                 _ => {
-                    crate::core::typecheck::tc_push_error!(errors, *span, TEK::SliceTargetNotArrayOrString(sliced_target_ty));
+                    crate::core::typecheck::tc_push_error!(
+                        errors,
+                        *span,
+                        TEK::SliceTargetNotArrayOrString(sliced_target_ty)
+                    );
                     covered_exprs.insert(*expr_id);
                     return true;
                 }
@@ -335,7 +384,11 @@ pub(super) fn try_check_expr_obligation_index(
             if !super::term_utils::is_int_like(&start_ty)
                 && !super::term_utils::is_unresolved(&start_ty)
             {
-                crate::core::typecheck::tc_push_error!(errors, *span, TEK::IndexTypeNotInt(start_ty));
+                crate::core::typecheck::tc_push_error!(
+                    errors,
+                    *span,
+                    TEK::IndexTypeNotInt(start_ty)
+                );
                 covered_exprs.insert(*expr_id);
                 return true;
             }

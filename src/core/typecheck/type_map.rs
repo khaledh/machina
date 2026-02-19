@@ -10,7 +10,7 @@ use crate::core::tree::normalized as norm;
 use crate::core::tree::resolved as res;
 use crate::core::tree::semantic as sem;
 use crate::core::tree::{NodeId, ParamMode, RefinementKind};
-use crate::core::typecheck::errors::{TypeCheckError, TEK};
+use crate::core::typecheck::errors::{TEK, TypeCheckError};
 use crate::core::typecheck::nominal::NominalKey;
 use crate::core::typecheck::utils::{fn_param_mode, nominal_key_concreteness};
 use crate::core::types::{EnumVariant, FnParam, StructField, TyVarId, Type, TypeCache, TypeId};
@@ -76,13 +76,11 @@ pub(crate) fn resolve_type_def_with_args(
         .ok_or(TEK::UnknownType.at(Span::default()))?;
     if let Some(imported_ty) = module.imported_type_by_id(def_id) {
         if !type_args.is_empty() {
-            return Err(TEK::TypeArgCountMismatch(
-                def.name.clone(),
-                0,
-                type_args.len(),
-            )
-            .at(Span::default())
-            .into());
+            return Err(
+                TEK::TypeArgCountMismatch(def.name.clone(), 0, type_args.len())
+                    .at(Span::default())
+                    .into(),
+            );
         }
         return Ok(imported_ty.clone());
     }
@@ -214,9 +212,7 @@ fn resolve_type_expr_impl(
         res::TypeExprKind::Infer => Err(TEK::UnknownType.at(type_expr.span).into()),
         res::TypeExprKind::Union { variants } => {
             if !allow_error_union {
-                return Err(TEK::UnionNotAllowedHere
-                    .at(type_expr.span)
-                    .into());
+                return Err(TEK::UnionNotAllowedHere.at(type_expr.span).into());
             }
             let resolved = variants
                 .iter()
@@ -435,11 +431,9 @@ fn apply_refinements(
                     int_full_range(signed, bits)
                 };
                 if *min < min_bound || *max > max_bound {
-                    return Err(TEK::BoundsOutOfRange(
-                        *min, *max, min_bound, max_bound,
-                    )
-                    .at(span)
-                    .into());
+                    return Err(TEK::BoundsOutOfRange(*min, *max, min_bound, max_bound)
+                        .at(span)
+                        .into());
                 }
                 ty = Type::Int {
                     signed,
@@ -477,11 +471,9 @@ fn apply_refinements(
     } = ty
         && (bounds.min > 0 || bounds.max_excl <= 0)
     {
-        return Err(
-            TEK::RedundantNonZero(bounds.min, bounds.max_excl)
-                .at(span)
-                .into(),
-        );
+        return Err(TEK::RedundantNonZero(bounds.min, bounds.max_excl)
+            .at(span)
+            .into());
     }
 
     Ok(ty)
@@ -525,13 +517,11 @@ fn resolve_named_type(
 
     if def.name == "set" {
         if type_arg_exprs.len() != 1 {
-            return Err(TEK::TypeArgCountMismatch(
-                def.name.clone(),
-                1,
-                type_arg_exprs.len(),
-            )
-            .at(type_expr.span)
-            .into());
+            return Err(
+                TEK::TypeArgCountMismatch(def.name.clone(), 1, type_arg_exprs.len())
+                    .at(type_expr.span)
+                    .into(),
+            );
         }
         let elem_ty = resolve_type_expr_impl(
             def_table,
@@ -548,13 +538,11 @@ fn resolve_named_type(
     }
     if def.name == "map" {
         if type_arg_exprs.len() != 2 {
-            return Err(TEK::TypeArgCountMismatch(
-                def.name.clone(),
-                2,
-                type_arg_exprs.len(),
-            )
-            .at(type_expr.span)
-            .into());
+            return Err(
+                TEK::TypeArgCountMismatch(def.name.clone(), 2, type_arg_exprs.len())
+                    .at(type_expr.span)
+                    .into(),
+            );
         }
         let key_ty = resolve_type_expr_impl(
             def_table,
@@ -581,13 +569,11 @@ fn resolve_named_type(
     }
     if def.name == "Pending" || def.name == "ReplyCap" {
         if type_arg_exprs.len() != 1 {
-            return Err(TEK::TypeArgCountMismatch(
-                def.name.clone(),
-                1,
-                type_arg_exprs.len(),
-            )
-            .at(type_expr.span)
-            .into());
+            return Err(
+                TEK::TypeArgCountMismatch(def.name.clone(), 1, type_arg_exprs.len())
+                    .at(type_expr.span)
+                    .into(),
+            );
         }
         let response_set_ty = resolve_type_expr_impl(
             def_table,
@@ -611,13 +597,11 @@ fn resolve_named_type(
 
     if let Some(ty) = builtin_type(&def.name) {
         if !type_arg_exprs.is_empty() {
-            return Err(TEK::TypeArgCountMismatch(
-                def.name.clone(),
-                0,
-                type_arg_exprs.len(),
-            )
-            .at(type_expr.span)
-            .into());
+            return Err(
+                TEK::TypeArgCountMismatch(def.name.clone(), 0, type_arg_exprs.len())
+                    .at(type_expr.span)
+                    .into(),
+            );
         }
         return Ok(ty);
     }

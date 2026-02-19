@@ -7,7 +7,7 @@ use crate::core::tree::NodeId;
 use crate::core::tree::visit::{self, Visitor};
 use crate::core::tree::{ExprKind, MethodItem};
 use crate::core::typecheck::engine::TypecheckEngine;
-use crate::core::typecheck::errors::{TypeCheckError, TEK};
+use crate::core::typecheck::errors::{TEK, TypeCheckError};
 use crate::core::typecheck::type_map::resolve_type_expr;
 use crate::core::types::Type;
 
@@ -67,12 +67,16 @@ pub(super) fn check_protocol_shape_conformance(engine: &TypecheckEngine) -> Vec<
                 .unwrap_or_default();
             for required in &state_fact.shape.required_incoming {
                 if !seen_handlers.contains(required) {
-                    crate::core::typecheck::tc_push_error!(errors, binding.span, TEK::ProtocolStateHandlerMissing(
+                    crate::core::typecheck::tc_push_error!(
+                        errors,
+                        binding.span,
+                        TEK::ProtocolStateHandlerMissing(
                             binding.typestate_name.clone(),
                             role_label.clone(),
                             state_fact.name.clone(),
                             required.clone(),
-                        ));
+                        )
+                    );
                 }
             }
 
@@ -102,12 +106,16 @@ fn check_emit_conformance(
     errors: &mut Vec<TypeCheckError>,
 ) {
     if !state_fact.shape.allowed_outgoing.contains(&emit.payload_ty) {
-        crate::core::typecheck::tc_push_error!(errors, emit.span, TEK::ProtocolStateOutgoingPayloadNotAllowed(
+        crate::core::typecheck::tc_push_error!(
+            errors,
+            emit.span,
+            TEK::ProtocolStateOutgoingPayloadNotAllowed(
                 ctx.typestate_name.to_string(),
                 ctx.role_label.to_string(),
                 state_fact.name.clone(),
                 emit.payload_ty.clone(),
-            ));
+            )
+        );
         return;
     }
 
@@ -128,17 +136,24 @@ fn check_emit_conformance(
     let Some((field_name, bound_role_name)) =
         resolve_emit_destination_role(emit, ctx.peer_role_by_field)
     else {
-        crate::core::typecheck::tc_push_error!(errors, emit.span, TEK::ProtocolStateEmitDestinationRoleUnbound(
+        crate::core::typecheck::tc_push_error!(
+            errors,
+            emit.span,
+            TEK::ProtocolStateEmitDestinationRoleUnbound(
                 ctx.typestate_name.to_string(),
                 ctx.role_label.to_string(),
                 state_fact.name.clone(),
                 emit.payload_ty.clone(),
                 expected_roles.join(" | "),
-            ));
+            )
+        );
         return;
     };
     if !expected_roles.iter().any(|role| role == bound_role_name) {
-        crate::core::typecheck::tc_push_error!(errors, emit.span, TEK::ProtocolStateEmitDestinationRoleMismatch(
+        crate::core::typecheck::tc_push_error!(
+            errors,
+            emit.span,
+            TEK::ProtocolStateEmitDestinationRoleMismatch(
                 ctx.typestate_name.to_string(),
                 ctx.role_label.to_string(),
                 state_fact.name.clone(),
@@ -146,7 +161,8 @@ fn check_emit_conformance(
                 expected_roles.join(" | "),
                 field_name.to_string(),
                 bound_role_name.to_string(),
-            ));
+            )
+        );
         return;
     }
 
@@ -169,34 +185,46 @@ fn check_request_contract(
         &emit.payload_ty,
     );
     if matching_contracts.is_empty() {
-        crate::core::typecheck::tc_push_error!(errors, emit.span, TEK::ProtocolRequestContractMissing(
+        crate::core::typecheck::tc_push_error!(
+            errors,
+            emit.span,
+            TEK::ProtocolRequestContractMissing(
                 ctx.typestate_name.to_string(),
                 ctx.role_label.to_string(),
                 emit.payload_ty.clone(),
                 to_role_name.to_string(),
-            ));
+            )
+        );
         return;
     }
     if matching_contracts.len() > 1 {
-        crate::core::typecheck::tc_push_error!(errors, emit.span, TEK::ProtocolRequestContractAmbiguous(
+        crate::core::typecheck::tc_push_error!(
+            errors,
+            emit.span,
+            TEK::ProtocolRequestContractAmbiguous(
                 ctx.typestate_name.to_string(),
                 ctx.role_label.to_string(),
                 emit.payload_ty.clone(),
                 to_role_name.to_string(),
-            ));
+            )
+        );
         return;
     }
     let contract_responses = &matching_contracts[0].response_tys;
     let response_tys = emit.request_response_tys.as_deref().unwrap_or_default();
     for response_ty in response_tys {
         if !contract_responses.contains(response_ty) {
-            crate::core::typecheck::tc_push_error!(errors, emit.span, TEK::ProtocolRequestResponseNotInContract(
+            crate::core::typecheck::tc_push_error!(
+                errors,
+                emit.span,
+                TEK::ProtocolRequestResponseNotInContract(
                     ctx.typestate_name.to_string(),
                     ctx.role_label.to_string(),
                     emit.payload_ty.clone(),
                     to_role_name.to_string(),
                     response_ty.clone(),
-                ));
+                )
+            );
         }
     }
 }
@@ -249,19 +277,27 @@ pub(super) fn check_typestate_handler_overlap(engine: &TypecheckEngine) -> Vec<T
                     continue;
                 }
                 if left.request_site_label.is_none() && right.request_site_label.is_none() {
-                    crate::core::typecheck::tc_push_error!(errors, right.span, TEK::TypestateOverlappingOnHandlers(
+                    crate::core::typecheck::tc_push_error!(
+                        errors,
+                        right.span,
+                        TEK::TypestateOverlappingOnHandlers(
                             typestate_name.clone(),
                             state_name.clone(),
                             left.selector_ty.clone(),
                             overlap,
-                        ));
+                        )
+                    );
                 } else {
-                    crate::core::typecheck::tc_push_error!(errors, right.span, TEK::TypestateAmbiguousResponseProvenance(
+                    crate::core::typecheck::tc_push_error!(
+                        errors,
+                        right.span,
+                        TEK::TypestateAmbiguousResponseProvenance(
                             typestate_name.clone(),
                             state_name.clone(),
                             left.selector_ty.clone(),
                             overlap,
-                        ));
+                        )
+                    );
                 }
             }
         }
@@ -375,12 +411,16 @@ pub(super) fn check_typestate_request_response_shape(
                 }
             });
             if !has_handler {
-                crate::core::typecheck::tc_push_error!(errors, site.span, TEK::TypestateRequestMissingResponseHandler(
+                crate::core::typecheck::tc_push_error!(
+                    errors,
+                    site.span,
+                    TEK::TypestateRequestMissingResponseHandler(
                         site.typestate_name.clone(),
                         site.request_ty.clone(),
                         label_suffix.clone(),
                         response_ty.clone(),
-                    ));
+                    )
+                );
             }
         }
     }
@@ -409,12 +449,16 @@ pub(super) fn check_typestate_request_response_shape(
             label_matches && site.response_tys.contains(&handler.response_ty)
         });
         if !supported {
-            crate::core::typecheck::tc_push_error!(errors, handler.span, TEK::TypestateHandlerUnsupportedResponseVariant(
+            crate::core::typecheck::tc_push_error!(
+                errors,
+                handler.span,
+                TEK::TypestateHandlerUnsupportedResponseVariant(
                     handler.typestate_name.clone(),
                     handler.request_ty.clone(),
                     label_suffix,
                     handler.response_ty.clone(),
-                ));
+                )
+            );
         }
     }
 

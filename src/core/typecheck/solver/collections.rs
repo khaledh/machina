@@ -7,7 +7,7 @@ use std::collections::HashSet;
 
 use crate::core::tree::NodeId;
 use crate::core::typecheck::constraints::ExprObligation;
-use crate::core::typecheck::errors::{TypeCheckError, TEK};
+use crate::core::typecheck::errors::{TEK, TypeCheckError};
 use crate::core::typecheck::unify::TcUnifier;
 
 pub(super) fn try_check_expr_obligation_collections(
@@ -31,11 +31,11 @@ pub(super) fn try_check_expr_obligation_collections(
                 return true;
             }
             if let Err(failure) = super::ensure_hashable(&elem_ty_for_diag) {
-                crate::core::typecheck::tc_push_error!(errors, *span, TEK::TypeNotHashable(
-                        elem_ty_for_diag,
-                        failure.path,
-                        failure.failing_ty,
-                    ));
+                crate::core::typecheck::tc_push_error!(
+                    errors,
+                    *span,
+                    TEK::TypeNotHashable(elem_ty_for_diag, failure.path, failure.failing_ty,)
+                );
                 covered_exprs.insert(*expr_id);
             }
             true
@@ -54,11 +54,11 @@ pub(super) fn try_check_expr_obligation_collections(
                 return true;
             }
             if let Err(failure) = super::ensure_hashable(&key_ty_for_diag) {
-                crate::core::typecheck::tc_push_error!(errors, *span, TEK::TypeNotHashable(
-                        key_ty_for_diag,
-                        failure.path,
-                        failure.failing_ty,
-                    ));
+                crate::core::typecheck::tc_push_error!(
+                    errors,
+                    *span,
+                    TEK::TypeNotHashable(key_ty_for_diag, failure.path, failure.failing_ty,)
+                );
                 covered_exprs.insert(*expr_id);
             }
             true

@@ -9,7 +9,7 @@ use crate::core::context::NormalizedContext;
 use crate::core::diag::Span;
 use crate::core::resolve::DefId;
 use crate::core::semck::closure::capture::CaptureMode;
-use crate::core::semck::{push_error, SemCheckError, SEK};
+use crate::core::semck::{SEK, SemCheckError, push_error};
 use crate::core::tree::NodeId;
 use crate::core::tree::cfg::{TreeCfgBuilder, TreeCfgItem, TreeCfgTerminator};
 use crate::core::tree::normalized::ArrayLitInit;
@@ -281,8 +281,7 @@ impl<'a> MutBorrowConflictVisitor<'a> {
         }
         // Report once per base to avoid spamming.
         let name = def_name(self.ctx, def_id);
-        self.errors
-            .push(SEK::ClosureBorrowConflict(name).at(span));
+        self.errors.push(SEK::ClosureBorrowConflict(name).at(span));
     }
 }
 
@@ -353,8 +352,7 @@ impl<'a> ImmBorrowConflictVisitor<'a> {
             return;
         }
         let name = def_name(self.ctx, def_id);
-        self.errors
-            .push(SEK::ClosureBorrowConflict(name).at(span));
+        self.errors.push(SEK::ClosureBorrowConflict(name).at(span));
     }
 }
 
@@ -492,15 +490,13 @@ impl<'a> ClosureEscapeVisitor<'a> {
 
     fn check_store_value(&mut self, expr: &Expr) {
         if is_captured_closure_value(expr, self.state, self.capture_map) {
-            self.errors
-                .push(SEK::ClosureEscapeStore.at(expr.span));
+            self.errors.push(SEK::ClosureEscapeStore.at(expr.span));
         }
     }
 
     fn check_arg_value(&mut self, expr: &Expr) {
         if is_captured_closure_value(expr, self.state, self.capture_map) {
-            self.errors
-                .push(SEK::ClosureEscapeArg.at(expr.span));
+            self.errors.push(SEK::ClosureEscapeArg.at(expr.span));
         }
     }
 }

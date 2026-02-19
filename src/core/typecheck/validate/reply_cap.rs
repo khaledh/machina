@@ -6,7 +6,7 @@ use crate::core::tree::cfg::{AstBlockId, TreeCfgBuilder, TreeCfgItem, TreeCfgNod
 use crate::core::tree::visit::{self, Visitor};
 use crate::core::tree::{ExprKind, MethodItem, NodeId};
 use crate::core::typecheck::engine::TypecheckEngine;
-use crate::core::typecheck::errors::{TypeCheckError, TEK};
+use crate::core::typecheck::errors::{TEK, TypeCheckError};
 use crate::core::typecheck::type_map::resolve_type_expr;
 use crate::core::types::{Type, TypeAssignability, type_assignable};
 
@@ -133,16 +133,28 @@ fn check_handler_reply_calls(
             continue;
         };
         let Type::ReplyCap { .. } = cap_ty else {
-            crate::core::typecheck::tc_push_error!(errors, site.cap_span, TEK::ReplyCapExpected(cap_ty.clone()));
+            crate::core::typecheck::tc_push_error!(
+                errors,
+                site.cap_span,
+                TEK::ReplyCapExpected(cap_ty.clone())
+            );
             continue;
         };
 
         let Some(cap_def_id) = site.cap_def_id else {
-            crate::core::typecheck::tc_push_error!(errors, site.cap_span, TEK::ReplyCapParamRequired);
+            crate::core::typecheck::tc_push_error!(
+                errors,
+                site.cap_span,
+                TEK::ReplyCapParamRequired
+            );
             continue;
         };
         let Some(cap_param) = cap_params_by_id.get(&cap_def_id).copied() else {
-            crate::core::typecheck::tc_push_error!(errors, site.cap_span, TEK::ReplyCapParamRequired);
+            crate::core::typecheck::tc_push_error!(
+                errors,
+                site.cap_span,
+                TEK::ReplyCapParamRequired
+            );
             continue;
         };
 
@@ -154,10 +166,11 @@ fn check_handler_reply_calls(
             .iter()
             .any(|expected| type_assignable(value_ty, expected) != TypeAssignability::Incompatible);
         if !allowed {
-            crate::core::typecheck::tc_push_error!(errors, site.span, TEK::ReplyPayloadNotAllowed(
-                    value_ty.clone(),
-                    cap_param.response_tys.clone(),
-                ));
+            crate::core::typecheck::tc_push_error!(
+                errors,
+                site.span,
+                TEK::ReplyPayloadNotAllowed(value_ty.clone(), cap_param.response_tys.clone(),)
+            );
         }
     }
 
@@ -221,7 +234,11 @@ fn check_handler_reply_cap_linearity(
                         | ReplyCapFlowState::MaybeConsumed
                         | ReplyCapFlowState::InvalidDoubleConsume
                 ) {
-                    crate::core::typecheck::tc_push_error!(errors, *span, TEK::ReplyCapConsumedMultipleTimes(cap.name.clone()));
+                    crate::core::typecheck::tc_push_error!(
+                        errors,
+                        *span,
+                        TEK::ReplyCapConsumedMultipleTimes(cap.name.clone())
+                    );
                     state = ReplyCapFlowState::InvalidDoubleConsume;
                 } else {
                     state = apply_reply_cap_consume(state);
@@ -247,7 +264,11 @@ fn check_handler_reply_cap_linearity(
             }
         }
         if missing_on_some_path {
-            crate::core::typecheck::tc_push_error!(errors, cap.span, TEK::ReplyCapMustBeConsumed(cap.name.clone()));
+            crate::core::typecheck::tc_push_error!(
+                errors,
+                cap.span,
+                TEK::ReplyCapMustBeConsumed(cap.name.clone())
+            );
         }
     }
 

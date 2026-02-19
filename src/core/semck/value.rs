@@ -1,7 +1,7 @@
 use crate::core::context::NormalizedContext;
 use crate::core::diag::Span;
 use crate::core::resolve::DefId;
-use crate::core::semck::{SemCheckError, SEK};
+use crate::core::semck::{SEK, SemCheckError};
 use crate::core::tree::RefinementKind;
 use crate::core::tree::normalized::{
     BinaryOp, BindPatternKind, Expr, ExprKind, FuncDef, FunctionSig, StmtExpr, StmtExprKind,
@@ -123,8 +123,7 @@ impl<'a> ValueChecker<'a> {
             self.check_int_range(value, bounds.min, bounds.max_excl, span);
         }
         if *nonzero && value == 0 {
-            self.errors
-                .push(SEK::ValueNotNonZero(value).at(span));
+            self.errors.push(SEK::ValueNotNonZero(value).at(span));
         }
     }
 
@@ -291,8 +290,7 @@ impl<'a> ValueChecker<'a> {
             return;
         };
         if self.const_int_value(right) == Some(0) {
-            self.errors
-                .push(SEK::DivisionByZero.at(right.span));
+            self.errors.push(SEK::DivisionByZero.at(right.span));
         }
     }
 

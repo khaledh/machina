@@ -7,7 +7,7 @@
 use crate::core::context::NormalizedContext;
 use crate::core::diag::Span;
 use crate::core::resolve::DefId;
-use crate::core::semck::{SemCheckError, SEK};
+use crate::core::semck::{SEK, SemCheckError};
 use crate::core::tree::normalized::{CallArg, Expr, ExprKind, FuncDef, ParamMode};
 use crate::core::tree::visit::{Visitor, walk_expr};
 use crate::core::types::TypeId;
@@ -114,8 +114,7 @@ impl<'a> LvalueOverlapChecker<'a> {
                     continue;
                 }
                 if Self::paths_maybe_overlap(&left.path, &right.path) {
-                    self.errors
-                        .push(SEK::OverlappingLvalueArgs.at(right.span));
+                    self.errors.push(SEK::OverlappingLvalueArgs.at(right.span));
                 }
             }
         }

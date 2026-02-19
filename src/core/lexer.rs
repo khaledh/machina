@@ -219,6 +219,7 @@ pub enum LexErrorKind {
 }
 
 pub type LexError = SpannedError<LexErrorKind>;
+pub use LexErrorKind as LEK;
 
 impl LexErrorKind {
     pub fn at(self, span: Span) -> LexError {
@@ -313,19 +314,15 @@ impl<'a> Lexer<'a> {
                     lexer.advance();
                     Ok(ch)
                 }
-                None => {
-                    Err(LexErrorKind::UnexpectedCharacter('\'').at(Span::new(start, lexer.pos)))
-                }
+                None => Err(LEK::UnexpectedCharacter('\'').at(Span::new(start, lexer.pos))),
             }
         };
 
         self.advance(); // consume opening quote
         let ch = next_char(self)?;
         if ch == '\'' {
-            return Err(
-                LexErrorKind::InvalidEscapeSequence("empty char literal".to_string())
-                    .at(Span::new(start, self.pos)),
-            );
+            return Err(LEK::InvalidEscapeSequence("empty char literal".to_string())
+                .at(Span::new(start, self.pos)));
         }
 
         let value = if ch == '\\' {
@@ -338,10 +335,10 @@ impl<'a> Lexer<'a> {
         match self.source.peek() {
             Some('\'') => self.advance(),
             Some(&ch) => {
-                return Err(LexErrorKind::UnexpectedCharacter(ch).at(Span::new(start, self.pos)));
+                return Err(LEK::UnexpectedCharacter(ch).at(Span::new(start, self.pos)));
             }
             None => {
-                return Err(LexErrorKind::UnexpectedCharacter('\'').at(Span::new(start, self.pos)));
+                return Err(LEK::UnexpectedCharacter('\'').at(Span::new(start, self.pos)));
             }
         }
 
@@ -354,7 +351,7 @@ impl<'a> Lexer<'a> {
 
         loop {
             let Some(&ch) = self.source.peek() else {
-                return Err(LexErrorKind::UnterminatedString.at(Span::new(start, self.pos)));
+                return Err(LEK::UnterminatedString.at(Span::new(start, self.pos)));
             };
 
             self.advance();
@@ -375,38 +372,41 @@ impl<'a> Lexer<'a> {
     fn parse_escape(&mut self, start: Position) -> Result<char, LexError> {
         let esc = match self.source.peek().copied() {
             Some(c) => c,
-            None => return Err(LexErrorKind::UnterminatedString.at(Span::new(start, self.pos))),
+            None => return Err(LEK::UnterminatedString.at(Span::new(start, self.pos))),
         };
         self.advance();
 
-        let ch = match esc {
-            'n' => '\n',
-            'r' => '\r',
-            't' => '\t',
-            '\\' => '\\',
-            '"' => '"',
-            '\'' => '\'',
-            '0' => '\0',
-            'x' => {
-                let h1 = self.source.peek().copied().ok_or_else(|| {
-                    LexErrorKind::UnterminatedString.at(Span::new(start, self.pos))
-                })?;
-                self.advance();
-                let h2 = self.source.peek().copied().ok_or_else(|| {
-                    LexErrorKind::UnterminatedString.at(Span::new(start, self.pos))
-                })?;
-                self.advance();
-                let hex = format!("{}{}", h1, h2);
-                let byte = u8::from_str_radix(&hex, 16).map_err(|_| {
-                    LexErrorKind::InvalidEscapeSequence(hex.clone()).at(Span::new(start, self.pos))
-                })?;
-                char::from(byte)
-            }
-            _ => {
-                return Err(LexErrorKind::InvalidEscapeSequence(format!("\\{}", esc))
-                    .at(Span::new(start, self.pos)));
-            }
-        };
+        let ch =
+            match esc {
+                'n' => '\n',
+                'r' => '\r',
+                't' => '\t',
+                '\\' => '\\',
+                '"' => '"',
+                '\'' => '\'',
+                '0' => '\0',
+                'x' => {
+                    let h1 =
+                        self.source.peek().copied().ok_or_else(|| {
+                            LEK::UnterminatedString.at(Span::new(start, self.pos))
+                        })?;
+                    self.advance();
+                    let h2 =
+                        self.source.peek().copied().ok_or_else(|| {
+                            LEK::UnterminatedString.at(Span::new(start, self.pos))
+                        })?;
+                    self.advance();
+                    let hex = format!("{}{}", h1, h2);
+                    let byte = u8::from_str_radix(&hex, 16).map_err(|_| {
+                        LEK::InvalidEscapeSequence(hex.clone()).at(Span::new(start, self.pos))
+                    })?;
+                    char::from(byte)
+                }
+                _ => {
+                    return Err(LEK::InvalidEscapeSequence(format!("\\{}", esc))
+                        .at(Span::new(start, self.pos)));
+                }
+            };
 
         Ok(ch)
     }
@@ -487,7 +487,7 @@ impl<'a> Lexer<'a> {
         if !saw_digit || last_underscore {
             // Disallow empty literals and trailing underscores.
             let err = u64::from_str_radix("", base).err().unwrap();
-            return Err(LexErrorKind::InvalidInteger(err).at(Span::new(start, self.pos)));
+            return Err(LEK::InvalidInteger(err).at(Span::new(start, self.pos)));
         }
 
         if base != 10
@@ -496,7 +496,7 @@ impl<'a> Lexer<'a> {
             // Reject invalid digits after base prefixes (e.g., 0b102).
             self.consume_invalid_digits(&mut digits);
             let err = u64::from_str_radix(&digits, base).err().unwrap();
-            return Err(LexErrorKind::InvalidInteger(err).at(Span::new(start, self.pos)));
+            return Err(LEK::InvalidInteger(err).at(Span::new(start, self.pos)));
         }
 
         let value = if base == 10 {
@@ -504,7 +504,7 @@ impl<'a> Lexer<'a> {
         } else {
             u64::from_str_radix(&digits, base)
         }
-        .map_err(|e| LexErrorKind::InvalidInteger(e).at(Span::new(start, self.pos)))?;
+        .map_err(|e| LEK::InvalidInteger(e).at(Span::new(start, self.pos)))?;
 
         Ok(TokenKind::IntLit(value))
     }
@@ -736,7 +736,7 @@ impl<'a> Lexer<'a> {
                 self.advance();
                 Ok(TokenKind::Tilde)
             }
-            Some(&ch) => Err(LexErrorKind::UnexpectedCharacter(ch).at(Span::new(start, self.pos))),
+            Some(&ch) => Err(LEK::UnexpectedCharacter(ch).at(Span::new(start, self.pos))),
             None => {
                 self.at_eof = true;
                 Ok(TokenKind::Eof)

@@ -6,7 +6,7 @@
 use crate::core::diag::Span;
 use crate::core::tree::NodeId;
 use crate::core::typecheck::constraints::{Constraint, ConstraintReason};
-use crate::core::typecheck::errors::{TypeCheckError, TEK};
+use crate::core::typecheck::errors::{TEK, TypeCheckError};
 use crate::core::typecheck::unify::{TcUnifier, TcUnifyError};
 use crate::core::types::Type;
 
@@ -54,18 +54,10 @@ pub(super) fn remap_index_unify_error(err: &TcUnifyError, span: Span) -> Option<
     match err {
         TcUnifyError::Mismatch(left, right) => {
             if !super::term_utils::is_int_like(left) && !super::term_utils::is_unresolved(left) {
-                return Some(
-                    TEK::IndexTypeNotInt(left.clone())
-                        .at(span)
-                        .into(),
-                );
+                return Some(TEK::IndexTypeNotInt(left.clone()).at(span).into());
             }
             if !super::term_utils::is_int_like(right) && !super::term_utils::is_unresolved(right) {
-                return Some(
-                    TEK::IndexTypeNotInt(right.clone())
-                        .at(span)
-                        .into(),
-                );
+                return Some(TEK::IndexTypeNotInt(right.clone()).at(span).into());
             }
             None
         }
@@ -73,11 +65,7 @@ pub(super) fn remap_index_unify_error(err: &TcUnifyError, span: Span) -> Option<
             if !super::term_utils::is_int_like(found)
                 && !super::term_utils::is_unresolved(found) =>
         {
-            Some(
-                TEK::IndexTypeNotInt(found.clone())
-                    .at(span)
-                    .into(),
-            )
+            Some(TEK::IndexTypeNotInt(found.clone()).at(span).into())
         }
         _ => None,
     }
@@ -112,14 +100,10 @@ pub(super) fn remap_enum_payload_unify_error(
 pub(super) fn unify_error_to_diag(err: TcUnifyError, span: Span) -> TypeCheckError {
     match err {
         TcUnifyError::Mismatch(expected, found) => {
-            TEK::DeclTypeMismatch(expected, found)
-                .at(span)
-                .into()
+            TEK::DeclTypeMismatch(expected, found).at(span).into()
         }
         TcUnifyError::CannotBindRigid(var, found) => {
-            TEK::DeclTypeMismatch(Type::Var(var), found)
-                .at(span)
-                .into()
+            TEK::DeclTypeMismatch(Type::Var(var), found).at(span).into()
         }
         TcUnifyError::OccursCheckFailed(_, _) => TEK::UnknownType.at(span).into(),
     }
@@ -146,19 +130,13 @@ fn return_unify_error_to_diag(err: TcUnifyError, span: Span) -> TypeCheckError {
                     .collect::<Vec<_>>();
                 variants.sort();
                 variants.dedup();
-                return TEK::ReturnNotInErrorUnion(variants, found)
-                    .at(span)
-                    .into();
+                return TEK::ReturnNotInErrorUnion(variants, found).at(span).into();
             }
-            TEK::ReturnTypeMismatch(expected, found)
-                .at(span)
-                .into()
+            TEK::ReturnTypeMismatch(expected, found).at(span).into()
         }
-        TcUnifyError::CannotBindRigid(var, found) => {
-            TEK::ReturnTypeMismatch(Type::Var(var), found)
-                .at(span)
-                .into()
-        }
+        TcUnifyError::CannotBindRigid(var, found) => TEK::ReturnTypeMismatch(Type::Var(var), found)
+            .at(span)
+            .into(),
         TcUnifyError::OccursCheckFailed(_, _) => TEK::UnknownType.at(span).into(),
     }
 }

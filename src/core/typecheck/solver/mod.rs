@@ -36,7 +36,7 @@ use crate::core::typecheck::constraints::{
     ConstrainOutput, Constraint, ConstraintReason, ExprObligation,
 };
 use crate::core::typecheck::engine::{CollectedPropertySig, CollectedTraitSig, TypecheckEngine};
-use crate::core::typecheck::errors::{TypeCheckError, TEK};
+use crate::core::typecheck::errors::{TEK, TypeCheckError};
 use crate::core::typecheck::property_access;
 use crate::core::typecheck::typesys::TypeVarKind;
 use crate::core::typecheck::unify::{TcUnifier, TcUnifyError};

@@ -14,7 +14,7 @@ use crate::core::typecheck::constraints::{CallCallee, CallObligation};
 use crate::core::typecheck::engine::{
     CollectedCallableSig, CollectedPropertySig, CollectedTraitSig, lookup_property,
 };
-use crate::core::typecheck::errors::{TypeCheckError, TEK};
+use crate::core::typecheck::errors::{TEK, TypeCheckError};
 use crate::core::typecheck::unify::TcUnifier;
 use crate::core::types::{TyVarId, Type};
 
@@ -45,11 +45,15 @@ pub(super) fn check_call_obligations(
                 let callee_ty = super::term_utils::resolve_term(callee_term, unifier);
                 if let Type::Fn { params, ret_ty } = callee_ty {
                     if params.len() != obligation.arg_terms.len() {
-                        crate::core::typecheck::tc_push_error!(errors, obligation.span, TEK::ArgCountMismatch(
+                        crate::core::typecheck::tc_push_error!(
+                            errors,
+                            obligation.span,
+                            TEK::ArgCountMismatch(
                                 "<fn>".to_string(),
                                 params.len(),
                                 obligation.arg_terms.len(),
-                            ));
+                            )
+                        );
                         continue;
                     }
                     let mut arg_failed = false;
@@ -60,11 +64,15 @@ pub(super) fn check_call_obligations(
                         if let Err(_) =
                             super::assignability::solve_assignable(&arg_ty, &param.ty, unifier)
                         {
-                            crate::core::typecheck::tc_push_error!(errors, obligation.span, TEK::ArgTypeMismatch(
+                            crate::core::typecheck::tc_push_error!(
+                                errors,
+                                obligation.span,
+                                TEK::ArgTypeMismatch(
                                     index + 1,
                                     super::term_utils::canonicalize_type(unifier.apply(&param.ty)),
                                     super::term_utils::canonicalize_type(unifier.apply(&arg_ty)),
-                                ));
+                                )
+                            );
                             arg_failed = true;
                             break;
                         }
@@ -84,7 +92,11 @@ pub(super) fn check_call_obligations(
                 } else if super::term_utils::is_unresolved(&callee_ty) {
                     deferred.push(obligation.clone());
                 } else {
-                    crate::core::typecheck::tc_push_error!(errors, obligation.span, TEK::OverloadNoMatch(format!("<dynamic:{expr_id}>")));
+                    crate::core::typecheck::tc_push_error!(
+                        errors,
+                        obligation.span,
+                        TEK::OverloadNoMatch(format!("<dynamic:{expr_id}>"))
+                    );
                 }
             } else {
                 deferred.push(obligation.clone());
@@ -169,9 +181,17 @@ pub(super) fn check_call_obligations(
                 CallCallee::Dynamic { expr_id, .. } => format!("<dynamic:{expr_id}>"),
             };
             if inaccessible_count > 0 {
-                crate::core::typecheck::tc_push_error!(errors, obligation.span, TEK::CallableNotAccessible(name));
+                crate::core::typecheck::tc_push_error!(
+                    errors,
+                    obligation.span,
+                    TEK::CallableNotAccessible(name)
+                );
             } else {
-                crate::core::typecheck::tc_push_error!(errors, obligation.span, TEK::OverloadNoMatch(name));
+                crate::core::typecheck::tc_push_error!(
+                    errors,
+                    obligation.span,
+                    TEK::OverloadNoMatch(name)
+                );
             }
             continue;
         }
@@ -262,7 +282,11 @@ pub(super) fn check_call_obligations(
                     CallCallee::Method { name } => name.clone(),
                     CallCallee::Dynamic { expr_id, .. } => format!("<dynamic:{expr_id}>"),
                 };
-                crate::core::typecheck::tc_push_error!(errors, obligation.span, TEK::OverloadAmbiguous(name));
+                crate::core::typecheck::tc_push_error!(
+                    errors,
+                    obligation.span,
+                    TEK::OverloadAmbiguous(name)
+                );
                 continue;
             }
             if let Some(prop_name) = called_property_name(obligation, def_id, property_sigs, &next)
@@ -270,7 +294,11 @@ pub(super) fn check_call_obligations(
                 // Preserve substitutions to reduce follow-on inference noise, but
                 // reject property accessor call syntax in source.
                 *unifier = next;
-                crate::core::typecheck::tc_push_error!(errors, obligation.span, TEK::PropertyCalledAsMethod(prop_name));
+                crate::core::typecheck::tc_push_error!(
+                    errors,
+                    obligation.span,
+                    TEK::PropertyCalledAsMethod(prop_name)
+                );
                 continue;
             }
             *unifier = next;
@@ -291,7 +319,11 @@ pub(super) fn check_call_obligations(
                 CallCallee::Method { name } => name.clone(),
                 CallCallee::Dynamic { expr_id, .. } => format!("<dynamic:{expr_id}>"),
             };
-            crate::core::typecheck::tc_push_error!(errors, obligation.span, TEK::OverloadNoMatch(name));
+            crate::core::typecheck::tc_push_error!(
+                errors,
+                obligation.span,
+                TEK::OverloadNoMatch(name)
+            );
         }
     }
     (errors, resolved_call_defs, deferred)
@@ -412,11 +444,9 @@ fn try_solve_builtin_method(
 
     // Properties that should not be called as methods.
     if builtin_methods::resolve_builtin_property(&receiver_ty, method_name).is_some() {
-        return Some(Err(TEK::PropertyCalledAsMethod(
-            method_name.to_string(),
-        )
-        .at(obligation.span)
-        .into()));
+        return Some(Err(TEK::PropertyCalledAsMethod(method_name.to_string())
+            .at(obligation.span)
+            .into()));
     }
 
     let builtin = builtin_methods::resolve_builtin_method(&receiver_ty, method_name)?;

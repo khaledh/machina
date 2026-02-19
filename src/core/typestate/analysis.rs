@@ -5,7 +5,7 @@
 
 use std::collections::HashSet;
 
-use crate::core::resolve::{ResolveError, ResolveErrorKind};
+use crate::core::resolve::{REK, ResolveError};
 use crate::core::tree::parsed::{
     FuncDef, StructDefField, TypeExpr, TypeExprKind, TypestateDef, TypestateFields, TypestateItem,
     TypestateOnHandler, TypestateState, TypestateStateItem,
@@ -49,8 +49,7 @@ pub(super) fn analyze_typestate(typestate: &TypestateDef) -> TypestateAnalysis {
         .unwrap_or_default();
 
     for extra in fields_blocks.iter().skip(1) {
-        errors
-            .push(ResolveErrorKind::TypestateDuplicateFieldsBlock(ts_name.clone()).at(extra.span));
+        errors.push(REK::TypestateDuplicateFieldsBlock(ts_name.clone()).at(extra.span));
     }
 
     // 2) Collect unique states and report duplicates.
@@ -69,11 +68,8 @@ pub(super) fn analyze_typestate(typestate: &TypestateDef) -> TypestateAnalysis {
                     states.push(state.clone());
                 } else {
                     errors.push(
-                        ResolveErrorKind::TypestateDuplicateState(
-                            ts_name.clone(),
-                            state.name.clone(),
-                        )
-                        .at(state.span),
+                        REK::TypestateDuplicateState(ts_name.clone(), state.name.clone())
+                            .at(state.span),
                     );
                 }
             }
@@ -84,7 +80,7 @@ pub(super) fn analyze_typestate(typestate: &TypestateDef) -> TypestateAnalysis {
 
     // A typestate with no states is not meaningful.
     if states.is_empty() {
-        errors.push(ResolveErrorKind::TypestateMissingState(ts_name.clone()).at(typestate.span));
+        errors.push(REK::TypestateMissingState(ts_name.clone()).at(typestate.span));
     }
 
     // 3) Validate each state against typestate-level invariants.
@@ -110,8 +106,7 @@ pub(super) fn analyze_typestate(typestate: &TypestateDef) -> TypestateAnalysis {
     for handler in &handlers {
         if !is_valid_on_handler_return(&handler.ret_ty_expr, &state_names) {
             errors.push(
-                ResolveErrorKind::TypestateInvalidOnHandlerReturn(ts_name.clone())
-                    .at(handler.ret_ty_expr.span),
+                REK::TypestateInvalidOnHandlerReturn(ts_name.clone()).at(handler.ret_ty_expr.span),
             );
         }
     }
@@ -134,15 +129,12 @@ pub(super) fn analyze_typestate(typestate: &TypestateDef) -> TypestateAnalysis {
     };
 
     match new_ctors.as_slice() {
-        [] => {
-            errors.push(ResolveErrorKind::TypestateMissingNew(ts_name.clone()).at(typestate.span))
-        }
+        [] => errors.push(REK::TypestateMissingNew(ts_name.clone()).at(typestate.span)),
         [single] => {
             // `new` must return `State` or `State | Error...` (state first).
             if !is_valid_state_return(&single.sig.ret_ty_expr, &state_names) {
                 errors.push(
-                    ResolveErrorKind::TypestateInvalidNewReturn(ts_name.clone())
-                        .at(single.sig.ret_ty_expr.span),
+                    REK::TypestateInvalidNewReturn(ts_name.clone()).at(single.sig.ret_ty_expr.span),
                 );
             }
         }
@@ -150,13 +142,11 @@ pub(super) fn analyze_typestate(typestate: &TypestateDef) -> TypestateAnalysis {
             // Keep first constructor for lowering so we can continue and report
             // additional diagnostics in the same pass.
             for duplicate in rest {
-                errors.push(
-                    ResolveErrorKind::TypestateDuplicateNew(ts_name.clone()).at(duplicate.sig.span),
-                );
+                errors.push(REK::TypestateDuplicateNew(ts_name.clone()).at(duplicate.sig.span));
             }
             if !is_valid_state_return(&new_ctors[0].sig.ret_ty_expr, &state_names) {
                 errors.push(
-                    ResolveErrorKind::TypestateInvalidNewReturn(ts_name.clone())
+                    REK::TypestateInvalidNewReturn(ts_name.clone())
                         .at(new_ctors[0].sig.ret_ty_expr.span),
                 );
             }
@@ -182,22 +172,21 @@ fn parse_state_attrs(
     let mut is_final = false;
     for attr in &state.attrs {
         if !seen.insert(attr.name.clone()) {
-            errors.push(ResolveErrorKind::AttrDuplicate(attr.name.clone()).at(attr.span));
+            errors.push(REK::AttrDuplicate(attr.name.clone()).at(attr.span));
             continue;
         }
         match attr.name.as_str() {
             "final" => {
                 if !attr.args.is_empty() {
                     errors.push(
-                        ResolveErrorKind::AttrWrongArgCount(attr.name.clone(), 0, attr.args.len())
-                            .at(attr.span),
+                        REK::AttrWrongArgCount(attr.name.clone(), 0, attr.args.len()).at(attr.span),
                     );
                     continue;
                 }
                 is_final = true;
             }
             _ => errors.push(
-                ResolveErrorKind::TypestateUnknownStateAttribute(
+                REK::TypestateUnknownStateAttribute(
                     ts_name.to_string(),
                     state.name.clone(),
                     attr.name.clone(),
@@ -229,11 +218,8 @@ fn validate_state_items(
         .collect();
     for extra in fields_blocks.iter().skip(1) {
         errors.push(
-            ResolveErrorKind::TypestateDuplicateStateFieldsBlock(
-                ts_name.to_string(),
-                state.name.clone(),
-            )
-            .at(extra.span),
+            REK::TypestateDuplicateStateFieldsBlock(ts_name.to_string(), state.name.clone())
+                .at(extra.span),
         );
     }
     if let Some(local_fields) = fields_blocks.first() {
@@ -241,7 +227,7 @@ fn validate_state_items(
         for field in &local_fields.fields {
             if shared_field_names.contains(&field.name) {
                 errors.push(
-                    ResolveErrorKind::TypestateStateFieldShadowsCarriedField(
+                    REK::TypestateStateFieldShadowsCarriedField(
                         ts_name.to_string(),
                         state.name.clone(),
                         field.name.clone(),
@@ -257,7 +243,7 @@ fn validate_state_items(
             match item {
                 TypestateStateItem::Method(method) => {
                     errors.push(
-                        ResolveErrorKind::TypestateFinalStateHasTransition(
+                        REK::TypestateFinalStateHasTransition(
                             ts_name.to_string(),
                             state.name.clone(),
                         )
@@ -266,11 +252,8 @@ fn validate_state_items(
                 }
                 TypestateStateItem::Handler(handler) => {
                     errors.push(
-                        ResolveErrorKind::TypestateFinalStateHasHandler(
-                            ts_name.to_string(),
-                            state.name.clone(),
-                        )
-                        .at(handler.span),
+                        REK::TypestateFinalStateHasHandler(ts_name.to_string(), state.name.clone())
+                            .at(handler.span),
                     );
                 }
                 TypestateStateItem::Fields(_) => {}
@@ -287,7 +270,7 @@ fn validate_state_items(
             TypestateStateItem::Method(method) => {
                 if !seen_methods.insert(method.sig.name.clone()) {
                     errors.push(
-                        ResolveErrorKind::TypestateDuplicateTransition(
+                        REK::TypestateDuplicateTransition(
                             ts_name.to_string(),
                             state.name.clone(),
                             method.sig.name.clone(),
@@ -301,7 +284,7 @@ fn validate_state_items(
                     method.sig.params.iter().find(|param| param.ident == "self")
                 {
                     errors.push(
-                        ResolveErrorKind::TypestateExplicitSelfNotAllowed(
+                        REK::TypestateExplicitSelfNotAllowed(
                             ts_name.to_string(),
                             state.name.clone(),
                             method.sig.name.clone(),
@@ -313,7 +296,7 @@ fn validate_state_items(
                 // Transition success return follows the same shape rule as `new`.
                 if !is_valid_state_return(&method.sig.ret_ty_expr, state_names) {
                     errors.push(
-                        ResolveErrorKind::TypestateInvalidTransitionReturn(
+                        REK::TypestateInvalidTransitionReturn(
                             ts_name.to_string(),
                             state.name.clone(),
                             method.sig.name.clone(),
@@ -325,7 +308,7 @@ fn validate_state_items(
             TypestateStateItem::Handler(handler) => {
                 if !is_valid_on_handler_return(&handler.ret_ty_expr, state_names) {
                     errors.push(
-                        ResolveErrorKind::TypestateInvalidStateOnHandlerReturn(
+                        REK::TypestateInvalidStateOnHandlerReturn(
                             ts_name.to_string(),
                             state.name.clone(),
                         )

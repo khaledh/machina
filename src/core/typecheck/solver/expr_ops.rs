@@ -9,7 +9,7 @@ use crate::core::diag::Span;
 use crate::core::tree::NodeId;
 use crate::core::typecheck::capability::ensure_equatable;
 use crate::core::typecheck::constraints::ExprObligation;
-use crate::core::typecheck::errors::{TypeCheckError, TEK};
+use crate::core::typecheck::errors::{TEK, TypeCheckError};
 use crate::core::typecheck::unify::TcUnifier;
 use crate::core::types::Type;
 
@@ -93,13 +93,21 @@ pub(super) fn try_check_expr_obligation_ops(
                     if !super::term_utils::is_int_like(&operand_ty)
                         && !super::term_utils::is_unresolved(&operand_ty)
                     {
-                        crate::core::typecheck::tc_push_error!(errors, *span, TEK::NegationOperandNotInt(operand_ty));
+                        crate::core::typecheck::tc_push_error!(
+                            errors,
+                            *span,
+                            TEK::NegationOperandNotInt(operand_ty)
+                        );
                         covered_exprs.insert(*expr_id);
                     }
                 }
                 crate::core::tree::resolved::UnaryOp::LogicalNot => {
                     if operand_ty != Type::Bool && !super::term_utils::is_unresolved(&operand_ty) {
-                        crate::core::typecheck::tc_push_error!(errors, *span, TEK::LogicalOperandNotBoolean(operand_ty));
+                        crate::core::typecheck::tc_push_error!(
+                            errors,
+                            *span,
+                            TEK::LogicalOperandNotBoolean(operand_ty)
+                        );
                         covered_exprs.insert(*expr_id);
                     }
                 }
@@ -120,36 +128,20 @@ fn op_span(obligation: &ExprObligation) -> Span {
 
 fn first_non_int_operand(left: &Type, right: &Type, span: Span) -> Option<TypeCheckError> {
     if !super::term_utils::is_int_like(left) && !super::term_utils::is_unresolved(left) {
-        return Some(
-            TEK::ArithOperandNotInt(left.clone())
-                .at(span)
-                .into(),
-        );
+        return Some(TEK::ArithOperandNotInt(left.clone()).at(span).into());
     }
     if !super::term_utils::is_int_like(right) && !super::term_utils::is_unresolved(right) {
-        return Some(
-            TEK::ArithOperandNotInt(right.clone())
-                .at(span)
-                .into(),
-        );
+        return Some(TEK::ArithOperandNotInt(right.clone()).at(span).into());
     }
     None
 }
 
 fn first_non_int_cmp_operand(left: &Type, right: &Type, span: Span) -> Option<TypeCheckError> {
     if !super::term_utils::is_int_like(left) && !super::term_utils::is_unresolved(left) {
-        return Some(
-            TEK::CmpOperandNotInt(left.clone())
-                .at(span)
-                .into(),
-        );
+        return Some(TEK::CmpOperandNotInt(left.clone()).at(span).into());
     }
     if !super::term_utils::is_int_like(right) && !super::term_utils::is_unresolved(right) {
-        return Some(
-            TEK::CmpOperandNotInt(right.clone())
-                .at(span)
-                .into(),
-        );
+        return Some(TEK::CmpOperandNotInt(right.clone()).at(span).into());
     }
     None
 }
@@ -182,18 +174,10 @@ fn first_non_equatable_cmp_operand(
 
 fn first_non_bool_operand(left: &Type, right: &Type, span: Span) -> Option<TypeCheckError> {
     if *left != Type::Bool && !super::term_utils::is_unresolved(left) {
-        return Some(
-            TEK::LogicalOperandNotBoolean(left.clone())
-                .at(span)
-                .into(),
-        );
+        return Some(TEK::LogicalOperandNotBoolean(left.clone()).at(span).into());
     }
     if *right != Type::Bool && !super::term_utils::is_unresolved(right) {
-        return Some(
-            TEK::LogicalOperandNotBoolean(right.clone())
-                .at(span)
-                .into(),
-        );
+        return Some(TEK::LogicalOperandNotBoolean(right.clone()).at(span).into());
     }
     None
 }

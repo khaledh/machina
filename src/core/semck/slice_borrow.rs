@@ -15,7 +15,7 @@ use crate::core::analysis::dataflow::solve_forward;
 use crate::core::context::NormalizedContext;
 use crate::core::resolve::DefId;
 use crate::core::semck::liveness_util;
-use crate::core::semck::{push_error, SemCheckError, SEK};
+use crate::core::semck::{SEK, SemCheckError, push_error};
 use crate::core::tree::cfg::{
     AstBlockId, TreeCfg, TreeCfgBuilder, TreeCfgItem, TreeCfgNode, TreeCfgTerminator,
 };
@@ -574,8 +574,7 @@ impl<'a> BorrowConflictVisitor<'a> {
             && let Some(def) = base_def_id(receiver, self.ctx)
             && self.borrowed_bases.contains(&def)
         {
-            self.errors
-                .push(SEK::SliceBorrowConflict.at(receiver.span));
+            self.errors.push(SEK::SliceBorrowConflict.at(receiver.span));
         }
 
         for (param, arg) in sig.params.iter().zip(args) {
@@ -590,8 +589,7 @@ impl<'a> BorrowConflictVisitor<'a> {
             if let Some(def) = base_def_id(arg_expr, self.ctx)
                 && self.borrowed_bases.contains(&def)
             {
-                self.errors
-                    .push(SEK::SliceBorrowConflict.at(arg.span));
+                self.errors.push(SEK::SliceBorrowConflict.at(arg.span));
             }
         }
     }
@@ -605,8 +603,7 @@ impl Visitor<DefId, TypeId> for BorrowConflictVisitor<'_> {
                 if let Some(def) = base_def_id(inner, self.ctx)
                     && self.borrowed_bases.contains(&def)
                 {
-                    self.errors
-                        .push(SEK::SliceBorrowConflict.at(expr.span));
+                    self.errors.push(SEK::SliceBorrowConflict.at(expr.span));
                 }
             }
             ExprKind::Call { args, .. } => {

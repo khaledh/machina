@@ -14,7 +14,7 @@ use crate::core::context::NormalizedContext;
 use crate::core::diag::Span;
 use crate::core::resolve::{DefId, DefKind};
 use crate::core::semck::ast_liveness::{self, AstLiveness};
-use crate::core::semck::{SemCheckError, SEK};
+use crate::core::semck::{SEK, SemCheckError};
 use crate::core::tree::cfg::{
     AstBlockId, TreeCfgBuilder, TreeCfgItem, TreeCfgNode, TreeCfgTerminator,
 };

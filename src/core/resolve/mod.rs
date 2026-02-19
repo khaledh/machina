@@ -10,7 +10,7 @@ pub use def::{
     Visibility,
 };
 pub use def_table::{DefLocation, DefTable, DefTableBuilder, NodeDefLookup};
-pub use errors::{ResolveError, ResolveErrorKind};
+pub use errors::{ResolveError, ResolveErrorKind, ResolveErrorKind as REK};
 pub use owners::attach_def_owners;
 pub use resolver::{
     ImportedCallableSig, ImportedFacts, ImportedModule, ImportedParamSig, ImportedSymbol,
