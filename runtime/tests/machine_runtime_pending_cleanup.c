@@ -65,6 +65,8 @@ int main(void) {
     mc_machine_runtime_t rt;
     pending_cleanup_ctx_t state = {0};
     mc_machine_id_t client = 0;
+    mc_machine_id_t client_fault_policy = 0;
+    mc_machine_id_t client_timeout = 0;
     mc_machine_id_t server = 0;
 
     __mc_machine_runtime_init(&rt);
@@ -118,92 +120,112 @@ int main(void) {
         != MC_MAILBOX_ENQUEUE_OK) {
         return 11;
     }
-    __mc_machine_runtime_set_lifecycle(&rt, client, MC_MACHINE_FAULTED);
-    if (__mc_machine_runtime_pending_contains(&rt, pending_faulted)) {
+    if (!__mc_machine_runtime_mark_faulted(&rt, client)) {
         return 12;
+    }
+    if (__mc_machine_runtime_pending_contains(&rt, pending_faulted)) {
+        return 13;
     }
     if (__mc_machine_runtime_pending_cleanup_count(&rt, MC_PENDING_CLEANUP_REQUESTER_FAULTED)
         != 1) {
-        return 13;
+        return 14;
     }
     if (state.hook_counts[MC_PENDING_CLEANUP_REQUESTER_FAULTED] != 1
         || state.last_pending_id != pending_faulted
         || state.last_reason != MC_PENDING_CLEANUP_REQUESTER_FAULTED) {
-        return 14;
-    }
-
-    // Fault-policy cleanup path (runtime-driven fault transition).
-    __mc_machine_runtime_set_lifecycle(&rt, client, MC_MACHINE_RUNNING);
-    state.fault_machine = client;
-    state.fault_kind = 99;
-    uint64_t pending_fault_policy = 0;
-    if (__mc_machine_runtime_request(&rt, client, server, &req, &pending_fault_policy)
-        != MC_MAILBOX_ENQUEUE_OK) {
         return 15;
     }
-    mc_machine_envelope_t fault_evt = {.kind = 99};
-    if (__mc_machine_runtime_enqueue(&rt, client, &fault_evt) != MC_MAILBOX_ENQUEUE_OK) {
+
+    // Fault-policy cleanup path (runtime-driven fault transition) on a fresh
+    // requester machine.
+    if (!__mc_machine_runtime_spawn(&rt, 4, &client_fault_policy)) {
         return 16;
     }
+    if (!__mc_machine_runtime_start(&rt, client_fault_policy)) {
+        return 17;
+    }
+    state.fault_machine = client_fault_policy;
+    state.fault_kind = 99;
+    uint64_t pending_fault_policy = 0;
+    if (__mc_machine_runtime_request(
+            &rt,
+            client_fault_policy,
+            server,
+            &req,
+            &pending_fault_policy
+        )
+        != MC_MAILBOX_ENQUEUE_OK) {
+        return 18;
+    }
+    mc_machine_envelope_t fault_evt = {.kind = 99};
+    if (__mc_machine_runtime_enqueue(&rt, client_fault_policy, &fault_evt)
+        != MC_MAILBOX_ENQUEUE_OK) {
+        return 19;
+    }
     for (uint32_t i = 0; i < 8; i++) {
-        if (__mc_machine_runtime_lifecycle(&rt, client) == MC_MACHINE_FAULTED) {
+        if (__mc_machine_runtime_lifecycle(&rt, client_fault_policy) == MC_MACHINE_FAULTED) {
             break;
         }
         if (!__mc_machine_runtime_dispatch_one_txn(&rt, noop_dispatch, &state)) {
             break;
         }
     }
-    if (__mc_machine_runtime_lifecycle(&rt, client) != MC_MACHINE_FAULTED) {
-        return 19;
+    if (__mc_machine_runtime_lifecycle(&rt, client_fault_policy) != MC_MACHINE_FAULTED) {
+        return 20;
     }
     if (__mc_machine_runtime_pending_contains(&rt, pending_fault_policy)) {
-        return 20;
+        return 21;
     }
     if (__mc_machine_runtime_pending_cleanup_count(&rt, MC_PENDING_CLEANUP_REQUESTER_FAULTED)
         != 2) {
-        return 21;
+        return 22;
     }
     if (state.hook_counts[MC_PENDING_CLEANUP_REQUESTER_FAULTED] != 2
         || state.last_pending_id != pending_fault_policy
         || state.last_reason != MC_PENDING_CLEANUP_REQUESTER_FAULTED) {
-        return 22;
+        return 23;
     }
     state.fault_machine = 0;
     state.fault_kind = 0;
 
-    // Timeout cleanup path.
-    __mc_machine_runtime_set_lifecycle(&rt, client, MC_MACHINE_RUNNING);
+    // Timeout cleanup path on a fresh requester machine.
+    if (!__mc_machine_runtime_spawn(&rt, 4, &client_timeout)) {
+        return 24;
+    }
+    if (!__mc_machine_runtime_start(&rt, client_timeout)) {
+        return 25;
+    }
     __mc_machine_runtime_set_pending_timeout_steps(&rt, 1);
     if (__mc_machine_runtime_pending_timeout_steps(&rt) != 1) {
-        return 23;
+        return 26;
     }
 
     uint64_t pending_timeout = 0;
-    if (__mc_machine_runtime_request(&rt, client, server, &req, &pending_timeout)
+    if (__mc_machine_runtime_request(&rt, client_timeout, server, &req, &pending_timeout)
         != MC_MAILBOX_ENQUEUE_OK) {
-        return 24;
+        return 27;
     }
     // One dispatch step advances time and triggers timeout cleanup.
     if (!__mc_machine_runtime_dispatch_one_txn(&rt, noop_dispatch, &state)) {
-        return 25;
+        return 28;
     }
     if (__mc_machine_runtime_pending_contains(&rt, pending_timeout)) {
-        return 26;
+        return 29;
     }
     if (__mc_machine_runtime_pending_cleanup_count(&rt, MC_PENDING_CLEANUP_TIMEOUT) != 1) {
-        return 27;
+        return 30;
     }
     if (state.hook_counts[MC_PENDING_CLEANUP_TIMEOUT] != 1
         || state.last_pending_id != pending_timeout
         || state.last_reason != MC_PENDING_CLEANUP_TIMEOUT) {
-        return 28;
+        return 31;
     }
 
     if (__mc_machine_runtime_pending_created_count(&rt) != 4) {
-        return 29;
+        return 32;
     }
     if (__mc_machine_runtime_pending_len(&rt) != 0) {
-        return 30;
+        return 33;
     }
 
     __mc_machine_runtime_drop(&rt);

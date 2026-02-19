@@ -242,7 +242,9 @@ int main(void) {
         ) != MC_MAILBOX_ENQUEUE_OK) {
         return 25;
     }
-    __mc_machine_runtime_set_lifecycle(&rt, state.client, MC_MACHINE_STOPPED);
+    if (!__mc_machine_runtime_stop(&rt, state.client)) {
+        return 29;
+    }
     if (__mc_machine_runtime_pending_contains(&rt, pending_stopped)) {
         return 26;
     }

@@ -180,47 +180,63 @@ int main(void) {
         return 23;
     }
 
-    __mc_machine_runtime_set_lifecycle(&rt, state.server, MC_MACHINE_STOPPED);
-    if (__mc_machine_runtime_request(&rt, state.client, state.server, &req, &pending)
-        != MC_MAILBOX_ENQUEUE_MACHINE_NOT_RUNNING) {
+    if (!__mc_machine_runtime_stop(&rt, state.server)) {
         return 24;
     }
-    if (state.dead_count != 3 || state.dead_reason[2] != MC_DEAD_LETTER_STOPPED_MACHINE) {
+    if (__mc_machine_runtime_request(&rt, state.client, state.server, &req, &pending)
+        != MC_MAILBOX_ENQUEUE_MACHINE_NOT_RUNNING) {
         return 25;
+    }
+    if (state.dead_count != 3 || state.dead_reason[2] != MC_DEAD_LETTER_STOPPED_MACHINE) {
+        return 26;
+    }
+
+    // Continue scenario with a fresh running server machine.
+    if (!__mc_machine_runtime_spawn(&rt, 4, &state.server)) {
+        return 27;
+    }
+    if (!__mc_machine_runtime_start(&rt, state.server)) {
+        return 28;
     }
 
     // If requester is stopped, inflight pending ids are reclaimed immediately.
-    __mc_machine_runtime_set_lifecycle(&rt, state.server, MC_MACHINE_RUNNING);
     uint64_t pending2 = 0;
     if (__mc_machine_runtime_request(&rt, state.client, state.server, &req, &pending2)
         != MC_MAILBOX_ENQUEUE_OK) {
-        return 26;
-    }
-    if (!__mc_machine_runtime_dispatch_one_txn(&rt, reqreply_dispatch, &state)) {
-        return 27;
-    }
-
-    __mc_machine_runtime_set_lifecycle(&rt, state.client, MC_MACHINE_STOPPED);
-    if (__mc_machine_runtime_pending_len(&rt) != 0) {
-        return 28;
-    }
-    if (__mc_machine_runtime_pending_contains(&rt, pending2)) {
         return 29;
     }
-    if (__mc_machine_runtime_reply(&rt, state.server, pending2, &resp) != MC_REPLY_CAP_UNKNOWN) {
+    if (!__mc_machine_runtime_dispatch_one_txn(&rt, reqreply_dispatch, &state)) {
         return 30;
     }
-    if (state.dead_count != 4 || state.dead_reason[3] != MC_DEAD_LETTER_REPLY_CAP_UNKNOWN) {
+
+    if (!__mc_machine_runtime_stop(&rt, state.client)) {
         return 31;
     }
-
-    // Restore requester; timed-out/stopped correlations stay reclaimed.
-    __mc_machine_runtime_set_lifecycle(&rt, state.client, MC_MACHINE_RUNNING);
     if (__mc_machine_runtime_pending_len(&rt) != 0) {
         return 32;
     }
     if (__mc_machine_runtime_pending_contains(&rt, pending2)) {
         return 33;
+    }
+    if (__mc_machine_runtime_reply(&rt, state.server, pending2, &resp) != MC_REPLY_CAP_UNKNOWN) {
+        return 34;
+    }
+    if (state.dead_count != 4 || state.dead_reason[3] != MC_DEAD_LETTER_REPLY_CAP_UNKNOWN) {
+        return 35;
+    }
+
+    // Continue scenario with a fresh running requester.
+    if (!__mc_machine_runtime_spawn(&rt, 4, &state.client)) {
+        return 36;
+    }
+    if (!__mc_machine_runtime_start(&rt, state.client)) {
+        return 37;
+    }
+    if (__mc_machine_runtime_pending_len(&rt) != 0) {
+        return 38;
+    }
+    if (__mc_machine_runtime_pending_contains(&rt, pending2)) {
+        return 39;
     }
 
     // Out-of-order response routing:
@@ -236,31 +252,13 @@ int main(void) {
     mc_machine_envelope_t req_b = {.kind = 100, .payload0 = 902};
     if (__mc_machine_runtime_request(&rt, state.client, state.server, &req_a, &pending_a)
         != MC_MAILBOX_ENQUEUE_OK) {
-        return 35;
+        return 40;
     }
     if (__mc_machine_runtime_request(&rt, state.client, state.server, &req_b, &pending_b)
         != MC_MAILBOX_ENQUEUE_OK) {
-        return 36;
-    }
-    if (pending_a == 0 || pending_b == 0 || pending_a == pending_b) {
-        return 37;
-    }
-    if (!__mc_machine_runtime_dispatch_one_txn(&rt, reqreply_dispatch, &state)) {
-        return 38;
-    }
-    if (!__mc_machine_runtime_dispatch_one_txn(&rt, reqreply_dispatch, &state)) {
-        return 39;
-    }
-    if (state.server_reply_caps_len != 2
-        || state.server_reply_caps[0] != pending_a
-        || state.server_reply_caps[1] != pending_b) {
-        return 40;
-    }
-
-    if (__mc_machine_runtime_reply(&rt, state.server, pending_b, &resp) != MC_REPLY_OK) {
         return 41;
     }
-    if (__mc_machine_runtime_reply(&rt, state.server, pending_a, &resp) != MC_REPLY_OK) {
+    if (pending_a == 0 || pending_b == 0 || pending_a == pending_b) {
         return 42;
     }
     if (!__mc_machine_runtime_dispatch_one_txn(&rt, reqreply_dispatch, &state)) {
@@ -269,15 +267,33 @@ int main(void) {
     if (!__mc_machine_runtime_dispatch_one_txn(&rt, reqreply_dispatch, &state)) {
         return 44;
     }
+    if (state.server_reply_caps_len != 2
+        || state.server_reply_caps[0] != pending_a
+        || state.server_reply_caps[1] != pending_b) {
+        return 45;
+    }
+
+    if (__mc_machine_runtime_reply(&rt, state.server, pending_b, &resp) != MC_REPLY_OK) {
+        return 46;
+    }
+    if (__mc_machine_runtime_reply(&rt, state.server, pending_a, &resp) != MC_REPLY_OK) {
+        return 47;
+    }
+    if (!__mc_machine_runtime_dispatch_one_txn(&rt, reqreply_dispatch, &state)) {
+        return 48;
+    }
+    if (!__mc_machine_runtime_dispatch_one_txn(&rt, reqreply_dispatch, &state)) {
+        return 49;
+    }
     if (state.client_pending_seq_len != 2
         || state.client_pending_seq[0] != pending_b
         || state.client_pending_seq[1] != pending_a) {
-        return 45;
+        return 50;
     }
     if (state.client_origin_payload_seq_len != 2
         || state.client_origin_payload_seq[0] != req_b.payload0
         || state.client_origin_payload_seq[1] != req_a.payload0) {
-        return 46;
+        return 51;
     }
     if (__mc_machine_runtime_pending_len(&rt) != 0) {
         return 47;

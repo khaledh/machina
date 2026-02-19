@@ -452,11 +452,18 @@ mc_machine_lifecycle_t __mc_machine_runtime_lifecycle(
     mc_machine_id_t machine_id
 );
 
-// Override lifecycle state for an existing machine.
-void __mc_machine_runtime_set_lifecycle(
+// Transition machine to STOPPED and eagerly release per-machine resources.
+// Returns 1 on success, 0 on unknown machine id.
+uint8_t __mc_machine_runtime_stop(
     mc_machine_runtime_t *rt,
-    mc_machine_id_t machine_id,
-    mc_machine_lifecycle_t lifecycle
+    mc_machine_id_t machine_id
+);
+
+// Transition machine to FAULTED and reclaim pending requester correlations.
+// Returns 1 on success, 0 on unknown machine id.
+uint8_t __mc_machine_runtime_mark_faulted(
+    mc_machine_runtime_t *rt,
+    mc_machine_id_t machine_id
 );
 
 // Transition machine from CREATED to RUNNING.

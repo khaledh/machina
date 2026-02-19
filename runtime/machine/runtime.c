@@ -343,18 +343,6 @@ static void mc_stop_machine_and_cleanup_slot(
     rt->stopped_cleanup_count += 1;
 }
 
-// Re-initialize mailbox storage when a previously-stopped slot is explicitly
-// transitioned back to CREATED/RUNNING via lifecycle override.
-static uint8_t mc_restore_mailbox_if_needed(mc_machine_slot_t *slot) {
-    if (!slot) {
-        return 0;
-    }
-    if (slot->mailbox.items != NULL) {
-        return 1;
-    }
-    return mc_mailbox_init(&slot->mailbox, slot->mailbox.cap);
-}
-
 // Hook emitters ---------------------------------------------------------------
 
 // Best-effort dead-letter callback.
@@ -923,30 +911,38 @@ mc_machine_lifecycle_t __mc_machine_runtime_lifecycle(
     return slot->lifecycle;
 }
 
-// Public API: lifecycle override for existing machine id.
-void __mc_machine_runtime_set_lifecycle(
+// Public API: stop one machine and eagerly cleanup per-machine resources.
+uint8_t __mc_machine_runtime_stop(
     mc_machine_runtime_t *rt,
-    mc_machine_id_t machine_id,
-    mc_machine_lifecycle_t lifecycle
+    mc_machine_id_t machine_id
 ) {
     mc_machine_slot_t *slot = mc_get_slot(rt, machine_id);
     if (!slot) {
-        return;
+        return 0;
     }
-    if (slot->lifecycle == lifecycle) {
-        return;
+    if (slot->lifecycle == MC_MACHINE_STOPPED) {
+        return 1;
     }
-    if (lifecycle == MC_MACHINE_STOPPED) {
-        mc_stop_machine_and_cleanup_slot(rt, machine_id, slot);
-    } else if (lifecycle == MC_MACHINE_FAULTED) {
-        slot->lifecycle = lifecycle;
-        (void)mc_pending_cleanup_requester(rt, machine_id, MC_PENDING_CLEANUP_REQUESTER_FAULTED);
-    } else {
-        if (slot->lifecycle == MC_MACHINE_STOPPED && !mc_restore_mailbox_if_needed(slot)) {
-            return;
-        }
-        slot->lifecycle = lifecycle;
+    mc_stop_machine_and_cleanup_slot(rt, machine_id, slot);
+    return 1;
+}
+
+// Public API: mark one machine faulted and reclaim requester pending entries.
+uint8_t __mc_machine_runtime_mark_faulted(
+    mc_machine_runtime_t *rt,
+    mc_machine_id_t machine_id
+) {
+    mc_machine_slot_t *slot = mc_get_slot(rt, machine_id);
+    if (!slot) {
+        return 0;
     }
+    if (slot->lifecycle == MC_MACHINE_FAULTED) {
+        return 1;
+    }
+    // Mark-faulted is idempotent and does not run stop cleanup.
+    slot->lifecycle = MC_MACHINE_FAULTED;
+    (void)mc_pending_cleanup_requester(rt, machine_id, MC_PENDING_CLEANUP_REQUESTER_FAULTED);
+    return 1;
 }
 
 // Public API: start a CREATED machine.

@@ -361,13 +361,11 @@ uint8_t __mc_machine_runtime_bind_dispatch_thunk(
     void *dispatch_ctx
 ) {
     mc_machine_dispatch_txn_fn dispatch = __mc_machine_runtime_lookup_thunk(thunk_id);
-    mc_machine_slot_t *slot = mc_get_slot(rt, machine_id);
-    if (!slot || !dispatch) {
+    if (!dispatch) {
         return 0;
     }
-    slot->dispatch = dispatch;
-    slot->dispatch_ctx = dispatch_ctx;
-    return 1;
+    __mc_machine_runtime_bind_dispatch(rt, machine_id, dispatch, dispatch_ctx);
+    return mc_get_slot(rt, machine_id) != NULL;
 }
 
 uint64_t __mc_machine_runtime_register_descriptor(
