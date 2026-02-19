@@ -401,6 +401,7 @@ pub enum TypeCheckErrorKind {
 }
 
 pub type TypeCheckError = SpannedError<TypeCheckErrorKind>;
+pub use TypeCheckErrorKind as TEK;
 
 impl TypeCheckErrorKind {
     pub fn at(self, span: Span) -> TypeCheckError {

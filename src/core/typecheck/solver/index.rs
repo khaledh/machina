@@ -7,7 +7,7 @@ use std::collections::HashSet;
 
 use crate::core::tree::NodeId;
 use crate::core::typecheck::constraints::ExprObligation;
-use crate::core::typecheck::errors::{TypeCheckError, TypeCheckErrorKind};
+use crate::core::typecheck::errors::{TypeCheckError, TEK};
 use crate::core::typecheck::typesys::TypeVarKind;
 use crate::core::typecheck::unify::TcUnifier;
 use crate::core::types::Type;
@@ -58,11 +58,7 @@ pub(super) fn try_check_expr_obligation_index(
                         force_unresolved_index_to_u64(index_term, unifier);
                     }
                     if indices.len() > dims.len() {
-                        errors.push(
-                            TypeCheckErrorKind::TooManyIndices(dims.len(), indices.len())
-                                .at(*span)
-                                .into(),
-                        );
+                        crate::core::typecheck::tc_push_error!(errors, *span, TEK::TooManyIndices(dims.len(), indices.len()));
                         covered_exprs.insert(*expr_id);
                         return true;
                     }
@@ -102,11 +98,7 @@ pub(super) fn try_check_expr_obligation_index(
                         force_unresolved_index_to_u64(index_term, unifier);
                     }
                     if indices.len() != 1 {
-                        errors.push(
-                            TypeCheckErrorKind::TooManyIndices(1, indices.len())
-                                .at(*span)
-                                .into(),
-                        );
+                        crate::core::typecheck::tc_push_error!(errors, *span, TEK::TooManyIndices(1, indices.len()));
                         covered_exprs.insert(*expr_id);
                         return true;
                     }
@@ -138,11 +130,7 @@ pub(super) fn try_check_expr_obligation_index(
                         force_unresolved_index_to_u64(index_term, unifier);
                     }
                     if indices.len() != 1 {
-                        errors.push(
-                            TypeCheckErrorKind::TooManyIndices(1, indices.len())
-                                .at(*span)
-                                .into(),
-                        );
+                        crate::core::typecheck::tc_push_error!(errors, *span, TEK::TooManyIndices(1, indices.len()));
                         covered_exprs.insert(*expr_id);
                         return true;
                     }
@@ -174,11 +162,7 @@ pub(super) fn try_check_expr_obligation_index(
                         force_unresolved_index_to_u64(index_term, unifier);
                     }
                     if indices.len() != 1 {
-                        errors.push(
-                            TypeCheckErrorKind::TooManyIndices(1, indices.len())
-                                .at(*span)
-                                .into(),
-                        );
+                        crate::core::typecheck::tc_push_error!(errors, *span, TEK::TooManyIndices(1, indices.len()));
                         covered_exprs.insert(*expr_id);
                         return true;
                     }
@@ -186,11 +170,7 @@ pub(super) fn try_check_expr_obligation_index(
                 }
                 Type::Map { key_ty, value_ty } => {
                     if indices.len() != 1 {
-                        errors.push(
-                            TypeCheckErrorKind::TooManyIndices(1, indices.len())
-                                .at(*span)
-                                .into(),
-                        );
+                        crate::core::typecheck::tc_push_error!(errors, *span, TEK::TooManyIndices(1, indices.len()));
                         covered_exprs.insert(*expr_id);
                         return true;
                     }
@@ -200,14 +180,10 @@ pub(super) fn try_check_expr_obligation_index(
                     {
                         if !super::term_utils::is_unresolved(&key_index_ty) {
                             let diag_span = index_spans.first().copied().unwrap_or(*span);
-                            errors.push(
-                                TypeCheckErrorKind::MapKeyTypeMismatch(
+                            crate::core::typecheck::tc_push_error!(errors, diag_span, TEK::MapKeyTypeMismatch(
                                     key_ty.as_ref().clone(),
                                     key_index_ty,
-                                )
-                                .at(diag_span)
-                                .into(),
-                            );
+                                ));
                             covered_exprs.insert(*expr_id);
                             if let Some(node_id) = index_nodes.first() {
                                 covered_exprs.insert(*node_id);
@@ -218,24 +194,16 @@ pub(super) fn try_check_expr_obligation_index(
                     if !super::term_utils::is_unresolved(key_ty)
                         && let Err(failure) = super::ensure_hashable(key_ty)
                     {
-                        errors.push(
-                            TypeCheckErrorKind::TypeNotHashable(
+                        crate::core::typecheck::tc_push_error!(errors, *span, TEK::TypeNotHashable(
                                 key_ty.as_ref().clone(),
                                 failure.path,
                                 failure.failing_ty,
-                            )
-                            .at(*span)
-                            .into(),
-                        );
+                            ));
                         covered_exprs.insert(*expr_id);
                         return true;
                     }
                     if value_ty.needs_drop() && !super::term_utils::is_unresolved(value_ty) {
-                        errors.push(
-                            TypeCheckErrorKind::MapIndexValueNotCopySafe(value_ty.as_ref().clone())
-                                .at(*span)
-                                .into(),
-                        );
+                        crate::core::typecheck::tc_push_error!(errors, *span, TEK::MapIndexValueNotCopySafe(value_ty.as_ref().clone()));
                         covered_exprs.insert(*expr_id);
                         return true;
                     }
@@ -247,11 +215,7 @@ pub(super) fn try_check_expr_obligation_index(
                 }
                 ty if super::term_utils::is_unresolved(ty) => {}
                 _ => {
-                    errors.push(
-                        TypeCheckErrorKind::InvalidIndexTargetType(indexed_target_ty)
-                            .at(*span)
-                            .into(),
-                    );
+                    crate::core::typecheck::tc_push_error!(errors, *span, TEK::InvalidIndexTargetType(indexed_target_ty));
                     covered_exprs.insert(*expr_id);
                     return true;
                 }
@@ -266,11 +230,7 @@ pub(super) fn try_check_expr_obligation_index(
             let owner_ty =
                 super::term_utils::peel_heap(super::term_utils::resolve_term(target, unifier));
             if matches!(owner_ty, Type::Map { .. }) {
-                errors.push(
-                    TypeCheckErrorKind::MapIndexAssignUnsupported
-                        .at(*span)
-                        .into(),
-                );
+                crate::core::typecheck::tc_push_error!(errors, *span, TEK::MapIndexAssignUnsupported);
                 covered_exprs.insert(*stmt_id);
             }
             true
@@ -304,11 +264,7 @@ pub(super) fn try_check_expr_obligation_index(
                 bad_bound_ty = Some(end_ty);
             }
             if let Some(bound_ty) = bad_bound_ty {
-                errors.push(
-                    TypeCheckErrorKind::IndexTypeNotInt(bound_ty)
-                        .at(*span)
-                        .into(),
-                );
+                crate::core::typecheck::tc_push_error!(errors, *span, TEK::IndexTypeNotInt(bound_ty));
                 covered_exprs.insert(*expr_id);
                 return true;
             }
@@ -316,11 +272,7 @@ pub(super) fn try_check_expr_obligation_index(
             match &sliced_target_ty {
                 Type::Array { elem_ty, dims } => {
                     if dims.is_empty() {
-                        errors.push(
-                            TypeCheckErrorKind::SliceTargetZeroDimArray(sliced_target_ty)
-                                .at(*span)
-                                .into(),
-                        );
+                        crate::core::typecheck::tc_push_error!(errors, *span, TEK::SliceTargetZeroDimArray(sliced_target_ty));
                         covered_exprs.insert(*expr_id);
                         return true;
                     }
@@ -365,11 +317,7 @@ pub(super) fn try_check_expr_obligation_index(
                 }
                 ty if super::term_utils::is_unresolved(ty) => {}
                 _ => {
-                    errors.push(
-                        TypeCheckErrorKind::SliceTargetNotArrayOrString(sliced_target_ty)
-                            .at(*span)
-                            .into(),
-                    );
+                    crate::core::typecheck::tc_push_error!(errors, *span, TEK::SliceTargetNotArrayOrString(sliced_target_ty));
                     covered_exprs.insert(*expr_id);
                     return true;
                 }
@@ -387,11 +335,7 @@ pub(super) fn try_check_expr_obligation_index(
             if !super::term_utils::is_int_like(&start_ty)
                 && !super::term_utils::is_unresolved(&start_ty)
             {
-                errors.push(
-                    TypeCheckErrorKind::IndexTypeNotInt(start_ty)
-                        .at(*span)
-                        .into(),
-                );
+                crate::core::typecheck::tc_push_error!(errors, *span, TEK::IndexTypeNotInt(start_ty));
                 covered_exprs.insert(*expr_id);
                 return true;
             }
@@ -399,7 +343,7 @@ pub(super) fn try_check_expr_obligation_index(
             if !super::term_utils::is_int_like(&end_ty)
                 && !super::term_utils::is_unresolved(&end_ty)
             {
-                errors.push(TypeCheckErrorKind::IndexTypeNotInt(end_ty).at(*span).into());
+                crate::core::typecheck::tc_push_error!(errors, *span, TEK::IndexTypeNotInt(end_ty));
                 covered_exprs.insert(*expr_id);
                 return true;
             }
@@ -435,11 +379,7 @@ fn emit_bad_int_index(
     bad_idx_ty: Type,
 ) {
     let diag_span = index_spans.get(idx_i).copied().unwrap_or(fallback_span);
-    errors.push(
-        TypeCheckErrorKind::IndexTypeNotInt(bad_idx_ty)
-            .at(diag_span)
-            .into(),
-    );
+    crate::core::typecheck::tc_push_error!(errors, diag_span, TEK::IndexTypeNotInt(bad_idx_ty));
     covered_exprs.insert(expr_id);
     if let Some(node_id) = index_nodes.get(idx_i) {
         covered_exprs.insert(*node_id);

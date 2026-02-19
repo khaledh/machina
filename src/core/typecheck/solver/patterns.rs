@@ -14,7 +14,7 @@ use crate::core::tree::resolved::{
     BindPattern, BindPatternKind, MatchPattern, MatchPatternBinding,
 };
 use crate::core::typecheck::constraints::PatternObligation;
-use crate::core::typecheck::errors::{TypeCheckError, TypeCheckErrorKind};
+use crate::core::typecheck::errors::{TypeCheckError, TEK};
 use crate::core::typecheck::type_map::{resolve_type_def_with_args, resolve_type_expr};
 use crate::core::typecheck::unify::TcUnifier;
 use crate::core::types::{Type, TypeAssignability, type_assignable};
@@ -142,14 +142,10 @@ fn bind_match_pattern_types(
                             .iter()
                             .map(super::diag_utils::compact_type_name)
                             .collect::<Vec<_>>();
-                        errors.push(
-                            TypeCheckErrorKind::MatchTypedBindingTypeMismatch(
+                        crate::core::typecheck::tc_push_error!(errors, *span, TEK::MatchTypedBindingTypeMismatch(
                                 variant_names,
                                 pat_ty.clone(),
-                            )
-                            .at(*span)
-                            .into(),
-                        );
+                            ));
                         covered.insert(*id);
                         covered.insert(pattern_id);
                     }
@@ -280,7 +276,7 @@ fn check_bind_pattern(
             Type::Tuple { field_tys } => {
                 if field_tys.len() != patterns.len() {
                     return Some(
-                        TypeCheckErrorKind::TuplePatternLengthMismatch(
+                        TEK::TuplePatternLengthMismatch(
                             field_tys.len(),
                             patterns.len(),
                         )
@@ -305,7 +301,7 @@ fn check_bind_pattern(
             }
             ty if super::term_utils::is_unresolved(ty) => None,
             _ => Some(
-                TypeCheckErrorKind::PatternTypeMismatch(pattern.clone(), value_ty.clone())
+                TEK::PatternTypeMismatch(pattern.clone(), value_ty.clone())
                     .at(span)
                     .into(),
             ),
@@ -315,7 +311,7 @@ fn check_bind_pattern(
                 let expected_len = dims.first().copied().unwrap_or(0);
                 if expected_len != patterns.len() {
                     return Some(
-                        TypeCheckErrorKind::ArrayPatternLengthMismatch(
+                        TEK::ArrayPatternLengthMismatch(
                             expected_len,
                             patterns.len(),
                         )
@@ -348,7 +344,7 @@ fn check_bind_pattern(
             }
             ty if super::term_utils::is_unresolved(ty) => None,
             _ => Some(
-                TypeCheckErrorKind::PatternTypeMismatch(pattern.clone(), value_ty.clone())
+                TEK::PatternTypeMismatch(pattern.clone(), value_ty.clone())
                     .at(span)
                     .into(),
             ),
@@ -373,7 +369,7 @@ fn check_bind_pattern(
                         .map(|def| def.name.clone())
                         .unwrap_or_else(|| super::diag_utils::compact_nominal_name(name));
                     return Some(
-                        TypeCheckErrorKind::OpaquePatternDestructure(diag_name)
+                        TEK::OpaquePatternDestructure(diag_name)
                             .at(span)
                             .into(),
                     );
@@ -399,7 +395,7 @@ fn check_bind_pattern(
             }
             ty if super::term_utils::is_unresolved(ty) => None,
             _ => Some(
-                TypeCheckErrorKind::PatternTypeMismatch(pattern.clone(), value_ty.clone())
+                TEK::PatternTypeMismatch(pattern.clone(), value_ty.clone())
                     .at(span)
                     .into(),
             ),

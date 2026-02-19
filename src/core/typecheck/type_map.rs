@@ -10,7 +10,7 @@ use crate::core::tree::normalized as norm;
 use crate::core::tree::resolved as res;
 use crate::core::tree::semantic as sem;
 use crate::core::tree::{NodeId, ParamMode, RefinementKind};
-use crate::core::typecheck::errors::{TypeCheckError, TypeCheckErrorKind};
+use crate::core::typecheck::errors::{TypeCheckError, TEK};
 use crate::core::typecheck::nominal::NominalKey;
 use crate::core::typecheck::utils::{fn_param_mode, nominal_key_concreteness};
 use crate::core::types::{EnumVariant, FnParam, StructField, TyVarId, Type, TypeCache, TypeId};
@@ -73,10 +73,10 @@ pub(crate) fn resolve_type_def_with_args(
 ) -> Result<Type, TypeCheckError> {
     let def = def_table
         .lookup_def(def_id)
-        .ok_or(TypeCheckErrorKind::UnknownType.at(Span::default()))?;
+        .ok_or(TEK::UnknownType.at(Span::default()))?;
     if let Some(imported_ty) = module.imported_type_by_id(def_id) {
         if !type_args.is_empty() {
-            return Err(TypeCheckErrorKind::TypeArgCountMismatch(
+            return Err(TEK::TypeArgCountMismatch(
                 def.name.clone(),
                 0,
                 type_args.len(),
@@ -88,10 +88,10 @@ pub(crate) fn resolve_type_def_with_args(
     }
     let type_def = module
         .type_def_by_id(def_id)
-        .ok_or(TypeCheckErrorKind::UnknownType.at(Span::default()))?;
+        .ok_or(TEK::UnknownType.at(Span::default()))?;
 
     if type_def.type_params.len() != type_args.len() {
-        return Err(TypeCheckErrorKind::TypeArgCountMismatch(
+        return Err(TEK::TypeArgCountMismatch(
             def.name.clone(),
             type_def.type_params.len(),
             type_args.len(),
@@ -211,10 +211,10 @@ fn resolve_type_expr_impl(
     allow_error_union: bool,
 ) -> Result<Type, TypeCheckError> {
     match &type_expr.kind {
-        res::TypeExprKind::Infer => Err(TypeCheckErrorKind::UnknownType.at(type_expr.span).into()),
+        res::TypeExprKind::Infer => Err(TEK::UnknownType.at(type_expr.span).into()),
         res::TypeExprKind::Union { variants } => {
             if !allow_error_union {
-                return Err(TypeCheckErrorKind::UnionNotAllowedHere
+                return Err(TEK::UnionNotAllowedHere
                     .at(type_expr.span)
                     .into());
             }
@@ -427,7 +427,7 @@ fn apply_refinements(
                     nonzero,
                 } = ty
                 else {
-                    return Err(TypeCheckErrorKind::RefinementBaseNotInt(ty).at(span).into());
+                    return Err(TEK::RefinementBaseNotInt(ty).at(span).into());
                 };
                 let (min_bound, max_bound) = if let Some(bounds) = bounds {
                     (bounds.min, bounds.max_excl)
@@ -435,7 +435,7 @@ fn apply_refinements(
                     int_full_range(signed, bits)
                 };
                 if *min < min_bound || *max > max_bound {
-                    return Err(TypeCheckErrorKind::BoundsOutOfRange(
+                    return Err(TEK::BoundsOutOfRange(
                         *min, *max, min_bound, max_bound,
                     )
                     .at(span)
@@ -459,7 +459,7 @@ fn apply_refinements(
                     ..
                 } = ty
                 else {
-                    return Err(TypeCheckErrorKind::RefinementBaseNotInt(ty).at(span).into());
+                    return Err(TEK::RefinementBaseNotInt(ty).at(span).into());
                 };
                 ty = Type::Int {
                     signed,
@@ -478,7 +478,7 @@ fn apply_refinements(
         && (bounds.min > 0 || bounds.max_excl <= 0)
     {
         return Err(
-            TypeCheckErrorKind::RedundantNonZero(bounds.min, bounds.max_excl)
+            TEK::RedundantNonZero(bounds.min, bounds.max_excl)
                 .at(span)
                 .into(),
         );
@@ -521,11 +521,11 @@ fn resolve_named_type(
 ) -> Result<Type, TypeCheckError> {
     let def = def_table
         .lookup_def(*def_id)
-        .ok_or(TypeCheckErrorKind::UnknownType.at(type_expr.span))?;
+        .ok_or(TEK::UnknownType.at(type_expr.span))?;
 
     if def.name == "set" {
         if type_arg_exprs.len() != 1 {
-            return Err(TypeCheckErrorKind::TypeArgCountMismatch(
+            return Err(TEK::TypeArgCountMismatch(
                 def.name.clone(),
                 1,
                 type_arg_exprs.len(),
@@ -548,7 +548,7 @@ fn resolve_named_type(
     }
     if def.name == "map" {
         if type_arg_exprs.len() != 2 {
-            return Err(TypeCheckErrorKind::TypeArgCountMismatch(
+            return Err(TEK::TypeArgCountMismatch(
                 def.name.clone(),
                 2,
                 type_arg_exprs.len(),
@@ -581,7 +581,7 @@ fn resolve_named_type(
     }
     if def.name == "Pending" || def.name == "ReplyCap" {
         if type_arg_exprs.len() != 1 {
-            return Err(TypeCheckErrorKind::TypeArgCountMismatch(
+            return Err(TEK::TypeArgCountMismatch(
                 def.name.clone(),
                 1,
                 type_arg_exprs.len(),
@@ -611,7 +611,7 @@ fn resolve_named_type(
 
     if let Some(ty) = builtin_type(&def.name) {
         if !type_arg_exprs.is_empty() {
-            return Err(TypeCheckErrorKind::TypeArgCountMismatch(
+            return Err(TEK::TypeArgCountMismatch(
                 def.name.clone(),
                 0,
                 type_arg_exprs.len(),
@@ -634,13 +634,13 @@ fn resolve_named_type(
             {
                 return Ok(Type::Var(*var));
             }
-            Err(TypeCheckErrorKind::UnknownType.at(type_expr.span).into())
+            Err(TEK::UnknownType.at(type_expr.span).into())
         }
         DefKind::TypeDef { .. } => {
             let Some(type_def) = module.type_def_by_id(*def_id) else {
                 if let Some(imported_ty) = module.imported_type_by_id(*def_id) {
                     if !type_arg_exprs.is_empty() {
-                        return Err(TypeCheckErrorKind::TypeArgCountMismatch(
+                        return Err(TEK::TypeArgCountMismatch(
                             def.name.clone(),
                             0,
                             type_arg_exprs.len(),
@@ -650,11 +650,11 @@ fn resolve_named_type(
                     }
                     return Ok(imported_ty.clone());
                 }
-                return Err(TypeCheckErrorKind::UnknownType.at(type_expr.span).into());
+                return Err(TEK::UnknownType.at(type_expr.span).into());
             };
             if type_def.type_params.is_empty() {
                 if !type_arg_exprs.is_empty() {
-                    return Err(TypeCheckErrorKind::TypeArgCountMismatch(
+                    return Err(TEK::TypeArgCountMismatch(
                         def.name.clone(),
                         0,
                         type_arg_exprs.len(),
@@ -700,7 +700,7 @@ fn resolve_named_type(
             }
 
             if type_def.type_params.len() != type_arg_exprs.len() {
-                return Err(TypeCheckErrorKind::TypeArgCountMismatch(
+                return Err(TEK::TypeArgCountMismatch(
                     def.name.clone(),
                     type_def.type_params.len(),
                     type_arg_exprs.len(),
@@ -765,7 +765,7 @@ fn resolve_named_type(
                 ),
             }
         }
-        _ => Err(TypeCheckErrorKind::UnknownType.at(type_expr.span).into()),
+        _ => Err(TEK::UnknownType.at(type_expr.span).into()),
     }
 }
 

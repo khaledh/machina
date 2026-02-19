@@ -14,7 +14,7 @@ use crate::core::typecheck::constraints::{CallCallee, CallObligation};
 use crate::core::typecheck::engine::{
     CollectedCallableSig, CollectedPropertySig, CollectedTraitSig, lookup_property,
 };
-use crate::core::typecheck::errors::{TypeCheckError, TypeCheckErrorKind};
+use crate::core::typecheck::errors::{TypeCheckError, TEK};
 use crate::core::typecheck::unify::TcUnifier;
 use crate::core::types::{TyVarId, Type};
 
@@ -45,15 +45,11 @@ pub(super) fn check_call_obligations(
                 let callee_ty = super::term_utils::resolve_term(callee_term, unifier);
                 if let Type::Fn { params, ret_ty } = callee_ty {
                     if params.len() != obligation.arg_terms.len() {
-                        errors.push(
-                            TypeCheckErrorKind::ArgCountMismatch(
+                        crate::core::typecheck::tc_push_error!(errors, obligation.span, TEK::ArgCountMismatch(
                                 "<fn>".to_string(),
                                 params.len(),
                                 obligation.arg_terms.len(),
-                            )
-                            .at(obligation.span)
-                            .into(),
-                        );
+                            ));
                         continue;
                     }
                     let mut arg_failed = false;
@@ -64,15 +60,11 @@ pub(super) fn check_call_obligations(
                         if let Err(_) =
                             super::assignability::solve_assignable(&arg_ty, &param.ty, unifier)
                         {
-                            errors.push(
-                                TypeCheckErrorKind::ArgTypeMismatch(
+                            crate::core::typecheck::tc_push_error!(errors, obligation.span, TEK::ArgTypeMismatch(
                                     index + 1,
                                     super::term_utils::canonicalize_type(unifier.apply(&param.ty)),
                                     super::term_utils::canonicalize_type(unifier.apply(&arg_ty)),
-                                )
-                                .at(obligation.span)
-                                .into(),
-                            );
+                                ));
                             arg_failed = true;
                             break;
                         }
@@ -92,11 +84,7 @@ pub(super) fn check_call_obligations(
                 } else if super::term_utils::is_unresolved(&callee_ty) {
                     deferred.push(obligation.clone());
                 } else {
-                    errors.push(
-                        TypeCheckErrorKind::OverloadNoMatch(format!("<dynamic:{expr_id}>"))
-                            .at(obligation.span)
-                            .into(),
-                    );
+                    crate::core::typecheck::tc_push_error!(errors, obligation.span, TEK::OverloadNoMatch(format!("<dynamic:{expr_id}>")));
                 }
             } else {
                 deferred.push(obligation.clone());
@@ -181,17 +169,9 @@ pub(super) fn check_call_obligations(
                 CallCallee::Dynamic { expr_id, .. } => format!("<dynamic:{expr_id}>"),
             };
             if inaccessible_count > 0 {
-                errors.push(
-                    TypeCheckErrorKind::CallableNotAccessible(name)
-                        .at(obligation.span)
-                        .into(),
-                );
+                crate::core::typecheck::tc_push_error!(errors, obligation.span, TEK::CallableNotAccessible(name));
             } else {
-                errors.push(
-                    TypeCheckErrorKind::OverloadNoMatch(name)
-                        .at(obligation.span)
-                        .into(),
-                );
+                crate::core::typecheck::tc_push_error!(errors, obligation.span, TEK::OverloadNoMatch(name));
             }
             continue;
         }
@@ -216,7 +196,7 @@ pub(super) fn check_call_obligations(
                     super::assignability::solve_assignable(&arg_ty, param_ty, &mut trial)
                 {
                     first_error.get_or_insert_with(|| {
-                        TypeCheckErrorKind::ArgTypeMismatch(
+                        TEK::ArgTypeMismatch(
                             index + 1,
                             super::term_utils::canonicalize_type(trial.apply(param_ty)),
                             super::term_utils::canonicalize_type(trial.apply(&arg_ty)),
@@ -249,7 +229,7 @@ pub(super) fn check_call_obligations(
                 unsatisfied_trait_bound(&instantiated.bound_terms, &trial, trait_impls)
             {
                 first_error.get_or_insert_with(|| {
-                    TypeCheckErrorKind::TraitBoundNotSatisfied(trait_name, ty)
+                    TEK::TraitBoundNotSatisfied(trait_name, ty)
                         .at(obligation.span)
                         .into()
                 });
@@ -282,11 +262,7 @@ pub(super) fn check_call_obligations(
                     CallCallee::Method { name } => name.clone(),
                     CallCallee::Dynamic { expr_id, .. } => format!("<dynamic:{expr_id}>"),
                 };
-                errors.push(
-                    TypeCheckErrorKind::OverloadAmbiguous(name)
-                        .at(obligation.span)
-                        .into(),
-                );
+                crate::core::typecheck::tc_push_error!(errors, obligation.span, TEK::OverloadAmbiguous(name));
                 continue;
             }
             if let Some(prop_name) = called_property_name(obligation, def_id, property_sigs, &next)
@@ -294,11 +270,7 @@ pub(super) fn check_call_obligations(
                 // Preserve substitutions to reduce follow-on inference noise, but
                 // reject property accessor call syntax in source.
                 *unifier = next;
-                errors.push(
-                    TypeCheckErrorKind::PropertyCalledAsMethod(prop_name)
-                        .at(obligation.span)
-                        .into(),
-                );
+                crate::core::typecheck::tc_push_error!(errors, obligation.span, TEK::PropertyCalledAsMethod(prop_name));
                 continue;
             }
             *unifier = next;
@@ -319,11 +291,7 @@ pub(super) fn check_call_obligations(
                 CallCallee::Method { name } => name.clone(),
                 CallCallee::Dynamic { expr_id, .. } => format!("<dynamic:{expr_id}>"),
             };
-            errors.push(
-                TypeCheckErrorKind::OverloadNoMatch(name)
-                    .at(obligation.span)
-                    .into(),
-            );
+            crate::core::typecheck::tc_push_error!(errors, obligation.span, TEK::OverloadNoMatch(name));
         }
     }
     (errors, resolved_call_defs, deferred)
@@ -444,7 +412,7 @@ fn try_solve_builtin_method(
 
     // Properties that should not be called as methods.
     if builtin_methods::resolve_builtin_property(&receiver_ty, method_name).is_some() {
-        return Some(Err(TypeCheckErrorKind::PropertyCalledAsMethod(
+        return Some(Err(TEK::PropertyCalledAsMethod(
             method_name.to_string(),
         )
         .at(obligation.span)
@@ -456,7 +424,7 @@ fn try_solve_builtin_method(
         && !super::term_utils::is_unresolved(hashable_ty)
         && let Err(failure) = super::ensure_hashable(hashable_ty)
     {
-        return Some(Err(TypeCheckErrorKind::TypeNotHashable(
+        return Some(Err(TEK::TypeNotHashable(
             hashable_ty.clone(),
             failure.path,
             failure.failing_ty,
@@ -469,7 +437,7 @@ fn try_solve_builtin_method(
     // Generic arity + assignability check.
     let arity = obligation.arg_terms.len();
     if arity != params.len() {
-        return Some(Err(TypeCheckErrorKind::ArgCountMismatch(
+        return Some(Err(TEK::ArgCountMismatch(
             method_name.to_string(),
             params.len(),
             arity,
@@ -482,7 +450,7 @@ fn try_solve_builtin_method(
     {
         let arg_ty = super::term_utils::resolve_term(arg_term, unifier);
         if let Err(_) = super::assignability::solve_assignable(&arg_ty, &expected_ty.ty, unifier) {
-            return Some(Err(TypeCheckErrorKind::ArgTypeMismatch(
+            return Some(Err(TEK::ArgTypeMismatch(
                 index + 1,
                 expected_ty.ty.clone(),
                 arg_ty,
@@ -497,7 +465,7 @@ fn try_solve_builtin_method(
         BuiltinMethodRet::Bool => Type::Bool,
         BuiltinMethodRet::MapGet { value_ty } => {
             if value_ty.needs_drop() && !super::term_utils::is_unresolved(&value_ty) {
-                return Some(Err(TypeCheckErrorKind::MapIndexValueNotCopySafe(value_ty)
+                return Some(Err(TEK::MapIndexValueNotCopySafe(value_ty)
                     .at(obligation.span)
                     .into()));
             }

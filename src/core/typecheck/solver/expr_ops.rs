@@ -9,7 +9,7 @@ use crate::core::diag::Span;
 use crate::core::tree::NodeId;
 use crate::core::typecheck::capability::ensure_equatable;
 use crate::core::typecheck::constraints::ExprObligation;
-use crate::core::typecheck::errors::{TypeCheckError, TypeCheckErrorKind};
+use crate::core::typecheck::errors::{TypeCheckError, TEK};
 use crate::core::typecheck::unify::TcUnifier;
 use crate::core::types::Type;
 
@@ -93,21 +93,13 @@ pub(super) fn try_check_expr_obligation_ops(
                     if !super::term_utils::is_int_like(&operand_ty)
                         && !super::term_utils::is_unresolved(&operand_ty)
                     {
-                        errors.push(
-                            TypeCheckErrorKind::NegationOperandNotInt(operand_ty)
-                                .at(*span)
-                                .into(),
-                        );
+                        crate::core::typecheck::tc_push_error!(errors, *span, TEK::NegationOperandNotInt(operand_ty));
                         covered_exprs.insert(*expr_id);
                     }
                 }
                 crate::core::tree::resolved::UnaryOp::LogicalNot => {
                     if operand_ty != Type::Bool && !super::term_utils::is_unresolved(&operand_ty) {
-                        errors.push(
-                            TypeCheckErrorKind::LogicalOperandNotBoolean(operand_ty)
-                                .at(*span)
-                                .into(),
-                        );
+                        crate::core::typecheck::tc_push_error!(errors, *span, TEK::LogicalOperandNotBoolean(operand_ty));
                         covered_exprs.insert(*expr_id);
                     }
                 }
@@ -129,14 +121,14 @@ fn op_span(obligation: &ExprObligation) -> Span {
 fn first_non_int_operand(left: &Type, right: &Type, span: Span) -> Option<TypeCheckError> {
     if !super::term_utils::is_int_like(left) && !super::term_utils::is_unresolved(left) {
         return Some(
-            TypeCheckErrorKind::ArithOperandNotInt(left.clone())
+            TEK::ArithOperandNotInt(left.clone())
                 .at(span)
                 .into(),
         );
     }
     if !super::term_utils::is_int_like(right) && !super::term_utils::is_unresolved(right) {
         return Some(
-            TypeCheckErrorKind::ArithOperandNotInt(right.clone())
+            TEK::ArithOperandNotInt(right.clone())
                 .at(span)
                 .into(),
         );
@@ -147,14 +139,14 @@ fn first_non_int_operand(left: &Type, right: &Type, span: Span) -> Option<TypeCh
 fn first_non_int_cmp_operand(left: &Type, right: &Type, span: Span) -> Option<TypeCheckError> {
     if !super::term_utils::is_int_like(left) && !super::term_utils::is_unresolved(left) {
         return Some(
-            TypeCheckErrorKind::CmpOperandNotInt(left.clone())
+            TEK::CmpOperandNotInt(left.clone())
                 .at(span)
                 .into(),
         );
     }
     if !super::term_utils::is_int_like(right) && !super::term_utils::is_unresolved(right) {
         return Some(
-            TypeCheckErrorKind::CmpOperandNotInt(right.clone())
+            TEK::CmpOperandNotInt(right.clone())
                 .at(span)
                 .into(),
         );
@@ -171,7 +163,7 @@ fn first_non_equatable_cmp_operand(
         && let Err(failure) = ensure_equatable(left)
     {
         return Some(
-            TypeCheckErrorKind::TypeNotEquatable(left.clone(), failure.path, failure.failing_ty)
+            TEK::TypeNotEquatable(left.clone(), failure.path, failure.failing_ty)
                 .at(span)
                 .into(),
         );
@@ -180,7 +172,7 @@ fn first_non_equatable_cmp_operand(
         && let Err(failure) = ensure_equatable(right)
     {
         return Some(
-            TypeCheckErrorKind::TypeNotEquatable(right.clone(), failure.path, failure.failing_ty)
+            TEK::TypeNotEquatable(right.clone(), failure.path, failure.failing_ty)
                 .at(span)
                 .into(),
         );
@@ -191,14 +183,14 @@ fn first_non_equatable_cmp_operand(
 fn first_non_bool_operand(left: &Type, right: &Type, span: Span) -> Option<TypeCheckError> {
     if *left != Type::Bool && !super::term_utils::is_unresolved(left) {
         return Some(
-            TypeCheckErrorKind::LogicalOperandNotBoolean(left.clone())
+            TEK::LogicalOperandNotBoolean(left.clone())
                 .at(span)
                 .into(),
         );
     }
     if *right != Type::Bool && !super::term_utils::is_unresolved(right) {
         return Some(
-            TypeCheckErrorKind::LogicalOperandNotBoolean(right.clone())
+            TEK::LogicalOperandNotBoolean(right.clone())
                 .at(span)
                 .into(),
         );

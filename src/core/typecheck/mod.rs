@@ -19,12 +19,22 @@ mod utils;
 mod validate;
 
 pub use engine::TypecheckOutput;
-pub use errors::{TypeCheckError, TypeCheckErrorKind};
+pub use errors::{TEK, TypeCheckError, TypeCheckErrorKind};
 pub use infer_unify::{Unifier, UnifyError};
 
 use crate::core::context::{TypecheckStageInput, TypecheckStageOutput};
 use crate::core::resolve::ImportedFacts;
 use crate::core::typecheck::engine::TypecheckEngine;
+
+macro_rules! tc_push_error {
+    ($errors:expr, $span:expr, $kind:expr) => {
+        {
+            $errors.push(($kind).at($span));
+        }
+    };
+}
+
+pub(crate) use tc_push_error;
 
 /// Internal stage entrypoint.
 ///

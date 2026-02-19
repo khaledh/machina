@@ -2,7 +2,7 @@
 
 use crate::core::typecheck::constraints::ControlFact;
 use crate::core::typecheck::engine::TypecheckEngine;
-use crate::core::typecheck::errors::{TypeCheckError, TypeCheckErrorKind};
+use crate::core::typecheck::errors::{TypeCheckError, TEK};
 use crate::core::types::Type;
 
 pub(super) fn check_control_facts(engine: &TypecheckEngine) -> Vec<TypeCheckError> {
@@ -13,12 +13,12 @@ pub(super) fn check_control_facts(engine: &TypecheckEngine) -> Vec<TypeCheckErro
             ControlFact::Break {
                 loop_depth, span, ..
             } if *loop_depth == 0 => {
-                errors.push(TypeCheckErrorKind::BreakOutsideLoop.at(*span).into())
+                crate::core::typecheck::tc_push_error!(errors, *span, TEK::BreakOutsideLoop)
             }
             ControlFact::Continue {
                 loop_depth, span, ..
             } if *loop_depth == 0 => {
-                errors.push(TypeCheckErrorKind::ContinueOutsideLoop.at(*span).into());
+                crate::core::typecheck::tc_push_error!(errors, *span, TEK::ContinueOutsideLoop);
             }
             ControlFact::Return {
                 has_value,
@@ -27,18 +27,14 @@ pub(super) fn check_control_facts(engine: &TypecheckEngine) -> Vec<TypeCheckErro
                 ..
             } => match expected_return_ty {
                 None => {
-                    errors.push(TypeCheckErrorKind::ReturnOutsideFunction.at(*span).into());
+                    crate::core::typecheck::tc_push_error!(errors, *span, TEK::ReturnOutsideFunction);
                 }
                 Some(expected_ty) => {
                     let expected_ty = engine.type_vars().apply(expected_ty);
                     if *has_value && expected_ty == Type::Unit {
-                        errors.push(TypeCheckErrorKind::ReturnValueUnexpected.at(*span).into());
+                        crate::core::typecheck::tc_push_error!(errors, *span, TEK::ReturnValueUnexpected);
                     } else if !*has_value && expected_ty != Type::Unit {
-                        errors.push(
-                            TypeCheckErrorKind::ReturnValueMissing(expected_ty)
-                                .at(*span)
-                                .into(),
-                        );
+                        crate::core::typecheck::tc_push_error!(errors, *span, TEK::ReturnValueMissing(expected_ty));
                     }
                 }
             },

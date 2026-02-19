@@ -8,7 +8,7 @@ use std::collections::{HashMap, HashSet};
 use crate::core::resolve::DefId;
 use crate::core::tree::NodeId;
 use crate::core::typecheck::constraints::ExprObligation;
-use crate::core::typecheck::errors::{TypeCheckError, TypeCheckErrorKind};
+use crate::core::typecheck::errors::{TypeCheckError, TEK};
 use crate::core::typecheck::unify::TcUnifier;
 use crate::core::types::{Type, TypeAssignability, type_assignable};
 
@@ -95,20 +95,12 @@ pub(super) fn try_check_expr_obligation_control(
                     if let Some(variants) =
                         super::diag_utils::error_union_variant_names(&result_ty_diag)
                     {
-                        errors.push(
-                            TypeCheckErrorKind::JoinArmNotInErrorUnion(variants, arm_ty_diag)
-                                .at(*span)
-                                .into(),
-                        );
+                        crate::core::typecheck::tc_push_error!(errors, *span, TEK::JoinArmNotInErrorUnion(variants, arm_ty_diag));
                     } else {
-                        errors.push(
-                            TypeCheckErrorKind::JoinArmTypeMismatch(
+                        crate::core::typecheck::tc_push_error!(errors, *span, TEK::JoinArmTypeMismatch(
                                 result_ty_diag.clone(),
                                 arm_ty_diag,
-                            )
-                            .at(*span)
-                            .into(),
-                        );
+                            ));
                     }
                     covered_exprs.insert(*expr_id);
                     break;
@@ -131,11 +123,7 @@ pub(super) fn try_check_expr_obligation_control(
             );
             let Type::ErrorUnion { ok_ty, err_tys } = &operand_ty else {
                 if !super::term_utils::is_unresolved(&operand_ty_for_diag) {
-                    errors.push(
-                        TypeCheckErrorKind::TryOperandNotErrorUnion(operand_ty_for_diag)
-                            .at(*span)
-                            .into(),
-                    );
+                    crate::core::typecheck::tc_push_error!(errors, *span, TEK::TryOperandNotErrorUnion(operand_ty_for_diag));
                     covered_exprs.insert(*expr_id);
                 }
                 return true;
@@ -170,7 +158,7 @@ pub(super) fn try_check_expr_obligation_control(
             }
 
             if expected_return_ty.is_none() && callable_def_id.is_none() {
-                errors.push(TypeCheckErrorKind::TryOutsideFunction.at(*span).into());
+                crate::core::typecheck::tc_push_error!(errors, *span, TEK::TryOutsideFunction);
                 covered_exprs.insert(*expr_id);
                 return true;
             }
@@ -205,24 +193,16 @@ pub(super) fn try_check_expr_obligation_control(
                             .collect::<Vec<_>>();
                         return_variant_names.sort();
                         return_variant_names.dedup();
-                        errors.push(
-                            TypeCheckErrorKind::TryErrorNotInReturn(
+                        crate::core::typecheck::tc_push_error!(errors, *span, TEK::TryErrorNotInReturn(
                                 missing_names,
                                 return_variant_names,
-                            )
-                            .at(*span)
-                            .into(),
-                        );
+                            ));
                         covered_exprs.insert(*expr_id);
                     }
                 }
                 ty if super::term_utils::is_unresolved(ty) => {}
                 _ => {
-                    errors.push(
-                        TypeCheckErrorKind::TryReturnTypeNotErrorUnion(return_ty.clone())
-                            .at(*span)
-                            .into(),
-                    );
+                    crate::core::typecheck::tc_push_error!(errors, *span, TEK::TryReturnTypeNotErrorUnion(return_ty.clone()));
                     covered_exprs.insert(*expr_id);
                 }
             }
@@ -242,11 +222,7 @@ pub(super) fn try_check_expr_obligation_control(
             if !super::is_iterable(&iter_ty_for_diag)
                 && !super::term_utils::is_unresolved(&iter_ty_for_diag)
             {
-                errors.push(
-                    TypeCheckErrorKind::ForIterNotIterable(iter_ty_for_diag)
-                        .at(*span)
-                        .into(),
-                );
+                crate::core::typecheck::tc_push_error!(errors, *span, TEK::ForIterNotIterable(iter_ty_for_diag));
                 covered_exprs.insert(*stmt_id);
                 return true;
             }
@@ -260,11 +236,7 @@ pub(super) fn try_check_expr_obligation_control(
                 ) && !super::term_utils::is_unresolved(&pattern_ty)
                     && !super::term_utils::is_unresolved(&elem_ty)
                 {
-                    errors.push(
-                        TypeCheckErrorKind::DeclTypeMismatch(pattern_ty, elem_ty)
-                            .at(*span)
-                            .into(),
-                    );
+                    crate::core::typecheck::tc_push_error!(errors, *span, TEK::DeclTypeMismatch(pattern_ty, elem_ty));
                     covered_exprs.insert(*stmt_id);
                 }
             }

@@ -6,7 +6,7 @@ use crate::core::tree::cfg::{AstBlockId, TreeCfgBuilder, TreeCfgItem, TreeCfgNod
 use crate::core::tree::visit::{self, Visitor};
 use crate::core::tree::{ExprKind, MethodItem, NodeId};
 use crate::core::typecheck::engine::TypecheckEngine;
-use crate::core::typecheck::errors::{TypeCheckError, TypeCheckErrorKind};
+use crate::core::typecheck::errors::{TypeCheckError, TEK};
 use crate::core::typecheck::type_map::resolve_type_expr;
 use crate::core::types::{Type, TypeAssignability, type_assignable};
 
@@ -72,7 +72,7 @@ impl Visitor<DefId, ()> for ReplyOutsideHandlerCollector {
     fn visit_expr(&mut self, expr: &crate::core::tree::resolved::Expr) {
         if matches!(expr.kind, ExprKind::Reply { .. }) && !self.in_typestate_handler {
             self.errors
-                .push(TypeCheckErrorKind::ReplyOutsideHandler.at(expr.span).into());
+                .push(TEK::ReplyOutsideHandler.at(expr.span).into());
         }
         visit::walk_expr(self, expr);
     }
@@ -133,28 +133,16 @@ fn check_handler_reply_calls(
             continue;
         };
         let Type::ReplyCap { .. } = cap_ty else {
-            errors.push(
-                TypeCheckErrorKind::ReplyCapExpected(cap_ty.clone())
-                    .at(site.cap_span)
-                    .into(),
-            );
+            crate::core::typecheck::tc_push_error!(errors, site.cap_span, TEK::ReplyCapExpected(cap_ty.clone()));
             continue;
         };
 
         let Some(cap_def_id) = site.cap_def_id else {
-            errors.push(
-                TypeCheckErrorKind::ReplyCapParamRequired
-                    .at(site.cap_span)
-                    .into(),
-            );
+            crate::core::typecheck::tc_push_error!(errors, site.cap_span, TEK::ReplyCapParamRequired);
             continue;
         };
         let Some(cap_param) = cap_params_by_id.get(&cap_def_id).copied() else {
-            errors.push(
-                TypeCheckErrorKind::ReplyCapParamRequired
-                    .at(site.cap_span)
-                    .into(),
-            );
+            crate::core::typecheck::tc_push_error!(errors, site.cap_span, TEK::ReplyCapParamRequired);
             continue;
         };
 
@@ -166,14 +154,10 @@ fn check_handler_reply_calls(
             .iter()
             .any(|expected| type_assignable(value_ty, expected) != TypeAssignability::Incompatible);
         if !allowed {
-            errors.push(
-                TypeCheckErrorKind::ReplyPayloadNotAllowed(
+            crate::core::typecheck::tc_push_error!(errors, site.span, TEK::ReplyPayloadNotAllowed(
                     value_ty.clone(),
                     cap_param.response_tys.clone(),
-                )
-                .at(site.span)
-                .into(),
-            );
+                ));
         }
     }
 
@@ -237,11 +221,7 @@ fn check_handler_reply_cap_linearity(
                         | ReplyCapFlowState::MaybeConsumed
                         | ReplyCapFlowState::InvalidDoubleConsume
                 ) {
-                    errors.push(
-                        TypeCheckErrorKind::ReplyCapConsumedMultipleTimes(cap.name.clone())
-                            .at(*span)
-                            .into(),
-                    );
+                    crate::core::typecheck::tc_push_error!(errors, *span, TEK::ReplyCapConsumedMultipleTimes(cap.name.clone()));
                     state = ReplyCapFlowState::InvalidDoubleConsume;
                 } else {
                     state = apply_reply_cap_consume(state);
@@ -267,11 +247,7 @@ fn check_handler_reply_cap_linearity(
             }
         }
         if missing_on_some_path {
-            errors.push(
-                TypeCheckErrorKind::ReplyCapMustBeConsumed(cap.name.clone())
-                    .at(cap.span)
-                    .into(),
-            );
+            crate::core::typecheck::tc_push_error!(errors, cap.span, TEK::ReplyCapMustBeConsumed(cap.name.clone()));
         }
     }
 
