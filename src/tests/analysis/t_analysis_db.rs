@@ -2627,7 +2627,7 @@ fn diagnostics_for_program_file_typestate_connection_example_is_clean_when_enabl
 
     let path = PathBuf::from("examples/typestate/connection.mc");
     let source = std::fs::read_to_string(&path).expect("failed to read typestate example");
-    let file_id = db.upsert_disk_text(path, source);
+    let file_id = db.upsert_disk_text(path, source.clone());
 
     let diagnostics = db
         .diagnostics_for_program_file(file_id)
@@ -2829,7 +2829,7 @@ fn hover_for_program_typestate_example_uses_source_facing_names() {
         lit_hover.display
     );
 
-    let retries_span = span_for_substring(&source, "retries");
+    let retries_span = span_for_substring_with_len(&source, "retries: u64", "retries".len());
     let retries_hover = db
         .hover_at_program_file(file_id, retries_span)
         .expect("program hover query should succeed")
@@ -2853,18 +2853,21 @@ fn hover_for_typestate_field_with_zero_offset_span_returns_info() {
 
     let path = PathBuf::from("examples/typestate/connection.mc");
     let source = std::fs::read_to_string(&path).expect("failed to read typestate example");
-    let file_id = db.upsert_disk_text(path, source);
+    let file_id = db.upsert_disk_text(path, source.clone());
 
+    // Simulate LSP's frequent "line/column only" cursor shape by zeroing the
+    // offset while keeping an exact line/column target for a typestate field.
+    let retries = span_for_substring_with_len(&source, "retries: u64", "retries".len());
     let span = Span {
         start: Position {
             offset: 0,
-            line: 3,
-            column: 12,
+            line: retries.start.line,
+            column: retries.start.column,
         },
         end: Position {
             offset: 0,
-            line: 3,
-            column: 12,
+            line: retries.start.line,
+            column: retries.start.column,
         },
     };
     let hover = db
@@ -2992,6 +2995,19 @@ fn span_for_substring(source: &str, needle: &str) -> Span {
         .find(needle)
         .expect("needle should exist in source for span helper");
     let end = start + needle.len();
+    let start_pos = position_at(source, start);
+    let end_pos = position_at(source, end);
+    Span {
+        start: start_pos,
+        end: end_pos,
+    }
+}
+
+fn span_for_substring_with_len(source: &str, needle: &str, len: usize) -> Span {
+    let start = source
+        .find(needle)
+        .expect("needle should exist in source for span helper");
+    let end = start + len;
     let start_pos = position_at(source, start);
     let end_pos = position_at(source, end);
     Span {
