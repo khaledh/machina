@@ -298,8 +298,7 @@ impl<'a> Parser<'a> {
                     let (_type_name, type_args) = self.parse_type_name_with_args()?;
                     return self.parse_typed_set_lit_with_args(marker, type_args);
                 }
-                Err(ParseErrorKind::ExpectedPrimary(self.curr_token.clone())
-                    .at(self.curr_token.span))
+                self.err_here(PEK::ExpectedPrimary(self.curr_token.clone()))
             }
             TK::KwMap => {
                 let marker = self.mark();
@@ -309,8 +308,7 @@ impl<'a> Parser<'a> {
                     let (_type_name, type_args) = self.parse_type_name_with_args()?;
                     return self.parse_typed_map_lit_with_args(marker, type_args);
                 }
-                Err(ParseErrorKind::ExpectedPrimary(self.curr_token.clone())
-                    .at(self.curr_token.span))
+                self.err_here(PEK::ExpectedPrimary(self.curr_token.clone()))
             }
             TK::KwSelf => {
                 let marker = self.mark();
@@ -345,10 +343,7 @@ impl<'a> Parser<'a> {
 
             TK::LBracket => self.parse_array_lit(),
 
-            _ => {
-                Err(ParseErrorKind::ExpectedPrimary(self.curr_token.clone())
-                    .at(self.curr_token.span))
-            }
+            _ => self.err_here(PEK::ExpectedPrimary(self.curr_token.clone())),
         }
     }
 
@@ -365,10 +360,7 @@ impl<'a> Parser<'a> {
         self.consume(&TK::LParen)?;
         let to_label = self.parse_ident()?;
         if to_label != "to" {
-            return Err(
-                ParseErrorKind::ExpectedToken(TK::Colon, self.curr_token.clone())
-                    .at(self.curr_token.span),
-            );
+            return self.expected_token(TK::Colon);
         }
         self.consume(&TK::Colon)?;
         let to = self.parse_expr(0)?;
@@ -386,10 +378,7 @@ impl<'a> Parser<'a> {
                 payload: Box::new(payload),
                 request_site_label,
             },
-            _ => {
-                return Err(ParseErrorKind::ExpectedPrimary(self.curr_token.clone())
-                    .at(self.curr_token.span));
-            }
+            _ => return self.err_here(PEK::ExpectedPrimary(self.curr_token.clone())),
         };
 
         Ok(Expr {
@@ -445,10 +434,7 @@ impl<'a> Parser<'a> {
         // typestate command desugaring can lower it deterministically before
         // resolve/typecheck.
         let ExprKind::Var { ident, .. } = &expr.kind else {
-            return Err(
-                ParseErrorKind::ExpectedToken(TK::LParen, self.curr_token.clone())
-                    .at(self.curr_token.span),
-            );
+            return self.expected_token(TK::LParen);
         };
 
         self.consume(&TK::Colon)?;
@@ -523,10 +509,7 @@ impl<'a> Parser<'a> {
         self.advance();
 
         if self.curr_token.kind == TK::RBracket {
-            return Err(
-                ParseErrorKind::ExpectedArrayIndexOrRange(self.curr_token.clone())
-                    .at(self.curr_token.span),
-            );
+            return self.err_here(PEK::ExpectedArrayIndexOrRange(self.curr_token.clone()));
         }
 
         if is_slice {
@@ -611,8 +594,7 @@ impl<'a> Parser<'a> {
                 self.advance();
                 self.parse_dot_named_postfix(expr, marker, "reply".to_string())
             }
-            _ => Err(ParseErrorKind::ExpectedStructField(self.curr_token.clone())
-                .at(self.curr_token.span)),
+            _ => self.err_here(PEK::ExpectedStructField(self.curr_token.clone())),
         }
     }
 
@@ -790,18 +772,13 @@ impl<'a> Parser<'a> {
             if allow_empty {
                 return Ok(Vec::new());
             }
-            return Err(
-                ParseErrorKind::ExpectedPrimary(self.curr_token.clone()).at(self.curr_token.span)
-            );
+            return self.err_here(PEK::ExpectedPrimary(self.curr_token.clone()));
         }
 
         let first = self.parse_expr(0)?;
         if self.curr_token.kind != TK::Comma {
             if require_singleton_trailing_comma {
-                return Err(
-                    ParseErrorKind::SingleElementSetMissingComma(self.curr_token.clone())
-                        .at(self.curr_token.span),
-                );
+                return self.err_here(PEK::SingleElementSetMissingComma(self.curr_token.clone()));
             }
             return Ok(vec![first]);
         }
@@ -841,9 +818,7 @@ impl<'a> Parser<'a> {
             if allow_empty {
                 return Ok(Vec::new());
             }
-            return Err(
-                ParseErrorKind::ExpectedPrimary(self.curr_token.clone()).at(self.curr_token.span)
-            );
+            return self.err_here(PEK::ExpectedPrimary(self.curr_token.clone()));
         }
 
         let first = self.parse_map_lit_entry()?;
@@ -1016,11 +991,7 @@ impl<'a> Parser<'a> {
                 self.advance();
                 "map".to_string()
             }
-            _ => {
-                return Err(
-                    ParseErrorKind::ExpectedIdent(self.curr_token.clone()).at(self.curr_token.span)
-                );
-            }
+            _ => return self.err_here(PEK::ExpectedIdent(self.curr_token.clone())),
         };
         let type_args = self.parse_type_args()?;
         Ok((name, type_args))

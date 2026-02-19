@@ -89,7 +89,7 @@ impl<'a> Parser<'a> {
                         pos = Self::advance_position(pos, '}');
                         i += 2;
                     } else {
-                        return Err(ParseErrorKind::UnmatchedFormatBrace.at(span));
+                        return Err(PEK::UnmatchedFormatBrace.at(span));
                     }
                 }
                 ch => {
@@ -150,7 +150,7 @@ impl<'a> Parser<'a> {
         let tokens = Lexer::new(src)
             .tokenize()
             .collect::<Result<Vec<Token>, LexError>>()
-            .map_err(|_| ParseErrorKind::InvalidFormatExpr.at(span))?;
+            .map_err(|_| PEK::InvalidFormatExpr.at(span))?;
 
         let id_gen = std::mem::take(&mut self.id_gen);
 
@@ -163,7 +163,7 @@ impl<'a> Parser<'a> {
         let expr = expr?;
 
         if has_trailing {
-            return Err(ParseErrorKind::InvalidFormatExpr.at(span));
+            return Err(PEK::InvalidFormatExpr.at(span));
         }
 
         Ok(expr)
@@ -212,7 +212,7 @@ impl<'a> Parser<'a> {
                 '}' => {
                     if depth == 0 {
                         if i == 0 {
-                            return Err(ParseErrorKind::EmptyFormatExpr.at(span));
+                            return Err(PEK::EmptyFormatExpr.at(span));
                         }
                         let expr = chars[..i].iter().collect::<String>();
                         return Ok((expr, i + 1));
@@ -223,6 +223,6 @@ impl<'a> Parser<'a> {
             }
         }
 
-        Err(ParseErrorKind::UnterminatedFormatExpr.at(span))
+        Err(PEK::UnterminatedFormatExpr.at(span))
     }
 }

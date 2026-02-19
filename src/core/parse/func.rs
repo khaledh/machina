@@ -189,9 +189,7 @@ impl<'a> Parser<'a> {
         let self_marker = self.mark();
         let self_mode = self.parse_param_mode();
         if self.curr_token.kind != TK::KwSelf {
-            return Err(
-                ParseErrorKind::ExpectedSelf(self.curr_token.clone()).at(self.curr_token.span)
-            );
+            return self.err_here(PEK::ExpectedSelf(self.curr_token.clone()));
         }
         self.advance();
         let self_param = SelfParam {
@@ -246,11 +244,7 @@ impl<'a> Parser<'a> {
                 TK::KwGet => {
                     // `get { ... }` => method `prop_name(self) -> prop_ty`.
                     if getter.is_some() {
-                        return Err(ParseErrorKind::ExpectedToken(
-                            TK::RBrace,
-                            self.curr_token.clone(),
-                        )
-                        .at(self.curr_token.span));
+                        return self.expected_token(TK::RBrace);
                     }
                     self.advance();
 
@@ -310,11 +304,7 @@ impl<'a> Parser<'a> {
                 TK::KwSet => {
                     // `set(v) { ... }` => method `prop_name(inout self, v: prop_ty) -> ()`.
                     if setter.is_some() {
-                        return Err(ParseErrorKind::ExpectedToken(
-                            TK::RBrace,
-                            self.curr_token.clone(),
-                        )
-                        .at(self.curr_token.span));
+                        return self.expected_token(TK::RBrace);
                     }
                     self.advance();
                     self.consume(&TK::LParen)?;
@@ -383,12 +373,7 @@ impl<'a> Parser<'a> {
                         }));
                     }
                 }
-                _ => {
-                    return Err(
-                        ParseErrorKind::ExpectedToken(TK::KwGet, self.curr_token.clone())
-                            .at(self.curr_token.span),
-                    );
-                }
+                _ => return self.expected_token(TK::KwGet),
             }
         }
         self.consume(&TK::RBrace)?;
@@ -440,10 +425,7 @@ impl<'a> Parser<'a> {
             items.push(setter);
         }
         if items.is_empty() {
-            return Err(
-                ParseErrorKind::ExpectedToken(TK::KwGet, self.curr_token.clone())
-                    .at(self.curr_token.span),
-            );
+            return self.expected_token(TK::KwGet);
         }
 
         let _ = self.close(marker);
@@ -610,9 +592,7 @@ impl<'a> Parser<'a> {
         self.consume(&TK::LBracket)?;
         self.consume(&TK::KwMove)?;
         if self.curr_token.kind == TK::RBracket {
-            return Err(
-                ParseErrorKind::ExpectedIdent(self.curr_token.clone()).at(self.curr_token.span)
-            );
+            return self.err_here(PEK::ExpectedIdent(self.curr_token.clone()));
         }
         let captures = self.parse_list(TK::Comma, TK::RBracket, |parser| {
             let marker = parser.mark();

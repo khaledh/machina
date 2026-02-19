@@ -11,10 +11,7 @@ impl<'a> Parser<'a> {
             TK::Ident(name) => self.parse_name_bind_pattern(marker, name.clone()),
             TK::LBracket => self.parse_array_bind_pattern(marker),
             TK::LParen => self.parse_tuple_bind_pattern(marker),
-            _ => {
-                Err(ParseErrorKind::ExpectedPattern(self.curr_token.clone())
-                    .at(self.curr_token.span))
-            }
+            _ => self.err_here(PEK::ExpectedPattern(self.curr_token.clone())),
         }
     }
 

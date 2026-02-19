@@ -16,7 +16,7 @@ mod func;
 mod match_expr;
 mod type_expr;
 
-pub use errors::{ParseError, ParseErrorKind};
+pub use errors::{ParseError, ParseErrorKind, ParseErrorKind as PEK};
 
 #[derive(Debug, Clone, Copy)]
 struct Marker {
@@ -145,15 +145,20 @@ impl<'a> Parser<'a> {
         Span::new(marker.pos, end)
     }
 
+    fn err_here<T>(&self, kind: PEK) -> Result<T, ParseError> {
+        Err(kind.at(self.curr_token.span))
+    }
+
+    fn expected_token<T>(&self, expected: TokenKind) -> Result<T, ParseError> {
+        self.err_here(PEK::ExpectedToken(expected, self.curr_token.clone()))
+    }
+
     fn consume(&mut self, expected: &TokenKind) -> Result<(), ParseError> {
         if self.curr_token.kind == *expected {
             self.advance();
             Ok(())
         } else {
-            Err(
-                ParseErrorKind::ExpectedToken(expected.clone(), self.curr_token.clone())
-                    .at(self.curr_token.span),
-            )
+            self.expected_token(expected.clone())
         }
     }
 
@@ -162,10 +167,7 @@ impl<'a> Parser<'a> {
             self.advance();
             Ok(())
         } else {
-            Err(
-                ParseErrorKind::ExpectedToken(expected, self.curr_token.clone())
-                    .at(self.curr_token.span),
-            )
+            self.expected_token(expected)
         }
     }
 
@@ -190,7 +192,7 @@ impl<'a> Parser<'a> {
             self.advance();
             Ok(name.clone())
         } else {
-            Err(ParseErrorKind::ExpectedIdent(self.curr_token.clone()).at(self.curr_token.span))
+            self.err_here(PEK::ExpectedIdent(self.curr_token.clone()))
         }
     }
 
@@ -203,11 +205,7 @@ impl<'a> Parser<'a> {
             self.advance();
             Ok(())
         } else {
-            Err(ParseErrorKind::ExpectedToken(
-                TK::Ident(keyword.to_string()),
-                self.curr_token.clone(),
-            )
-            .at(self.curr_token.span))
+            self.expected_token(TK::Ident(keyword.to_string()))
         }
     }
 
@@ -216,7 +214,7 @@ impl<'a> Parser<'a> {
             self.advance();
             Ok(*value)
         } else {
-            Err(ParseErrorKind::ExpectedIntLit(self.curr_token.clone()).at(self.curr_token.span))
+            self.err_here(PEK::ExpectedIntLit(self.curr_token.clone()))
         }
     }
 
@@ -234,7 +232,7 @@ impl<'a> Parser<'a> {
             self.advance();
             Ok(value.clone())
         } else {
-            Err(ParseErrorKind::ExpectedStringLit(self.curr_token.clone()).at(self.curr_token.span))
+            self.err_here(PEK::ExpectedStringLit(self.curr_token.clone()))
         }
     }
 
