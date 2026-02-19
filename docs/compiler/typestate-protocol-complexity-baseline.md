@@ -108,3 +108,28 @@ This document captures the initial complexity baseline for Milestone 12 issue #1
 
 - Runtime cleanup is deferred to Milestone 13; compiler-side dedup first keeps risk lower while preserving test confidence.
 - The baseline numbers are intended for trend tracking; exact values may shift with formatting and nearby feature work.
+
+## Complexity Ratchet
+
+Use the checked-in script:
+
+```bash
+python3 scripts/complexity/typestate_protocol_ratchet.py
+```
+
+Enforced mode (non-zero exit on threshold breach):
+
+```bash
+python3 scripts/complexity/typestate_protocol_ratchet.py --enforce
+```
+
+Current guardrails are encoded in:
+
+- file limits: `FILE_LIMITS` in `scripts/complexity/typestate_protocol_ratchet.py`
+- function limits: `FUNCTION_LIMITS` in `scripts/complexity/typestate_protocol_ratchet.py`
+
+Policy:
+
+- keep default mode warning-only for local exploration,
+- use `--enforce` in quality gates to prevent complexity regressions in the
+  typestate/protocol hot path.
