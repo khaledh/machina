@@ -37,6 +37,86 @@ pub(super) fn machine_handle_method_block(
         }
     }
 
+    fn runtime_current_or_error_items(
+        node_id_gen: &mut NodeIdGen,
+        span: Span,
+    ) -> Vec<parsed::BlockItem> {
+        vec![
+            parsed::BlockItem::Stmt(let_bind_stmt(
+                "__mc_rt",
+                call_expr(MANAGED_RUNTIME_CURRENT_FN, Vec::new(), node_id_gen, span),
+                node_id_gen,
+                span,
+            )),
+            parsed::BlockItem::Expr(return_machine_error_if_zero(
+                "__mc_rt",
+                MACHINE_MANAGED_RUNTIME_UNAVAILABLE_TYPE_NAME,
+                node_id_gen,
+                span,
+            )),
+        ]
+    }
+
+    fn typed_payload_pack_item(node_id_gen: &mut NodeIdGen, span: Span) -> parsed::BlockItem {
+        // Pack typed payload into runtime ABI words:
+        // - payload0: heap box pointer
+        // - payload1: payload layout id
+        parsed::BlockItem::Stmt(let_bind_stmt(
+            "__mc_packed",
+            call_expr(
+                "__mc_machine_payload_pack",
+                vec![var_expr("payload", node_id_gen, span)],
+                node_id_gen,
+                span,
+            ),
+            node_id_gen,
+            span,
+        ))
+    }
+
+    fn send_status_error_items(
+        status_var: &str,
+        node_id_gen: &mut NodeIdGen,
+        span: Span,
+    ) -> Vec<parsed::BlockItem> {
+        vec![
+            parsed::BlockItem::Expr(return_machine_error_if_eq(
+                status_var,
+                1,
+                MACHINE_UNKNOWN_TYPE_NAME,
+                node_id_gen,
+                span,
+            )),
+            parsed::BlockItem::Expr(return_machine_error_if_eq(
+                status_var,
+                2,
+                MACHINE_NOT_RUNNING_TYPE_NAME,
+                node_id_gen,
+                span,
+            )),
+            parsed::BlockItem::Expr(return_machine_error_if_eq(
+                status_var,
+                3,
+                MACHINE_MAILBOX_FULL_TYPE_NAME,
+                node_id_gen,
+                span,
+            )),
+        ]
+    }
+
+    fn request_failed_item(
+        pending_var: &str,
+        node_id_gen: &mut NodeIdGen,
+        span: Span,
+    ) -> parsed::BlockItem {
+        parsed::BlockItem::Expr(return_machine_error_if_zero(
+            pending_var,
+            MACHINE_REQUEST_FAILED_TYPE_NAME,
+            node_id_gen,
+            span,
+        ))
+    }
+
     let send_method = MethodDef {
         id: node_id_gen.new_id(),
         def_id: (),
@@ -82,20 +162,9 @@ pub(super) fn machine_handle_method_block(
         body: Expr {
             id: node_id_gen.new_id(),
             kind: ExprKind::Block {
-                items: vec![
-                    parsed::BlockItem::Stmt(let_bind_stmt(
-                        "__mc_rt",
-                        call_expr(MANAGED_RUNTIME_CURRENT_FN, Vec::new(), node_id_gen, span),
-                        node_id_gen,
-                        span,
-                    )),
-                    parsed::BlockItem::Expr(return_machine_error_if_zero(
-                        "__mc_rt",
-                        MACHINE_MANAGED_RUNTIME_UNAVAILABLE_TYPE_NAME,
-                        node_id_gen,
-                        span,
-                    )),
-                    parsed::BlockItem::Stmt(let_bind_stmt(
+                items: {
+                    let mut items = runtime_current_or_error_items(node_id_gen, span);
+                    items.push(parsed::BlockItem::Stmt(let_bind_stmt(
                         "__mc_status",
                         call_expr(
                             "__mc_machine_runtime_send_u64",
@@ -111,29 +180,10 @@ pub(super) fn machine_handle_method_block(
                         ),
                         node_id_gen,
                         span,
-                    )),
-                    parsed::BlockItem::Expr(return_machine_error_if_eq(
-                        "__mc_status",
-                        1,
-                        MACHINE_UNKNOWN_TYPE_NAME,
-                        node_id_gen,
-                        span,
-                    )),
-                    parsed::BlockItem::Expr(return_machine_error_if_eq(
-                        "__mc_status",
-                        2,
-                        MACHINE_NOT_RUNNING_TYPE_NAME,
-                        node_id_gen,
-                        span,
-                    )),
-                    parsed::BlockItem::Expr(return_machine_error_if_eq(
-                        "__mc_status",
-                        3,
-                        MACHINE_MAILBOX_FULL_TYPE_NAME,
-                        node_id_gen,
-                        span,
-                    )),
-                ],
+                    )));
+                    items.extend(send_status_error_items("__mc_status", node_id_gen, span));
+                    items
+                },
                 tail: Some(Box::new(unit_expr(node_id_gen, span))),
             },
             ty: (),
@@ -172,39 +222,10 @@ pub(super) fn machine_handle_method_block(
                 body: Expr {
                     id: node_id_gen.new_id(),
                     kind: ExprKind::Block {
-                        items: vec![
-                            parsed::BlockItem::Stmt(let_bind_stmt(
-                                "__mc_rt",
-                                call_expr(
-                                    MANAGED_RUNTIME_CURRENT_FN,
-                                    Vec::new(),
-                                    node_id_gen,
-                                    span,
-                                ),
-                                node_id_gen,
-                                span,
-                            )),
-                            parsed::BlockItem::Expr(return_machine_error_if_zero(
-                                "__mc_rt",
-                                MACHINE_MANAGED_RUNTIME_UNAVAILABLE_TYPE_NAME,
-                                node_id_gen,
-                                span,
-                            )),
-                            // Pack typed payload into runtime ABI words:
-                            // - payload0: heap box pointer
-                            // - payload1: payload layout id
-                            parsed::BlockItem::Stmt(let_bind_stmt(
-                                "__mc_packed",
-                                call_expr(
-                                    "__mc_machine_payload_pack",
-                                    vec![var_expr("payload", node_id_gen, span)],
-                                    node_id_gen,
-                                    span,
-                                ),
-                                node_id_gen,
-                                span,
-                            )),
-                            parsed::BlockItem::Stmt(let_bind_stmt(
+                        items: {
+                            let mut items = runtime_current_or_error_items(node_id_gen, span);
+                            items.push(typed_payload_pack_item(node_id_gen, span));
+                            items.push(parsed::BlockItem::Stmt(let_bind_stmt(
                                 "__mc_status",
                                 call_expr(
                                     "__mc_machine_runtime_send_u64",
@@ -230,29 +251,10 @@ pub(super) fn machine_handle_method_block(
                                 ),
                                 node_id_gen,
                                 span,
-                            )),
-                            parsed::BlockItem::Expr(return_machine_error_if_eq(
-                                "__mc_status",
-                                1,
-                                MACHINE_UNKNOWN_TYPE_NAME,
-                                node_id_gen,
-                                span,
-                            )),
-                            parsed::BlockItem::Expr(return_machine_error_if_eq(
-                                "__mc_status",
-                                2,
-                                MACHINE_NOT_RUNNING_TYPE_NAME,
-                                node_id_gen,
-                                span,
-                            )),
-                            parsed::BlockItem::Expr(return_machine_error_if_eq(
-                                "__mc_status",
-                                3,
-                                MACHINE_MAILBOX_FULL_TYPE_NAME,
-                                node_id_gen,
-                                span,
-                            )),
-                        ],
+                            )));
+                            items.extend(send_status_error_items("__mc_status", node_id_gen, span));
+                            items
+                        },
                         tail: Some(Box::new(unit_expr(node_id_gen, span))),
                     },
                     ty: (),
@@ -316,20 +318,9 @@ pub(super) fn machine_handle_method_block(
         body: Expr {
             id: node_id_gen.new_id(),
             kind: ExprKind::Block {
-                items: vec![
-                    parsed::BlockItem::Stmt(let_bind_stmt(
-                        "__mc_rt",
-                        call_expr(MANAGED_RUNTIME_CURRENT_FN, Vec::new(), node_id_gen, span),
-                        node_id_gen,
-                        span,
-                    )),
-                    parsed::BlockItem::Expr(return_machine_error_if_zero(
-                        "__mc_rt",
-                        MACHINE_MANAGED_RUNTIME_UNAVAILABLE_TYPE_NAME,
-                        node_id_gen,
-                        span,
-                    )),
-                    parsed::BlockItem::Stmt(let_bind_stmt(
+                items: {
+                    let mut items = runtime_current_or_error_items(node_id_gen, span);
+                    items.push(parsed::BlockItem::Stmt(let_bind_stmt(
                         "__mc_pending_id",
                         call_expr(
                             "__mc_machine_runtime_request_u64",
@@ -346,14 +337,10 @@ pub(super) fn machine_handle_method_block(
                         ),
                         node_id_gen,
                         span,
-                    )),
-                    parsed::BlockItem::Expr(return_machine_error_if_zero(
-                        "__mc_pending_id",
-                        MACHINE_REQUEST_FAILED_TYPE_NAME,
-                        node_id_gen,
-                        span,
-                    )),
-                ],
+                    )));
+                    items.push(request_failed_item("__mc_pending_id", node_id_gen, span));
+                    items
+                },
                 tail: Some(Box::new(var_expr("__mc_pending_id", node_id_gen, span))),
             },
             ty: (),
@@ -402,39 +389,10 @@ pub(super) fn machine_handle_method_block(
                 body: Expr {
                     id: node_id_gen.new_id(),
                     kind: ExprKind::Block {
-                        items: vec![
-                            parsed::BlockItem::Stmt(let_bind_stmt(
-                                "__mc_rt",
-                                call_expr(
-                                    MANAGED_RUNTIME_CURRENT_FN,
-                                    Vec::new(),
-                                    node_id_gen,
-                                    span,
-                                ),
-                                node_id_gen,
-                                span,
-                            )),
-                            parsed::BlockItem::Expr(return_machine_error_if_zero(
-                                "__mc_rt",
-                                MACHINE_MANAGED_RUNTIME_UNAVAILABLE_TYPE_NAME,
-                                node_id_gen,
-                                span,
-                            )),
-                            // Pack typed payload into runtime ABI words:
-                            // - payload0: heap box pointer
-                            // - payload1: payload layout id
-                            parsed::BlockItem::Stmt(let_bind_stmt(
-                                "__mc_packed",
-                                call_expr(
-                                    "__mc_machine_payload_pack",
-                                    vec![var_expr("payload", node_id_gen, span)],
-                                    node_id_gen,
-                                    span,
-                                ),
-                                node_id_gen,
-                                span,
-                            )),
-                            parsed::BlockItem::Stmt(let_bind_stmt(
+                        items: {
+                            let mut items = runtime_current_or_error_items(node_id_gen, span);
+                            items.push(typed_payload_pack_item(node_id_gen, span));
+                            items.push(parsed::BlockItem::Stmt(let_bind_stmt(
                                 "__mc_pending_id",
                                 call_expr(
                                     "__mc_machine_runtime_request_u64",
@@ -461,14 +419,10 @@ pub(super) fn machine_handle_method_block(
                                 ),
                                 node_id_gen,
                                 span,
-                            )),
-                            parsed::BlockItem::Expr(return_machine_error_if_zero(
-                                "__mc_pending_id",
-                                MACHINE_REQUEST_FAILED_TYPE_NAME,
-                                node_id_gen,
-                                span,
-                            )),
-                        ],
+                            )));
+                            items.push(request_failed_item("__mc_pending_id", node_id_gen, span));
+                            items
+                        },
                         tail: Some(Box::new(var_expr("__mc_pending_id", node_id_gen, span))),
                     },
                     ty: (),
