@@ -2,17 +2,8 @@ requires {
     std::io::println
 }
 
-// Runnable managed typestate request/reply flow.
-//
-// Run:
-//   cargo mcr --experimental typestate examples/typestate/inter_machine_request_reply.mc
-//
-// Expected output includes:
-//   approve path
-//   approved
-//   deny path
-//   denied
-
+// Canonical concurrent request example:
+// same request/response types, disambiguated by request-site labels.
 type KickApprove = {}
 type KickDeny = {}
 type AuthCheck = {}
@@ -20,50 +11,45 @@ type AuthReply = {}
 
 typestate AuthClient {
     fn new() -> Idle {
+        println("[AuthClient] new");
         Idle {}
     }
 
     state Idle {
-        on KickApprove(e) -> stay {
-            e;
-            // Two concurrent same-type inflight requests are disambiguated by
-            // request-site labels.
-            let p: Pending<AuthReply> =
-                request:approve(1, AuthCheck {});
-            p;
+        on KickApprove(_e) {
+            println("[AuthClient] recv: KickApprove");
+            println("[AuthClient] send: AuthCheck:approve ~> AuthServer");
+            let _p: Pending<AuthReply> = request:approve(1, AuthCheck {});
         }
 
-        on KickDeny(e) -> stay {
-            e;
-            let p: Pending<AuthReply> =
-                request:deny(1, AuthCheck {});
-            p;
+        on KickDeny(_e) {
+            println("[AuthClient] recv: KickDeny");
+            println("[AuthClient] send: AuthCheck:deny ~> AuthServer");
+            let _p: Pending<AuthReply> = request:deny(1, AuthCheck {});
         }
 
-        on AuthReply(resp) for AuthCheck:approve(req) -> stay {
-            req;
-            resp;
-            println("approve path");
-            println("approved");
+        on AuthReply(_resp) for AuthCheck:approve(_req) {
+            println("[AuthClient] recv: AuthReply for AuthCheck:approve");
+            println("[AuthClient] approve path (approved)");
         }
 
-        on AuthReply(resp) for AuthCheck:deny(req) -> stay {
-            req;
-            resp;
-            println("deny path");
-            println("denied");
+        on AuthReply(_resp) for AuthCheck:deny(_req) {
+            println("[AuthClient] recv: AuthReply for AuthCheck:deny");
+            println("[AuthClient] deny path (denied)");
         }
     }
 }
 
 typestate AuthServer {
     fn new() -> Ready {
+        println("[AuthServer] new");
         Ready {}
     }
 
     state Ready {
-        on AuthCheck(req: AuthCheck, cap: ReplyCap<AuthReply>) -> stay {
-            req;
+        on AuthCheck(_req: AuthCheck, cap: ReplyCap<AuthReply>) {
+            println("[AuthServer] recv: AuthCheck");
+            println("[AuthServer] reply: AuthReply");
             cap.reply(AuthReply {});
         }
     }
@@ -71,12 +57,10 @@ typestate AuthServer {
 
 @machines
 fn main() -> () | MachineError {
-    // Spawn server first so its machine id is 1 (used by client Request `to:`).
+    // Spawn server first so its machine id is 1 (used by request(..., to: 1)).
     let _server = AuthServer::spawn()?;
     let client = AuthClient::spawn()?;
-    // Queue two concurrent same-type requests.
+
     client.send(KickApprove {})?;
     client.send(KickDeny {})?;
-
-    // `@machines` auto-drives the managed runtime until it reaches idle.
 }

@@ -2,16 +2,11 @@ requires {
     std::io::println
 }
 
-// Runnable managed typestate example with explicit state transitions between
-// handlers plus inter-machine request/reply interaction.
-//
-// Run:
-//   cargo mcr --experimental typestate examples/typestate/managed_state_transitions.mc
-//
-// Expected output:
-//   open event 1
-//   door transitioned: Closed -> Waiting -> Open
-
+// Canonical machine + transition example:
+// - Controller receives a user event.
+// - Controller requests actuator work.
+// - Controller transitions Closed -> Waiting -> Open.
+// - Open is final.
 type OpenPressed = { id: u64 }
 type OpenCmd = {}
 type Opened = {}
@@ -22,8 +17,7 @@ typestate DoorActuator {
     }
 
     state Ready {
-        on OpenCmd(cmd: OpenCmd, cap: ReplyCap<Opened>) -> stay {
-            cmd;
+        on OpenCmd(_cmd: OpenCmd, cap: ReplyCap<Opened>) {
             cap.reply(Opened {});
         }
     }
@@ -61,6 +55,5 @@ typestate DoorController {
 fn main() -> () | MachineError {
     let actuator = DoorActuator::spawn()?;
     let controller = DoorController::spawn(actuator)?;
-
     controller.send(OpenPressed { id: 1 })?;
 }

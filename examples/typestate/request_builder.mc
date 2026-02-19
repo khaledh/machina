@@ -2,18 +2,28 @@ requires {
     std::io::println
 }
 
+// Canonical typestate example: builder ordering enforced by state.
+// You cannot send before transitioning to `Ready`.
 typestate RequestBuilder {
     fields {
         url: string,
     }
 
-    fn new(url: string) -> Empty {
-        Empty { url: url }
+    fn new(url: string) -> Build {
+        Build { url: url, header_count: 0 }
     }
 
-    state Empty {
-        fn with_header() -> Ready {
-            Ready { header_count: 1 }
+    state Build {
+        fields {
+            header_count: u64,
+        }
+
+        fn with_header() -> Build {
+            Build { header_count: self.header_count + 1 }
+        }
+
+        fn finish() -> Ready {
+          Ready { header_count: self.header_count }
         }
     }
 
@@ -35,8 +45,20 @@ typestate RequestBuilder {
 }
 
 fn main() {
-    let r0 = RequestBuilder::new("https://machina.dev");
-    let r1 = r0.with_header();
-    let r2 = r1.send();
-    println(f"status = {r2.status}");
+    let req0 = RequestBuilder::new("https://example.com");
+    // req0.send(); // compile error: `send` is not available in `Build`
+    println(f"[Build] url = {req0.url}");
+
+    let req1 = req0.with_header();
+    println(f"[Build] header_count = {req1.header_count}");
+
+    let req2 = req1.with_header();
+    println(f"[Build] header_count = {req2.header_count}");
+
+    let ready = req2.finish();
+    // ready.with_header(); // compile error: `with_header` is not available in `Ready`
+    println(f"[Ready] header_count = {ready.header_count}");
+
+    let sent = ready.send();
+    println(f"[Sent] status = {sent.status}");
 }
