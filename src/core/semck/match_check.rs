@@ -2,7 +2,7 @@ use std::collections::HashSet;
 
 use crate::core::context::NormalizedContext;
 use crate::core::diag::Span;
-use crate::core::semck::{SemCheckError, SemCheckErrorKind};
+use crate::core::semck::{push_error, SemCheckError, SEK};
 use crate::core::tree::normalized::{Expr, MatchArm};
 use crate::core::tree::resolved::MatchPattern;
 use crate::core::typecheck::type_map::resolve_type_expr;
@@ -21,7 +21,7 @@ pub(super) fn check_match(
         .find(|(_, arm)| matches!(arm.pattern, MatchPattern::Wildcard { .. }))
         && index + 1 != arms.len()
     {
-        errors.push(SemCheckErrorKind::WildcardArmNotLast.at(pattern_span(&arm.pattern)));
+        errors.push(SEK::WildcardArmNotLast.at(pattern_span(&arm.pattern)));
     }
 
     let scrutinee_ty = ctx.type_map.type_table().get(scrutinee.ty);
@@ -71,9 +71,7 @@ impl<'a> MatchRuleKind<'a> {
             MatchRuleKind::Int(rule) => rule.check(arms, span, errors),
             MatchRuleKind::Tuple(rule) => rule.check(arms, span, errors),
             MatchRuleKind::Unsupported => {
-                errors.push(
-                    SemCheckErrorKind::MatchTargetNotEnum(scrutinee_ty.clone()).at(scrutinee_span),
-                );
+                push_error(errors, scrutinee_span, SEK::MatchTargetNotEnum(scrutinee_ty.clone()));
             }
         }
     }
@@ -105,48 +103,36 @@ impl<'a> EnumRule<'a> {
                     if let Some(pat_enum_name) = pat_enum_name
                         && !enum_name_matches(pat_enum_name, self.name)
                     {
-                        errors.push(
-                            SemCheckErrorKind::MatchPatternEnumMismatch(
+                        push_error(errors, *span, SEK::MatchPatternEnumMismatch(
                                 self.name.to_string(),
                                 pat_enum_name.clone(),
-                            )
-                            .at(*span),
-                        );
+                            ));
                     }
 
                     if !seen_variants.insert(variant_name.clone()) {
-                        errors.push(
-                            SemCheckErrorKind::DuplicateMatchVariant(variant_name.clone())
-                                .at(*span),
-                        );
+                        push_error(errors, *span, SEK::DuplicateMatchVariant(variant_name.clone()));
                     }
 
                     let Some(variant) = self.variants.iter().find(|v| v.name == *variant_name)
                     else {
-                        errors.push(
-                            SemCheckErrorKind::UnknownEnumVariant(
+                        push_error(errors, *span, SEK::UnknownEnumVariant(
                                 self.name.to_string(),
                                 variant_name.clone(),
-                            )
-                            .at(*span),
-                        );
+                            ));
                         continue;
                     };
 
                     if bindings.len() != variant.payload.len() {
-                        errors.push(
-                            SemCheckErrorKind::EnumVariantPayloadArityMismatch(
+                        push_error(errors, *span, SEK::EnumVariantPayloadArityMismatch(
                                 variant_name.clone(),
                                 variant.payload.len(),
                                 bindings.len(),
-                            )
-                            .at(*span),
-                        );
+                            ));
                     }
                 }
                 _ => {
                     errors.push(
-                        SemCheckErrorKind::InvalidMatchPattern(Type::Enum {
+                        SEK::InvalidMatchPattern(Type::Enum {
                             name: self.name.to_string(),
                             variants: self.variants.to_vec(),
                         })
@@ -157,7 +143,7 @@ impl<'a> EnumRule<'a> {
         }
 
         if !has_wildcard && seen_variants.len() != self.variants.len() {
-            errors.push(SemCheckErrorKind::NonExhaustiveMatch.at(span));
+            push_error(errors, span, SEK::NonExhaustiveMatch);
         }
     }
 }
@@ -194,21 +180,17 @@ impl<'a> UnionRule<'a> {
                     };
 
                     let Some(index) = self.variant_index(&arm_ty) else {
-                        errors.push(
-                            SemCheckErrorKind::InvalidMatchPattern(union_ty.clone()).at(*span),
-                        );
+                        push_error(errors, *span, SEK::InvalidMatchPattern(union_ty.clone()));
                         continue;
                     };
 
                     if !seen_variant_indices.insert(index) {
-                        errors.push(
-                            SemCheckErrorKind::DuplicateMatchVariant(arm_ty.to_string()).at(*span),
-                        );
+                        push_error(errors, *span, SEK::DuplicateMatchVariant(arm_ty.to_string()));
                     }
                 }
                 _ => {
                     errors.push(
-                        SemCheckErrorKind::InvalidMatchPattern(union_ty.clone())
+                        SEK::InvalidMatchPattern(union_ty.clone())
                             .at(pattern_span(&arm.pattern)),
                     );
                 }
@@ -226,7 +208,7 @@ impl<'a> UnionRule<'a> {
                     missing.push(compact_type_name(err_ty));
                 }
             }
-            errors.push(SemCheckErrorKind::NonExhaustiveUnionMatch(missing).at(span));
+            push_error(errors, span, SEK::NonExhaustiveUnionMatch(missing));
         }
     }
 
@@ -266,26 +248,21 @@ impl IntRule {
                 }
                 MatchPattern::IntLit { value, span } => {
                     if *value > max_value {
-                        errors.push(
-                            SemCheckErrorKind::ValueOutOfRange(
+                        push_error(errors, *span, SEK::ValueOutOfRange(
                                 *value as i128,
                                 0,
                                 (max_value as i128) + 1,
-                            )
-                            .at(*span),
-                        );
+                            ));
                         continue;
                     }
 
                     if !seen.insert(*value) {
-                        errors.push(
-                            SemCheckErrorKind::DuplicateMatchVariant(value.to_string()).at(*span),
-                        );
+                        push_error(errors, *span, SEK::DuplicateMatchVariant(value.to_string()));
                     }
                 }
                 _ => {
                     errors.push(
-                        SemCheckErrorKind::InvalidMatchPattern(Type::Int {
+                        SEK::InvalidMatchPattern(Type::Int {
                             signed: self.signed,
                             bits: self.bits,
                             bounds: None,
@@ -298,7 +275,7 @@ impl IntRule {
         }
 
         if !has_wildcard {
-            errors.push(SemCheckErrorKind::NonExhaustiveMatch.at(span));
+            push_error(errors, span, SEK::NonExhaustiveMatch);
         }
     }
 
@@ -340,7 +317,7 @@ impl<'a> TupleRule<'a> {
                 _ => {
                     all_irrefutable = false;
                     errors.push(
-                        SemCheckErrorKind::InvalidMatchPattern(Type::Tuple {
+                        SEK::InvalidMatchPattern(Type::Tuple {
                             field_tys: self.field_tys.to_vec(),
                         })
                         .at(pattern_span(&arm.pattern)),
@@ -350,7 +327,7 @@ impl<'a> TupleRule<'a> {
         }
 
         if !has_wildcard && !all_irrefutable {
-            errors.push(SemCheckErrorKind::NonExhaustiveMatch.at(span));
+            push_error(errors, span, SEK::NonExhaustiveMatch);
         }
     }
 
@@ -362,10 +339,7 @@ impl<'a> TupleRule<'a> {
         errors: &mut Vec<SemCheckError>,
     ) {
         if patterns.len() != field_tys.len() {
-            errors.push(
-                SemCheckErrorKind::TuplePatternArityMismatch(field_tys.len(), patterns.len())
-                    .at(span),
-            );
+            push_error(errors, span, SEK::TuplePatternArityMismatch(field_tys.len(), patterns.len()));
         }
 
         for (field_ty, pattern) in field_tys.iter().zip(patterns.iter()) {
@@ -376,12 +350,12 @@ impl<'a> TupleRule<'a> {
                 | MatchPattern::Wildcard { .. } => {}
                 MatchPattern::BoolLit { span, .. } => {
                     if !matches!(peeled_ty, Type::Bool) {
-                        errors.push(SemCheckErrorKind::InvalidMatchPattern(peeled_ty).at(*span));
+                        push_error(errors, *span, SEK::InvalidMatchPattern(peeled_ty));
                     }
                 }
                 MatchPattern::IntLit { value, span } => {
                     let Type::Int { signed, bits, .. } = peeled_ty else {
-                        errors.push(SemCheckErrorKind::InvalidMatchPattern(peeled_ty).at(*span));
+                        push_error(errors, *span, SEK::InvalidMatchPattern(peeled_ty));
                         continue;
                     };
                     check_int_pattern_range(*value, signed, bits, *span, errors);
@@ -389,7 +363,7 @@ impl<'a> TupleRule<'a> {
                 MatchPattern::EnumVariant { .. } => {
                     let Type::Enum { name, variants } = peeled_ty else {
                         errors.push(
-                            SemCheckErrorKind::InvalidMatchPattern(peeled_ty)
+                            SEK::InvalidMatchPattern(peeled_ty)
                                 .at(pattern_span(pattern)),
                         );
                         continue;
@@ -401,7 +375,7 @@ impl<'a> TupleRule<'a> {
                         field_tys: nested_fields,
                     } = peeled_ty
                     else {
-                        errors.push(SemCheckErrorKind::InvalidMatchPattern(peeled_ty).at(*span));
+                        push_error(errors, *span, SEK::InvalidMatchPattern(peeled_ty));
                         continue;
                     };
                     self.check_tuple_pattern(&nested_fields, patterns, *span, errors);
@@ -428,15 +402,13 @@ fn check_bool_match(arms: &[MatchArm], span: Span, errors: &mut Vec<SemCheckErro
                     &mut saw_false
                 };
                 if *seen {
-                    errors.push(
-                        SemCheckErrorKind::DuplicateMatchVariant(value.to_string()).at(*span),
-                    );
+                    push_error(errors, *span, SEK::DuplicateMatchVariant(value.to_string()));
                 }
                 *seen = true;
             }
             _ => {
                 errors.push(
-                    SemCheckErrorKind::InvalidMatchPattern(Type::Bool)
+                    SEK::InvalidMatchPattern(Type::Bool)
                         .at(pattern_span(&arm.pattern)),
                 );
             }
@@ -444,7 +416,7 @@ fn check_bool_match(arms: &[MatchArm], span: Span, errors: &mut Vec<SemCheckErro
     }
 
     if !(has_wildcard || (saw_true && saw_false)) {
-        errors.push(SemCheckErrorKind::NonExhaustiveMatch.at(span));
+        push_error(errors, span, SEK::NonExhaustiveMatch);
     }
 }
 
@@ -490,9 +462,7 @@ fn check_int_pattern_range(
     };
 
     if value > max_value {
-        errors.push(
-            SemCheckErrorKind::ValueOutOfRange(value as i128, 0, (max_value as i128) + 1).at(span),
-        );
+        push_error(errors, span, SEK::ValueOutOfRange(value as i128, 0, (max_value as i128) + 1));
     }
 }
 
@@ -536,31 +506,22 @@ fn check_enum_pattern(
     if let Some(pat_enum_name) = pat_enum_name
         && !enum_name_matches(pat_enum_name, enum_name)
     {
-        errors.push(
-            SemCheckErrorKind::MatchPatternEnumMismatch(
+        push_error(errors, *span, SEK::MatchPatternEnumMismatch(
                 enum_name.to_string(),
                 pat_enum_name.clone(),
-            )
-            .at(*span),
-        );
+            ));
     }
 
     let Some(variant) = variants.iter().find(|v| v.name == *variant_name) else {
-        errors.push(
-            SemCheckErrorKind::UnknownEnumVariant(enum_name.to_string(), variant_name.clone())
-                .at(*span),
-        );
+        push_error(errors, *span, SEK::UnknownEnumVariant(enum_name.to_string(), variant_name.clone()));
         return;
     };
 
     if bindings.len() != variant.payload.len() {
-        errors.push(
-            SemCheckErrorKind::EnumVariantPayloadArityMismatch(
+        push_error(errors, *span, SEK::EnumVariantPayloadArityMismatch(
                 variant_name.clone(),
                 variant.payload.len(),
                 bindings.len(),
-            )
-            .at(*span),
-        );
+            ));
     }
 }

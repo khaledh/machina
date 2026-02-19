@@ -14,7 +14,7 @@ use crate::core::context::NormalizedContext;
 use crate::core::diag::Span;
 use crate::core::resolve::{DefId, DefKind};
 use crate::core::semck::ast_liveness::{self, AstLiveness};
-use crate::core::semck::{SemCheckError, SemCheckErrorKind};
+use crate::core::semck::{SemCheckError, SEK};
 use crate::core::tree::cfg::{
     AstBlockId, TreeCfgBuilder, TreeCfgItem, TreeCfgNode, TreeCfgTerminator,
 };
@@ -138,6 +138,10 @@ impl<'a> MoveVisitor<'a> {
         }
     }
 
+    fn err(&mut self, span: Span, kind: SEK) {
+        self.errors.push(kind.at(span));
+    }
+
     /// Process a CFG block: check each item with its liveness context.
     fn visit_cfg_node(&mut self, node: &TreeCfgNode<'_, TypeId>, block_id: AstBlockId) {
         // Precompute per-item info for implicit move detection:
@@ -178,8 +182,7 @@ impl<'a> MoveVisitor<'a> {
                 };
                 // Params can only be moved if they're sink params (owned).
                 if matches!(def.kind, DefKind::Param { .. }) && !self.sink_params.contains(def_id) {
-                    self.errors
-                        .push(SemCheckErrorKind::MoveFromParam.at(expr.span));
+                    self.err(expr.span, SEK::MoveFromParam);
                     return;
                 }
                 let ty = self.ctx.type_map.type_table().get(expr.ty);
@@ -189,9 +192,7 @@ impl<'a> MoveVisitor<'a> {
                 }
             }
             // `move x.field` or `move arr[i]` not allowed - must move whole variable.
-            _ => self
-                .errors
-                .push(SemCheckErrorKind::InvalidMoveTarget.at(expr.span)),
+            _ => self.err(expr.span, SEK::InvalidMoveTarget),
         }
     }
 
@@ -202,7 +203,7 @@ impl<'a> MoveVisitor<'a> {
         };
         // Params can only be moved if they're sink params (owned).
         if matches!(def.kind, DefKind::Param { .. }) && !self.sink_params.contains(&def_id) {
-            self.errors.push(SemCheckErrorKind::MoveFromParam.at(span));
+            self.err(span, SEK::MoveFromParam);
             return;
         }
         let Some(ty_id) = self.ctx.type_map.lookup_def_type_id(def) else {
@@ -229,8 +230,7 @@ impl<'a> MoveVisitor<'a> {
             && let Some(def) = self.ctx.def_table.lookup_def(def_id)
             && self.moved.contains(&def_id)
         {
-            self.errors
-                .push(SemCheckErrorKind::UseAfterMove(def.name.clone()).at(expr.span));
+            self.err(expr.span, SEK::UseAfterMove(def.name.clone()));
         }
     }
 
@@ -247,14 +247,12 @@ impl<'a> MoveVisitor<'a> {
             if matches!(def.kind, DefKind::Param { .. }) {
                 // Allow moving from sink params only.
                 if !self.sink_params.contains(&def_id) {
-                    self.errors
-                        .push(SemCheckErrorKind::MoveFromParam.at(expr.span));
+                    self.err(expr.span, SEK::MoveFromParam);
                     return;
                 }
             }
             let Some(ref live_after) = self.current_live_after else {
-                self.errors
-                    .push(SemCheckErrorKind::OwnedMoveRequired.at(expr.span));
+                self.err(expr.span, SEK::OwnedMoveRequired);
                 return;
             };
             let use_count = self
@@ -267,8 +265,7 @@ impl<'a> MoveVisitor<'a> {
             // - Used multiple times in same item (e.g., `f(p, p)`) - ambiguous which moves
             // - Live after this item - can't implicitly consume something still needed
             if use_count > 1 || live_after.contains(&def_id) {
-                self.errors
-                    .push(SemCheckErrorKind::OwnedMoveRequired.at(expr.span));
+                self.err(expr.span, SEK::OwnedMoveRequired);
                 return;
             }
 

@@ -1,7 +1,7 @@
 use crate::core::context::NormalizedContext;
 use crate::core::diag::Span;
 use crate::core::resolve::DefId;
-use crate::core::semck::{SemCheckError, SemCheckErrorKind};
+use crate::core::semck::{SemCheckError, SEK};
 use crate::core::tree::RefinementKind;
 use crate::core::tree::normalized::{
     BinaryOp, BindPatternKind, Expr, ExprKind, FuncDef, FunctionSig, StmtExpr, StmtExprKind,
@@ -108,7 +108,7 @@ impl<'a> ValueChecker<'a> {
     fn check_int_range(&mut self, value: i128, min: i128, max_excl: i128, span: Span) {
         if value < min || value >= max_excl {
             self.errors
-                .push(SemCheckErrorKind::ValueOutOfRange(value, min, max_excl).at(span));
+                .push(SEK::ValueOutOfRange(value, min, max_excl).at(span));
         }
     }
 
@@ -124,7 +124,7 @@ impl<'a> ValueChecker<'a> {
         }
         if *nonzero && value == 0 {
             self.errors
-                .push(SemCheckErrorKind::ValueNotNonZero(value).at(span));
+                .push(SEK::ValueNotNonZero(value).at(span));
         }
     }
 
@@ -239,7 +239,7 @@ impl<'a> ValueChecker<'a> {
                 && min >= max
             {
                 self.errors
-                    .push(SemCheckErrorKind::InvalidRangeBounds(*min, *max).at(ty.span));
+                    .push(SEK::InvalidRangeBounds(*min, *max).at(ty.span));
             }
         }
     }
@@ -277,7 +277,7 @@ impl<'a> ValueChecker<'a> {
         }
         if start >= end {
             self.errors
-                .push(SemCheckErrorKind::InvalidRangeBounds(start, end).at(expr.span));
+                .push(SEK::InvalidRangeBounds(start, end).at(expr.span));
         }
     }
 
@@ -292,7 +292,7 @@ impl<'a> ValueChecker<'a> {
         };
         if self.const_int_value(right) == Some(0) {
             self.errors
-                .push(SemCheckErrorKind::DivisionByZero.at(right.span));
+                .push(SEK::DivisionByZero.at(right.span));
         }
     }
 

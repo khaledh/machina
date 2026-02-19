@@ -16,10 +16,15 @@ mod value;
 
 use std::collections::HashSet;
 
-pub use errors::{SemCheckError, SemCheckErrorKind};
+pub use errors::{SemCheckError, SemCheckErrorKind, SemCheckErrorKind as SEK};
 
 use crate::core::context::{SemCheckNormalizedContext, SemCheckStageInput, SemCheckStageOutput};
+use crate::core::diag::Span;
 use crate::core::tree::NodeId;
+
+pub(crate) fn push_error(errors: &mut Vec<SemCheckError>, span: Span, kind: SEK) {
+    errors.push(kind.at(span));
+}
 
 /// Internal stage entrypoint.
 ///
