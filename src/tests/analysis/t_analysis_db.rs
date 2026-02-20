@@ -490,7 +490,7 @@ fn main() -> u64 { id(1) }
     assert_eq!(hover.def_name.as_deref(), Some("id"));
     assert!(hover.ty.is_some(), "expected hover type for symbol");
     assert!(
-        hover.display.starts_with("id:"),
+        hover.display.starts_with("fn id("),
         "expected hover label to include symbol name"
     );
 }
@@ -514,7 +514,7 @@ fn main() -> u64 {
         .expect("expected hover info");
 
     assert_eq!(hover.def_name.as_deref(), Some("id"));
-    assert_eq!(hover.display, "id: fn<T>(T) -> T");
+    assert_eq!(hover.display, "fn id<T>(x: T) -> T");
 }
 
 #[test]

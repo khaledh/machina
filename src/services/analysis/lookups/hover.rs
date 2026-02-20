@@ -8,7 +8,8 @@
 use std::path::Path;
 
 use crate::core::diag::{Position, Span};
-use crate::core::resolve::{DefId, DefTable, UNKNOWN_DEF_ID};
+use crate::core::resolve::{DefId, DefKind, DefTable, UNKNOWN_DEF_ID};
+use crate::core::tree::typed as typed_tree;
 use crate::core::typecheck::type_map::TypeMap;
 use crate::core::types::{Type, TypeRenderConfig, render_type};
 use crate::services::analysis::pipeline::LookupState;
@@ -89,6 +90,7 @@ fn try_call_site_hover(
         Some(&def.name),
         ty.as_ref(),
         Some(def_id),
+        Some(&typed.module),
         Some(&typed.type_map),
         &typed.def_table,
     );
@@ -174,6 +176,7 @@ fn try_node_hover(
             def_name.as_deref(),
             ty.as_ref(),
             def_id,
+            Some(&typed.module),
             Some(&typed.type_map),
             &typed.def_table,
         );
@@ -215,6 +218,7 @@ fn try_typestate_role_hover(
         def_name.as_deref(),
         None,
         Some(def_id),
+        Some(&typed.module),
         Some(&typed.type_map),
         &typed.def_table,
     );
@@ -242,6 +246,7 @@ fn try_def_table_hover(
     fallback_hover_from_def_table(
         &typed.def_table,
         Some(&typed.type_map),
+        Some(&typed.module),
         query_span,
         current_file_path,
         query_ident,
@@ -310,6 +315,7 @@ fn try_resolved_hover(
         None,
         Some(def_id),
         None,
+        None,
         &resolved.def_table,
     );
     Some(HoverInfo {
@@ -323,6 +329,7 @@ fn try_resolved_hover(
     .or_else(|| {
         fallback_hover_from_def_table(
             &resolved.def_table,
+            None,
             None,
             query_span,
             current_file_path,
@@ -425,6 +432,7 @@ fn paths_equivalent(lhs: &Path, rhs: &Path) -> bool {
 fn fallback_hover_from_def_table(
     def_table: &DefTable,
     type_map: Option<&crate::core::typecheck::type_map::TypeMap>,
+    typed_module: Option<&typed_tree::Module>,
     query_span: Span,
     current_file_path: Option<&Path>,
     query_ident: Option<&str>,
@@ -451,6 +459,7 @@ fn fallback_hover_from_def_table(
             Some(&def.name),
             ty.as_ref(),
             Some(def.id),
+            typed_module,
             type_map,
             def_table,
         );
@@ -639,16 +648,176 @@ fn field_type_in_struct<'a>(ty: &'a Type, field_name: &str) -> Option<&'a Type> 
     }
 }
 
+fn try_format_source_callable_signature(
+    def_id: Option<DefId>,
+    typed_module: Option<&typed_tree::Module>,
+    type_map: Option<&TypeMap>,
+    def_table: &DefTable,
+    demangler: &TypestateNameDemangler,
+) -> Option<String> {
+    let def_id = def_id?;
+    let typed_module = typed_module?;
+    let type_map = type_map?;
+    let def = def_table.lookup_def(def_id)?;
+    if !matches!(def.kind, DefKind::FuncDef { .. } | DefKind::FuncDecl { .. }) {
+        return None;
+    }
+    let fn_ty = type_map.lookup_def_type(def)?;
+    let Type::Fn { params, ret_ty } = fn_ty else {
+        return None;
+    };
+
+    let callable = typed_module
+        .callables()
+        .into_iter()
+        .find(|callable| match callable {
+            typed_tree::CallableRef::FuncDecl(func_decl) => func_decl.def_id == def_id,
+            typed_tree::CallableRef::FuncDef(func_def) => func_def.def_id == def_id,
+            typed_tree::CallableRef::MethodDecl { method_decl, .. } => method_decl.def_id == def_id,
+            typed_tree::CallableRef::MethodDef { method_def, .. } => method_def.def_id == def_id,
+            typed_tree::CallableRef::ClosureDef(closure_def) => closure_def.def_id == def_id,
+        })?;
+
+    let (name, type_params, params_src): (
+        String,
+        Vec<String>,
+        Vec<(String, crate::core::tree::ParamMode, DefId)>,
+    ) = match callable {
+        typed_tree::CallableRef::FuncDecl(func_decl) => (
+            func_decl.sig.name.clone(),
+            func_decl
+                .sig
+                .type_params
+                .iter()
+                .map(|param| param.ident.clone())
+                .collect(),
+            func_decl
+                .sig
+                .params
+                .iter()
+                .map(|param| (param.ident.clone(), param.mode.clone(), param.def_id))
+                .collect(),
+        ),
+        typed_tree::CallableRef::FuncDef(func_def) => (
+            func_def.sig.name.clone(),
+            func_def
+                .sig
+                .type_params
+                .iter()
+                .map(|param| param.ident.clone())
+                .collect(),
+            func_def
+                .sig
+                .params
+                .iter()
+                .map(|param| (param.ident.clone(), param.mode.clone(), param.def_id))
+                .collect(),
+        ),
+        typed_tree::CallableRef::MethodDecl { method_decl, .. } => (
+            method_decl.sig.name.clone(),
+            method_decl
+                .sig
+                .type_params
+                .iter()
+                .map(|param| param.ident.clone())
+                .collect(),
+            method_decl
+                .sig
+                .params
+                .iter()
+                .map(|param| (param.ident.clone(), param.mode.clone(), param.def_id))
+                .collect(),
+        ),
+        typed_tree::CallableRef::MethodDef { method_def, .. } => (
+            method_def.sig.name.clone(),
+            method_def
+                .sig
+                .type_params
+                .iter()
+                .map(|param| param.ident.clone())
+                .collect(),
+            method_def
+                .sig
+                .params
+                .iter()
+                .map(|param| (param.ident.clone(), param.mode.clone(), param.def_id))
+                .collect(),
+        ),
+        typed_tree::CallableRef::ClosureDef(closure_def) => (
+            "<closure>".to_string(),
+            Vec::new(),
+            closure_def
+                .sig
+                .params
+                .iter()
+                .map(|param| (param.ident.clone(), param.mode.clone(), param.def_id))
+                .collect(),
+        ),
+    };
+
+    let type_var_names = type_map.lookup_def_type_param_names(def_id);
+    let nominal_name_map = |name: &str| {
+        if let Some(state_name) = demangler.demangle_state_qualified(name) {
+            state_name
+        } else {
+            demangler.demangle_text(name)
+        }
+    };
+    let render = |ty: &Type| {
+        render_type(
+            ty,
+            &TypeRenderConfig {
+                show_in_mode: false,
+                type_var_names,
+                nominal_name_map: Some(&nominal_name_map),
+            },
+        )
+    };
+
+    let mut rendered_params = Vec::with_capacity(params_src.len());
+    for (idx, (param_name, mode, param_def_id)) in params_src.into_iter().enumerate() {
+        let mode_prefix = match mode {
+            crate::core::tree::ParamMode::In => "",
+            crate::core::tree::ParamMode::InOut => "inout ",
+            crate::core::tree::ParamMode::Out => "out ",
+            crate::core::tree::ParamMode::Sink => "sink ",
+        };
+        let param_ty = def_table
+            .lookup_def(param_def_id)
+            .and_then(|param_def| type_map.lookup_def_type(param_def))
+            .or_else(|| params.get(idx).map(|param| param.ty.clone()))
+            .unwrap_or(Type::Unknown);
+        rendered_params.push(format!("{mode_prefix}{param_name}: {}", render(&param_ty)));
+    }
+    let rendered_name = demangler.demangle_text(&name);
+    let rendered_ret = render(&ret_ty);
+    let rendered_tparams = if type_params.is_empty() {
+        String::new()
+    } else {
+        format!("<{}>", type_params.join(", "))
+    };
+    Some(format!(
+        "fn {rendered_name}{rendered_tparams}({}) -> {rendered_ret}",
+        rendered_params.join(", ")
+    ))
+}
+
 // --- Display formatting ---
 
 fn format_hover_label(
     def_name: Option<&str>,
     ty: Option<&Type>,
     def_id: Option<DefId>,
+    typed_module: Option<&typed_tree::Module>,
     type_map: Option<&TypeMap>,
     def_table: &DefTable,
 ) -> String {
     let demangler = TypestateNameDemangler::from_def_table(def_table);
+    if let Some(signature) =
+        try_format_source_callable_signature(def_id, typed_module, type_map, def_table, &demangler)
+    {
+        return signature;
+    }
     let render_name = |name: &str| demangler.demangle_text(name);
     let render_type = |ty: &Type| format_type_for_hover(ty, def_id, type_map, &demangler);
     match (def_name, ty) {
