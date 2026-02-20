@@ -1,6 +1,6 @@
 //! Local-scope completion collection.
 //!
-//! This module walks the callable/block/pattern structure around the cursor and
+//! This module walks callable/block/pattern structure around the cursor and
 //! returns scope frames in visibility order (outer -> inner).
 
 use std::collections::HashMap;
@@ -19,13 +19,11 @@ pub(super) fn collect_local_scopes(
     def_table: &crate::core::resolve::DefTable,
     cursor: Position,
 ) -> Vec<HashMap<String, CompletionItem>> {
-    let mut scopes = Vec::new();
+    let mut collector = LocalScopeCollector::new(cursor, def_table);
     if let Some(callable) = containing_callable(module, cursor) {
-        scopes.push(HashMap::new());
-        add_callable_params_to_scope(&callable, def_table, scopes.last_mut().unwrap());
-        collect_defs_before_cursor_in_expr(callable.body(), cursor, def_table, &mut scopes);
+        collector.collect_callable(callable);
     }
-    scopes
+    collector.into_scopes()
 }
 
 pub(super) fn enclosing_callable_def_id(
@@ -46,6 +44,269 @@ pub(super) fn enclosing_callable_def_id(
         }
     }
     best.map(|(def_id, _)| def_id)
+}
+
+struct LocalScopeCollector<'a> {
+    cursor: Position,
+    def_table: &'a crate::core::resolve::DefTable,
+    scopes: Vec<HashMap<String, CompletionItem>>,
+}
+
+impl<'a> LocalScopeCollector<'a> {
+    fn new(cursor: Position, def_table: &'a crate::core::resolve::DefTable) -> Self {
+        Self {
+            cursor,
+            def_table,
+            scopes: Vec::new(),
+        }
+    }
+
+    fn into_scopes(self) -> Vec<HashMap<String, CompletionItem>> {
+        self.scopes
+    }
+
+    fn collect_callable(&mut self, callable: CallableAtCursor<'_>) {
+        self.push_scope();
+        self.add_callable_params(&callable);
+        self.collect_expr(callable.body());
+    }
+
+    fn collect_expr(&mut self, expr: &res::Expr) {
+        if !self.span_contains_pos(expr.span) {
+            return;
+        }
+        if let res::ExprKind::Block { items, tail } = &expr.kind {
+            self.push_scope();
+            for item in items {
+                match item {
+                    BlockItem::Stmt(stmt) => {
+                        if position_leq(stmt.span.end, self.cursor) {
+                            self.collect_stmt_bindings(stmt);
+                            continue;
+                        }
+                        if self.span_contains_pos(stmt.span) {
+                            self.collect_stmt_at_cursor(stmt);
+                            return;
+                        }
+                    }
+                    BlockItem::Expr(item_expr) => {
+                        if self.span_contains_pos(item_expr.span) {
+                            self.collect_expr(item_expr);
+                            return;
+                        }
+                    }
+                }
+            }
+            if let Some(tail) = tail
+                && self.span_contains_pos(tail.span)
+            {
+                self.collect_expr(tail);
+            }
+            return;
+        }
+
+        match &expr.kind {
+            res::ExprKind::If {
+                cond,
+                then_body,
+                else_body,
+            } => {
+                if self.span_contains_pos(cond.span) {
+                    self.collect_expr(cond);
+                } else if self.span_contains_pos(then_body.span) {
+                    self.collect_expr(then_body);
+                } else if self.span_contains_pos(else_body.span) {
+                    self.collect_expr(else_body);
+                }
+            }
+            res::ExprKind::Match { scrutinee, arms } => {
+                if self.span_contains_pos(scrutinee.span) {
+                    self.collect_expr(scrutinee);
+                    return;
+                }
+                for arm in arms {
+                    if !self.span_contains_pos(arm.span) {
+                        continue;
+                    }
+                    self.push_scope();
+                    self.collect_match_pattern_bindings(&arm.pattern);
+                    self.collect_expr(&arm.body);
+                    return;
+                }
+            }
+            res::ExprKind::Closure { params, body, .. } => {
+                if self.span_contains_pos(body.span) {
+                    self.push_scope();
+                    for param in params {
+                        self.insert_def(param.def_id);
+                    }
+                    self.collect_expr(body);
+                }
+            }
+            _ => {}
+        }
+    }
+
+    fn collect_stmt_at_cursor(&mut self, stmt: &crate::core::tree::StmtExpr<DefId>) {
+        match &stmt.kind {
+            StmtExprKind::LetBind { value, .. } | StmtExprKind::VarBind { value, .. } => {
+                if self.span_contains_pos(value.span) {
+                    self.collect_expr(value);
+                }
+            }
+            StmtExprKind::Assign {
+                assignee, value, ..
+            }
+            | StmtExprKind::CompoundAssign {
+                assignee, value, ..
+            } => {
+                if self.span_contains_pos(assignee.span) {
+                    self.collect_expr(assignee);
+                } else if self.span_contains_pos(value.span) {
+                    self.collect_expr(value);
+                }
+            }
+            StmtExprKind::While { cond, body } => {
+                if self.span_contains_pos(cond.span) {
+                    self.collect_expr(cond);
+                } else if self.span_contains_pos(body.span) {
+                    self.collect_expr(body);
+                }
+            }
+            StmtExprKind::For {
+                pattern,
+                iter,
+                body,
+            } => {
+                if self.span_contains_pos(iter.span) {
+                    self.collect_expr(iter);
+                    return;
+                }
+                if self.span_contains_pos(body.span) {
+                    self.push_scope();
+                    self.collect_bind_pattern_bindings(pattern);
+                    self.collect_expr(body);
+                }
+            }
+            StmtExprKind::Return { value } => {
+                if let Some(value) = value
+                    && self.span_contains_pos(value.span)
+                {
+                    self.collect_expr(value);
+                }
+            }
+            StmtExprKind::VarDecl { .. } | StmtExprKind::Break | StmtExprKind::Continue => {}
+        }
+    }
+
+    fn collect_stmt_bindings(&mut self, stmt: &crate::core::tree::StmtExpr<DefId>) {
+        match &stmt.kind {
+            StmtExprKind::LetBind { pattern, .. } | StmtExprKind::VarBind { pattern, .. } => {
+                self.collect_bind_pattern_bindings(pattern);
+            }
+            StmtExprKind::VarDecl { def_id, .. } => {
+                self.insert_def(*def_id);
+            }
+            _ => {}
+        }
+    }
+
+    fn collect_bind_pattern_bindings(&mut self, pattern: &crate::core::tree::BindPattern<DefId>) {
+        match &pattern.kind {
+            crate::core::tree::BindPatternKind::Name { def_id, .. } => {
+                self.insert_def(*def_id);
+            }
+            crate::core::tree::BindPatternKind::Array { patterns }
+            | crate::core::tree::BindPatternKind::Tuple { patterns } => {
+                for sub in patterns {
+                    self.collect_bind_pattern_bindings(sub);
+                }
+            }
+            crate::core::tree::BindPatternKind::Struct { fields, .. } => {
+                for field in fields {
+                    self.collect_bind_pattern_bindings(&field.pattern);
+                }
+            }
+        }
+    }
+
+    fn collect_match_pattern_bindings(&mut self, pattern: &crate::core::tree::MatchPattern<DefId>) {
+        match pattern {
+            crate::core::tree::MatchPattern::Binding { def_id, .. }
+            | crate::core::tree::MatchPattern::TypedBinding { def_id, .. } => {
+                self.insert_def(*def_id);
+            }
+            crate::core::tree::MatchPattern::Tuple { patterns, .. } => {
+                for sub in patterns {
+                    self.collect_match_pattern_bindings(sub);
+                }
+            }
+            crate::core::tree::MatchPattern::EnumVariant { bindings, .. } => {
+                for binding in bindings {
+                    if let crate::core::tree::MatchPatternBinding::Named { def_id, .. } = binding {
+                        self.insert_def(*def_id);
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+
+    fn add_callable_params(&mut self, callable: &CallableAtCursor<'_>) {
+        match callable {
+            CallableAtCursor::Func(def) => {
+                for type_param in &def.sig.type_params {
+                    self.insert_def(type_param.def_id);
+                }
+                for param in &def.sig.params {
+                    self.insert_def(param.def_id);
+                }
+            }
+            CallableAtCursor::Method(def) => {
+                for type_param in &def.sig.type_params {
+                    self.insert_def(type_param.def_id);
+                }
+                self.insert_def(def.sig.self_param.def_id);
+                for param in &def.sig.params {
+                    self.insert_def(param.def_id);
+                }
+            }
+            CallableAtCursor::Closure(def) => {
+                for param in &def.sig.params {
+                    self.insert_def(param.def_id);
+                }
+            }
+        }
+    }
+
+    fn insert_def(&mut self, def_id: DefId) {
+        let Some(def) = self.def_table.lookup_def(def_id) else {
+            return;
+        };
+        let Some(kind) = completion_kind_for_def(&def.kind) else {
+            return;
+        };
+        let Some(scope) = self.scopes.last_mut() else {
+            return;
+        };
+        scope.insert(
+            def.name.clone(),
+            CompletionItem {
+                label: def.name.clone(),
+                kind,
+                def_id: def.id,
+                detail: Some(def.kind.to_string()),
+            },
+        );
+    }
+
+    fn push_scope(&mut self) {
+        self.scopes.push(HashMap::new());
+    }
+
+    fn span_contains_pos(&self, span: Span) -> bool {
+        span_contains_pos(span, self.cursor)
+    }
 }
 
 enum CallableAtCursor<'a> {
@@ -109,262 +370,6 @@ fn choose_smallest_callable<'a>(
     if replace {
         *best = Some(candidate);
     }
-}
-
-fn add_callable_params_to_scope(
-    callable: &CallableAtCursor<'_>,
-    def_table: &crate::core::resolve::DefTable,
-    scope: &mut HashMap<String, CompletionItem>,
-) {
-    match callable {
-        CallableAtCursor::Func(def) => {
-            for type_param in &def.sig.type_params {
-                insert_def_into_scope(type_param.def_id, def_table, scope);
-            }
-            for param in &def.sig.params {
-                insert_def_into_scope(param.def_id, def_table, scope);
-            }
-        }
-        CallableAtCursor::Method(def) => {
-            for type_param in &def.sig.type_params {
-                insert_def_into_scope(type_param.def_id, def_table, scope);
-            }
-            insert_def_into_scope(def.sig.self_param.def_id, def_table, scope);
-            for param in &def.sig.params {
-                insert_def_into_scope(param.def_id, def_table, scope);
-            }
-        }
-        CallableAtCursor::Closure(def) => {
-            for param in &def.sig.params {
-                insert_def_into_scope(param.def_id, def_table, scope);
-            }
-        }
-    }
-}
-
-fn collect_defs_before_cursor_in_expr(
-    expr: &res::Expr,
-    cursor: Position,
-    def_table: &crate::core::resolve::DefTable,
-    scopes: &mut Vec<HashMap<String, CompletionItem>>,
-) {
-    if !span_contains_pos(expr.span, cursor) {
-        return;
-    }
-    if let res::ExprKind::Block { items, tail } = &expr.kind {
-        scopes.push(HashMap::new());
-        for item in items {
-            match item {
-                BlockItem::Stmt(stmt) => {
-                    if position_leq(stmt.span.end, cursor) {
-                        collect_stmt_bindings(stmt, def_table, scopes.last_mut().unwrap());
-                        continue;
-                    }
-                    if span_contains_pos(stmt.span, cursor) {
-                        collect_defs_at_cursor_in_stmt(stmt, cursor, def_table, scopes);
-                        return;
-                    }
-                }
-                BlockItem::Expr(item_expr) => {
-                    if span_contains_pos(item_expr.span, cursor) {
-                        collect_defs_before_cursor_in_expr(item_expr, cursor, def_table, scopes);
-                        return;
-                    }
-                }
-            }
-        }
-        if let Some(tail) = tail
-            && span_contains_pos(tail.span, cursor)
-        {
-            collect_defs_before_cursor_in_expr(tail, cursor, def_table, scopes);
-        }
-        return;
-    }
-
-    match &expr.kind {
-        res::ExprKind::If {
-            cond,
-            then_body,
-            else_body,
-        } => {
-            if span_contains_pos(cond.span, cursor) {
-                collect_defs_before_cursor_in_expr(cond, cursor, def_table, scopes);
-            } else if span_contains_pos(then_body.span, cursor) {
-                collect_defs_before_cursor_in_expr(then_body, cursor, def_table, scopes);
-            } else if span_contains_pos(else_body.span, cursor) {
-                collect_defs_before_cursor_in_expr(else_body, cursor, def_table, scopes);
-            }
-        }
-        res::ExprKind::Match { scrutinee, arms } => {
-            if span_contains_pos(scrutinee.span, cursor) {
-                collect_defs_before_cursor_in_expr(scrutinee, cursor, def_table, scopes);
-                return;
-            }
-            for arm in arms {
-                if !span_contains_pos(arm.span, cursor) {
-                    continue;
-                }
-                scopes.push(HashMap::new());
-                collect_match_pattern_bindings(&arm.pattern, def_table, scopes.last_mut().unwrap());
-                collect_defs_before_cursor_in_expr(&arm.body, cursor, def_table, scopes);
-                return;
-            }
-        }
-        res::ExprKind::Closure { params, body, .. } => {
-            if span_contains_pos(body.span, cursor) {
-                scopes.push(HashMap::new());
-                for param in params {
-                    insert_def_into_scope(param.def_id, def_table, scopes.last_mut().unwrap());
-                }
-                collect_defs_before_cursor_in_expr(body, cursor, def_table, scopes);
-            }
-        }
-        _ => {}
-    }
-}
-
-fn collect_defs_at_cursor_in_stmt(
-    stmt: &crate::core::tree::StmtExpr<DefId>,
-    cursor: Position,
-    def_table: &crate::core::resolve::DefTable,
-    scopes: &mut Vec<HashMap<String, CompletionItem>>,
-) {
-    match &stmt.kind {
-        StmtExprKind::LetBind { value, .. } | StmtExprKind::VarBind { value, .. } => {
-            if span_contains_pos(value.span, cursor) {
-                collect_defs_before_cursor_in_expr(value, cursor, def_table, scopes);
-            }
-        }
-        StmtExprKind::Assign {
-            assignee, value, ..
-        }
-        | StmtExprKind::CompoundAssign {
-            assignee, value, ..
-        } => {
-            if span_contains_pos(assignee.span, cursor) {
-                collect_defs_before_cursor_in_expr(assignee, cursor, def_table, scopes);
-            } else if span_contains_pos(value.span, cursor) {
-                collect_defs_before_cursor_in_expr(value, cursor, def_table, scopes);
-            }
-        }
-        StmtExprKind::While { cond, body } => {
-            if span_contains_pos(cond.span, cursor) {
-                collect_defs_before_cursor_in_expr(cond, cursor, def_table, scopes);
-            } else if span_contains_pos(body.span, cursor) {
-                collect_defs_before_cursor_in_expr(body, cursor, def_table, scopes);
-            }
-        }
-        StmtExprKind::For {
-            pattern,
-            iter,
-            body,
-        } => {
-            if span_contains_pos(iter.span, cursor) {
-                collect_defs_before_cursor_in_expr(iter, cursor, def_table, scopes);
-                return;
-            }
-            if span_contains_pos(body.span, cursor) {
-                scopes.push(HashMap::new());
-                collect_bind_pattern_bindings(pattern, def_table, scopes.last_mut().unwrap());
-                collect_defs_before_cursor_in_expr(body, cursor, def_table, scopes);
-            }
-        }
-        StmtExprKind::Return { value } => {
-            if let Some(value) = value
-                && span_contains_pos(value.span, cursor)
-            {
-                collect_defs_before_cursor_in_expr(value, cursor, def_table, scopes);
-            }
-        }
-        StmtExprKind::VarDecl { .. } | StmtExprKind::Break | StmtExprKind::Continue => {}
-    }
-}
-
-fn collect_stmt_bindings(
-    stmt: &crate::core::tree::StmtExpr<DefId>,
-    def_table: &crate::core::resolve::DefTable,
-    scope: &mut HashMap<String, CompletionItem>,
-) {
-    match &stmt.kind {
-        StmtExprKind::LetBind { pattern, .. } | StmtExprKind::VarBind { pattern, .. } => {
-            collect_bind_pattern_bindings(pattern, def_table, scope);
-        }
-        StmtExprKind::VarDecl { def_id, .. } => {
-            insert_def_into_scope(*def_id, def_table, scope);
-        }
-        _ => {}
-    }
-}
-
-fn collect_bind_pattern_bindings(
-    pattern: &crate::core::tree::BindPattern<DefId>,
-    def_table: &crate::core::resolve::DefTable,
-    scope: &mut HashMap<String, CompletionItem>,
-) {
-    match &pattern.kind {
-        crate::core::tree::BindPatternKind::Name { def_id, .. } => {
-            insert_def_into_scope(*def_id, def_table, scope);
-        }
-        crate::core::tree::BindPatternKind::Array { patterns }
-        | crate::core::tree::BindPatternKind::Tuple { patterns } => {
-            for sub in patterns {
-                collect_bind_pattern_bindings(sub, def_table, scope);
-            }
-        }
-        crate::core::tree::BindPatternKind::Struct { fields, .. } => {
-            for field in fields {
-                collect_bind_pattern_bindings(&field.pattern, def_table, scope);
-            }
-        }
-    }
-}
-
-fn collect_match_pattern_bindings(
-    pattern: &crate::core::tree::MatchPattern<DefId>,
-    def_table: &crate::core::resolve::DefTable,
-    scope: &mut HashMap<String, CompletionItem>,
-) {
-    match pattern {
-        crate::core::tree::MatchPattern::Binding { def_id, .. }
-        | crate::core::tree::MatchPattern::TypedBinding { def_id, .. } => {
-            insert_def_into_scope(*def_id, def_table, scope);
-        }
-        crate::core::tree::MatchPattern::Tuple { patterns, .. } => {
-            for sub in patterns {
-                collect_match_pattern_bindings(sub, def_table, scope);
-            }
-        }
-        crate::core::tree::MatchPattern::EnumVariant { bindings, .. } => {
-            for binding in bindings {
-                if let crate::core::tree::MatchPatternBinding::Named { def_id, .. } = binding {
-                    insert_def_into_scope(*def_id, def_table, scope);
-                }
-            }
-        }
-        _ => {}
-    }
-}
-
-fn insert_def_into_scope(
-    def_id: DefId,
-    def_table: &crate::core::resolve::DefTable,
-    scope: &mut HashMap<String, CompletionItem>,
-) {
-    let Some(def) = def_table.lookup_def(def_id) else {
-        return;
-    };
-    let Some(kind) = completion_kind_for_def(&def.kind) else {
-        return;
-    };
-    scope.insert(
-        def.name.clone(),
-        CompletionItem {
-            label: def.name.clone(),
-            kind,
-            def_id: def.id,
-            detail: Some(def.kind.to_string()),
-        },
-    );
 }
 
 fn span_contains_pos(span: Span, pos: Position) -> bool {
