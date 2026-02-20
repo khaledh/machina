@@ -11,6 +11,9 @@ fn __rt_memset(inout buf: u8[], value: u8);
 @runtime
 fn __rt_string_from_bytes(out dst: string, bytes: u8[]);
 
+@intrinsic
+fn type_of<T>(value: T) -> string;
+
 // Managed machine runtime bridge helpers.
 @runtime
 fn __mc_machine_runtime_new() -> u64;

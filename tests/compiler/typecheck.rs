@@ -43,6 +43,68 @@ fn test_overloaded_functions() {
     assert_eq!(stdout, "105\n20\n", "unexpected stdout: {stdout}");
 }
 
+#[test]
+fn test_type_of_intrinsic_prints_static_type_names() {
+    let run = run_program(
+        "type_of_intrinsic",
+        r#"
+            requires {
+                std::io::println
+            }
+
+            type Point = { x: u64, y: u64 }
+
+            fn main() {
+                let p = Point { x: 1, y: 2 };
+                println(type_of(p));
+                println(type_of(42));
+                println(type_of("hello"));
+            }
+        "#,
+    );
+    assert_eq!(run.status.code(), Some(0));
+
+    let stdout = String::from_utf8_lossy(&run.stdout);
+    assert_eq!(
+        stdout, "Point\ni32\nstring\n",
+        "unexpected stdout: {stdout}"
+    );
+}
+
+#[test]
+fn test_type_of_intrinsic_handles_generic_struct_values() {
+    let run = run_program(
+        "type_of_intrinsic_generic_struct",
+        r#"
+            requires {
+                std::io::println
+            }
+
+            type Pair<L, R> = {
+                left: L,
+                right: R,
+            }
+
+            fn pair<L, R>(left: L, right: R) -> Pair<L, R> {
+                Pair { left, right }
+            }
+
+            fn main() {
+                println(type_of(pair));
+                let p = pair("age", 7);
+                println(type_of(p));
+            }
+        "#,
+    );
+    assert_eq!(run.status.code(), Some(0));
+
+    let stdout = String::from_utf8_lossy(&run.stdout);
+    assert_eq!(
+        stdout, "fn<L, R>(L, R) -> Pair<L, R>\nPair<string, i32>\n",
+        "unexpected stdout: {stdout}"
+    );
+}
+
 fn with_temp_program(
     name: &str,
     entry_source: &str,

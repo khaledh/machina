@@ -109,6 +109,8 @@ impl<'a> Elaborator<'a> {
                     )
                 {
                     target = sem::CallTarget::Intrinsic(sem::IntrinsicCall::StringLen);
+                } else if intrinsic_name == "type_of" {
+                    target = sem::CallTarget::Intrinsic(sem::IntrinsicCall::TypeOf);
                 }
             } else if def.is_runtime() {
                 let runtime_name = def.link_name().unwrap_or(def.name.as_str());
@@ -304,6 +306,18 @@ impl<'a> Elaborator<'a> {
                     );
                 }
                 vec![sem::ArgLowering::Direct(sem::CallInput::Receiver)]
+            }
+            sem::CallTarget::Intrinsic(sem::IntrinsicCall::TypeOf) => {
+                if has_receiver {
+                    panic!("compiler bug: type_of intrinsic has receiver");
+                }
+                if call_sig.params.len() != 1 {
+                    panic!(
+                        "compiler bug: intrinsic type_of expects 1 arg, got {}",
+                        call_sig.params.len()
+                    );
+                }
+                vec![sem::ArgLowering::Direct(sem::CallInput::Arg(0))]
             }
             sem::CallTarget::Intrinsic(sem::IntrinsicCall::MachinePayloadPack) => {
                 if has_receiver {

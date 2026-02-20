@@ -101,23 +101,28 @@ fn build_outputs(engine: &TypecheckEngine) -> FinalizeOutput {
     }
 
     let callable_types = collect_callable_def_types(engine);
+    let callable_type_param_names = collect_callable_type_param_names(engine);
 
     // Fill definition-side types, with callable fallback for unresolved defs.
     for def in engine.context().def_table.clone() {
+        let def_id = def.id;
         let mut ty = engine
             .state()
             .solve
             .resolved_def_types
-            .get(&def.id)
+            .get(&def_id)
             .cloned()
             .unwrap_or(Type::Unknown);
         if is_unresolved_type(&ty)
-            && let Some(callable_ty) = callable_types.get(&def.id)
+            && let Some(callable_ty) = callable_types.get(&def_id)
         {
             ty = callable_ty.clone();
         }
         let nominal = nominal_keys.infer(&ty);
         builder.record_def_type_with_nominal(def, ty, nominal);
+        if let Some(names) = callable_type_param_names.get(&def_id) {
+            builder.record_def_type_param_names(def_id, names.clone());
+        }
     }
 
     // Materialize call signatures and generic instantiations from call
@@ -208,7 +213,14 @@ fn build_outputs(engine: &TypecheckEngine) -> FinalizeOutput {
             },
         );
         if let Some(inst) = generic_inst {
-            builder.record_generic_inst(obligation.call_node, inst);
+            // Intrinsic calls are lowered by compiler intent and do not require
+            // monomorphized function clones, even if their declarations are generic.
+            let skip_monomorph = def_id
+                .and_then(|id| engine.context().def_table.lookup_def(id))
+                .is_some_and(|def| def.is_intrinsic());
+            if !skip_monomorph {
+                builder.record_generic_inst(obligation.call_node, inst);
+            }
         }
     }
 
@@ -850,6 +862,29 @@ fn collect_callable_def_types(engine: &TypecheckEngine) -> std::collections::Has
         for overloads in by_name.values() {
             for sig in overloads {
                 out.insert(sig.def_id, callable_sig_to_fn_type(sig));
+            }
+        }
+    }
+    out
+}
+
+fn collect_callable_type_param_names(
+    engine: &TypecheckEngine,
+) -> std::collections::HashMap<DefId, std::collections::BTreeMap<u32, String>> {
+    let mut out = HashMap::new();
+    for overloads in engine.env().func_sigs.values() {
+        for sig in overloads {
+            if !sig.type_param_var_names.is_empty() {
+                out.insert(sig.def_id, sig.type_param_var_names.clone());
+            }
+        }
+    }
+    for by_name in engine.env().method_sigs.values() {
+        for overloads in by_name.values() {
+            for sig in overloads {
+                if !sig.type_param_var_names.is_empty() {
+                    out.insert(sig.def_id, sig.type_param_var_names.clone());
+                }
             }
         }
     }

@@ -14,7 +14,7 @@ use crate::core::typecheck::errors::{TEK, TypeCheckError};
 use crate::core::typecheck::nominal::NominalKey;
 use crate::core::typecheck::utils::{fn_param_mode, nominal_key_concreteness};
 use crate::core::types::{EnumVariant, FnParam, StructField, TyVarId, Type, TypeCache, TypeId};
-use std::collections::{HashMap, HashSet};
+use std::collections::{BTreeMap, HashMap, HashSet};
 use std::fmt;
 
 type TypeParamMap = HashMap<DefId, TyVarId>;
@@ -921,6 +921,7 @@ pub struct TypeMapBuilder {
     type_table: TypeCache,
     node_type: HashMap<NodeId, TypeId>, // maps node to its type
     def_type: HashMap<Def, TypeId>,     // maps def to its type
+    def_type_param_names: HashMap<DefId, BTreeMap<u32, String>>,
     nominal_keys: HashMap<TypeId, NominalKey>,
     call_sigs: HashMap<NodeId, CallSig>,
     generic_insts: HashMap<NodeId, GenericInst>,
@@ -938,6 +939,7 @@ impl TypeMapBuilder {
             type_table: TypeCache::new(),
             node_type: HashMap::new(),
             def_type: HashMap::new(),
+            def_type_param_names: HashMap::new(),
             nominal_keys: HashMap::new(),
             call_sigs: HashMap::new(),
             generic_insts: HashMap::new(),
@@ -980,6 +982,13 @@ impl TypeMapBuilder {
 
     pub fn record_generic_inst(&mut self, node_id: NodeId, inst: GenericInst) {
         self.generic_insts.insert(node_id, inst);
+    }
+
+    pub fn record_def_type_param_names(&mut self, def_id: DefId, names: BTreeMap<u32, String>) {
+        if names.is_empty() {
+            return;
+        }
+        self.def_type_param_names.insert(def_id, names);
     }
 
     pub fn apply_inference<F>(&mut self, mut apply: F)
@@ -1029,6 +1038,7 @@ impl TypeMapBuilder {
             TypeMap {
                 type_table: self.type_table,
                 def_type: self.def_type,
+                def_type_param_names: self.def_type_param_names,
                 node_type: self.node_type,
                 nominal_keys: self.nominal_keys,
             },
@@ -1079,6 +1089,7 @@ pub struct CallParam {
 pub struct TypeMap {
     type_table: TypeCache,
     def_type: HashMap<Def, TypeId>,
+    def_type_param_names: HashMap<DefId, BTreeMap<u32, String>>,
     node_type: HashMap<NodeId, TypeId>,
     nominal_keys: HashMap<TypeId, NominalKey>,
 }
@@ -1102,6 +1113,10 @@ impl TypeMap {
 
     pub fn lookup_def_type_id(&self, def: &Def) -> Option<TypeId> {
         self.def_type.get(def).copied()
+    }
+
+    pub fn lookup_def_type_param_names(&self, def_id: DefId) -> Option<&BTreeMap<u32, String>> {
+        self.def_type_param_names.get(&def_id)
     }
 
     pub(crate) fn lookup_nominal_key_for_type_id(&self, type_id: TypeId) -> Option<&NominalKey> {

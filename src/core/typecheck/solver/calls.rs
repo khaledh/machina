@@ -397,6 +397,7 @@ fn method_call_candidates(
                     params: method.params.clone(),
                     ret_ty: method.ret_ty.clone(),
                     type_param_count: method.type_param_count,
+                    type_param_var_names: std::collections::BTreeMap::new(),
                     type_param_bounds: method.type_param_bounds.clone(),
                     self_mode: Some(method.self_mode.clone()),
                     impl_trait: Some(trait_name.clone()),

@@ -7,8 +7,7 @@
 //!
 //! Each pass is kept as a small module and executed in fixed order by `run`.
 
-use std::collections::HashMap;
-use std::collections::HashSet;
+use std::collections::{BTreeMap, HashMap, HashSet};
 
 use crate::core::context::{ResolvedContext, TypeCheckedContext};
 use crate::core::diag::Span;
@@ -83,6 +82,7 @@ pub(crate) struct CollectedCallableSig {
     pub(crate) params: Vec<CollectedParamSig>,
     pub(crate) ret_ty: Type,
     pub(crate) type_param_count: usize,
+    pub(crate) type_param_var_names: BTreeMap<u32, String>,
     pub(crate) type_param_bounds: Vec<Option<String>>,
     pub(crate) self_mode: Option<ParamMode>,
     pub(crate) impl_trait: Option<String>,

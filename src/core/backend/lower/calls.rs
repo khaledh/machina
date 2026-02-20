@@ -3,11 +3,12 @@
 use crate::core::backend::lower::LowerToIrError;
 use crate::core::backend::lower::lowerer::{CallInputValue, FuncLowerer, LinearValue};
 use crate::core::diag::Span;
-use crate::core::ir::{Callee, RuntimeFn, ValueId};
-use crate::core::resolve::DefId;
+use crate::core::ir::{Callee, CastKind, RuntimeFn, ValueId};
+use crate::core::resolve::{DefId, DefKind};
 use crate::core::tree::ParamMode;
 use crate::core::tree::{NodeId, semantic as sem};
-use crate::core::types::Type;
+use crate::core::types::{Type, TypeId};
+use std::collections::BTreeMap;
 
 fn drop_def_for_value_expr(expr: &sem::ValueExpr) -> Option<DefId> {
     match &expr.kind {
@@ -29,6 +30,348 @@ fn drop_def_for_place_expr(place: &sem::PlaceExpr) -> Option<DefId> {
 }
 
 impl<'a, 'g> FuncLowerer<'a, 'g> {
+    fn type_of_base_name(name: &str) -> String {
+        name.split('<').next().unwrap_or(name).trim().to_string()
+    }
+
+    fn replace_tyvars_in_text_with(
+        text: &str,
+        vars: &mut Vec<u32>,
+        overrides: Option<&BTreeMap<u32, String>>,
+    ) -> String {
+        let mut out = String::with_capacity(text.len());
+        let mut chars = text.chars().peekable();
+        while let Some(ch) = chars.next() {
+            if ch == 'T' {
+                let mut digits = String::new();
+                while let Some(next) = chars.peek() {
+                    if next.is_ascii_digit() {
+                        digits.push(*next);
+                        chars.next();
+                    } else {
+                        break;
+                    }
+                }
+                if !digits.is_empty()
+                    && let Ok(id) = digits.parse::<u32>()
+                {
+                    out.push_str(&Self::type_of_var_name_with(id, vars, overrides));
+                    continue;
+                }
+                out.push('T');
+                out.push_str(&digits);
+                continue;
+            }
+            out.push(ch);
+        }
+        out
+    }
+
+    fn format_nominal_name_for_type_of_with(
+        name: &str,
+        vars: &mut Vec<u32>,
+        overrides: Option<&BTreeMap<u32, String>>,
+    ) -> String {
+        if !name.contains('<') {
+            return Self::type_of_base_name(name);
+        }
+        Self::replace_tyvars_in_text_with(name, vars, overrides)
+    }
+
+    fn type_of_var_name_with(
+        var_id: u32,
+        vars: &mut Vec<u32>,
+        overrides: Option<&BTreeMap<u32, String>>,
+    ) -> String {
+        if let Some(idx) = vars.iter().position(|id| *id == var_id) {
+            if let Some(name) =
+                overrides.and_then(|names| names.get(&var_id).or_else(|| names.get(&(idx as u32))))
+            {
+                return name.clone();
+            }
+            return format!("T{idx}");
+        }
+        vars.push(var_id);
+        let idx = vars.len() - 1;
+        if let Some(name) =
+            overrides.and_then(|names| names.get(&var_id).or_else(|| names.get(&(idx as u32))))
+        {
+            return name.clone();
+        }
+        format!("T{idx}")
+    }
+
+    fn format_type_for_type_of_with(
+        ty: &Type,
+        vars: &mut Vec<u32>,
+        overrides: Option<&BTreeMap<u32, String>>,
+    ) -> String {
+        match ty {
+            Type::Struct { name, .. } | Type::Enum { name, .. } => {
+                Self::format_nominal_name_for_type_of_with(name, vars, overrides)
+            }
+            Type::Array { elem_ty, dims } => {
+                let dims_str = dims.iter().map(|d| d.to_string()).collect::<Vec<_>>();
+                format!(
+                    "{}[{}]",
+                    Self::format_type_for_type_of_with(elem_ty, vars, overrides),
+                    dims_str.join(", ")
+                )
+            }
+            Type::DynArray { elem_ty } => {
+                format!(
+                    "{}[*]",
+                    Self::format_type_for_type_of_with(elem_ty, vars, overrides)
+                )
+            }
+            Type::Set { elem_ty } => {
+                format!(
+                    "set<{}>",
+                    Self::format_type_for_type_of_with(elem_ty, vars, overrides)
+                )
+            }
+            Type::Map { key_ty, value_ty } => format!(
+                "map<{}, {}>",
+                Self::format_type_for_type_of_with(key_ty, vars, overrides),
+                Self::format_type_for_type_of_with(value_ty, vars, overrides)
+            ),
+            Type::Tuple { field_tys } => {
+                let fields = field_tys
+                    .iter()
+                    .map(|ty| Self::format_type_for_type_of_with(ty, vars, overrides))
+                    .collect::<Vec<_>>();
+                format!("({})", fields.join(", "))
+            }
+            Type::Slice { elem_ty } => {
+                format!(
+                    "{}[]",
+                    Self::format_type_for_type_of_with(elem_ty, vars, overrides)
+                )
+            }
+            Type::Heap { elem_ty } => format!(
+                "{}^",
+                Self::format_type_for_type_of_with(elem_ty, vars, overrides)
+            ),
+            Type::Ref { mutable, elem_ty } => {
+                if *mutable {
+                    format!(
+                        "ref mut {}",
+                        Self::format_type_for_type_of_with(elem_ty, vars, overrides)
+                    )
+                } else {
+                    format!(
+                        "ref {}",
+                        Self::format_type_for_type_of_with(elem_ty, vars, overrides)
+                    )
+                }
+            }
+            Type::Range { elem_ty } => {
+                format!(
+                    "range<{}>",
+                    Self::format_type_for_type_of_with(elem_ty, vars, overrides)
+                )
+            }
+            Type::Pending { response_tys } => format!(
+                "Pending<{}>",
+                response_tys
+                    .iter()
+                    .map(|ty| Self::format_type_for_type_of_with(ty, vars, overrides))
+                    .collect::<Vec<_>>()
+                    .join(" | ")
+            ),
+            Type::ReplyCap { response_tys } => format!(
+                "ReplyCap<{}>",
+                response_tys
+                    .iter()
+                    .map(|ty| Self::format_type_for_type_of_with(ty, vars, overrides))
+                    .collect::<Vec<_>>()
+                    .join(" | ")
+            ),
+            Type::ErrorUnion { ok_ty, err_tys } => {
+                let mut variants = Vec::with_capacity(err_tys.len() + 1);
+                variants.push(Self::format_type_for_type_of_with(ok_ty, vars, overrides));
+                variants.extend(
+                    err_tys
+                        .iter()
+                        .map(|ty| Self::format_type_for_type_of_with(ty, vars, overrides)),
+                );
+                variants.join(" | ")
+            }
+            Type::Fn { params, ret_ty } => {
+                let params_str = params
+                    .iter()
+                    .map(|param| {
+                        let mode = match param.mode {
+                            crate::core::types::FnParamMode::In => "",
+                            crate::core::types::FnParamMode::InOut => "inout ",
+                            crate::core::types::FnParamMode::Out => "out ",
+                            crate::core::types::FnParamMode::Sink => "sink ",
+                        };
+                        format!(
+                            "{}{}",
+                            mode,
+                            Self::format_type_for_type_of_with(&param.ty, vars, overrides)
+                        )
+                    })
+                    .collect::<Vec<_>>()
+                    .join(", ");
+                let ret = Self::format_type_for_type_of_with(ret_ty, vars, overrides);
+                if vars.is_empty() {
+                    format!("fn({params_str}) -> {ret}")
+                } else {
+                    let tparams = vars
+                        .iter()
+                        .enumerate()
+                        .map(|(idx, var_id)| {
+                            overrides
+                                .and_then(|names| {
+                                    names.get(var_id).or_else(|| names.get(&(idx as u32)))
+                                })
+                                .cloned()
+                                .unwrap_or_else(|| format!("T{idx}"))
+                        })
+                        .collect::<Vec<_>>()
+                        .join(", ");
+                    format!("fn<{tparams}>({params_str}) -> {ret}")
+                }
+            }
+            Type::Var(var) => Self::type_of_var_name_with(var.index(), vars, overrides),
+            _ => ty.to_string(),
+        }
+    }
+
+    fn format_type_for_type_of(ty: &Type, vars: &mut Vec<u32>) -> String {
+        Self::format_type_for_type_of_with(ty, vars, None)
+    }
+
+    fn format_nominal_for_type_of(&self, type_id: TypeId) -> Option<String> {
+        let key = self.type_map.lookup_nominal_key_for_type_id(type_id)?;
+        let def = self.def_table.lookup_def(key.def_id)?;
+        if key.type_args.is_empty() {
+            return Some(def.name.clone());
+        }
+        let mut vars = Vec::new();
+        let args = key
+            .type_args
+            .iter()
+            .map(|ty| Self::format_type_for_type_of(ty, &mut vars))
+            .collect::<Vec<_>>()
+            .join(", ");
+        Some(format!("{}<{}>", def.name, args))
+    }
+
+    fn callable_type_param_names_for_type_of(
+        &self,
+        def_id: DefId,
+    ) -> Option<BTreeMap<u32, String>> {
+        self.type_map.lookup_def_type_param_names(def_id).cloned()
+    }
+
+    fn type_of_function_symbol_name(&self, args: &[sem::CallArg]) -> Option<String> {
+        if args.len() != 1 {
+            return None;
+        }
+        let expr = match &args[0] {
+            sem::CallArg::In { expr, .. } | sem::CallArg::Sink { expr, .. } => expr,
+            sem::CallArg::InOut { .. } | sem::CallArg::Out { .. } => return None,
+        };
+        let place = Self::type_of_symbol_place(expr)?;
+        let sem::PlaceExprKind::Var { def_id, .. } = &place.kind else {
+            return None;
+        };
+        let def = self.def_table.lookup_def(*def_id)?;
+        if !matches!(def.kind, DefKind::FuncDef { .. } | DefKind::FuncDecl { .. }) {
+            return None;
+        }
+        let fn_ty = self.type_map.lookup_def_type(def)?;
+        let overrides = self.callable_type_param_names_for_type_of(*def_id);
+        let mut vars = Vec::new();
+        Some(Self::format_type_for_type_of_with(
+            &fn_ty,
+            &mut vars,
+            overrides.as_ref(),
+        ))
+    }
+
+    fn type_of_symbol_place<'b>(expr: &'b sem::ValueExpr) -> Option<&'b sem::PlaceExpr> {
+        let mut current = expr;
+        loop {
+            match &current.kind {
+                sem::ValueExprKind::Load { place }
+                | sem::ValueExprKind::Move { place }
+                | sem::ValueExprKind::ImplicitMove { place } => return Some(place),
+                // Type-check inserts coercions around function symbols; peel them
+                // to recover the underlying definition.
+                sem::ValueExprKind::Coerce { expr, .. } => {
+                    current = expr;
+                }
+                _ => return None,
+            }
+        }
+    }
+
+    fn lower_type_of_intrinsic(
+        &mut self,
+        expr: &sem::ValueExpr,
+        args: &[sem::CallArg],
+        call_plan: &sem::CallPlan,
+    ) -> Result<Option<LinearValue>, LowerToIrError> {
+        // Function items are pure symbols; lowering them as runtime values is not
+        // required for `type_of`, so read their polymorphic signature directly.
+        if let Some(type_name) = self.type_of_function_symbol_name(args) {
+            let value = self.lower_static_string_value(expr.ty, type_name.as_bytes());
+            return Ok(Some(value));
+        }
+
+        let Some(arg_values) = self.lower_call_arg_values(args)? else {
+            return Ok(None);
+        };
+        if arg_values.len() != 1 {
+            panic!(
+                "backend type_of intrinsic expects exactly one arg, got {}",
+                arg_values.len()
+            );
+        }
+
+        let arg_type_id = match &args[0] {
+            sem::CallArg::In { expr, .. } | sem::CallArg::Sink { expr, .. } => expr.ty,
+            sem::CallArg::InOut { place, .. } | sem::CallArg::Out { place, .. } => place.ty,
+        };
+        let type_name = self
+            .format_nominal_for_type_of(arg_type_id)
+            .unwrap_or_else(|| Self::format_type_for_type_of(&arg_values[0].ty, &mut Vec::new()));
+        let value = self.lower_static_string_value(expr.ty, type_name.as_bytes());
+        self.apply_call_drop_effects(call_plan, args, None, &arg_values)?;
+        Ok(Some(value))
+    }
+
+    fn lower_static_string_value(&mut self, string_ty_id: TypeId, bytes: &[u8]) -> LinearValue {
+        let string_ty = self.type_lowerer.lower_type_id(string_ty_id);
+        let slot = self.alloc_value_slot(string_ty);
+
+        let u8_ty = self.type_lowerer.lower_type(&Type::uint(8));
+        let u8_ptr_ty = self.type_lowerer.ptr_to(u8_ty);
+        let ptr_val = if bytes.is_empty() {
+            let u64_ty = self.type_lowerer.lower_type(&Type::uint(64));
+            let zero = self.builder.const_int(0, false, 64, u64_ty);
+            self.builder.cast(CastKind::IntToPtr, zero, u8_ptr_ty)
+        } else {
+            let global_id = self.add_global_bytes(bytes.to_vec());
+            self.builder.const_global_addr(global_id, u8_ptr_ty)
+        };
+
+        let len_ty = self.type_lowerer.lower_type(&Type::uint(32));
+        let len_val = self
+            .builder
+            .const_int(bytes.len() as i128, false, 32, len_ty);
+        let cap_val = self.builder.const_int(0, false, 32, len_ty);
+
+        self.store_field(slot.addr, 0, u8_ptr_ty, ptr_val);
+        self.store_field(slot.addr, 1, len_ty, len_val);
+        self.store_field(slot.addr, 2, len_ty, cap_val);
+        self.load_slot(&slot)
+    }
+
     fn lower_machine_payload_pack_intrinsic(
         &mut self,
         expr: &sem::ValueExpr,
@@ -141,6 +484,11 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
                     return None;
                 }
             }
+            sem::CallTarget::Intrinsic(sem::IntrinsicCall::TypeOf) => {
+                // `type_of` is compile-time metadata extraction; it does not need
+                // argument conversion checks against callee parameter types.
+                return None;
+            }
             sem::CallTarget::Intrinsic(_) | sem::CallTarget::Runtime(_) => {
                 let callee_expr = callee_expr?;
                 self.type_map.type_table().get(callee_expr.ty).clone()
@@ -221,6 +569,9 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
             sem::CallTarget::Intrinsic(intrinsic) => match intrinsic {
                 sem::IntrinsicCall::StringLen => {
                     panic!("backend call expr cannot lower string len without a receiver");
+                }
+                sem::IntrinsicCall::TypeOf => {
+                    return self.lower_type_of_intrinsic(expr, args, &call_plan);
                 }
                 sem::IntrinsicCall::MachinePayloadPack => {
                     return self.lower_machine_payload_pack_intrinsic(expr, args, &call_plan);
@@ -362,6 +713,9 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
                 // String length is a field load; avoid emitting a runtime call.
                 self.lower_string_len_method(expr.span, receiver, receiver_value)
                     .map(Some)
+            }
+            sem::IntrinsicCall::TypeOf => {
+                panic!("backend type_of intrinsic cannot lower with a method receiver");
             }
             sem::IntrinsicCall::DynArrayAppend => {
                 let Some(mut arg_values) = self.lower_call_arg_values(args)? else {

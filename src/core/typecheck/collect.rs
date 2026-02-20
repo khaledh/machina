@@ -10,7 +10,7 @@
 //! declaration-only pass so downstream phases can reason over a stable symbol
 //! environment.
 
-use std::collections::{HashMap, HashSet};
+use std::collections::{BTreeMap, HashMap, HashSet};
 
 use crate::core::diag::Span;
 use crate::core::resolve::{DefId, ImportedCallableSig, ImportedFacts, ImportedTraitSig};
@@ -351,6 +351,7 @@ fn imported_callable_sig_to_collected(
             .collect(),
         ret_ty: imported.ret_ty.clone(),
         type_param_count: 0,
+        type_param_var_names: BTreeMap::new(),
         type_param_bounds: Vec::new(),
         self_mode: None,
         impl_trait: None,
@@ -664,6 +665,17 @@ fn collect_callable_sig(
         params,
         ret_ty,
         type_param_count: sig.type_params.len(),
+        type_param_var_names: sig
+            .type_params
+            .iter()
+            .filter_map(|type_param| {
+                let var = type_param_map
+                    .as_ref()
+                    .and_then(|map| map.get(&type_param.def_id))
+                    .copied()?;
+                Some((var.index(), type_param.ident.clone()))
+            })
+            .collect(),
         type_param_bounds: type_param_bounds(&sig.type_params),
         self_mode,
         impl_trait,
