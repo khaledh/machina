@@ -3,17 +3,20 @@
 //! This module owns completion context detection, scope/member candidate
 //! collection, and fallback source synthesis for incomplete member probes.
 
+mod site;
+mod source_probe;
+
 use std::collections::{HashMap, HashSet};
 
 use crate::core::capsule::ModuleId;
 use crate::core::diag::{Position, Span};
 use crate::core::resolve::{DefId, DefKind, UNKNOWN_DEF_ID};
 use crate::core::tree::resolved as res;
-use crate::core::tree::visit::Visitor;
 use crate::core::tree::{BlockItem, NodeId, StmtExprKind};
 use crate::core::types::Type;
 use crate::services::analysis::results::{CompletionItem, CompletionKind};
-use crate::services::analysis::syntax_index::{node_at_span, position_leq};
+use crate::services::analysis::syntax_index::position_leq;
+use site::{CompletionSite, CompletionSiteKind, classify_completion_site};
 
 pub(crate) fn collect(
     source: &str,
@@ -21,7 +24,13 @@ pub(crate) fn collect(
     resolved: &crate::core::context::ResolvedContext,
     typed: Option<&crate::core::context::TypeCheckedContext>,
 ) -> Vec<CompletionItem> {
-    let site = classify_completion_site(source, query_span, resolved, typed);
+    let site = classify_completion_site(
+        source,
+        query_span,
+        resolved,
+        typed,
+        enclosing_callable_def_id,
+    );
     let items = dispatch_site_completions(&site, query_span.start, resolved);
     completion_post_pass(items, site.prefix())
 }
@@ -30,88 +39,7 @@ pub(crate) fn synthesize_member_completion_source(
     source: &str,
     cursor: Position,
 ) -> Option<String> {
-    let offset = offset_for_position(source, cursor)?;
-    if offset == 0 || offset > source.len() {
-        return None;
-    }
-
-    let bytes = source.as_bytes();
-    let mut dot_probe = offset;
-    while dot_probe > 0 && bytes[dot_probe - 1].is_ascii_whitespace() {
-        dot_probe -= 1;
-    }
-    if dot_probe == 0 || bytes[dot_probe - 1] != b'.' {
-        return None;
-    }
-
-    let mut synthesized = String::with_capacity(source.len() + 16);
-    synthesized.push_str(&source[..offset]);
-    synthesized.push_str("__mc_completion");
-    if should_terminate_member_probe(source, offset) {
-        synthesized.push(';');
-    }
-    synthesized.push_str(&source[offset..]);
-    Some(synthesized)
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum CompletionSiteKind {
-    Scope,
-    Member,
-    QualifiedPath,
-    RequiresPath,
-    TypeExpr,
-    Pattern,
-}
-
-#[derive(Debug, Clone)]
-enum CompletionSite {
-    Scope {
-        prefix: String,
-        cursor: Position,
-    },
-    Member {
-        prefix: String,
-        receiver_ty: Type,
-        caller_def_id: Option<DefId>,
-    },
-    QualifiedPath {
-        prefix: String,
-        path_segments: Vec<String>,
-    },
-    RequiresPath {
-        prefix: String,
-    },
-    TypeExpr {
-        prefix: String,
-    },
-    Pattern {
-        prefix: String,
-    },
-}
-
-impl CompletionSite {
-    fn kind(&self) -> CompletionSiteKind {
-        match self {
-            Self::Scope { .. } => CompletionSiteKind::Scope,
-            Self::Member { .. } => CompletionSiteKind::Member,
-            Self::QualifiedPath { .. } => CompletionSiteKind::QualifiedPath,
-            Self::RequiresPath { .. } => CompletionSiteKind::RequiresPath,
-            Self::TypeExpr { .. } => CompletionSiteKind::TypeExpr,
-            Self::Pattern { .. } => CompletionSiteKind::Pattern,
-        }
-    }
-
-    fn prefix(&self) -> &str {
-        match self {
-            Self::Scope { prefix, .. }
-            | Self::Member { prefix, .. }
-            | Self::QualifiedPath { prefix, .. }
-            | Self::RequiresPath { prefix }
-            | Self::TypeExpr { prefix }
-            | Self::Pattern { prefix } => prefix,
-        }
-    }
+    source_probe::synthesize_member_completion_source(source, cursor)
 }
 
 struct CompletionProviders {
@@ -136,168 +64,6 @@ impl Default for CompletionProviders {
             pattern: provide_pattern_completions,
         }
     }
-}
-
-#[derive(Debug, Clone)]
-struct PrefixProbe {
-    prefix: String,
-    prefix_start: usize,
-    dot_probe: usize,
-}
-
-fn classify_completion_site(
-    source: &str,
-    query_span: Span,
-    resolved: &crate::core::context::ResolvedContext,
-    typed: Option<&crate::core::context::TypeCheckedContext>,
-) -> CompletionSite {
-    let cursor = query_span.start;
-    let offset = offset_for_position(source, query_span.start).unwrap_or(source.len());
-    let probe = prefix_probe(source, offset);
-
-    if let Some(site) = classify_member_site(source, query_span, typed, &probe) {
-        return site;
-    }
-    if requires_site_at_cursor(&resolved.module, cursor) {
-        return CompletionSite::RequiresPath {
-            prefix: probe.prefix,
-        };
-    }
-    if let Some(site) = classify_qualified_path_site(source, offset, &probe) {
-        return site;
-    }
-    let pattern_classifier = PatternAndTypeClassifier::classify(&resolved.module, cursor);
-    if pattern_classifier.in_type_expr {
-        return CompletionSite::TypeExpr {
-            prefix: probe.prefix,
-        };
-    }
-    if pattern_classifier.in_pattern {
-        return CompletionSite::Pattern {
-            prefix: probe.prefix,
-        };
-    }
-
-    CompletionSite::Scope {
-        prefix: probe.prefix,
-        cursor,
-    }
-}
-
-fn prefix_probe(source: &str, offset: usize) -> PrefixProbe {
-    let bytes = source.as_bytes();
-    let mut prefix_start = offset;
-    while prefix_start > 0 && is_ident_byte(bytes[prefix_start - 1]) {
-        prefix_start -= 1;
-    }
-    let prefix = source[prefix_start..offset.min(source.len())].to_string();
-
-    let mut dot_probe = prefix_start;
-    while dot_probe > 0 && bytes[dot_probe - 1].is_ascii_whitespace() {
-        dot_probe -= 1;
-    }
-
-    PrefixProbe {
-        prefix,
-        prefix_start,
-        dot_probe,
-    }
-}
-
-fn classify_member_site(
-    source: &str,
-    query_span: Span,
-    typed: Option<&crate::core::context::TypeCheckedContext>,
-    probe: &PrefixProbe,
-) -> Option<CompletionSite> {
-    let bytes = source.as_bytes();
-    if probe.dot_probe == 0 || bytes[probe.dot_probe - 1] != b'.' {
-        return None;
-    }
-    let Some(typed) = typed else {
-        return None;
-    };
-
-    let mut recv_end = probe.dot_probe - 1;
-    while recv_end > 0 && bytes[recv_end - 1].is_ascii_whitespace() {
-        recv_end -= 1;
-    }
-    if recv_end == 0 {
-        return None;
-    }
-    let receiver_char = recv_end - 1;
-    let Some(receiver_span) = single_char_span(source, receiver_char) else {
-        return None;
-    };
-    let Some(node_id) = node_at_span(&typed.module, receiver_span) else {
-        return None;
-    };
-    let Some(receiver_ty) = typed.type_map.lookup_node_type(node_id) else {
-        return None;
-    };
-
-    Some(CompletionSite::Member {
-        prefix: probe.prefix.clone(),
-        receiver_ty,
-        caller_def_id: enclosing_callable_def_id(&typed.module, query_span.start),
-    })
-}
-
-fn classify_qualified_path_site(
-    source: &str,
-    offset: usize,
-    probe: &PrefixProbe,
-) -> Option<CompletionSite> {
-    let path_segments = qualified_path_segments(source, offset, probe.prefix_start)?;
-    Some(CompletionSite::QualifiedPath {
-        prefix: probe.prefix.clone(),
-        path_segments,
-    })
-}
-
-fn qualified_path_segments(
-    source: &str,
-    offset: usize,
-    prefix_start: usize,
-) -> Option<Vec<String>> {
-    let bytes = source.as_bytes();
-    let mut cursor = prefix_start.min(offset);
-    let mut segments = Vec::<String>::new();
-
-    loop {
-        while cursor > 0 && bytes[cursor - 1].is_ascii_whitespace() {
-            cursor -= 1;
-        }
-        if cursor < 2 || bytes[cursor - 1] != b':' || bytes[cursor - 2] != b':' {
-            break;
-        }
-        cursor -= 2;
-
-        while cursor > 0 && bytes[cursor - 1].is_ascii_whitespace() {
-            cursor -= 1;
-        }
-        let seg_end = cursor;
-        while cursor > 0 && is_ident_byte(bytes[cursor - 1]) {
-            cursor -= 1;
-        }
-        if seg_end == cursor {
-            return None;
-        }
-        segments.push(source[cursor..seg_end].to_string());
-    }
-
-    if segments.is_empty() {
-        return None;
-    }
-    segments.reverse();
-    Some(segments)
-}
-
-fn requires_site_at_cursor(module: &res::Module, cursor: Position) -> bool {
-    module
-        .requires
-        .iter()
-        .any(|req| span_contains_pos(req.span, cursor))
 }
 
 fn dispatch_site_completions(
@@ -391,56 +157,6 @@ fn provide_pattern_completions(
     _resolved: &crate::core::context::ResolvedContext,
 ) -> Vec<CompletionItem> {
     Vec::new()
-}
-
-struct PatternAndTypeClassifier {
-    cursor: Position,
-    in_type_expr: bool,
-    in_pattern: bool,
-}
-
-impl PatternAndTypeClassifier {
-    fn classify(module: &res::Module, cursor: Position) -> Self {
-        let mut classifier = Self {
-            cursor,
-            in_type_expr: false,
-            in_pattern: false,
-        };
-        classifier.visit_module(module);
-        classifier
-    }
-}
-
-impl Visitor<DefId, ()> for PatternAndTypeClassifier {
-    fn visit_type_expr(&mut self, type_expr: &crate::core::tree::TypeExpr<DefId>) {
-        if span_contains_pos(type_expr.span, self.cursor) {
-            self.in_type_expr = true;
-        }
-        crate::core::tree::visit::walk_type_expr(self, type_expr);
-    }
-
-    fn visit_bind_pattern(&mut self, pattern: &crate::core::tree::BindPattern<DefId>) {
-        if span_contains_pos(pattern.span, self.cursor) {
-            self.in_pattern = true;
-        }
-        crate::core::tree::visit::walk_bind_pattern(self, pattern);
-    }
-
-    fn visit_match_pattern(&mut self, pattern: &crate::core::tree::MatchPattern<DefId>) {
-        let span = match pattern {
-            crate::core::tree::MatchPattern::Wildcard { span }
-            | crate::core::tree::MatchPattern::BoolLit { span, .. }
-            | crate::core::tree::MatchPattern::IntLit { span, .. }
-            | crate::core::tree::MatchPattern::Binding { span, .. }
-            | crate::core::tree::MatchPattern::TypedBinding { span, .. }
-            | crate::core::tree::MatchPattern::Tuple { span, .. }
-            | crate::core::tree::MatchPattern::EnumVariant { span, .. } => *span,
-        };
-        if span_contains_pos(span, self.cursor) {
-            self.in_pattern = true;
-        }
-        crate::core::tree::visit::walk_match_pattern(self, pattern);
-    }
 }
 
 fn scope_completions(
@@ -1133,94 +849,6 @@ fn span_width(span: Span) -> usize {
     span.end.offset.saturating_sub(span.start.offset)
 }
 
-fn is_ident_byte(byte: u8) -> bool {
-    byte == b'_' || byte.is_ascii_alphanumeric()
-}
-
-fn offset_for_position(source: &str, pos: crate::core::diag::Position) -> Option<usize> {
-    if pos.line == 0 || pos.column == 0 {
-        return Some(0);
-    }
-    let mut line = 1usize;
-    let mut col = 1usize;
-    for (offset, ch) in source.char_indices() {
-        if line == pos.line && col == pos.column {
-            return Some(offset);
-        }
-        if ch == '\n' {
-            line += 1;
-            col = 1;
-        } else {
-            col += 1;
-        }
-    }
-    (line == pos.line && col == pos.column).then_some(source.len())
-}
-
-fn position_for_offset(source: &str, target_offset: usize) -> Option<crate::core::diag::Position> {
-    if target_offset > source.len() {
-        return None;
-    }
-    let mut line = 1usize;
-    let mut column = 1usize;
-    for (offset, ch) in source.char_indices() {
-        if offset == target_offset {
-            return Some(crate::core::diag::Position {
-                offset: target_offset,
-                line,
-                column,
-            });
-        }
-        if ch == '\n' {
-            line += 1;
-            column = 1;
-        } else {
-            column += 1;
-        }
-    }
-    if target_offset == source.len() {
-        return Some(crate::core::diag::Position {
-            offset: target_offset,
-            line,
-            column,
-        });
-    }
-    None
-}
-
-fn single_char_span(source: &str, offset: usize) -> Option<Span> {
-    let start = position_for_offset(source, offset)?;
-    let mut next_offset = source.len();
-    for (idx, _) in source[offset..].char_indices().skip(1) {
-        next_offset = offset + idx;
-        break;
-    }
-    if next_offset == source.len() && offset < source.len() {
-        next_offset = source.len();
-    }
-    let end = position_for_offset(source, next_offset)?;
-    Some(Span { start, end })
-}
-
-fn should_terminate_member_probe(source: &str, offset: usize) -> bool {
-    let mut i = offset;
-    let bytes = source.as_bytes();
-    while i < bytes.len() {
-        match bytes[i] {
-            b' ' | b'\t' => {
-                i += 1;
-            }
-            b'/' if i + 1 < bytes.len() && bytes[i + 1] == b'/' => {
-                return true;
-            }
-            b'\r' | b'\n' | b'}' => return true,
-            b';' => return false,
-            _ => return false,
-        }
-    }
-    true
-}
-
 #[cfg(test)]
 mod tests {
     use std::collections::HashMap;
@@ -1232,7 +860,8 @@ mod tests {
     use crate::core::diag::{Position, Span};
     use crate::core::tree::NodeIdGen;
 
-    use super::{CompletionSite, classify_completion_site, position_for_offset};
+    use super::source_probe::position_for_offset;
+    use super::{CompletionSite, classify_completion_site, enclosing_callable_def_id};
 
     #[test]
     fn classify_site_detects_member_context() {
@@ -1250,7 +879,13 @@ fn main() {
 "#;
         let (resolved, typed) = resolved_and_typed(source);
         let cursor = cursor_at_end_of(source, "p.");
-        let site = classify_completion_site(source, cursor, &resolved, Some(&typed));
+        let site = classify_completion_site(
+            source,
+            cursor,
+            &resolved,
+            Some(&typed),
+            enclosing_callable_def_id,
+        );
         assert!(matches!(site, CompletionSite::Member { .. }));
     }
 
@@ -1265,7 +900,8 @@ fn main() {}
 "#;
         let resolved = resolved_only(source);
         let cursor = cursor_at_end_of(source, "std::i");
-        let site = classify_completion_site(source, cursor, &resolved, None);
+        let site =
+            classify_completion_site(source, cursor, &resolved, None, enclosing_callable_def_id);
         assert!(matches!(site, CompletionSite::RequiresPath { .. }));
     }
 
@@ -1278,7 +914,8 @@ fn main() {
 "#;
         let resolved = resolved_only(source);
         let cursor = cursor_at_end_of(source, "u64");
-        let site = classify_completion_site(source, cursor, &resolved, None);
+        let site =
+            classify_completion_site(source, cursor, &resolved, None, enclosing_callable_def_id);
         assert!(matches!(site, CompletionSite::TypeExpr { .. }));
     }
 
@@ -1293,7 +930,8 @@ fn f() -> u64 {
 "#;
         let resolved = resolved_only(source);
         let cursor = cursor_at_end_of(source, "valu");
-        let site = classify_completion_site(source, cursor, &resolved, None);
+        let site =
+            classify_completion_site(source, cursor, &resolved, None, enclosing_callable_def_id);
         assert!(matches!(site, CompletionSite::Pattern { .. }));
     }
 
@@ -1309,7 +947,8 @@ fn main() -> u64 {
 "#;
         let resolved = resolved_only(source);
         let cursor = cursor_at_end_of(source, "Flag::Of");
-        let site = classify_completion_site(source, cursor, &resolved, None);
+        let site =
+            classify_completion_site(source, cursor, &resolved, None, enclosing_callable_def_id);
         assert!(matches!(site, CompletionSite::QualifiedPath { .. }));
     }
 
