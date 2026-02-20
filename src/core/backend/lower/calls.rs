@@ -7,7 +7,7 @@ use crate::core::ir::{Callee, CastKind, RuntimeFn, ValueId};
 use crate::core::resolve::{DefId, DefKind};
 use crate::core::tree::ParamMode;
 use crate::core::tree::{NodeId, semantic as sem};
-use crate::core::types::{Type, TypeId};
+use crate::core::types::{Type, TypeId, TypeRenderConfig, render_type};
 use std::collections::BTreeMap;
 
 fn drop_def_for_value_expr(expr: &sem::ValueExpr) -> Option<DefId> {
@@ -30,218 +30,15 @@ fn drop_def_for_place_expr(place: &sem::PlaceExpr) -> Option<DefId> {
 }
 
 impl<'a, 'g> FuncLowerer<'a, 'g> {
-    fn type_of_base_name(name: &str) -> String {
-        name.split('<').next().unwrap_or(name).trim().to_string()
-    }
-
-    fn replace_tyvars_in_text_with(
-        text: &str,
-        vars: &mut Vec<u32>,
-        overrides: Option<&BTreeMap<u32, String>>,
-    ) -> String {
-        let mut out = String::with_capacity(text.len());
-        let mut chars = text.chars().peekable();
-        while let Some(ch) = chars.next() {
-            if ch == 'T' {
-                let mut digits = String::new();
-                while let Some(next) = chars.peek() {
-                    if next.is_ascii_digit() {
-                        digits.push(*next);
-                        chars.next();
-                    } else {
-                        break;
-                    }
-                }
-                if !digits.is_empty()
-                    && let Ok(id) = digits.parse::<u32>()
-                {
-                    out.push_str(&Self::type_of_var_name_with(id, vars, overrides));
-                    continue;
-                }
-                out.push('T');
-                out.push_str(&digits);
-                continue;
-            }
-            out.push(ch);
-        }
-        out
-    }
-
-    fn format_nominal_name_for_type_of_with(
-        name: &str,
-        vars: &mut Vec<u32>,
-        overrides: Option<&BTreeMap<u32, String>>,
-    ) -> String {
-        if !name.contains('<') {
-            return Self::type_of_base_name(name);
-        }
-        Self::replace_tyvars_in_text_with(name, vars, overrides)
-    }
-
-    fn type_of_var_name_with(
-        var_id: u32,
-        vars: &mut Vec<u32>,
-        overrides: Option<&BTreeMap<u32, String>>,
-    ) -> String {
-        if let Some(idx) = vars.iter().position(|id| *id == var_id) {
-            if let Some(name) =
-                overrides.and_then(|names| names.get(&var_id).or_else(|| names.get(&(idx as u32))))
-            {
-                return name.clone();
-            }
-            return format!("T{idx}");
-        }
-        vars.push(var_id);
-        let idx = vars.len() - 1;
-        if let Some(name) =
-            overrides.and_then(|names| names.get(&var_id).or_else(|| names.get(&(idx as u32))))
-        {
-            return name.clone();
-        }
-        format!("T{idx}")
-    }
-
-    fn format_type_for_type_of_with(
-        ty: &Type,
-        vars: &mut Vec<u32>,
-        overrides: Option<&BTreeMap<u32, String>>,
-    ) -> String {
-        match ty {
-            Type::Struct { name, .. } | Type::Enum { name, .. } => {
-                Self::format_nominal_name_for_type_of_with(name, vars, overrides)
-            }
-            Type::Array { elem_ty, dims } => {
-                let dims_str = dims.iter().map(|d| d.to_string()).collect::<Vec<_>>();
-                format!(
-                    "{}[{}]",
-                    Self::format_type_for_type_of_with(elem_ty, vars, overrides),
-                    dims_str.join(", ")
-                )
-            }
-            Type::DynArray { elem_ty } => {
-                format!(
-                    "{}[*]",
-                    Self::format_type_for_type_of_with(elem_ty, vars, overrides)
-                )
-            }
-            Type::Set { elem_ty } => {
-                format!(
-                    "set<{}>",
-                    Self::format_type_for_type_of_with(elem_ty, vars, overrides)
-                )
-            }
-            Type::Map { key_ty, value_ty } => format!(
-                "map<{}, {}>",
-                Self::format_type_for_type_of_with(key_ty, vars, overrides),
-                Self::format_type_for_type_of_with(value_ty, vars, overrides)
-            ),
-            Type::Tuple { field_tys } => {
-                let fields = field_tys
-                    .iter()
-                    .map(|ty| Self::format_type_for_type_of_with(ty, vars, overrides))
-                    .collect::<Vec<_>>();
-                format!("({})", fields.join(", "))
-            }
-            Type::Slice { elem_ty } => {
-                format!(
-                    "{}[]",
-                    Self::format_type_for_type_of_with(elem_ty, vars, overrides)
-                )
-            }
-            Type::Heap { elem_ty } => format!(
-                "{}^",
-                Self::format_type_for_type_of_with(elem_ty, vars, overrides)
-            ),
-            Type::Ref { mutable, elem_ty } => {
-                if *mutable {
-                    format!(
-                        "ref mut {}",
-                        Self::format_type_for_type_of_with(elem_ty, vars, overrides)
-                    )
-                } else {
-                    format!(
-                        "ref {}",
-                        Self::format_type_for_type_of_with(elem_ty, vars, overrides)
-                    )
-                }
-            }
-            Type::Range { elem_ty } => {
-                format!(
-                    "range<{}>",
-                    Self::format_type_for_type_of_with(elem_ty, vars, overrides)
-                )
-            }
-            Type::Pending { response_tys } => format!(
-                "Pending<{}>",
-                response_tys
-                    .iter()
-                    .map(|ty| Self::format_type_for_type_of_with(ty, vars, overrides))
-                    .collect::<Vec<_>>()
-                    .join(" | ")
-            ),
-            Type::ReplyCap { response_tys } => format!(
-                "ReplyCap<{}>",
-                response_tys
-                    .iter()
-                    .map(|ty| Self::format_type_for_type_of_with(ty, vars, overrides))
-                    .collect::<Vec<_>>()
-                    .join(" | ")
-            ),
-            Type::ErrorUnion { ok_ty, err_tys } => {
-                let mut variants = Vec::with_capacity(err_tys.len() + 1);
-                variants.push(Self::format_type_for_type_of_with(ok_ty, vars, overrides));
-                variants.extend(
-                    err_tys
-                        .iter()
-                        .map(|ty| Self::format_type_for_type_of_with(ty, vars, overrides)),
-                );
-                variants.join(" | ")
-            }
-            Type::Fn { params, ret_ty } => {
-                let params_str = params
-                    .iter()
-                    .map(|param| {
-                        let mode = match param.mode {
-                            crate::core::types::FnParamMode::In => "",
-                            crate::core::types::FnParamMode::InOut => "inout ",
-                            crate::core::types::FnParamMode::Out => "out ",
-                            crate::core::types::FnParamMode::Sink => "sink ",
-                        };
-                        format!(
-                            "{}{}",
-                            mode,
-                            Self::format_type_for_type_of_with(&param.ty, vars, overrides)
-                        )
-                    })
-                    .collect::<Vec<_>>()
-                    .join(", ");
-                let ret = Self::format_type_for_type_of_with(ret_ty, vars, overrides);
-                if vars.is_empty() {
-                    format!("fn({params_str}) -> {ret}")
-                } else {
-                    let tparams = vars
-                        .iter()
-                        .enumerate()
-                        .map(|(idx, var_id)| {
-                            overrides
-                                .and_then(|names| {
-                                    names.get(var_id).or_else(|| names.get(&(idx as u32)))
-                                })
-                                .cloned()
-                                .unwrap_or_else(|| format!("T{idx}"))
-                        })
-                        .collect::<Vec<_>>()
-                        .join(", ");
-                    format!("fn<{tparams}>({params_str}) -> {ret}")
-                }
-            }
-            Type::Var(var) => Self::type_of_var_name_with(var.index(), vars, overrides),
-            _ => ty.to_string(),
-        }
-    }
-
-    fn format_type_for_type_of(ty: &Type, vars: &mut Vec<u32>) -> String {
-        Self::format_type_for_type_of_with(ty, vars, None)
+    fn render_type_for_type_of(ty: &Type, overrides: Option<&BTreeMap<u32, String>>) -> String {
+        render_type(
+            ty,
+            &TypeRenderConfig {
+                show_in_mode: false,
+                type_var_names: overrides,
+                nominal_name_map: None,
+            },
+        )
     }
 
     fn format_nominal_for_type_of(&self, type_id: TypeId) -> Option<String> {
@@ -250,11 +47,10 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
         if key.type_args.is_empty() {
             return Some(def.name.clone());
         }
-        let mut vars = Vec::new();
         let args = key
             .type_args
             .iter()
-            .map(|ty| Self::format_type_for_type_of(ty, &mut vars))
+            .map(|ty| Self::render_type_for_type_of(ty, None))
             .collect::<Vec<_>>()
             .join(", ");
         Some(format!("{}<{}>", def.name, args))
@@ -285,12 +81,7 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
         }
         let fn_ty = self.type_map.lookup_def_type(def)?;
         let overrides = self.callable_type_param_names_for_type_of(*def_id);
-        let mut vars = Vec::new();
-        Some(Self::format_type_for_type_of_with(
-            &fn_ty,
-            &mut vars,
-            overrides.as_ref(),
-        ))
+        Some(Self::render_type_for_type_of(&fn_ty, overrides.as_ref()))
     }
 
     fn type_of_symbol_place<'b>(expr: &'b sem::ValueExpr) -> Option<&'b sem::PlaceExpr> {
@@ -339,7 +130,7 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
         };
         let type_name = self
             .format_nominal_for_type_of(arg_type_id)
-            .unwrap_or_else(|| Self::format_type_for_type_of(&arg_values[0].ty, &mut Vec::new()));
+            .unwrap_or_else(|| Self::render_type_for_type_of(&arg_values[0].ty, None));
         let value = self.lower_static_string_value(expr.ty, type_name.as_bytes());
         self.apply_call_drop_effects(call_plan, args, None, &arg_values)?;
         Ok(Some(value))

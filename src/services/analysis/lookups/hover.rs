@@ -9,7 +9,8 @@ use std::path::Path;
 
 use crate::core::diag::{Position, Span};
 use crate::core::resolve::{DefId, DefTable, UNKNOWN_DEF_ID};
-use crate::core::types::Type;
+use crate::core::typecheck::type_map::TypeMap;
+use crate::core::types::{Type, TypeRenderConfig, render_type};
 use crate::services::analysis::pipeline::LookupState;
 use crate::services::analysis::results::HoverInfo;
 use crate::services::analysis::syntax_index::{
@@ -18,7 +19,6 @@ use crate::services::analysis::syntax_index::{
 
 use super::TypestateNameDemangler;
 use super::definition::typestate_role_def_at_span;
-use super::fn_param_mode_name;
 
 pub(crate) fn hover_at_span_in_file(
     state: &LookupState,
@@ -85,7 +85,13 @@ fn try_call_site_hover(
         return None;
     }
     let ty = typed.type_map.lookup_def_type(def);
-    let display = format_hover_label(Some(&def.name), ty.as_ref(), &typed.def_table);
+    let display = format_hover_label(
+        Some(&def.name),
+        ty.as_ref(),
+        Some(def_id),
+        Some(&typed.type_map),
+        &typed.def_table,
+    );
     Some(HoverInfo {
         node_id: call.callee_node_id,
         span: query_span,
@@ -150,7 +156,8 @@ fn try_node_hover(
         if let (Some(query_ident), Some(ty)) = (query_ident, ty.as_ref())
             && let Some(field_ty) = field_type_in_struct(ty, query_ident)
         {
-            let field_ty_display = demangler.demangle_text(&field_ty.to_string());
+            let field_ty_display =
+                format_type_for_hover(field_ty, None, Some(&typed.type_map), &demangler);
             let info = HoverInfo {
                 node_id,
                 span: query_span,
@@ -163,7 +170,13 @@ fn try_node_hover(
             continue;
         }
 
-        let display = format_hover_label(def_name.as_deref(), ty.as_ref(), &typed.def_table);
+        let display = format_hover_label(
+            def_name.as_deref(),
+            ty.as_ref(),
+            def_id,
+            Some(&typed.type_map),
+            &typed.def_table,
+        );
         let score =
             hover_candidate_score(def_name.as_deref(), ty.is_some(), query_ident, &demangler);
         let info = HoverInfo {
@@ -198,7 +211,13 @@ fn try_typestate_role_hover(
     {
         return None;
     }
-    let display = format_hover_label(def_name.as_deref(), None, &typed.def_table);
+    let display = format_hover_label(
+        def_name.as_deref(),
+        None,
+        Some(def_id),
+        Some(&typed.type_map),
+        &typed.def_table,
+    );
     Some(HoverInfo {
         node_id: typed
             .def_table
@@ -286,7 +305,13 @@ fn try_resolved_hover(
     {
         return None;
     }
-    let display = format_hover_label(def_name.as_deref(), None, &resolved.def_table);
+    let display = format_hover_label(
+        def_name.as_deref(),
+        None,
+        Some(def_id),
+        None,
+        &resolved.def_table,
+    );
     Some(HoverInfo {
         node_id,
         span: query_span,
@@ -422,7 +447,13 @@ fn fallback_hover_from_def_table(
             continue;
         }
         let ty = type_map.and_then(|map| map.lookup_def_type(def));
-        let display = format_hover_label(Some(&def.name), ty.as_ref(), def_table);
+        let display = format_hover_label(
+            Some(&def.name),
+            ty.as_ref(),
+            Some(def.id),
+            type_map,
+            def_table,
+        );
         return Some(HoverInfo {
             node_id: def_table
                 .lookup_def_node_id(def.id)
@@ -610,10 +641,16 @@ fn field_type_in_struct<'a>(ty: &'a Type, field_name: &str) -> Option<&'a Type> 
 
 // --- Display formatting ---
 
-fn format_hover_label(def_name: Option<&str>, ty: Option<&Type>, def_table: &DefTable) -> String {
+fn format_hover_label(
+    def_name: Option<&str>,
+    ty: Option<&Type>,
+    def_id: Option<DefId>,
+    type_map: Option<&TypeMap>,
+    def_table: &DefTable,
+) -> String {
     let demangler = TypestateNameDemangler::from_def_table(def_table);
     let render_name = |name: &str| demangler.demangle_text(name);
-    let render_type = |ty: &Type| format_type_for_hover(ty, &demangler);
+    let render_type = |ty: &Type| format_type_for_hover(ty, def_id, type_map, &demangler);
     match (def_name, ty) {
         (Some(name), Some(ty)) => {
             let name = render_name(name);
@@ -633,40 +670,27 @@ fn format_hover_label(def_name: Option<&str>, ty: Option<&Type>, def_table: &Def
     }
 }
 
-fn format_type_for_hover(ty: &Type, demangler: &TypestateNameDemangler) -> String {
-    match ty {
-        Type::Struct { name, .. } => {
-            if let Some(state_name) = demangler.demangle_state_qualified(name) {
-                state_name
-            } else {
-                demangler.demangle_text(&ty.to_string())
-            }
+fn format_type_for_hover(
+    ty: &Type,
+    def_id: Option<DefId>,
+    type_map: Option<&TypeMap>,
+    demangler: &TypestateNameDemangler,
+) -> String {
+    let type_var_names =
+        def_id.and_then(|id| type_map.and_then(|map| map.lookup_def_type_param_names(id)));
+    let nominal_name_map = |name: &str| {
+        if let Some(state_name) = demangler.demangle_state_qualified(name) {
+            state_name
+        } else {
+            demangler.demangle_text(name)
         }
-        Type::Fn { params, ret_ty } => {
-            let params = params
-                .iter()
-                .map(|param| {
-                    format!(
-                        "{} {}",
-                        fn_param_mode_name(&param.mode),
-                        format_type_for_hover(&param.ty, demangler)
-                    )
-                })
-                .collect::<Vec<_>>()
-                .join(", ");
-            format!(
-                "fn({params}) -> {}",
-                format_type_for_hover(ret_ty, demangler)
-            )
-        }
-        Type::ErrorUnion { ok_ty, err_tys } => {
-            let mut parts = Vec::with_capacity(err_tys.len() + 1);
-            parts.push(format_type_for_hover(ok_ty, demangler));
-            for err_ty in err_tys {
-                parts.push(format_type_for_hover(err_ty, demangler));
-            }
-            parts.join(" | ")
-        }
-        _ => demangler.demangle_text(&ty.to_string()),
-    }
+    };
+    render_type(
+        ty,
+        &TypeRenderConfig {
+            show_in_mode: false,
+            type_var_names,
+            nominal_name_map: Some(&nominal_name_map),
+        },
+    )
 }

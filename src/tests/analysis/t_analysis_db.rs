@@ -496,6 +496,28 @@ fn main() -> u64 { id(1) }
 }
 
 #[test]
+fn hover_uses_readable_generic_type_param_names() {
+    let mut db = AnalysisDb::new();
+    let source = r#"
+fn id<T>(x: T) -> T { x }
+fn main() -> u64 {
+    let n = id(1);
+    n
+}
+"#;
+    let file_id = db.upsert_disk_text(PathBuf::from("examples/lookup_hover_generic.mc"), source);
+    let mut call_span = span_for_substring(source, "id(1)");
+    call_span.end = position_at(source, call_span.start.offset + 2);
+    let hover = db
+        .hover_at_file(file_id, call_span)
+        .expect("hover query should succeed")
+        .expect("expected hover info");
+
+    assert_eq!(hover.def_name.as_deref(), Some("id"));
+    assert_eq!(hover.display, "id: fn<T>(T) -> T");
+}
+
+#[test]
 fn hover_returns_none_for_unknown_symbol_target() {
     let mut db = AnalysisDb::new();
     let source = r#"

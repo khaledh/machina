@@ -1,11 +1,13 @@
 mod format;
 mod relations;
+mod render;
 mod type_cache;
 
 pub use relations::{
     TypeAssignability, ValueAssignability, array_to_dyn_array_assignable,
     array_to_slice_assignable, dyn_array_to_slice_assignable, type_assignable, value_assignable,
 };
+pub use render::{TypeRenderConfig, render_type};
 pub use type_cache::{TypeCache, TypeId};
 
 use std::borrow::Cow;
