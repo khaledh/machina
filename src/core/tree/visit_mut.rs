@@ -804,6 +804,15 @@ pub fn walk_expr<V: VisitorMut<D, T> + ?Sized, D, T>(v: &mut V, expr: &mut Expr<
         ExprKind::UnaryOp { expr, .. } => {
             v.visit_expr(expr);
         }
+        ExprKind::Try {
+            fallible_expr,
+            on_error,
+        } => {
+            v.visit_expr(fallible_expr);
+            if let Some(handler) = on_error {
+                v.visit_expr(handler);
+            }
+        }
 
         ExprKind::HeapAlloc { expr } => {
             v.visit_expr(expr);

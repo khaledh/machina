@@ -6,7 +6,7 @@
 use std::collections::HashMap;
 
 use crate::core::tree::semantic as sem;
-use crate::core::tree::{BinaryOp, NodeId, UnaryOp};
+use crate::core::tree::{BinaryOp, NodeId};
 
 pub fn build_lowering_plans(
     module: &sem::Module,
@@ -116,6 +116,15 @@ impl<'a> LoweringPlanBuilder<'a> {
             sem::ValueExprKind::BinOp { left, right, .. } => {
                 self.visit_value_expr(left);
                 self.visit_value_expr(right);
+            }
+            sem::ValueExprKind::Try {
+                fallible_expr,
+                on_error,
+            } => {
+                self.visit_value_expr(fallible_expr);
+                if let Some(handler) = on_error {
+                    self.visit_value_expr(handler);
+                }
             }
             sem::ValueExprKind::UnaryOp { expr, .. }
             | sem::ValueExprKind::HeapAlloc { expr }
@@ -327,10 +336,8 @@ impl<'a> LoweringPlanBuilder<'a> {
                 payload.iter().all(|value| self.is_linear_value_expr(value))
             }
 
-            sem::ValueExprKind::UnaryOp { op, expr } => match op {
-                UnaryOp::Try => false,
-                _ => self.is_linear_value_expr(expr),
-            },
+            sem::ValueExprKind::UnaryOp { expr, .. } => self.is_linear_value_expr(expr),
+            sem::ValueExprKind::Try { .. } => false,
             sem::ValueExprKind::HeapAlloc { expr } => self.is_linear_value_expr(expr),
 
             sem::ValueExprKind::BinOp { left, op, right } => match op {

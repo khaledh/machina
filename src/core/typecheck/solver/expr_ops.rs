@@ -111,7 +111,6 @@ pub(super) fn try_check_expr_obligation_ops(
                         covered_exprs.insert(*expr_id);
                     }
                 }
-                crate::core::tree::resolved::UnaryOp::Try => {}
             }
             true
         }

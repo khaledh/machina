@@ -38,6 +38,15 @@ pub enum TypeCheckErrorKind {
     #[error("`?` requires an error-union return type, found {0}")]
     TryReturnTypeNotErrorUnion(Type),
 
+    #[error("`or` handler must be callable, found {0}")]
+    TryHandlerNotCallable(Type),
+
+    #[error("`or` handler must accept exactly one argument, found {0}")]
+    TryHandlerArity(usize),
+
+    #[error("`or` handler argument type mismatch: expected {0}, found {1}")]
+    TryHandlerArgTypeMismatch(Type, Type),
+
     #[error(
         "`?` cannot propagate errors {missing} into return union {ret}; add them to the return union or handle them with match",
         missing = .0.join(" | "),

@@ -453,6 +453,10 @@ pub enum ValueExprKind {
         op: UnaryOp,
         expr: Box<ValueExpr>,
     },
+    Try {
+        fallible_expr: Box<ValueExpr>,
+        on_error: Option<Box<ValueExpr>>,
+    },
 
     // Heap allocation
     HeapAlloc {

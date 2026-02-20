@@ -1174,6 +1174,15 @@ fn reseed_expr(expr: &mut res::Expr, node_id_gen: &mut NodeIdGen) {
         res::ExprKind::UnaryOp { expr, .. } => {
             reseed_expr(expr, node_id_gen);
         }
+        res::ExprKind::Try {
+            fallible_expr,
+            on_error,
+        } => {
+            reseed_expr(fallible_expr, node_id_gen);
+            if let Some(handler) = on_error {
+                reseed_expr(handler, node_id_gen);
+            }
+        }
         res::ExprKind::HeapAlloc { expr }
         | res::ExprKind::Move { expr }
         | res::ExprKind::AddrOf { expr }

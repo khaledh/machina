@@ -334,6 +334,15 @@ impl<'a> DropPlanBuilder<'a> {
                 self.visit_value_expr(right);
             }
             sem::ValueExprKind::UnaryOp { expr, .. } => self.visit_value_expr(expr),
+            sem::ValueExprKind::Try {
+                fallible_expr,
+                on_error,
+            } => {
+                self.visit_value_expr(fallible_expr);
+                if let Some(handler) = on_error {
+                    self.visit_value_expr(handler);
+                }
+            }
             sem::ValueExprKind::HeapAlloc { expr } => self.visit_value_expr(expr),
             sem::ValueExprKind::Move { place } | sem::ValueExprKind::ImplicitMove { place } => {
                 self.visit_place_expr(place)

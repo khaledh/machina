@@ -345,6 +345,15 @@ impl<'a> Elaborator<'a> {
                 self.desugar_value_expr(left);
                 self.desugar_value_expr(right);
             }
+            sem::ValueExprKind::Try {
+                fallible_expr,
+                on_error,
+            } => {
+                self.desugar_value_expr(fallible_expr);
+                if let Some(handler) = on_error {
+                    self.desugar_value_expr(handler);
+                }
+            }
             sem::ValueExprKind::UnaryOp { expr, .. }
             | sem::ValueExprKind::HeapAlloc { expr }
             | sem::ValueExprKind::Coerce { expr, .. } => self.desugar_value_expr(expr),

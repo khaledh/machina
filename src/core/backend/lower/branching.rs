@@ -4,9 +4,9 @@ use crate::core::backend::lower::LowerToIrError;
 use crate::core::backend::lower::lowerer::{BranchResult, FuncLowerer, LoopContext, StmtOutcome};
 use crate::core::backend::lower::r#match::MatchLowerer;
 use crate::core::ir::IrTypeId;
-use crate::core::ir::{CastKind, CmpOp, ConstValue, SwitchCase, Terminator, ValueId};
+use crate::core::ir::{Callee, CastKind, CmpOp, ConstValue, SwitchCase, Terminator, ValueId};
 use crate::core::resolve::DefId;
-use crate::core::tree::{BinaryOp, UnaryOp, semantic as sem};
+use crate::core::tree::{BinaryOp, semantic as sem};
 use crate::core::types::Type;
 
 impl<'a, 'g> FuncLowerer<'a, 'g> {
@@ -175,10 +175,16 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
                 Ok(BranchResult::Value(join_value))
             }
 
-            sem::ValueExprKind::UnaryOp {
-                op: UnaryOp::Try,
-                expr: inner,
-            } => self.lower_try_propagate(expr, inner),
+            sem::ValueExprKind::Try {
+                fallible_expr,
+                on_error,
+            } => {
+                if let Some(handler) = on_error {
+                    self.lower_try_handle(expr, fallible_expr, handler)
+                } else {
+                    self.lower_try_propagate(expr, fallible_expr)
+                }
+            }
 
             // Match expression: switch on enum tags (decision tree not yet supported).
             sem::ValueExprKind::Match { scrutinee, arms } => {
@@ -314,6 +320,115 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
                 &err_variants,
             )?;
         }
+
+        let join_value = join.join_value();
+        join.finalize(self);
+        Ok(BranchResult::Value(join_value))
+    }
+
+    pub(super) fn lower_try_handle(
+        &mut self,
+        expr: &sem::ValueExpr,
+        fallible_expr: &sem::ValueExpr,
+        handler_expr: &sem::ValueExpr,
+    ) -> Result<BranchResult, LowerToIrError> {
+        let union_value = match self.lower_value_expr(fallible_expr)? {
+            BranchResult::Value(value) => value,
+            BranchResult::Return => return Ok(BranchResult::Return),
+        };
+
+        let union_ty = self.type_map.type_table().get(fallible_expr.ty).clone();
+        let Type::ErrorUnion { ok_ty, .. } = &union_ty else {
+            panic!(
+                "backend try operator expects error union operand, found {:?}",
+                union_ty
+            );
+        };
+        let try_result_ty = self.type_map.type_table().get(expr.ty).clone();
+        let join_expr_ty = if try_result_ty.contains_unresolved() {
+            self.type_map
+                .type_table()
+                .lookup_id(ok_ty)
+                .unwrap_or(expr.ty)
+        } else {
+            expr.ty
+        };
+
+        let union_ir_ty = self.type_lowerer.lower_type_id(fallible_expr.ty);
+        let union_slot = self.materialize_value_slot(union_value, union_ir_ty);
+        let (tag_ty, blob_ty, ok_payload_ty, ok_payload_offset) = {
+            let layout = self.type_lowerer.enum_layout(fallible_expr.ty);
+            let ok_variant = layout
+                .variants
+                .first()
+                .unwrap_or_else(|| panic!("backend try missing ok variant in {:?}", union_ty));
+            if ok_variant.field_tys.len() != 1 || ok_variant.field_offsets.len() != 1 {
+                panic!(
+                    "backend try expects single-payload ok variant, found {:?}",
+                    ok_variant.field_tys
+                );
+            }
+            (
+                layout.tag_ty,
+                layout.blob_ty,
+                ok_variant.field_tys[0],
+                ok_variant.field_offsets[0],
+            )
+        };
+
+        let tag = self.load_field(union_slot.addr, 0, tag_ty);
+        let tag_zero = self.builder.const_int(0, false, 32, tag_ty);
+        let bool_ty = self.type_lowerer.lower_type(&Type::Bool);
+        let is_ok = self.builder.cmp(CmpOp::Eq, tag, tag_zero, bool_ty);
+
+        let ok_bb = self.builder.add_block();
+        let err_bb = self.builder.add_block();
+        let join_expr = sem::ValueExpr {
+            ty: join_expr_ty,
+            ..expr.clone()
+        };
+        let join = self.begin_join(&join_expr);
+
+        self.builder.terminate(Terminator::CondBr {
+            cond: is_ok,
+            then_bb: ok_bb,
+            then_args: Vec::new(),
+            else_bb: err_bb,
+            else_args: Vec::new(),
+        });
+
+        self.builder.select_block(ok_bb);
+        let ok_value =
+            self.load_union_payload(union_slot.addr, blob_ty, ok_payload_ty, ok_payload_offset);
+        let try_sem_ty = self.type_map.type_table().get(join_expr_ty).clone();
+        let ok_coerced = self.coerce_value(ok_value, ok_ty, &try_sem_ty);
+        join.emit_branch(self, ok_coerced, expr.span)?;
+
+        join.restore_locals(self);
+        self.builder.select_block(err_bb);
+        let handler_value = match self.lower_value_expr(handler_expr)? {
+            BranchResult::Value(value) => value,
+            BranchResult::Return => return Ok(BranchResult::Return),
+        };
+        let call_plan = self.call_plan(expr.id);
+        let mut handler_args = vec![crate::core::backend::lower::lowerer::CallInputValue {
+            value: union_value,
+            ty: union_ty.clone(),
+            is_addr: false,
+            drop_def: None,
+        }];
+        let call_args = self.lower_call_args_from_plan(
+            expr.id,
+            expr.span,
+            &call_plan,
+            None,
+            &mut handler_args,
+        )?;
+        let result_ir_ty = self.type_lowerer.lower_type_id(join_expr_ty);
+        let handled = self
+            .builder
+            .call(Callee::Value(handler_value), call_args, result_ir_ty);
+        join.emit_branch(self, handled, expr.span)?;
 
         let join_value = join.join_value();
         join.finalize(self);

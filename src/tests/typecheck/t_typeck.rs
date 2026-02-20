@@ -1958,6 +1958,97 @@ fn test_try_operator_allows_direct_success_return_expression() {
 }
 
 #[test]
+fn test_try_or_handler_recovers_with_closure() {
+    let source = r#"
+        type IoError = { code: u64 }
+
+        fn ok(value: u64) -> u64 | IoError {
+            value
+        }
+
+        fn fail() -> u64 | IoError {
+            IoError { code: 1 }
+        }
+
+        fn read(flag: bool) -> u64 | IoError {
+            if flag { ok(41) } else { fail() }
+        }
+
+        fn run(flag: bool) -> u64 {
+            read(flag) or |err| {
+                err;
+                0
+            }
+        }
+    "#;
+
+    let _ctx = type_check_source(source).expect("Failed to type check");
+}
+
+#[test]
+fn test_try_or_handler_rejects_non_callable_handler() {
+    let source = r#"
+        type IoError = { code: u64 }
+
+        fn read() -> u64 | IoError {
+            IoError { code: 1 }
+        }
+
+        fn run() -> u64 {
+            read() or 7
+        }
+    "#;
+
+    let result = type_check_source(source);
+    assert!(result.is_err());
+
+    if let Err(errors) = result {
+        assert!(
+            errors
+                .iter()
+                .any(|e| matches!(e.kind(), TypeCheckErrorKind::TryHandlerNotCallable(_, ..)))
+        );
+    }
+}
+
+#[test]
+fn test_try_or_handler_rejects_param_type_mismatch() {
+    let source = r#"
+        type IoError = { code: u64 }
+
+        fn ok(value: u64) -> u64 | IoError {
+            value
+        }
+
+        fn fail() -> u64 | IoError {
+            IoError { code: 1 }
+        }
+
+        fn read(flag: bool) -> u64 | IoError {
+            if flag { ok(41) } else { fail() }
+        }
+
+        fn handle(err: u64) -> u64 {
+            err
+        }
+
+        fn run(flag: bool) -> u64 {
+            read(flag) or handle
+        }
+    "#;
+
+    let result = type_check_source(source);
+    assert!(result.is_err());
+
+    if let Err(errors) = result {
+        assert!(errors.iter().any(|e| matches!(
+            e.kind(),
+            TypeCheckErrorKind::TryHandlerArgTypeMismatch(_, _, ..)
+        )));
+    }
+}
+
+#[test]
 fn test_try_operator_rejects_non_union_operand() {
     let source = r#"
         fn run() -> u64 {

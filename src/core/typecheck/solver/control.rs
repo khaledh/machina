@@ -116,6 +116,7 @@ pub(super) fn try_check_expr_obligation_control(
         ExprObligation::Try {
             expr_id,
             operand,
+            on_error,
             result,
             expected_return_ty,
             callable_def_id,
@@ -139,6 +140,56 @@ pub(super) fn try_check_expr_obligation_control(
             };
 
             let _ = unifier.unify(result, ok_ty);
+
+            if let Some(handler_term) = on_error {
+                let handler_ty = super::term_utils::resolve_term(handler_term, unifier);
+                let handler_ty_for_diag = super::term_utils::default_infer_ints_for_diagnostics(
+                    handler_ty.clone(),
+                    unifier.vars(),
+                );
+                match &handler_ty {
+                    Type::Fn { params, ret_ty } => {
+                        if params.len() != 1 {
+                            crate::core::typecheck::tc_push_error!(
+                                errors,
+                                *span,
+                                TEK::TryHandlerArity(params.len())
+                            );
+                            covered_exprs.insert(*expr_id);
+                            return true;
+                        }
+                        let param_ty = super::term_utils::default_infer_ints_for_diagnostics(
+                            params[0].ty.clone(),
+                            unifier.vars(),
+                        );
+                        if matches!(
+                            type_assignable(&operand_ty_for_diag, &param_ty),
+                            TypeAssignability::Incompatible
+                        ) && !super::term_utils::is_unresolved(&param_ty)
+                        {
+                            crate::core::typecheck::tc_push_error!(
+                                errors,
+                                *span,
+                                TEK::TryHandlerArgTypeMismatch(operand_ty_for_diag, param_ty)
+                            );
+                            covered_exprs.insert(*expr_id);
+                            return true;
+                        }
+                        let _ = unifier.unify(result, ret_ty);
+                    }
+                    _ if super::term_utils::is_unresolved(&handler_ty_for_diag) => {}
+                    _ => {
+                        crate::core::typecheck::tc_push_error!(
+                            errors,
+                            *span,
+                            TEK::TryHandlerNotCallable(handler_ty_for_diag)
+                        );
+                        covered_exprs.insert(*expr_id);
+                        return true;
+                    }
+                }
+                return true;
+            }
 
             let mut return_ty = expected_return_ty
                 .as_ref()

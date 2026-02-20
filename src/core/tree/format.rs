@@ -1161,6 +1161,19 @@ impl Expr {
                 writeln!(f, "{}Operand:", pad1)?;
                 expr.fmt_with_indent(f, level + 2)?;
             }
+            ExprKind::Try {
+                fallible_expr,
+                on_error,
+            } => {
+                let pad1 = indent(level + 1);
+                writeln!(f, "{}Try [{}]", pad, self.id)?;
+                writeln!(f, "{}Fallible:", pad1)?;
+                fallible_expr.fmt_with_indent(f, level + 2)?;
+                if let Some(handler) = on_error {
+                    writeln!(f, "{}OnError:", pad1)?;
+                    handler.fmt_with_indent(f, level + 2)?;
+                }
+            }
             ExprKind::HeapAlloc { expr } => {
                 let pad1 = indent(level + 1);
                 writeln!(f, "{}HeapAlloc [{}]", pad, self.id)?;
@@ -1360,7 +1373,6 @@ impl fmt::Display for UnaryOp {
             UnaryOp::Neg => write!(f, "-")?,
             UnaryOp::LogicalNot => write!(f, "!")?,
             UnaryOp::BitNot => write!(f, "~")?,
-            UnaryOp::Try => write!(f, "?")?,
         }
         Ok(())
     }

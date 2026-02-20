@@ -178,7 +178,8 @@ StructPatternField ::= Identifier ( ":" Pattern )?
 PatternList        ::= Pattern ( "," Pattern )* ","?
 
 # Expressions
-Expr               ::= If | Match | TernaryExpr
+Expr               ::= If | Match | TryExpr
+TryExpr            ::= TernaryExpr ( "or" Expr )?
 TernaryExpr        ::= InfixExpr ( "?" Expr ":" TernaryExpr )?
 
 # Control flow
@@ -228,7 +229,7 @@ UnaryExpr          ::= ( "-" | "!" | "~" | "^" ) UnaryExpr
                      | "move" UnaryExpr
                      | PostfixExpr
 
-PostfixExpr        ::= Primary ( Call | LabeledCall | ArrayIndex | SliceRange | TupleField | StructField | MethodCall )*
+PostfixExpr        ::= Primary ( Call | LabeledCall | ArrayIndex | SliceRange | TupleField | StructField | MethodCall )* ( "?" )?
 
 Call               ::= "(" CallArgList? ")"
 LabeledCall        ::= ":" Identifier "(" CallArgList? ")"

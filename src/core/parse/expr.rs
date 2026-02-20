@@ -142,6 +142,20 @@ impl<'a> Parser<'a> {
             };
         }
 
+        if min_bp <= Self::TERNARY_BP && self.is_contextual_keyword("or") {
+            self.consume_contextual_keyword("or")?;
+            let on_error = self.parse_expr(Self::TERNARY_BP + 1)?;
+            lhs = Expr {
+                id: self.id_gen.new_id(),
+                kind: ExprKind::Try {
+                    fallible_expr: Box::new(lhs),
+                    on_error: Some(Box::new(on_error)),
+                },
+                ty: (),
+                span: self.close(marker),
+            };
+        }
+
         Ok(lhs)
     }
 
@@ -697,9 +711,9 @@ impl<'a> Parser<'a> {
         self.consume(&TK::Question)?;
         Ok(Expr {
             id: self.id_gen.new_id(),
-            kind: ExprKind::UnaryOp {
-                op: UnaryOp::Try,
-                expr: Box::new(expr),
+            kind: ExprKind::Try {
+                fallible_expr: Box::new(expr),
+                on_error: None,
             },
             ty: (),
             span: self.close(marker),

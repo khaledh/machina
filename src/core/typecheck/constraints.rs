@@ -82,6 +82,7 @@ pub(crate) enum ExprObligation {
     Try {
         expr_id: NodeId,
         operand: Type,
+        on_error: Option<Type>,
         result: Type,
         expected_return_ty: Option<Type>,
         callable_def_id: Option<DefId>,

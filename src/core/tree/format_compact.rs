@@ -225,6 +225,20 @@ pub fn format_semantic_value_expr_compact(expr: &sem::ValueExpr) -> String {
                 format_semantic_value_expr_compact(expr)
             )
         }
+        sem::ValueExprKind::Try {
+            fallible_expr,
+            on_error,
+        } => {
+            let fallible = format_semantic_value_expr_compact(fallible_expr);
+            if let Some(handler) = on_error {
+                format!(
+                    "{fallible} or {}",
+                    format_semantic_value_expr_compact(handler)
+                )
+            } else {
+                format!("{fallible}?")
+            }
+        }
         sem::ValueExprKind::HeapAlloc { expr } => {
             format!("^{}", format_semantic_value_expr_compact(expr))
         }

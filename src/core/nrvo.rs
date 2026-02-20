@@ -289,6 +289,15 @@ impl NrvoSafetyChecker {
             VEK::Coerce { expr, .. } => self.check_expr(expr, false),
 
             VEK::UnaryOp { expr, .. } => self.check_expr(expr, false),
+            VEK::Try {
+                fallible_expr,
+                on_error,
+            } => {
+                self.check_expr(fallible_expr, false)
+                    && on_error
+                        .as_deref()
+                        .is_none_or(|handler| self.check_expr(handler, false))
+            }
 
             VEK::BinOp { left, right, .. } => {
                 let left_ok = self.check_expr(left, false);

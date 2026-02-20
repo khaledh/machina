@@ -925,6 +925,10 @@ pub enum ExprKind<D, T = ()> {
         op: UnaryOp,
         expr: Box<Expr<D, T>>,
     },
+    Try {
+        fallible_expr: Box<Expr<D, T>>,
+        on_error: Option<Box<Expr<D, T>>>,
+    },
 
     // Heap allocation
     HeapAlloc {
@@ -1140,5 +1144,4 @@ pub enum UnaryOp {
     Neg,
     LogicalNot,
     BitNot,
-    Try,
 }

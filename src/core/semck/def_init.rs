@@ -1135,6 +1135,19 @@ impl<'a> DefInitChecker<'a> {
                 self.check_expr(right);
             }
             ExprKind::UnaryOp { expr, .. } => self.check_expr(expr),
+            ExprKind::Try {
+                fallible_expr,
+                on_error,
+            } => {
+                self.check_expr(fallible_expr);
+                if let Some(handler) = on_error {
+                    let base = self.initialized.clone();
+                    let handler_state = self.with_init(base.clone(), |this| {
+                        this.check_expr(handler);
+                    });
+                    self.initialized = intersect_states(&[base, handler_state]);
+                }
+            }
             ExprKind::HeapAlloc { expr } => self.check_expr(expr),
             ExprKind::Move { expr } => self.check_expr(expr),
             ExprKind::Coerce { expr, .. } => self.check_expr(expr),

@@ -836,7 +836,7 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
         (addr, ty)
     }
 
-    fn lower_call_args_from_plan(
+    pub(super) fn lower_call_args_from_plan(
         &mut self,
         expr_id: NodeId,
         span: Span,

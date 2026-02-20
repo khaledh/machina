@@ -2370,6 +2370,15 @@ fn value_has_for(value: &sem::ValueExpr) -> bool {
         sem::ValueExprKind::UnaryOp { expr, .. }
         | sem::ValueExprKind::HeapAlloc { expr }
         | sem::ValueExprKind::Coerce { expr, .. } => value_has_for(expr),
+        sem::ValueExprKind::Try {
+            fallible_expr,
+            on_error,
+        } => {
+            value_has_for(fallible_expr)
+                || on_error
+                    .as_ref()
+                    .is_some_and(|handler| value_has_for(handler))
+        }
         sem::ValueExprKind::BinOp { left, right, .. } => {
             value_has_for(left) || value_has_for(right)
         }

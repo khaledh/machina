@@ -607,7 +607,6 @@ impl<'a> ConstraintCollector<'a> {
                 let inner_expected = match op {
                     UnaryOp::Neg | UnaryOp::BitNot => expected.clone(),
                     UnaryOp::LogicalNot => None,
-                    UnaryOp::Try => None,
                 };
                 let inner_ty = self.collect_expr(inner, inner_expected);
                 match op {
@@ -644,17 +643,48 @@ impl<'a> ConstraintCollector<'a> {
                             ConstraintReason::Expr(expr.id, expr.span),
                         );
                     }
-                    UnaryOp::Try => {
-                        self.out.expr_obligations.push(ExprObligation::Try {
-                            expr_id: expr.id,
-                            operand: inner_ty,
-                            result: expr_ty.clone(),
-                            expected_return_ty: self.current_return_ty(),
-                            callable_def_id: self.current_callable_def_id(),
-                            span: expr.span,
-                        });
-                    }
                 }
+            }
+            ExprKind::Try {
+                fallible_expr,
+                on_error,
+            } => {
+                let operand_ty = self.collect_expr(fallible_expr, None);
+                let handler_expected_ty = Type::Fn {
+                    params: vec![crate::core::types::FnParam {
+                        mode: crate::core::types::FnParamMode::In,
+                        ty: operand_ty.clone(),
+                    }],
+                    ret_ty: Box::new(expr_ty.clone()),
+                };
+                let on_error_ty = on_error
+                    .as_ref()
+                    .map(|handler| self.collect_expr(handler, Some(handler_expected_ty.clone())));
+                if let (Some(handler_expr), Some(handler_ty)) =
+                    (on_error.as_ref(), on_error_ty.as_ref())
+                {
+                    self.out.call_obligations.push(CallObligation {
+                        call_node: expr.id,
+                        span: expr.span,
+                        caller_def_id: self.current_callable_def_id(),
+                        callee: CallCallee::Dynamic {
+                            expr_id: handler_expr.id,
+                        },
+                        callee_ty: Some(handler_ty.clone()),
+                        receiver: None,
+                        arg_terms: vec![operand_ty.clone()],
+                        ret_ty: expr_ty.clone(),
+                    });
+                }
+                self.out.expr_obligations.push(ExprObligation::Try {
+                    expr_id: expr.id,
+                    operand: operand_ty,
+                    on_error: on_error_ty,
+                    result: expr_ty.clone(),
+                    expected_return_ty: self.current_return_ty(),
+                    callable_def_id: self.current_callable_def_id(),
+                    span: expr.span,
+                });
             }
             ExprKind::Closure {
                 def_id,

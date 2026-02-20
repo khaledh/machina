@@ -1559,6 +1559,15 @@ pub fn walk_expr_kind<M: TreeMapper + ?Sized>(
             op: *op,
             expr: Box::new(mapper.map_expr(expr, ctx)),
         },
+        ExprKind::Try {
+            fallible_expr,
+            on_error,
+        } => ExprKind::Try {
+            fallible_expr: Box::new(mapper.map_expr(fallible_expr, ctx)),
+            on_error: on_error
+                .as_ref()
+                .map(|expr| Box::new(mapper.map_expr(expr, ctx))),
+        },
         ExprKind::HeapAlloc { expr } => ExprKind::HeapAlloc {
             expr: Box::new(mapper.map_expr(expr, ctx)),
         },

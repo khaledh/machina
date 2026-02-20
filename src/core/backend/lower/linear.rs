@@ -407,17 +407,23 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
                 Ok(self.load_slot(&slot).into())
             }
 
-            sem::ValueExprKind::UnaryOp { op, expr: inner } => {
-                if matches!(op, UnaryOp::Try) {
-                    return self.lower_try_propagate(expr, inner);
+            sem::ValueExprKind::Try {
+                fallible_expr,
+                on_error,
+            } => {
+                if let Some(handler) = on_error {
+                    return self.lower_try_handle(expr, fallible_expr, handler);
                 }
+                return self.lower_try_propagate(expr, fallible_expr);
+            }
+
+            sem::ValueExprKind::UnaryOp { op, expr: inner } => {
                 let value = eval_value!(inner);
                 let ty = self.type_lowerer.lower_type_id(expr.ty);
                 let result = match op {
                     UnaryOp::Neg => self.builder.unop(UnOp::Neg, value, ty),
                     UnaryOp::LogicalNot => self.builder.unop(UnOp::Not, value, ty),
                     UnaryOp::BitNot => self.builder.unop(UnOp::BitNot, value, ty),
-                    UnaryOp::Try => unreachable!("handled above"),
                 };
                 Ok(result.into())
             }

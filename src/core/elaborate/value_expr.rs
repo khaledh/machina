@@ -377,6 +377,24 @@ impl<'a> Elaborator<'a> {
                 op: *op,
                 expr: Box::new(self.elab_value(expr)),
             },
+            norm::ExprKind::Try {
+                fallible_expr,
+                on_error,
+            } => {
+                if on_error.is_some() {
+                    // `try-or` error handlers lower as callable values and still
+                    // need normal call-ABI planning for payload passing.
+                    let call_sig = self.get_call_sig(expr.id);
+                    let plan = self.build_call_plan(expr.id, None, &call_sig);
+                    self.record_call_plan(expr.id, plan);
+                }
+                sem::ValueExprKind::Try {
+                    fallible_expr: Box::new(self.elab_value(fallible_expr)),
+                    on_error: on_error
+                        .as_ref()
+                        .map(|expr| Box::new(self.elab_value(expr))),
+                }
+            }
             norm::ExprKind::HeapAlloc { expr } => sem::ValueExprKind::HeapAlloc {
                 expr: Box::new(self.elab_value(expr)),
             },

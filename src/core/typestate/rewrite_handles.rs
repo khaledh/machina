@@ -97,10 +97,7 @@ pub(super) fn rewrite_machine_request_method_destinations(
 
     fn expr_is_spawn_handle(expr: &Expr) -> bool {
         match &expr.kind {
-            ExprKind::UnaryOp {
-                op: crate::core::tree::UnaryOp::Try,
-                expr,
-            } => expr_is_spawn_handle(expr),
+            ExprKind::Try { fallible_expr, .. } => expr_is_spawn_handle(fallible_expr),
             ExprKind::Call { callee, .. } => matches!(
                 &callee.kind,
                 ExprKind::Var { ident, .. } if ident.starts_with("__ts_spawn_")

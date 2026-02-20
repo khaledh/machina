@@ -5,7 +5,9 @@
 This document defines the initial error handling model for Machina:
 
 - Error unions in return position: `T | E1 | E2`
-- Postfix propagation operator: `?`
+- A canonical `Try` construct with two surface forms:
+  - Postfix propagation operator: `?`
+  - Recovery operator with handler: `or |err| { ... }`
 - Exhaustive `match` over union variants with type-pattern arms
 - Regular structs/enums as error variants (no separate error type category)
 
@@ -60,7 +62,37 @@ Given `x: T | E1 | E2`, `x?`:
 - Early-returns `E1` or `E2` from the current function.
 - Requires `E1` and `E2` to be present in the caller's declared error set.
 
-### 4. Match arm binding
+### 4. Recovery operator (`or`)
+
+Given `x: T | E1 | E2`, users may handle the error path inline:
+
+```mc
+let cfg = parse_config(text) or |err| {
+    match err {
+        ParseError => default_config(),
+        IoError => default_config(),
+    }
+};
+```
+
+`or` keeps success-path code linear while making recovery explicit.
+
+### 5. Canonical internal form
+
+Both `?` and `or` lower to one core construct in the tree model:
+
+```text
+Try { fallible_expr, on_error }
+```
+
+Where:
+
+- `on_error = Propagate` for `expr?`
+- `on_error = Handle(handler_expr)` for `expr or handler_expr`
+
+`handler_expr` is expected to be callable with one argument (the error union).
+
+### 6. Match arm binding
 
 `match` supports:
 
@@ -77,7 +109,7 @@ match load_config(path) {
 }
 ```
 
-### 5. Placement restrictions (MVP)
+### 7. Placement restrictions (MVP)
 
 Allowed:
 
@@ -102,8 +134,20 @@ assignable to at least one union variant.
 
 ### Subset propagation
 
-For `expr?` where `expr: T | E1 | E2`, caller must declare `E1 | E2` in its
-own return error set. Otherwise, emit a compile error.
+For `Try { on_error = Propagate }` where `expr: T | E1 | E2`, caller must
+declare `E1 | E2` in its own return error set. Otherwise, emit a compile error.
+
+### Recovery handler typing
+
+For `Try { on_error = Handle(h) }` and `expr: T | E...`:
+
+- `h` must be callable with one argument of type `E...` (error-only union).
+- `Try` expression result type is the join of:
+  - success type `T`, and
+  - handler return type.
+
+In most cases, expected-context typing constrains this join to a single target
+type (for example, assignment or function return context).
 
 ### Invalid try
 
@@ -131,15 +175,18 @@ Lowering/codegen should reuse existing enum machinery where possible.
 
 ### 1. Parser and AST
 
-- Update grammar in `grammar.bnf` for return unions, postfix `?`, and
-  union-type arm patterns.
-- Extend parse modules under `src/parse/*`.
-- Extend tree model in `src/tree/model.rs`.
+- Keep one canonical `Try` node in the AST/tree model.
+- Parse `?` as `Try { on_error = Propagate }`.
+- Parse `or` as contextual keyword in expression position:
+  - `lhs or rhs` -> `Try { fallible_expr: lhs, on_error: Handle(rhs) }`.
+- Reuse the existing closure parser path for `rhs`; do not add a special
+  parser for error handlers.
 
 ### 2. Resolver
 
 - Resolve union return variant types.
 - Resolve `name: Type` match-arm bindings.
+- Resolve handler expression/bindings for `Try { on_error = Handle(..) }`.
 
 ### 3. Types
 
@@ -150,7 +197,9 @@ Lowering/codegen should reuse existing enum machinery where possible.
 
 In `src/typecheck/constraints.rs`:
 
-- Emit obligations for `Try` (`?`) expressions.
+- Emit obligations for canonical `Try` expressions:
+  - propagate mode (`?`)
+  - handle mode (`or ...`)
 - Emit obligations for union-arm narrowing and exhaustiveness checks.
 - Emit return conformance obligations against union variants.
 
@@ -158,7 +207,9 @@ In `src/typecheck/constraints.rs`:
 
 In `src/typecheck/solve.rs`:
 
-- Enforce subset propagation for `?`.
+- Enforce subset propagation for `Try::Propagate`.
+- Enforce handler callable-arity/type constraints for `Try::Handle`.
+- Compute/join result type for success and handler paths.
 - Resolve/narrow union arm types.
 - Enforce exhaustiveness diagnostics.
 - Check return expression compatibility with union variants.
@@ -185,6 +236,8 @@ Add/extend diagnostics in `src/typecheck/errors.rs`:
 - `TryOutsideFunction`
 - `TryReturnTypeNotErrorUnion`
 - `TryErrorNotInReturn`
+- `TryHandlerNotCallable`
+- `TryHandlerArgMismatch`
 - `ReturnNotInErrorUnion`
 - `JoinArmNotInErrorUnion`
 - `UnionNotAllowedHere`
@@ -197,8 +250,9 @@ Add/extend diagnostics in `src/semck/errors.rs`:
 
 Add tests under `src/tests/*`:
 
-- Parse tests for return unions, `?`, and match type-arm binding.
+- Parse tests for return unions, `?`, `or`, and closure-handler syntax reuse.
 - Typecheck tests for subset propagation and exhaustiveness.
+- Typecheck tests for handler callable typing and join typing.
 - Negative tests for forbidden union positions.
 - Normalize/lowering tests for union control-flow and payload behavior.
 - End-to-end examples under subfolders in `examples/` (e.g. `examples/error_handling/*.mc`).
@@ -220,6 +274,9 @@ Add tests under `src/tests/*`:
 
 ## Future Extensions
 
-- Optional syntactic sugar for validation-heavy code (`guard`-like form).
+- Optional sugar:
+  - `expr or { ... }` desugaring to `expr or |_| { ... }`
+  - match-arm style `or { A(..) => ..., B(..) => ... }` desugaring to
+    `or |err| { match err { ... } }`
 - Controlled broadening of where union types may appear.
 - Better IDE diagnostics and quick-fix suggestions for propagation mismatches.

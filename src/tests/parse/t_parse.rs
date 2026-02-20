@@ -1644,11 +1644,14 @@ fn test_parse_postfix_try_operator() {
 
     let tail = block_tail(&test_fn.body);
     match &tail.kind {
-        ExprKind::UnaryOp { op, expr } => {
-            assert!(matches!(op, UnaryOp::Try));
-            assert!(matches!(&expr.kind, ExprKind::Call { .. }));
+        ExprKind::Try {
+            fallible_expr,
+            on_error,
+        } => {
+            assert!(on_error.is_none());
+            assert!(matches!(&fallible_expr.kind, ExprKind::Call { .. }));
         }
-        other => panic!("Expected unary try expression, got {other:?}"),
+        other => panic!("Expected try expression, got {other:?}"),
     }
 }
 
@@ -2957,12 +2960,47 @@ fn test_parse_try_postfix_still_works() {
     let funcs = parse_source(source).expect("Failed to parse");
     let func = &funcs[0];
     let tail = block_tail(&func.body);
-    let ExprKind::UnaryOp { op, expr } = &tail.kind else {
-        panic!("Expected unary try expression");
+    let ExprKind::Try {
+        fallible_expr,
+        on_error,
+    } = &tail.kind
+    else {
+        panic!("Expected try expression");
     };
-    assert_eq!(*op, UnaryOp::Try);
+    assert!(on_error.is_none());
     assert!(
-        matches!(expr.kind, ExprKind::Call { .. }),
+        matches!(fallible_expr.kind, ExprKind::Call { .. }),
         "Expected try operand to be a call"
+    );
+}
+
+#[test]
+fn test_parse_try_or_with_closure_handler() {
+    let source = r#"
+        fn test() -> u64 {
+            parse_u64("42") or |err| { err; 0 }
+        }
+    "#;
+
+    let funcs = parse_source(source).expect("Failed to parse");
+    let func = &funcs[0];
+    let tail = block_tail(&func.body);
+    let ExprKind::Try {
+        fallible_expr,
+        on_error,
+    } = &tail.kind
+    else {
+        panic!("Expected try expression");
+    };
+    assert!(
+        matches!(fallible_expr.kind, ExprKind::Call { .. }),
+        "Expected fallible expression to be a call"
+    );
+    let Some(handler) = on_error else {
+        panic!("Expected try-or to carry an on_error handler");
+    };
+    assert!(
+        matches!(handler.kind, ExprKind::Closure { .. }),
+        "Expected on_error handler to be parsed as a closure expression"
     );
 }
