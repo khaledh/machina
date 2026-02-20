@@ -2049,6 +2049,61 @@ fn test_try_or_handler_rejects_param_type_mismatch() {
 }
 
 #[test]
+fn test_try_or_block_sugar_typechecks() {
+    let source = r#"
+        type IoError = { code: u64 }
+
+        fn ok(value: u64) -> u64 | IoError {
+            value
+        }
+
+        fn fail() -> u64 | IoError {
+            IoError { code: 1 }
+        }
+
+        fn read(flag: bool) -> u64 | IoError {
+            flag ? ok(41) : fail()
+        }
+
+        fn run(flag: bool) -> u64 {
+            read(flag) or { 0 }
+        }
+    "#;
+
+    let _ctx = type_check_source(source).expect("Failed to type check");
+}
+
+#[test]
+fn test_try_or_arm_sugar_typechecks() {
+    let source = r#"
+        type IoError = { code: u64 }
+        type ParseError = { line: u64 }
+
+        fn ok(value: u64) -> u64 | IoError | ParseError {
+            value
+        }
+
+        fn fail() -> u64 | IoError | ParseError {
+            IoError { code: 1 }
+        }
+
+        fn read(flag: bool) -> u64 | IoError | ParseError {
+            flag ? ok(41) : fail()
+        }
+
+        fn run(flag: bool) -> u64 {
+            read(flag) or {
+                value: u64 => value,
+                io: IoError => io.code,
+                parse: ParseError => parse.line,
+            }
+        }
+    "#;
+
+    let _ctx = type_check_source(source).expect("Failed to type check");
+}
+
+#[test]
 fn test_try_operator_rejects_non_union_operand() {
     let source = r#"
         fn run() -> u64 {

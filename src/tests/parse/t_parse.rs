@@ -3004,3 +3004,76 @@ fn test_parse_try_or_with_closure_handler() {
         "Expected on_error handler to be parsed as a closure expression"
     );
 }
+
+#[test]
+fn test_parse_try_or_block_sugar_wraps_handler_closure() {
+    let source = r#"
+        fn test() -> u64 {
+            parse_u64("42") or { 0 }
+        }
+    "#;
+
+    let funcs = parse_source(source).expect("Failed to parse");
+    let func = &funcs[0];
+    let tail = block_tail(&func.body);
+    let ExprKind::Try {
+        fallible_expr,
+        on_error,
+    } = &tail.kind
+    else {
+        panic!("Expected try expression");
+    };
+    assert!(matches!(fallible_expr.kind, ExprKind::Call { .. }));
+    let Some(handler) = on_error else {
+        panic!("Expected handler closure");
+    };
+    let ExprKind::Closure { params, body, .. } = &handler.kind else {
+        panic!("Expected closure handler");
+    };
+    assert_eq!(params.len(), 1);
+    assert!(matches!(body.kind, ExprKind::Block { .. }));
+}
+
+#[test]
+fn test_parse_try_or_arm_sugar_wraps_match_handler_closure() {
+    let source = r#"
+        type IoError = { code: u64 }
+        type ParseError = { line: u64 }
+
+        fn test() -> u64 {
+            read() or {
+                value: u64 => value,
+                io: IoError => io.code,
+                parse: ParseError => parse.line,
+            }
+        }
+    "#;
+
+    let funcs = parse_source(source).expect("Failed to parse");
+    let func = funcs
+        .iter()
+        .find(|func| func.sig.name == "test")
+        .expect("Missing test function");
+    let tail = block_tail(&func.body);
+    let ExprKind::Try {
+        on_error: Some(handler),
+        ..
+    } = &tail.kind
+    else {
+        panic!("Expected try expression with handler");
+    };
+    let ExprKind::Closure { body, .. } = &handler.kind else {
+        panic!("Expected closure handler");
+    };
+    let ExprKind::Block {
+        tail: Some(match_tail),
+        ..
+    } = &body.kind
+    else {
+        panic!("Expected closure body block");
+    };
+    let ExprKind::Match { arms, .. } = &match_tail.kind else {
+        panic!("Expected match expression in arm-style sugar");
+    };
+    assert_eq!(arms.len(), 3);
+}

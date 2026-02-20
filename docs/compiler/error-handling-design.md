@@ -8,6 +8,9 @@ This document defines the initial error handling model for Machina:
 - A canonical `Try` construct with two surface forms:
   - Postfix propagation operator: `?`
   - Recovery operator with handler: `or |err| { ... }`
+- Sugar forms over recovery handlers:
+  - `expr or { ... }` (ignore error payload)
+  - `expr or { E1 => ..., E2 => ... }` (arm-style recovery)
 - Exhaustive `match` over union variants with type-pattern arms
 - Regular structs/enums as error variants (no separate error type category)
 
@@ -77,6 +80,33 @@ let cfg = parse_config(text) or |err| {
 
 `or` keeps success-path code linear while making recovery explicit.
 
+#### Recovery sugar forms
+
+Two sugar forms are supported and lower to the same canonical `Try` core:
+
+```mc
+// Ignore payload sugar
+read(flag) or { 0 }
+// Desugars to:
+read(flag) or |err| {
+    err;
+    0
+}
+
+// Arm-style sugar
+read(flag) or {
+    io: IoError => io.code,
+    parse: ParseError => parse.line,
+}
+// Desugars to:
+read(flag) or |err| {
+    match err {
+        io: IoError => io.code,
+        parse: ParseError => parse.line,
+    }
+}
+```
+
 ### 5. Canonical internal form
 
 Both `?` and `or` lower to one core construct in the tree model:
@@ -89,6 +119,9 @@ Where:
 
 - `on_error = Propagate` for `expr?`
 - `on_error = Handle(handler_expr)` for `expr or handler_expr`
+- `expr or { ... }` is lowered to a synthetic closure handler.
+- `expr or { arm => ... }` is lowered to a synthetic closure with an inner
+  `match` on the error union.
 
 `handler_expr` is expected to be callable with one argument (the error union).
 
@@ -179,8 +212,9 @@ Lowering/codegen should reuse existing enum machinery where possible.
 - Parse `?` as `Try { on_error = Propagate }`.
 - Parse `or` as contextual keyword in expression position:
   - `lhs or rhs` -> `Try { fallible_expr: lhs, on_error: Handle(rhs) }`.
-- Reuse the existing closure parser path for `rhs`; do not add a special
-  parser for error handlers.
+- Parse sugar forms and desugar at parse-time into standard handler expressions:
+  - `or { ... }` -> synthetic closure
+  - `or { arm => ... }` -> synthetic closure with `match`
 
 ### 2. Resolver
 
@@ -256,6 +290,7 @@ Add tests under `src/tests/*`:
 - Negative tests for forbidden union positions.
 - Normalize/lowering tests for union control-flow and payload behavior.
 - End-to-end examples under subfolders in `examples/` (e.g. `examples/error_handling/*.mc`).
+- Include sugar coverage via `/Users/khaled/src/khaledh/machina/examples/error_handling/try_or_sugar.mc`.
 
 ## Rollout
 
@@ -274,9 +309,5 @@ Add tests under `src/tests/*`:
 
 ## Future Extensions
 
-- Optional sugar:
-  - `expr or { ... }` desugaring to `expr or |_| { ... }`
-  - match-arm style `or { A(..) => ..., B(..) => ... }` desugaring to
-    `or |err| { match err { ... } }`
 - Controlled broadening of where union types may appear.
 - Better IDE diagnostics and quick-fix suggestions for propagation mismatches.

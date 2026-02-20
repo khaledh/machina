@@ -144,7 +144,7 @@ impl<'a> Parser<'a> {
 
         if min_bp <= Self::TERNARY_BP && self.is_contextual_keyword("or") {
             self.consume_contextual_keyword("or")?;
-            let on_error = self.parse_expr(Self::TERNARY_BP + 1)?;
+            let on_error = self.parse_try_or_handler_expr()?;
             lhs = Expr {
                 id: self.id_gen.new_id(),
                 kind: ExprKind::Try {
@@ -718,6 +718,110 @@ impl<'a> Parser<'a> {
             ty: (),
             span: self.close(marker),
         })
+    }
+
+    fn parse_try_or_handler_expr(&mut self) -> Result<Expr, ParseError> {
+        if self.curr_token.kind == TK::LBrace {
+            return self.parse_try_or_brace_sugar();
+        }
+        self.parse_expr(Self::TERNARY_BP + 1)
+    }
+
+    fn parse_try_or_brace_sugar(&mut self) -> Result<Expr, ParseError> {
+        if self.lookahead_for(TK::FatArrow, TK::RBrace) {
+            self.parse_try_or_arm_handler_closure()
+        } else {
+            let body = self.parse_block()?;
+            Ok(self.wrap_try_or_handler_block(body))
+        }
+    }
+
+    fn parse_try_or_arm_handler_closure(&mut self) -> Result<Expr, ParseError> {
+        let marker = self.mark();
+        self.consume(&TK::LBrace)?;
+        let arms = self.parse_list(TK::Comma, TK::RBrace, |parser| parser.parse_match_arm())?;
+        if arms.is_empty() {
+            return self.err_here(PEK::ExpectedMatchArm(self.curr_token.clone()));
+        }
+        self.consume(&TK::RBrace)?;
+        let span = self.close(marker);
+
+        let err_param_name = "__err".to_string();
+        let scrutinee = Expr {
+            id: self.id_gen.new_id(),
+            kind: ExprKind::Var {
+                ident: err_param_name.clone(),
+                def_id: (),
+            },
+            ty: (),
+            span,
+        };
+        let match_expr = Expr {
+            id: self.id_gen.new_id(),
+            kind: ExprKind::Match {
+                scrutinee: Box::new(scrutinee),
+                arms,
+            },
+            ty: (),
+            span,
+        };
+        let body = Expr {
+            id: self.id_gen.new_id(),
+            kind: ExprKind::Block {
+                items: Vec::new(),
+                tail: Some(Box::new(match_expr)),
+            },
+            ty: (),
+            span,
+        };
+        Ok(self.wrap_try_or_handler_with_param(err_param_name, body, span))
+    }
+
+    fn wrap_try_or_handler_block(&mut self, body: Expr) -> Expr {
+        let span = body.span;
+        self.wrap_try_or_handler_with_param("__err".to_string(), body, span)
+    }
+
+    fn wrap_try_or_handler_with_param(
+        &mut self,
+        param_name: String,
+        body: Expr,
+        span: crate::core::diag::Span,
+    ) -> Expr {
+        let param = Param {
+            id: self.id_gen.new_id(),
+            ident: param_name,
+            def_id: (),
+            typ: TypeExpr {
+                id: self.id_gen.new_id(),
+                kind: TypeExprKind::Infer,
+                span,
+            },
+            mode: ParamMode::In,
+            span,
+        };
+
+        self.closure_index += 1;
+        let base = self.closure_base.as_deref().unwrap_or("anon");
+        let ident = format!("{base}$closure${}", self.closure_index);
+
+        Expr {
+            id: self.id_gen.new_id(),
+            kind: ExprKind::Closure {
+                ident,
+                def_id: (),
+                captures: Vec::new(),
+                params: vec![param],
+                return_ty: TypeExpr {
+                    id: self.id_gen.new_id(),
+                    kind: TypeExprKind::Infer,
+                    span,
+                },
+                body: Box::new(body),
+            },
+            ty: (),
+            span,
+        }
     }
 
     pub(super) fn parse_if(&mut self) -> Result<Expr, ParseError> {

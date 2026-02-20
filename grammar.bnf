@@ -179,7 +179,10 @@ PatternList        ::= Pattern ( "," Pattern )* ","?
 
 # Expressions
 Expr               ::= If | Match | TryExpr
-TryExpr            ::= TernaryExpr ( "or" Expr )?
+TryExpr            ::= TernaryExpr ( "or" ( Expr | OrHandlerBlock ) )?
+OrHandlerBlock     ::= "{" ( MatchArmList | BlockBody )? "}"
+MatchArmList       ::= MatchArm ( "," MatchArm )* ","?
+BlockBody          ::= BlockItem* (Expr ";"?)?
 TernaryExpr        ::= InfixExpr ( "?" Expr ":" TernaryExpr )?
 
 # Control flow

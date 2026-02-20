@@ -30,7 +30,7 @@ impl<'a> Parser<'a> {
         })
     }
 
-    fn parse_match_arm(&mut self) -> Result<MatchArm, ParseError> {
+    pub(super) fn parse_match_arm(&mut self) -> Result<MatchArm, ParseError> {
         let marker = self.mark();
 
         let pattern = self.parse_match_pattern()?;
