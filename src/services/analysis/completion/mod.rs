@@ -14,7 +14,7 @@ use crate::core::diag::{Position, Span};
 use crate::services::analysis::results::CompletionItem;
 use member::{member_completions, qualified_path_completions};
 use scope::{enclosing_callable_def_id, scope_completions};
-use site::{CompletionSite, CompletionSiteKind, classify_completion_site};
+use site::{CompletionSite, classify_completion_site};
 
 pub(crate) fn collect(
     source: &str,
@@ -40,50 +40,31 @@ pub(crate) fn synthesize_member_completion_source(
     source_probe::synthesize_member_completion_source(source, cursor)
 }
 
-struct CompletionProviders {
-    scope: fn(&CompletionSite, &crate::core::context::ResolvedContext) -> Vec<CompletionItem>,
-    member: fn(&CompletionSite, &crate::core::context::ResolvedContext) -> Vec<CompletionItem>,
-    qualified_path:
-        fn(&CompletionSite, &crate::core::context::ResolvedContext) -> Vec<CompletionItem>,
-    requires_path:
-        fn(&CompletionSite, &crate::core::context::ResolvedContext) -> Vec<CompletionItem>,
-    type_expr: fn(&CompletionSite, &crate::core::context::ResolvedContext) -> Vec<CompletionItem>,
-    pattern: fn(&CompletionSite, &crate::core::context::ResolvedContext) -> Vec<CompletionItem>,
-}
-
-impl Default for CompletionProviders {
-    fn default() -> Self {
-        Self {
-            scope: provide_scope_completions,
-            member: provide_member_completions,
-            qualified_path: provide_qualified_path_completions,
-            requires_path: provide_requires_path_completions,
-            type_expr: provide_type_expr_completions,
-            pattern: provide_pattern_completions,
-        }
-    }
-}
-
 fn dispatch_site_completions(
     site: &CompletionSite,
     fallback_cursor: Position,
     resolved: &crate::core::context::ResolvedContext,
 ) -> Vec<CompletionItem> {
-    let providers = CompletionProviders::default();
-    let items = match site.kind() {
-        CompletionSiteKind::Scope => (providers.scope)(site, resolved),
-        CompletionSiteKind::Member => (providers.member)(site, resolved),
-        CompletionSiteKind::QualifiedPath => (providers.qualified_path)(site, resolved),
-        CompletionSiteKind::RequiresPath => (providers.requires_path)(site, resolved),
-        CompletionSiteKind::TypeExpr => (providers.type_expr)(site, resolved),
-        CompletionSiteKind::Pattern => (providers.pattern)(site, resolved),
+    let items = match site {
+        CompletionSite::Scope { cursor, .. } => scope_completions(resolved, *cursor),
+        CompletionSite::Member {
+            receiver_ty,
+            caller_def_id,
+            ..
+        } => member_completions(resolved, receiver_ty, *caller_def_id),
+        CompletionSite::QualifiedPath { path_segments, .. } => {
+            qualified_path_completions(resolved, path_segments)
+        }
+        CompletionSite::RequiresPath { .. }
+        | CompletionSite::TypeExpr { .. }
+        | CompletionSite::Pattern { .. } => Vec::new(),
     };
     if items.is_empty()
         && matches!(
-            site.kind(),
-            CompletionSiteKind::RequiresPath
-                | CompletionSiteKind::TypeExpr
-                | CompletionSiteKind::Pattern
+            site,
+            CompletionSite::RequiresPath { .. }
+                | CompletionSite::TypeExpr { .. }
+                | CompletionSite::Pattern { .. }
         )
     {
         scope_completions(resolved, fallback_cursor)
@@ -98,63 +79,6 @@ fn completion_post_pass(mut items: Vec<CompletionItem>, prefix: &str) -> Vec<Com
     items.retain(|item| seen.insert(item.label.clone()));
     items.sort_unstable_by(|a, b| a.label.cmp(&b.label));
     items
-}
-
-fn provide_scope_completions(
-    site: &CompletionSite,
-    resolved: &crate::core::context::ResolvedContext,
-) -> Vec<CompletionItem> {
-    match site {
-        CompletionSite::Scope { cursor, .. } => scope_completions(resolved, *cursor),
-        _ => Vec::new(),
-    }
-}
-
-fn provide_member_completions(
-    site: &CompletionSite,
-    resolved: &crate::core::context::ResolvedContext,
-) -> Vec<CompletionItem> {
-    match site {
-        CompletionSite::Member {
-            receiver_ty,
-            caller_def_id,
-            ..
-        } => member_completions(resolved, receiver_ty, *caller_def_id),
-        _ => Vec::new(),
-    }
-}
-
-fn provide_requires_path_completions(
-    _site: &CompletionSite,
-    _resolved: &crate::core::context::ResolvedContext,
-) -> Vec<CompletionItem> {
-    Vec::new()
-}
-
-fn provide_qualified_path_completions(
-    site: &CompletionSite,
-    resolved: &crate::core::context::ResolvedContext,
-) -> Vec<CompletionItem> {
-    match site {
-        CompletionSite::QualifiedPath { path_segments, .. } => {
-            qualified_path_completions(resolved, path_segments)
-        }
-        _ => Vec::new(),
-    }
-}
-
-fn provide_type_expr_completions(
-    _site: &CompletionSite,
-    _resolved: &crate::core::context::ResolvedContext,
-) -> Vec<CompletionItem> {
-    Vec::new()
-}
-
-fn provide_pattern_completions(
-    _site: &CompletionSite,
-    _resolved: &crate::core::context::ResolvedContext,
-) -> Vec<CompletionItem> {
-    Vec::new()
 }
 
 #[cfg(test)]

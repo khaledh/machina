@@ -9,16 +9,6 @@ use crate::services::analysis::syntax_index::node_at_span;
 
 use super::source_probe::{is_ident_byte, offset_for_position, single_char_span};
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(super) enum CompletionSiteKind {
-    Scope,
-    Member,
-    QualifiedPath,
-    RequiresPath,
-    TypeExpr,
-    Pattern,
-}
-
 #[derive(Debug, Clone)]
 pub(super) enum CompletionSite {
     Scope {
@@ -46,17 +36,6 @@ pub(super) enum CompletionSite {
 }
 
 impl CompletionSite {
-    pub(super) fn kind(&self) -> CompletionSiteKind {
-        match self {
-            Self::Scope { .. } => CompletionSiteKind::Scope,
-            Self::Member { .. } => CompletionSiteKind::Member,
-            Self::QualifiedPath { .. } => CompletionSiteKind::QualifiedPath,
-            Self::RequiresPath { .. } => CompletionSiteKind::RequiresPath,
-            Self::TypeExpr { .. } => CompletionSiteKind::TypeExpr,
-            Self::Pattern { .. } => CompletionSiteKind::Pattern,
-        }
-    }
-
     pub(super) fn prefix(&self) -> &str {
         match self {
             Self::Scope { prefix, .. }
