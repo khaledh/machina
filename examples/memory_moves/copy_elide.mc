@@ -20,11 +20,7 @@ fn elide_simple() -> u64 {
 fn elide_across_blocks(flag: bool) -> u64 {
     let a = u64[1, 2, 3];
     let b = a;
-    if flag {
-        b[0]
-    } else {
-        b[1]
-    }
+    flag ? b[0] : b[1]
 }
 
 // Copy should NOT be elided: source is used after the copy.

@@ -8,6 +8,9 @@ enum GenericLitKind {
 }
 
 impl<'a> Parser<'a> {
+    // Conditional operator precedence (`?:`) is lower than all binary ops.
+    const TERNARY_BP: u8 = 0;
+
     /// Expression parsing (using Pratt parsing for operator precedence)
     pub(super) fn parse_expr(&mut self, min_bp: u8) -> Result<Expr, ParseError> {
         let marker = self.mark();
@@ -120,6 +123,25 @@ impl<'a> Parser<'a> {
             };
         }
 
+        // Ternary conditional is right-associative and desugars into the
+        // existing `if` expression node.
+        if min_bp <= Self::TERNARY_BP && self.should_parse_ternary_question() {
+            self.advance();
+            let then_body = self.parse_expr(0)?;
+            self.consume(&TK::Colon)?;
+            let else_body = self.parse_expr(Self::TERNARY_BP)?;
+            lhs = Expr {
+                id: self.id_gen.new_id(),
+                kind: ExprKind::If {
+                    cond: Box::new(lhs),
+                    then_body: Box::new(then_body),
+                    else_body: Box::new(else_body),
+                },
+                ty: (),
+                span: self.close(marker),
+            };
+        }
+
         Ok(lhs)
     }
 
@@ -148,6 +170,41 @@ impl<'a> Parser<'a> {
         }
     }
 
+    fn should_parse_ternary_question(&self) -> bool {
+        self.curr_token.kind == TK::Question
+            && self
+                .peek()
+                .is_some_and(|token| Self::is_expr_start_token(&token.kind))
+    }
+
+    fn is_expr_start_token(token: &TokenKind) -> bool {
+        matches!(
+            token,
+            TK::Minus
+                | TK::LogicalNot
+                | TK::Tilde
+                | TK::Caret
+                | TK::KwMove
+                | TK::IntLit(_)
+                | TK::BoolLit(_)
+                | TK::CharLit(_)
+                | TK::StringLit(_)
+                | TK::KwIf
+                | TK::KwMatch
+                | TK::KwEmit
+                | TK::KwReply
+                | TK::Ident(_)
+                | TK::KwSet
+                | TK::KwMap
+                | TK::KwSelf
+                | TK::LParen
+                | TK::LBrace
+                | TK::Pipe
+                | TK::LogicalOr
+                | TK::LBracket
+        )
+    }
+
     fn parse_postfix(&mut self) -> Result<Expr, ParseError> {
         let marker = self.mark();
         let mut expr = self.parse_primary()?;
@@ -160,7 +217,12 @@ impl<'a> Parser<'a> {
                 }
                 TK::LBracket => self.parse_index_or_slice_postfix(expr, marker)?,
                 TK::Dot => self.parse_dot_postfix(expr, marker)?,
-                TK::Question => self.parse_try_postfix(expr, marker)?,
+                TK::Question => {
+                    if self.should_parse_ternary_question() {
+                        break;
+                    }
+                    self.parse_try_postfix(expr, marker)?
+                }
                 _ => break,
             };
             expr = next;

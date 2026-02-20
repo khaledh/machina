@@ -2880,3 +2880,89 @@ fn test_parse_shift_compound_assignment() {
     assert_eq!(*op, BinaryOp::Shl);
     assert!(matches!(value.kind, ExprKind::IntLit(3)));
 }
+
+#[test]
+fn test_parse_ternary_expr_desugars_to_if_expr() {
+    let source = r#"
+        fn test() -> u64 {
+            let flag = true;
+            flag ? 1 : 2
+        }
+    "#;
+
+    let funcs = parse_source(source).expect("Failed to parse");
+    let func = &funcs[0];
+    let tail = block_tail(&func.body);
+    let ExprKind::If {
+        cond,
+        then_body,
+        else_body,
+    } = &tail.kind
+    else {
+        panic!("Expected ternary to parse as If expr");
+    };
+    assert!(matches!(cond.kind, ExprKind::Var { .. }));
+    assert!(matches!(then_body.kind, ExprKind::IntLit(1)));
+    assert!(matches!(else_body.kind, ExprKind::IntLit(2)));
+}
+
+#[test]
+fn test_parse_ternary_precedence_with_binary_condition() {
+    let source = r#"
+        fn test() -> u64 {
+            1 + 2 * 3 > 0 ? 4 : 5
+        }
+    "#;
+
+    let funcs = parse_source(source).expect("Failed to parse");
+    let func = &funcs[0];
+    let tail = block_tail(&func.body);
+    let ExprKind::If { cond, .. } = &tail.kind else {
+        panic!("Expected ternary If expr");
+    };
+    let ExprKind::BinOp { op, .. } = &cond.kind else {
+        panic!("Expected binary condition");
+    };
+    assert_eq!(*op, BinaryOp::Gt);
+}
+
+#[test]
+fn test_parse_nested_ternary_is_right_associative() {
+    let source = r#"
+        fn test() -> u64 {
+            a ? b : c ? d : e
+        }
+    "#;
+
+    let funcs = parse_source(source).expect("Failed to parse");
+    let func = &funcs[0];
+    let tail = block_tail(&func.body);
+    let ExprKind::If { else_body, .. } = &tail.kind else {
+        panic!("Expected outer ternary If expr");
+    };
+    assert!(
+        matches!(else_body.kind, ExprKind::If { .. }),
+        "Expected nested ternary in else-branch"
+    );
+}
+
+#[test]
+fn test_parse_try_postfix_still_works() {
+    let source = r#"
+        fn test() -> u64 | ParseErr {
+            parse_u64("42")?
+        }
+    "#;
+
+    let funcs = parse_source(source).expect("Failed to parse");
+    let func = &funcs[0];
+    let tail = block_tail(&func.body);
+    let ExprKind::UnaryOp { op, expr } = &tail.kind else {
+        panic!("Expected unary try expression");
+    };
+    assert_eq!(*op, UnaryOp::Try);
+    assert!(
+        matches!(expr.kind, ExprKind::Call { .. }),
+        "Expected try operand to be a call"
+    );
+}

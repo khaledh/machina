@@ -36,11 +36,7 @@ fn main() -> () {
 
     let opt_bool = Option::Some(true);
     match opt_bool {
-        Some(b) => if b {
-          println("opt = Some(true)")
-        } else {
-          println("opt = Some(false)")
-        },
+        Some(b) => println(f"opt = Some({b})"),
         None => println("opt = None"),
     };
 }

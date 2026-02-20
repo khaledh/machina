@@ -11,11 +11,7 @@ fn fail() -> u64 | AppError {
 }
 
 fn maybe_read(success: bool) -> u64 | AppError {
-    if success {
-        ok(0)
-    } else {
-        fail()
-    }
+    success ? ok(0) : fail()
 }
 
 // Demonstrates executable entrypoint handling for `main` returning an error union.

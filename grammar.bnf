@@ -178,7 +178,8 @@ StructPatternField ::= Identifier ( ":" Pattern )?
 PatternList        ::= Pattern ( "," Pattern )* ","?
 
 # Expressions
-Expr               ::= If | Match | InfixExpr
+Expr               ::= If | Match | TernaryExpr
+TernaryExpr        ::= InfixExpr ( "?" Expr ":" TernaryExpr )?
 
 # Control flow
 If                 ::= "if" Expr Block IfTail?

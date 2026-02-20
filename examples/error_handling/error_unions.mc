@@ -24,11 +24,7 @@ fn fail() -> u64 | IoError {
 }
 
 fn choose(flag: bool, value: u64) -> u64 | IoError {
-    if flag {
-        ok(value)
-    } else {
-        fail()
-    }
+    flag ? ok(value) : fail()
 }
 
 // Demonstrates if-join lifting: success arm is plain u64, error arm is IoError.
@@ -65,11 +61,7 @@ fn read_parse() -> u64 | ParseError {
 // - callee returns `u64 | IoError` / `u64 | ParseError`
 // - caller returns `u64 | AppError` where AppError wraps both.
 fn read_with_wrapped_errors(flag: bool) -> u64 | AppError {
-    if flag {
-        read_io()?
-    } else {
-        read_parse()?
-    }
+    flag ? read_io()? : read_parse()?
 }
 
 fn main() {
