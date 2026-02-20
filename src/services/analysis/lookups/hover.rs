@@ -648,13 +648,13 @@ fn field_type_in_struct<'a>(ty: &'a Type, field_name: &str) -> Option<&'a Type> 
     }
 }
 
-fn try_format_source_callable_signature(
+pub(super) fn try_format_source_callable_signature(
     def_id: Option<DefId>,
     typed_module: Option<&typed_tree::Module>,
     type_map: Option<&TypeMap>,
     def_table: &DefTable,
     demangler: &TypestateNameDemangler,
-) -> Option<String> {
+) -> Option<(String, Vec<String>)> {
     let def_id = def_id?;
     let typed_module = typed_module?;
     let type_map = type_map?;
@@ -678,80 +678,59 @@ fn try_format_source_callable_signature(
             typed_tree::CallableRef::ClosureDef(closure_def) => closure_def.def_id == def_id,
         })?;
 
+    let map_type_params = |params: &[typed_tree::TypeParam]| {
+        params
+            .iter()
+            .map(|param| param.ident.clone())
+            .collect::<Vec<_>>()
+    };
+    let map_params = |params: &[typed_tree::Param]| {
+        params
+            .iter()
+            .map(|param| {
+                (
+                    param.ident.clone(),
+                    param.mode.clone(),
+                    param.def_id,
+                    param.typ.clone(),
+                )
+            })
+            .collect::<Vec<_>>()
+    };
     let (name, type_params, params_src): (
         String,
         Vec<String>,
-        Vec<(String, crate::core::tree::ParamMode, DefId)>,
+        Vec<(
+            String,
+            crate::core::tree::ParamMode,
+            DefId,
+            typed_tree::TypeExpr,
+        )>,
     ) = match callable {
         typed_tree::CallableRef::FuncDecl(func_decl) => (
             func_decl.sig.name.clone(),
-            func_decl
-                .sig
-                .type_params
-                .iter()
-                .map(|param| param.ident.clone())
-                .collect(),
-            func_decl
-                .sig
-                .params
-                .iter()
-                .map(|param| (param.ident.clone(), param.mode.clone(), param.def_id))
-                .collect(),
+            map_type_params(&func_decl.sig.type_params),
+            map_params(&func_decl.sig.params),
         ),
         typed_tree::CallableRef::FuncDef(func_def) => (
             func_def.sig.name.clone(),
-            func_def
-                .sig
-                .type_params
-                .iter()
-                .map(|param| param.ident.clone())
-                .collect(),
-            func_def
-                .sig
-                .params
-                .iter()
-                .map(|param| (param.ident.clone(), param.mode.clone(), param.def_id))
-                .collect(),
+            map_type_params(&func_def.sig.type_params),
+            map_params(&func_def.sig.params),
         ),
         typed_tree::CallableRef::MethodDecl { method_decl, .. } => (
             method_decl.sig.name.clone(),
-            method_decl
-                .sig
-                .type_params
-                .iter()
-                .map(|param| param.ident.clone())
-                .collect(),
-            method_decl
-                .sig
-                .params
-                .iter()
-                .map(|param| (param.ident.clone(), param.mode.clone(), param.def_id))
-                .collect(),
+            map_type_params(&method_decl.sig.type_params),
+            map_params(&method_decl.sig.params),
         ),
         typed_tree::CallableRef::MethodDef { method_def, .. } => (
             method_def.sig.name.clone(),
-            method_def
-                .sig
-                .type_params
-                .iter()
-                .map(|param| param.ident.clone())
-                .collect(),
-            method_def
-                .sig
-                .params
-                .iter()
-                .map(|param| (param.ident.clone(), param.mode.clone(), param.def_id))
-                .collect(),
+            map_type_params(&method_def.sig.type_params),
+            map_params(&method_def.sig.params),
         ),
         typed_tree::CallableRef::ClosureDef(closure_def) => (
             "<closure>".to_string(),
             Vec::new(),
-            closure_def
-                .sig
-                .params
-                .iter()
-                .map(|param| (param.ident.clone(), param.mode.clone(), param.def_id))
-                .collect(),
+            map_params(&closure_def.sig.params),
         ),
     };
 
@@ -775,19 +754,30 @@ fn try_format_source_callable_signature(
     };
 
     let mut rendered_params = Vec::with_capacity(params_src.len());
-    for (idx, (param_name, mode, param_def_id)) in params_src.into_iter().enumerate() {
+    for (idx, (param_name, mode, param_def_id, param_ty_expr)) in params_src.into_iter().enumerate()
+    {
         let mode_prefix = match mode {
             crate::core::tree::ParamMode::In => "",
             crate::core::tree::ParamMode::InOut => "inout ",
             crate::core::tree::ParamMode::Out => "out ",
             crate::core::tree::ParamMode::Sink => "sink ",
         };
-        let param_ty = def_table
-            .lookup_def(param_def_id)
-            .and_then(|param_def| type_map.lookup_def_type(param_def))
-            .or_else(|| params.get(idx).map(|param| param.ty.clone()))
-            .unwrap_or(Type::Unknown);
-        rendered_params.push(format!("{mode_prefix}{param_name}: {}", render(&param_ty)));
+        let param_ty =
+            format_type_expr_for_signature(&param_ty_expr, demangler).unwrap_or_else(|| {
+                // Fallback to typed info when the source-level type expression
+                // cannot be rendered directly.
+                let param_ty = params
+                    .get(idx)
+                    .map(|param| param.ty.clone())
+                    .or_else(|| {
+                        def_table
+                            .lookup_def(param_def_id)
+                            .and_then(|param_def| type_map.lookup_def_type(param_def))
+                    })
+                    .unwrap_or(Type::Unknown);
+                render(&param_ty)
+            });
+        rendered_params.push(format!("{mode_prefix}{param_name}: {param_ty}"));
     }
     let rendered_name = demangler.demangle_text(&name);
     let rendered_ret = render(&ret_ty);
@@ -796,10 +786,102 @@ fn try_format_source_callable_signature(
     } else {
         format!("<{}>", type_params.join(", "))
     };
-    Some(format!(
+    let label = format!(
         "fn {rendered_name}{rendered_tparams}({}) -> {rendered_ret}",
         rendered_params.join(", ")
-    ))
+    );
+    Some((label, rendered_params))
+}
+
+fn format_type_expr_for_signature(
+    ty_expr: &typed_tree::TypeExpr,
+    demangler: &TypestateNameDemangler,
+) -> Option<String> {
+    use crate::core::tree::TypeExprKind;
+    Some(match &ty_expr.kind {
+        TypeExprKind::Infer => "_".to_string(),
+        TypeExprKind::Named {
+            ident, type_args, ..
+        } => {
+            if type_args.is_empty() {
+                demangler.demangle_text(ident)
+            } else {
+                let args: Vec<_> = type_args
+                    .iter()
+                    .filter_map(|arg| format_type_expr_for_signature(arg, demangler))
+                    .collect();
+                format!("{}<{}>", demangler.demangle_text(ident), args.join(", "))
+            }
+        }
+        TypeExprKind::Array { elem_ty_expr, dims } => {
+            let mut elem = format_type_expr_for_signature(elem_ty_expr, demangler)?;
+            for dim in dims {
+                elem = format!("{elem}[{dim}]");
+            }
+            elem
+        }
+        TypeExprKind::DynArray { elem_ty_expr } => {
+            let elem = format_type_expr_for_signature(elem_ty_expr, demangler)?;
+            format!("{elem}[*]")
+        }
+        TypeExprKind::Slice { elem_ty_expr } => {
+            let elem = format_type_expr_for_signature(elem_ty_expr, demangler)?;
+            format!("{elem}[]")
+        }
+        TypeExprKind::Heap { elem_ty_expr } => {
+            let elem = format_type_expr_for_signature(elem_ty_expr, demangler)?;
+            format!("{elem}^")
+        }
+        TypeExprKind::Tuple { field_ty_exprs } => {
+            let fields: Vec<_> = field_ty_exprs
+                .iter()
+                .filter_map(|field| format_type_expr_for_signature(field, demangler))
+                .collect();
+            format!("({})", fields.join(", "))
+        }
+        TypeExprKind::Union { variants } => {
+            let fields: Vec<_> = variants
+                .iter()
+                .filter_map(|field| format_type_expr_for_signature(field, demangler))
+                .collect();
+            fields.join(" | ")
+        }
+        TypeExprKind::Fn {
+            params,
+            ret_ty_expr,
+        } => {
+            let params: Vec<_> = params
+                .iter()
+                .filter_map(|param| {
+                    let ty = format_type_expr_for_signature(&param.ty_expr, demangler)?;
+                    let mode = match param.mode {
+                        crate::core::tree::ParamMode::In => "",
+                        crate::core::tree::ParamMode::InOut => "inout ",
+                        crate::core::tree::ParamMode::Out => "out ",
+                        crate::core::tree::ParamMode::Sink => "sink ",
+                    };
+                    Some(format!("{mode}{ty}"))
+                })
+                .collect();
+            let ret = format_type_expr_for_signature(ret_ty_expr, demangler)?;
+            format!("fn({}) -> {ret}", params.join(", "))
+        }
+        TypeExprKind::Refined {
+            base_ty_expr,
+            refinements: _,
+        } => format_type_expr_for_signature(base_ty_expr, demangler)?,
+        TypeExprKind::Ref {
+            mutable,
+            elem_ty_expr,
+        } => {
+            let elem = format_type_expr_for_signature(elem_ty_expr, demangler)?;
+            if *mutable {
+                format!("mut {elem}")
+            } else {
+                elem
+            }
+        }
+    })
 }
 
 // --- Display formatting ---
@@ -816,7 +898,7 @@ fn format_hover_label(
     if let Some(signature) =
         try_format_source_callable_signature(def_id, typed_module, type_map, def_table, &demangler)
     {
-        return signature;
+        return signature.0;
     }
     let render_name = |name: &str| demangler.demangle_text(name);
     let render_type = |ty: &Type| format_type_for_hover(ty, def_id, type_map, &demangler);

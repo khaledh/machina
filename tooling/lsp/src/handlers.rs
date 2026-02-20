@@ -69,6 +69,7 @@ pub fn handle_message(
     match method {
         Some("initialize") => {
             session.set_experimental_typestate(parse_initialize_typestate_flag(params));
+            let signature_retrigger_characters = signature_help_retrigger_characters();
             let response = success_response(
                 id.unwrap_or(Value::Null),
                 json!({
@@ -87,7 +88,7 @@ pub fn handle_message(
                         "renameProvider": false,
                         "signatureHelpProvider": {
                             "triggerCharacters": ["(", ","],
-                            "retriggerCharacters": [","]
+                            "retriggerCharacters": signature_retrigger_characters
                         },
                         "semanticTokensProvider": Value::Null,
                         "documentSymbolProvider": false,
@@ -200,6 +201,22 @@ pub fn handle_message(
             (HandlerAction::Continue, response)
         }
     }
+}
+
+/// Characters that should keep parameter hints alive while editing inside
+/// argument lists. VS Code re-requests signatureHelp when these are typed and
+/// a hint session is already active.
+fn signature_help_retrigger_characters() -> Vec<String> {
+    let mut out: Vec<String> = Vec::new();
+    for ch in "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789".chars() {
+        out.push(ch.to_string());
+    }
+    for ch in [
+        '_', '"', '\'', '.', '-', '+', '*', '/', '%', '&', '|', '^', '!', '~', '=',
+    ] {
+        out.push(ch.to_string());
+    }
+    out
 }
 
 fn parse_initialize_typestate_flag(params: Option<&Value>) -> bool {
@@ -580,21 +597,23 @@ fn signature_help_response(
     uri: &str,
     line0: usize,
     col0: usize,
-    version: i32,
+    _version: i32,
 ) -> Value {
-    let file_id = match resolve_versioned_file(session, &id, uri, version) {
+    // Signature help is highly interactive while typing. Be permissive about
+    // transient version skew so we can still show useful parameter hints
+    // instead of returning stale-result errors during fast edits.
+    let file_id = match session.file_id_for_uri(uri) {
         Ok(fid) => fid,
-        Err(r) => return r,
+        Err(error) => return session_error_response(id, &error),
     };
     if session.is_position_in_line_comment(file_id, line0, col0) {
         return success_response(id, Value::Null);
     }
     let span = span_from_lsp_position(line0, col0);
-    let result = match version_guarded_query(session, &id, uri, version, |db| {
-        db.signature_help_at_program_file(file_id, span)
-    }) {
+    let result = match session.execute_query(|db| db.signature_help_at_program_file(file_id, span))
+    {
         Ok(r) => r,
-        Err(r) => return r,
+        Err(_) => return session_error_response(id, &SessionError::Cancelled),
     };
     match result {
         Some(sig) => {

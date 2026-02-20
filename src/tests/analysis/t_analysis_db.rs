@@ -996,7 +996,7 @@ fn main() -> u64 { pair(1, 2) }
         .expect("expected signature help at call site");
 
     assert!(
-        sig.label.starts_with("pair("),
+        sig.label.contains("pair("),
         "unexpected label: {}",
         sig.label
     );
@@ -1027,7 +1027,7 @@ fn main() -> u64 {
         .expect("expected signature help for incomplete call");
 
     assert!(
-        sig.label.starts_with("add("),
+        sig.label.contains("add("),
         "unexpected label: {}",
         sig.label
     );
@@ -1058,7 +1058,136 @@ fn main() -> u64 {
         .expect("expected signature help with cursor inside empty call");
 
     assert!(
-        sig.label.starts_with("add("),
+        sig.label.contains("add("),
+        "unexpected label: {}",
+        sig.label
+    );
+    assert_eq!(sig.parameters.len(), 2);
+    assert_eq!(sig.active_parameter, 0);
+}
+
+#[test]
+fn signature_help_survives_cursor_after_first_arg_before_comma() {
+    let mut db = AnalysisDb::new();
+    let source = r#"
+fn pair(a: u64, b: u64) -> u64 { a + b }
+fn main() -> u64 {
+    pair(1)
+}
+"#;
+    let file_id = db.upsert_disk_text(
+        PathBuf::from("examples/signature_help_after_first_arg.mc"),
+        source,
+    );
+    let query_span = cursor_after_substring(source, "    pair(1");
+
+    let sig = db
+        .signature_help_at_file(file_id, query_span)
+        .expect("signature help query should succeed")
+        .expect("expected signature help with cursor after first arg");
+
+    assert!(
+        sig.label.contains("pair"),
+        "unexpected label: {}",
+        sig.label
+    );
+    assert_eq!(sig.parameters.len(), 2);
+    assert_eq!(sig.active_parameter, 0);
+}
+
+#[test]
+fn signature_help_moves_to_second_param_after_comma_before_second_arg() {
+    let mut db = AnalysisDb::new();
+    let source = r#"
+fn foo(a: u64, b: u64) -> u64 { a + b }
+fn main() -> u64 {
+    foo(42,)
+}
+"#;
+    let file_id = db.upsert_disk_text(
+        PathBuf::from("examples/signature_help_after_comma_before_second_arg.mc"),
+        source,
+    );
+    let query_span = cursor_after_substring(source, "    foo(42,");
+
+    let sig = db
+        .signature_help_at_file(file_id, query_span)
+        .expect("signature help query should succeed")
+        .expect("expected signature help after comma");
+
+    assert!(sig.label.contains("foo"), "unexpected label: {}", sig.label);
+    assert_eq!(sig.parameters.len(), 2);
+    assert_eq!(sig.active_parameter, 1);
+}
+
+#[test]
+fn signature_help_survives_empty_let_call_before_next_statement() {
+    let mut db = AnalysisDb::new();
+    let source = r#"
+requires {
+    std::io::println
+}
+
+fn pair<L, R>(left: L, right: R) -> (L, R) {
+    (left, right)
+}
+
+fn main() {
+    let p = pair("age", 7);
+    let q = pair()
+    println(type_of(p));
+}
+"#;
+    let file_id = db.upsert_disk_text(
+        PathBuf::from("examples/signature_help_empty_let_call_incomplete_stmt.mc"),
+        source,
+    );
+    let query_span = cursor_after_substring(source, "    let q = pair(");
+
+    let sig = db
+        .signature_help_at_program_file(file_id, query_span)
+        .expect("signature help query should succeed")
+        .expect("expected signature help with cursor inside empty let-call");
+
+    assert!(
+        sig.label.contains("pair"),
+        "unexpected label: {}",
+        sig.label
+    );
+    assert_eq!(sig.parameters.len(), 2);
+    assert_eq!(sig.active_parameter, 0);
+}
+
+#[test]
+fn signature_help_at_program_file_survives_cursor_after_first_generic_arg() {
+    let mut db = AnalysisDb::new();
+    let source = r#"
+requires {
+    std::io::println
+}
+
+fn pair<L, R>(left: L, right: R) -> (L, R) {
+    (left, right)
+}
+
+fn main() {
+    let q = pair(1)
+    println(type_of(q));
+}
+"#;
+    let file_id = db.upsert_disk_text(
+        PathBuf::from("examples/signature_help_program_after_first_generic_arg.mc"),
+        source,
+    );
+    let query_span = cursor_after_substring(source, "    let q = pair(1");
+
+    let sig = db
+        .signature_help_at_program_file(file_id, query_span)
+        .expect("signature help query should succeed")
+        .expect("expected signature help with cursor after first generic arg");
+
+    assert!(
+        sig.label.contains("pair"),
         "unexpected label: {}",
         sig.label
     );

@@ -13,30 +13,60 @@ pub(crate) fn synthesize_call_signature_sources(source: &str, cursor: Position) 
     if cursor_offset == 0 || cursor_offset > source.len() {
         return Vec::new();
     }
-    let Some(offset) = call_arg_insert_offset(source, cursor_offset) else {
+    let insert = if let Some(offset) = call_arg_insert_offset(source, cursor_offset) {
+        ProbeInsert::new(offset, "0")
+    } else if let Some(offset) = call_next_arg_insert_offset(source, cursor_offset) {
+        ProbeInsert::new(offset, ", 0")
+    } else {
         return Vec::new();
     };
+    let offset = insert.offset;
 
     let mut out = Vec::with_capacity(3);
-    out.push(inject_probe_at(source, offset, "0"));
+    out.push(inject_probe_at(source, offset, insert.probe));
 
     let has_existing_close_paren =
         next_non_whitespace_byte(source, offset).is_some_and(|(_, byte)| byte == b')');
     if !has_existing_close_paren {
-        out.push(inject_probe_at(source, offset, "0)"));
+        out.push(inject_probe_at(
+            source,
+            offset,
+            &format!("{})", insert.probe),
+        ));
     }
 
     if has_existing_close_paren {
         if let Some((close_idx, _)) = next_non_whitespace_byte(source, offset)
             && should_terminate_call_probe(source, close_idx + 1)
         {
-            let with_arg = inject_probe_at(source, offset, "0");
-            out.push(inject_probe_at(&with_arg, close_idx + 2, ";"));
+            let with_arg = inject_probe_at(source, offset, insert.probe);
+            let semicolon_offset = close_idx + insert.probe_len + 1;
+            out.push(inject_probe_at(&with_arg, semicolon_offset, ";"));
         }
     } else if should_terminate_call_probe(source, offset) {
-        out.push(inject_probe_at(source, offset, "0);"));
+        out.push(inject_probe_at(
+            source,
+            offset,
+            &format!("{});", insert.probe),
+        ));
     }
     out
+}
+
+struct ProbeInsert<'a> {
+    offset: usize,
+    probe: &'a str,
+    probe_len: usize,
+}
+
+impl<'a> ProbeInsert<'a> {
+    fn new(offset: usize, probe: &'a str) -> Self {
+        Self {
+            offset,
+            probe,
+            probe_len: probe.len(),
+        }
+    }
 }
 
 fn inject_probe_at(source: &str, offset: usize, probe: &str) -> String {
@@ -69,6 +99,36 @@ fn call_arg_insert_offset(source: &str, cursor_offset: usize) -> Option<usize> {
     None
 }
 
+fn call_next_arg_insert_offset(source: &str, cursor_offset: usize) -> Option<usize> {
+    let bytes = source.as_bytes();
+    if cursor_offset > bytes.len() {
+        return None;
+    }
+
+    // Cursor must be at (or before whitespace leading to) the call's closing
+    // `)`, with a non-empty preceding argument.
+    let mut right = cursor_offset;
+    while right < bytes.len() && bytes[right].is_ascii_whitespace() {
+        right += 1;
+    }
+    if right >= bytes.len() || bytes[right] != b')' {
+        return None;
+    }
+
+    let mut left = cursor_offset;
+    while left > 0 && bytes[left - 1].is_ascii_whitespace() {
+        left -= 1;
+    }
+    if left == 0 {
+        return None;
+    }
+    let prev = bytes[left - 1];
+    if prev == b'(' || prev == b',' {
+        return None;
+    }
+    Some(cursor_offset)
+}
+
 fn should_terminate_call_probe(source: &str, offset: usize) -> bool {
     let bytes = source.as_bytes();
     let mut i = offset;
@@ -93,7 +153,7 @@ fn next_non_whitespace_byte(source: &str, offset: usize) -> Option<(usize, u8)> 
     (i < bytes.len()).then_some((i, bytes[i]))
 }
 
-fn offset_for_position(source: &str, pos: Position) -> Option<usize> {
+pub(crate) fn offset_for_position(source: &str, pos: Position) -> Option<usize> {
     if pos.line == 0 || pos.column == 0 {
         return Some(0);
     }

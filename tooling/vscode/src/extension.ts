@@ -252,6 +252,21 @@ async function ensureClientStarted(context: vscode.ExtensionContext): Promise<bo
         }
         return result;
       },
+      async provideSignatureHelp(document, position, context, token, next) {
+        const debug = isDebugLoggingEnabled();
+        if (debug) {
+          output?.appendLine(
+            `[lsp] signatureHelp request uri=${document.uri.toString()} line=${position.line} col=${position.character} triggerKind=${context.triggerKind} triggerChar=${context.triggerCharacter ?? "<none>"} isRetrigger=${context.isRetrigger} docVersion=${document.version}`
+          );
+        }
+
+        const result = await next(document, position, context, token);
+
+        if (debug) {
+          output?.appendLine(`[lsp] signatureHelp response ${summarizeSignatureHelpResult(result)}`);
+        }
+        return result;
+      },
     },
     errorHandler: {
       error(error, message, count) {
@@ -424,4 +439,16 @@ function summarizeCodeActionResult(
     return `result=array(len=${result.length})`;
   }
   return "result=single-command";
+}
+
+function summarizeSignatureHelpResult(
+  result: vscode.SignatureHelp | null | undefined
+): string {
+  if (result == null) {
+    return "result=null";
+  }
+  const sigCount = result.signatures.length;
+  const activeSig = result.activeSignature ?? 0;
+  const activeParam = result.activeParameter ?? 0;
+  return `result=signatureHelp(signatures=${sigCount}, activeSignature=${activeSig}, activeParameter=${activeParam})`;
 }

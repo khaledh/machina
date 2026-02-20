@@ -496,8 +496,10 @@ impl AnalysisDb {
         file_id: FileId,
         query_span: Span,
     ) -> QueryResult<Option<SignatureHelp>> {
+        let snapshot = self.snapshot();
+        let source = snapshot.text(file_id).map(|s| s.to_string());
         let state = self.lookup_state_for_file(file_id)?;
-        if let Some(sig) = signature_help_at_span(&state, query_span) {
+        if let Some(sig) = self.signature_help_for_state(&state, query_span, source.as_deref()) {
             return Ok(Some(sig));
         }
         self.signature_help_with_synthetic_fallback(file_id, query_span)
@@ -520,15 +522,23 @@ impl AnalysisDb {
         file_id: FileId,
         query_span: Span,
     ) -> QueryResult<Option<SignatureHelp>> {
+        let snapshot = self.snapshot();
+        let source = snapshot.text(file_id).map(|s| s.to_string());
         let state = if let Some(state) = self.entry_lookup_state_for_program_file(file_id)? {
             state
         } else {
             self.lookup_state_for_file(file_id)?
         };
-        if let Some(sig) = signature_help_at_span(&state, query_span) {
+        if let Some(sig) = self.signature_help_for_state(&state, query_span, source.as_deref()) {
             return Ok(Some(sig));
         }
-        self.signature_help_with_synthetic_fallback(file_id, query_span)
+        if let Some(sig) = self.signature_help_with_synthetic_fallback(file_id, query_span)? {
+            return Ok(Some(sig));
+        }
+        // Best-effort fallback: when program-aware state is unavailable due
+        // transient graph/import failures while editing, keep signature help
+        // useful by trying the file-local pipeline.
+        self.signature_help_at_file(file_id, query_span)
     }
 
     pub fn document_symbols_at_path(&mut self, path: &Path) -> QueryResult<Vec<DocumentSymbol>> {
@@ -679,11 +689,14 @@ impl AnalysisDb {
 
         let mut fallback_sig = None;
         for synthetic_source in synthesize_call_signature_sources(&source, query_span.start) {
-            let Some(synthetic_state) = self.lookup_state_for_source(file_id, synthetic_source)?
+            let Some(synthetic_state) =
+                self.lookup_state_for_source(file_id, synthetic_source.clone())?
             else {
                 continue;
             };
-            if let Some(sig) = signature_help_at_span(&synthetic_state, query_span) {
+            if let Some(sig) =
+                self.signature_help_for_state(&synthetic_state, query_span, Some(&synthetic_source))
+            {
                 if sig.def_id.is_some() {
                     return Ok(Some(sig));
                 }
@@ -693,6 +706,28 @@ impl AnalysisDb {
             }
         }
         Ok(fallback_sig)
+    }
+
+    fn signature_help_for_state(
+        &self,
+        state: &LookupState,
+        query_span: Span,
+        source: Option<&str>,
+    ) -> Option<SignatureHelp> {
+        if let Some(sig) = signature_help_at_span(state, query_span, source) {
+            return Some(sig);
+        }
+        // Signature help should stay available while editing, even when
+        // unrelated resolve diagnostics suppress the main typed stage.
+        let resolved = state.resolved.as_ref()?.clone();
+        let fallback_typed =
+            api::typecheck_stage_partial(resolved, resolve::ImportedFacts::default()).context;
+        let fallback_state = LookupState {
+            resolved: state.resolved.clone(),
+            typed: Some(fallback_typed),
+            poisoned_nodes: state.poisoned_nodes.clone(),
+        };
+        signature_help_at_span(&fallback_state, query_span, source)
     }
 
     fn program_pipeline_for_file(&mut self, file_id: FileId) -> QueryResult<ProgramPipelineResult> {
