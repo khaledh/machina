@@ -43,7 +43,7 @@ typestate MonitorMachine : Heartbeat::Monitor {
     }
 
     fn new(worker: Machine<WorkerMachine>) -> Idle {
-        Idle { worker: worker }
+        Idle { worker }
     }
 
     state Idle {

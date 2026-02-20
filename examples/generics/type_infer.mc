@@ -17,7 +17,7 @@ fn make_some<T>(value: T) -> Option<T> {
 }
 
 fn pair<L, R>(left: L, right: R) -> Pair<L, R> {
-    Pair { left: left, right: right }
+    Pair { left, right }
 }
 
 fn choose<T>(primary: Option<T>, fallback: T) -> T {

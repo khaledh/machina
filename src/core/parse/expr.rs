@@ -1133,10 +1133,21 @@ impl<'a> Parser<'a> {
         let fields = self.parse_list(TK::Comma, TK::RBrace, |parser| {
             let field_marker = parser.mark();
             let name = parser.parse_ident()?;
-
-            parser.consume(&TK::Colon)?;
-
-            let value = parser.parse_expr(0)?;
+            let value = if parser.curr_token.kind == TK::Colon {
+                parser.advance();
+                parser.parse_expr(0)?
+            } else {
+                // Struct field shorthand: `Point { x }` desugars to `Point { x: x }`.
+                Expr {
+                    id: parser.id_gen.new_id(),
+                    kind: ExprKind::Var {
+                        ident: name.clone(),
+                        def_id: (),
+                    },
+                    ty: (),
+                    span: parser.close(field_marker),
+                }
+            };
 
             Ok(StructLitField {
                 id: parser.id_gen.new_id(),
@@ -1223,8 +1234,21 @@ impl<'a> Parser<'a> {
         let fields = self.parse_list(TK::Comma, TK::RBrace, |parser| {
             let field_marker = parser.mark();
             let name = parser.parse_ident()?;
-            parser.consume(&TK::Colon)?;
-            let value = parser.parse_expr(0)?;
+            let value = if parser.curr_token.kind == TK::Colon {
+                parser.advance();
+                parser.parse_expr(0)?
+            } else {
+                // Struct update shorthand: `{ p | x }` desugars to `{ p | x: x }`.
+                Expr {
+                    id: parser.id_gen.new_id(),
+                    kind: ExprKind::Var {
+                        ident: name.clone(),
+                        def_id: (),
+                    },
+                    ty: (),
+                    span: parser.close(field_marker),
+                }
+            };
             Ok(StructUpdateField {
                 id: parser.id_gen.new_id(),
                 name,

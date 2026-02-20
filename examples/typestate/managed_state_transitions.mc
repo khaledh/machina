@@ -29,7 +29,7 @@ typestate DoorController {
     }
 
     fn new(door: Machine<DoorActuator>) -> Closed {
-        Closed { door: door }
+        Closed { door }
     }
 
     state Closed {

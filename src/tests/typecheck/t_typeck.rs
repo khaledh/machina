@@ -1300,6 +1300,22 @@ fn test_struct_pattern_shorthand() {
 }
 
 #[test]
+fn test_struct_lit_field_shorthand() {
+    let source = r#"
+        type Point = { x: u64, y: u64 }
+
+        fn test() -> u64 {
+            let x = 1;
+            let y = 2;
+            let p = Point { x, y };
+            p.x + p.y
+        }
+    "#;
+
+    let _ctx = type_check_source(source).expect("Failed to type check");
+}
+
+#[test]
 fn test_struct_update_basic() {
     let source = r#"
         type Point = { x: u64, y: u64 }
@@ -1308,6 +1324,22 @@ fn test_struct_update_basic() {
             let p = Point { x: 1, y: 2 };
             let q = { p | x: 3 };
             q.x
+        }
+    "#;
+
+    let _ctx = type_check_source(source).expect("Failed to type check");
+}
+
+#[test]
+fn test_struct_update_field_shorthand() {
+    let source = r#"
+        type Point = { x: u64, y: u64 }
+
+        fn test() -> u64 {
+            let p = Point { x: 1, y: 2 };
+            let x = 10;
+            let q = { p | x };
+            q.x + q.y
         }
     "#;
 

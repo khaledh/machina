@@ -878,6 +878,74 @@ fn test_parse_struct_update_expr() {
 }
 
 #[test]
+fn test_parse_struct_update_field_shorthand() {
+    let source = r#"
+        type Point = { x: u64, y: u64, color: u64 }
+
+        fn main() -> Point {
+            let p = Point { x: 1, y: 2, color: 3 };
+            let x = 10;
+            { p | x, color: 5 }
+        }
+    "#;
+
+    let funcs = parse_source(source).expect("Failed to parse");
+    let func = &funcs[0];
+    let (items, tail) = block_parts(&func.body);
+    assert_eq!(items.len(), 2);
+
+    let tail = tail.expect("Expected block tail");
+    let ExprKind::StructUpdate { fields, .. } = &tail.kind else {
+        panic!("Expected StructUpdate expression");
+    };
+    assert_eq!(fields.len(), 2);
+    assert_eq!(fields[0].name, "x");
+    assert_eq!(fields[1].name, "color");
+
+    match &fields[0].value.kind {
+        ExprKind::Var { ident, .. } => assert_eq!(ident, "x"),
+        _ => panic!("Expected shorthand field value to parse as Var"),
+    }
+    match &fields[1].value.kind {
+        ExprKind::IntLit(value) => assert_eq!(*value, 5),
+        _ => panic!("Expected explicit field value"),
+    }
+}
+
+#[test]
+fn test_parse_struct_lit_field_shorthand() {
+    let source = r#"
+        type Point = { x: u64, y: u64 }
+
+        fn main() -> Point {
+            let x = 1;
+            let y = 2;
+            Point { x, y }
+        }
+    "#;
+
+    let funcs = parse_source(source).expect("Failed to parse");
+    let func = &funcs[0];
+
+    let tail = block_tail(&func.body);
+    let ExprKind::StructLit { fields, .. } = &tail.kind else {
+        panic!("Expected StructLit expression");
+    };
+    assert_eq!(fields.len(), 2);
+    assert_eq!(fields[0].name, "x");
+    assert_eq!(fields[1].name, "y");
+
+    match &fields[0].value.kind {
+        ExprKind::Var { ident, .. } => assert_eq!(ident, "x"),
+        _ => panic!("Expected shorthand field value to parse as Var"),
+    }
+    match &fields[1].value.kind {
+        ExprKind::Var { ident, .. } => assert_eq!(ident, "y"),
+        _ => panic!("Expected shorthand field value to parse as Var"),
+    }
+}
+
+#[test]
 fn test_parse_tuple_literal() {
     let source = r#"
         fn test() -> (u64, bool) {

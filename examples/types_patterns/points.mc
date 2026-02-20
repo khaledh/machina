@@ -49,7 +49,7 @@ fn scale(p: Point, dx: u64, dy: u64) -> Point {
 }
 
 fn change_color(p: Point, color: Color) -> Point {
-    { p | color: color }
+    { p | color }
 }
 
 fn is_blue(p: Point) -> bool {

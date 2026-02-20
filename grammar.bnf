@@ -270,10 +270,10 @@ SetLit             ::= "{" Expr "," ExprList? "}"
 
 StructLit          ::= Identifier "{" StructLitFieldList? "}"
 StructLitFieldList ::= StructLitField ("," StructLitField)* ","?
-StructLitField     ::= Identifier ":" Expr
+StructLitField     ::= Identifier ( ":" Expr )?
 
 StructUpdate       ::= "{" Expr "|" StructUpdateField ("," StructUpdateField)* ","? "}"
-StructUpdateField  ::= Identifier ":" Expr
+StructUpdateField  ::= Identifier ( ":" Expr )?
 
 EnumVariant        ::= Identifier "::" Identifier ( "(" ExprList ")" )?
 

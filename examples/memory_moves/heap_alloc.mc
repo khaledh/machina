@@ -8,7 +8,7 @@ type Msg = Ping(u64) | Pong(u64)
 type BoxedMsg = { msg: Msg^ }
 
 fn make_point(x: u64, y: u64) -> Point^ {
-    ^Point { x: x, y: y }
+    ^Point { x, y }
 }
 
 fn consume_point(p: Point^) -> u64 {

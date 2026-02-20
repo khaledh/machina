@@ -15,7 +15,7 @@ typestate Client {
 
     fn new(auth: Machine<AuthServer>) -> Ready {
         println("[Client] new");
-        Ready { auth: auth }
+        Ready { auth }
     }
 
     state Ready {

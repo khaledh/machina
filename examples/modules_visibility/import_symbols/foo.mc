@@ -5,7 +5,7 @@ type Foo = {
 
 @public
 fn make_foo(value: u64) -> Foo {
-    Foo { value: value }
+    Foo { value }
 }
 
 @public

@@ -10,7 +10,7 @@ typestate RequestBuilder {
     }
 
     fn new(url: string) -> Build {
-        Build { url: url, header_count: 0 }
+        Build { url, header_count: 0 }
     }
 
     state Build {

@@ -47,7 +47,7 @@ typestate Gateway : Auth::Client {
     }
 
     fn new(server: Machine<AuthServer>) -> Idle {
-        Idle { server: server }
+        Idle { server }
     }
 
     state Idle {
