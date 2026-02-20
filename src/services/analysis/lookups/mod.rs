@@ -3,12 +3,13 @@
 //! This module keeps per-feature lookup logic out of `analysis::db` so the DB
 //! focuses on snapshot/query orchestration.
 
+mod callable_signature;
 mod definition;
 mod hover;
 
 pub(crate) use definition::{def_at_span, def_location_at_span};
 pub(crate) use hover::hover_at_span_in_file;
-use hover::try_format_source_callable_signature;
+use callable_signature::format_source_callable_signature;
 
 use crate::core::diag::Span;
 use crate::core::resolve::{DefKind, DefTable, UNKNOWN_DEF_ID};
@@ -139,7 +140,7 @@ where
     F: Fn(usize) -> usize,
 {
     let demangler = TypestateNameDemangler::from_def_table(&typed.def_table);
-    let (label, parameters) = try_format_source_callable_signature(
+    let rendered = format_source_callable_signature(
         render_def_id,
         Some(&typed.module),
         Some(&typed.type_map),
@@ -147,10 +148,10 @@ where
         &demangler,
     )?;
     Some(SignatureHelp {
-        label,
+        label: rendered.label,
         def_id: render_def_id,
-        active_parameter: active_parameter_for(parameters.len()),
-        parameters,
+        active_parameter: active_parameter_for(rendered.parameters.len()),
+        parameters: rendered.parameters,
     })
 }
 
