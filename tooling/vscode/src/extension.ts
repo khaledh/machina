@@ -190,7 +190,11 @@ async function ensureClientStarted(context: vscode.ExtensionContext): Promise<bo
         const debug = isDebugLoggingEnabled();
         if (debug) {
           output?.appendLine(
-            `[lsp] hover request uri=${document.uri.toString()} line=${position.line} col=${position.character} docVersion=${document.version}`
+            `[lsp] hover request ` +
+              `uri=${document.uri.toString()} ` +
+              `line=${position.line} ` +
+              `col=${position.character} ` +
+              `docVersion=${document.version}`
           );
         }
 
@@ -205,7 +209,11 @@ async function ensureClientStarted(context: vscode.ExtensionContext): Promise<bo
         const debug = isDebugLoggingEnabled();
         if (debug) {
           output?.appendLine(
-            `[lsp] definition request uri=${document.uri.toString()} line=${position.line} col=${position.character} docVersion=${document.version}`
+            `[lsp] definition request ` +
+              `uri=${document.uri.toString()} ` +
+              `line=${position.line} ` +
+              `col=${position.character} ` +
+              `docVersion=${document.version}`
           );
         }
 
@@ -220,7 +228,12 @@ async function ensureClientStarted(context: vscode.ExtensionContext): Promise<bo
         const debug = isDebugLoggingEnabled();
         if (debug) {
           output?.appendLine(
-            `[lsp] completion request uri=${document.uri.toString()} line=${position.line} col=${position.character} triggerKind=${context.triggerKind} triggerChar=${context.triggerCharacter ?? "<none>"} docVersion=${document.version}`
+            `[lsp] completion request uri=${document.uri.toString()} ` +
+              `line=${position.line} ` +
+              `col=${position.character} ` +
+              `triggerKind=${context.triggerKind} ` +
+              `triggerChar=${context.triggerCharacter ?? "<none>"} ` +
+              `docVersion=${document.version}`
           );
         }
 
@@ -241,7 +254,13 @@ async function ensureClientStarted(context: vscode.ExtensionContext): Promise<bo
         const debug = isDebugLoggingEnabled();
         if (debug) {
           output?.appendLine(
-            `[lsp] codeAction request uri=${document.uri.toString()} range=(${range.start.line}:${range.start.character})-(${range.end.line}:${range.end.character}) contextDiagnostics=${context.diagnostics.length} docVersion=${document.version}`
+            `[lsp] codeAction request ` +
+              `uri=${document.uri.toString()} ` +
+              `range=` +
+                `(${range.start.line}:${range.start.character})-` +
+                `(${range.end.line}:${range.end.character}) ` +
+              `contextDiagnostics=${context.diagnostics.length} ` +
+              `docVersion=${document.version}`
           );
         }
 
@@ -256,7 +275,14 @@ async function ensureClientStarted(context: vscode.ExtensionContext): Promise<bo
         const debug = isDebugLoggingEnabled();
         if (debug) {
           output?.appendLine(
-            `[lsp] signatureHelp request uri=${document.uri.toString()} line=${position.line} col=${position.character} triggerKind=${context.triggerKind} triggerChar=${context.triggerCharacter ?? "<none>"} isRetrigger=${context.isRetrigger} docVersion=${document.version}`
+            `[lsp] signatureHelp request ` +
+              `uri=${document.uri.toString()} ` +
+              `line=${position.line} ` +
+              `col=${position.character} ` +
+              `triggerKind=${context.triggerKind} ` +
+              `triggerChar=${context.triggerCharacter ?? "<none>"} ` +
+              `isRetrigger=${context.isRetrigger} ` +
+              `docVersion=${document.version}`
           );
         }
 
@@ -406,7 +432,9 @@ function summarizeCompletionResult(
   if (Array.isArray(result)) {
     return `result=array(len=${result.length})`;
   }
-  return `result=list(len=${result.items.length}, isIncomplete=${result.isIncomplete})`;
+  return `result=list(` +
+    `len=${result.items.length}, ` +
+    `isIncomplete=${result.isIncomplete})`;
 }
 
 function completionLabels(
@@ -450,5 +478,8 @@ function summarizeSignatureHelpResult(
   const sigCount = result.signatures.length;
   const activeSig = result.activeSignature ?? 0;
   const activeParam = result.activeParameter ?? 0;
-  return `result=signatureHelp(signatures=${sigCount}, activeSignature=${activeSig}, activeParameter=${activeParam})`;
+  return `result=signatureHelp(` +
+    `signatures=${sigCount}, ` +
+    `activeSignature=${activeSig}, ` +
+    `activeParameter=${activeParam})`;
 }

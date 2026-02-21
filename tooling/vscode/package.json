@@ -15,12 +15,6 @@
   "categories": [
     "Programming Languages"
   ],
-  "activationEvents": [
-    "onLanguage:machina",
-    "onCommand:machina.showOutput",
-    "onCommand:machina.ping",
-    "onCommand:machina.restartLanguageServer"
-  ],
   "main": "./out/extension.js",
   "contributes": {
     "languages": [
