@@ -142,56 +142,9 @@ impl<'a> ConstraintCollector<'a> {
                     ConstraintReason::Expr(expr.id, expr.span),
                 );
             }
-            ExprKind::ArrayLit { init, .. } => match init {
-                crate::core::tree::resolved::ArrayLitInit::Elems(elems) => {
-                    let elem_term = if let ExprKind::ArrayLit {
-                        elem_ty: Some(explicit_elem_ty),
-                        ..
-                    } = &expr.kind
-                    {
-                        self.resolve_type_in_scope(explicit_elem_ty)
-                            .unwrap_or_else(|_| self.fresh_var_term())
-                    } else {
-                        self.fresh_var_term()
-                    };
-                    for elem in elems {
-                        let value_ty = self.collect_expr(elem, Some(elem_term.clone()));
-                        self.push_assignable(
-                            value_ty,
-                            elem_term.clone(),
-                            ConstraintReason::Expr(elem.id, elem.span),
-                        );
-                    }
-                    self.push_eq(
-                        expr_ty.clone(),
-                        array_type_from_elem(&elem_term, elems.len()),
-                        ConstraintReason::Expr(expr.id, expr.span),
-                    );
-                }
-                crate::core::tree::resolved::ArrayLitInit::Repeat(value, count) => {
-                    let elem_term = if let ExprKind::ArrayLit {
-                        elem_ty: Some(explicit_elem_ty),
-                        ..
-                    } = &expr.kind
-                    {
-                        self.resolve_type_in_scope(explicit_elem_ty)
-                            .unwrap_or_else(|_| self.fresh_var_term())
-                    } else {
-                        self.fresh_var_term()
-                    };
-                    let value_ty = self.collect_expr(value, Some(elem_term.clone()));
-                    self.push_assignable(
-                        value_ty,
-                        elem_term.clone(),
-                        ConstraintReason::Expr(value.id, value.span),
-                    );
-                    self.push_eq(
-                        expr_ty.clone(),
-                        array_type_from_elem(&elem_term, *count as usize),
-                        ConstraintReason::Expr(expr.id, expr.span),
-                    );
-                }
-            },
+            ExprKind::ArrayLit { init, .. } => {
+                self.collect_array_lit(expr, &expr_ty, init);
+            }
             ExprKind::SetLit { elem_ty, elems } => {
                 let elem_term = if let Some(explicit_elem_ty) = elem_ty {
                     self.resolve_type_in_scope(explicit_elem_ty)
@@ -273,51 +226,7 @@ impl<'a> ConstraintCollector<'a> {
                 type_args,
                 fields,
             } => {
-                // Resolve nominal struct type (including generic instantiation)
-                // when possible, then type fields against known field types.
-                let known_struct = self
-                    .resolve_type_instance_for_name(name, type_args, expected.as_ref())
-                    .or_else(|| {
-                        self.resolve_type_instance_for_expr(expr, type_args, expected.as_ref())
-                    })
-                    .or_else(|| self.type_defs.get(name).cloned());
-                if let Some(Type::Struct {
-                    fields: struct_fields,
-                    ..
-                }) = known_struct.as_ref()
-                {
-                    self.push_eq(
-                        expr_ty.clone(),
-                        known_struct.clone().expect("known struct type"),
-                        ConstraintReason::Expr(expr.id, expr.span),
-                    );
-                    for field in fields {
-                        let expected = struct_fields
-                            .iter()
-                            .find(|f| f.name == field.name)
-                            .map(|f| f.ty.clone());
-                        self.collect_expr(&field.value, expected);
-                    }
-                } else {
-                    for field in fields {
-                        self.collect_expr(&field.value, None);
-                    }
-                }
-                let type_name = known_struct
-                    .as_ref()
-                    .and_then(|ty| match ty {
-                        Type::Struct { name, .. } => Some(name.clone()),
-                        _ => None,
-                    })
-                    .unwrap_or_else(|| name.clone());
-                self.out
-                    .expr_obligations
-                    .push(ExprObligation::StructConstruct {
-                        expr_id: expr.id,
-                        type_name,
-                        caller_def_id: self.current_callable_def_id(),
-                        span: expr.span,
-                    });
+                self.collect_struct_lit(expr, &expr_ty, name, type_args, fields, &expected);
             }
             ExprKind::EnumVariant {
                 enum_name,
@@ -325,52 +234,9 @@ impl<'a> ConstraintCollector<'a> {
                 variant,
                 payload,
             } => {
-                // Resolve nominal enum type (including generic instantiation),
-                // and collect payload terms with per-position expected types.
-                let known_enum = self
-                    .resolve_type_instance_for_name(enum_name, type_args, expected.as_ref())
-                    .or_else(|| {
-                        self.resolve_type_instance_for_expr(expr, type_args, expected.as_ref())
-                    })
-                    .or_else(|| self.type_defs.get(enum_name).cloned());
-                let variant_payload_tys = if let Some(Type::Enum { variants, .. }) = &known_enum {
-                    variants
-                        .iter()
-                        .find(|v| v.name == *variant)
-                        .map(|v| v.payload.clone())
-                } else {
-                    None
-                };
-                let mut payload_terms = Vec::with_capacity(payload.len());
-                let mut payload_nodes = Vec::with_capacity(payload.len());
-                let mut payload_spans = Vec::with_capacity(payload.len());
-                for (index, item) in payload.iter().enumerate() {
-                    payload_nodes.push(item.id);
-                    payload_spans.push(item.span);
-                    let expected = variant_payload_tys
-                        .as_ref()
-                        .and_then(|tys| tys.get(index))
-                        .cloned();
-                    payload_terms.push(self.collect_expr(item, expected));
-                }
-                if let Some(enum_ty) = known_enum {
-                    self.push_eq(
-                        expr_ty.clone(),
-                        enum_ty,
-                        ConstraintReason::Expr(expr.id, expr.span),
-                    );
-                }
-                self.out
-                    .expr_obligations
-                    .push(ExprObligation::EnumVariantPayload {
-                        expr_id: expr.id,
-                        enum_name: enum_name.clone(),
-                        variant: variant.clone(),
-                        payload: payload_terms,
-                        payload_nodes,
-                        payload_spans,
-                        span: expr.span,
-                    });
+                self.collect_enum_variant(
+                    expr, &expr_ty, enum_name, type_args, variant, payload, &expected,
+                );
             }
             ExprKind::StructUpdate { target, fields } => {
                 let target_ty = self.collect_expr(target, None);
@@ -436,48 +302,7 @@ impl<'a> ConstraintCollector<'a> {
                 then_body,
                 else_body,
             } => {
-                self.collect_expr(cond, Some(Type::Bool));
-                if is_synthesized_missing_else(then_body, else_body) {
-                    let then_ty = self.collect_expr(then_body, Some(Type::Unit));
-                    let else_ty = self.collect_expr(else_body, Some(Type::Unit));
-                    self.push_assignable(
-                        then_ty,
-                        Type::Unit,
-                        ConstraintReason::Expr(expr.id, expr.span),
-                    );
-                    self.push_assignable(
-                        else_ty,
-                        Type::Unit,
-                        ConstraintReason::Expr(expr.id, expr.span),
-                    );
-                    self.push_eq(
-                        expr_ty.clone(),
-                        Type::Unit,
-                        ConstraintReason::Expr(expr.id, expr.span),
-                    );
-                } else {
-                    let then_ty = self.collect_expr(then_body, expected.clone());
-                    let else_ty = self.collect_expr(else_body, expected.clone());
-                    if expected.is_some() {
-                        self.push_assignable(
-                            then_ty.clone(),
-                            expr_ty.clone(),
-                            ConstraintReason::Expr(expr.id, expr.span),
-                        );
-                        self.push_assignable(
-                            else_ty,
-                            expr_ty.clone(),
-                            ConstraintReason::Expr(expr.id, expr.span),
-                        );
-                    } else {
-                        self.out.expr_obligations.push(ExprObligation::Join {
-                            expr_id: expr.id,
-                            arms: vec![then_ty, else_ty],
-                            result: expr_ty.clone(),
-                            span: expr.span,
-                        });
-                    }
-                }
+                self.collect_if(expr, &expr_ty, cond, then_body, else_body, &expected);
             }
             ExprKind::Range { start, end } => {
                 let start_ty = self.collect_expr(start, Some(Type::uint(64)));
@@ -604,87 +429,13 @@ impl<'a> ConstraintCollector<'a> {
                 self.collect_binop_constraints(expr, left_ty, right_ty);
             }
             ExprKind::UnaryOp { op, expr: inner } => {
-                let inner_expected = match op {
-                    UnaryOp::Neg | UnaryOp::BitNot => expected.clone(),
-                    UnaryOp::LogicalNot => None,
-                };
-                let inner_ty = self.collect_expr(inner, inner_expected);
-                match op {
-                    UnaryOp::Neg | UnaryOp::BitNot => {
-                        self.out.expr_obligations.push(ExprObligation::UnaryOp {
-                            expr_id: expr.id,
-                            op: *op,
-                            operand: inner_ty.clone(),
-                            result: expr_ty.clone(),
-                            span: expr.span,
-                        });
-                        self.push_eq(
-                            expr_ty.clone(),
-                            inner_ty,
-                            ConstraintReason::Expr(expr.id, expr.span),
-                        );
-                    }
-                    UnaryOp::LogicalNot => {
-                        self.out.expr_obligations.push(ExprObligation::UnaryOp {
-                            expr_id: expr.id,
-                            op: *op,
-                            operand: inner_ty.clone(),
-                            result: expr_ty.clone(),
-                            span: expr.span,
-                        });
-                        self.push_eq(
-                            inner_ty,
-                            Type::Bool,
-                            ConstraintReason::Expr(expr.id, expr.span),
-                        );
-                        self.push_eq(
-                            expr_ty.clone(),
-                            Type::Bool,
-                            ConstraintReason::Expr(expr.id, expr.span),
-                        );
-                    }
-                }
+                self.collect_unary_op(expr, &expr_ty, op, inner, &expected);
             }
             ExprKind::Try {
                 fallible_expr,
                 on_error,
             } => {
-                let operand_ty = self.collect_expr(fallible_expr, None);
-                let handler_expected_ty = Type::Fn {
-                    params: vec![crate::core::types::FnParam {
-                        mode: crate::core::types::FnParamMode::In,
-                        ty: operand_ty.clone(),
-                    }],
-                    ret_ty: Box::new(expr_ty.clone()),
-                };
-                let on_error_ty = on_error
-                    .as_ref()
-                    .map(|handler| self.collect_expr(handler, Some(handler_expected_ty.clone())));
-                if let (Some(handler_expr), Some(handler_ty)) =
-                    (on_error.as_ref(), on_error_ty.as_ref())
-                {
-                    self.out.call_obligations.push(CallObligation {
-                        call_node: expr.id,
-                        span: expr.span,
-                        caller_def_id: self.current_callable_def_id(),
-                        callee: CallCallee::Dynamic {
-                            expr_id: handler_expr.id,
-                        },
-                        callee_ty: Some(handler_ty.clone()),
-                        receiver: None,
-                        arg_terms: vec![operand_ty.clone()],
-                        ret_ty: expr_ty.clone(),
-                    });
-                }
-                self.out.expr_obligations.push(ExprObligation::Try {
-                    expr_id: expr.id,
-                    operand: operand_ty,
-                    on_error: on_error_ty,
-                    result: expr_ty.clone(),
-                    expected_return_ty: self.current_return_ty(),
-                    callable_def_id: self.current_callable_def_id(),
-                    span: expr.span,
-                });
+                self.collect_try(expr, &expr_ty, fallible_expr, on_error);
             }
             ExprKind::Closure {
                 def_id,
@@ -693,63 +444,381 @@ impl<'a> ConstraintCollector<'a> {
                 body,
                 ..
             } => {
-                let closure_sig = self.collect_closure_signature(params, return_ty);
-                if let Some(sig) = closure_sig.as_ref() {
-                    self.push_eq(
-                        expr_ty.clone(),
-                        sig.fn_ty.clone(),
-                        ConstraintReason::Expr(expr.id, expr.span),
-                    );
-                }
-                let closure_def_ty = self.def_term(*def_id);
-                self.push_eq(
-                    closure_def_ty,
-                    expr_ty.clone(),
-                    ConstraintReason::Decl(*def_id, expr.span),
-                );
-
-                let return_term = closure_sig
-                    .as_ref()
-                    .map(|sig| sig.ret_ty.clone())
-                    .unwrap_or_else(|| self.fresh_var_term());
-
-                self.enter_callable(*def_id, return_term.clone(), expr.span);
-                for (index, param) in params.iter().enumerate() {
-                    let param_term = self.def_term(param.def_id);
-                    let sig_param_ty = closure_sig
-                        .as_ref()
-                        .and_then(|sig| sig.param_tys.get(index))
-                        .cloned();
-                    if let Some(param_ty) = sig_param_ty {
-                        self.push_eq(
-                            param_term.clone(),
-                            param_ty,
-                            ConstraintReason::Decl(param.def_id, param.span),
-                        );
-                    } else if let Ok(param_ty) = self.resolve_type_in_scope(&param.typ) {
-                        self.push_eq(
-                            param_term.clone(),
-                            param_ty,
-                            ConstraintReason::Decl(param.def_id, param.span),
-                        );
-                    }
-                    let node_term = self.node_term(param.id);
-                    self.push_eq(
-                        node_term,
-                        param_term,
-                        ConstraintReason::Decl(param.def_id, param.span),
-                    );
-                }
-                let body_ty = self.collect_expr(body, Some(return_term.clone()));
-                self.push_assignable(
-                    body_ty,
-                    return_term,
-                    ConstraintReason::Expr(body.id, body.span),
-                );
-                self.exit_callable(*def_id, expr.span);
+                self.collect_closure(expr, &expr_ty, *def_id, params, return_ty, body);
             }
         }
 
         expr_ty
+    }
+
+    fn collect_array_lit(
+        &mut self,
+        expr: &Expr,
+        expr_ty: &Type,
+        init: &crate::core::tree::resolved::ArrayLitInit,
+    ) {
+        // Resolve explicit element type annotation once (shared by both sub-arms).
+        let elem_term = if let ExprKind::ArrayLit {
+            elem_ty: Some(explicit_elem_ty),
+            ..
+        } = &expr.kind
+        {
+            self.resolve_type_in_scope(explicit_elem_ty)
+                .unwrap_or_else(|_| self.fresh_var_term())
+        } else {
+            self.fresh_var_term()
+        };
+
+        match init {
+            crate::core::tree::resolved::ArrayLitInit::Elems(elems) => {
+                for elem in elems {
+                    let value_ty = self.collect_expr(elem, Some(elem_term.clone()));
+                    self.push_assignable(
+                        value_ty,
+                        elem_term.clone(),
+                        ConstraintReason::Expr(elem.id, elem.span),
+                    );
+                }
+                self.push_eq(
+                    expr_ty.clone(),
+                    array_type_from_elem(&elem_term, elems.len()),
+                    ConstraintReason::Expr(expr.id, expr.span),
+                );
+            }
+            crate::core::tree::resolved::ArrayLitInit::Repeat(value, count) => {
+                let value_ty = self.collect_expr(value, Some(elem_term.clone()));
+                self.push_assignable(
+                    value_ty,
+                    elem_term.clone(),
+                    ConstraintReason::Expr(value.id, value.span),
+                );
+                self.push_eq(
+                    expr_ty.clone(),
+                    array_type_from_elem(&elem_term, *count as usize),
+                    ConstraintReason::Expr(expr.id, expr.span),
+                );
+            }
+        }
+    }
+
+    fn collect_struct_lit(
+        &mut self,
+        expr: &Expr,
+        expr_ty: &Type,
+        name: &str,
+        type_args: &[TypeExpr],
+        fields: &[crate::core::tree::resolved::StructLitField],
+        expected: &Option<Type>,
+    ) {
+        // Resolve nominal struct type (including generic instantiation)
+        // when possible, then type fields against known field types.
+        let known_struct = self
+            .resolve_type_instance_for_name(name, type_args, expected.as_ref())
+            .or_else(|| self.resolve_type_instance_for_expr(expr, type_args, expected.as_ref()))
+            .or_else(|| self.type_defs.get(name).cloned());
+        if let Some(Type::Struct {
+            fields: struct_fields,
+            ..
+        }) = known_struct.as_ref()
+        {
+            self.push_eq(
+                expr_ty.clone(),
+                known_struct.clone().expect("known struct type"),
+                ConstraintReason::Expr(expr.id, expr.span),
+            );
+            for field in fields {
+                let expected = struct_fields
+                    .iter()
+                    .find(|f| f.name == field.name)
+                    .map(|f| f.ty.clone());
+                self.collect_expr(&field.value, expected);
+            }
+        } else {
+            for field in fields {
+                self.collect_expr(&field.value, None);
+            }
+        }
+        let type_name = known_struct
+            .as_ref()
+            .and_then(|ty| match ty {
+                Type::Struct { name, .. } => Some(name.clone()),
+                _ => None,
+            })
+            .unwrap_or_else(|| name.to_string());
+        self.out
+            .expr_obligations
+            .push(ExprObligation::StructConstruct {
+                expr_id: expr.id,
+                type_name,
+                caller_def_id: self.current_callable_def_id(),
+                span: expr.span,
+            });
+    }
+
+    fn collect_enum_variant(
+        &mut self,
+        expr: &Expr,
+        expr_ty: &Type,
+        enum_name: &str,
+        type_args: &[TypeExpr],
+        variant: &str,
+        payload: &[Expr],
+        expected: &Option<Type>,
+    ) {
+        // Resolve nominal enum type (including generic instantiation),
+        // and collect payload terms with per-position expected types.
+        let known_enum = self
+            .resolve_type_instance_for_name(enum_name, type_args, expected.as_ref())
+            .or_else(|| self.resolve_type_instance_for_expr(expr, type_args, expected.as_ref()))
+            .or_else(|| self.type_defs.get(enum_name).cloned());
+        let variant_payload_tys = if let Some(Type::Enum { variants, .. }) = &known_enum {
+            variants
+                .iter()
+                .find(|v| v.name == *variant)
+                .map(|v| v.payload.clone())
+        } else {
+            None
+        };
+        let mut payload_terms = Vec::with_capacity(payload.len());
+        let mut payload_nodes = Vec::with_capacity(payload.len());
+        let mut payload_spans = Vec::with_capacity(payload.len());
+        for (index, item) in payload.iter().enumerate() {
+            payload_nodes.push(item.id);
+            payload_spans.push(item.span);
+            let expected = variant_payload_tys
+                .as_ref()
+                .and_then(|tys| tys.get(index))
+                .cloned();
+            payload_terms.push(self.collect_expr(item, expected));
+        }
+        if let Some(enum_ty) = known_enum {
+            self.push_eq(
+                expr_ty.clone(),
+                enum_ty,
+                ConstraintReason::Expr(expr.id, expr.span),
+            );
+        }
+        self.out
+            .expr_obligations
+            .push(ExprObligation::EnumVariantPayload {
+                expr_id: expr.id,
+                enum_name: enum_name.to_string(),
+                variant: variant.to_string(),
+                payload: payload_terms,
+                payload_nodes,
+                payload_spans,
+                span: expr.span,
+            });
+    }
+
+    fn collect_if(
+        &mut self,
+        expr: &Expr,
+        expr_ty: &Type,
+        cond: &Expr,
+        then_body: &Expr,
+        else_body: &Expr,
+        expected: &Option<Type>,
+    ) {
+        self.collect_expr(cond, Some(Type::Bool));
+        if is_synthesized_missing_else(then_body, else_body) {
+            let then_ty = self.collect_expr(then_body, Some(Type::Unit));
+            let else_ty = self.collect_expr(else_body, Some(Type::Unit));
+            self.push_assignable(
+                then_ty,
+                Type::Unit,
+                ConstraintReason::Expr(expr.id, expr.span),
+            );
+            self.push_assignable(
+                else_ty,
+                Type::Unit,
+                ConstraintReason::Expr(expr.id, expr.span),
+            );
+            self.push_eq(
+                expr_ty.clone(),
+                Type::Unit,
+                ConstraintReason::Expr(expr.id, expr.span),
+            );
+        } else {
+            let then_ty = self.collect_expr(then_body, expected.clone());
+            let else_ty = self.collect_expr(else_body, expected.clone());
+            if expected.is_some() {
+                self.push_assignable(
+                    then_ty.clone(),
+                    expr_ty.clone(),
+                    ConstraintReason::Expr(expr.id, expr.span),
+                );
+                self.push_assignable(
+                    else_ty,
+                    expr_ty.clone(),
+                    ConstraintReason::Expr(expr.id, expr.span),
+                );
+            } else {
+                self.out.expr_obligations.push(ExprObligation::Join {
+                    expr_id: expr.id,
+                    arms: vec![then_ty, else_ty],
+                    result: expr_ty.clone(),
+                    span: expr.span,
+                });
+            }
+        }
+    }
+
+    fn collect_unary_op(
+        &mut self,
+        expr: &Expr,
+        expr_ty: &Type,
+        op: &UnaryOp,
+        inner: &Expr,
+        expected: &Option<Type>,
+    ) {
+        let inner_expected = match op {
+            UnaryOp::Neg | UnaryOp::BitNot => expected.clone(),
+            UnaryOp::LogicalNot => None,
+        };
+        let inner_ty = self.collect_expr(inner, inner_expected);
+        match op {
+            UnaryOp::Neg | UnaryOp::BitNot => {
+                self.out.expr_obligations.push(ExprObligation::UnaryOp {
+                    expr_id: expr.id,
+                    op: *op,
+                    operand: inner_ty.clone(),
+                    result: expr_ty.clone(),
+                    span: expr.span,
+                });
+                self.push_eq(
+                    expr_ty.clone(),
+                    inner_ty,
+                    ConstraintReason::Expr(expr.id, expr.span),
+                );
+            }
+            UnaryOp::LogicalNot => {
+                self.out.expr_obligations.push(ExprObligation::UnaryOp {
+                    expr_id: expr.id,
+                    op: *op,
+                    operand: inner_ty.clone(),
+                    result: expr_ty.clone(),
+                    span: expr.span,
+                });
+                self.push_eq(
+                    inner_ty,
+                    Type::Bool,
+                    ConstraintReason::Expr(expr.id, expr.span),
+                );
+                self.push_eq(
+                    expr_ty.clone(),
+                    Type::Bool,
+                    ConstraintReason::Expr(expr.id, expr.span),
+                );
+            }
+        }
+    }
+
+    fn collect_try(
+        &mut self,
+        expr: &Expr,
+        expr_ty: &Type,
+        fallible_expr: &Expr,
+        on_error: &Option<Box<Expr>>,
+    ) {
+        let operand_ty = self.collect_expr(fallible_expr, None);
+        let handler_expected_ty = Type::Fn {
+            params: vec![crate::core::types::FnParam {
+                mode: crate::core::types::FnParamMode::In,
+                ty: operand_ty.clone(),
+            }],
+            ret_ty: Box::new(expr_ty.clone()),
+        };
+        let on_error_ty = on_error
+            .as_ref()
+            .map(|handler| self.collect_expr(handler, Some(handler_expected_ty.clone())));
+        if let (Some(handler_expr), Some(handler_ty)) = (on_error.as_ref(), on_error_ty.as_ref()) {
+            self.out.call_obligations.push(CallObligation {
+                call_node: expr.id,
+                span: expr.span,
+                caller_def_id: self.current_callable_def_id(),
+                callee: CallCallee::Dynamic {
+                    expr_id: handler_expr.id,
+                },
+                callee_ty: Some(handler_ty.clone()),
+                receiver: None,
+                arg_terms: vec![operand_ty.clone()],
+                ret_ty: expr_ty.clone(),
+            });
+        }
+        self.out.expr_obligations.push(ExprObligation::Try {
+            expr_id: expr.id,
+            operand: operand_ty,
+            on_error: on_error_ty,
+            result: expr_ty.clone(),
+            expected_return_ty: self.current_return_ty(),
+            callable_def_id: self.current_callable_def_id(),
+            span: expr.span,
+        });
+    }
+
+    fn collect_closure(
+        &mut self,
+        expr: &Expr,
+        expr_ty: &Type,
+        def_id: DefId,
+        params: &[crate::core::tree::resolved::Param],
+        return_ty: &TypeExpr,
+        body: &Expr,
+    ) {
+        let closure_sig = self.collect_closure_signature(params, return_ty);
+        if let Some(sig) = closure_sig.as_ref() {
+            self.push_eq(
+                expr_ty.clone(),
+                sig.fn_ty.clone(),
+                ConstraintReason::Expr(expr.id, expr.span),
+            );
+        }
+        let closure_def_ty = self.def_term(def_id);
+        self.push_eq(
+            closure_def_ty,
+            expr_ty.clone(),
+            ConstraintReason::Decl(def_id, expr.span),
+        );
+
+        let return_term = closure_sig
+            .as_ref()
+            .map(|sig| sig.ret_ty.clone())
+            .unwrap_or_else(|| self.fresh_var_term());
+
+        self.enter_callable(def_id, return_term.clone(), expr.span);
+        for (index, param) in params.iter().enumerate() {
+            let param_term = self.def_term(param.def_id);
+            let sig_param_ty = closure_sig
+                .as_ref()
+                .and_then(|sig| sig.param_tys.get(index))
+                .cloned();
+            if let Some(param_ty) = sig_param_ty {
+                self.push_eq(
+                    param_term.clone(),
+                    param_ty,
+                    ConstraintReason::Decl(param.def_id, param.span),
+                );
+            } else if let Ok(param_ty) = self.resolve_type_in_scope(&param.typ) {
+                self.push_eq(
+                    param_term.clone(),
+                    param_ty,
+                    ConstraintReason::Decl(param.def_id, param.span),
+                );
+            }
+            let node_term = self.node_term(param.id);
+            self.push_eq(
+                node_term,
+                param_term,
+                ConstraintReason::Decl(param.def_id, param.span),
+            );
+        }
+        let body_ty = self.collect_expr(body, Some(return_term.clone()));
+        self.push_assignable(
+            body_ty,
+            return_term,
+            ConstraintReason::Expr(body.id, body.span),
+        );
+        self.exit_callable(def_id, expr.span);
     }
 }

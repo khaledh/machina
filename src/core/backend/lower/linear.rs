@@ -34,50 +34,8 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
         &mut self,
         expr: &sem::ValueExpr,
     ) -> Result<BranchResult, LowerToIrError> {
-        macro_rules! eval_value {
-            ($expr:expr) => {
-                match self.lower_value_expr_opt($expr)? {
-                    // Propagate early return from a branching subexpression.
-                    Some(value) => value,
-                    None => return Ok(BranchResult::Return),
-                }
-            };
-        }
-
         match &expr.kind {
-            sem::ValueExprKind::Block { items, tail } => {
-                self.with_drop_scope(expr.id, |lowerer| {
-                    for item in items {
-                        match item {
-                            sem::BlockItem::Stmt(stmt) => {
-                                match lowerer.lower_stmt_expr_linear(stmt)? {
-                                    StmtOutcome::Continue => {}
-                                    StmtOutcome::Return => {
-                                        panic!(
-                                            "backend lower_linear_value_expr hit return in linear block at {:?}",
-                                            stmt.span
-                                        );
-                                    }
-                                }
-                            }
-                            sem::BlockItem::Expr(expr) => {
-                                lowerer.annotate_expr(expr);
-                                let _ = lowerer.lower_linear_value_expr(expr)?;
-                            }
-                        }
-                    }
-
-                    if let Some(tail) = tail {
-                        lowerer.annotate_expr(tail);
-                        return lowerer
-                            .lower_linear_value_expr(tail)
-                            .map(Into::into);
-                    }
-
-                    let ty = lowerer.type_lowerer.lower_type_id(expr.ty);
-                    Ok(lowerer.builder.const_unit(ty).into())
-                })
-            }
+            sem::ValueExprKind::Block { items, tail } => self.lower_block_expr(expr, items, tail),
 
             sem::ValueExprKind::UnitLit => {
                 let ty = self.type_lowerer.lower_type_id(expr.ty);
@@ -97,43 +55,12 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
             }
             sem::ValueExprKind::CharLit(value) => {
                 let ty = self.type_lowerer.lower_type_id(expr.ty);
-                let signed = false;
-                let bits = 32;
                 Ok(self
                     .builder
-                    .const_int(*value as u32 as i128, signed, bits, ty)
+                    .const_int(*value as u32 as i128, false, 32, ty)
                     .into())
             }
-            sem::ValueExprKind::StringLit { value } => {
-                let string_ty = self.type_lowerer.lower_type_id(expr.ty);
-                let slot = self.alloc_value_slot(string_ty);
-
-                // pointer to global bytes
-                let u8_ty = self.type_lowerer.lower_type(&Type::uint(8));
-                let u8_ptr_ty = self.type_lowerer.ptr_to(u8_ty);
-                let ptr_val = if value.is_empty() {
-                    let u64_ty = self.type_lowerer.lower_type(&Type::uint(64));
-                    let zero = self.builder.const_int(0, false, 64, u64_ty);
-                    self.builder.cast(CastKind::IntToPtr, zero, u8_ptr_ty)
-                } else {
-                    let global_id = self.add_global_bytes(value.as_bytes().to_vec());
-                    self.builder.const_global_addr(global_id, u8_ptr_ty)
-                };
-
-                // length and capacity (same for string literals)
-                let len_ty = self.type_lowerer.lower_type(&Type::uint(32));
-                let len_val = self
-                    .builder
-                    .const_int(value.len() as i128, false, 32, len_ty);
-                let cap_val = self.builder.const_int(0, false, 32, len_ty);
-
-                // store fields in string struct
-                self.store_field(slot.addr, 0, u8_ptr_ty, ptr_val);
-                self.store_field(slot.addr, 1, len_ty, len_val);
-                self.store_field(slot.addr, 2, len_ty, cap_val);
-
-                Ok(self.load_slot(&slot).into())
-            }
+            sem::ValueExprKind::StringLit { value } => self.lower_string_lit_expr(expr, value),
 
             sem::ValueExprKind::Range { start, end } => {
                 let (sem::ValueExprKind::IntLit(start), sem::ValueExprKind::IntLit(_end)) =
@@ -142,10 +69,7 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
                     panic!("backend range values require literal bounds");
                 };
                 let ty = self.type_lowerer.lower_type_id(expr.ty);
-                Ok(self
-                    .builder
-                    .const_int(*start as i128, false, 64, ty)
-                    .into())
+                Ok(self.builder.const_int(*start as i128, false, 64, ty).into())
             }
 
             sem::ValueExprKind::StringFmt { plan } => {
@@ -160,252 +84,23 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
                 Ok(value.into())
             }
 
-            sem::ValueExprKind::ArrayLit { init, .. } => {
-                // Allocate a local for the array and get its address
-                let array_ty = self.type_lowerer.lower_type_id(expr.ty);
-                let addr = self.alloc_local_addr(array_ty);
+            sem::ValueExprKind::ArrayLit { init, .. } => self.lower_array_lit_expr(expr, init),
+            sem::ValueExprKind::SetLit { elems, .. } => self.lower_set_lit_expr(expr, elems),
+            sem::ValueExprKind::MapLit { entries, .. } => self.lower_map_lit_expr(expr, entries),
 
-                let u64_ty = self.type_lowerer.lower_type(&Type::uint(64));
-
-                // Store each element
-                match init {
-                    sem::ArrayLitInit::Elems(elems) => {
-                        for (i, elem_expr) in elems.iter().enumerate() {
-                            let value = eval_value!(elem_expr);
-                            let index_val = self.builder.const_int(i as i128, false, 64, u64_ty);
-                            let elem_ty = self.type_lowerer.lower_type_id(elem_expr.ty);
-                            let elem_ptr_ty = self.type_lowerer.ptr_to(elem_ty);
-                            let elem_addr = self.builder.index_addr(addr, index_val, elem_ptr_ty);
-                            self.builder.store(elem_addr, value);
-                        }
-                    }
-                    sem::ArrayLitInit::Repeat(expr, count) => {
-                        let value = eval_value!(expr);
-                        let elem_ty = self.type_lowerer.lower_type_id(expr.ty);
-                        let sem_ty = self.type_map.type_table().get(expr.ty);
-                        if matches!(sem_ty, Type::Int { signed: false, bits: 8, .. }) {
-                            let elem_ptr_ty = self.type_lowerer.ptr_to(elem_ty);
-                            let zero = self.builder.const_int(0, false, 64, u64_ty);
-                            let len = self.builder.const_int(*count as i128, false, 64, u64_ty);
-                            let base_ptr = self.builder.index_addr(addr, zero, elem_ptr_ty);
-                            self.builder.memset(base_ptr, value, len);
-                        } else {
-                            for i in 0..*count {
-                                let index_val =
-                                    self.builder.const_int(i as i128, false, 64, u64_ty);
-                                let elem_ptr_ty = self.type_lowerer.ptr_to(elem_ty);
-                                let elem_addr =
-                                    self.builder.index_addr(addr, index_val, elem_ptr_ty);
-                                self.builder.store(elem_addr, value);
-                            }
-                        }
-                    }
-                }
-
-                // Load the array value
-                Ok(self.builder.load(addr, array_ty).into())
-            }
-
-            sem::ValueExprKind::SetLit { elems, .. } => {
-                let set_sem_ty = self.type_map.type_table().get(expr.ty).clone();
-                let Type::Set { elem_ty } = set_sem_ty else {
-                    panic!("backend set literal has non-set type");
-                };
-
-                let set_ir_ty = self.type_lowerer.lower_type_id(expr.ty);
-                let slot = self.alloc_value_slot(set_ir_ty);
-
-                let elem_ir_ty = self.type_lowerer.lower_type(&elem_ty);
-                let elem_ptr_ty = self.type_lowerer.ptr_to(elem_ir_ty);
-                let u32_ty = self.type_lowerer.lower_type(&Type::uint(32));
-                let u64_ty = self.type_lowerer.lower_type(&Type::uint(64));
-                let zero_u64 = self.builder.const_int(0, false, 64, u64_ty);
-                let zero_ptr = self.builder.cast(CastKind::IntToPtr, zero_u64, elem_ptr_ty);
-                let zero_u32 = self.builder.const_int(0, false, 32, u32_ty);
-
-                // Start with an empty, non-owned set; runtime insert promotes to owned.
-                self.store_field(slot.addr, 0, elem_ptr_ty, zero_ptr);
-                self.store_field(slot.addr, 1, u32_ty, zero_u32);
-                self.store_field(slot.addr, 2, u32_ty, zero_u32);
-
-                let layout = self.type_lowerer.ir_type_cache.layout(elem_ir_ty);
-                let elem_size = self
-                    .builder
-                    .const_int(layout.size() as i128, false, 64, u64_ty);
-                let elem_align = self
-                    .builder
-                    .const_int(layout.align() as i128, false, 64, u64_ty);
-                let bool_ty = self.type_lowerer.lower_type(&Type::Bool);
-
-                for elem_expr in elems.iter() {
-                    let value = eval_value!(elem_expr);
-                    let elem_value_ty = self.type_map.type_table().get(elem_expr.ty).clone();
-                    let elem_addr = self.materialize_value_addr(value, &elem_value_ty);
-                    let _ = self.builder.call(
-                        Callee::Runtime(RuntimeFn::SetInsertElem),
-                        vec![slot.addr, elem_addr, elem_size, elem_align],
-                        bool_ty,
-                    );
-                }
-
-                Ok(self.load_slot(&slot).into())
-            }
-            sem::ValueExprKind::MapLit { entries, .. } => {
-                let map_sem_ty = self.type_map.type_table().get(expr.ty).clone();
-                let Type::Map { key_ty, value_ty } = map_sem_ty else {
-                    panic!("backend map literal has non-map type");
-                };
-
-                let map_ir_ty = self.type_lowerer.lower_type_id(expr.ty);
-                let slot = self.alloc_value_slot(map_ir_ty);
-
-                let key_ir_ty = self.type_lowerer.lower_type(&key_ty);
-                let key_ptr_ty = self.type_lowerer.ptr_to(key_ir_ty);
-                let u32_ty = self.type_lowerer.lower_type(&Type::uint(32));
-                let u64_ty = self.type_lowerer.lower_type(&Type::uint(64));
-                let zero_u64 = self.builder.const_int(0, false, 64, u64_ty);
-                let zero_ptr = self.builder.cast(CastKind::IntToPtr, zero_u64, key_ptr_ty);
-                let zero_u32 = self.builder.const_int(0, false, 32, u32_ty);
-
-                // Start with an empty, non-owned map; runtime insert promotes to owned.
-                self.store_field(slot.addr, 0, key_ptr_ty, zero_ptr);
-                self.store_field(slot.addr, 1, u32_ty, zero_u32);
-                self.store_field(slot.addr, 2, u32_ty, zero_u32);
-
-                let key_layout = self.type_lowerer.ir_type_cache.layout(key_ir_ty);
-                let value_ir_ty = self.type_lowerer.lower_type(&value_ty);
-                let value_layout = self.type_lowerer.ir_type_cache.layout(value_ir_ty);
-                let key_size = self
-                    .builder
-                    .const_int(key_layout.size() as i128, false, 64, u64_ty);
-                let value_size = self
-                    .builder
-                    .const_int(value_layout.size() as i128, false, 64, u64_ty);
-                let bool_ty = self.type_lowerer.lower_type(&Type::Bool);
-
-                for entry in entries.iter() {
-                    let key_value = eval_value!(&entry.key);
-                    let key_value_ty = self.type_map.type_table().get(entry.key.ty).clone();
-                    let key_addr = self.materialize_value_addr(key_value, &key_value_ty);
-
-                    let value_value = eval_value!(&entry.value);
-                    let value_value_ty = self.type_map.type_table().get(entry.value.ty).clone();
-                    let value_addr = self.materialize_value_addr(value_value, &value_value_ty);
-
-                    let _ = self.builder.call(
-                        Callee::Runtime(RuntimeFn::MapInsertOrAssign),
-                        vec![slot.addr, key_addr, value_addr, key_size, value_size],
-                        bool_ty,
-                    );
-                }
-
-                Ok(self.load_slot(&slot).into())
-            }
-
-            sem::ValueExprKind::TupleLit(items) => {
-                // Allocate a local for the tuple and get its address
-                let tuple_ty = self.type_lowerer.lower_type_id(expr.ty);
-                let slot = self.alloc_value_slot(tuple_ty);
-
-                // Store each field
-                for (i, elem_expr) in items.iter().enumerate() {
-                    let value = eval_value!(elem_expr);
-                    let field_ty = self.lower_tuple_field_ty(expr.ty, i);
-                    self.store_field(slot.addr, i, field_ty, value);
-                }
-
-                // Load the tuple value
-                Ok(self.load_slot(&slot).into())
-            }
-
+            sem::ValueExprKind::TupleLit(items) => self.lower_tuple_lit_expr(expr, items),
             sem::ValueExprKind::StructLit { fields, .. } => {
-                // Allocate a local for the struct and get its address
-                let struct_ty = self.type_lowerer.lower_type_id(expr.ty);
-                let slot = self.alloc_value_slot(struct_ty);
-
-                // Store each field
-                for field in fields.iter() {
-                    let value = eval_value!(&field.value);
-                    let (field_index, field_ty) = self.lower_struct_field_ty(expr.ty, &field.name);
-                    self.store_field(slot.addr, field_index, field_ty, value);
-                }
-
-                // Load the struct value
-                Ok(self.load_slot(&slot).into())
+                self.lower_struct_lit_expr(expr, fields)
             }
-
             sem::ValueExprKind::StructUpdate { target, fields } => {
-                // Allocate a local for the updated struct and get its address
-                let struct_ty = self.type_lowerer.lower_type_id(expr.ty);
-                let slot = self.alloc_value_slot(struct_ty);
-
-                // Copy the base struct
-                let base_value = eval_value!(target);
-                let base_ty = self.type_map.type_table().get(expr.ty);
-                self.store_value_into_addr(slot.addr, base_value, base_ty, struct_ty);
-
-                // Overwrite the updated fields
-                for field in fields.iter() {
-                    let value = eval_value!(&field.value);
-                    let (field_index, field_ty) = self.lower_struct_field_ty(expr.ty, &field.name);
-                    self.store_field(slot.addr, field_index, field_ty, value);
-                }
-
-                // Load the updated struct value
-                Ok(self.load_slot(&slot).into())
+                self.lower_struct_update_expr(expr, target, fields)
             }
 
             sem::ValueExprKind::EnumVariant {
                 enum_name: _,
                 variant,
                 payload,
-            } => {
-                let (tag_ty, blob_ty, variant_tag, field_offsets, field_tys) = {
-                    let layout = self.type_lowerer.enum_layout(expr.ty);
-                    let variant_layout = layout.variant_by_name(variant);
-                    (
-                        layout.tag_ty,
-                        layout.blob_ty,
-                        variant_layout.tag,
-                        variant_layout.field_offsets.clone(),
-                        variant_layout.field_tys.clone(),
-                    )
-                };
-
-                // Allocate a local for the enum and get its address.
-                let enum_ty = self.type_lowerer.lower_type_id(expr.ty);
-                let slot = self.alloc_value_slot(enum_ty);
-
-                // Store the tag in field 0.
-                let tag_val = self
-                    .builder
-                    .const_int(variant_tag as i128, false, 32, tag_ty);
-                self.store_field(slot.addr, 0, tag_ty, tag_val);
-
-                // Store each payload field into the blob (field 1) at its offset.
-                let payload_ptr = self.field_addr_typed(slot.addr, 1, blob_ty);
-
-                if field_offsets.len() != payload.len() || field_tys.len() != payload.len() {
-                    panic!(
-                        "backend enum variant payload mismatch for {}: {} offsets, {} tys, {} values",
-                        variant,
-                        field_offsets.len(),
-                        field_tys.len(),
-                        payload.len()
-                    );
-                }
-
-                for ((value_expr, offset), value_ty) in payload
-                    .iter()
-                    .zip(field_offsets.iter())
-                    .zip(field_tys.iter().copied())
-                {
-                    let value = eval_value!(value_expr);
-                    self.store_into_blob(payload_ptr, *offset, value, value_ty);
-                }
-
-                Ok(self.load_slot(&slot).into())
-            }
+            } => self.lower_enum_variant_expr(expr, variant, payload),
 
             sem::ValueExprKind::Try {
                 fallible_expr,
@@ -414,11 +109,13 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
                 if let Some(handler) = on_error {
                     return self.lower_try_handle(expr, fallible_expr, handler);
                 }
-                return self.lower_try_propagate(expr, fallible_expr);
+                self.lower_try_propagate(expr, fallible_expr)
             }
 
             sem::ValueExprKind::UnaryOp { op, expr: inner } => {
-                let value = eval_value!(inner);
+                let Some(value) = self.lower_value_expr_opt(inner)? else {
+                    return Ok(BranchResult::Return);
+                };
                 let ty = self.type_lowerer.lower_type_id(expr.ty);
                 let result = match op {
                     UnaryOp::Neg => self.builder.unop(UnOp::Neg, value, ty),
@@ -429,278 +126,18 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
             }
 
             sem::ValueExprKind::HeapAlloc { expr: inner } => {
-                let heap_ty = self.type_map.type_table().get(expr.ty).clone();
-                let Type::Heap { elem_ty } = heap_ty else {
-                    panic!("backend heap alloc expects heap type, got {:?}", heap_ty);
-                };
-
-                let elem_ir_ty = self.type_lowerer.lower_type(&elem_ty);
-                let ptr_ir_ty = self.type_lowerer.ptr_to(elem_ir_ty);
-                let layout = self.type_lowerer.ir_type_cache.layout(elem_ir_ty);
-
-                let u64_ty = self.type_lowerer.lower_type(&Type::uint(64));
-                let size_val =
-                    self.builder
-                        .const_int(layout.size() as i128, false, 64, u64_ty);
-                let align_val =
-                    self.builder
-                        .const_int(layout.align() as i128, false, 64, u64_ty);
-
-                // Allocate heap storage and initialize it with the value.
-                let ptr_val = self.builder.call(
-                    Callee::Runtime(RuntimeFn::Alloc),
-                    vec![size_val, align_val],
-                    ptr_ir_ty,
-                );
-
-                if layout.size() != 0 {
-                    let value = eval_value!(inner);
-                    self.store_value_into_addr(ptr_val, value, &elem_ty, elem_ir_ty);
-                }
-
-                Ok(ptr_val.into())
+                self.lower_heap_alloc_expr(expr, inner)
             }
-
             sem::ValueExprKind::BinOp { left, op, right } => {
-                if matches!(op, BinaryOp::LogicalAnd | BinaryOp::LogicalOr) {
-                    return self.lower_branching_value_expr(expr);
-                }
-                let lhs = eval_value!(left);
-                let rhs = eval_value!(right);
-                let ty = self.type_lowerer.lower_type_id(expr.ty);
-                let sem_ty = self.type_map.type_table().get(expr.ty);
-
-                if let Some(binop) = map_binop(*op) {
-                    if matches!(*op, BinaryOp::Div | BinaryOp::Mod) {
-                        self.emit_div_by_zero_check(rhs, sem_ty);
-                    }
-                    return Ok(self.builder.binop(binop, lhs, rhs, ty).into());
-                }
-                if matches!(op, BinaryOp::Eq | BinaryOp::Ne) {
-                    let operand_ty = self.type_map.type_table().get(left.ty).clone();
-                    let eq_value = self.lower_eq_value(lhs, rhs, &operand_ty);
-                    let bool_ty = self.type_lowerer.lower_type(&Type::Bool);
-                    let value = if matches!(op, BinaryOp::Eq) {
-                        eq_value
-                    } else {
-                        self.builder.unop(UnOp::Not, eq_value, bool_ty)
-                    };
-                    return Ok(value.into());
-                }
-                if let Some(cmp) = map_cmp(*op) {
-                    return Ok(self.builder.cmp(cmp, lhs, rhs, ty).into());
-                }
-                panic!(
-                    "backend lower_value_expr_value unsupported binop {:?} at {:?}",
-                    op, expr.span
-                );
+                self.lower_binop_expr(expr, left, *op, right)
             }
-
             sem::ValueExprKind::Slice { target, start, end } => {
-                // Build a slice value { ptr, len } from a place and optional bounds.
-                let plan = self.slice_plan(expr.id);
-
-                let Type::Slice { elem_ty } = self.type_map.type_table().get(expr.ty).clone()
-                else {
-                    panic!("backend slice expr has non-slice type");
-                };
-
-                let u64_ty = self.type_lowerer.lower_type(&Type::uint(64));
-                let elem_ir_ty = self.type_lowerer.lower_type(&elem_ty);
-                let elem_ptr_ty = self.type_lowerer.ptr_to(elem_ir_ty);
-
-                // Resolve the base pointer and length from the slice plan.
-                let (base_ptr, base_len) = match plan.base {
-                    sem::SliceBaseKind::Array { len, deref_count } => {
-                        let (base_addr, base_ty) = self.resolve_deref_base(target, deref_count)?;
-                        let Type::Array { .. } = base_ty else {
-                            panic!("backend slice on non-array base {:?}", base_ty);
-                        };
-                        let view = self.load_array_view(base_addr, elem_ptr_ty, len);
-                        (view.ptr, view.len)
-                    }
-                    sem::SliceBaseKind::Slice { deref_count } => {
-                        let (base_addr, base_ty) = self.resolve_deref_base(target, deref_count)?;
-                        let Type::Slice { .. } = base_ty else {
-                            panic!("backend slice on non-slice base {:?}", base_ty);
-                        };
-                        let view = self.load_slice_view(base_addr, elem_ptr_ty);
-                        (view.ptr, view.len)
-                    }
-                    sem::SliceBaseKind::String { deref_count } => {
-                        let (base_addr, base_ty) = self.resolve_deref_base(target, deref_count)?;
-                        let Type::String = base_ty else {
-                            panic!("backend slice on non-string base {:?}", base_ty);
-                        };
-                        let view = self.load_string_view(base_addr);
-                        (view.ptr, view.len)
-                    }
-                    sem::SliceBaseKind::DynArray { deref_count } => {
-                        let (base_addr, base_ty) = self.resolve_deref_base(target, deref_count)?;
-                        let Type::DynArray { .. } = base_ty else {
-                            panic!("backend slice on non-dyn-array base {:?}", base_ty);
-                        };
-                        let view = self.load_dyn_array_view(base_addr, elem_ptr_ty);
-                        (view.ptr, view.len)
-                    }
-                };
-
-                // Evaluate bounds (default start=0, end=base_len).
-                let start_val = match start {
-                    Some(expr) => eval_value!(expr),
-                    None => self.builder.const_int(0, false, 64, u64_ty),
-                };
-                let end_val = match end {
-                    Some(expr) => eval_value!(expr),
-                    None => base_len,
-                };
-
-                let start_check = start
-                    .as_deref()
-                    .is_some_and(|expr| !matches!(expr.kind, sem::ValueExprKind::IntLit(0)));
-                let end_check = end.is_some();
-
-                if start_check || end_check {
-                    let zero = self.builder.const_int(0, false, 64, u64_ty);
-                    let one = self.builder.const_int(1, false, 64, u64_ty);
-                    let max_excl = self.builder.binop(BinOp::Add, base_len, one, u64_ty);
-
-                    // Enforce start <= base_len when it is not trivially zero.
-                    if start_check {
-                        self.emit_range_check(start_val, zero, max_excl, false);
-                    }
-                    // Enforce start <= end <= base_len when an explicit end is provided.
-                    if end_check {
-                        self.emit_range_check(end_val, start_val, max_excl, false);
-                    }
-                }
-
-                let slice_ty = self.type_lowerer.lower_type_id(expr.ty);
-                Ok(self
-                    .emit_slice_value(
-                        slice_ty,
-                        elem_ptr_ty,
-                        u64_ty,
-                        base_ptr,
-                        base_len,
-                        start_val,
-                        end_val,
-                    )
-                    .into())
+                self.lower_slice_expr(expr, target, start.as_deref(), end.as_deref())
             }
-
             sem::ValueExprKind::MapGet { target, key } => {
-                let map_value = eval_value!(target);
-                let map_target_ty = self.type_map.type_table().get(target.ty).clone();
-                let (map_addr, map_ty) = {
-                    let (peeled_ty, deref_count) = map_target_ty.peel_heap_with_count();
-                    let (addr, ty) = if deref_count == 0 {
-                        let addr = self.materialize_value_addr(map_value, &map_target_ty);
-                        (addr, peeled_ty)
-                    } else {
-                        self.resolve_deref_base_value(map_value, map_target_ty.clone(), deref_count)
-                    };
-                    (addr, ty)
-                };
-                let Type::Map { key_ty, value_ty } = map_ty else {
-                    panic!("backend map index on non-map type");
-                };
-
-                let key_value = eval_value!(key);
-                let key_addr = self.materialize_value_addr(key_value, &key_ty);
-
-                let value_ir_ty = self.type_lowerer.lower_type(&value_ty);
-                let value_slot = self.alloc_value_slot(value_ir_ty);
-
-                let key_ir_ty = self.type_lowerer.lower_type(&key_ty);
-                let key_layout = self.type_lowerer.ir_type_cache.layout(key_ir_ty);
-                let value_layout = self.type_lowerer.ir_type_cache.layout(value_ir_ty);
-                let u64_ty = self.type_lowerer.lower_type(&Type::uint(64));
-                let key_size = self
-                    .builder
-                    .const_int(key_layout.size() as i128, false, 64, u64_ty);
-                let value_size = self
-                    .builder
-                    .const_int(value_layout.size() as i128, false, 64, u64_ty);
-
-                let bool_ty = self.type_lowerer.lower_type(&Type::Bool);
-                let hit = self.builder.call(
-                    Callee::Runtime(RuntimeFn::MapGetValue),
-                    vec![map_addr, key_addr, key_size, value_size, value_slot.addr],
-                    bool_ty,
-                );
-
-                // Build `V | KeyNotFound`: tag 0 when key is present, tag 1 otherwise.
-                let union_ir_ty = self.type_lowerer.lower_type_id(expr.ty);
-                let union_slot = self.alloc_value_slot(union_ir_ty);
-                let (tag_ty, blob_ty, payload_offset, payload_ty) = {
-                    let layout = self.type_lowerer.enum_layout(expr.ty);
-                    let ok_variant = layout
-                        .variants
-                        .first()
-                        .unwrap_or_else(|| panic!("backend map get missing ok union variant"));
-                    if ok_variant.field_offsets.len() != 1 || ok_variant.field_tys.len() != 1 {
-                        panic!("backend map get expects single-payload ok union variant");
-                    }
-                    (
-                        layout.tag_ty,
-                        layout.blob_ty,
-                        ok_variant.field_offsets[0],
-                        ok_variant.field_tys[0],
-                    )
-                };
-
-                let hit_u32 = self.builder.int_extend(hit, tag_ty, false);
-                let one_u32 = self.builder.const_int(1, false, 32, tag_ty);
-                let tag = self.builder.binop(BinOp::Xor, one_u32, hit_u32, tag_ty);
-                self.store_field(union_slot.addr, 0, tag_ty, tag);
-
-                let payload = self.builder.load(value_slot.addr, value_ir_ty);
-                let blob_ptr = self.field_addr_typed(union_slot.addr, 1, blob_ty);
-                self.store_into_blob(blob_ptr, payload_offset, payload, payload_ty);
-
-                Ok(self.load_slot(&union_slot).into())
+                self.lower_map_get_expr(expr, target, key)
             }
-
-            sem::ValueExprKind::Len { place } => {
-                // Length is an internal node for array/slice iteration.
-                let place_ty = self.type_map.type_table().get(place.ty).clone();
-                match place_ty {
-                    Type::Array { dims, .. } => {
-                        let len = dims
-                            .first()
-                            .copied()
-                            .unwrap_or_else(|| panic!("backend len on array with empty dims"));
-                        let ty = self.type_lowerer.lower_type_id(expr.ty);
-                        Ok(self
-                            .builder
-                            .const_int(len as i128, false, 64, ty)
-                            .into())
-                    }
-                    Type::Slice { .. } => {
-                        let place_addr = self.lower_place_addr(place)?;
-                        let len_ty = self.type_lowerer.lower_type(&Type::uint(64));
-                        let len_addr = self.field_addr_typed(place_addr.addr, 1, len_ty);
-                        Ok(self.builder.load(len_addr, len_ty).into())
-                    }
-                    Type::String => {
-                        let place_addr = self.lower_place_addr(place)?;
-                        let view = self.load_string_view(place_addr.addr);
-                        Ok(view.len.into())
-                    }
-                    Type::DynArray { .. } => {
-                        let place_addr = self.lower_place_addr(place)?;
-                        let u8_ty = self.type_lowerer.lower_type(&Type::uint(8));
-                        let u8_ptr_ty = self.type_lowerer.ptr_to(u8_ty);
-                        let view = self.load_dyn_array_view(
-                            place_addr.addr,
-                            u8_ptr_ty,
-                        );
-                        Ok(view.len.into())
-                    }
-                    other => panic!("backend len on unsupported type {:?}", other),
-                }
-            }
+            sem::ValueExprKind::Len { place } => self.lower_len_expr(expr, place),
 
             sem::ValueExprKind::Move { place } | sem::ValueExprKind::ImplicitMove { place } => {
                 match &place.kind {
@@ -718,217 +155,9 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
                 }
             }
 
-            sem::ValueExprKind::Coerce { kind, expr: inner } => match kind {
-                CoerceKind::ArrayToSlice => {
-                    let plan = self.slice_plan(expr.id);
-
-                    let Type::Slice { elem_ty } = self.type_map.type_table().get(expr.ty).clone()
-                    else {
-                        panic!("backend coerce array-to-slice has non-slice type");
-                    };
-
-                    let u64_ty = self.type_lowerer.lower_type(&Type::uint(64));
-                    let elem_ir_ty = self.type_lowerer.lower_type(&elem_ty);
-                    let elem_ptr_ty = self.type_lowerer.ptr_to(elem_ir_ty);
-
-                    let (base_addr, base_len) = match plan.base {
-                        sem::SliceBaseKind::Array { len, deref_count } => {
-                            let base_ty = self.type_map.type_table().get(inner.ty).clone();
-
-                            // Prefer a place-based lowering to reuse the base address; otherwise
-                            // materialize the value into a temporary slot.
-                            let (base_addr, base_ty) = match &inner.kind {
-                                sem::ValueExprKind::Load { place }
-                                | sem::ValueExprKind::Move { place }
-                                | sem::ValueExprKind::ImplicitMove { place } => {
-                                    self.resolve_deref_base(place, deref_count)?
-                                }
-                                _ => {
-                                    let value = eval_value!(inner);
-                                    if deref_count == 0 {
-                                        let array_ty = self.type_lowerer.lower_type_id(inner.ty);
-                                        let addr = self.alloc_local_addr(array_ty);
-                                        let array_sem_ty =
-                                            self.type_map.type_table().get(inner.ty);
-                                        self.store_value_into_addr(
-                                            addr,
-                                            value,
-                                            array_sem_ty,
-                                            array_ty,
-                                        );
-                                        (addr, base_ty)
-                                    } else {
-                                        self.resolve_deref_base_value(value, base_ty, deref_count)
-                                    }
-                                }
-                            };
-
-                            let Type::Array { .. } = base_ty else {
-                                panic!("backend coerce array-to-slice on {:?}", base_ty);
-                            };
-
-                            let zero = self.builder.const_int(0, false, 64, u64_ty);
-                            let ptr = self.builder.index_addr(base_addr, zero, elem_ptr_ty);
-                            let len_val = self.builder.const_int(len as i128, false, 64, u64_ty);
-                            (ptr, len_val)
-                        }
-                        other => {
-                            panic!("backend coerce array-to-slice with base {:?}", other);
-                        }
-                    };
-
-                    let start_val = self.builder.const_int(0, false, 64, u64_ty);
-                    let end_val = base_len;
-                    let slice_ty = self.type_lowerer.lower_type_id(expr.ty);
-                    Ok(self
-                        .emit_slice_value(
-                            slice_ty,
-                            elem_ptr_ty,
-                            u64_ty,
-                            base_addr,
-                            base_len,
-                            start_val,
-                            end_val,
-                        )
-                        .into())
-                }
-                CoerceKind::ArrayToDynArray => {
-                    let target_dyn_ty = self.type_map.type_table().get(expr.ty).clone();
-                    let Type::DynArray { elem_ty } = target_dyn_ty else {
-                        panic!("backend coerce array-to-dyn-array has non-dyn-array type");
-                    };
-
-                    let source_array_ty = self.type_map.type_table().get(inner.ty).clone();
-                    let Type::Array { dims, .. } = source_array_ty else {
-                        panic!(
-                            "backend coerce array-to-dyn-array expects array source, got {:?}",
-                            source_array_ty
-                        );
-                    };
-                    let len = dims
-                        .first()
-                        .copied()
-                        .unwrap_or_else(|| panic!("backend array-to-dyn-array source missing dims"));
-                    let len_u32 = u32::try_from(len).unwrap_or_else(|_| {
-                        panic!("backend array length {} exceeds u32::MAX for dyn array", len)
-                    });
-
-                    let elem_ir_ty = self.type_lowerer.lower_type(&elem_ty);
-                    let elem_ptr_ty = self.type_lowerer.ptr_to(elem_ir_ty);
-                    let dyn_ir_ty = self.type_lowerer.lower_type_id(expr.ty);
-                    let dyn_slot = self.alloc_value_slot(dyn_ir_ty);
-
-                    // Lower the source as an addressable array value.
-                    let source_addr = match &inner.kind {
-                        sem::ValueExprKind::Load { place }
-                        | sem::ValueExprKind::Move { place }
-                        | sem::ValueExprKind::ImplicitMove { place } => {
-                            self.lower_place_addr(place)?.addr
-                        }
-                        _ => {
-                            let value = eval_value!(inner);
-                            let array_ir_ty = self.type_lowerer.lower_type_id(inner.ty);
-                            let addr = self.alloc_local_addr(array_ir_ty);
-                            let array_sem_ty = self.type_map.type_table().get(inner.ty);
-                            self.store_value_into_addr(addr, value, array_sem_ty, array_ir_ty);
-                            addr
-                        }
-                    };
-
-                    let u64_ty = self.type_lowerer.lower_type(&Type::uint(64));
-                    let u32_ty = self.type_lowerer.lower_type(&Type::uint(32));
-                    let layout = self.type_lowerer.ir_type_cache.layout(elem_ir_ty);
-                    let elem_size = layout.size() as u64;
-                    let elem_align = layout.align() as u64;
-
-                    let data_ptr = if len_u32 == 0 || elem_size == 0 {
-                        let zero = self.builder.const_int(0, false, 64, u64_ty);
-                        self.builder.cast(CastKind::IntToPtr, zero, elem_ptr_ty)
-                    } else {
-                        let bytes = self
-                            .builder
-                            .const_int((len_u32 as u64 * elem_size) as i128, false, 64, u64_ty);
-                        let align = self.builder.const_int(elem_align as i128, false, 64, u64_ty);
-                        let dst_ptr =
-                            self.builder.call(Callee::Runtime(RuntimeFn::Alloc), vec![bytes, align], elem_ptr_ty);
-
-                        let zero = self.builder.const_int(0, false, 64, u64_ty);
-                        let src_ptr = self.builder.index_addr(source_addr, zero, elem_ptr_ty);
-                        self.builder.memcopy(dst_ptr, src_ptr, bytes);
-                        dst_ptr
-                    };
-
-                    let len_val = self.builder.const_int(len_u32 as i128, false, 32, u32_ty);
-                    let cap_raw = (len_u32 | 0x8000_0000) as i128;
-                    let cap_val = self.builder.const_int(cap_raw, false, 32, u32_ty);
-
-                    self.store_field(dyn_slot.addr, 0, elem_ptr_ty, data_ptr);
-                    self.store_field(dyn_slot.addr, 1, u32_ty, len_val);
-                    self.store_field(dyn_slot.addr, 2, u32_ty, cap_val);
-
-                    Ok(self.load_slot(&dyn_slot).into())
-                }
-                CoerceKind::DynArrayToSlice => {
-                    let plan = self.slice_plan(expr.id);
-
-                    let Type::Slice { elem_ty } = self.type_map.type_table().get(expr.ty).clone()
-                    else {
-                        panic!("backend coerce dyn-array-to-slice has non-slice type");
-                    };
-
-                    let u64_ty = self.type_lowerer.lower_type(&Type::uint(64));
-                    let elem_ir_ty = self.type_lowerer.lower_type(&elem_ty);
-                    let elem_ptr_ty = self.type_lowerer.ptr_to(elem_ir_ty);
-
-                    let (base_ptr, base_len) = match plan.base {
-                        sem::SliceBaseKind::DynArray { deref_count } => {
-                            let base_ty = self.type_map.type_table().get(inner.ty).clone();
-                            let (base_addr, base_ty) = match &inner.kind {
-                                sem::ValueExprKind::Load { place }
-                                | sem::ValueExprKind::Move { place }
-                                | sem::ValueExprKind::ImplicitMove { place } => {
-                                    self.resolve_deref_base(place, deref_count)?
-                                }
-                                _ => {
-                                    let value = eval_value!(inner);
-                                    if deref_count == 0 {
-                                        let dyn_ir_ty = self.type_lowerer.lower_type_id(inner.ty);
-                                        let addr = self.alloc_local_addr(dyn_ir_ty);
-                                        let dyn_sem_ty = self.type_map.type_table().get(inner.ty);
-                                        self.store_value_into_addr(addr, value, dyn_sem_ty, dyn_ir_ty);
-                                        (addr, base_ty)
-                                    } else {
-                                        self.resolve_deref_base_value(value, base_ty, deref_count)
-                                    }
-                                }
-                            };
-
-                            let Type::DynArray { .. } = base_ty else {
-                                panic!("backend coerce dyn-array-to-slice on {:?}", base_ty);
-                            };
-                            let view = self.load_dyn_array_view(base_addr, elem_ptr_ty);
-                            (view.ptr, view.len)
-                        }
-                        other => {
-                            panic!("backend coerce dyn-array-to-slice with base {:?}", other);
-                        }
-                    };
-
-                    let start_val = self.builder.const_int(0, false, 64, u64_ty);
-                    let slice_ty = self.type_lowerer.lower_type_id(expr.ty);
-                    Ok(self
-                        .emit_slice_value(
-                            slice_ty,
-                            elem_ptr_ty,
-                            u64_ty,
-                            base_ptr,
-                            base_len,
-                            start_val,
-                            base_len,
-                        )
-                        .into())
-                }
-            },
+            sem::ValueExprKind::Coerce { kind, expr: inner } => {
+                self.lower_coerce_expr(expr, *kind, inner)
+            }
 
             sem::ValueExprKind::Load { place } => match &place.kind {
                 sem::PlaceExprKind::Var { def_id, .. } => {
@@ -937,12 +166,14 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
                     } else {
                         let def = self.def(*def_id);
                         match def.kind {
-                            DefKind::FuncDef { .. }
-                            | DefKind::FuncDecl { .. } => {
+                            DefKind::FuncDef { .. } | DefKind::FuncDecl { .. } => {
                                 let value_ty = self.type_lowerer.lower_type_id(place.ty);
                                 Ok(self.builder.const_func_addr(*def_id, value_ty).into())
                             }
-                            _ => panic!("backend load missing local for non-function def {:?}", def_id),
+                            _ => panic!(
+                                "backend load missing local for non-function def {:?}",
+                                def_id
+                            ),
                         }
                     }
                 }
@@ -973,103 +204,31 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
                 };
                 Ok(value.into())
             }
+
             sem::ValueExprKind::EmitSend { to, payload } => {
-                let dst = match self.lower_value_expr_value(to)? {
-                    BranchResult::Value(value) => value,
-                    BranchResult::Return => return Ok(BranchResult::Return),
-                };
-                let payload_value = match self.lower_value_expr_value(payload)? {
-                    BranchResult::Value(value) => value,
-                    BranchResult::Return => return Ok(BranchResult::Return),
-                };
-                let u64_ty = self.type_lowerer.lower_type(&Type::uint(64));
-                let payload_ty = self.type_map.type_table().get(payload.ty).clone();
-                let event_kind = self.machine_payload_event_kind(&payload_ty).unwrap_or(0);
-                let kind = self.builder.const_int(event_kind as i128, false, 64, u64_ty);
-                let (payload0, payload1) =
-                    self.pack_machine_payload_words(payload_value, &payload_ty);
-                let bool_ty = self.type_lowerer.lower_type(&Type::Bool);
-                let _status = self.builder.call(
-                    Callee::Runtime(RuntimeFn::MachineEmitSend),
-                    vec![dst, kind, payload0, payload1],
-                    bool_ty,
-                );
-                let unit_ty = self.type_lowerer.lower_type_id(expr.ty);
-                Ok(self.builder.const_int(0, false, 8, unit_ty).into())
+                self.lower_emit_send_expr(expr, to, payload)
             }
             sem::ValueExprKind::EmitRequest {
                 to,
                 payload,
                 request_site_key,
-            } => {
-                let dst = match self.lower_value_expr_value(to)? {
-                    BranchResult::Value(value) => value,
-                    BranchResult::Return => return Ok(BranchResult::Return),
-                };
-                let payload_value = match self.lower_value_expr_value(payload)? {
-                    BranchResult::Value(value) => value,
-                    BranchResult::Return => return Ok(BranchResult::Return),
-                };
-                let u64_ty = self.type_lowerer.lower_type(&Type::uint(64));
-                let payload_ty = self.type_map.type_table().get(payload.ty).clone();
-                let event_kind = self.machine_payload_event_kind(&payload_ty).unwrap_or(0);
-                let kind = self.builder.const_int(event_kind as i128, false, 64, u64_ty);
-                let (payload0, payload1) =
-                    self.pack_machine_payload_words(payload_value, &payload_ty);
-                let request_site =
-                    self.builder
-                        .const_int(*request_site_key as i128, false, 64, u64_ty);
-                let pending_ty = self.type_lowerer.lower_type_id(expr.ty);
-                let pending = self.builder.call(
-                    Callee::Runtime(RuntimeFn::MachineEmitRequest),
-                    vec![dst, kind, payload0, payload1, request_site],
-                    pending_ty,
-                );
-                Ok(pending.into())
-            }
-            sem::ValueExprKind::Reply { cap, value } => {
-                let cap_value = match self.lower_value_expr_value(cap)? {
-                    BranchResult::Value(value) => value,
-                    BranchResult::Return => return Ok(BranchResult::Return),
-                };
-                let reply_value = match self.lower_value_expr_value(value)? {
-                    BranchResult::Value(value) => value,
-                    BranchResult::Return => return Ok(BranchResult::Return),
-                };
-                let u64_ty = self.type_lowerer.lower_type(&Type::uint(64));
-                let response_ty = self.type_map.type_table().get(value.ty).clone();
-                let event_kind = self
-                    .machine_response_event_kind(&response_ty)
-                    .unwrap_or(0);
-                let kind = self.builder.const_int(event_kind as i128, false, 64, u64_ty);
-                let (payload0, payload1) =
-                    self.pack_machine_payload_words(reply_value, &response_ty);
-                let bool_ty = self.type_lowerer.lower_type(&Type::Bool);
-                let _status = self.builder.call(
-                    Callee::Runtime(RuntimeFn::MachineEmitReply),
-                    vec![cap_value, kind, payload0, payload1],
-                    bool_ty,
-                );
-                let unit_ty = self.type_lowerer.lower_type_id(expr.ty);
-                Ok(self.builder.const_int(0, false, 8, unit_ty).into())
-            }
+            } => self.lower_emit_request_expr(expr, to, payload, *request_site_key),
+            sem::ValueExprKind::Reply { cap, value } => self.lower_reply_expr(expr, cap, value),
 
             sem::ValueExprKind::ClosureRef { def_id } => {
                 let ty = self.type_lowerer.lower_type_id(expr.ty);
                 Ok(self.builder.const_func_addr(*def_id, ty).into())
             }
 
-            _ => {
-                match self.lowering_plan(expr.id) {
-                    sem::LoweringPlan::Branching => self.lower_branching_value_expr(expr),
-                    sem::LoweringPlan::Linear => {
-                        panic!(
-                            "backend lower_value_expr_value unsupported expr {:?} at {:?}",
-                            expr.kind, expr.span
-                        );
-                    }
+            _ => match self.lowering_plan(expr.id) {
+                sem::LoweringPlan::Branching => self.lower_branching_value_expr(expr),
+                sem::LoweringPlan::Linear => {
+                    panic!(
+                        "backend lower_value_expr_value unsupported expr {:?} at {:?}",
+                        expr.kind, expr.span
+                    );
                 }
-            }
+            },
         }
     }
 
@@ -1220,6 +379,1004 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
                 );
             }
         }
+    }
+
+    // ── Extracted value-expression helpers ─────────────────────────────
+
+    fn lower_block_expr(
+        &mut self,
+        expr: &sem::ValueExpr,
+        items: &[sem::BlockItem],
+        tail: &Option<Box<sem::ValueExpr>>,
+    ) -> Result<BranchResult, LowerToIrError> {
+        self.with_drop_scope(expr.id, |lowerer| {
+            for item in items {
+                match item {
+                    sem::BlockItem::Stmt(stmt) => {
+                        match lowerer.lower_stmt_expr_linear(stmt)? {
+                            StmtOutcome::Continue => {}
+                            StmtOutcome::Return => {
+                                panic!(
+                                    "backend lower_linear_value_expr hit return in linear block at {:?}",
+                                    stmt.span
+                                );
+                            }
+                        }
+                    }
+                    sem::BlockItem::Expr(expr) => {
+                        lowerer.annotate_expr(expr);
+                        let _ = lowerer.lower_linear_value_expr(expr)?;
+                    }
+                }
+            }
+
+            if let Some(tail) = tail {
+                lowerer.annotate_expr(tail);
+                return lowerer
+                    .lower_linear_value_expr(tail)
+                    .map(Into::into);
+            }
+
+            let ty = lowerer.type_lowerer.lower_type_id(expr.ty);
+            Ok(lowerer.builder.const_unit(ty).into())
+        })
+    }
+
+    fn lower_string_lit_expr(
+        &mut self,
+        expr: &sem::ValueExpr,
+        value: &str,
+    ) -> Result<BranchResult, LowerToIrError> {
+        let string_ty = self.type_lowerer.lower_type_id(expr.ty);
+        let slot = self.alloc_value_slot(string_ty);
+
+        // pointer to global bytes
+        let u8_ty = self.type_lowerer.lower_type(&Type::uint(8));
+        let u8_ptr_ty = self.type_lowerer.ptr_to(u8_ty);
+        let ptr_val = if value.is_empty() {
+            let u64_ty = self.type_lowerer.lower_type(&Type::uint(64));
+            let zero = self.builder.const_int(0, false, 64, u64_ty);
+            self.builder.cast(CastKind::IntToPtr, zero, u8_ptr_ty)
+        } else {
+            let global_id = self.add_global_bytes(value.as_bytes().to_vec());
+            self.builder.const_global_addr(global_id, u8_ptr_ty)
+        };
+
+        // length and capacity (same for string literals)
+        let len_ty = self.type_lowerer.lower_type(&Type::uint(32));
+        let len_val = self
+            .builder
+            .const_int(value.len() as i128, false, 32, len_ty);
+        let cap_val = self.builder.const_int(0, false, 32, len_ty);
+
+        // store fields in string struct
+        self.store_field(slot.addr, 0, u8_ptr_ty, ptr_val);
+        self.store_field(slot.addr, 1, len_ty, len_val);
+        self.store_field(slot.addr, 2, len_ty, cap_val);
+
+        Ok(self.load_slot(&slot).into())
+    }
+
+    fn lower_array_lit_expr(
+        &mut self,
+        expr: &sem::ValueExpr,
+        init: &sem::ArrayLitInit,
+    ) -> Result<BranchResult, LowerToIrError> {
+        let array_ty = self.type_lowerer.lower_type_id(expr.ty);
+        let addr = self.alloc_local_addr(array_ty);
+        let u64_ty = self.type_lowerer.lower_type(&Type::uint(64));
+
+        match init {
+            sem::ArrayLitInit::Elems(elems) => {
+                for (i, elem_expr) in elems.iter().enumerate() {
+                    let Some(value) = self.lower_value_expr_opt(elem_expr)? else {
+                        return Ok(BranchResult::Return);
+                    };
+                    let index_val = self.builder.const_int(i as i128, false, 64, u64_ty);
+                    let elem_ty = self.type_lowerer.lower_type_id(elem_expr.ty);
+                    let elem_ptr_ty = self.type_lowerer.ptr_to(elem_ty);
+                    let elem_addr = self.builder.index_addr(addr, index_val, elem_ptr_ty);
+                    self.builder.store(elem_addr, value);
+                }
+            }
+            sem::ArrayLitInit::Repeat(repeat_expr, count) => {
+                let Some(value) = self.lower_value_expr_opt(repeat_expr)? else {
+                    return Ok(BranchResult::Return);
+                };
+                let elem_ty = self.type_lowerer.lower_type_id(repeat_expr.ty);
+                let sem_ty = self.type_map.type_table().get(repeat_expr.ty);
+                if matches!(
+                    sem_ty,
+                    Type::Int {
+                        signed: false,
+                        bits: 8,
+                        ..
+                    }
+                ) {
+                    let elem_ptr_ty = self.type_lowerer.ptr_to(elem_ty);
+                    let zero = self.builder.const_int(0, false, 64, u64_ty);
+                    let len = self.builder.const_int(*count as i128, false, 64, u64_ty);
+                    let base_ptr = self.builder.index_addr(addr, zero, elem_ptr_ty);
+                    self.builder.memset(base_ptr, value, len);
+                } else {
+                    for i in 0..*count {
+                        let index_val = self.builder.const_int(i as i128, false, 64, u64_ty);
+                        let elem_ptr_ty = self.type_lowerer.ptr_to(elem_ty);
+                        let elem_addr = self.builder.index_addr(addr, index_val, elem_ptr_ty);
+                        self.builder.store(elem_addr, value);
+                    }
+                }
+            }
+        }
+
+        Ok(self.builder.load(addr, array_ty).into())
+    }
+
+    fn lower_set_lit_expr(
+        &mut self,
+        expr: &sem::ValueExpr,
+        elems: &[sem::ValueExpr],
+    ) -> Result<BranchResult, LowerToIrError> {
+        let set_sem_ty = self.type_map.type_table().get(expr.ty).clone();
+        let Type::Set { elem_ty } = set_sem_ty else {
+            panic!("backend set literal has non-set type");
+        };
+
+        let set_ir_ty = self.type_lowerer.lower_type_id(expr.ty);
+        let slot = self.alloc_value_slot(set_ir_ty);
+
+        let elem_ir_ty = self.type_lowerer.lower_type(&elem_ty);
+        let elem_ptr_ty = self.type_lowerer.ptr_to(elem_ir_ty);
+        let u32_ty = self.type_lowerer.lower_type(&Type::uint(32));
+        let u64_ty = self.type_lowerer.lower_type(&Type::uint(64));
+        let zero_u64 = self.builder.const_int(0, false, 64, u64_ty);
+        let zero_ptr = self.builder.cast(CastKind::IntToPtr, zero_u64, elem_ptr_ty);
+        let zero_u32 = self.builder.const_int(0, false, 32, u32_ty);
+
+        // Start with an empty, non-owned set; runtime insert promotes to owned.
+        self.store_field(slot.addr, 0, elem_ptr_ty, zero_ptr);
+        self.store_field(slot.addr, 1, u32_ty, zero_u32);
+        self.store_field(slot.addr, 2, u32_ty, zero_u32);
+
+        let layout = self.type_lowerer.ir_type_cache.layout(elem_ir_ty);
+        let elem_size = self
+            .builder
+            .const_int(layout.size() as i128, false, 64, u64_ty);
+        let elem_align = self
+            .builder
+            .const_int(layout.align() as i128, false, 64, u64_ty);
+        let bool_ty = self.type_lowerer.lower_type(&Type::Bool);
+
+        for elem_expr in elems.iter() {
+            let Some(value) = self.lower_value_expr_opt(elem_expr)? else {
+                return Ok(BranchResult::Return);
+            };
+            let elem_value_ty = self.type_map.type_table().get(elem_expr.ty).clone();
+            let elem_addr = self.materialize_value_addr(value, &elem_value_ty);
+            let _ = self.builder.call(
+                Callee::Runtime(RuntimeFn::SetInsertElem),
+                vec![slot.addr, elem_addr, elem_size, elem_align],
+                bool_ty,
+            );
+        }
+
+        Ok(self.load_slot(&slot).into())
+    }
+
+    fn lower_map_lit_expr(
+        &mut self,
+        expr: &sem::ValueExpr,
+        entries: &[sem::MapLitEntry],
+    ) -> Result<BranchResult, LowerToIrError> {
+        let map_sem_ty = self.type_map.type_table().get(expr.ty).clone();
+        let Type::Map { key_ty, value_ty } = map_sem_ty else {
+            panic!("backend map literal has non-map type");
+        };
+
+        let map_ir_ty = self.type_lowerer.lower_type_id(expr.ty);
+        let slot = self.alloc_value_slot(map_ir_ty);
+
+        let key_ir_ty = self.type_lowerer.lower_type(&key_ty);
+        let key_ptr_ty = self.type_lowerer.ptr_to(key_ir_ty);
+        let u32_ty = self.type_lowerer.lower_type(&Type::uint(32));
+        let u64_ty = self.type_lowerer.lower_type(&Type::uint(64));
+        let zero_u64 = self.builder.const_int(0, false, 64, u64_ty);
+        let zero_ptr = self.builder.cast(CastKind::IntToPtr, zero_u64, key_ptr_ty);
+        let zero_u32 = self.builder.const_int(0, false, 32, u32_ty);
+
+        // Start with an empty, non-owned map; runtime insert promotes to owned.
+        self.store_field(slot.addr, 0, key_ptr_ty, zero_ptr);
+        self.store_field(slot.addr, 1, u32_ty, zero_u32);
+        self.store_field(slot.addr, 2, u32_ty, zero_u32);
+
+        let key_layout = self.type_lowerer.ir_type_cache.layout(key_ir_ty);
+        let value_ir_ty = self.type_lowerer.lower_type(&value_ty);
+        let value_layout = self.type_lowerer.ir_type_cache.layout(value_ir_ty);
+        let key_size = self
+            .builder
+            .const_int(key_layout.size() as i128, false, 64, u64_ty);
+        let value_size = self
+            .builder
+            .const_int(value_layout.size() as i128, false, 64, u64_ty);
+        let bool_ty = self.type_lowerer.lower_type(&Type::Bool);
+
+        for entry in entries.iter() {
+            let Some(key_value) = self.lower_value_expr_opt(&entry.key)? else {
+                return Ok(BranchResult::Return);
+            };
+            let key_value_ty = self.type_map.type_table().get(entry.key.ty).clone();
+            let key_addr = self.materialize_value_addr(key_value, &key_value_ty);
+
+            let Some(value_value) = self.lower_value_expr_opt(&entry.value)? else {
+                return Ok(BranchResult::Return);
+            };
+            let value_value_ty = self.type_map.type_table().get(entry.value.ty).clone();
+            let value_addr = self.materialize_value_addr(value_value, &value_value_ty);
+
+            let _ = self.builder.call(
+                Callee::Runtime(RuntimeFn::MapInsertOrAssign),
+                vec![slot.addr, key_addr, value_addr, key_size, value_size],
+                bool_ty,
+            );
+        }
+
+        Ok(self.load_slot(&slot).into())
+    }
+
+    fn lower_tuple_lit_expr(
+        &mut self,
+        expr: &sem::ValueExpr,
+        items: &[sem::ValueExpr],
+    ) -> Result<BranchResult, LowerToIrError> {
+        let tuple_ty = self.type_lowerer.lower_type_id(expr.ty);
+        let slot = self.alloc_value_slot(tuple_ty);
+
+        for (i, elem_expr) in items.iter().enumerate() {
+            let Some(value) = self.lower_value_expr_opt(elem_expr)? else {
+                return Ok(BranchResult::Return);
+            };
+            let field_ty = self.lower_tuple_field_ty(expr.ty, i);
+            self.store_field(slot.addr, i, field_ty, value);
+        }
+
+        Ok(self.load_slot(&slot).into())
+    }
+
+    fn lower_struct_lit_expr(
+        &mut self,
+        expr: &sem::ValueExpr,
+        fields: &[sem::StructLitField],
+    ) -> Result<BranchResult, LowerToIrError> {
+        let struct_ty = self.type_lowerer.lower_type_id(expr.ty);
+        let slot = self.alloc_value_slot(struct_ty);
+
+        for field in fields.iter() {
+            let Some(value) = self.lower_value_expr_opt(&field.value)? else {
+                return Ok(BranchResult::Return);
+            };
+            let (field_index, field_ty) = self.lower_struct_field_ty(expr.ty, &field.name);
+            self.store_field(slot.addr, field_index, field_ty, value);
+        }
+
+        Ok(self.load_slot(&slot).into())
+    }
+
+    fn lower_struct_update_expr(
+        &mut self,
+        expr: &sem::ValueExpr,
+        target: &sem::ValueExpr,
+        fields: &[sem::StructUpdateField],
+    ) -> Result<BranchResult, LowerToIrError> {
+        let struct_ty = self.type_lowerer.lower_type_id(expr.ty);
+        let slot = self.alloc_value_slot(struct_ty);
+
+        // Copy the base struct
+        let Some(base_value) = self.lower_value_expr_opt(target)? else {
+            return Ok(BranchResult::Return);
+        };
+        let base_ty = self.type_map.type_table().get(expr.ty);
+        self.store_value_into_addr(slot.addr, base_value, base_ty, struct_ty);
+
+        // Overwrite the updated fields
+        for field in fields.iter() {
+            let Some(value) = self.lower_value_expr_opt(&field.value)? else {
+                return Ok(BranchResult::Return);
+            };
+            let (field_index, field_ty) = self.lower_struct_field_ty(expr.ty, &field.name);
+            self.store_field(slot.addr, field_index, field_ty, value);
+        }
+
+        Ok(self.load_slot(&slot).into())
+    }
+
+    fn lower_enum_variant_expr(
+        &mut self,
+        expr: &sem::ValueExpr,
+        variant: &str,
+        payload: &[sem::ValueExpr],
+    ) -> Result<BranchResult, LowerToIrError> {
+        let (tag_ty, blob_ty, variant_tag, field_offsets, field_tys) = {
+            let layout = self.type_lowerer.enum_layout(expr.ty);
+            let variant_layout = layout.variant_by_name(variant);
+            (
+                layout.tag_ty,
+                layout.blob_ty,
+                variant_layout.tag,
+                variant_layout.field_offsets.clone(),
+                variant_layout.field_tys.clone(),
+            )
+        };
+
+        let enum_ty = self.type_lowerer.lower_type_id(expr.ty);
+        let slot = self.alloc_value_slot(enum_ty);
+
+        // Store the tag in field 0.
+        let tag_val = self
+            .builder
+            .const_int(variant_tag as i128, false, 32, tag_ty);
+        self.store_field(slot.addr, 0, tag_ty, tag_val);
+
+        // Store each payload field into the blob (field 1) at its offset.
+        let payload_ptr = self.field_addr_typed(slot.addr, 1, blob_ty);
+
+        if field_offsets.len() != payload.len() || field_tys.len() != payload.len() {
+            panic!(
+                "backend enum variant payload mismatch for {}: {} offsets, {} tys, {} values",
+                variant,
+                field_offsets.len(),
+                field_tys.len(),
+                payload.len()
+            );
+        }
+
+        for ((value_expr, offset), value_ty) in payload
+            .iter()
+            .zip(field_offsets.iter())
+            .zip(field_tys.iter().copied())
+        {
+            let Some(value) = self.lower_value_expr_opt(value_expr)? else {
+                return Ok(BranchResult::Return);
+            };
+            self.store_into_blob(payload_ptr, *offset, value, value_ty);
+        }
+
+        Ok(self.load_slot(&slot).into())
+    }
+
+    fn lower_heap_alloc_expr(
+        &mut self,
+        expr: &sem::ValueExpr,
+        inner: &sem::ValueExpr,
+    ) -> Result<BranchResult, LowerToIrError> {
+        let heap_ty = self.type_map.type_table().get(expr.ty).clone();
+        let Type::Heap { elem_ty } = heap_ty else {
+            panic!("backend heap alloc expects heap type, got {:?}", heap_ty);
+        };
+
+        let elem_ir_ty = self.type_lowerer.lower_type(&elem_ty);
+        let ptr_ir_ty = self.type_lowerer.ptr_to(elem_ir_ty);
+        let layout = self.type_lowerer.ir_type_cache.layout(elem_ir_ty);
+
+        let u64_ty = self.type_lowerer.lower_type(&Type::uint(64));
+        let size_val = self
+            .builder
+            .const_int(layout.size() as i128, false, 64, u64_ty);
+        let align_val = self
+            .builder
+            .const_int(layout.align() as i128, false, 64, u64_ty);
+
+        let ptr_val = self.builder.call(
+            Callee::Runtime(RuntimeFn::Alloc),
+            vec![size_val, align_val],
+            ptr_ir_ty,
+        );
+
+        if layout.size() != 0 {
+            let Some(value) = self.lower_value_expr_opt(inner)? else {
+                return Ok(BranchResult::Return);
+            };
+            self.store_value_into_addr(ptr_val, value, &elem_ty, elem_ir_ty);
+        }
+
+        Ok(ptr_val.into())
+    }
+
+    fn lower_binop_expr(
+        &mut self,
+        expr: &sem::ValueExpr,
+        left: &sem::ValueExpr,
+        op: BinaryOp,
+        right: &sem::ValueExpr,
+    ) -> Result<BranchResult, LowerToIrError> {
+        if matches!(op, BinaryOp::LogicalAnd | BinaryOp::LogicalOr) {
+            return self.lower_branching_value_expr(expr);
+        }
+        let Some(lhs) = self.lower_value_expr_opt(left)? else {
+            return Ok(BranchResult::Return);
+        };
+        let Some(rhs) = self.lower_value_expr_opt(right)? else {
+            return Ok(BranchResult::Return);
+        };
+        let ty = self.type_lowerer.lower_type_id(expr.ty);
+        let sem_ty = self.type_map.type_table().get(expr.ty);
+
+        if let Some(binop) = map_binop(op) {
+            if matches!(op, BinaryOp::Div | BinaryOp::Mod) {
+                self.emit_div_by_zero_check(rhs, sem_ty);
+            }
+            return Ok(self.builder.binop(binop, lhs, rhs, ty).into());
+        }
+        if matches!(op, BinaryOp::Eq | BinaryOp::Ne) {
+            let operand_ty = self.type_map.type_table().get(left.ty).clone();
+            let eq_value = self.lower_eq_value(lhs, rhs, &operand_ty);
+            let bool_ty = self.type_lowerer.lower_type(&Type::Bool);
+            let value = if matches!(op, BinaryOp::Eq) {
+                eq_value
+            } else {
+                self.builder.unop(UnOp::Not, eq_value, bool_ty)
+            };
+            return Ok(value.into());
+        }
+        if let Some(cmp) = map_cmp(op) {
+            return Ok(self.builder.cmp(cmp, lhs, rhs, ty).into());
+        }
+        panic!(
+            "backend lower_value_expr_value unsupported binop {:?} at {:?}",
+            op, expr.span
+        );
+    }
+
+    fn lower_slice_expr(
+        &mut self,
+        expr: &sem::ValueExpr,
+        target: &sem::PlaceExpr,
+        start: Option<&sem::ValueExpr>,
+        end: Option<&sem::ValueExpr>,
+    ) -> Result<BranchResult, LowerToIrError> {
+        let plan = self.slice_plan(expr.id);
+
+        let Type::Slice { elem_ty } = self.type_map.type_table().get(expr.ty).clone() else {
+            panic!("backend slice expr has non-slice type");
+        };
+
+        let u64_ty = self.type_lowerer.lower_type(&Type::uint(64));
+        let elem_ir_ty = self.type_lowerer.lower_type(&elem_ty);
+        let elem_ptr_ty = self.type_lowerer.ptr_to(elem_ir_ty);
+
+        // Resolve the base pointer and length from the slice plan.
+        let (base_ptr, base_len) = match plan.base {
+            sem::SliceBaseKind::Array { len, deref_count } => {
+                let (base_addr, base_ty) = self.resolve_deref_base(target, deref_count)?;
+                let Type::Array { .. } = base_ty else {
+                    panic!("backend slice on non-array base {:?}", base_ty);
+                };
+                let view = self.load_array_view(base_addr, elem_ptr_ty, len);
+                (view.ptr, view.len)
+            }
+            sem::SliceBaseKind::Slice { deref_count } => {
+                let (base_addr, base_ty) = self.resolve_deref_base(target, deref_count)?;
+                let Type::Slice { .. } = base_ty else {
+                    panic!("backend slice on non-slice base {:?}", base_ty);
+                };
+                let view = self.load_slice_view(base_addr, elem_ptr_ty);
+                (view.ptr, view.len)
+            }
+            sem::SliceBaseKind::String { deref_count } => {
+                let (base_addr, base_ty) = self.resolve_deref_base(target, deref_count)?;
+                let Type::String = base_ty else {
+                    panic!("backend slice on non-string base {:?}", base_ty);
+                };
+                let view = self.load_string_view(base_addr);
+                (view.ptr, view.len)
+            }
+            sem::SliceBaseKind::DynArray { deref_count } => {
+                let (base_addr, base_ty) = self.resolve_deref_base(target, deref_count)?;
+                let Type::DynArray { .. } = base_ty else {
+                    panic!("backend slice on non-dyn-array base {:?}", base_ty);
+                };
+                let view = self.load_dyn_array_view(base_addr, elem_ptr_ty);
+                (view.ptr, view.len)
+            }
+        };
+
+        // Evaluate bounds (default start=0, end=base_len).
+        let start_val = match start {
+            Some(start_expr) => {
+                let Some(v) = self.lower_value_expr_opt(start_expr)? else {
+                    return Ok(BranchResult::Return);
+                };
+                v
+            }
+            None => self.builder.const_int(0, false, 64, u64_ty),
+        };
+        let end_val = match end {
+            Some(end_expr) => {
+                let Some(v) = self.lower_value_expr_opt(end_expr)? else {
+                    return Ok(BranchResult::Return);
+                };
+                v
+            }
+            None => base_len,
+        };
+
+        let start_check =
+            start.is_some_and(|expr| !matches!(expr.kind, sem::ValueExprKind::IntLit(0)));
+        let end_check = end.is_some();
+
+        if start_check || end_check {
+            let zero = self.builder.const_int(0, false, 64, u64_ty);
+            let one = self.builder.const_int(1, false, 64, u64_ty);
+            let max_excl = self.builder.binop(BinOp::Add, base_len, one, u64_ty);
+
+            if start_check {
+                self.emit_range_check(start_val, zero, max_excl, false);
+            }
+            if end_check {
+                self.emit_range_check(end_val, start_val, max_excl, false);
+            }
+        }
+
+        let slice_ty = self.type_lowerer.lower_type_id(expr.ty);
+        Ok(self
+            .emit_slice_value(
+                slice_ty,
+                elem_ptr_ty,
+                u64_ty,
+                base_ptr,
+                base_len,
+                start_val,
+                end_val,
+            )
+            .into())
+    }
+
+    fn lower_map_get_expr(
+        &mut self,
+        expr: &sem::ValueExpr,
+        target: &sem::ValueExpr,
+        key: &sem::ValueExpr,
+    ) -> Result<BranchResult, LowerToIrError> {
+        let Some(map_value) = self.lower_value_expr_opt(target)? else {
+            return Ok(BranchResult::Return);
+        };
+        let map_target_ty = self.type_map.type_table().get(target.ty).clone();
+        let (map_addr, map_ty) = {
+            let (peeled_ty, deref_count) = map_target_ty.peel_heap_with_count();
+            if deref_count == 0 {
+                let addr = self.materialize_value_addr(map_value, &map_target_ty);
+                (addr, peeled_ty)
+            } else {
+                self.resolve_deref_base_value(map_value, map_target_ty.clone(), deref_count)
+            }
+        };
+        let Type::Map { key_ty, value_ty } = map_ty else {
+            panic!("backend map index on non-map type");
+        };
+
+        let Some(key_value) = self.lower_value_expr_opt(key)? else {
+            return Ok(BranchResult::Return);
+        };
+        let key_addr = self.materialize_value_addr(key_value, &key_ty);
+
+        let value_ir_ty = self.type_lowerer.lower_type(&value_ty);
+        let value_slot = self.alloc_value_slot(value_ir_ty);
+
+        let key_ir_ty = self.type_lowerer.lower_type(&key_ty);
+        let key_layout = self.type_lowerer.ir_type_cache.layout(key_ir_ty);
+        let value_layout = self.type_lowerer.ir_type_cache.layout(value_ir_ty);
+        let u64_ty = self.type_lowerer.lower_type(&Type::uint(64));
+        let key_size = self
+            .builder
+            .const_int(key_layout.size() as i128, false, 64, u64_ty);
+        let value_size = self
+            .builder
+            .const_int(value_layout.size() as i128, false, 64, u64_ty);
+
+        let bool_ty = self.type_lowerer.lower_type(&Type::Bool);
+        let hit = self.builder.call(
+            Callee::Runtime(RuntimeFn::MapGetValue),
+            vec![map_addr, key_addr, key_size, value_size, value_slot.addr],
+            bool_ty,
+        );
+
+        // Build `V | KeyNotFound`: tag 0 when key is present, tag 1 otherwise.
+        let union_ir_ty = self.type_lowerer.lower_type_id(expr.ty);
+        let union_slot = self.alloc_value_slot(union_ir_ty);
+        let (tag_ty, blob_ty, payload_offset, payload_ty) = {
+            let layout = self.type_lowerer.enum_layout(expr.ty);
+            let ok_variant = layout
+                .variants
+                .first()
+                .unwrap_or_else(|| panic!("backend map get missing ok union variant"));
+            if ok_variant.field_offsets.len() != 1 || ok_variant.field_tys.len() != 1 {
+                panic!("backend map get expects single-payload ok union variant");
+            }
+            (
+                layout.tag_ty,
+                layout.blob_ty,
+                ok_variant.field_offsets[0],
+                ok_variant.field_tys[0],
+            )
+        };
+
+        let hit_u32 = self.builder.int_extend(hit, tag_ty, false);
+        let one_u32 = self.builder.const_int(1, false, 32, tag_ty);
+        let tag = self.builder.binop(BinOp::Xor, one_u32, hit_u32, tag_ty);
+        self.store_field(union_slot.addr, 0, tag_ty, tag);
+
+        let payload = self.builder.load(value_slot.addr, value_ir_ty);
+        let blob_ptr = self.field_addr_typed(union_slot.addr, 1, blob_ty);
+        self.store_into_blob(blob_ptr, payload_offset, payload, payload_ty);
+
+        Ok(self.load_slot(&union_slot).into())
+    }
+
+    fn lower_len_expr(
+        &mut self,
+        expr: &sem::ValueExpr,
+        place: &sem::PlaceExpr,
+    ) -> Result<BranchResult, LowerToIrError> {
+        let place_ty = self.type_map.type_table().get(place.ty).clone();
+        match place_ty {
+            Type::Array { dims, .. } => {
+                let len = dims
+                    .first()
+                    .copied()
+                    .unwrap_or_else(|| panic!("backend len on array with empty dims"));
+                let ty = self.type_lowerer.lower_type_id(expr.ty);
+                Ok(self.builder.const_int(len as i128, false, 64, ty).into())
+            }
+            Type::Slice { .. } => {
+                let place_addr = self.lower_place_addr(place)?;
+                let len_ty = self.type_lowerer.lower_type(&Type::uint(64));
+                let len_addr = self.field_addr_typed(place_addr.addr, 1, len_ty);
+                Ok(self.builder.load(len_addr, len_ty).into())
+            }
+            Type::String => {
+                let place_addr = self.lower_place_addr(place)?;
+                let view = self.load_string_view(place_addr.addr);
+                Ok(view.len.into())
+            }
+            Type::DynArray { .. } => {
+                let place_addr = self.lower_place_addr(place)?;
+                let u8_ty = self.type_lowerer.lower_type(&Type::uint(8));
+                let u8_ptr_ty = self.type_lowerer.ptr_to(u8_ty);
+                let view = self.load_dyn_array_view(place_addr.addr, u8_ptr_ty);
+                Ok(view.len.into())
+            }
+            other => panic!("backend len on unsupported type {:?}", other),
+        }
+    }
+
+    fn lower_coerce_expr(
+        &mut self,
+        expr: &sem::ValueExpr,
+        kind: CoerceKind,
+        inner: &sem::ValueExpr,
+    ) -> Result<BranchResult, LowerToIrError> {
+        match kind {
+            CoerceKind::ArrayToSlice => self.lower_coerce_array_to_slice(expr, inner),
+            CoerceKind::ArrayToDynArray => self.lower_coerce_array_to_dyn_array(expr, inner),
+            CoerceKind::DynArrayToSlice => self.lower_coerce_dyn_array_to_slice(expr, inner),
+        }
+    }
+
+    fn lower_coerce_array_to_slice(
+        &mut self,
+        expr: &sem::ValueExpr,
+        inner: &sem::ValueExpr,
+    ) -> Result<BranchResult, LowerToIrError> {
+        let plan = self.slice_plan(expr.id);
+
+        let Type::Slice { elem_ty } = self.type_map.type_table().get(expr.ty).clone() else {
+            panic!("backend coerce array-to-slice has non-slice type");
+        };
+
+        let u64_ty = self.type_lowerer.lower_type(&Type::uint(64));
+        let elem_ir_ty = self.type_lowerer.lower_type(&elem_ty);
+        let elem_ptr_ty = self.type_lowerer.ptr_to(elem_ir_ty);
+
+        let (base_addr, base_len) = match plan.base {
+            sem::SliceBaseKind::Array { len, deref_count } => {
+                let base_ty = self.type_map.type_table().get(inner.ty).clone();
+
+                // Prefer a place-based lowering to reuse the base address; otherwise
+                // materialize the value into a temporary slot.
+                let (base_addr, base_ty) = match &inner.kind {
+                    sem::ValueExprKind::Load { place }
+                    | sem::ValueExprKind::Move { place }
+                    | sem::ValueExprKind::ImplicitMove { place } => {
+                        self.resolve_deref_base(place, deref_count)?
+                    }
+                    _ => {
+                        let Some(value) = self.lower_value_expr_opt(inner)? else {
+                            return Ok(BranchResult::Return);
+                        };
+                        if deref_count == 0 {
+                            let array_ty = self.type_lowerer.lower_type_id(inner.ty);
+                            let addr = self.alloc_local_addr(array_ty);
+                            let array_sem_ty = self.type_map.type_table().get(inner.ty);
+                            self.store_value_into_addr(addr, value, array_sem_ty, array_ty);
+                            (addr, base_ty)
+                        } else {
+                            self.resolve_deref_base_value(value, base_ty, deref_count)
+                        }
+                    }
+                };
+
+                let Type::Array { .. } = base_ty else {
+                    panic!("backend coerce array-to-slice on {:?}", base_ty);
+                };
+
+                let zero = self.builder.const_int(0, false, 64, u64_ty);
+                let ptr = self.builder.index_addr(base_addr, zero, elem_ptr_ty);
+                let len_val = self.builder.const_int(len as i128, false, 64, u64_ty);
+                (ptr, len_val)
+            }
+            other => {
+                panic!("backend coerce array-to-slice with base {:?}", other);
+            }
+        };
+
+        let start_val = self.builder.const_int(0, false, 64, u64_ty);
+        let end_val = base_len;
+        let slice_ty = self.type_lowerer.lower_type_id(expr.ty);
+        Ok(self
+            .emit_slice_value(
+                slice_ty,
+                elem_ptr_ty,
+                u64_ty,
+                base_addr,
+                base_len,
+                start_val,
+                end_val,
+            )
+            .into())
+    }
+
+    fn lower_coerce_array_to_dyn_array(
+        &mut self,
+        expr: &sem::ValueExpr,
+        inner: &sem::ValueExpr,
+    ) -> Result<BranchResult, LowerToIrError> {
+        let target_dyn_ty = self.type_map.type_table().get(expr.ty).clone();
+        let Type::DynArray { elem_ty } = target_dyn_ty else {
+            panic!("backend coerce array-to-dyn-array has non-dyn-array type");
+        };
+
+        let source_array_ty = self.type_map.type_table().get(inner.ty).clone();
+        let Type::Array { dims, .. } = source_array_ty else {
+            panic!(
+                "backend coerce array-to-dyn-array expects array source, got {:?}",
+                source_array_ty
+            );
+        };
+        let len = dims
+            .first()
+            .copied()
+            .unwrap_or_else(|| panic!("backend array-to-dyn-array source missing dims"));
+        let len_u32 = u32::try_from(len).unwrap_or_else(|_| {
+            panic!(
+                "backend array length {} exceeds u32::MAX for dyn array",
+                len
+            )
+        });
+
+        let elem_ir_ty = self.type_lowerer.lower_type(&elem_ty);
+        let elem_ptr_ty = self.type_lowerer.ptr_to(elem_ir_ty);
+        let dyn_ir_ty = self.type_lowerer.lower_type_id(expr.ty);
+        let dyn_slot = self.alloc_value_slot(dyn_ir_ty);
+
+        // Lower the source as an addressable array value.
+        let source_addr = match &inner.kind {
+            sem::ValueExprKind::Load { place }
+            | sem::ValueExprKind::Move { place }
+            | sem::ValueExprKind::ImplicitMove { place } => self.lower_place_addr(place)?.addr,
+            _ => {
+                let Some(value) = self.lower_value_expr_opt(inner)? else {
+                    return Ok(BranchResult::Return);
+                };
+                let array_ir_ty = self.type_lowerer.lower_type_id(inner.ty);
+                let addr = self.alloc_local_addr(array_ir_ty);
+                let array_sem_ty = self.type_map.type_table().get(inner.ty);
+                self.store_value_into_addr(addr, value, array_sem_ty, array_ir_ty);
+                addr
+            }
+        };
+
+        let u64_ty = self.type_lowerer.lower_type(&Type::uint(64));
+        let u32_ty = self.type_lowerer.lower_type(&Type::uint(32));
+        let layout = self.type_lowerer.ir_type_cache.layout(elem_ir_ty);
+        let elem_size = layout.size() as u64;
+        let elem_align = layout.align() as u64;
+
+        let data_ptr = if len_u32 == 0 || elem_size == 0 {
+            let zero = self.builder.const_int(0, false, 64, u64_ty);
+            self.builder.cast(CastKind::IntToPtr, zero, elem_ptr_ty)
+        } else {
+            let bytes =
+                self.builder
+                    .const_int((len_u32 as u64 * elem_size) as i128, false, 64, u64_ty);
+            let align = self
+                .builder
+                .const_int(elem_align as i128, false, 64, u64_ty);
+            let dst_ptr = self.builder.call(
+                Callee::Runtime(RuntimeFn::Alloc),
+                vec![bytes, align],
+                elem_ptr_ty,
+            );
+
+            let zero = self.builder.const_int(0, false, 64, u64_ty);
+            let src_ptr = self.builder.index_addr(source_addr, zero, elem_ptr_ty);
+            self.builder.memcopy(dst_ptr, src_ptr, bytes);
+            dst_ptr
+        };
+
+        let len_val = self.builder.const_int(len_u32 as i128, false, 32, u32_ty);
+        let cap_raw = (len_u32 | 0x8000_0000) as i128;
+        let cap_val = self.builder.const_int(cap_raw, false, 32, u32_ty);
+
+        self.store_field(dyn_slot.addr, 0, elem_ptr_ty, data_ptr);
+        self.store_field(dyn_slot.addr, 1, u32_ty, len_val);
+        self.store_field(dyn_slot.addr, 2, u32_ty, cap_val);
+
+        Ok(self.load_slot(&dyn_slot).into())
+    }
+
+    fn lower_coerce_dyn_array_to_slice(
+        &mut self,
+        expr: &sem::ValueExpr,
+        inner: &sem::ValueExpr,
+    ) -> Result<BranchResult, LowerToIrError> {
+        let plan = self.slice_plan(expr.id);
+
+        let Type::Slice { elem_ty } = self.type_map.type_table().get(expr.ty).clone() else {
+            panic!("backend coerce dyn-array-to-slice has non-slice type");
+        };
+
+        let u64_ty = self.type_lowerer.lower_type(&Type::uint(64));
+        let elem_ir_ty = self.type_lowerer.lower_type(&elem_ty);
+        let elem_ptr_ty = self.type_lowerer.ptr_to(elem_ir_ty);
+
+        let (base_ptr, base_len) = match plan.base {
+            sem::SliceBaseKind::DynArray { deref_count } => {
+                let base_ty = self.type_map.type_table().get(inner.ty).clone();
+                let (base_addr, base_ty) = match &inner.kind {
+                    sem::ValueExprKind::Load { place }
+                    | sem::ValueExprKind::Move { place }
+                    | sem::ValueExprKind::ImplicitMove { place } => {
+                        self.resolve_deref_base(place, deref_count)?
+                    }
+                    _ => {
+                        let Some(value) = self.lower_value_expr_opt(inner)? else {
+                            return Ok(BranchResult::Return);
+                        };
+                        if deref_count == 0 {
+                            let dyn_ir_ty = self.type_lowerer.lower_type_id(inner.ty);
+                            let addr = self.alloc_local_addr(dyn_ir_ty);
+                            let dyn_sem_ty = self.type_map.type_table().get(inner.ty);
+                            self.store_value_into_addr(addr, value, dyn_sem_ty, dyn_ir_ty);
+                            (addr, base_ty)
+                        } else {
+                            self.resolve_deref_base_value(value, base_ty, deref_count)
+                        }
+                    }
+                };
+
+                let Type::DynArray { .. } = base_ty else {
+                    panic!("backend coerce dyn-array-to-slice on {:?}", base_ty);
+                };
+                let view = self.load_dyn_array_view(base_addr, elem_ptr_ty);
+                (view.ptr, view.len)
+            }
+            other => {
+                panic!("backend coerce dyn-array-to-slice with base {:?}", other);
+            }
+        };
+
+        let start_val = self.builder.const_int(0, false, 64, u64_ty);
+        let slice_ty = self.type_lowerer.lower_type_id(expr.ty);
+        Ok(self
+            .emit_slice_value(
+                slice_ty,
+                elem_ptr_ty,
+                u64_ty,
+                base_ptr,
+                base_len,
+                start_val,
+                base_len,
+            )
+            .into())
+    }
+
+    fn lower_emit_send_expr(
+        &mut self,
+        expr: &sem::ValueExpr,
+        to: &sem::ValueExpr,
+        payload: &sem::ValueExpr,
+    ) -> Result<BranchResult, LowerToIrError> {
+        let Some(dst) = self.lower_value_expr_opt(to)? else {
+            return Ok(BranchResult::Return);
+        };
+        let Some(payload_value) = self.lower_value_expr_opt(payload)? else {
+            return Ok(BranchResult::Return);
+        };
+        let u64_ty = self.type_lowerer.lower_type(&Type::uint(64));
+        let payload_ty = self.type_map.type_table().get(payload.ty).clone();
+        let event_kind = self.machine_payload_event_kind(&payload_ty).unwrap_or(0);
+        let kind = self
+            .builder
+            .const_int(event_kind as i128, false, 64, u64_ty);
+        let (payload0, payload1) = self.pack_machine_payload_words(payload_value, &payload_ty);
+        let bool_ty = self.type_lowerer.lower_type(&Type::Bool);
+        let _status = self.builder.call(
+            Callee::Runtime(RuntimeFn::MachineEmitSend),
+            vec![dst, kind, payload0, payload1],
+            bool_ty,
+        );
+        let unit_ty = self.type_lowerer.lower_type_id(expr.ty);
+        Ok(self.builder.const_int(0, false, 8, unit_ty).into())
+    }
+
+    fn lower_emit_request_expr(
+        &mut self,
+        expr: &sem::ValueExpr,
+        to: &sem::ValueExpr,
+        payload: &sem::ValueExpr,
+        request_site_key: u64,
+    ) -> Result<BranchResult, LowerToIrError> {
+        let Some(dst) = self.lower_value_expr_opt(to)? else {
+            return Ok(BranchResult::Return);
+        };
+        let Some(payload_value) = self.lower_value_expr_opt(payload)? else {
+            return Ok(BranchResult::Return);
+        };
+        let u64_ty = self.type_lowerer.lower_type(&Type::uint(64));
+        let payload_ty = self.type_map.type_table().get(payload.ty).clone();
+        let event_kind = self.machine_payload_event_kind(&payload_ty).unwrap_or(0);
+        let kind = self
+            .builder
+            .const_int(event_kind as i128, false, 64, u64_ty);
+        let (payload0, payload1) = self.pack_machine_payload_words(payload_value, &payload_ty);
+        let request_site = self
+            .builder
+            .const_int(request_site_key as i128, false, 64, u64_ty);
+        let pending_ty = self.type_lowerer.lower_type_id(expr.ty);
+        let pending = self.builder.call(
+            Callee::Runtime(RuntimeFn::MachineEmitRequest),
+            vec![dst, kind, payload0, payload1, request_site],
+            pending_ty,
+        );
+        Ok(pending.into())
+    }
+
+    fn lower_reply_expr(
+        &mut self,
+        expr: &sem::ValueExpr,
+        cap: &sem::ValueExpr,
+        value: &sem::ValueExpr,
+    ) -> Result<BranchResult, LowerToIrError> {
+        let Some(cap_value) = self.lower_value_expr_opt(cap)? else {
+            return Ok(BranchResult::Return);
+        };
+        let Some(reply_value) = self.lower_value_expr_opt(value)? else {
+            return Ok(BranchResult::Return);
+        };
+        let u64_ty = self.type_lowerer.lower_type(&Type::uint(64));
+        let response_ty = self.type_map.type_table().get(value.ty).clone();
+        let event_kind = self.machine_response_event_kind(&response_ty).unwrap_or(0);
+        let kind = self
+            .builder
+            .const_int(event_kind as i128, false, 64, u64_ty);
+        let (payload0, payload1) = self.pack_machine_payload_words(reply_value, &response_ty);
+        let bool_ty = self.type_lowerer.lower_type(&Type::Bool);
+        let _status = self.builder.call(
+            Callee::Runtime(RuntimeFn::MachineEmitReply),
+            vec![cap_value, kind, payload0, payload1],
+            bool_ty,
+        );
+        let unit_ty = self.type_lowerer.lower_type_id(expr.ty);
+        Ok(self.builder.const_int(0, false, 8, unit_ty).into())
     }
 
     /// Builds a slice value from a base pointer and length.
