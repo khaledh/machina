@@ -6,6 +6,7 @@
 //! - module-closure invalidation.
 
 mod completion_helpers;
+mod editor_helpers;
 mod pipeline_helpers;
 mod signature_helpers;
 
@@ -19,26 +20,17 @@ use crate::core::tree::NodeId;
 use crate::core::types::Type;
 use crate::services::analysis::diagnostics::Diagnostic;
 use crate::services::analysis::lookups::{
-    code_actions_for_range, def_at_span, def_location_at_span, document_symbols,
-    hover_at_span_in_file, semantic_tokens, type_at_span,
+    def_at_span, def_location_at_span, hover_at_span_in_file, type_at_span,
 };
 use crate::services::analysis::module_graph::ModuleGraph;
 use crate::services::analysis::pipeline::{
     collect_sorted_diagnostics, run_module_pipeline_with_query_input,
 };
-use crate::services::analysis::program_pipeline::{
-    resolve_imported_symbol_target_from_import_env,
-};
+use crate::services::analysis::program_pipeline::resolve_imported_symbol_target_from_import_env;
 use crate::services::analysis::query::{
     CacheStats, CancellationToken, QueryKey, QueryResult, QueryRuntime,
 };
-use crate::services::analysis::rename::{
-    references as collect_references, rename_plan as build_rename_plan,
-};
-use crate::services::analysis::results::{
-    CodeAction, CompletionItem, DocumentSymbol, HoverInfo, Location, RenamePlan, SemanticToken,
-    SignatureHelp,
-};
+use crate::services::analysis::results::{CompletionItem, HoverInfo, Location, SignatureHelp};
 use crate::services::analysis::snapshot::{AnalysisSnapshot, FileId, SourceStore};
 
 #[derive(Default)]
@@ -488,78 +480,6 @@ impl AnalysisDb {
         // transient graph/import failures while editing, keep signature help
         // useful by trying the file-local pipeline.
         self.signature_help_at_file(file_id, query_span)
-    }
-
-    pub fn document_symbols_at_path(&mut self, path: &Path) -> QueryResult<Vec<DocumentSymbol>> {
-        self.with_file_id(path, Vec::new, |db, file_id| {
-            db.document_symbols_at_file(file_id)
-        })
-    }
-
-    pub fn document_symbols_at_file(
-        &mut self,
-        file_id: FileId,
-    ) -> QueryResult<Vec<DocumentSymbol>> {
-        let state = self.lookup_state_for_file(file_id)?;
-        Ok(document_symbols(&state))
-    }
-
-    pub fn semantic_tokens_at_path(&mut self, path: &Path) -> QueryResult<Vec<SemanticToken>> {
-        self.with_file_id(path, Vec::new, |db, file_id| {
-            db.semantic_tokens_at_file(file_id)
-        })
-    }
-
-    pub fn semantic_tokens_at_file(&mut self, file_id: FileId) -> QueryResult<Vec<SemanticToken>> {
-        let state = self.lookup_state_for_file(file_id)?;
-        Ok(semantic_tokens(&state))
-    }
-
-    pub fn code_actions_at_path(
-        &mut self,
-        path: &Path,
-        range: Span,
-    ) -> QueryResult<Vec<CodeAction>> {
-        self.with_file_id(path, Vec::new, |db, file_id| {
-            db.code_actions_at_file(file_id, range)
-        })
-    }
-
-    pub fn code_actions_at_file(
-        &mut self,
-        file_id: FileId,
-        range: Span,
-    ) -> QueryResult<Vec<CodeAction>> {
-        let diagnostics = self.diagnostics_for_file(file_id)?;
-        self.code_actions_for_diagnostics_at_file(file_id, range, diagnostics)
-    }
-
-    pub fn code_actions_for_diagnostics_at_file(
-        &mut self,
-        file_id: FileId,
-        range: Span,
-        diagnostics: Vec<Diagnostic>,
-    ) -> QueryResult<Vec<CodeAction>> {
-        let source = self.snapshot().text(file_id);
-        Ok(code_actions_for_range(
-            &diagnostics,
-            range,
-            source.as_deref(),
-        ))
-    }
-
-    pub fn references(&mut self, def_id: DefId) -> QueryResult<Vec<Location>> {
-        let snapshot = self.snapshot();
-        collect_references(&snapshot, def_id, |file_id| {
-            self.lookup_state_for_file(file_id)
-        })
-    }
-
-    pub fn rename_plan(&mut self, def_id: DefId, new_name: &str) -> QueryResult<RenamePlan> {
-        let snapshot = self.snapshot();
-        build_rename_plan(&snapshot, def_id, new_name, |file_id| {
-            self.lookup_state_for_file(file_id)
-        })
     }
 
     pub fn execute_query<T, F>(&mut self, key: QueryKey, compute: F) -> QueryResult<T>
