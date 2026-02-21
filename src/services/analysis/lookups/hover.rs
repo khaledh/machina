@@ -660,13 +660,9 @@ fn format_hover_label(
     def_table: &DefTable,
 ) -> String {
     let demangler = TypestateNameDemangler::from_def_table(def_table);
-    if let Some(signature) = format_source_callable_signature(
-        def_id,
-        typed_module,
-        type_map,
-        def_table,
-        &demangler,
-    ) {
+    if let Some(signature) =
+        format_source_callable_signature(def_id, typed_module, type_map, def_table, &demangler)
+    {
         return signature.label;
     }
     let render_name = |name: &str| demangler.demangle_text(name);
