@@ -6,6 +6,7 @@
 //! - module-closure invalidation.
 
 mod completion_helpers;
+mod pipeline_helpers;
 mod signature_helpers;
 
 use std::collections::HashSet;
@@ -17,18 +18,16 @@ use crate::core::resolve::{DefId, GlobalDefId};
 use crate::core::tree::NodeId;
 use crate::core::types::Type;
 use crate::services::analysis::diagnostics::Diagnostic;
-use crate::services::analysis::frontend_support::stable_source_revision;
 use crate::services::analysis::lookups::{
     code_actions_for_range, def_at_span, def_location_at_span, document_symbols,
     hover_at_span_in_file, semantic_tokens, type_at_span,
 };
 use crate::services::analysis::module_graph::ModuleGraph;
 use crate::services::analysis::pipeline::{
-    LookupState, collect_sorted_diagnostics, run_module_pipeline_with_query_input, to_lookup_state,
+    collect_sorted_diagnostics, run_module_pipeline_with_query_input,
 };
 use crate::services::analysis::program_pipeline::{
-    ProgramPipelineResult, resolve_imported_symbol_target_from_import_env,
-    run_program_pipeline_for_file_with_options,
+    resolve_imported_symbol_target_from_import_env,
 };
 use crate::services::analysis::query::{
     CacheStats, CancellationToken, QueryKey, QueryResult, QueryRuntime,
@@ -561,80 +560,6 @@ impl AnalysisDb {
         build_rename_plan(&snapshot, def_id, new_name, |file_id| {
             self.lookup_state_for_file(file_id)
         })
-    }
-
-    fn lookup_state_for_file(&mut self, file_id: FileId) -> QueryResult<LookupState> {
-        let snapshot = self.snapshot();
-        let Some(source) = snapshot.text(file_id) else {
-            return Ok(LookupState::default());
-        };
-        let revision = snapshot.revision();
-        let module_id = ModuleId(file_id.0);
-        let experimental_typestate = self.experimental_typestate;
-        let query_input = if experimental_typestate { 1 } else { 0 };
-
-        let lookup_key = QueryKey::with_input(
-            crate::services::analysis::query::QueryKind::LookupState,
-            module_id,
-            revision,
-            query_input,
-        );
-        self.execute_query(lookup_key, move |rt| {
-            let state = run_module_pipeline_with_query_input(
-                rt,
-                module_id,
-                revision,
-                source,
-                query_input,
-                experimental_typestate,
-            )?;
-            Ok(to_lookup_state(&state))
-        })
-    }
-
-    fn lookup_state_for_source(
-        &mut self,
-        file_id: FileId,
-        source: String,
-    ) -> QueryResult<Option<LookupState>> {
-        let snapshot = self.snapshot();
-        if source.is_empty() {
-            return Ok(None);
-        }
-
-        let revision = snapshot.revision();
-        let query_input = stable_source_revision(&source).wrapping_add(1);
-        let query_input = query_input.wrapping_add(if self.experimental_typestate { 1 } else { 0 });
-        let module_id = ModuleId(file_id.0);
-        let pipeline = run_module_pipeline_with_query_input(
-            &mut self.runtime,
-            module_id,
-            revision,
-            std::sync::Arc::<str>::from(source),
-            query_input,
-            self.experimental_typestate,
-        )?;
-        Ok(Some(to_lookup_state(&pipeline)))
-    }
-
-    fn entry_lookup_state_for_program_file(
-        &mut self,
-        file_id: FileId,
-    ) -> QueryResult<Option<LookupState>> {
-        let program = self.program_pipeline_for_file(file_id)?;
-        Ok(program
-            .entry_module_id
-            .and_then(|entry| program.module_states.get(&entry).cloned()))
-    }
-
-    fn program_pipeline_for_file(&mut self, file_id: FileId) -> QueryResult<ProgramPipelineResult> {
-        let snapshot = self.snapshot();
-        run_program_pipeline_for_file_with_options(
-            &mut self.runtime,
-            snapshot,
-            file_id,
-            self.experimental_typestate,
-        )
     }
 
     pub fn execute_query<T, F>(&mut self, key: QueryKey, compute: F) -> QueryResult<T>
