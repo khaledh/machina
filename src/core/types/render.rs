@@ -1,20 +1,11 @@
 use super::{FnParamMode, Type};
 use std::collections::BTreeMap;
 
+#[derive(Default)]
 pub struct TypeRenderConfig<'a> {
     pub show_in_mode: bool,
     pub type_var_names: Option<&'a BTreeMap<u32, String>>,
     pub nominal_name_map: Option<&'a dyn Fn(&str) -> String>,
-}
-
-impl<'a> Default for TypeRenderConfig<'a> {
-    fn default() -> Self {
-        Self {
-            show_in_mode: false,
-            type_var_names: None,
-            nominal_name_map: None,
-        }
-    }
 }
 
 pub fn render_type(ty: &Type, cfg: &TypeRenderConfig<'_>) -> String {

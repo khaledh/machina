@@ -1013,10 +1013,10 @@ fn resolve_method_call_by_def_id(
     ))
 }
 
-fn pick_overload<'a>(
-    overloads: &'a [CollectedCallableSig],
+fn pick_overload(
+    overloads: &[CollectedCallableSig],
     arity: usize,
-) -> Option<&'a CollectedCallableSig> {
+) -> Option<&CollectedCallableSig> {
     let mut matches = overloads.iter().filter(|sig| sig.params.len() == arity);
     let first = matches.next()?;
     if matches.next().is_some() {

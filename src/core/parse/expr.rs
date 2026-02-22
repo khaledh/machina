@@ -118,7 +118,7 @@ impl<'a> Parser<'a> {
 
         // Ternary conditional is right-associative and desugars into the
         // existing `if` expression node.
-        if min_bp <= Self::TERNARY_BP && self.should_parse_ternary_question() {
+        if min_bp == Self::TERNARY_BP && self.should_parse_ternary_question() {
             self.advance();
             let then_body = self.parse_expr(0)?;
             self.consume(&TK::Colon)?;
@@ -134,7 +134,7 @@ impl<'a> Parser<'a> {
             };
         }
 
-        if min_bp <= Self::TERNARY_BP && self.is_contextual_keyword("or") {
+        if min_bp == Self::TERNARY_BP && self.is_contextual_keyword("or") {
             self.consume_contextual_keyword("or")?;
             let on_error = self.parse_try_or_handler_expr()?;
             lhs = Expr {
@@ -302,18 +302,18 @@ impl<'a> Parser<'a> {
             TK::Ident(name) => {
                 let marker = self.mark();
 
-                if self.peek().map(|t| &t.kind) == Some(&TK::LessThan) {
-                    if let Some(kind) = self.peek_generic_lit_kind() {
-                        let (type_name, type_args) = self.parse_type_name_with_args()?;
-                        return match kind {
-                            GenericLitKind::EnumVariant => {
-                                self.parse_enum_variant_with_args(marker, type_name, type_args)
-                            }
-                            GenericLitKind::StructLit => {
-                                self.parse_struct_lit_with_args(marker, type_name, type_args)
-                            }
-                        };
-                    }
+                if self.peek().map(|t| &t.kind) == Some(&TK::LessThan)
+                    && let Some(kind) = self.peek_generic_lit_kind()
+                {
+                    let (type_name, type_args) = self.parse_type_name_with_args()?;
+                    return match kind {
+                        GenericLitKind::EnumVariant => {
+                            self.parse_enum_variant_with_args(marker, type_name, type_args)
+                        }
+                        GenericLitKind::StructLit => {
+                            self.parse_struct_lit_with_args(marker, type_name, type_args)
+                        }
+                    };
                 }
 
                 if self.peek().map(|t| &t.kind) == Some(&TK::DoubleColon) {

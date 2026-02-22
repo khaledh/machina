@@ -1187,8 +1187,8 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
         let u64_ty = self.type_lowerer.lower_type(&Type::uint(64));
         let u32_ty = self.type_lowerer.lower_type(&Type::uint(32));
         let layout = self.type_lowerer.ir_type_cache.layout(elem_ir_ty);
-        let elem_size = layout.size() as u64;
-        let elem_align = layout.align() as u64;
+        let elem_size = layout.size();
+        let elem_align = layout.align();
 
         let data_ptr = if len_u32 == 0 || elem_size == 0 {
             let zero = self.builder.const_int(0, false, 64, u64_ty);

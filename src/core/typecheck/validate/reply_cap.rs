@@ -78,8 +78,7 @@ impl Visitor for ReplyOutsideHandlerCollector {
 
     fn visit_expr(&mut self, expr: &Expr) {
         if matches!(expr.kind, ExprKind::Reply { .. }) && !self.in_typestate_handler {
-            self.errors
-                .push(TEK::ReplyOutsideHandler.at(expr.span).into());
+            self.errors.push(TEK::ReplyOutsideHandler.at(expr.span));
         }
         visit::walk_expr(self, expr);
     }
@@ -255,8 +254,8 @@ fn check_handler_reply_cap_linearity(
         }
 
         let mut missing_on_some_path = false;
-        for idx in 0..cfg.num_nodes() {
-            if !reachable[idx] {
+        for (idx, is_reachable) in reachable.iter().enumerate().take(cfg.num_nodes()) {
+            if !is_reachable {
                 continue;
             }
             let node = AstBlockId(idx);

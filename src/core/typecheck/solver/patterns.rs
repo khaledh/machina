@@ -313,9 +313,7 @@ fn check_bind_pattern(
             Type::Tuple { field_tys } => {
                 if field_tys.len() != patterns.len() {
                     return Some(
-                        TEK::TuplePatternLengthMismatch(field_tys.len(), patterns.len())
-                            .at(span)
-                            .into(),
+                        TEK::TuplePatternLengthMismatch(field_tys.len(), patterns.len()).at(span),
                     );
                 }
                 for (child, child_ty) in patterns.iter().zip(field_tys.iter()) {
@@ -334,20 +332,14 @@ fn check_bind_pattern(
                 None
             }
             ty if super::term_utils::is_unresolved(ty) => None,
-            _ => Some(
-                TEK::PatternTypeMismatch(pattern.clone(), value_ty.clone())
-                    .at(span)
-                    .into(),
-            ),
+            _ => Some(TEK::PatternTypeMismatch(pattern.clone(), value_ty.clone()).at(span)),
         },
         BindPatternKind::Array { patterns } => match value_ty {
             Type::Array { elem_ty, dims } => {
                 let expected_len = dims.first().copied().unwrap_or(0);
                 if expected_len != patterns.len() {
                     return Some(
-                        TEK::ArrayPatternLengthMismatch(expected_len, patterns.len())
-                            .at(span)
-                            .into(),
+                        TEK::ArrayPatternLengthMismatch(expected_len, patterns.len()).at(span),
                     );
                 }
                 let child_ty = if dims.len() <= 1 {
@@ -374,11 +366,7 @@ fn check_bind_pattern(
                 None
             }
             ty if super::term_utils::is_unresolved(ty) => None,
-            _ => Some(
-                TEK::PatternTypeMismatch(pattern.clone(), value_ty.clone())
-                    .at(span)
-                    .into(),
-            ),
+            _ => Some(TEK::PatternTypeMismatch(pattern.clone(), value_ty.clone()).at(span)),
         },
         BindPatternKind::Struct { fields, .. } => match value_ty {
             Type::Struct {
@@ -399,7 +387,7 @@ fn check_bind_pattern(
                         .lookup_def(type_def_id)
                         .map(|def| def.name.clone())
                         .unwrap_or_else(|| super::diag_utils::compact_nominal_name(name));
-                    return Some(TEK::OpaquePatternDestructure(diag_name).at(span).into());
+                    return Some(TEK::OpaquePatternDestructure(diag_name).at(span));
                 }
                 for field in fields {
                     let Some(struct_field) = struct_fields.iter().find(|f| f.name == field.name)
@@ -421,11 +409,7 @@ fn check_bind_pattern(
                 None
             }
             ty if super::term_utils::is_unresolved(ty) => None,
-            _ => Some(
-                TEK::PatternTypeMismatch(pattern.clone(), value_ty.clone())
-                    .at(span)
-                    .into(),
-            ),
+            _ => Some(TEK::PatternTypeMismatch(pattern.clone(), value_ty.clone()).at(span)),
         },
     }
 }

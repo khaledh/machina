@@ -930,19 +930,17 @@ fn record_property_sig(
         && !property_sigs
             .get(type_name)
             .is_some_and(|props| props.contains_key(prop_name))
+        && let Some(Type::Struct { fields, .. }) = type_defs.get(type_name)
+        && let Some(field) = fields.iter().find(|field| field.name == prop_name)
     {
-        if let Some(Type::Struct { fields, .. }) = type_defs.get(type_name) {
-            if let Some(field) = fields.iter().find(|field| field.name == prop_name) {
-                if property_conflicts.insert((type_name.to_string(), prop_name.to_string())) {
-                    crate::core::typecheck::tc_push_error!(
-                        errors,
-                        span,
-                        TEK::PropertyConflictsWithField(prop_name.to_string(), field.name.clone(),)
-                    );
-                }
-                return;
-            }
+        if property_conflicts.insert((type_name.to_string(), prop_name.to_string())) {
+            crate::core::typecheck::tc_push_error!(
+                errors,
+                span,
+                TEK::PropertyConflictsWithField(prop_name.to_string(), field.name.clone(),)
+            );
         }
+        return;
     }
 
     let props = property_sigs.entry(type_name.to_string()).or_default();

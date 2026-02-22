@@ -133,9 +133,7 @@ fn classify_member_site(
     if probe.dot_probe == 0 || bytes[probe.dot_probe - 1] != b'.' {
         return None;
     }
-    let Some(typed) = typed else {
-        return None;
-    };
+    let typed = typed?;
 
     let mut recv_end = probe.dot_probe - 1;
     while recv_end > 0 && bytes[recv_end - 1].is_ascii_whitespace() {
@@ -145,15 +143,9 @@ fn classify_member_site(
         return None;
     }
     let receiver_char = recv_end - 1;
-    let Some(receiver_span) = single_char_span(source, receiver_char) else {
-        return None;
-    };
-    let Some(node_id) = node_at_span(&typed.module, receiver_span) else {
-        return None;
-    };
-    let Some(receiver_ty) = typed.type_map.lookup_node_type(node_id) else {
-        return None;
-    };
+    let receiver_span = single_char_span(source, receiver_char)?;
+    let node_id = node_at_span(&typed.module, receiver_span)?;
+    let receiver_ty = typed.type_map.lookup_node_type(node_id)?;
 
     Some(CompletionSite::Member {
         prefix: probe.prefix.clone(),

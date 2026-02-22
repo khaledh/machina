@@ -18,16 +18,16 @@ pub(super) fn member_completions(
     let mut out = Vec::new();
     let owner = receiver_ty.peel_heap();
 
-    if let Type::Struct { name, fields } = &owner {
-        if struct_fields_accessible(resolved, name, caller_def_id) {
-            for field in fields {
-                out.push(CompletionItem {
-                    label: field.name.clone(),
-                    kind: CompletionKind::Variable,
-                    def_id: UNKNOWN_DEF_ID,
-                    detail: Some(field.ty.to_string()),
-                });
-            }
+    if let Type::Struct { name, fields } = &owner
+        && struct_fields_accessible(resolved, name, caller_def_id)
+    {
+        for field in fields {
+            out.push(CompletionItem {
+                label: field.name.clone(),
+                kind: CompletionKind::Variable,
+                def_id: UNKNOWN_DEF_ID,
+                detail: Some(field.ty.to_string()),
+            });
         }
     }
 

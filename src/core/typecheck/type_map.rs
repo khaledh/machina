@@ -79,9 +79,7 @@ pub(crate) fn resolve_type_def_with_args(
     if let Some(imported_ty) = module.imported_type_by_id(def_id) {
         if !type_args.is_empty() {
             return Err(
-                TEK::TypeArgCountMismatch(def.name.clone(), 0, type_args.len())
-                    .at(Span::default())
-                    .into(),
+                TEK::TypeArgCountMismatch(def.name.clone(), 0, type_args.len()).at(Span::default()),
             );
         }
         return Ok(imported_ty.clone());
@@ -96,8 +94,7 @@ pub(crate) fn resolve_type_def_with_args(
             type_def.type_params.len(),
             type_args.len(),
         )
-        .at(type_def.span)
-        .into());
+        .at(type_def.span));
     }
 
     let mut arg_map = TypeArgMap::new();
@@ -205,10 +202,10 @@ fn resolve_type_expr_impl(
     allow_error_union: bool,
 ) -> Result<Type, TypeCheckError> {
     match &type_expr.kind {
-        ast::TypeExprKind::Infer => Err(TEK::UnknownType.at(type_expr.span).into()),
+        ast::TypeExprKind::Infer => Err(TEK::UnknownType.at(type_expr.span)),
         ast::TypeExprKind::Union { variants } => {
             if !allow_error_union {
-                return Err(TEK::UnionNotAllowedHere.at(type_expr.span).into());
+                return Err(TEK::UnionNotAllowedHere.at(type_expr.span));
             }
             let resolved = variants
                 .iter()
@@ -438,7 +435,7 @@ fn apply_refinements(
                     nonzero,
                 } = ty
                 else {
-                    return Err(TEK::RefinementBaseNotInt(ty).at(span).into());
+                    return Err(TEK::RefinementBaseNotInt(ty).at(span));
                 };
                 let (min_bound, max_bound) = if let Some(bounds) = bounds {
                     (bounds.min, bounds.max_excl)
@@ -446,9 +443,7 @@ fn apply_refinements(
                     int_full_range(signed, bits)
                 };
                 if *min < min_bound || *max > max_bound {
-                    return Err(TEK::BoundsOutOfRange(*min, *max, min_bound, max_bound)
-                        .at(span)
-                        .into());
+                    return Err(TEK::BoundsOutOfRange(*min, *max, min_bound, max_bound).at(span));
                 }
                 ty = Type::Int {
                     signed,
@@ -468,7 +463,7 @@ fn apply_refinements(
                     ..
                 } = ty
                 else {
-                    return Err(TEK::RefinementBaseNotInt(ty).at(span).into());
+                    return Err(TEK::RefinementBaseNotInt(ty).at(span));
                 };
                 ty = Type::Int {
                     signed,
@@ -486,9 +481,7 @@ fn apply_refinements(
     } = ty
         && (bounds.min > 0 || bounds.max_excl <= 0)
     {
-        return Err(TEK::RedundantNonZero(bounds.min, bounds.max_excl)
-            .at(span)
-            .into());
+        return Err(TEK::RedundantNonZero(bounds.min, bounds.max_excl).at(span));
     }
 
     Ok(ty)
@@ -534,8 +527,7 @@ fn resolve_named_type(
         if type_arg_exprs.len() != 1 {
             return Err(
                 TEK::TypeArgCountMismatch(def.name.clone(), 1, type_arg_exprs.len())
-                    .at(type_expr.span)
-                    .into(),
+                    .at(type_expr.span),
             );
         }
         let elem_ty = resolve_type_expr_impl(
@@ -555,8 +547,7 @@ fn resolve_named_type(
         if type_arg_exprs.len() != 2 {
             return Err(
                 TEK::TypeArgCountMismatch(def.name.clone(), 2, type_arg_exprs.len())
-                    .at(type_expr.span)
-                    .into(),
+                    .at(type_expr.span),
             );
         }
         let key_ty = resolve_type_expr_impl(
@@ -586,8 +577,7 @@ fn resolve_named_type(
         if type_arg_exprs.len() != 1 {
             return Err(
                 TEK::TypeArgCountMismatch(def.name.clone(), 1, type_arg_exprs.len())
-                    .at(type_expr.span)
-                    .into(),
+                    .at(type_expr.span),
             );
         }
         let response_set_ty = resolve_type_expr_impl(
@@ -614,8 +604,7 @@ fn resolve_named_type(
         if !type_arg_exprs.is_empty() {
             return Err(
                 TEK::TypeArgCountMismatch(def.name.clone(), 0, type_arg_exprs.len())
-                    .at(type_expr.span)
-                    .into(),
+                    .at(type_expr.span),
             );
         }
         return Ok(ty);
@@ -633,7 +622,7 @@ fn resolve_named_type(
             {
                 return Ok(Type::Var(*var));
             }
-            Err(TEK::UnknownType.at(type_expr.span).into())
+            Err(TEK::UnknownType.at(type_expr.span))
         }
         DefKind::TypeDef { .. } => {
             let Some(type_def) = module.type_def_by_id(def_table, *def_id) else {
@@ -644,12 +633,11 @@ fn resolve_named_type(
                             0,
                             type_arg_exprs.len(),
                         )
-                        .at(type_expr.span)
-                        .into());
+                        .at(type_expr.span));
                     }
                     return Ok(imported_ty.clone());
                 }
-                return Err(TEK::UnknownType.at(type_expr.span).into());
+                return Err(TEK::UnknownType.at(type_expr.span));
             };
             if type_def.type_params.is_empty() {
                 if !type_arg_exprs.is_empty() {
@@ -658,8 +646,7 @@ fn resolve_named_type(
                         0,
                         type_arg_exprs.len(),
                     )
-                    .at(type_expr.span)
-                    .into());
+                    .at(type_expr.span));
                 }
                 let type_name = def.name.as_str();
                 return match &type_def.kind {
@@ -704,8 +691,7 @@ fn resolve_named_type(
                     type_def.type_params.len(),
                     type_arg_exprs.len(),
                 )
-                .at(type_expr.span)
-                .into());
+                .at(type_expr.span));
             }
 
             let resolved_args = type_arg_exprs
@@ -764,7 +750,7 @@ fn resolve_named_type(
                 ),
             }
         }
-        _ => Err(TEK::UnknownType.at(type_expr.span).into()),
+        _ => Err(TEK::UnknownType.at(type_expr.span)),
     }
 }
 
@@ -1032,7 +1018,7 @@ impl TypeMapBuilder {
         }
 
         for inst in self.generic_insts.values_mut() {
-            inst.type_args = inst.type_args.iter().map(|ty| apply(ty)).collect();
+            inst.type_args = inst.type_args.iter().map(&mut apply).collect();
         }
     }
 

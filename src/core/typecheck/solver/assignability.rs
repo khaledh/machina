@@ -92,9 +92,7 @@ fn infer_array_to_dyn_array_assignability(
     else {
         return None;
     };
-    let Some(array_item_ty) = from.array_item_type() else {
-        return None;
-    };
+    let array_item_ty = from.array_item_type()?;
     Some(unifier.unify(&array_item_ty, dyn_elem_ty))
 }
 

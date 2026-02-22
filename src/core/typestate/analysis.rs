@@ -122,11 +122,7 @@ pub(super) fn analyze_typestate(typestate: &TypestateDef) -> TypestateAnalysis {
             _ => None,
         })
         .collect();
-    let constructor = if let Some(first_new) = new_ctors.first() {
-        Some((*first_new).clone())
-    } else {
-        None
-    };
+    let constructor = new_ctors.first().map(|first_new| (*first_new).clone());
 
     match new_ctors.as_slice() {
         [] => errors.push(REK::TypestateMissingNew(ts_name.clone()).at(typestate.span)),

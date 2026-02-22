@@ -84,7 +84,7 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
         Some(Self::render_type_for_type_of(&fn_ty, overrides.as_ref()))
     }
 
-    fn type_of_symbol_place<'b>(expr: &'b sem::ValueExpr) -> Option<&'b sem::PlaceExpr> {
+    fn type_of_symbol_place(expr: &sem::ValueExpr) -> Option<&sem::PlaceExpr> {
         let mut current = expr;
         loop {
             match &current.kind {

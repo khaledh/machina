@@ -108,21 +108,13 @@ impl<'a> ConstraintCollector<'a> {
                         tail_ty,
                         ConstraintReason::Expr(expr.id, expr.span),
                     );
-                } else {
-                    if let Some(expected) = expected.clone() {
-                        if self.block_has_explicit_return(items) {
-                            self.push_eq(
-                                expr_ty.clone(),
-                                expected,
-                                ConstraintReason::Expr(expr.id, expr.span),
-                            );
-                        } else {
-                            self.push_eq(
-                                expr_ty.clone(),
-                                Type::Unit,
-                                ConstraintReason::Expr(expr.id, expr.span),
-                            );
-                        }
+                } else if let Some(expected) = expected.clone() {
+                    if self.block_has_explicit_return(items) {
+                        self.push_eq(
+                            expr_ty.clone(),
+                            expected,
+                            ConstraintReason::Expr(expr.id, expr.span),
+                        );
                     } else {
                         self.push_eq(
                             expr_ty.clone(),
@@ -130,6 +122,12 @@ impl<'a> ConstraintCollector<'a> {
                             ConstraintReason::Expr(expr.id, expr.span),
                         );
                     }
+                } else {
+                    self.push_eq(
+                        expr_ty.clone(),
+                        Type::Unit,
+                        ConstraintReason::Expr(expr.id, expr.span),
+                    );
                 }
             }
             ExprKind::TupleLit(fields) => {

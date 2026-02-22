@@ -304,12 +304,11 @@ impl VisitorMut for ModuleAliasCallRewriter<'_> {
     fn visit_expr(&mut self, expr: &mut Expr) {
         visit_mut::walk_expr(self, expr);
 
-        if let ExprKind::Call { callee, .. } = &mut expr.kind {
-            if let ExprKind::Var { ident, .. } = &mut callee.kind
-                && let Some(new_name) = self.rewrite_qualified_callable_name(ident, expr.span)
-            {
-                *ident = new_name;
-            }
+        if let ExprKind::Call { callee, .. } = &mut expr.kind
+            && let ExprKind::Var { ident, .. } = &mut callee.kind
+            && let Some(new_name) = self.rewrite_qualified_callable_name(ident, expr.span)
+        {
+            *ident = new_name;
         }
 
         if let ExprKind::Var { ident, .. } = &mut expr.kind

@@ -358,35 +358,34 @@ impl VisitorMut for Normalizer<'_> {
         // Rewrite property assignments (`obj.prop = v`) into method calls
         // (`obj.prop(v)`) using the call signature recorded by type checking.
         let mut property_call = None;
-        if let BlockItem::Stmt(stmt) = item {
-            if let StmtExprKind::Assign {
+        if let BlockItem::Stmt(stmt) = item
+            && let StmtExprKind::Assign {
                 assignee, value, ..
             } = &stmt.kind
-                && let ExprKind::StructField { target, field } = &assignee.kind
-                && self.call_sigs.contains_key(&assignee.id)
-            {
-                let call_expr = Expr {
-                    id: assignee.id,
-                    kind: ExprKind::MethodCall {
-                        callee: target.clone(),
-                        method_name: field.clone(),
-                        args: vec![CallArg {
-                            mode: CallArgMode::Default,
-                            expr: *value.clone(),
-                            init: InitInfo::default(),
-                            span: value.span,
-                        }],
-                    },
-                    span: stmt.span,
-                };
-                self.type_map.insert_node_type(
-                    assignee.id,
-                    Type::Unit,
-                    "normalize",
-                    SyntheticReason::NormalizeCoercion,
-                );
-                property_call = Some(call_expr);
-            }
+            && let ExprKind::StructField { target, field } = &assignee.kind
+            && self.call_sigs.contains_key(&assignee.id)
+        {
+            let call_expr = Expr {
+                id: assignee.id,
+                kind: ExprKind::MethodCall {
+                    callee: target.clone(),
+                    method_name: field.clone(),
+                    args: vec![CallArg {
+                        mode: CallArgMode::Default,
+                        expr: *value.clone(),
+                        init: InitInfo::default(),
+                        span: value.span,
+                    }],
+                },
+                span: stmt.span,
+            };
+            self.type_map.insert_node_type(
+                assignee.id,
+                Type::Unit,
+                "normalize",
+                SyntheticReason::NormalizeCoercion,
+            );
+            property_call = Some(call_expr);
         }
 
         if let Some(mut call_expr) = property_call {
@@ -436,28 +435,28 @@ impl VisitorMut for Normalizer<'_> {
             };
         }
 
-        if let ExprKind::Call { callee, args } = &expr.kind {
-            if let ExprKind::Var { ident } = &callee.kind {
-                let def_id = self.def_table.def_id(callee.id);
-                if self
-                    .def_table
-                    .lookup_def(def_id)
-                    .is_some_and(|def| matches!(def.kind, DefKind::EnumVariantName))
-                    && let Some(Type::Enum { name, .. }) = self.type_map.lookup_node_type(expr.id)
-                {
-                    let enum_name = name
-                        .split_once('<')
-                        .map(|(base, _)| base.to_string())
-                        .unwrap_or(name);
-                    let payload = args.iter().map(|arg| arg.expr.clone()).collect();
-                    expr.kind = ExprKind::EnumVariant {
-                        enum_name,
-                        type_args: Vec::new(),
-                        variant: ident.clone(),
-                        payload,
-                    };
-                    return;
-                }
+        if let ExprKind::Call { callee, args } = &expr.kind
+            && let ExprKind::Var { ident } = &callee.kind
+        {
+            let def_id = self.def_table.def_id(callee.id);
+            if self
+                .def_table
+                .lookup_def(def_id)
+                .is_some_and(|def| matches!(def.kind, DefKind::EnumVariantName))
+                && let Some(Type::Enum { name, .. }) = self.type_map.lookup_node_type(expr.id)
+            {
+                let enum_name = name
+                    .split_once('<')
+                    .map(|(base, _)| base.to_string())
+                    .unwrap_or(name);
+                let payload = args.iter().map(|arg| arg.expr.clone()).collect();
+                expr.kind = ExprKind::EnumVariant {
+                    enum_name,
+                    type_args: Vec::new(),
+                    variant: ident.clone(),
+                    payload,
+                };
+                return;
             }
         }
 

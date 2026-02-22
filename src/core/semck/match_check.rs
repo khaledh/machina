@@ -508,7 +508,7 @@ fn enum_name_matches(pat_enum_name: &str, enum_name: &str) -> bool {
     pat_enum_name == enum_name
         || enum_name
             .split_once('<')
-            .map_or(false, |(base, _)| base == pat_enum_name)
+            .is_some_and(|(base, _)| base == pat_enum_name)
 }
 
 fn check_enum_pattern(

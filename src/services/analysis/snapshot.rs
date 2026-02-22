@@ -89,9 +89,9 @@ impl SourceStore {
         if changed {
             self.disk_text.insert(file_id, text);
             self.bump_revision();
-        } else if !self.disk_text.contains_key(&file_id) {
+        } else if let std::collections::hash_map::Entry::Vacant(e) = self.disk_text.entry(file_id) {
             // First insertion may compare equal only if map was empty.
-            self.disk_text.insert(file_id, text);
+            e.insert(text);
             self.bump_revision();
         }
         file_id

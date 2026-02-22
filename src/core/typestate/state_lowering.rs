@@ -117,7 +117,6 @@ impl TransitionLiteralRewriter<'_> {
         // Materialize all carried fields as `name: self.name`.
         self.carried_field_names
             .iter()
-            .cloned()
             .map(|name| StructLitField {
                 id: self.node_id_gen.new_id(),
                 name: name.clone(),

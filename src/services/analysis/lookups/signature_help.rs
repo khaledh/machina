@@ -68,10 +68,10 @@ pub(crate) fn signature_help_at_span(
     // If we can resolve the callee to a named callable definition, prefer
     // source-level signature rendering even when call-site typing failed (for
     // example, generic arity/type mismatch while the user is still typing).
-    if let Some(def_id) = callee_def_id {
-        if let Some(help) = source_signature_help(typed, Some(def_id), active_parameter_for) {
-            return Some(help);
-        }
+    if let Some(def_id) = callee_def_id
+        && let Some(help) = source_signature_help(typed, Some(def_id), active_parameter_for)
+    {
+        return Some(help);
     }
 
     // Fallback for incomplete/mismatched calls where call-site resolution did

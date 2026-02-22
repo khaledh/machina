@@ -134,7 +134,7 @@ fn merge_type_maps(base: &mut TypeMap, patch: &TypeMap) {
     // even if Unknown.
     for (def, patch_type_id) in patch.iter_def_type_ids() {
         let ty = patch.type_table().get(patch_type_id).clone();
-        if matches!(ty, Type::Unknown) && base.lookup_def_type_id(&def).is_some() {
+        if matches!(ty, Type::Unknown) && base.lookup_def_type_id(def).is_some() {
             continue;
         }
         let new_type_id = base.insert_def_type(def.clone(), ty);

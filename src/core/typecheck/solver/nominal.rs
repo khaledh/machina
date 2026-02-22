@@ -164,11 +164,13 @@ pub(super) fn try_check_expr_obligation_nominal(
                         else {
                             continue;
                         };
-                        if let Err(_) = super::assignability::solve_assignable(
+                        if super::assignability::solve_assignable(
                             &found_ty,
                             &expected_field.ty,
                             unifier,
-                        ) {
+                        )
+                        .is_err()
+                        {
                             let found_ty =
                                 super::term_utils::canonicalize_type(unifier.apply(&found_ty));
                             if super::term_utils::is_unresolved(&found_ty) {
@@ -377,8 +379,7 @@ pub(super) fn try_check_expr_obligation_nominal(
                         return true;
                     }
                     let _ = unifier.unify(assignee, &prop.ty);
-                    if let Err(_) =
-                        super::assignability::solve_assignable(&value_ty, &prop.ty, unifier)
+                    if super::assignability::solve_assignable(&value_ty, &prop.ty, unifier).is_err()
                     {
                         let value_ty =
                             super::term_utils::canonicalize_type(unifier.apply(&value_ty));
@@ -426,8 +427,7 @@ pub(super) fn try_check_expr_obligation_nominal(
                     return true;
                 }
                 let _ = unifier.unify(assignee, &prop.ty);
-                if let Err(_) = super::assignability::solve_assignable(&value_ty, &prop.ty, unifier)
-                {
+                if super::assignability::solve_assignable(&value_ty, &prop.ty, unifier).is_err() {
                     let value_ty = super::term_utils::canonicalize_type(unifier.apply(&value_ty));
                     if super::term_utils::is_unresolved(&value_ty) {
                         return true;
@@ -467,11 +467,13 @@ pub(super) fn try_check_expr_obligation_nominal(
                     }
                     if let Some(struct_field) = fields.iter().find(|f| f.name == *field) {
                         let _ = unifier.unify(assignee, &struct_field.ty);
-                        if let Err(_) = super::assignability::solve_assignable(
+                        if super::assignability::solve_assignable(
                             &value_ty,
                             &struct_field.ty,
                             unifier,
-                        ) {
+                        )
+                        .is_err()
+                        {
                             let value_ty =
                                 super::term_utils::canonicalize_type(unifier.apply(&value_ty));
                             if super::term_utils::is_unresolved(&value_ty) {

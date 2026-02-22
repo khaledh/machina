@@ -61,8 +61,8 @@ pub(super) fn check_call_obligations(
                         obligation.arg_terms.iter().zip(params.iter()).enumerate()
                     {
                         let arg_ty = super::term_utils::resolve_term(arg_term, unifier);
-                        if let Err(_) =
-                            super::assignability::solve_assignable(&arg_ty, &param.ty, unifier)
+                        if super::assignability::solve_assignable(&arg_ty, &param.ty, unifier)
+                            .is_err()
                         {
                             crate::core::typecheck::tc_push_error!(
                                 errors,
@@ -212,9 +212,7 @@ pub(super) fn check_call_obligations(
                 .enumerate()
             {
                 let arg_ty = super::term_utils::resolve_term(arg_term, &trial);
-                if let Err(_) =
-                    super::assignability::solve_assignable(&arg_ty, param_ty, &mut trial)
-                {
+                if super::assignability::solve_assignable(&arg_ty, param_ty, &mut trial).is_err() {
                     first_error.get_or_insert_with(|| {
                         TEK::ArgTypeMismatch(
                             index + 1,
@@ -222,7 +220,6 @@ pub(super) fn check_call_obligations(
                             super::term_utils::canonicalize_type(trial.apply(&arg_ty)),
                         )
                         .at(obligation.span)
-                        .into()
                     });
                     failed = true;
                     break;
@@ -249,9 +246,7 @@ pub(super) fn check_call_obligations(
                 unsatisfied_trait_bound(&instantiated.bound_terms, &trial, trait_impls)
             {
                 first_error.get_or_insert_with(|| {
-                    TEK::TraitBoundNotSatisfied(trait_name, ty)
-                        .at(obligation.span)
-                        .into()
+                    TEK::TraitBoundNotSatisfied(trait_name, ty).at(obligation.span)
                 });
                 continue;
             }
@@ -445,9 +440,9 @@ fn try_solve_builtin_method(
 
     // Properties that should not be called as methods.
     if builtin_methods::resolve_builtin_property(&receiver_ty, method_name).is_some() {
-        return Some(Err(TEK::PropertyCalledAsMethod(method_name.to_string())
-            .at(obligation.span)
-            .into()));
+        return Some(Err(
+            TEK::PropertyCalledAsMethod(method_name.to_string()).at(obligation.span)
+        ));
     }
 
     let builtin = builtin_methods::resolve_builtin_method(&receiver_ty, method_name)?;
@@ -460,8 +455,7 @@ fn try_solve_builtin_method(
             failure.path,
             failure.failing_ty,
         )
-        .at(obligation.span)
-        .into()));
+        .at(obligation.span)));
     }
     let params = builtin.params();
 
@@ -473,21 +467,19 @@ fn try_solve_builtin_method(
             params.len(),
             arity,
         )
-        .at(obligation.span)
-        .into()));
+        .at(obligation.span)));
     }
     for (index, (arg_term, expected_ty)) in
         obligation.arg_terms.iter().zip(params.iter()).enumerate()
     {
         let arg_ty = super::term_utils::resolve_term(arg_term, unifier);
-        if let Err(_) = super::assignability::solve_assignable(&arg_ty, &expected_ty.ty, unifier) {
+        if super::assignability::solve_assignable(&arg_ty, &expected_ty.ty, unifier).is_err() {
             return Some(Err(TEK::ArgTypeMismatch(
                 index + 1,
                 expected_ty.ty.clone(),
                 arg_ty,
             )
-            .at(obligation.span)
-            .into()));
+            .at(obligation.span)));
         }
     }
 
@@ -496,9 +488,9 @@ fn try_solve_builtin_method(
         BuiltinMethodRet::Bool => Type::Bool,
         BuiltinMethodRet::MapGet { value_ty } => {
             if value_ty.needs_drop() && !super::term_utils::is_unresolved(&value_ty) {
-                return Some(Err(TEK::MapIndexValueNotCopySafe(value_ty)
-                    .at(obligation.span)
-                    .into()));
+                return Some(Err(
+                    TEK::MapIndexValueNotCopySafe(value_ty).at(obligation.span)
+                ));
             }
             Type::ErrorUnion {
                 ok_ty: Box::new(value_ty),

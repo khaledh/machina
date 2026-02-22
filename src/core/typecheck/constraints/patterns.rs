@@ -32,16 +32,11 @@ impl<'a> ConstraintCollector<'a> {
             MatchPattern::EnumVariant { bindings, .. } => {
                 for binding in bindings {
                     if let crate::core::tree::MatchPatternBinding::Named { id, span, .. } = binding
+                        && let Some(def_id) = self.lookup_def_id(*id)
                     {
-                        if let Some(def_id) = self.lookup_def_id(*id) {
-                            let bind_term = self.def_term(def_id);
-                            let node_term = self.node_term(*id);
-                            self.push_eq(
-                                node_term,
-                                bind_term,
-                                ConstraintReason::Pattern(*id, *span),
-                            );
-                        }
+                        let bind_term = self.def_term(def_id);
+                        let node_term = self.node_term(*id);
+                        self.push_eq(node_term, bind_term, ConstraintReason::Pattern(*id, *span));
                     }
                 }
             }
