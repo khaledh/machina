@@ -9,7 +9,7 @@ use std::path::Path;
 
 use crate::core::diag::{Position, Span};
 use crate::core::resolve::{DefId, DefTable, UNKNOWN_DEF_ID};
-use crate::core::tree::typed as typed_tree;
+use crate::core::tree::Module;
 use crate::core::typecheck::type_map::TypeMap;
 use crate::core::types::{Type, TypeRenderConfig, render_type};
 use crate::services::analysis::pipeline::LookupState;
@@ -433,7 +433,7 @@ fn paths_equivalent(lhs: &Path, rhs: &Path) -> bool {
 fn fallback_hover_from_def_table(
     def_table: &DefTable,
     type_map: Option<&crate::core::typecheck::type_map::TypeMap>,
-    typed_module: Option<&typed_tree::Module>,
+    module: Option<&Module>,
     query_span: Span,
     current_file_path: Option<&Path>,
     query_ident: Option<&str>,
@@ -460,7 +460,7 @@ fn fallback_hover_from_def_table(
             Some(&def.name),
             ty.as_ref(),
             Some(def.id),
-            typed_module,
+            module,
             type_map,
             def_table,
         );
@@ -655,13 +655,13 @@ fn format_hover_label(
     def_name: Option<&str>,
     ty: Option<&Type>,
     def_id: Option<DefId>,
-    typed_module: Option<&typed_tree::Module>,
+    module: Option<&Module>,
     type_map: Option<&TypeMap>,
     def_table: &DefTable,
 ) -> String {
     let demangler = TypestateNameDemangler::from_def_table(def_table);
     if let Some(signature) =
-        format_source_callable_signature(def_id, typed_module, type_map, def_table, &demangler)
+        format_source_callable_signature(def_id, module, type_map, def_table, &demangler)
     {
         return signature.label;
     }

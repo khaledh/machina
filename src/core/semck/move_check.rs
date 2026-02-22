@@ -15,15 +15,12 @@ use crate::core::diag::Span;
 use crate::core::resolve::{DefId, DefKind};
 use crate::core::semck::ast_liveness::{self, AstLiveness};
 use crate::core::semck::{SEK, SemCheckError};
-use crate::core::tree::cfg::{
-    AstBlockId, TreeCfgBuilder, TreeCfgItem, TreeCfgNode, TreeCfgTerminator,
-};
-use crate::core::tree::normalized::{
+use crate::core::tree::cfg::{AstBlockId, CfgBuilder, CfgItem, CfgNode, CfgTerminator};
+use crate::core::tree::visit::{Visitor, walk_expr};
+use crate::core::tree::{
     BindPattern, BindPatternKind, CaptureSpec, Expr, ExprKind, FuncDef, NodeId, ParamMode,
     StmtExpr, StmtExprKind,
 };
-use crate::core::tree::visit::{Visitor, walk_expr};
-use crate::core::types::TypeId;
 
 pub struct MoveCheckResult {
     pub errors: Vec<SemCheckError>,
@@ -50,7 +47,7 @@ fn check_func_def(
     errors: &mut Vec<SemCheckError>,
     implicit_moves: &mut HashSet<NodeId>,
 ) {
-    let cfg = TreeCfgBuilder::<TypeId>::new().build_from_expr(&func_def.body);
+    let cfg = CfgBuilder::new().build_from_expr(&func_def.body);
 
     // Precompute heap liveness for last-use detection (implicit moves).
     let liveness = ast_liveness::analyze(&cfg, ctx);
@@ -59,7 +56,7 @@ fn check_func_def(
     let mut sink_params = HashSet::new();
     for param in &func_def.sig.params {
         if param.mode == ParamMode::Sink {
-            sink_params.insert(param.def_id);
+            sink_params.insert(ctx.def_table.def_id(param.id));
         }
     }
 
@@ -143,7 +140,7 @@ impl<'a> MoveVisitor<'a> {
     }
 
     /// Process a CFG block: check each item with its liveness context.
-    fn visit_cfg_node(&mut self, node: &TreeCfgNode<'_, TypeId>, block_id: AstBlockId) {
+    fn visit_cfg_node(&mut self, node: &CfgNode<'_>, block_id: AstBlockId) {
         // Precompute per-item info for implicit move detection:
         // - use_counts: how many times each heap var is used in each item
         // - live_after: which heap vars are live after each item
@@ -159,8 +156,8 @@ impl<'a> MoveVisitor<'a> {
             self.current_live_after = Some(live_after[idx].clone());
             self.current_use_counts = Some(item_use_counts[idx].clone());
             match item {
-                TreeCfgItem::Stmt(stmt) => self.visit_stmt_expr(stmt),
-                TreeCfgItem::Expr(expr) => self.visit_expr(expr),
+                CfgItem::Stmt(stmt) => self.visit_stmt_expr(stmt),
+                CfgItem::Expr(expr) => self.visit_expr(expr),
             }
         }
         self.current_live_after = None;
@@ -168,27 +165,32 @@ impl<'a> MoveVisitor<'a> {
 
         // Check terminator condition (if any).
         match &node.term {
-            TreeCfgTerminator::If { cond, .. } => self.visit_expr(cond),
-            TreeCfgTerminator::Goto(_) | TreeCfgTerminator::End => {}
+            CfgTerminator::If { cond, .. } => self.visit_expr(cond),
+            CfgTerminator::Goto(_) | CfgTerminator::End => {}
         }
     }
 
     /// Process `move x`: validate target and mark as moved.
     fn handle_move_target(&mut self, expr: &Expr) {
         match &expr.kind {
-            ExprKind::Var { def_id, .. } => {
-                let Some(def) = self.ctx.def_table.lookup_def(*def_id) else {
-                    return;
-                };
+            ExprKind::Var { .. } => {
+                let def_id = self.ctx.def_table.def_id(expr.id);
+                let def =
+                    self.ctx.def_table.lookup_def(def_id).unwrap_or_else(|| {
+                        panic!("compiler bug: missing def metadata for {}", def_id)
+                    });
                 // Params can only be moved if they're sink params (owned).
-                if matches!(def.kind, DefKind::Param { .. }) && !self.sink_params.contains(def_id) {
+                if matches!(def.kind, DefKind::Param { .. }) && !self.sink_params.contains(&def_id)
+                {
                     self.err(expr.span, SEK::MoveFromParam);
                     return;
                 }
-                let ty = self.ctx.type_map.type_table().get(expr.ty);
+                let Some(ty) = self.ctx.type_map.lookup_node_type(expr.id) else {
+                    return;
+                };
                 // Only track moves for types that need ownership tracking.
                 if ty.is_move_tracked() {
-                    self.moved.insert(*def_id);
+                    self.moved.insert(def_id);
                 }
             }
             // `move x.field` or `move arr[i]` not allowed - must move whole variable.
@@ -226,10 +228,16 @@ impl<'a> MoveVisitor<'a> {
 
     /// Error if using a variable that has already been moved.
     fn check_use(&mut self, expr: &Expr) {
-        if let ExprKind::Var { def_id, .. } = expr.kind
-            && let Some(def) = self.ctx.def_table.lookup_def(def_id)
-            && self.moved.contains(&def_id)
-        {
+        if !matches!(expr.kind, ExprKind::Var { .. }) {
+            return;
+        }
+        let def_id = self.ctx.def_table.def_id(expr.id);
+        let def = self
+            .ctx
+            .def_table
+            .lookup_def(def_id)
+            .unwrap_or_else(|| panic!("compiler bug: missing def metadata for {}", def_id));
+        if self.moved.contains(&def_id) {
             self.err(expr.span, SEK::UseAfterMove(def.name.clone()));
         }
     }
@@ -237,13 +245,21 @@ impl<'a> MoveVisitor<'a> {
     /// For heap-owned values: require explicit `move` unless this is the last use.
     /// Last-use detection: not live after this item AND only used once in this item.
     fn check_heap_move_required(&mut self, expr: &Expr) {
-        if self.ctx.type_map.type_table().get(expr.ty).is_heap() {
-            let ExprKind::Var { def_id, .. } = expr.kind else {
+        if self
+            .ctx
+            .type_map
+            .lookup_node_type(expr.id)
+            .is_some_and(|ty| ty.is_heap())
+        {
+            let ExprKind::Var { .. } = expr.kind else {
                 return;
             };
-            let Some(def) = self.ctx.def_table.lookup_def(def_id) else {
-                return;
-            };
+            let def_id = self.ctx.def_table.def_id(expr.id);
+            let def = self
+                .ctx
+                .def_table
+                .lookup_def(def_id)
+                .unwrap_or_else(|| panic!("compiler bug: missing def metadata for {}", def_id));
             if matches!(def.kind, DefKind::Param { .. }) {
                 // Allow moving from sink params only.
                 if !self.sink_params.contains(&def_id) {
@@ -303,8 +319,9 @@ impl<'a> MoveVisitor<'a> {
     /// Called on let/var bindings and reassignments to "revive" the variable.
     fn clear_pattern_defs(&mut self, pattern: &BindPattern) {
         match &pattern.kind {
-            BindPatternKind::Name { def_id, .. } => {
-                self.moved.remove(def_id);
+            BindPatternKind::Name { .. } => {
+                let def_id = self.ctx.def_table.def_id(pattern.id);
+                self.moved.remove(&def_id);
             }
             BindPatternKind::Array { patterns } | BindPatternKind::Tuple { patterns } => {
                 for p in patterns {
@@ -321,9 +338,10 @@ impl<'a> MoveVisitor<'a> {
 
     fn visit_out_arg(&mut self, arg: &Expr) {
         match &arg.kind {
-            ExprKind::Var { def_id, .. } => {
+            ExprKind::Var { .. } => {
                 // Out args are reinitialized by the callee.
-                self.moved.remove(def_id);
+                let def_id = self.ctx.def_table.def_id(arg.id);
+                self.moved.remove(&def_id);
             }
             ExprKind::StructField { target, .. } => {
                 self.visit_place_base(target);
@@ -351,7 +369,7 @@ impl<'a> MoveVisitor<'a> {
     }
 }
 
-impl<'a> Visitor<DefId, TypeId> for MoveVisitor<'a> {
+impl<'a> Visitor for MoveVisitor<'a> {
     fn visit_stmt_expr(&mut self, stmt: &StmtExpr) {
         match &stmt.kind {
             StmtExprKind::LetBind { pattern, value, .. }
@@ -364,8 +382,9 @@ impl<'a> Visitor<DefId, TypeId> for MoveVisitor<'a> {
                 assignee, value, ..
             } => {
                 self.visit_expr(value);
-                if let ExprKind::Var { def_id, .. } = assignee.kind {
+                if let ExprKind::Var { .. } = assignee.kind {
                     // Reassigning a variable clears its moved status.
+                    let def_id = self.ctx.def_table.def_id(assignee.id);
                     self.moved.remove(&def_id);
                 } else {
                     // For projections (x.field = ...), check the base is usable.
@@ -378,7 +397,8 @@ impl<'a> Visitor<DefId, TypeId> for MoveVisitor<'a> {
                 // Compound assignment reads assignee before writing it back.
                 self.visit_expr(assignee);
                 self.visit_expr(value);
-                if let ExprKind::Var { def_id, .. } = assignee.kind {
+                if let ExprKind::Var { .. } = assignee.kind {
+                    let def_id = self.ctx.def_table.def_id(assignee.id);
                     self.moved.remove(&def_id);
                 }
             }
@@ -501,8 +521,9 @@ impl<'a> Visitor<DefId, TypeId> for MoveVisitor<'a> {
                 // use-after-move for explicitly moved captures.
                 walk_expr(self, expr);
                 for capture in captures {
-                    let CaptureSpec::Move { def_id, span, .. } = capture;
-                    self.handle_move_capture(*def_id, *span);
+                    let CaptureSpec::Move { id, span, .. } = capture;
+                    let def_id = self.ctx.def_table.def_id(*id);
+                    self.handle_move_capture(def_id, *span);
                 }
             }
             _ => walk_expr(self, expr),

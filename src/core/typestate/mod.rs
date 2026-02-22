@@ -12,16 +12,9 @@ use std::collections::{HashMap, HashSet};
 use crate::core::diag::Span;
 use crate::core::machine::naming::GENERATED_FINAL_STATE_MARKER;
 use crate::core::resolve::{REK, ResolveError};
-use crate::core::tree::NodeIdGen;
-use crate::core::tree::parsed::{
-    self, BindPattern, BindPatternKind, CallArg, EnumDefVariant, Expr, ExprKind, FuncDecl, FuncDef,
-    MethodBlock, MethodDef, MethodItem, MethodSig, Module, SelfParam, StmtExpr, StmtExprKind,
-    StructDefField, StructLitField, TopLevelItem, TypeDef, TypeDefKind, TypeExpr, TypeExprKind,
-    TypestateDef, TypestateItem, TypestateOnHandler, TypestateState, TypestateStateItem,
-};
 use crate::core::tree::visit::{self, Visitor};
 use crate::core::tree::visit_mut::{self, VisitorMut};
-use crate::core::tree::{CallArgMode, InitInfo, ParamMode};
+use crate::core::tree::*;
 
 mod analysis;
 mod ast_build;
@@ -269,7 +262,6 @@ fn desugar_typestate(
         // Generated struct state type.
         lowered.push(TopLevelItem::TypeDef(TypeDef {
             id: node_id_gen.new_id(),
-            def_id: (),
             attrs: Vec::new(),
             name: state_ty_name.clone(),
             type_params: Vec::new(),
@@ -371,9 +363,8 @@ fn desugar_typestate(
         // enforce required constructor.
         lowered.push(TopLevelItem::FuncDecl(FuncDecl {
             id: node_id_gen.new_id(),
-            def_id: (),
             attrs: Vec::new(),
-            sig: parsed::FunctionSig {
+            sig: FunctionSig {
                 name: ctor_name,
                 type_params: Vec::new(),
                 params: Vec::new(),
@@ -389,9 +380,8 @@ fn desugar_typestate(
     }
     lowered.push(TopLevelItem::FuncDecl(FuncDecl {
         id: node_id_gen.new_id(),
-        def_id: (),
         attrs: Vec::new(),
-        sig: parsed::FunctionSig {
+        sig: FunctionSig {
             name: descriptor_id_helper_name,
             type_params: Vec::new(),
             params: Vec::new(),
@@ -442,7 +432,6 @@ fn u64_type_expr(node_id_gen: &mut NodeIdGen, span: Span) -> TypeExpr {
         id: node_id_gen.new_id(),
         kind: TypeExprKind::Named {
             ident: "u64".to_string(),
-            def_id: (),
             type_args: Vec::new(),
         },
         span,
@@ -453,7 +442,6 @@ fn unit_expr(node_id_gen: &mut NodeIdGen, span: Span) -> Expr {
     Expr {
         id: node_id_gen.new_id(),
         kind: ExprKind::UnitLit,
-        ty: (),
         span,
     }
 }
@@ -463,7 +451,6 @@ fn named_type_expr(name: &str, node_id_gen: &mut NodeIdGen, span: Span) -> TypeE
         id: node_id_gen.new_id(),
         kind: TypeExprKind::Named {
             ident: name.to_string(),
-            def_id: (),
             type_args: Vec::new(),
         },
         span,
@@ -660,14 +647,12 @@ fn final_state_marker_method_def(span: Span, node_id_gen: &mut NodeIdGen) -> Met
     // terminal without leaking source-only typestate attributes downstream.
     MethodDef {
         id: node_id_gen.new_id(),
-        def_id: (),
         attrs: Vec::new(),
         sig: MethodSig {
             name: GENERATED_FINAL_STATE_MARKER.to_string(),
             type_params: Vec::new(),
             self_param: SelfParam {
                 id: node_id_gen.new_id(),
-                def_id: (),
                 mode: ParamMode::In,
                 span,
             },
@@ -680,7 +665,6 @@ fn final_state_marker_method_def(span: Span, node_id_gen: &mut NodeIdGen) -> Met
         body: Expr {
             id: node_id_gen.new_id(),
             kind: ExprKind::UnitLit,
-            ty: (),
             span,
         },
         span,
@@ -715,7 +699,7 @@ struct CtorCallRewriter<'a> {
     first_spawn_call_span: Option<Span>,
 }
 
-impl VisitorMut<()> for CtorCallRewriter<'_> {
+impl VisitorMut for CtorCallRewriter<'_> {
     fn visit_expr(&mut self, expr: &mut Expr) {
         // Post-order traversal so nested ctor calls are rewritten first.
         visit_mut::walk_expr(self, expr);
@@ -755,9 +739,7 @@ impl VisitorMut<()> for CtorCallRewriter<'_> {
                     id: self.node_id_gen.new_id(),
                     kind: ExprKind::Var {
                         ident: callee_name.clone(),
-                        def_id: (),
                     },
-                    ty: (),
                     span: expr.span,
                 }),
                 args,
@@ -798,7 +780,7 @@ impl ExternalStateLiteralChecker<'_> {
     }
 }
 
-impl Visitor<()> for ExternalStateLiteralChecker<'_> {
+impl Visitor for ExternalStateLiteralChecker<'_> {
     fn visit_func_def(&mut self, func_def: &FuncDef) {
         let prev = self.allow_state_literals;
         // Generated typestate constructor function body is allowed to construct states.

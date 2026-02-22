@@ -11,11 +11,13 @@ impl<'a> ConstraintCollector<'a> {
             .collect::<Vec<_>>();
         let ret_ty = self.node_term(call_expr.id);
         let callee_kind = match &callee.kind {
-            ExprKind::Var { def_id, ident } => {
-                if let Some(def) = self.ctx.def_table.lookup_def(*def_id) {
+            ExprKind::Var { ident } => {
+                if let Some(def_id) = self.lookup_def_id(callee.id)
+                    && let Some(def) = self.ctx.def_table.lookup_def(def_id)
+                {
                     if matches!(def.kind, DefKind::FuncDef { .. } | DefKind::FuncDecl { .. }) {
                         CallCallee::NamedFunction {
-                            def_id: *def_id,
+                            def_id,
                             name: ident.clone(),
                         }
                     } else {

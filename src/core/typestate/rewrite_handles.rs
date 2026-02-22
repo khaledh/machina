@@ -9,7 +9,7 @@ pub(super) fn rewrite_typed_machine_handle_refs(
         handle_by_typestate: &'a HashMap<String, String>,
     }
 
-    impl VisitorMut<()> for TypedMachineHandleRewriter<'_> {
+    impl VisitorMut for TypedMachineHandleRewriter<'_> {
         fn visit_stmt_expr(&mut self, stmt: &mut StmtExpr) {
             // `decl_ty` in let/var is not traversed by generic walk; handle
             // those explicitly so `Machine<Typestate>` annotations rewrite.
@@ -130,7 +130,7 @@ pub(super) fn rewrite_machine_request_method_destinations(
                     out.insert(ident.clone());
                 }
             }
-            StmtExprKind::VarDecl { ident, decl_ty, .. } => {
+            StmtExprKind::VarDecl { ident, decl_ty } => {
                 if is_machine_handle_type_expr(decl_ty) {
                     out.insert(ident.clone());
                 }
@@ -166,12 +166,8 @@ pub(super) fn rewrite_machine_request_method_destinations(
             ExprKind::Block { items, tail } => {
                 for item in items {
                     match item {
-                        parsed::BlockItem::Stmt(stmt) => {
-                            collect_machine_bindings_from_stmt(stmt, out)
-                        }
-                        parsed::BlockItem::Expr(inner) => {
-                            collect_machine_bindings_from_expr(inner, out)
-                        }
+                        BlockItem::Stmt(stmt) => collect_machine_bindings_from_stmt(stmt, out),
+                        BlockItem::Expr(inner) => collect_machine_bindings_from_expr(inner, out),
                     }
                 }
                 if let Some(tail) = tail {
@@ -210,9 +206,7 @@ pub(super) fn rewrite_machine_request_method_destinations(
                         id: self.node_id_gen.new_id(),
                         kind: ExprKind::Var {
                             ident: MACHINE_TARGET_ID_HELPER_FN.to_string(),
-                            def_id: (),
                         },
-                        ty: (),
                         span,
                     }),
                     args: vec![CallArg {
@@ -222,13 +216,12 @@ pub(super) fn rewrite_machine_request_method_destinations(
                         span,
                     }],
                 },
-                ty: (),
                 span,
             }
         }
     }
 
-    impl VisitorMut<()> for RequestDstExprRewriter<'_> {
+    impl VisitorMut for RequestDstExprRewriter<'_> {
         fn visit_expr(&mut self, expr: &mut Expr) {
             visit_mut::walk_expr(self, expr);
 
@@ -274,7 +267,6 @@ pub(super) fn rewrite_machine_request_method_destinations(
                 Expr {
                     id: self.node_id_gen.new_id(),
                     kind: ExprKind::UnitLit,
-                    ty: (),
                     span: first_arg.span,
                 },
             );
@@ -282,7 +274,7 @@ pub(super) fn rewrite_machine_request_method_destinations(
         }
     }
 
-    fn rewrite_body_expr(body: &mut Expr, params: &[parsed::Param], node_id_gen: &mut NodeIdGen) {
+    fn rewrite_body_expr(body: &mut Expr, params: &[Param], node_id_gen: &mut NodeIdGen) {
         let mut machine_locals = HashSet::new();
         for param in params {
             if is_machine_handle_type_expr(&param.typ) {

@@ -1,19 +1,14 @@
 use crate::core::context::NormalizedContext;
 use crate::core::diag::Span;
-use crate::core::resolve::DefId;
 use crate::core::resolve::DefKind;
 use crate::core::semck::match_check;
 use crate::core::semck::{SEK, SemCheckError};
-use crate::core::tree::normalized::{
-    BindPattern, BindPatternKind, CallArg, CallArgMode, Expr, ExprKind, FunctionSig, MatchArm,
-    MethodSig, Param, ParamMode, StmtExpr, StmtExprKind, StructLitField, StructUpdateField,
-    TypeDefKind,
-};
 use crate::core::tree::visit::{
     Visitor, walk_expr, walk_func_sig, walk_method_sig, walk_stmt_expr,
 };
+use crate::core::tree::*;
 use crate::core::typecheck::type_map::{CallSig, resolve_type_expr};
-use crate::core::types::{Type, TypeId};
+use crate::core::types::Type;
 use std::collections::{HashMap, HashSet};
 
 pub(super) fn check(ctx: &NormalizedContext) -> Vec<SemCheckError> {
@@ -133,7 +128,11 @@ impl<'a> StructuralChecker<'a> {
 
     fn check_struct_update(&mut self, target: &Expr, fields: &[StructUpdateField]) {
         // Validate field names on struct update expressions.
-        let target_ty = self.ctx.type_map.type_table().get(target.ty);
+        let target_ty = self
+            .ctx
+            .type_map
+            .type_table()
+            .get(self.ctx.type_map.type_of(target.id));
         let Type::Struct {
             fields: struct_fields,
             ..
@@ -286,8 +285,11 @@ impl<'a> StructuralChecker<'a> {
 
     fn is_mutable_lvalue(&self, expr: &Expr) -> Option<bool> {
         match &expr.kind {
-            ExprKind::Var { def_id, .. } => {
-                let def = self.ctx.def_table.lookup_def(*def_id)?;
+            ExprKind::Var { .. } => {
+                let def = self
+                    .ctx
+                    .def_table
+                    .lookup_def(self.ctx.def_table.def_id(expr.id))?;
                 match def.kind {
                     DefKind::LocalVar { is_mutable, .. } | DefKind::Param { is_mutable, .. } => {
                         Some(is_mutable)
@@ -306,11 +308,13 @@ impl<'a> StructuralChecker<'a> {
 
     fn is_lvalue(&self, expr: &Expr) -> bool {
         match &expr.kind {
-            ExprKind::Var { def_id, .. } => {
-                self.ctx.def_table.lookup_def(*def_id).is_some_and(|def| {
+            ExprKind::Var { .. } => self
+                .ctx
+                .def_table
+                .lookup_def(self.ctx.def_table.def_id(expr.id))
+                .is_some_and(|def| {
                     matches!(def.kind, DefKind::LocalVar { .. } | DefKind::Param { .. })
-                })
-            }
+                }),
             ExprKind::ArrayIndex { target, .. }
             | ExprKind::TupleField { target, .. }
             | ExprKind::StructField { target, .. }
@@ -392,7 +396,7 @@ impl<'a> StructuralChecker<'a> {
     }
 }
 
-impl Visitor<DefId, TypeId> for StructuralChecker<'_> {
+impl Visitor for StructuralChecker<'_> {
     fn visit_func_sig(&mut self, func_sig: &FunctionSig) {
         self.check_param_modes(&func_sig.params);
         walk_func_sig(self, func_sig);
@@ -433,7 +437,12 @@ impl Visitor<DefId, TypeId> for StructuralChecker<'_> {
             }
             ExprKind::StructField { target, field } => {
                 // Validate struct field access targets early for clearer errors.
-                let target_ty = self.ctx.type_map.type_table().get(target.ty).peel_heap();
+                let target_ty = self
+                    .ctx
+                    .type_map
+                    .type_table()
+                    .get(self.ctx.type_map.type_of(target.id))
+                    .peel_heap();
                 if let Type::Struct { fields, .. } = target_ty
                     && !fields.iter().any(|f| f.name == *field)
                 {

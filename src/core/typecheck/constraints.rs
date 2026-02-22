@@ -14,7 +14,7 @@ use std::collections::HashMap;
 use crate::core::diag::Span;
 use crate::core::resolve::{DefId, DefKind};
 use crate::core::tree::NodeId;
-use crate::core::tree::resolved::{
+use crate::core::tree::{
     BinaryOp, BindPattern, BindPatternKind, BlockItem, CallArg, EmitKind, Expr, ExprKind, FuncDef,
     MatchArm, MatchPattern, MethodSig, StmtExpr, StmtExprKind, StringFmtSegment,
     StructFieldBindPattern, TypeExpr, TypeParam, UnaryOp,
@@ -286,6 +286,7 @@ struct ClosureSigInfo {
 struct ConstraintCollector<'a> {
     ctx: &'a crate::core::context::ResolvedContext,
     type_defs: &'a HashMap<String, Type>,
+    allow_missing_def_ids: bool,
     vars: &'a mut TypeVarStore,
     out: &'a mut ConstrainOutput,
     control_stack: Vec<ControlContext>,
@@ -296,16 +297,26 @@ impl<'a> ConstraintCollector<'a> {
     fn new(
         ctx: &'a crate::core::context::ResolvedContext,
         type_defs: &'a HashMap<String, Type>,
+        allow_missing_def_ids: bool,
         vars: &'a mut TypeVarStore,
         out: &'a mut ConstrainOutput,
     ) -> Self {
         Self {
             ctx,
             type_defs,
+            allow_missing_def_ids,
             vars,
             out,
             control_stack: Vec::new(),
             type_param_stack: Vec::new(),
+        }
+    }
+
+    fn lookup_def_id(&self, node_id: NodeId) -> Option<DefId> {
+        if self.allow_missing_def_ids {
+            self.ctx.def_table.lookup_node_def_id(node_id)
+        } else {
+            Some(self.ctx.def_table.def_id(node_id))
         }
     }
 
@@ -320,12 +331,15 @@ impl<'a> ConstraintCollector<'a> {
 
         let mapping = type_params
             .iter()
-            .map(|param| (param.def_id, self.vars.fresh_rigid_param(param.def_id)))
+            .map(|param| {
+                let def_id = self.ctx.def_table.def_id(param.id);
+                (def_id, self.vars.fresh_rigid_param(def_id))
+            })
             .collect::<HashMap<_, _>>();
 
         for param in type_params {
             if let Some(bound) = &param.bound
-                && let Some(var) = mapping.get(&param.def_id)
+                && let Some(var) = mapping.get(&self.ctx.def_table.def_id(param.id))
             {
                 self.out
                     .var_trait_bounds
@@ -498,11 +512,13 @@ fn is_synthesized_missing_else(then_body: &Expr, else_body: &Expr) -> bool {
 pub(crate) fn run(engine: &mut TypecheckEngine) -> Result<(), Vec<TypeCheckError>> {
     let ctx = engine.context().clone();
     let type_defs = engine.env().type_defs.clone();
+    let allow_missing_def_ids = engine.is_partial_mode();
     let mut output = ConstrainOutput::default();
 
     {
         let vars = engine.type_vars_mut();
-        let mut collector = ConstraintCollector::new(&ctx, &type_defs, vars, &mut output);
+        let mut collector =
+            ConstraintCollector::new(&ctx, &type_defs, allow_missing_def_ids, vars, &mut output);
         collector.collect_module();
     }
 

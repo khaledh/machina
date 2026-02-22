@@ -13,7 +13,7 @@ use crate::core::diag::Span;
 use crate::core::resolve::DefId;
 use crate::core::semck::closure::capture::CaptureMode;
 use crate::core::semck::closure::capture::ClosureCapture;
-use crate::core::tree::normalized as norm;
+use crate::core::tree as ast;
 use crate::core::tree::semantic as sem;
 use crate::core::tree::{InitInfo, NodeId, NodeIdGen, ParamMode};
 use crate::core::typecheck::type_map::CallSigMap;
@@ -176,7 +176,7 @@ impl<'a> Elaborator<'a> {
     /// dedicated closure materialization pass.
     pub(super) fn run_place_value_planning_pass(
         &mut self,
-        module: &norm::Module,
+        module: &ast::Module,
     ) -> Vec<sem::TopLevelItem> {
         module
             .top_level_items
@@ -185,37 +185,35 @@ impl<'a> Elaborator<'a> {
             .collect()
     }
 
-    fn elab_top_level_item(&mut self, item: &norm::TopLevelItem) -> Option<sem::TopLevelItem> {
+    fn elab_top_level_item(&mut self, item: &ast::TopLevelItem) -> Option<sem::TopLevelItem> {
         match item {
-            norm::TopLevelItem::ProtocolDef(_) => {
+            ast::TopLevelItem::ProtocolDef(_) => {
                 // Protocol definitions are frontend-only conformance metadata.
                 // They do not participate in semantic IR/codegen, so elaborate
                 // drops them instead of treating them as an internal error.
                 None
             }
-            norm::TopLevelItem::TraitDef(def) => Some(sem::TopLevelItem::TraitDef(def.clone())),
-            norm::TopLevelItem::TypeDef(def) => Some(sem::TopLevelItem::TypeDef(def.clone())),
-            norm::TopLevelItem::TypestateDef(_) => {
+            ast::TopLevelItem::TraitDef(def) => Some(sem::TopLevelItem::TraitDef(def.clone())),
+            ast::TopLevelItem::TypeDef(def) => Some(sem::TopLevelItem::TypeDef(def.clone())),
+            ast::TopLevelItem::TypestateDef(_) => {
                 panic!("compiler bug: typestate defs should be desugared before elaborate")
             }
-            norm::TopLevelItem::FuncDecl(decl) => {
-                Some(sem::TopLevelItem::FuncDecl(sem::FuncDecl {
-                    id: decl.id,
-                    def_id: decl.def_id,
-                    attrs: decl.attrs.clone(),
-                    sig: decl.sig.clone(),
-                    span: decl.span,
-                }))
-            }
-            norm::TopLevelItem::FuncDef(def) => Some(sem::TopLevelItem::FuncDef(sem::FuncDef {
+            ast::TopLevelItem::FuncDecl(decl) => Some(sem::TopLevelItem::FuncDecl(sem::FuncDecl {
+                id: decl.id,
+                def_id: self.def_id_for(decl.id),
+                attrs: decl.attrs.clone(),
+                sig: decl.sig.clone(),
+                span: decl.span,
+            })),
+            ast::TopLevelItem::FuncDef(def) => Some(sem::TopLevelItem::FuncDef(sem::FuncDef {
                 id: def.id,
-                def_id: def.def_id,
+                def_id: self.def_id_for(def.id),
                 attrs: def.attrs.clone(),
                 sig: def.sig.clone(),
                 body: self.elab_value(&def.body),
                 span: def.span,
             })),
-            norm::TopLevelItem::MethodBlock(block) => {
+            ast::TopLevelItem::MethodBlock(block) => {
                 Some(sem::TopLevelItem::MethodBlock(sem::MethodBlock {
                     id: block.id,
                     type_name: block.type_name.clone(),
@@ -224,10 +222,10 @@ impl<'a> Elaborator<'a> {
                         .method_items
                         .iter()
                         .map(|method_item| match method_item {
-                            norm::MethodItem::Decl(method_decl) => {
+                            ast::MethodItem::Decl(method_decl) => {
                                 sem::MethodItem::Decl(self.elab_method_decl(method_decl))
                             }
-                            norm::MethodItem::Def(method_def) => {
+                            ast::MethodItem::Def(method_def) => {
                                 sem::MethodItem::Def(self.elab_method_def(method_def))
                             }
                         })
@@ -235,16 +233,16 @@ impl<'a> Elaborator<'a> {
                     span: block.span,
                 }))
             }
-            norm::TopLevelItem::ClosureDef(_) => {
+            ast::TopLevelItem::ClosureDef(_) => {
                 panic!("compiler bug: closure defs should not exist before elaborate")
             }
         }
     }
 
-    fn elab_method_def(&mut self, def: &norm::MethodDef) -> sem::MethodDef {
+    fn elab_method_def(&mut self, def: &ast::MethodDef) -> sem::MethodDef {
         sem::MethodDef {
             id: def.id,
-            def_id: def.def_id,
+            def_id: self.def_id_for(def.id),
             attrs: def.attrs.clone(),
             sig: def.sig.clone(),
             body: self.elab_value(&def.body),
@@ -252,10 +250,10 @@ impl<'a> Elaborator<'a> {
         }
     }
 
-    fn elab_method_decl(&mut self, decl: &norm::MethodDecl) -> sem::MethodDecl {
+    fn elab_method_decl(&mut self, decl: &ast::MethodDecl) -> sem::MethodDecl {
         sem::MethodDecl {
             id: decl.id,
-            def_id: decl.def_id,
+            def_id: self.def_id_for(decl.id),
             attrs: decl.attrs.clone(),
             sig: decl.sig.clone(),
             span: decl.span,
@@ -264,6 +262,14 @@ impl<'a> Elaborator<'a> {
 
     pub(super) fn insert_synth_node_type(&mut self, node_id: NodeId, ty: Type) -> TypeId {
         self.insert_node_type_for(node_id, ty, SyntheticReason::ElaborateSyntheticNode)
+    }
+
+    pub(super) fn def_id_for(&self, node_id: NodeId) -> DefId {
+        self.def_table.def_id(node_id)
+    }
+
+    pub(super) fn type_id_for(&self, node_id: NodeId) -> TypeId {
+        self.type_map.type_of(node_id)
     }
 
     pub(super) fn def_or_panic(&self, def_id: DefId, context: &str) -> crate::core::resolve::Def {

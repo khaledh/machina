@@ -2,32 +2,32 @@
 
 use super::StringFmtPlan;
 use crate::core::diag::Span;
-use crate::core::resolve::DefId;
+use crate::core::resolve::{DefId, DefTable};
 use crate::core::tree as ast_model;
 use crate::core::tree::{BinaryOp, CoerceKind, InitInfo, NodeId, ParamMode, UnaryOp};
 use crate::core::types::TypeId;
 
 // -- Semantic tree type aliases (reused parsed fragments) ---
 
-pub type TypeExpr = ast_model::TypeExpr<DefId>;
-pub type TypeExprKind = ast_model::TypeExprKind<DefId>;
-pub type FnTypeParam = ast_model::FnTypeParam<DefId>;
+pub type TypeExpr = ast_model::TypeExpr;
+pub type TypeExprKind = ast_model::TypeExprKind;
+pub type FnTypeParam = ast_model::FnTypeParam;
 
-pub type TypeDef = ast_model::TypeDef<DefId>;
-pub type TypeDefKind = ast_model::TypeDefKind<DefId>;
-pub type StructDefField = ast_model::StructDefField<DefId>;
-pub type EnumDefVariant = ast_model::EnumDefVariant<DefId>;
-pub type TraitDef = ast_model::TraitDef<DefId>;
-pub type TraitMethod = ast_model::TraitMethod<DefId>;
-pub type TraitProperty = ast_model::TraitProperty<DefId>;
+pub type TypeDef = ast_model::TypeDef;
+pub type TypeDefKind = ast_model::TypeDefKind;
+pub type StructDefField = ast_model::StructDefField;
+pub type EnumDefVariant = ast_model::EnumDefVariant;
+pub type TraitDef = ast_model::TraitDef;
+pub type TraitMethod = ast_model::TraitMethod;
+pub type TraitProperty = ast_model::TraitProperty;
 
-pub type FunctionSig = ast_model::FunctionSig<DefId>;
-pub type MethodSig = ast_model::MethodSig<DefId>;
-pub type SelfParam = ast_model::SelfParam<DefId>;
-pub type Param = ast_model::Param<DefId>;
+pub type FunctionSig = ast_model::FunctionSig;
+pub type MethodSig = ast_model::MethodSig;
+pub type SelfParam = ast_model::SelfParam;
+pub type Param = ast_model::Param;
 
-pub type MatchPattern = ast_model::MatchPattern<DefId>;
-pub type MatchPatternBinding = ast_model::MatchPatternBinding<DefId>;
+pub type MatchPattern = ast_model::MatchPattern;
+pub type MatchPatternBinding = ast_model::MatchPatternBinding;
 
 // -- Bind patterns (semantic) ---
 
@@ -100,10 +100,11 @@ impl Module {
             .collect()
     }
 
-    pub fn type_def_by_id(&self, def_id: DefId) -> Option<&TypeDef> {
-        self.top_level_items.iter().find_map(|item| match item {
-            TopLevelItem::TypeDef(type_def) if type_def.def_id == def_id => Some(type_def),
-            _ => None,
+    pub fn type_def_by_id(&self, def_table: &DefTable, def_id: DefId) -> Option<&TypeDef> {
+        self.type_defs().into_iter().find(|type_def| {
+            def_table
+                .lookup_node_def_id(type_def.id)
+                .is_some_and(|d| d == def_id)
         })
     }
 

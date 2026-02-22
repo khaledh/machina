@@ -23,10 +23,7 @@ impl<'a> Parser<'a> {
         self.advance(); // consume the ident
         Ok(BindPattern {
             id: self.id_gen.new_id(),
-            kind: BindPatternKind::Name {
-                ident: var_name,
-                def_id: (),
-            },
+            kind: BindPatternKind::Name { ident: var_name },
             span: self.close(marker),
         })
     }
@@ -55,7 +52,6 @@ impl<'a> Parser<'a> {
                     id: parser.id_gen.new_id(),
                     kind: BindPatternKind::Name {
                         ident: field_name.clone(),
-                        def_id: (),
                     },
                     span: parser.close(field_marker),
                 }

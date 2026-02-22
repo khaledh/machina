@@ -17,7 +17,6 @@ pub(super) fn machine_error_type_def(node_id_gen: &mut NodeIdGen) -> TopLevelIte
     let span = Span::default();
     TopLevelItem::TypeDef(TypeDef {
         id: node_id_gen.new_id(),
-        def_id: (),
         attrs: Vec::new(),
         name: MACHINE_ERROR_TYPE_NAME.to_string(),
         type_params: Vec::new(),
@@ -103,7 +102,6 @@ pub(super) fn machine_error_variant_expr(
             variant: variant_name.to_string(),
             payload: Vec::new(),
         },
-        ty: (),
         span,
     }
 }
@@ -122,13 +120,12 @@ pub(super) fn return_machine_error_if_eq(
             op: crate::core::tree::BinaryOp::Eq,
             right: Box::new(int_expr(expected, node_id_gen, span)),
         },
-        ty: (),
         span,
     };
     let then_body = Expr {
         id: node_id_gen.new_id(),
         kind: ExprKind::Block {
-            items: vec![parsed::BlockItem::Stmt(return_stmt(
+            items: vec![BlockItem::Stmt(return_stmt(
                 machine_error_variant_expr(
                     machine_error_variant_for_kind(error_kind),
                     node_id_gen,
@@ -139,7 +136,6 @@ pub(super) fn return_machine_error_if_eq(
             ))],
             tail: None,
         },
-        ty: (),
         span,
     };
     Expr {
@@ -153,11 +149,9 @@ pub(super) fn return_machine_error_if_eq(
                     items: Vec::new(),
                     tail: None,
                 },
-                ty: (),
                 span,
             }),
         },
-        ty: (),
         span,
     }
 }
@@ -175,23 +169,23 @@ pub(super) fn send_status_error_items(
     status_var: &str,
     node_id_gen: &mut NodeIdGen,
     span: Span,
-) -> Vec<parsed::BlockItem> {
+) -> Vec<BlockItem> {
     vec![
-        parsed::BlockItem::Expr(return_machine_error_if_eq(
+        BlockItem::Expr(return_machine_error_if_eq(
             status_var,
             1,
             MachineErrorKind::Unknown,
             node_id_gen,
             span,
         )),
-        parsed::BlockItem::Expr(return_machine_error_if_eq(
+        BlockItem::Expr(return_machine_error_if_eq(
             status_var,
             2,
             MachineErrorKind::NotRunning,
             node_id_gen,
             span,
         )),
-        parsed::BlockItem::Expr(return_machine_error_if_eq(
+        BlockItem::Expr(return_machine_error_if_eq(
             status_var,
             3,
             MachineErrorKind::MailboxFull,

@@ -4,14 +4,8 @@
 use std::collections::{HashMap, HashSet};
 
 use crate::core::diag::Span;
-use crate::core::tree::NodeIdGen;
-use crate::core::tree::ParamMode;
-use crate::core::tree::parsed::{
-    BindPattern, BindPatternKind, Expr, ExprKind, FuncDef, MatchPattern, MethodDef, MethodSig,
-    SelfParam, StmtExpr, StmtExprKind, StructDefField, StructLitField, TypeExpr, TypeExprKind,
-    TypestateFields, TypestateStateItem,
-};
 use crate::core::tree::visit_mut::{self, VisitorMut};
+use crate::core::tree::*;
 
 /// Shared lowering inputs for methods/handlers within one source state.
 pub(super) struct StateLoweringContext<'a> {
@@ -52,14 +46,12 @@ pub(super) fn lower_state_method(
     rewrite_state_refs_in_func(&mut method, ctx.state_name_map);
     MethodDef {
         id: method.id,
-        def_id: method.def_id,
         attrs: method.attrs,
         sig: MethodSig {
             name: method.sig.name,
             type_params: method.sig.type_params,
             self_param: SelfParam {
                 id: node_id_gen.new_id(),
-                def_id: (),
                 mode: ParamMode::Sink,
                 span: ctx.span,
             },
@@ -112,14 +104,11 @@ impl TransitionLiteralRewriter<'_> {
                     kind: ExprKind::Var {
                         ident: "self".to_string(),
                         // Resolved later in the normal resolver pass.
-                        def_id: (),
                     },
-                    ty: (),
                     span,
                 }),
                 field: field_name.to_string(),
             },
-            ty: (),
             span,
         }
     }
@@ -139,7 +128,7 @@ impl TransitionLiteralRewriter<'_> {
     }
 }
 
-impl VisitorMut<()> for TransitionLiteralRewriter<'_> {
+impl VisitorMut for TransitionLiteralRewriter<'_> {
     fn visit_expr(&mut self, expr: &mut Expr) {
         // Visit children first so nested transition literals are rewritten
         // before parent transforms potentially replace this node.
@@ -209,7 +198,7 @@ impl<'a> StateRefRewriter<'a> {
     }
 }
 
-impl VisitorMut<()> for StateRefRewriter<'_> {
+impl VisitorMut for StateRefRewriter<'_> {
     fn visit_type_expr(&mut self, type_expr: &mut TypeExpr) {
         if let TypeExprKind::Named { ident, .. } = &mut type_expr.kind {
             self.rewrite_name(ident);

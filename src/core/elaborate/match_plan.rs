@@ -21,8 +21,7 @@
 //! without re-examining pattern structure.
 
 use crate::core::elaborate::elaborator::Elaborator;
-use crate::core::tree::NodeId;
-use crate::core::tree::normalized as norm;
+use crate::core::tree as ast;
 use crate::core::tree::semantic as sem;
 use crate::core::types::Type;
 
@@ -33,9 +32,9 @@ impl<'a> Elaborator<'a> {
     /// switch-based or decision-tree-based dispatch strategy.
     pub(super) fn build_match_plan(
         &mut self,
-        _match_id: NodeId,
+        _match_id: ast::NodeId,
         scrutinee_ty: Type,
-        arms: &[norm::MatchArm],
+        arms: &[ast::MatchArm],
     ) -> sem::MatchPlan {
         let (peeled_ty, deref_count) = scrutinee_ty.peel_heap_with_count();
         let scrutinee_place = self.scrutinee_place(&peeled_ty, deref_count);
@@ -59,7 +58,7 @@ impl<'a> Elaborator<'a> {
         &mut self,
         scrutinee_ty: &Type,
         scrutinee_place: &sem::MatchPlace,
-        arms: &[norm::MatchArm],
+        arms: &[ast::MatchArm],
     ) -> (sem::MatchDecision, Vec<sem::MatchArmPlan>) {
         let mut cases = Vec::new();
         let mut default = None;
@@ -68,10 +67,10 @@ impl<'a> Elaborator<'a> {
         for (index, arm) in arms.iter().enumerate() {
             let mut bindings = Vec::new();
             match &arm.pattern {
-                norm::MatchPattern::Wildcard { .. } => {
+                ast::MatchPattern::Wildcard { .. } => {
                     default = Some(index);
                 }
-                norm::MatchPattern::EnumVariant {
+                ast::MatchPattern::EnumVariant {
                     variant_name,
                     bindings: pattern_bindings,
                     ..
@@ -89,24 +88,19 @@ impl<'a> Elaborator<'a> {
                         &mut bindings,
                     );
                 }
-                norm::MatchPattern::BoolLit { value, .. } => {
+                ast::MatchPattern::BoolLit { value, .. } => {
                     cases.push(sem::MatchSwitchCase {
                         value: u64::from(*value),
                         arm_index: index,
                     });
                 }
-                norm::MatchPattern::IntLit { value, .. } => {
+                ast::MatchPattern::IntLit { value, .. } => {
                     cases.push(sem::MatchSwitchCase {
                         value: *value,
                         arm_index: index,
                     });
                 }
-                norm::MatchPattern::TypedBinding {
-                    id,
-                    def_id,
-                    ty_expr,
-                    ..
-                } => {
+                ast::MatchPattern::TypedBinding { id, ty_expr, .. } => {
                     let Type::ErrorUnion { ok_ty, err_tys } = scrutinee_ty else {
                         panic!(
                             "compiler bug: typed binding pattern in switch plan requires error-union scrutinee"
@@ -115,6 +109,7 @@ impl<'a> Elaborator<'a> {
                     let payload_ty = self
                         .type_map
                         .lookup_node_type(ty_expr.id)
+                        .filter(|ty| !matches!(ty, Type::Unknown))
                         .or_else(|| {
                             self.error_union_variant_from_type_expr(ok_ty, err_tys, ty_expr)
                                 .cloned()
@@ -138,12 +133,12 @@ impl<'a> Elaborator<'a> {
                         arm_index: index,
                     });
                     bindings.push(sem::MatchBinding {
-                        def_id: *def_id,
+                        def_id: self.def_id_for(*id),
                         node_id: *id,
                         source: self.error_union_payload_place(scrutinee_place, payload_ty),
                     });
                 }
-                norm::MatchPattern::Binding { .. } | norm::MatchPattern::Tuple { .. } => {
+                ast::MatchPattern::Binding { .. } | ast::MatchPattern::Tuple { .. } => {
                     panic!(
                         "compiler bug: unexpected match pattern in switch plan: {:?}",
                         arm.pattern
@@ -171,7 +166,7 @@ impl<'a> Elaborator<'a> {
         &mut self,
         scrutinee_ty: &Type,
         scrutinee_place: &sem::MatchPlace,
-        arms: &[norm::MatchArm],
+        arms: &[ast::MatchArm],
     ) -> (sem::MatchDecision, Vec<sem::MatchArmPlan>) {
         let mut decisions = Vec::with_capacity(arms.len());
         let mut arm_plans = Vec::with_capacity(arms.len());
@@ -181,8 +176,8 @@ impl<'a> Elaborator<'a> {
             let mut bindings = Vec::new();
 
             match &arm.pattern {
-                norm::MatchPattern::Wildcard { .. } => {}
-                norm::MatchPattern::Tuple { patterns, .. } => {
+                ast::MatchPattern::Wildcard { .. } => {}
+                ast::MatchPattern::Tuple { patterns, .. } => {
                     self.collect_tuple_pattern_tests(
                         scrutinee_ty,
                         scrutinee_place,
@@ -305,9 +300,9 @@ impl<'a> Elaborator<'a> {
         &self,
         ok_ty: &'b Type,
         err_tys: &'b [Type],
-        ty_expr: &norm::TypeExpr,
+        ty_expr: &ast::TypeExpr,
     ) -> Option<&'b Type> {
-        let norm::TypeExprKind::Named { ident, .. } = &ty_expr.kind else {
+        let ast::TypeExprKind::Named { ident, .. } = &ty_expr.kind else {
             return None;
         };
         std::iter::once(ok_ty)
@@ -370,8 +365,8 @@ impl<'a> Elaborator<'a> {
         &self,
         tuple_ty: &Type,
         tuple_place: &sem::MatchPlace,
-        patterns: &[norm::MatchPattern],
-        arm_id: NodeId,
+        patterns: &[ast::MatchPattern],
+        arm_id: ast::NodeId,
         tests: &mut Vec<sem::MatchTest>,
     ) {
         let Type::Tuple { field_tys } = tuple_ty else {
@@ -396,15 +391,15 @@ impl<'a> Elaborator<'a> {
         &self,
         field_ty: &Type,
         field_place: &sem::MatchPlace,
-        pattern: &norm::MatchPattern,
-        arm_id: NodeId,
+        pattern: &ast::MatchPattern,
+        arm_id: ast::NodeId,
         tests: &mut Vec<sem::MatchTest>,
     ) {
         match pattern {
-            norm::MatchPattern::Binding { .. }
-            | norm::MatchPattern::TypedBinding { .. }
-            | norm::MatchPattern::Wildcard { .. } => {}
-            norm::MatchPattern::BoolLit { value, .. } => {
+            ast::MatchPattern::Binding { .. }
+            | ast::MatchPattern::TypedBinding { .. }
+            | ast::MatchPattern::Wildcard { .. } => {}
+            ast::MatchPattern::BoolLit { value, .. } => {
                 let (peeled_ty, deref_count) = field_ty.peel_heap_with_count();
                 if !matches!(peeled_ty, Type::Bool) {
                     panic!("compiler bug: bool pattern on non-bool in arm {arm_id}");
@@ -415,7 +410,7 @@ impl<'a> Elaborator<'a> {
                     kind: sem::MatchTestKind::Bool { value: *value },
                 });
             }
-            norm::MatchPattern::IntLit { value, .. } => {
+            ast::MatchPattern::IntLit { value, .. } => {
                 let (peeled_ty, deref_count) = field_ty.peel_heap_with_count();
                 let Type::Int { signed, bits, .. } = peeled_ty else {
                     panic!("compiler bug: int pattern on non-int in arm {arm_id}");
@@ -430,7 +425,7 @@ impl<'a> Elaborator<'a> {
                     },
                 });
             }
-            norm::MatchPattern::EnumVariant { variant_name, .. } => {
+            ast::MatchPattern::EnumVariant { variant_name, .. } => {
                 let (peeled_ty, deref_count) = field_ty.peel_heap_with_count();
                 let Type::Enum { .. } = &peeled_ty else {
                     panic!("compiler bug: enum pattern on non-enum in arm {arm_id}");
@@ -445,7 +440,7 @@ impl<'a> Elaborator<'a> {
                     },
                 });
             }
-            norm::MatchPattern::Tuple { patterns, .. } => {
+            ast::MatchPattern::Tuple { patterns, .. } => {
                 let (peeled_ty, deref_count) = field_ty.peel_heap_with_count();
                 let Type::Tuple { .. } = &peeled_ty else {
                     panic!("compiler bug: tuple pattern on non-tuple in arm {arm_id}");
@@ -461,7 +456,7 @@ impl<'a> Elaborator<'a> {
         &self,
         tuple_ty: &Type,
         tuple_place: &sem::MatchPlace,
-        patterns: &[norm::MatchPattern],
+        patterns: &[ast::MatchPattern],
         bindings: &mut Vec<sem::MatchBinding>,
     ) {
         let Type::Tuple { field_tys } = tuple_ty else {
@@ -478,24 +473,24 @@ impl<'a> Elaborator<'a> {
                 field_ty.clone(),
             );
             match pattern {
-                norm::MatchPattern::Binding { id, def_id, .. } => {
+                ast::MatchPattern::Binding { id, .. } => {
                     bindings.push(sem::MatchBinding {
-                        def_id: *def_id,
+                        def_id: self.def_id_for(*id),
                         node_id: *id,
                         source: field_place,
                     });
                 }
-                norm::MatchPattern::TypedBinding { id, def_id, .. } => {
+                ast::MatchPattern::TypedBinding { id, .. } => {
                     bindings.push(sem::MatchBinding {
-                        def_id: *def_id,
+                        def_id: self.def_id_for(*id),
                         node_id: *id,
                         source: field_place,
                     });
                 }
-                norm::MatchPattern::Wildcard { .. }
-                | norm::MatchPattern::BoolLit { .. }
-                | norm::MatchPattern::IntLit { .. } => {}
-                norm::MatchPattern::EnumVariant {
+                ast::MatchPattern::Wildcard { .. }
+                | ast::MatchPattern::BoolLit { .. }
+                | ast::MatchPattern::IntLit { .. } => {}
+                ast::MatchPattern::EnumVariant {
                     variant_name,
                     bindings: pattern_bindings,
                     ..
@@ -514,7 +509,7 @@ impl<'a> Elaborator<'a> {
                         bindings,
                     );
                 }
-                norm::MatchPattern::Tuple { patterns, .. } => {
+                ast::MatchPattern::Tuple { patterns, .. } => {
                     let (peeled_ty, deref_count) = field_ty.peel_heap_with_count();
                     let Type::Tuple { .. } = &peeled_ty else {
                         panic!("compiler bug: tuple pattern on non-tuple in tuple binding");
@@ -535,7 +530,7 @@ impl<'a> Elaborator<'a> {
         enum_ty: &Type,
         enum_place: &sem::MatchPlace,
         variant_name: &str,
-        pattern_bindings: &[norm::MatchPatternBinding],
+        pattern_bindings: &[ast::MatchPatternBinding],
         bindings: &mut Vec<sem::MatchBinding>,
     ) {
         let Type::Enum { variants, .. } = enum_ty else {
@@ -553,7 +548,7 @@ impl<'a> Elaborator<'a> {
             .zip(variant.payload.iter())
             .enumerate()
         {
-            let norm::MatchPatternBinding::Named { id, def_id, .. } = binding else {
+            let ast::MatchPatternBinding::Named { id, .. } = binding else {
                 continue;
             };
 
@@ -563,7 +558,7 @@ impl<'a> Elaborator<'a> {
                 offset: offsets[index],
             });
             bindings.push(sem::MatchBinding {
-                def_id: *def_id,
+                def_id: self.def_id_for(*id),
                 node_id: *id,
                 source: sem::MatchPlace {
                     base: enum_place.base.clone(),

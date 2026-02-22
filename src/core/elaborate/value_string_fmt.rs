@@ -19,7 +19,7 @@
 //! runtime length queries.
 
 use crate::core::elaborate::elaborator::Elaborator;
-use crate::core::tree::normalized as norm;
+use crate::core::tree as ast;
 use crate::core::tree::semantic as sem;
 use crate::core::types::Type;
 
@@ -32,27 +32,31 @@ impl<'a> Elaborator<'a> {
     /// Build a formatting plan for a string interpolation expression.
     pub(in crate::core::elaborate::value) fn elab_string_fmt_plan(
         &mut self,
-        segments: &[norm::StringFmtSegment],
+        segments: &[ast::StringFmtSegment],
     ) -> sem::StringFmtPlan {
         let mut plan_segments = Vec::with_capacity(segments.len());
         let mut reserve_terms = Vec::new();
 
         for segment in segments {
             match segment {
-                norm::StringFmtSegment::Literal { value, .. } => {
+                ast::StringFmtSegment::Literal { value, .. } => {
                     // Literal bytes contribute directly to both plan segments and reserve length.
                     plan_segments.push(sem::SegmentKind::LiteralBytes(value.clone()));
                     reserve_terms.push(sem::LenTerm::Literal(value.len()));
                 }
-                norm::StringFmtSegment::Expr { expr, .. } => {
-                    if let norm::ExprKind::StringLit { value } = &expr.kind {
+                ast::StringFmtSegment::Expr { expr, .. } => {
+                    if let ast::ExprKind::StringLit { value } = &expr.kind {
                         // Inline string literals as literal bytes for cheaper view formatting.
                         plan_segments.push(sem::SegmentKind::LiteralBytes(value.clone()));
                         reserve_terms.push(sem::LenTerm::Literal(value.len()));
                         continue;
                     }
 
-                    let ty = self.type_map.type_table().get(expr.ty).clone();
+                    let ty = self
+                        .type_map
+                        .type_table()
+                        .get(self.type_id_for(expr.id))
+                        .clone();
                     match ty {
                         Type::String => {
                             // String values require owned formatting and a dynamic reserve term.

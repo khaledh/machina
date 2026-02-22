@@ -6,10 +6,11 @@ use crate::core::api::{
 use crate::core::context::ParsedContext;
 use crate::core::machine::request_site::labeled_request_site_key;
 use crate::core::resolve::ResolveErrorKind;
-use crate::core::tree::NodeIdGen;
-use crate::core::tree::resolved as res;
 use crate::core::tree::semantic as sem;
 use crate::core::tree::visit::{self, Visitor};
+use crate::core::tree::{
+    EmitKind, Expr, ExprKind, FuncDef, MethodItem, NodeIdGen, TopLevelItem, TypeExprKind,
+};
 use crate::core::typecheck::TypeCheckErrorKind;
 use crate::core::types::Type;
 
@@ -1654,14 +1655,14 @@ typestate M {
     let mut found_handler = false;
     let mut aggregate = HandlerCommandNormalizationFinder::default();
     for item in &resolved.module.top_level_items {
-        let res::TopLevelItem::MethodBlock(block) = item else {
+        let TopLevelItem::MethodBlock(block) = item else {
             continue;
         };
         if !block.type_name.starts_with("__ts_") {
             continue;
         }
         for method_item in &block.method_items {
-            let res::MethodItem::Def(method) = method_item else {
+            let MethodItem::Def(method) = method_item else {
                 continue;
             };
             if !method.sig.name.starts_with("__ts_on_") {
@@ -1670,7 +1671,7 @@ typestate M {
             found_handler = true;
             assert!(matches!(
                 method.sig.ret_ty_expr.kind,
-                res::TypeExprKind::Named { ref ident, .. } if ident != "stay"
+                TypeExprKind::Named { ref ident, .. } if ident != "stay"
             ));
             aggregate.visit_expr(&method.body);
         }
@@ -1730,7 +1731,7 @@ typestate Connection {
         .filter(|block| block.type_name.starts_with("__ts_"))
         .flat_map(|block| &block.method_items)
         .filter_map(|item| match item {
-            res::MethodItem::Def(def) if def.sig.name.starts_with("__ts_on_") => Some(def),
+            MethodItem::Def(def) if def.sig.name.starts_with("__ts_on_") => Some(def),
             _ => None,
         })
         .next()
@@ -1744,11 +1745,11 @@ typestate Connection {
         .collect::<Vec<_>>();
     assert_eq!(names, vec!["__event", "__pending", "req", "ok"]);
     assert!(
-        matches!(handler.sig.params[1].typ.kind, res::TypeExprKind::Named { ref ident, .. } if ident == "Pending"),
+        matches!(handler.sig.params[1].typ.kind, TypeExprKind::Named { ref ident, .. } if ident == "Pending"),
         "expected hidden pending parameter in lowered provenance handler"
     );
     assert!(
-        matches!(handler.sig.params[2].typ.kind, res::TypeExprKind::Named { ref ident, .. } if ident == "AuthCheck"),
+        matches!(handler.sig.params[2].typ.kind, TypeExprKind::Named { ref ident, .. } if ident == "AuthCheck"),
         "expected provenance binding parameter type to be preserved"
     );
 }
@@ -1884,10 +1885,10 @@ typestate Connection {
         .context
         .expect("resolve should succeed for typestate spawn contract test");
 
-    let mut ctor: Option<&res::FuncDef> = None;
-    let mut spawn: Option<&res::FuncDef> = None;
+    let mut ctor: Option<&FuncDef> = None;
+    let mut spawn: Option<&FuncDef> = None;
     for item in &resolved.module.top_level_items {
-        let res::TopLevelItem::FuncDef(func) = item else {
+        let TopLevelItem::FuncDef(func) = item else {
             continue;
         };
         if func.sig.name == "__ts_ctor_Connection" {
@@ -1933,7 +1934,7 @@ fn main() {}
     let mut found_main = false;
     let mut found_bootstrap_call = false;
     for item in &resolved.module.top_level_items {
-        let res::TopLevelItem::FuncDef(func) = item else {
+        let TopLevelItem::FuncDef(func) = item else {
             continue;
         };
         if func.sig.name != "main" {
@@ -1961,11 +1962,11 @@ struct HandlerCommandNormalizationFinder {
     emit_request_seen: bool,
 }
 
-impl Visitor<crate::core::resolve::DefId> for HandlerCommandNormalizationFinder {
-    fn visit_expr(&mut self, expr: &res::Expr) {
+impl Visitor for HandlerCommandNormalizationFinder {
+    fn visit_expr(&mut self, expr: &Expr) {
         match &expr.kind {
-            res::ExprKind::Call { callee, .. } => {
-                if let res::ExprKind::Var { ident, .. } = &callee.kind {
+            ExprKind::Call { callee, .. } => {
+                if let ExprKind::Var { ident, .. } = &callee.kind {
                     if ident == "send" {
                         self.sugar_send_call_seen = true;
                     } else if ident == "request" {
@@ -1973,9 +1974,9 @@ impl Visitor<crate::core::resolve::DefId> for HandlerCommandNormalizationFinder 
                     }
                 }
             }
-            res::ExprKind::Emit { kind } => match kind {
-                res::EmitKind::Send { .. } => self.emit_send_seen = true,
-                res::EmitKind::Request { .. } => self.emit_request_seen = true,
+            ExprKind::Emit { kind } => match kind {
+                EmitKind::Send { .. } => self.emit_send_seen = true,
+                EmitKind::Request { .. } => self.emit_request_seen = true,
             },
             _ => {}
         }
@@ -1988,10 +1989,10 @@ struct SpawnForwardCtorCallFinder {
     forwards_ctor_call: bool,
 }
 
-impl Visitor<crate::core::resolve::DefId> for SpawnForwardCtorCallFinder {
-    fn visit_expr(&mut self, expr: &res::Expr) {
-        if let res::ExprKind::Call { callee, args } = &expr.kind
-            && let res::ExprKind::Var { ident, .. } = &callee.kind
+impl Visitor for SpawnForwardCtorCallFinder {
+    fn visit_expr(&mut self, expr: &Expr) {
+        if let ExprKind::Call { callee, args } = &expr.kind
+            && let ExprKind::Var { ident, .. } = &callee.kind
             && ident == "__ts_ctor_Connection"
             && args.len() == 2
         {
@@ -2006,10 +2007,10 @@ struct BootstrapCallFinder {
     found: bool,
 }
 
-impl Visitor<crate::core::resolve::DefId> for BootstrapCallFinder {
-    fn visit_expr(&mut self, expr: &res::Expr) {
-        if let res::ExprKind::Call { callee, .. } = &expr.kind
-            && let res::ExprKind::Var { ident, .. } = &callee.kind
+impl Visitor for BootstrapCallFinder {
+    fn visit_expr(&mut self, expr: &Expr) {
+        if let ExprKind::Call { callee, .. } = &expr.kind
+            && let ExprKind::Var { ident, .. } = &callee.kind
             && ident == "__mc_machine_runtime_managed_bootstrap_u64"
         {
             self.found = true;

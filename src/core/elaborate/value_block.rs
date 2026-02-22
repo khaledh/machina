@@ -8,7 +8,7 @@
 //! form later in the elaborate pipeline.
 
 use crate::core::elaborate::elaborator::Elaborator;
-use crate::core::tree::normalized as norm;
+use crate::core::tree as ast;
 use crate::core::tree::semantic as sem;
 use crate::core::types::Type;
 
@@ -16,23 +16,23 @@ impl<'a> Elaborator<'a> {
     /// Elaborate a single block item (statement or expression).
     pub(in crate::core::elaborate::value) fn elab_block_item(
         &mut self,
-        item: &norm::BlockItem,
+        item: &ast::BlockItem,
     ) -> sem::BlockItem {
         match item {
-            norm::BlockItem::Stmt(stmt) => sem::BlockItem::Stmt(self.elab_stmt_expr(stmt)),
-            norm::BlockItem::Expr(expr) => sem::BlockItem::Expr(self.elab_value(expr)),
+            ast::BlockItem::Stmt(stmt) => sem::BlockItem::Stmt(self.elab_stmt_expr(stmt)),
+            ast::BlockItem::Expr(expr) => sem::BlockItem::Expr(self.elab_value(expr)),
         }
     }
 
-    fn elab_stmt_expr(&mut self, stmt: &norm::StmtExpr) -> sem::StmtExpr {
-        let is_let = matches!(stmt.kind, norm::StmtExprKind::LetBind { .. });
+    fn elab_stmt_expr(&mut self, stmt: &ast::StmtExpr) -> sem::StmtExpr {
+        let is_let = matches!(stmt.kind, ast::StmtExprKind::LetBind { .. });
         let kind = match &stmt.kind {
-            norm::StmtExprKind::LetBind {
+            ast::StmtExprKind::LetBind {
                 pattern,
                 decl_ty,
                 value,
             }
-            | norm::StmtExprKind::VarBind {
+            | ast::StmtExprKind::VarBind {
                 pattern,
                 decl_ty,
                 value,
@@ -54,16 +54,12 @@ impl<'a> Elaborator<'a> {
                     }
                 }
             }
-            norm::StmtExprKind::VarDecl {
-                ident,
-                def_id,
-                decl_ty,
-            } => sem::StmtExprKind::VarDecl {
+            ast::StmtExprKind::VarDecl { ident, decl_ty } => sem::StmtExprKind::VarDecl {
                 ident: ident.clone(),
-                def_id: *def_id,
+                def_id: self.def_id_for(stmt.id),
                 decl_ty: decl_ty.clone(),
             },
-            norm::StmtExprKind::Assign {
+            ast::StmtExprKind::Assign {
                 assignee, value, ..
             } => {
                 let place = self.elab_place(assignee);
@@ -73,14 +69,14 @@ impl<'a> Elaborator<'a> {
                     init: self.init_info_for_id(place.id),
                 }
             }
-            norm::StmtExprKind::CompoundAssign { .. } => {
+            ast::StmtExprKind::CompoundAssign { .. } => {
                 panic!("normalize must desugar compound assignment before elaborate");
             }
-            norm::StmtExprKind::While { cond, body } => sem::StmtExprKind::While {
+            ast::StmtExprKind::While { cond, body } => sem::StmtExprKind::While {
                 cond: Box::new(self.elab_value(cond)),
                 body: Box::new(self.elab_value(body)),
             },
-            norm::StmtExprKind::For {
+            ast::StmtExprKind::For {
                 pattern,
                 iter,
                 body,
@@ -94,9 +90,9 @@ impl<'a> Elaborator<'a> {
                     body: Box::new(self.elab_value(body)),
                 }
             }
-            norm::StmtExprKind::Break => sem::StmtExprKind::Break,
-            norm::StmtExprKind::Continue => sem::StmtExprKind::Continue,
-            norm::StmtExprKind::Return { value } => sem::StmtExprKind::Return {
+            ast::StmtExprKind::Break => sem::StmtExprKind::Break,
+            ast::StmtExprKind::Continue => sem::StmtExprKind::Continue,
+            ast::StmtExprKind::Return { value } => sem::StmtExprKind::Return {
                 value: value.as_ref().map(|expr| Box::new(self.elab_value(expr))),
             },
         };
@@ -108,8 +104,12 @@ impl<'a> Elaborator<'a> {
         }
     }
 
-    fn for_iter_elem_type(&self, iter: &norm::Expr) -> Type {
-        let iter_ty = self.type_map.type_table().get(iter.ty).clone();
+    fn for_iter_elem_type(&self, iter: &ast::Expr) -> Type {
+        let iter_ty = self
+            .type_map
+            .type_table()
+            .get(self.type_id_for(iter.id))
+            .clone();
         self.iter_elem_type_or_panic(&iter_ty, "semantic for statement elaboration")
     }
 
@@ -120,28 +120,28 @@ impl<'a> Elaborator<'a> {
     /// correct closure type.
     fn elab_bind_value(
         &mut self,
-        pattern: &norm::BindPattern,
-        value: &norm::Expr,
+        pattern: &ast::BindPattern,
+        value: &ast::Expr,
     ) -> Box<sem::ValueExpr> {
-        if let norm::ExprKind::Closure {
+        if let ast::ExprKind::Closure {
             ident,
-            def_id,
             params,
             return_ty,
             body,
             captures: _,
         } = &value.kind
         {
-            if self.is_captureless_closure(*def_id) {
+            let def_id = self.def_id_for(value.id);
+            if self.is_captureless_closure(def_id) {
                 // Emit a top-level function for captureless closures.
                 self.ensure_closure_func(
-                    ident, *def_id, params, return_ty, body, value.span, value.id,
+                    ident, def_id, params, return_ty, body, value.span, value.id,
                 );
             } else {
                 let info = self.ensure_closure_info(
-                    ident, *def_id, params, return_ty, body, value.span, value.id,
+                    ident, def_id, params, return_ty, body, value.span, value.id,
                 );
-                self.record_closure_binding(pattern, *def_id, &info);
+                self.record_closure_binding(pattern, def_id, &info);
             }
         }
         Box::new(self.elab_value(value))

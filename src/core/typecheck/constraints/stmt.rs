@@ -42,12 +42,11 @@ impl<'a> ConstraintCollector<'a> {
                     self.collect_bind_pattern(pattern, value_ty);
                 }
             }
-            StmtExprKind::VarDecl {
-                def_id, decl_ty, ..
-            } => {
-                let def_term = self.def_term(*def_id);
+            StmtExprKind::VarDecl { decl_ty, .. } => {
+                let def_id = self.ctx.def_table.def_id(stmt.id);
+                let def_term = self.def_term(def_id);
                 if let Ok(ty) = self.resolve_type_in_scope(decl_ty) {
-                    self.push_eq(def_term, ty, ConstraintReason::Decl(*def_id, stmt.span));
+                    self.push_eq(def_term, ty, ConstraintReason::Decl(def_id, stmt.span));
                 }
             }
             StmtExprKind::Assign {

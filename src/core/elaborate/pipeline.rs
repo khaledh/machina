@@ -10,14 +10,14 @@
 //! `Elaborator` implementation to preserve behavior while making subsequent
 //! extraction work mechanical.
 
-use crate::core::tree::normalized as norm;
+use crate::core::tree as ast;
 use crate::core::tree::semantic as sem;
 
 use super::elaborator::Elaborator;
 use super::syntax_desugar;
 
 /// Run explicit pass boundaries for elaboration.
-pub(super) fn run(elaborator: &mut Elaborator<'_>, module: &norm::Module) -> sem::Module {
+pub(super) fn run(elaborator: &mut Elaborator<'_>, module: &ast::Module) -> sem::Module {
     elaborator.reset_module_state();
 
     // Pass 1: place/value lowering + plan capture.

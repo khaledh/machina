@@ -16,8 +16,7 @@ use thiserror::Error;
 use crate::core::diag::Span;
 use crate::core::lexer::{LexError, Lexer, Token};
 use crate::core::parse::{ParseError, Parser, ParserOptions};
-use crate::core::tree::NodeIdGen;
-use crate::core::tree::parsed::{Module, Require};
+use crate::core::tree::{Module, NodeIdGen, Require};
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct ModulePath {

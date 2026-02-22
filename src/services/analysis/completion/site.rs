@@ -2,8 +2,9 @@
 
 use crate::core::diag::{Position, Span};
 use crate::core::resolve::DefId;
-use crate::core::tree::resolved as res;
+use crate::core::tree::visit;
 use crate::core::tree::visit::Visitor;
+use crate::core::tree::{BindPattern, MatchPattern, Module, TypeExpr};
 use crate::core::types::Type;
 use crate::services::analysis::syntax_index::node_at_span;
 
@@ -60,7 +61,7 @@ pub(super) fn classify_completion_site(
     query_span: Span,
     resolved: &crate::core::context::ResolvedContext,
     typed: Option<&crate::core::context::TypeCheckedContext>,
-    enclosing_callable_def_id: impl Fn(&crate::core::tree::typed::Module, Position) -> Option<DefId>,
+    enclosing_callable_def_id: impl Fn(&Module, Position) -> Option<DefId>,
 ) -> CompletionSite {
     let cursor = query_span.start;
     let offset = offset_for_position(source, query_span.start).unwrap_or(source.len());
@@ -126,7 +127,7 @@ fn classify_member_site(
     query_span: Span,
     typed: Option<&crate::core::context::TypeCheckedContext>,
     probe: &PrefixProbe,
-    enclosing_callable_def_id: &impl Fn(&crate::core::tree::typed::Module, Position) -> Option<DefId>,
+    enclosing_callable_def_id: &impl Fn(&Module, Position) -> Option<DefId>,
 ) -> Option<CompletionSite> {
     let bytes = source.as_bytes();
     if probe.dot_probe == 0 || bytes[probe.dot_probe - 1] != b'.' {
@@ -211,7 +212,7 @@ fn qualified_path_segments(
     Some(segments)
 }
 
-fn requires_site_at_cursor(module: &res::Module, cursor: Position) -> bool {
+fn requires_site_at_cursor(module: &Module, cursor: Position) -> bool {
     module
         .requires
         .iter()
@@ -225,7 +226,7 @@ struct PatternAndTypeClassifier {
 }
 
 impl PatternAndTypeClassifier {
-    fn classify(module: &res::Module, cursor: Position) -> Self {
+    fn classify(module: &Module, cursor: Position) -> Self {
         let mut classifier = Self {
             cursor,
             in_type_expr: false,
@@ -236,35 +237,35 @@ impl PatternAndTypeClassifier {
     }
 }
 
-impl Visitor<DefId, ()> for PatternAndTypeClassifier {
-    fn visit_type_expr(&mut self, type_expr: &crate::core::tree::TypeExpr<DefId>) {
+impl Visitor for PatternAndTypeClassifier {
+    fn visit_type_expr(&mut self, type_expr: &TypeExpr) {
         if span_contains_pos(type_expr.span, self.cursor) {
             self.in_type_expr = true;
         }
-        crate::core::tree::visit::walk_type_expr(self, type_expr);
+        visit::walk_type_expr(self, type_expr);
     }
 
-    fn visit_bind_pattern(&mut self, pattern: &crate::core::tree::BindPattern<DefId>) {
+    fn visit_bind_pattern(&mut self, pattern: &BindPattern) {
         if span_contains_pos(pattern.span, self.cursor) {
             self.in_pattern = true;
         }
-        crate::core::tree::visit::walk_bind_pattern(self, pattern);
+        visit::walk_bind_pattern(self, pattern);
     }
 
-    fn visit_match_pattern(&mut self, pattern: &crate::core::tree::MatchPattern<DefId>) {
+    fn visit_match_pattern(&mut self, pattern: &MatchPattern) {
         let span = match pattern {
-            crate::core::tree::MatchPattern::Wildcard { span }
-            | crate::core::tree::MatchPattern::BoolLit { span, .. }
-            | crate::core::tree::MatchPattern::IntLit { span, .. }
-            | crate::core::tree::MatchPattern::Binding { span, .. }
-            | crate::core::tree::MatchPattern::TypedBinding { span, .. }
-            | crate::core::tree::MatchPattern::Tuple { span, .. }
-            | crate::core::tree::MatchPattern::EnumVariant { span, .. } => *span,
+            MatchPattern::Wildcard { span }
+            | MatchPattern::BoolLit { span, .. }
+            | MatchPattern::IntLit { span, .. }
+            | MatchPattern::Binding { span, .. }
+            | MatchPattern::TypedBinding { span, .. }
+            | MatchPattern::Tuple { span, .. }
+            | MatchPattern::EnumVariant { span, .. } => *span,
         };
         if span_contains_pos(span, self.cursor) {
             self.in_pattern = true;
         }
-        crate::core::tree::visit::walk_match_pattern(self, pattern);
+        visit::walk_match_pattern(self, pattern);
     }
 }
 

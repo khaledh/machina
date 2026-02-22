@@ -1,46 +1,45 @@
 //! Parsed-tree-based CFG construction.
 
 use crate::core::analysis::dataflow::DataflowGraph;
-use crate::core::resolve::DefId;
 use crate::core::tree::{BindPattern, BlockItem, Expr, ExprKind, StmtExpr, StmtExprKind};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct AstBlockId(pub usize);
 
-pub enum CfgItem<'a, D, T = ()> {
-    Stmt(&'a StmtExpr<D, T>),
-    Expr(&'a Expr<D, T>),
+pub enum CfgItem<'a> {
+    Stmt(&'a StmtExpr),
+    Expr(&'a Expr),
 }
 
-pub enum CfgTerminator<'a, D, T = ()> {
+pub enum CfgTerminator<'a> {
     Goto(AstBlockId),
     If {
-        cond: &'a Expr<D, T>,
+        cond: &'a Expr,
         then_bb: AstBlockId,
         else_bb: AstBlockId,
     },
     End,
 }
 
-pub struct CfgNode<'a, D, T = ()> {
-    pub items: Vec<CfgItem<'a, D, T>>,
-    pub term: CfgTerminator<'a, D, T>,
-    pub loop_inits: Vec<&'a BindPattern<D>>,
+pub struct CfgNode<'a> {
+    pub items: Vec<CfgItem<'a>>,
+    pub term: CfgTerminator<'a>,
+    pub loop_inits: Vec<&'a BindPattern>,
 }
 
-pub struct Cfg<'a, D, T = ()> {
-    pub nodes: Vec<CfgNode<'a, D, T>>,
+pub struct Cfg<'a> {
+    pub nodes: Vec<CfgNode<'a>>,
     preds: Vec<Vec<AstBlockId>>,
     succs: Vec<Vec<AstBlockId>>,
 }
 
-pub struct CfgBuilder<'a, D, T = ()> {
-    nodes: Vec<CfgNode<'a, D, T>>,
+pub struct CfgBuilder<'a> {
+    nodes: Vec<CfgNode<'a>>,
     succs: Vec<Vec<AstBlockId>>,
     loop_stack: Vec<LoopContext>,
 }
 
-impl<'a, D, T> Default for CfgBuilder<'a, D, T> {
+impl<'a> Default for CfgBuilder<'a> {
     fn default() -> Self {
         Self::new()
     }
@@ -58,7 +57,7 @@ struct BlockRange {
     exit: AstBlockId,
 }
 
-impl<'a, D, T> CfgBuilder<'a, D, T> {
+impl<'a> CfgBuilder<'a> {
     pub fn new() -> Self {
         Self {
             nodes: Vec::new(),
@@ -82,25 +81,25 @@ impl<'a, D, T> CfgBuilder<'a, D, T> {
         self.succs[from.0].push(to);
     }
 
-    fn set_term(&mut self, block: AstBlockId, term: CfgTerminator<'a, D, T>) {
+    fn set_term(&mut self, block: AstBlockId, term: CfgTerminator<'a>) {
         self.nodes[block.0].term = term;
     }
 
-    fn push_item(&mut self, block: AstBlockId, item: CfgItem<'a, D, T>) {
+    fn push_item(&mut self, block: AstBlockId, item: CfgItem<'a>) {
         self.nodes[block.0].items.push(item);
     }
 
-    fn push_loop_init(&mut self, block: AstBlockId, pattern: &'a BindPattern<D>) {
+    fn push_loop_init(&mut self, block: AstBlockId, pattern: &'a BindPattern) {
         self.nodes[block.0].loop_inits.push(pattern);
     }
 
-    pub fn build_from_expr(self, expr: &'a Expr<D, T>) -> Cfg<'a, D, T> {
+    pub fn build_from_expr(self, expr: &'a Expr) -> Cfg<'a> {
         let mut builder = self;
         let _ = builder.build_block_expr(expr);
         builder.finish()
     }
 
-    fn build_block_expr(&mut self, expr: &'a Expr<D, T>) -> BlockRange {
+    fn build_block_expr(&mut self, expr: &'a Expr) -> BlockRange {
         let ExprKind::Block { items, tail } = &expr.kind else {
             // For now, require a block expression at entry.
             let b = self.new_block();
@@ -139,7 +138,7 @@ impl<'a, D, T> CfgBuilder<'a, D, T> {
         }
     }
 
-    fn handle_stmt(&mut self, curr_bb: AstBlockId, stmt: &'a StmtExpr<D, T>) -> AstBlockId {
+    fn handle_stmt(&mut self, curr_bb: AstBlockId, stmt: &'a StmtExpr) -> AstBlockId {
         match &stmt.kind {
             StmtExprKind::While { cond, body } => {
                 let cond_bb = self.new_block();
@@ -237,7 +236,7 @@ impl<'a, D, T> CfgBuilder<'a, D, T> {
         }
     }
 
-    fn handle_expr(&mut self, cur: AstBlockId, expr: &'a Expr<D, T>) -> AstBlockId {
+    fn handle_expr(&mut self, cur: AstBlockId, expr: &'a Expr) -> AstBlockId {
         match &expr.kind {
             ExprKind::If {
                 cond,
@@ -259,7 +258,7 @@ impl<'a, D, T> CfgBuilder<'a, D, T> {
                 self.push_edge(cur, then_range.entry);
                 self.push_edge(cur, else_range.entry);
 
-                // Join edges (if blocks don’t already end).
+                // Join edges (if blocks don't already end).
                 self.push_edge(then_range.exit, join);
                 self.push_edge(else_range.exit, join);
 
@@ -269,7 +268,7 @@ impl<'a, D, T> CfgBuilder<'a, D, T> {
         }
     }
 
-    fn finish(self) -> Cfg<'a, D, T> {
+    fn finish(self) -> Cfg<'a> {
         let mut preds = vec![vec![]; self.nodes.len()];
         for (idx, outs) in self.succs.iter().enumerate() {
             let src = AstBlockId(idx);
@@ -286,7 +285,7 @@ impl<'a, D, T> CfgBuilder<'a, D, T> {
     }
 }
 
-impl<D, T> DataflowGraph for Cfg<'_, D, T> {
+impl DataflowGraph for Cfg<'_> {
     type Node = AstBlockId;
 
     fn num_nodes(&self) -> usize {
@@ -309,9 +308,3 @@ impl<D, T> DataflowGraph for Cfg<'_, D, T> {
         &self.succs[node.0]
     }
 }
-
-pub type TreeCfgItem<'a, Ty = ()> = CfgItem<'a, DefId, Ty>;
-pub type TreeCfgTerminator<'a, Ty = ()> = CfgTerminator<'a, DefId, Ty>;
-pub type TreeCfgNode<'a, Ty = ()> = CfgNode<'a, DefId, Ty>;
-pub type TreeCfg<'a, Ty = ()> = Cfg<'a, DefId, Ty>;
-pub type TreeCfgBuilder<'a, Ty = ()> = CfgBuilder<'a, DefId, Ty>;

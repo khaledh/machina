@@ -1,7 +1,7 @@
 use thiserror::Error;
 
 use crate::core::diag::{Span, SpannedError};
-use crate::core::tree::normalized::ExprKind;
+use crate::core::tree::ExprKind;
 use crate::core::types::Type;
 
 #[derive(Debug, Clone, Error)]

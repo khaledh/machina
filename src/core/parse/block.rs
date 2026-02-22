@@ -71,7 +71,6 @@ impl<'a> Parser<'a> {
         Ok(Expr {
             id: self.id_gen.new_id(),
             kind: ExprKind::Block { items, tail },
-            ty: (),
             span: self.close(marker),
         })
     }
@@ -119,7 +118,6 @@ impl<'a> Parser<'a> {
                 decl_ty,
                 value: Box::new(value),
             },
-            ty: (),
             span: self.close(marker),
         })
     }
@@ -154,7 +152,6 @@ impl<'a> Parser<'a> {
                     decl_ty,
                     value: Box::new(value),
                 },
-                ty: (),
                 span: self.close(marker),
             })
         } else {
@@ -168,12 +165,7 @@ impl<'a> Parser<'a> {
 
             Ok(StmtExpr {
                 id: self.id_gen.new_id(),
-                kind: StmtExprKind::VarDecl {
-                    ident,
-                    def_id: (),
-                    decl_ty,
-                },
-                ty: (),
+                kind: StmtExprKind::VarDecl { ident, decl_ty },
                 span: self.close(marker),
             })
         }
@@ -209,7 +201,6 @@ impl<'a> Parser<'a> {
         Ok(StmtExpr {
             id: self.id_gen.new_id(),
             kind,
-            ty: (),
             span: self.close(marker),
         })
     }
@@ -231,7 +222,6 @@ impl<'a> Parser<'a> {
                 cond: Box::new(cond),
                 body: Box::new(body),
             },
-            ty: (),
             span: self.close(marker),
         })
     }
@@ -258,7 +248,6 @@ impl<'a> Parser<'a> {
                 iter: Box::new(iter),
                 body: Box::new(body),
             },
-            ty: (),
             span: self.close(marker),
         })
     }
@@ -272,7 +261,6 @@ impl<'a> Parser<'a> {
         Ok(StmtExpr {
             id: self.id_gen.new_id(),
             kind: StmtExprKind::Break,
-            ty: (),
             span: self.close(marker),
         })
     }
@@ -286,7 +274,6 @@ impl<'a> Parser<'a> {
         Ok(StmtExpr {
             id: self.id_gen.new_id(),
             kind: StmtExprKind::Continue,
-            ty: (),
             span: self.close(marker),
         })
     }
@@ -307,7 +294,6 @@ impl<'a> Parser<'a> {
         Ok(StmtExpr {
             id: self.id_gen.new_id(),
             kind: StmtExprKind::Return { value },
-            ty: (),
             span: self.close(marker),
         })
     }

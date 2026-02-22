@@ -10,19 +10,19 @@ impl<'a> ConstraintCollector<'a> {
 
     pub(super) fn collect_match_pattern_bindings(&mut self, pattern: &MatchPattern) {
         match pattern {
-            MatchPattern::Binding {
-                def_id, id, span, ..
-            } => {
-                let bind_term = self.def_term(*def_id);
-                let node_term = self.node_term(*id);
-                self.push_eq(node_term, bind_term, ConstraintReason::Pattern(*id, *span));
+            MatchPattern::Binding { id, span, .. } => {
+                if let Some(def_id) = self.lookup_def_id(*id) {
+                    let bind_term = self.def_term(def_id);
+                    let node_term = self.node_term(*id);
+                    self.push_eq(node_term, bind_term, ConstraintReason::Pattern(*id, *span));
+                }
             }
-            MatchPattern::TypedBinding {
-                def_id, id, span, ..
-            } => {
-                let bind_term = self.def_term(*def_id);
-                let node_term = self.node_term(*id);
-                self.push_eq(node_term, bind_term, ConstraintReason::Pattern(*id, *span));
+            MatchPattern::TypedBinding { id, span, .. } => {
+                if let Some(def_id) = self.lookup_def_id(*id) {
+                    let bind_term = self.def_term(def_id);
+                    let node_term = self.node_term(*id);
+                    self.push_eq(node_term, bind_term, ConstraintReason::Pattern(*id, *span));
+                }
             }
             MatchPattern::Tuple { patterns, .. } => {
                 for pattern in patterns {
@@ -31,16 +31,17 @@ impl<'a> ConstraintCollector<'a> {
             }
             MatchPattern::EnumVariant { bindings, .. } => {
                 for binding in bindings {
-                    if let crate::core::tree::resolved::MatchPatternBinding::Named {
-                        def_id,
-                        id,
-                        span,
-                        ..
-                    } = binding
+                    if let crate::core::tree::MatchPatternBinding::Named { id, span, .. } = binding
                     {
-                        let bind_term = self.def_term(*def_id);
-                        let node_term = self.node_term(*id);
-                        self.push_eq(node_term, bind_term, ConstraintReason::Pattern(*id, *span));
+                        if let Some(def_id) = self.lookup_def_id(*id) {
+                            let bind_term = self.def_term(def_id);
+                            let node_term = self.node_term(*id);
+                            self.push_eq(
+                                node_term,
+                                bind_term,
+                                ConstraintReason::Pattern(*id, *span),
+                            );
+                        }
                     }
                 }
             }
@@ -59,19 +60,27 @@ impl<'a> ConstraintCollector<'a> {
         });
 
         match &pattern.kind {
-            BindPatternKind::Name { def_id, .. } => {
-                let bind_ty = self.def_term(*def_id);
+            BindPatternKind::Name { .. } => {
                 let node_ty = self.node_term(pattern.id);
-                self.push_eq(
-                    value_ty,
-                    bind_ty.clone(),
-                    ConstraintReason::Pattern(pattern.id, pattern.span),
-                );
-                self.push_eq(
-                    node_ty,
-                    bind_ty,
-                    ConstraintReason::Pattern(pattern.id, pattern.span),
-                );
+                if let Some(def_id) = self.lookup_def_id(pattern.id) {
+                    let bind_ty = self.def_term(def_id);
+                    self.push_eq(
+                        value_ty,
+                        bind_ty.clone(),
+                        ConstraintReason::Pattern(pattern.id, pattern.span),
+                    );
+                    self.push_eq(
+                        node_ty,
+                        bind_ty,
+                        ConstraintReason::Pattern(pattern.id, pattern.span),
+                    );
+                } else {
+                    self.push_eq(
+                        node_ty,
+                        value_ty,
+                        ConstraintReason::Pattern(pattern.id, pattern.span),
+                    );
+                }
             }
             BindPatternKind::Tuple { patterns } => {
                 let field_terms = patterns

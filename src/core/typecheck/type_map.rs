@@ -4,16 +4,18 @@
 //! resolves type expressions, records node/def/call typing side tables, and
 //! materializes final `TypeMap` outputs.
 
+use crate::core::context::{ResolvedContext, TypeCheckedContext};
 use crate::core::diag::Span;
 use crate::core::resolve::{Def, DefId, DefKind, DefTable};
-use crate::core::tree::normalized as norm;
-use crate::core::tree::resolved as res;
+use crate::core::tree as ast;
 use crate::core::tree::semantic as sem;
 use crate::core::tree::{NodeId, ParamMode, RefinementKind};
 use crate::core::typecheck::errors::{TEK, TypeCheckError};
 use crate::core::typecheck::nominal::NominalKey;
 use crate::core::typecheck::utils::{fn_param_mode, nominal_key_concreteness};
-use crate::core::types::{EnumVariant, FnParam, StructField, TyVarId, Type, TypeCache, TypeId};
+use crate::core::types::{
+    EnumVariant, FnParam, IntBounds, StructField, TyVarId, Type, TypeCache, TypeId,
+};
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::fmt;
 
@@ -41,7 +43,7 @@ fn builtin_type(name: &str) -> Option<Type> {
 pub(crate) fn resolve_type_expr(
     def_table: &DefTable,
     module: &impl TypeDefLookup,
-    type_expr: &res::TypeExpr,
+    type_expr: &ast::TypeExpr,
 ) -> Result<Type, TypeCheckError> {
     resolve_type_expr_with_params_and_args(def_table, module, type_expr, None, None, false)
 }
@@ -49,7 +51,7 @@ pub(crate) fn resolve_type_expr(
 pub(crate) fn resolve_type_expr_with_params(
     def_table: &DefTable,
     module: &impl TypeDefLookup,
-    type_expr: &res::TypeExpr,
+    type_expr: &ast::TypeExpr,
     type_params: Option<&TypeParamMap>,
 ) -> Result<Type, TypeCheckError> {
     resolve_type_expr_with_params_and_args(def_table, module, type_expr, type_params, None, false)
@@ -58,7 +60,7 @@ pub(crate) fn resolve_type_expr_with_params(
 pub(crate) fn resolve_return_type_expr_with_params(
     def_table: &DefTable,
     module: &impl TypeDefLookup,
-    type_expr: &res::TypeExpr,
+    type_expr: &ast::TypeExpr,
     type_params: Option<&TypeParamMap>,
 ) -> Result<Type, TypeCheckError> {
     resolve_type_expr_with_params_and_args(def_table, module, type_expr, type_params, None, true)
@@ -85,7 +87,7 @@ pub(crate) fn resolve_type_def_with_args(
         return Ok(imported_ty.clone());
     }
     let type_def = module
-        .type_def_by_id(def_id)
+        .type_def_by_id(def_table, def_id)
         .ok_or(TEK::UnknownType.at(Span::default()))?;
 
     if type_def.type_params.len() != type_args.len() {
@@ -100,13 +102,13 @@ pub(crate) fn resolve_type_def_with_args(
 
     let mut arg_map = TypeArgMap::new();
     for (param, arg_ty) in type_def.type_params.iter().zip(type_args.iter()) {
-        arg_map.insert(param.def_id, arg_ty.clone());
+        arg_map.insert(def_table.def_id(param.id), arg_ty.clone());
     }
 
     let type_name = mangle_type_name(&def.name, type_args);
     let mut in_progress = HashSet::new();
     match &type_def.kind {
-        res::TypeDefKind::Alias { aliased_ty } => resolve_type_alias(
+        ast::TypeDefKind::Alias { aliased_ty } => resolve_type_alias(
             def_table,
             module,
             def,
@@ -116,7 +118,7 @@ pub(crate) fn resolve_type_def_with_args(
             &mut in_progress,
             false,
         ),
-        res::TypeDefKind::Struct { fields } => resolve_struct_type(
+        ast::TypeDefKind::Struct { fields } => resolve_struct_type(
             def_table,
             module,
             def.id,
@@ -127,7 +129,7 @@ pub(crate) fn resolve_type_def_with_args(
             &mut in_progress,
             false,
         ),
-        res::TypeDefKind::Enum { variants } => resolve_enum_type(
+        ast::TypeDefKind::Enum { variants } => resolve_enum_type(
             def_table,
             module,
             def.id,
@@ -144,7 +146,7 @@ pub(crate) fn resolve_type_def_with_args(
 fn resolve_type_expr_with_params_and_args(
     def_table: &DefTable,
     module: &impl TypeDefLookup,
-    type_expr: &res::TypeExpr,
+    type_expr: &ast::TypeExpr,
     type_params: Option<&TypeParamMap>,
     type_args: Option<&TypeArgMap>,
     allow_error_union: bool,
@@ -162,55 +164,49 @@ fn resolve_type_expr_with_params_and_args(
 }
 
 pub(crate) trait TypeDefLookup {
-    fn type_def_by_id(&self, def_id: DefId) -> Option<&res::TypeDef>;
+    fn type_def_by_id(&self, def_table: &DefTable, def_id: DefId) -> Option<&ast::TypeDef>;
 
     fn imported_type_by_id(&self, _def_id: DefId) -> Option<&Type> {
         None
     }
 }
 
-impl TypeDefLookup for res::Module {
-    fn type_def_by_id(&self, def_id: DefId) -> Option<&res::TypeDef> {
-        res::Module::type_def_by_id(self, def_id)
-    }
-}
-
-impl TypeDefLookup for norm::Module {
-    fn type_def_by_id(&self, def_id: DefId) -> Option<&res::TypeDef> {
-        norm::Module::type_def_by_id(self, def_id)
+impl TypeDefLookup for ast::Module {
+    fn type_def_by_id(&self, def_table: &DefTable, def_id: DefId) -> Option<&ast::TypeDef> {
+        ast::Module::type_def_by_id(self, def_table, def_id)
     }
 }
 
 impl TypeDefLookup for sem::Module {
-    fn type_def_by_id(&self, def_id: DefId) -> Option<&res::TypeDef> {
-        sem::Module::type_def_by_id(self, def_id)
+    fn type_def_by_id(&self, def_table: &DefTable, def_id: DefId) -> Option<&ast::TypeDef> {
+        sem::Module::type_def_by_id(self, def_table, def_id)
     }
 }
 
-impl TypeDefLookup for crate::core::context::ResolvedContext {
-    fn type_def_by_id(&self, def_id: DefId) -> Option<&res::TypeDef> {
-        self.module.type_def_by_id(def_id)
+impl TypeDefLookup for ResolvedContext {
+    fn type_def_by_id(&self, _def_table: &DefTable, def_id: DefId) -> Option<&ast::TypeDef> {
+        self.module.type_def_by_id(&self.def_table, def_id)
     }
 }
 
-impl TypeDefLookup for crate::core::context::TypeCheckedContext {
-    fn type_def_by_id(&self, def_id: DefId) -> Option<&res::TypeDef> {
-        self.module.type_def_by_id(def_id)
+impl TypeDefLookup for TypeCheckedContext {
+    fn type_def_by_id(&self, _def_table: &DefTable, def_id: DefId) -> Option<&ast::TypeDef> {
+        self.module.type_def_by_id(&self.def_table, def_id)
     }
 }
 
 fn resolve_type_expr_impl(
     def_table: &DefTable,
     module: &impl TypeDefLookup,
-    type_expr: &res::TypeExpr,
+    type_expr: &ast::TypeExpr,
     type_params: Option<&TypeParamMap>,
     type_args: Option<&TypeArgMap>,
     in_progress: &mut HashSet<DefId>,
     allow_error_union: bool,
 ) -> Result<Type, TypeCheckError> {
     match &type_expr.kind {
-        res::TypeExprKind::Infer => Err(TEK::UnknownType.at(type_expr.span).into()),
-        res::TypeExprKind::Union { variants } => {
+        ast::TypeExprKind::Infer => Err(TEK::UnknownType.at(type_expr.span).into()),
+        ast::TypeExprKind::Union { variants } => {
             if !allow_error_union {
                 return Err(TEK::UnionNotAllowedHere.at(type_expr.span).into());
             }
@@ -237,22 +233,41 @@ fn resolve_type_expr_impl(
                 err_tys: err_tys.to_vec(),
             })
         }
-        res::TypeExprKind::Named {
-            def_id,
+        ast::TypeExprKind::Named {
+            ident,
             type_args: type_arg_exprs,
-            ..
-        } => resolve_named_type(
-            def_table,
-            module,
-            type_expr,
-            def_id,
-            type_arg_exprs,
-            type_params,
-            type_args,
-            in_progress,
-            allow_error_union,
-        ),
-        res::TypeExprKind::Array { elem_ty_expr, dims } => {
+        } => {
+            let def_id = if let Some(def_id) = def_table.lookup_node_def_id(type_expr.id) {
+                def_id
+            } else if let Some(type_params) = type_params {
+                type_params
+                    .keys()
+                    .copied()
+                    .find(|def_id| {
+                        def_table
+                            .lookup_def(*def_id)
+                            .is_some_and(|def| def.name == *ident)
+                    })
+                    .or_else(|| def_table.lookup_type_def_id(ident))
+                    .ok_or_else(|| TEK::UnknownType.at(type_expr.span))?
+            } else {
+                def_table
+                    .lookup_type_def_id(ident)
+                    .ok_or_else(|| TEK::UnknownType.at(type_expr.span))?
+            };
+            resolve_named_type(
+                def_table,
+                module,
+                type_expr,
+                &def_id,
+                type_arg_exprs,
+                type_params,
+                type_args,
+                in_progress,
+                allow_error_union,
+            )
+        }
+        ast::TypeExprKind::Array { elem_ty_expr, dims } => {
             let elem_ty = resolve_type_expr_impl(
                 def_table,
                 module,
@@ -267,7 +282,7 @@ fn resolve_type_expr_impl(
                 dims: dims.clone(),
             })
         }
-        res::TypeExprKind::DynArray { elem_ty_expr } => {
+        ast::TypeExprKind::DynArray { elem_ty_expr } => {
             let elem_ty = resolve_type_expr_impl(
                 def_table,
                 module,
@@ -281,7 +296,7 @@ fn resolve_type_expr_impl(
                 elem_ty: Box::new(elem_ty),
             })
         }
-        res::TypeExprKind::Tuple { field_ty_exprs } => {
+        ast::TypeExprKind::Tuple { field_ty_exprs } => {
             let field_tys = field_ty_exprs
                 .iter()
                 .map(|f| {
@@ -298,7 +313,7 @@ fn resolve_type_expr_impl(
                 .collect::<Result<Vec<Type>, _>>()?;
             Ok(Type::Tuple { field_tys })
         }
-        res::TypeExprKind::Refined {
+        ast::TypeExprKind::Refined {
             base_ty_expr,
             refinements,
         } => {
@@ -313,7 +328,7 @@ fn resolve_type_expr_impl(
             )?;
             apply_refinements(base_ty, refinements, type_expr.span)
         }
-        res::TypeExprKind::Slice { elem_ty_expr } => {
+        ast::TypeExprKind::Slice { elem_ty_expr } => {
             let elem_ty = resolve_type_expr_impl(
                 def_table,
                 module,
@@ -327,7 +342,7 @@ fn resolve_type_expr_impl(
                 elem_ty: Box::new(elem_ty),
             })
         }
-        res::TypeExprKind::Heap { elem_ty_expr } => {
+        ast::TypeExprKind::Heap { elem_ty_expr } => {
             let elem_ty = resolve_type_expr_impl(
                 def_table,
                 module,
@@ -341,7 +356,7 @@ fn resolve_type_expr_impl(
                 elem_ty: Box::new(elem_ty),
             })
         }
-        res::TypeExprKind::Ref {
+        ast::TypeExprKind::Ref {
             mutable,
             elem_ty_expr,
         } => {
@@ -359,7 +374,7 @@ fn resolve_type_expr_impl(
                 elem_ty: Box::new(elem_ty),
             })
         }
-        res::TypeExprKind::Fn {
+        ast::TypeExprKind::Fn {
             params,
             ret_ty_expr,
         } => {
@@ -438,7 +453,7 @@ fn apply_refinements(
                 ty = Type::Int {
                     signed,
                     bits,
-                    bounds: Some(crate::core::types::IntBounds {
+                    bounds: Some(IntBounds {
                         min: *min,
                         max_excl: *max,
                     }),
@@ -503,9 +518,9 @@ fn mangle_type_name(base: &str, type_args: &[Type]) -> String {
 fn resolve_named_type(
     def_table: &DefTable,
     module: &impl TypeDefLookup,
-    type_expr: &res::TypeExpr,
+    type_expr: &ast::TypeExpr,
     def_id: &DefId,
-    type_arg_exprs: &[res::TypeExpr],
+    type_arg_exprs: &[ast::TypeExpr],
     type_params: Option<&TypeParamMap>,
     type_args: Option<&TypeArgMap>,
     in_progress: &mut HashSet<DefId>,
@@ -621,7 +636,7 @@ fn resolve_named_type(
             Err(TEK::UnknownType.at(type_expr.span).into())
         }
         DefKind::TypeDef { .. } => {
-            let Some(type_def) = module.type_def_by_id(*def_id) else {
+            let Some(type_def) = module.type_def_by_id(def_table, *def_id) else {
                 if let Some(imported_ty) = module.imported_type_by_id(*def_id) {
                     if !type_arg_exprs.is_empty() {
                         return Err(TEK::TypeArgCountMismatch(
@@ -648,7 +663,7 @@ fn resolve_named_type(
                 }
                 let type_name = def.name.as_str();
                 return match &type_def.kind {
-                    res::TypeDefKind::Alias { aliased_ty } => resolve_type_alias(
+                    ast::TypeDefKind::Alias { aliased_ty } => resolve_type_alias(
                         def_table,
                         module,
                         def,
@@ -658,7 +673,7 @@ fn resolve_named_type(
                         in_progress,
                         allow_error_union,
                     ),
-                    res::TypeDefKind::Struct { fields } => resolve_struct_type(
+                    ast::TypeDefKind::Struct { fields } => resolve_struct_type(
                         def_table,
                         module,
                         def.id,
@@ -669,7 +684,7 @@ fn resolve_named_type(
                         in_progress,
                         allow_error_union,
                     ),
-                    res::TypeDefKind::Enum { variants } => resolve_enum_type(
+                    ast::TypeDefKind::Enum { variants } => resolve_enum_type(
                         def_table,
                         module,
                         def.id,
@@ -710,12 +725,12 @@ fn resolve_named_type(
 
             let mut arg_map = TypeArgMap::new();
             for (param, arg_ty) in type_def.type_params.iter().zip(resolved_args.iter()) {
-                arg_map.insert(param.def_id, arg_ty.clone());
+                arg_map.insert(def_table.def_id(param.id), arg_ty.clone());
             }
 
             let type_name = mangle_type_name(&def.name, &resolved_args);
             match &type_def.kind {
-                res::TypeDefKind::Alias { aliased_ty } => resolve_type_alias(
+                ast::TypeDefKind::Alias { aliased_ty } => resolve_type_alias(
                     def_table,
                     module,
                     def,
@@ -725,7 +740,7 @@ fn resolve_named_type(
                     in_progress,
                     allow_error_union,
                 ),
-                res::TypeDefKind::Struct { fields } => resolve_struct_type(
+                ast::TypeDefKind::Struct { fields } => resolve_struct_type(
                     def_table,
                     module,
                     def.id,
@@ -736,7 +751,7 @@ fn resolve_named_type(
                     in_progress,
                     allow_error_union,
                 ),
-                res::TypeDefKind::Enum { variants } => resolve_enum_type(
+                ast::TypeDefKind::Enum { variants } => resolve_enum_type(
                     def_table,
                     module,
                     def.id,
@@ -757,7 +772,7 @@ fn resolve_type_alias(
     def_table: &DefTable,
     module: &impl TypeDefLookup,
     def: &Def,
-    ty_expr: &res::TypeExpr,
+    ty_expr: &ast::TypeExpr,
     type_params: Option<&TypeParamMap>,
     type_args: Option<&TypeArgMap>,
     in_progress: &mut HashSet<DefId>,
@@ -785,7 +800,7 @@ fn resolve_struct_type(
     module: &impl TypeDefLookup,
     def_id: DefId,
     type_name: &str,
-    fields: &[res::StructDefField],
+    fields: &[ast::StructDefField],
     type_params: Option<&TypeParamMap>,
     type_args: Option<&TypeArgMap>,
     in_progress: &mut HashSet<DefId>,
@@ -820,7 +835,7 @@ fn resolve_struct_type(
 fn resolve_struct_fields(
     def_table: &DefTable,
     module: &impl TypeDefLookup,
-    fields: &[res::StructDefField],
+    fields: &[ast::StructDefField],
     type_params: Option<&TypeParamMap>,
     type_args: Option<&TypeArgMap>,
     in_progress: &mut HashSet<DefId>,
@@ -851,7 +866,7 @@ fn resolve_enum_type(
     module: &impl TypeDefLookup,
     def_id: DefId,
     type_name: &str,
-    variants: &[res::EnumDefVariant],
+    variants: &[ast::EnumDefVariant],
     type_params: Option<&TypeParamMap>,
     type_args: Option<&TypeArgMap>,
     in_progress: &mut HashSet<DefId>,
@@ -886,7 +901,7 @@ fn resolve_enum_type(
 fn resolve_enum_variants(
     def_table: &DefTable,
     module: &impl TypeDefLookup,
-    variants: &[res::EnumDefVariant],
+    variants: &[ast::EnumDefVariant],
     type_params: Option<&TypeParamMap>,
     type_args: Option<&TypeArgMap>,
     in_progress: &mut HashSet<DefId>,
@@ -1103,6 +1118,13 @@ impl TypeMap {
 
     pub fn lookup_node_type_id(&self, node: NodeId) -> Option<TypeId> {
         self.node_type.get(&node).copied()
+    }
+
+    pub fn type_of(&self, node: NodeId) -> TypeId {
+        self.node_type
+            .get(&node)
+            .copied()
+            .unwrap_or_else(|| panic!("missing type for node {node}"))
     }
 
     pub fn lookup_def_type(&self, def: &Def) -> Option<Type> {

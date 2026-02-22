@@ -9,10 +9,7 @@ use crate::core::capsule::ModuleId;
 use crate::core::context::ResolvedContext;
 use crate::core::diag::Span;
 use crate::core::resolve::{DefId, DefTable};
-use crate::core::tree::NodeId;
-use crate::core::tree::resolved::{
-    BindPattern, BindPatternKind, MatchPattern, MatchPatternBinding,
-};
+use crate::core::tree::{BindPattern, BindPatternKind, MatchPattern, MatchPatternBinding, NodeId};
 use crate::core::typecheck::constraints::PatternObligation;
 use crate::core::typecheck::errors::{TEK, TypeCheckError};
 use crate::core::typecheck::type_map::{resolve_type_def_with_args, resolve_type_expr};
@@ -28,6 +25,7 @@ pub(super) fn check_pattern_obligations(
     def_table: &DefTable,
     def_owners: &HashMap<DefId, ModuleId>,
     ctx: &ResolvedContext,
+    allow_missing_def_ids: bool,
 ) -> (Vec<TypeCheckError>, HashSet<NodeId>) {
     let mut errors = Vec::new();
     let mut covered = HashSet::new();
@@ -74,6 +72,7 @@ pub(super) fn check_pattern_obligations(
                     &mut errors,
                     &mut covered,
                     *arm_id,
+                    allow_missing_def_ids,
                 );
             }
         }
@@ -94,6 +93,7 @@ fn bind_match_pattern_types(
     errors: &mut Vec<TypeCheckError>,
     covered: &mut HashSet<NodeId>,
     pattern_id: NodeId,
+    allow_missing_def_ids: bool,
 ) {
     match pattern {
         MatchPattern::Wildcard { .. } => {}
@@ -108,18 +108,17 @@ fn bind_match_pattern_types(
                 let _ = unifier.unify(scrutinee_ty, &int_var);
             }
         }
-        MatchPattern::Binding { def_id, .. } => {
-            if let Some(term) = def_terms.get(def_id) {
+        MatchPattern::Binding { id, .. } => {
+            if let Some(def_id) = pattern_def_id(def_table, *id, allow_missing_def_ids)
+                && let Some(term) = def_terms.get(&def_id)
+            {
                 let _ = unifier.unify(term, scrutinee_ty);
             }
         }
         MatchPattern::TypedBinding {
-            id,
-            def_id,
-            ty_expr,
-            span,
-            ..
+            id, ty_expr, span, ..
         } => {
+            let def_id = pattern_def_id(def_table, *id, allow_missing_def_ids);
             if let Ok(pat_ty) = resolve_type_expr(def_table, ctx, ty_expr) {
                 let scrutinee_applied = unifier.apply(scrutinee_ty);
                 if let Type::ErrorUnion { ok_ty, err_tys } = &scrutinee_applied {
@@ -134,7 +133,9 @@ fn bind_match_pattern_types(
                         )
                     });
                     if matches_union_variant {
-                        if let Some(term) = def_terms.get(def_id) {
+                        if let Some(def_id) = def_id
+                            && let Some(term) = def_terms.get(&def_id)
+                        {
                             let _ = unifier.unify(term, &pat_ty);
                         }
                     } else if !super::term_utils::is_unresolved(&pat_ty) {
@@ -150,10 +151,14 @@ fn bind_match_pattern_types(
                         covered.insert(*id);
                         covered.insert(pattern_id);
                     }
-                } else if let Some(term) = def_terms.get(def_id) {
+                } else if let Some(def_id) = def_id
+                    && let Some(term) = def_terms.get(&def_id)
+                {
                     let _ = unifier.unify(term, &pat_ty);
                 }
-            } else if let Some(term) = def_terms.get(def_id) {
+            } else if let Some(def_id) = def_id
+                && let Some(term) = def_terms.get(&def_id)
+            {
                 let _ = unifier.unify(term, scrutinee_ty);
             }
         }
@@ -161,8 +166,17 @@ fn bind_match_pattern_types(
             if let Type::Tuple { field_tys } = scrutinee_ty {
                 for (child, child_ty) in patterns.iter().zip(field_tys.iter()) {
                     bind_match_pattern_types(
-                        child, child_ty, def_terms, unifier, type_defs, def_table, ctx, errors,
-                        covered, pattern_id,
+                        child,
+                        child_ty,
+                        def_terms,
+                        unifier,
+                        type_defs,
+                        def_table,
+                        ctx,
+                        errors,
+                        covered,
+                        pattern_id,
+                        allow_missing_def_ids,
                     );
                 }
             } else if super::term_utils::is_unresolved(scrutinee_ty) {
@@ -176,8 +190,17 @@ fn bind_match_pattern_types(
                 let _ = unifier.unify(scrutinee_ty, &inferred_tuple);
                 for (child, child_ty) in patterns.iter().zip(inferred_fields.iter()) {
                     bind_match_pattern_types(
-                        child, child_ty, def_terms, unifier, type_defs, def_table, ctx, errors,
-                        covered, pattern_id,
+                        child,
+                        child_ty,
+                        def_terms,
+                        unifier,
+                        type_defs,
+                        def_table,
+                        ctx,
+                        errors,
+                        covered,
+                        pattern_id,
+                        allow_missing_def_ids,
                     );
                 }
             }
@@ -210,8 +233,9 @@ fn bind_match_pattern_types(
 
             if let Some(variant) = matched_variant {
                 for (binding, payload_ty) in bindings.iter().zip(variant.payload.iter()) {
-                    if let MatchPatternBinding::Named { def_id, .. } = binding
-                        && let Some(term) = def_terms.get(def_id)
+                    if let MatchPatternBinding::Named { id, .. } = binding
+                        && let Some(def_id) = pattern_def_id(def_table, *id, allow_missing_def_ids)
+                        && let Some(term) = def_terms.get(&def_id)
                     {
                         let _ = unifier.unify(term, payload_ty);
                     }
@@ -221,17 +245,29 @@ fn bind_match_pattern_types(
     }
 }
 
+fn pattern_def_id(
+    def_table: &DefTable,
+    node_id: NodeId,
+    allow_missing_def_ids: bool,
+) -> Option<DefId> {
+    if allow_missing_def_ids {
+        def_table.lookup_node_def_id(node_id)
+    } else {
+        Some(def_table.def_id(node_id))
+    }
+}
+
 fn resolve_pattern_enum_type(
     pattern_id: NodeId,
     enum_name: &Option<String>,
-    type_args: &[crate::core::tree::resolved::TypeExpr],
+    type_args: &[crate::core::tree::TypeExpr],
     type_defs: &HashMap<String, Type>,
     def_table: &DefTable,
     ctx: &ResolvedContext,
     unifier: &mut TcUnifier,
 ) -> Option<Type> {
     if let Some(def_id) = def_table.lookup_node_def_id(pattern_id) {
-        let type_def = ctx.module.type_def_by_id(def_id)?;
+        let type_def = ctx.module.type_def_by_id(def_table, def_id)?;
         let resolved_args = if type_args.is_empty() {
             type_def
                 .type_params

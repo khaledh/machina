@@ -8,7 +8,7 @@ use crate::core::resolve::{
     ImportedCallableSig, ImportedModule, ImportedParamSig, ImportedSymbol, ImportedTraitMethodSig,
     ImportedTraitPropertySig, ImportedTraitSig,
 };
-use crate::core::tree::ParamMode;
+use crate::core::tree::{MethodSig, ParamMode, TopLevelItem};
 use crate::core::typecheck::type_map::{
     resolve_return_type_expr_with_params, resolve_type_def_with_args, resolve_type_expr_with_params,
 };
@@ -194,12 +194,8 @@ fn collect_public_callable_sigs(
     let mut out = HashMap::<String, Vec<ImportedCallableSig>>::new();
     for item in &typed.module.top_level_items {
         let callable = match item {
-            crate::core::tree::typed::TopLevelItem::FuncDecl(decl) => {
-                Some((&decl.sig.name, decl.def_id))
-            }
-            crate::core::tree::typed::TopLevelItem::FuncDef(def) => {
-                Some((&def.sig.name, def.def_id))
-            }
+            TopLevelItem::FuncDecl(decl) => Some((&decl.sig.name, typed.def_table.def_id(decl.id))),
+            TopLevelItem::FuncDef(def) => Some((&def.sig.name, typed.def_table.def_id(def.id))),
             _ => None,
         };
         let Some((name, def_id)) = callable else {
@@ -237,12 +233,10 @@ fn collect_public_callable_names(resolved: &ResolvedContext) -> HashSet<String> 
     let mut out = HashSet::new();
     for item in &resolved.module.top_level_items {
         let callable = match item {
-            crate::core::tree::resolved::TopLevelItem::FuncDecl(decl) => {
-                Some((&decl.sig.name, decl.def_id))
+            TopLevelItem::FuncDecl(decl) => {
+                Some((&decl.sig.name, resolved.def_table.def_id(decl.id)))
             }
-            crate::core::tree::resolved::TopLevelItem::FuncDef(def) => {
-                Some((&def.sig.name, def.def_id))
-            }
+            TopLevelItem::FuncDef(def) => Some((&def.sig.name, resolved.def_table.def_id(def.id))),
             _ => None,
         };
         let Some((name, def_id)) = callable else {
@@ -261,7 +255,10 @@ fn collect_public_callable_names(resolved: &ResolvedContext) -> HashSet<String> 
 fn collect_public_type_names(resolved: &ResolvedContext) -> HashSet<String> {
     let mut out = HashSet::new();
     for type_def in resolved.module.type_defs() {
-        let Some(def) = resolved.def_table.lookup_def(type_def.def_id) else {
+        let Some(def) = resolved
+            .def_table
+            .lookup_def(resolved.def_table.def_id(type_def.id))
+        else {
             continue;
         };
         if def.is_public() {
@@ -274,7 +271,10 @@ fn collect_public_type_names(resolved: &ResolvedContext) -> HashSet<String> {
 fn collect_public_trait_names(resolved: &ResolvedContext) -> HashSet<String> {
     let mut out = HashSet::new();
     for trait_def in resolved.module.trait_defs() {
-        let Some(def) = resolved.def_table.lookup_def(trait_def.def_id) else {
+        let Some(def) = resolved
+            .def_table
+            .lookup_def(resolved.def_table.def_id(trait_def.id))
+        else {
             continue;
         };
         if def.is_public() {
@@ -290,11 +290,13 @@ fn collect_public_callable_sigs_resolved(
     let mut out = HashMap::<String, Vec<ImportedCallableSig>>::new();
     for item in &resolved.module.top_level_items {
         let callable = match item {
-            crate::core::tree::resolved::TopLevelItem::FuncDecl(decl) => {
-                Some((&decl.sig.name, decl.def_id, &decl.sig))
-            }
-            crate::core::tree::resolved::TopLevelItem::FuncDef(def) => {
-                Some((&def.sig.name, def.def_id, &def.sig))
+            TopLevelItem::FuncDecl(decl) => Some((
+                &decl.sig.name,
+                resolved.def_table.def_id(decl.id),
+                &decl.sig,
+            )),
+            TopLevelItem::FuncDef(def) => {
+                Some((&def.sig.name, resolved.def_table.def_id(def.id), &def.sig))
             }
             _ => None,
         };
@@ -351,14 +353,14 @@ fn collect_public_type_tys(typed: &TypeCheckedContext) -> HashMap<String, Type> 
         if !type_def.type_params.is_empty() {
             continue;
         }
-        let Some(def) = typed.def_table.lookup_def(type_def.def_id) else {
+        let type_def_id = typed.def_table.def_id(type_def.id);
+        let Some(def) = typed.def_table.lookup_def(type_def_id) else {
             continue;
         };
         if !def.is_public() {
             continue;
         }
-        let Ok(ty) =
-            resolve_type_def_with_args(&typed.def_table, &typed.module, type_def.def_id, &[])
+        let Ok(ty) = resolve_type_def_with_args(&typed.def_table, &typed.module, type_def_id, &[])
         else {
             continue;
         };
@@ -370,7 +372,10 @@ fn collect_public_type_tys(typed: &TypeCheckedContext) -> HashMap<String, Type> 
 fn collect_public_trait_sigs(typed: &TypeCheckedContext) -> HashMap<String, ImportedTraitSig> {
     let mut out = HashMap::<String, ImportedTraitSig>::new();
     for trait_def in typed.module.trait_defs() {
-        let Some(def) = typed.def_table.lookup_def(trait_def.def_id) else {
+        let Some(def) = typed
+            .def_table
+            .lookup_def(typed.def_table.def_id(trait_def.id))
+        else {
             continue;
         };
         if !def.is_public() {
@@ -415,7 +420,7 @@ fn collect_public_trait_sigs(typed: &TypeCheckedContext) -> HashMap<String, Impo
 
 fn collect_imported_trait_method_sig(
     typed: &TypeCheckedContext,
-    sig: &crate::core::tree::typed::MethodSig,
+    sig: &MethodSig,
 ) -> Option<ImportedTraitMethodSig> {
     let type_param_map = if sig.type_params.is_empty() {
         None
@@ -424,7 +429,9 @@ fn collect_imported_trait_method_sig(
             sig.type_params
                 .iter()
                 .enumerate()
-                .map(|(index, param)| (param.def_id, TyVarId::new(index as u32)))
+                .map(|(index, param)| {
+                    (typed.def_table.def_id(param.id), TyVarId::new(index as u32))
+                })
                 .collect::<HashMap<_, _>>(),
         )
     };

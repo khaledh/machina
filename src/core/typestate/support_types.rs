@@ -125,17 +125,15 @@ pub(super) fn ensure_machine_runtime_intrinsics(module: &mut Module, node_id_gen
         }
         append.push(TopLevelItem::FuncDecl(FuncDecl {
             id: node_id_gen.new_id(),
-            def_id: (),
             attrs: Vec::new(),
-            sig: parsed::FunctionSig {
+            sig: FunctionSig {
                 name: name.to_string(),
                 type_params: Vec::new(),
                 params: param_names
                     .iter()
-                    .map(|param_name| parsed::Param {
+                    .map(|param_name| Param {
                         id: node_id_gen.new_id(),
                         ident: (*param_name).to_string(),
-                        def_id: (),
                         typ: u64_type_expr(node_id_gen, span),
                         mode: ParamMode::In,
                         span,
@@ -151,26 +149,22 @@ pub(super) fn ensure_machine_runtime_intrinsics(module: &mut Module, node_id_gen
     if !existing_callables.contains("__mc_machine_payload_pack") {
         append.push(TopLevelItem::FuncDecl(FuncDecl {
             id: node_id_gen.new_id(),
-            def_id: (),
             attrs: Vec::new(),
-            sig: parsed::FunctionSig {
+            sig: FunctionSig {
                 name: "__mc_machine_payload_pack".to_string(),
-                type_params: vec![parsed::TypeParam {
+                type_params: vec![TypeParam {
                     id: node_id_gen.new_id(),
                     ident: "T".to_string(),
                     bound: None,
-                    def_id: (),
                     span,
                 }],
-                params: vec![parsed::Param {
+                params: vec![Param {
                     id: node_id_gen.new_id(),
                     ident: "payload".to_string(),
-                    def_id: (),
                     typ: TypeExpr {
                         id: node_id_gen.new_id(),
                         kind: TypeExprKind::Named {
                             ident: "T".to_string(),
-                            def_id: (),
                             type_args: Vec::new(),
                         },
                         span,
@@ -208,7 +202,6 @@ pub(super) fn machine_handle_named_type_def(
 ) -> TopLevelItem {
     TopLevelItem::TypeDef(TypeDef {
         id: node_id_gen.new_id(),
-        def_id: (),
         attrs: Vec::new(),
         name: type_name.to_string(),
         type_params: Vec::new(),
@@ -227,7 +220,6 @@ pub(super) fn machine_handle_named_type_def(
 pub(super) fn empty_struct_type_def(name: &str, node_id_gen: &mut NodeIdGen) -> TopLevelItem {
     TopLevelItem::TypeDef(TypeDef {
         id: node_id_gen.new_id(),
-        def_id: (),
         attrs: Vec::new(),
         name: name.to_string(),
         type_params: Vec::new(),
@@ -240,15 +232,13 @@ pub(super) fn machine_target_id_u64_helper_def(node_id_gen: &mut NodeIdGen) -> T
     let span = Span::default();
     TopLevelItem::FuncDef(FuncDef {
         id: node_id_gen.new_id(),
-        def_id: (),
         attrs: Vec::new(),
-        sig: parsed::FunctionSig {
+        sig: FunctionSig {
             name: MACHINE_TARGET_ID_HELPER_FN.to_string(),
             type_params: Vec::new(),
-            params: vec![parsed::Param {
+            params: vec![Param {
                 id: node_id_gen.new_id(),
                 ident: "dst".to_string(),
-                def_id: (),
                 typ: u64_type_expr(node_id_gen, span),
                 mode: ParamMode::In,
                 span,
@@ -264,13 +254,10 @@ pub(super) fn machine_target_id_u64_helper_def(node_id_gen: &mut NodeIdGen) -> T
                     id: node_id_gen.new_id(),
                     kind: ExprKind::Var {
                         ident: "dst".to_string(),
-                        def_id: (),
                     },
-                    ty: (),
                     span,
                 })),
             },
-            ty: (),
             span,
         },
         span,
@@ -284,20 +271,17 @@ pub(super) fn machine_target_id_handle_helper_def(
     let span = Span::default();
     TopLevelItem::FuncDef(FuncDef {
         id: node_id_gen.new_id(),
-        def_id: (),
         attrs: Vec::new(),
-        sig: parsed::FunctionSig {
+        sig: FunctionSig {
             name: MACHINE_TARGET_ID_HELPER_FN.to_string(),
             type_params: Vec::new(),
-            params: vec![parsed::Param {
+            params: vec![Param {
                 id: node_id_gen.new_id(),
                 ident: "dst".to_string(),
-                def_id: (),
                 typ: TypeExpr {
                     id: node_id_gen.new_id(),
                     kind: TypeExprKind::Named {
                         ident: handle_type_name.to_string(),
-                        def_id: (),
                         type_args: Vec::new(),
                     },
                     span,
@@ -319,18 +303,14 @@ pub(super) fn machine_target_id_handle_helper_def(
                             id: node_id_gen.new_id(),
                             kind: ExprKind::Var {
                                 ident: "dst".to_string(),
-                                def_id: (),
                             },
-                            ty: (),
                             span,
                         }),
                         field: "_id".to_string(),
                     },
-                    ty: (),
                     span,
                 })),
             },
-            ty: (),
             span,
         },
         span,
@@ -342,7 +322,7 @@ pub(super) fn module_has_callable_param_type(
     name: &str,
     first_param_ty_name: &str,
 ) -> bool {
-    let matches_sig = |sig: &parsed::FunctionSig| {
+    let matches_sig = |sig: &FunctionSig| {
         sig.name == name
             && sig.params.first().is_some_and(|param| {
                 matches!(

@@ -20,9 +20,7 @@ use crate::core::resolve::{
     resolve_with_imports_and_symbols_and_typestate_roles_partial,
 };
 use crate::core::semck::{self, SemCheckError};
-use crate::core::tree::NodeId;
-use crate::core::tree::NodeIdGen;
-use crate::core::tree::parsed::Module as ParsedModule;
+use crate::core::tree::{Module, NodeId, NodeIdGen};
 use crate::core::typecheck::{
     TypeCheckError, TypecheckOutput, type_check_partial_with_imported_facts,
     type_check_with_imported_facts,
@@ -148,7 +146,7 @@ pub fn resolve_typecheck_pipeline_with_policy(
 pub fn parse_module_with_id_gen(
     source: &str,
     id_gen: NodeIdGen,
-) -> Result<(ParsedModule, NodeIdGen), ParseModuleError> {
+) -> Result<(Module, NodeIdGen), ParseModuleError> {
     parse_module_with_id_gen_and_options(source, id_gen, ParseModuleOptions::default())
 }
 
@@ -156,7 +154,7 @@ pub fn parse_module_with_id_gen_and_options(
     source: &str,
     id_gen: NodeIdGen,
     options: ParseModuleOptions,
-) -> Result<(ParsedModule, NodeIdGen), ParseModuleError> {
+) -> Result<(Module, NodeIdGen), ParseModuleError> {
     let lexer = Lexer::new(source);
     let tokens = lexer.tokenize().collect::<Result<Vec<Token>, LexError>>()?;
     let mut parser = Parser::new_with_id_gen_and_options(

@@ -1,16 +1,12 @@
 use crate::core::analysis::facts::{SyntheticReason, TypeMapOverlay};
 use crate::core::context::{SemCheckNormalizedContext, SemCheckStageInput};
-use crate::core::resolve::DefId;
 use crate::core::resolve::DefKind;
 use crate::core::resolve::def_table::DefTable;
-use crate::core::tree::NodeIdGen;
-use crate::core::tree::normalized as norm;
-use crate::core::tree::visit_mut;
-use crate::core::tree::visit_mut::VisitorMut;
+use crate::core::tree::visit_mut::{self, VisitorMut};
+use crate::core::tree::*;
 use crate::core::typecheck::type_map::{CallParam, CallSig, CallSigMap};
 use crate::core::types::{
-    Type, TypeId, array_to_dyn_array_assignable, array_to_slice_assignable,
-    dyn_array_to_slice_assignable,
+    Type, array_to_dyn_array_assignable, array_to_slice_assignable, dyn_array_to_slice_assignable,
 };
 
 /// Normalize a typed tree into a normalized tree.
@@ -34,14 +30,19 @@ pub fn normalize(ctx: SemCheckStageInput) -> SemCheckNormalizedContext {
         protocol_index,
     } = resolved;
     // `typed::Module` and `normalized::Module` currently share the same
-    // underlying representation (`tree::model::Module<DefId, TypeId>`), so
+    // underlying representation (`tree::model::Module`), so
     // normalization can mutate the owned module in place.
-    let mut module: norm::Module = module;
+    let mut module = module;
+    let mut def_table = def_table;
     let mut type_map = TypeMapOverlay::new(type_map);
     let mut node_id_gen = node_id_gen;
     let mut call_sigs = call_sigs;
-    let mut normalizer =
-        Normalizer::new(&def_table, &mut type_map, &mut call_sigs, &mut node_id_gen);
+    let mut normalizer = Normalizer::new(
+        &mut def_table,
+        &mut type_map,
+        &mut call_sigs,
+        &mut node_id_gen,
+    );
     normalizer.visit_module(&mut module);
     SemCheckNormalizedContext {
         module,
@@ -62,7 +63,7 @@ pub fn normalize(ctx: SemCheckStageInput) -> SemCheckNormalizedContext {
 }
 
 struct Normalizer<'a> {
-    def_table: &'a DefTable,
+    def_table: &'a mut DefTable,
     type_map: &'a mut TypeMapOverlay,
     call_sigs: &'a mut CallSigMap,
     node_id_gen: &'a mut NodeIdGen,
@@ -73,32 +74,34 @@ struct Normalizer<'a> {
 /// We only use this for normalize-time synthetic rewriting (e.g. compound
 /// assignment desugaring) where cloned nodes must not alias original node ids.
 struct ExprIdReseeder<'a> {
+    def_table: &'a mut DefTable,
+    type_map: &'a mut TypeMapOverlay,
     node_id_gen: &'a mut NodeIdGen,
 }
 
-impl VisitorMut<DefId, TypeId> for ExprIdReseeder<'_> {
-    fn visit_expr(&mut self, expr: &mut norm::Expr) {
-        expr.id = self.node_id_gen.new_id();
+impl VisitorMut for ExprIdReseeder<'_> {
+    fn visit_expr(&mut self, expr: &mut Expr) {
+        expr.id = self.reseed_id(expr.id);
         match &mut expr.kind {
-            norm::ExprKind::StructLit { fields, .. } => {
+            ExprKind::StructLit { fields, .. } => {
                 for field in fields {
-                    field.id = self.node_id_gen.new_id();
+                    field.id = self.reseed_id(field.id);
                 }
             }
-            norm::ExprKind::MapLit { entries, .. } => {
+            ExprKind::MapLit { entries, .. } => {
                 for entry in entries {
-                    entry.id = self.node_id_gen.new_id();
+                    entry.id = self.reseed_id(entry.id);
                 }
             }
-            norm::ExprKind::StructUpdate { fields, .. } => {
+            ExprKind::StructUpdate { fields, .. } => {
                 for field in fields {
-                    field.id = self.node_id_gen.new_id();
+                    field.id = self.reseed_id(field.id);
                 }
             }
-            norm::ExprKind::Closure { captures, .. } => {
+            ExprKind::Closure { captures, .. } => {
                 for capture in captures {
-                    let norm::CaptureSpec::Move { id, .. } = capture;
-                    *id = self.node_id_gen.new_id();
+                    let CaptureSpec::Move { id, .. } = capture;
+                    *id = self.reseed_id(*id);
                 }
             }
             _ => {}
@@ -106,58 +109,76 @@ impl VisitorMut<DefId, TypeId> for ExprIdReseeder<'_> {
         visit_mut::walk_expr(self, expr);
     }
 
-    fn visit_stmt_expr(&mut self, stmt: &mut norm::StmtExpr) {
-        stmt.id = self.node_id_gen.new_id();
+    fn visit_stmt_expr(&mut self, stmt: &mut StmtExpr) {
+        stmt.id = self.reseed_id(stmt.id);
         visit_mut::walk_stmt_expr(self, stmt);
     }
 
-    fn visit_bind_pattern(&mut self, pattern: &mut norm::BindPattern) {
-        pattern.id = self.node_id_gen.new_id();
+    fn visit_bind_pattern(&mut self, pattern: &mut BindPattern) {
+        pattern.id = self.reseed_id(pattern.id);
         visit_mut::walk_bind_pattern(self, pattern);
     }
 
-    fn visit_type_expr(&mut self, type_expr: &mut norm::TypeExpr) {
-        type_expr.id = self.node_id_gen.new_id();
+    fn visit_type_expr(&mut self, type_expr: &mut TypeExpr) {
+        type_expr.id = self.reseed_id(type_expr.id);
         visit_mut::walk_type_expr(self, type_expr);
     }
 
-    fn visit_match_arm(&mut self, arm: &mut norm::MatchArm) {
-        arm.id = self.node_id_gen.new_id();
+    fn visit_match_arm(&mut self, arm: &mut MatchArm) {
+        arm.id = self.reseed_id(arm.id);
         visit_mut::walk_match_arm(self, arm);
     }
 
-    fn visit_match_pattern(&mut self, pattern: &mut norm::MatchPattern) {
+    fn visit_match_pattern(&mut self, pattern: &mut MatchPattern) {
         match pattern {
-            norm::MatchPattern::Binding { id, .. } => {
-                *id = self.node_id_gen.new_id();
+            MatchPattern::Binding { id, .. } => {
+                *id = self.reseed_id(*id);
             }
-            norm::MatchPattern::TypedBinding { id, .. } => {
-                *id = self.node_id_gen.new_id();
+            MatchPattern::TypedBinding { id, .. } => {
+                *id = self.reseed_id(*id);
             }
-            norm::MatchPattern::EnumVariant { id, .. } => {
-                *id = self.node_id_gen.new_id();
+            MatchPattern::EnumVariant { id, .. } => {
+                *id = self.reseed_id(*id);
             }
             _ => {}
         }
         visit_mut::walk_match_pattern(self, pattern);
     }
 
-    fn visit_match_pattern_binding(&mut self, binding: &mut norm::MatchPatternBinding) {
-        if let norm::MatchPatternBinding::Named { id, .. } = binding {
-            *id = self.node_id_gen.new_id();
+    fn visit_match_pattern_binding(&mut self, binding: &mut MatchPatternBinding) {
+        if let MatchPatternBinding::Named { id, .. } = binding {
+            *id = self.reseed_id(*id);
         }
         visit_mut::walk_match_pattern_binding(self, binding);
     }
 
-    fn visit_param(&mut self, param: &mut norm::Param) {
-        param.id = self.node_id_gen.new_id();
+    fn visit_param(&mut self, param: &mut Param) {
+        param.id = self.reseed_id(param.id);
         visit_mut::walk_param(self, param);
+    }
+}
+
+impl ExprIdReseeder<'_> {
+    fn reseed_id(&mut self, old_id: NodeId) -> NodeId {
+        let new_id = self.node_id_gen.new_id();
+        if let Some(def_id) = self.def_table.lookup_node_def_id(old_id) {
+            self.def_table.record_use(new_id, def_id);
+        }
+        if let Some(ty) = self.type_map.lookup_node_type(old_id) {
+            self.type_map.insert_node_type(
+                new_id,
+                ty,
+                "normalize",
+                SyntheticReason::NormalizeCoercion,
+            );
+        }
+        new_id
     }
 }
 
 impl<'a> Normalizer<'a> {
     fn new(
-        def_table: &'a DefTable,
+        def_table: &'a mut DefTable,
         type_map: &'a mut TypeMapOverlay,
         call_sigs: &'a mut CallSigMap,
         node_id_gen: &'a mut NodeIdGen,
@@ -170,7 +191,7 @@ impl<'a> Normalizer<'a> {
         }
     }
 
-    fn coerce_call_args(&mut self, call_id: norm::NodeId, args: &mut [norm::CallArg]) {
+    fn coerce_call_args(&mut self, call_id: NodeId, args: &mut [CallArg]) {
         let Some(params) = self.call_sigs.get(&call_id).map(|sig| sig.params.clone()) else {
             return;
         };
@@ -179,30 +200,27 @@ impl<'a> Normalizer<'a> {
         }
     }
 
-    fn coerce_to_param(&mut self, param: &CallParam, arg: &mut norm::CallArg) {
-        if !matches!(
-            arg.mode,
-            norm::CallArgMode::Default | norm::CallArgMode::InOut
-        ) {
+    fn coerce_to_param(&mut self, param: &CallParam, arg: &mut CallArg) {
+        if !matches!(arg.mode, CallArgMode::Default | CallArgMode::InOut) {
             return;
         }
         self.coerce_expr_to_expected(&param.ty, &mut arg.expr);
     }
 
-    fn coerce_kind_for(&self, from: &Type, to: &Type) -> Option<norm::CoerceKind> {
+    fn coerce_kind_for(&self, from: &Type, to: &Type) -> Option<CoerceKind> {
         if array_to_slice_assignable(from, to) {
-            return Some(norm::CoerceKind::ArrayToSlice);
+            return Some(CoerceKind::ArrayToSlice);
         }
         if array_to_dyn_array_assignable(from, to) {
-            return Some(norm::CoerceKind::ArrayToDynArray);
+            return Some(CoerceKind::ArrayToDynArray);
         }
         if dyn_array_to_slice_assignable(from, to) {
-            return Some(norm::CoerceKind::DynArrayToSlice);
+            return Some(CoerceKind::DynArrayToSlice);
         }
         None
     }
 
-    fn coerce_expr_to_expected(&mut self, expected_ty: &Type, expr: &mut norm::Expr) {
+    fn coerce_expr_to_expected(&mut self, expected_ty: &Type, expr: &mut Expr) {
         let Some(from_ty) = self.type_map.lookup_node_type(expr.id) else {
             return;
         };
@@ -211,7 +229,7 @@ impl<'a> Normalizer<'a> {
         };
         if matches!(
             &expr.kind,
-            norm::ExprKind::Coerce {
+            ExprKind::Coerce {
                 kind: existing_kind,
                 ..
             } if *existing_kind == kind
@@ -222,19 +240,18 @@ impl<'a> Normalizer<'a> {
         let span = expr.span;
         let inner = expr.clone();
         let coerce_id = self.node_id_gen.new_id();
-        let ty_id = self.type_map.insert_node_type(
+        self.type_map.insert_node_type(
             coerce_id,
             expected_ty.clone(),
             "normalize",
             SyntheticReason::NormalizeCoercion,
         );
-        *expr = norm::Expr {
+        *expr = Expr {
             id: coerce_id,
-            kind: norm::ExprKind::Coerce {
+            kind: ExprKind::Coerce {
                 kind,
                 expr: Box::new(inner),
             },
-            ty: ty_id,
             span,
         };
     }
@@ -242,14 +259,16 @@ impl<'a> Normalizer<'a> {
     fn desugar_compound_assign(
         &mut self,
         stmt_span: crate::core::diag::Span,
-        assignee: &norm::Expr,
-        op: norm::BinaryOp,
-        rhs: &norm::Expr,
-        init: norm::InitInfo,
-    ) -> norm::StmtExprKind {
+        assignee: &Expr,
+        op: BinaryOp,
+        rhs: &Expr,
+        init: InitInfo,
+    ) -> StmtExprKind {
         let mut lhs = assignee.clone();
         // Ensure synthetic lhs read nodes don't alias assignee ids.
         ExprIdReseeder {
+            def_table: self.def_table,
+            type_map: self.type_map,
             node_id_gen: self.node_id_gen,
         }
         .visit_expr(&mut lhs);
@@ -258,7 +277,7 @@ impl<'a> Normalizer<'a> {
         // assignee has a setter call signature. For compound assignment, the
         // lhs read should use getter call semantics as well.
         if self.call_sigs.contains_key(&assignee.id)
-            && let norm::ExprKind::StructField { target, field } = &assignee.kind
+            && let ExprKind::StructField { target, field } = &assignee.kind
         {
             let lhs_call_id = self.node_id_gen.new_id();
             if let Some(setter_sig) = self.call_sigs.get(&assignee.id).cloned() {
@@ -273,32 +292,45 @@ impl<'a> Normalizer<'a> {
                     },
                 );
             }
-            lhs = norm::Expr {
+            lhs = Expr {
                 id: lhs_call_id,
-                kind: norm::ExprKind::MethodCall {
+                kind: ExprKind::MethodCall {
                     callee: target.clone(),
                     method_name: field.clone(),
                     args: Vec::new(),
                 },
-                ty: assignee.ty,
                 span: assignee.span,
             };
+            if let Some(assignee_ty) = self.type_map.lookup_node_type(assignee.id) {
+                self.type_map.insert_node_type(
+                    lhs_call_id,
+                    assignee_ty,
+                    "normalize",
+                    SyntheticReason::NormalizeCoercion,
+                );
+            }
         }
 
-        let value = norm::Expr {
-            id: self.node_id_gen.new_id(),
-            kind: norm::ExprKind::BinOp {
+        let value_id = self.node_id_gen.new_id();
+        if let Some(assignee_ty) = self.type_map.lookup_node_type(assignee.id) {
+            self.type_map.insert_node_type(
+                value_id,
+                assignee_ty,
+                "normalize",
+                SyntheticReason::NormalizeCoercion,
+            );
+        }
+        let value = Expr {
+            id: value_id,
+            kind: ExprKind::BinOp {
                 left: Box::new(lhs),
                 op,
                 right: Box::new(rhs.clone()),
             },
-            // Result type is solver-constrained to be assignable back to the
-            // assignee. Reuse assignee type id for normalized checks.
-            ty: assignee.ty,
             span: stmt_span,
         };
 
-        norm::StmtExprKind::Assign {
+        StmtExprKind::Assign {
             assignee: Box::new(assignee.clone()),
             value: Box::new(value),
             init,
@@ -306,14 +338,14 @@ impl<'a> Normalizer<'a> {
     }
 }
 
-impl VisitorMut<DefId, TypeId> for Normalizer<'_> {
-    fn visit_module(&mut self, module: &mut norm::Module) {
+impl VisitorMut for Normalizer<'_> {
+    fn visit_module(&mut self, module: &mut Module) {
         visit_mut::walk_module(self, module);
     }
 
-    fn visit_block_item(&mut self, item: &mut norm::BlockItem) {
-        if let norm::BlockItem::Stmt(stmt) = item
-            && let norm::StmtExprKind::CompoundAssign {
+    fn visit_block_item(&mut self, item: &mut BlockItem) {
+        if let BlockItem::Stmt(stmt) = item
+            && let StmtExprKind::CompoundAssign {
                 assignee,
                 op,
                 value,
@@ -326,33 +358,33 @@ impl VisitorMut<DefId, TypeId> for Normalizer<'_> {
         // Rewrite property assignments (`obj.prop = v`) into method calls
         // (`obj.prop(v)`) using the call signature recorded by type checking.
         let mut property_call = None;
-        if let norm::BlockItem::Stmt(stmt) = item {
-            if let norm::StmtExprKind::Assign {
+        if let BlockItem::Stmt(stmt) = item {
+            if let StmtExprKind::Assign {
                 assignee, value, ..
             } = &stmt.kind
-                && let norm::ExprKind::StructField { target, field } = &assignee.kind
+                && let ExprKind::StructField { target, field } = &assignee.kind
                 && self.call_sigs.contains_key(&assignee.id)
             {
-                let call_expr = norm::Expr {
+                let call_expr = Expr {
                     id: assignee.id,
-                    kind: norm::ExprKind::MethodCall {
+                    kind: ExprKind::MethodCall {
                         callee: target.clone(),
                         method_name: field.clone(),
-                        args: vec![norm::CallArg {
-                            mode: norm::CallArgMode::Default,
+                        args: vec![CallArg {
+                            mode: CallArgMode::Default,
                             expr: *value.clone(),
-                            init: norm::InitInfo::default(),
+                            init: InitInfo::default(),
                             span: value.span,
                         }],
                     },
-                    ty: self.type_map.insert_node_type(
-                        assignee.id,
-                        Type::Unit,
-                        "normalize",
-                        SyntheticReason::NormalizeCoercion,
-                    ),
                     span: stmt.span,
                 };
+                self.type_map.insert_node_type(
+                    assignee.id,
+                    Type::Unit,
+                    "normalize",
+                    SyntheticReason::NormalizeCoercion,
+                );
                 property_call = Some(call_expr);
             }
         }
@@ -361,26 +393,28 @@ impl VisitorMut<DefId, TypeId> for Normalizer<'_> {
             // Normalize the synthesized call and replace the statement with
             // an expression item so it follows the normal call lowering path.
             self.visit_expr(&mut call_expr);
-            *item = norm::BlockItem::Expr(call_expr);
+            *item = BlockItem::Expr(call_expr);
         } else {
             visit_mut::walk_block_item(self, item);
 
-            if let norm::BlockItem::Stmt(stmt) = item {
+            if let BlockItem::Stmt(stmt) = item {
                 match &mut stmt.kind {
-                    norm::StmtExprKind::LetBind { pattern, value, .. }
-                    | norm::StmtExprKind::VarBind { pattern, value, .. } => {
-                        if let norm::BindPatternKind::Name { def_id, .. } = pattern.kind
-                            && let Some(def) = self.def_table.lookup_def(def_id)
+                    StmtExprKind::LetBind { pattern, value, .. }
+                    | StmtExprKind::VarBind { pattern, value, .. } => {
+                        if let BindPatternKind::Name { .. } = pattern.kind
+                            && let Some(def) =
+                                self.def_table.lookup_def(self.def_table.def_id(pattern.id))
                             && let Some(expected_ty) = self.type_map.lookup_def_type(def)
                         {
                             self.coerce_expr_to_expected(&expected_ty, value);
                         }
                     }
-                    norm::StmtExprKind::Assign {
+                    StmtExprKind::Assign {
                         assignee, value, ..
                     } => {
-                        let expected_ty = self.type_map.type_table().get(assignee.ty).clone();
-                        self.coerce_expr_to_expected(&expected_ty, value);
+                        if let Some(expected_ty) = self.type_map.lookup_node_type(assignee.id) {
+                            self.coerce_expr_to_expected(&expected_ty, value);
+                        }
                     }
                     _ => {}
                 }
@@ -388,25 +422,26 @@ impl VisitorMut<DefId, TypeId> for Normalizer<'_> {
         }
     }
 
-    fn visit_expr(&mut self, expr: &mut norm::Expr) {
+    fn visit_expr(&mut self, expr: &mut Expr) {
         visit_mut::walk_expr(self, expr);
         // Rewrite property reads (`obj.prop`) into zero-arg method calls
         // (`obj.prop()`) when the type checker recorded a property getter.
-        if let norm::ExprKind::StructField { target, field } = &expr.kind
+        if let ExprKind::StructField { target, field } = &expr.kind
             && self.call_sigs.contains_key(&expr.id)
         {
-            expr.kind = norm::ExprKind::MethodCall {
+            expr.kind = ExprKind::MethodCall {
                 callee: target.clone(),
                 method_name: field.clone(),
                 args: Vec::new(),
             };
         }
 
-        if let norm::ExprKind::Call { callee, args } = &expr.kind {
-            if let norm::ExprKind::Var { def_id, ident } = &callee.kind {
+        if let ExprKind::Call { callee, args } = &expr.kind {
+            if let ExprKind::Var { ident } = &callee.kind {
+                let def_id = self.def_table.def_id(callee.id);
                 if self
                     .def_table
-                    .lookup_def(*def_id)
+                    .lookup_def(def_id)
                     .is_some_and(|def| matches!(def.kind, DefKind::EnumVariantName))
                     && let Some(Type::Enum { name, .. }) = self.type_map.lookup_node_type(expr.id)
                 {
@@ -415,7 +450,7 @@ impl VisitorMut<DefId, TypeId> for Normalizer<'_> {
                         .map(|(base, _)| base.to_string())
                         .unwrap_or(name);
                     let payload = args.iter().map(|arg| arg.expr.clone()).collect();
-                    expr.kind = norm::ExprKind::EnumVariant {
+                    expr.kind = ExprKind::EnumVariant {
                         enum_name,
                         type_args: Vec::new(),
                         variant: ident.clone(),
@@ -426,9 +461,7 @@ impl VisitorMut<DefId, TypeId> for Normalizer<'_> {
             }
         }
 
-        if let norm::ExprKind::Call { args, .. } | norm::ExprKind::MethodCall { args, .. } =
-            &mut expr.kind
-        {
+        if let ExprKind::Call { args, .. } | ExprKind::MethodCall { args, .. } = &mut expr.kind {
             // Apply call-argument coercions (e.g., array-to-slice).
             self.coerce_call_args(expr.id, args);
         }

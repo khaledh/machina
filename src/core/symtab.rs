@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 
 use crate::core::resolve::{DefId, DefTable};
-use crate::core::tree::resolved::Module;
+use crate::core::tree::Module;
 
 #[derive(Debug, Clone)]
 pub struct SymbolTable {
@@ -14,7 +14,11 @@ impl SymbolTable {
         let mut overloads: HashMap<String, Vec<DefId>> = HashMap::new();
         let mut fixed_names: HashMap<DefId, String> = HashMap::new();
         for callable in module.callables() {
-            let def_id = callable.def_id();
+            // During recovery (e.g., conflicting decl/def pairs), resolver may
+            // intentionally leave some callables unmapped while still reporting diagnostics.
+            let Some(def_id) = def_table.lookup_node_def_id(callable.id()) else {
+                continue;
+            };
             if let Some(def) = def_table.lookup_def(def_id)
                 && let Some(link_name) = def.link_name()
             {

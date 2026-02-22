@@ -7,11 +7,10 @@
 use std::collections::{HashMap, HashSet};
 
 use crate::core::context::TypeCheckedContext;
-use crate::core::resolve::{DefId, ImportedFacts};
+use crate::core::resolve::{DefId, DefTable, ImportedFacts};
 use crate::core::tree::NodeId;
-use crate::core::tree::map::TreeMapper;
-use crate::core::tree::resolved as res;
-use crate::core::tree::typed::build_module;
+use crate::core::tree::visit::{self, Visitor};
+use crate::core::tree::*;
 use crate::core::typecheck::Unifier;
 use crate::core::typecheck::builtin_methods;
 use crate::core::typecheck::constraints::{CallCallee, ExprObligation};
@@ -62,13 +61,14 @@ pub(crate) fn materialize(
         .finalize
         .clone()
         .expect("finalize output must be populated before materialize");
-    let typed_module = build_module(&finalized.type_map, &engine.context().module);
-    Ok(engine.context().clone().with_type_map(
+
+    let type_checked_context = engine.context().clone().with_type_map(
         finalized.type_map,
         finalized.call_sigs,
         finalized.generic_insts,
-        typed_module,
-    ))
+    );
+
+    Ok(type_checked_context)
 }
 
 fn build_outputs(engine: &TypecheckEngine) -> FinalizeOutput {
@@ -93,7 +93,7 @@ fn build_outputs(engine: &TypecheckEngine) -> FinalizeOutput {
     }
     for method_block in engine.context().module.method_blocks() {
         for method_item in &method_block.method_items {
-            if let res::MethodItem::Def(method_def) = method_item {
+            if let MethodItem::Def(method_def) = method_item {
                 let ty = resolved_node_type_or_unknown(engine, method_def.id);
                 record_node_type_with_nominal(&mut builder, method_def.id, ty, &nominal_keys);
             }
@@ -453,7 +453,7 @@ fn collect_nominal_templates(
     for type_def in resolved.module.type_defs() {
         if !matches!(
             type_def.kind,
-            res::TypeDefKind::Struct { .. } | res::TypeDefKind::Enum { .. }
+            TypeDefKind::Struct { .. } | TypeDefKind::Enum { .. }
         ) {
             continue;
         }
@@ -464,7 +464,7 @@ fn collect_nominal_templates(
         let Ok(ty) = resolve_type_def_with_args(
             &resolved.def_table,
             &resolved.module,
-            type_def.def_id,
+            resolved.def_table.def_id(type_def.id),
             &type_args,
         ) else {
             continue;
@@ -473,7 +473,7 @@ fn collect_nominal_templates(
             continue;
         }
         templates.push(NominalTemplate {
-            def_id: type_def.def_id,
+            def_id: resolved.def_table.def_id(type_def.id),
             param_count,
             ty,
         });
@@ -658,7 +658,7 @@ fn match_template_type(
 #[derive(Debug, Clone)]
 struct ExplicitNominalUse {
     def_id: DefId,
-    type_args: Vec<res::TypeExpr>,
+    type_args: Vec<TypeExpr>,
 }
 
 struct ExplicitNominalCollector<'a> {
@@ -669,18 +669,17 @@ struct ExplicitNominalCollector<'a> {
 impl<'a> ExplicitNominalCollector<'a> {
     fn collect(
         def_table: &'a crate::core::resolve::DefTable,
-        module: &res::Module,
+        module: &Module,
     ) -> Vec<ExplicitNominalUse> {
         let mut collector = Self {
             def_table,
             uses: Vec::new(),
         };
-        let mut ctx = ();
-        let _ = collector.map_module(module, &mut ctx);
+        collector.visit_module(module);
         collector.uses
     }
 
-    fn push_use(&mut self, def_id: DefId, type_args: &[res::TypeExpr]) {
+    fn push_use(&mut self, def_id: DefId, type_args: &[TypeExpr]) {
         self.uses.push(ExplicitNominalUse {
             def_id,
             type_args: type_args.to_vec(),
@@ -688,68 +687,30 @@ impl<'a> ExplicitNominalCollector<'a> {
     }
 }
 
-impl TreeMapper for ExplicitNominalCollector<'_> {
-    type Context = ();
-    type InD = DefId;
-    type InT = ();
-    type OutD = DefId;
-    type OutT = ();
-
-    fn map_def_id(
-        &mut self,
-        _node_id: NodeId,
-        def_id: &Self::InD,
-        _ctx: &mut Self::Context,
-    ) -> Self::OutD {
-        *def_id
-    }
-
-    fn map_type_payload(
-        &mut self,
-        _node_id: NodeId,
-        _payload: &Self::InT,
-        _ctx: &mut Self::Context,
-    ) -> Self::OutT {
-    }
-
-    fn map_type_expr(
-        &mut self,
-        type_expr: &res::TypeExpr,
-        ctx: &mut Self::Context,
-    ) -> res::TypeExpr {
-        if let res::TypeExprKind::Named {
-            def_id, type_args, ..
-        } = &type_expr.kind
+impl Visitor for ExplicitNominalCollector<'_> {
+    fn visit_type_expr(&mut self, type_expr: &TypeExpr) {
+        if let TypeExprKind::Named { type_args, .. } = &type_expr.kind
+            && let Some(def_id) = self.def_table.lookup_node_def_id(type_expr.id)
         {
-            self.push_use(*def_id, type_args);
+            self.push_use(def_id, type_args);
         }
-        crate::core::tree::map::walk_type_expr(self, type_expr, ctx)
+        visit::walk_type_expr(self, type_expr);
     }
 
-    fn map_expr_kind(
-        &mut self,
-        expr_id: NodeId,
-        expr: &res::ExprKind,
-        ctx: &mut Self::Context,
-    ) -> res::ExprKind {
-        match expr {
-            res::ExprKind::StructLit { type_args, .. }
-            | res::ExprKind::EnumVariant { type_args, .. } => {
-                if let Some(def_id) = self.def_table.lookup_node_def_id(expr_id) {
+    fn visit_expr(&mut self, expr: &Expr) {
+        match &expr.kind {
+            ExprKind::StructLit { type_args, .. } | ExprKind::EnumVariant { type_args, .. } => {
+                if let Some(def_id) = self.def_table.lookup_node_def_id(expr.id) {
                     self.push_use(def_id, type_args);
                 }
             }
             _ => {}
         }
-        crate::core::tree::map::walk_expr_kind(self, expr_id, expr, ctx)
+        visit::walk_expr(self, expr);
     }
 
-    fn map_match_pattern(
-        &mut self,
-        pattern: &res::MatchPattern,
-        ctx: &mut Self::Context,
-    ) -> res::MatchPattern {
-        if let res::MatchPattern::EnumVariant {
+    fn visit_match_pattern(&mut self, pattern: &MatchPattern) {
+        if let MatchPattern::EnumVariant {
             id,
             enum_name: Some(_),
             type_args,
@@ -759,7 +720,7 @@ impl TreeMapper for ExplicitNominalCollector<'_> {
         {
             self.push_use(def_id, type_args);
         }
-        crate::core::tree::map::walk_match_pattern(self, pattern, ctx)
+        visit::walk_match_pattern(self, pattern);
     }
 }
 
@@ -769,8 +730,10 @@ struct ResolvedTypeLookup<'a> {
 }
 
 impl TypeDefLookup for ResolvedTypeLookup<'_> {
-    fn type_def_by_id(&self, def_id: DefId) -> Option<&crate::core::tree::resolved::TypeDef> {
-        self.context.module.type_def_by_id(def_id)
+    fn type_def_by_id(&self, _def_table: &DefTable, def_id: DefId) -> Option<&TypeDef> {
+        self.context
+            .module
+            .type_def_by_id(&self.context.def_table, def_id)
     }
 
     fn imported_type_by_id(&self, def_id: DefId) -> Option<&Type> {
@@ -790,12 +753,15 @@ fn collect_explicit_nominal_keys(
     };
 
     for usage in uses {
-        let Some(type_def) = resolved.module.type_def_by_id(usage.def_id) else {
+        let Some(type_def) = resolved
+            .module
+            .type_def_by_id(&resolved.def_table, usage.def_id)
+        else {
             continue;
         };
         let is_nominal = matches!(
             type_def.kind,
-            res::TypeDefKind::Struct { .. } | res::TypeDefKind::Enum { .. }
+            TypeDefKind::Struct { .. } | TypeDefKind::Enum { .. }
         );
         if !is_nominal {
             continue;
@@ -1125,43 +1091,53 @@ struct PayloadNodeCollector {
 }
 
 impl PayloadNodeCollector {
-    fn collect(module: &res::Module) -> HashSet<NodeId> {
+    fn collect(module: &Module) -> HashSet<NodeId> {
         let mut collector = Self {
             nodes: HashSet::new(),
         };
-        let mut ctx = ();
-        let _mapped = collector.map_module(module, &mut ctx);
+        collector.visit_module(module);
         collector.nodes
     }
 }
 
-impl TreeMapper for PayloadNodeCollector {
-    type Context = ();
-    type InD = DefId;
-    type InT = ();
-    type OutD = DefId;
-    type OutT = ();
-
-    fn map_def_id(
-        &mut self,
-        _node_id: NodeId,
-        def_id: &Self::InD,
-        _ctx: &mut Self::Context,
-    ) -> Self::OutD {
-        *def_id
+impl Visitor for PayloadNodeCollector {
+    fn visit_type_expr(&mut self, type_expr: &TypeExpr) {
+        self.nodes.insert(type_expr.id);
+        visit::walk_type_expr(self, type_expr);
     }
 
-    fn map_type_payload(
-        &mut self,
-        node_id: NodeId,
-        _payload: &Self::InT,
-        _ctx: &mut Self::Context,
-    ) -> Self::OutT {
-        self.nodes.insert(node_id);
+    fn visit_bind_pattern(&mut self, pattern: &BindPattern) {
+        self.nodes.insert(pattern.id);
+        visit::walk_bind_pattern(self, pattern);
+    }
+
+    fn visit_match_pattern(&mut self, pattern: &MatchPattern) {
+        match pattern {
+            MatchPattern::Binding { id, .. }
+            | MatchPattern::TypedBinding { id, .. }
+            | MatchPattern::EnumVariant { id, .. } => {
+                self.nodes.insert(*id);
+            }
+            MatchPattern::Wildcard { .. }
+            | MatchPattern::BoolLit { .. }
+            | MatchPattern::IntLit { .. }
+            | MatchPattern::Tuple { .. } => {}
+        }
+        visit::walk_match_pattern(self, pattern);
+    }
+
+    fn visit_stmt_expr(&mut self, stmt: &StmtExpr) {
+        self.nodes.insert(stmt.id);
+        visit::walk_stmt_expr(self, stmt);
+    }
+
+    fn visit_expr(&mut self, expr: &Expr) {
+        self.nodes.insert(expr.id);
+        visit::walk_expr(self, expr);
     }
 }
 
-fn collect_payload_nodes(module: &res::Module) -> HashSet<NodeId> {
+fn collect_payload_nodes(module: &Module) -> HashSet<NodeId> {
     PayloadNodeCollector::collect(module)
 }
 

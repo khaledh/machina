@@ -24,10 +24,7 @@ pub struct ProtocolEmitExtract {
 /// - `emit Request(...)`
 /// - machine-handle method calls: `dst.send(payload)`, `src.request(dst, payload)`
 /// - `reply(cap, payload)` / `cap.reply(payload)` lowered `ExprKind::Reply`
-pub fn extract_emit_from_expr<D, T, F>(
-    expr: &Expr<D, T>,
-    mut lookup_type: F,
-) -> Option<ProtocolEmitExtract>
+pub fn extract_emit_from_expr<F>(expr: &Expr, mut lookup_type: F) -> Option<ProtocolEmitExtract>
 where
     F: FnMut(NodeId) -> Option<Type>,
 {
@@ -78,10 +75,10 @@ where
     }
 }
 
-fn extract_emit_from_machine_method_call<D, T, F>(
-    callee: &Expr<D, T>,
+fn extract_emit_from_machine_method_call<F>(
+    callee: &Expr,
     method_name: &str,
-    args: &[crate::core::tree::CallArg<D, T>],
+    args: &[crate::core::tree::CallArg],
     _call_span: Span,
     lookup_type: &mut F,
 ) -> Option<ProtocolEmitExtract>
@@ -125,7 +122,7 @@ where
     }
 }
 
-fn is_machine_handle_receiver<D, T, F>(callee: &Expr<D, T>, lookup_type: &mut F) -> bool
+fn is_machine_handle_receiver<F>(callee: &Expr, lookup_type: &mut F) -> bool
 where
     F: FnMut(NodeId) -> Option<Type>,
 {
@@ -153,7 +150,7 @@ fn type_is_machine_handle(ty: &Type) -> bool {
 /// Recognized forms:
 /// - `self.peer`
 /// - `__mc_machine_target_id(self.peer)` (handler sugar lowered form)
-pub fn destination_field_name<D, T>(expr: &Expr<D, T>) -> Option<String> {
+pub fn destination_field_name(expr: &Expr) -> Option<String> {
     if let ExprKind::Call { callee, args } = &expr.kind
         && let ExprKind::Var { ident, .. } = &callee.kind
         && ident == "__mc_machine_target_id"

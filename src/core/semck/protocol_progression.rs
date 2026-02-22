@@ -13,10 +13,9 @@ use crate::core::context::{
     ProtocolProgressionState, ProtocolProgressionStateKey, SemCheckNormalizedContext,
 };
 use crate::core::protocol::event_extract::extract_emit_from_expr;
-use crate::core::tree::cfg::{AstBlockId, TreeCfgBuilder, TreeCfgItem};
-use crate::core::tree::normalized::{Expr, ExprKind, MethodItem, StmtExprKind};
+use crate::core::tree::cfg::{AstBlockId, CfgBuilder, CfgItem};
+use crate::core::tree::{Expr, ExprKind, MethodItem, StmtExprKind};
 use crate::core::typecheck::type_map::resolve_type_expr;
-use crate::core::types::TypeId;
 
 pub(super) fn extract(ctx: &SemCheckNormalizedContext) -> ProtocolProgressionFacts {
     let mut out = ProtocolProgressionFacts::default();
@@ -49,6 +48,7 @@ pub(super) fn extract(ctx: &SemCheckNormalizedContext) -> ProtocolProgressionFac
 
             let base_cfg = build_handler_cfg(ctx, &typestate_name, &method_def.body);
             for binding in bindings {
+                let method_def_id = ctx.def_table.def_id(method_def.id);
                 let peer_role_by_field: HashMap<&str, &str> = binding
                     .peer_role_bindings
                     .iter()
@@ -57,7 +57,7 @@ pub(super) fn extract(ctx: &SemCheckNormalizedContext) -> ProtocolProgressionFac
                 let cfg = bind_cfg_roles(base_cfg.clone(), &peer_role_by_field);
 
                 let fact = ProtocolHandlerProgressionFact {
-                    handler_def_id: method_def.def_id,
+                    handler_def_id: method_def_id,
                     typestate_name: typestate_name.clone(),
                     entry_state: ProtocolProgressionState {
                         protocol_name: binding.protocol_name.clone(),
@@ -72,7 +72,7 @@ pub(super) fn extract(ctx: &SemCheckNormalizedContext) -> ProtocolProgressionFac
                 let fact_idx = out.handlers.len();
                 out.handlers.push(fact);
                 out.by_handler_def
-                    .entry(method_def.def_id)
+                    .entry(method_def_id)
                     .or_default()
                     .push(fact_idx);
                 out.by_state
@@ -96,7 +96,7 @@ fn build_handler_cfg(
     typestate_name: &str,
     body: &Expr,
 ) -> ProtocolProgressionCfg {
-    let cfg = TreeCfgBuilder::<TypeId>::new().build_from_expr(body);
+    let cfg = CfgBuilder::new().build_from_expr(body);
     let succs = (0..cfg.num_nodes())
         .map(|idx| cfg.succs(AstBlockId(idx)).iter().map(|n| n.0).collect())
         .collect::<Vec<Vec<usize>>>();
@@ -126,11 +126,11 @@ fn build_handler_cfg(
 fn collect_item_events(
     ctx: &SemCheckNormalizedContext,
     typestate_name: &str,
-    item: &TreeCfgItem<'_, TypeId>,
+    item: &CfgItem<'_>,
     out: &mut Vec<ProtocolProgressionEvent>,
 ) {
     match item {
-        TreeCfgItem::Stmt(stmt) => match &stmt.kind {
+        CfgItem::Stmt(stmt) => match &stmt.kind {
             StmtExprKind::LetBind { value, .. } | StmtExprKind::VarBind { value, .. } => {
                 if let Some(emit) = emit_event(ctx, value) {
                     out.push(ProtocolProgressionEvent::Emit(emit));
@@ -163,7 +163,7 @@ fn collect_item_events(
             }
             _ => {}
         },
-        TreeCfgItem::Expr(expr) => {
+        CfgItem::Expr(expr) => {
             if let Some(emit) = emit_event(ctx, expr) {
                 out.push(ProtocolProgressionEvent::Emit(emit));
             }

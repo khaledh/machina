@@ -2,7 +2,7 @@ use thiserror::Error;
 
 use crate::core::diag::{Span, SpannedError};
 use crate::core::resolve::symbols::SymbolKind;
-use crate::core::tree::parsed::ExprKind;
+use crate::core::tree::ExprKind;
 
 #[derive(Clone, Debug, Error)]
 pub enum ResolveErrorKind {

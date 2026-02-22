@@ -10,8 +10,8 @@ use crate::core::backend::lower::types::TypeLowerer;
 use crate::core::ir::builder::FunctionBuilder;
 use crate::core::ir::{BlockId, Function, FunctionSig, GlobalId, IrTypeCache, IrTypeId, ValueId};
 use crate::core::resolve::{Def, DefId, DefTable};
+use crate::core::tree as ast;
 use crate::core::tree::NodeId;
-use crate::core::tree::ParamMode;
 use crate::core::tree::format_compact::{
     format_semantic_stmt_compact, format_semantic_value_expr_compact,
 };
@@ -74,7 +74,7 @@ pub(super) struct FuncLowerer<'a, 'g> {
     pub(super) lowering_plans: &'a sem::LoweringPlanMap,
     pub(super) param_defs: Vec<DefId>,
     pub(super) param_tys: Vec<IrTypeId>,
-    pub(super) param_modes: Vec<ParamMode>,
+    pub(super) param_modes: Vec<ast::ParamMode>,
     pub(super) loop_stack: Vec<LoopContext>,
     pub(super) drop_manager: DropManager<'a>,
     pub(super) drop_glue: &'g mut DropGlueRegistry,
@@ -186,14 +186,22 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
         let mut param_tys = Vec::with_capacity(func.sig.params.len());
         let mut param_modes = Vec::with_capacity(func.sig.params.len());
         for param in &func.sig.params {
-            let def = def_table.lookup_def(param.def_id).unwrap_or_else(|| {
-                panic!("backend lower_func missing param def {:?}", param.def_id)
-            });
+            let def = def_table
+                .lookup_def(def_table.def_id(param.id))
+                .unwrap_or_else(|| {
+                    panic!(
+                        "backend lower_func missing param def {:?}",
+                        def_table.def_id(param.id)
+                    )
+                });
             let param_ty = type_map.lookup_def_type(def).unwrap_or_else(|| {
-                panic!("backend lower_func missing param type {:?}", param.def_id)
+                panic!(
+                    "backend lower_func missing param type {:?}",
+                    def_table.def_id(param.id)
+                )
             });
             let param_ty_id = match param.mode {
-                ParamMode::In | ParamMode::Sink => {
+                ast::ParamMode::In | ast::ParamMode::Sink => {
                     let value_ty = type_lowerer.lower_type(&param_ty);
                     if param_ty.is_scalar() {
                         value_ty
@@ -201,12 +209,12 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
                         type_lowerer.ptr_to(value_ty)
                     }
                 }
-                ParamMode::Out | ParamMode::InOut => {
+                ast::ParamMode::Out | ast::ParamMode::InOut => {
                     let value_ty = type_lowerer.lower_type(&param_ty);
                     type_lowerer.ptr_to(value_ty)
                 }
             };
-            param_defs.push(param.def_id);
+            param_defs.push(def_table.def_id(param.id));
             param_tys.push(param_ty_id);
             param_modes.push(param.mode.clone());
         }
@@ -267,21 +275,21 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
 
         // Lower the explicit `self` parameter first.
         let self_def = def_table
-            .lookup_def(method_def.sig.self_param.def_id)
+            .lookup_def(def_table.def_id(method_def.sig.self_param.id))
             .unwrap_or_else(|| {
                 panic!(
                     "backend lower_method missing self def {:?}",
-                    method_def.sig.self_param.def_id
+                    def_table.def_id(method_def.sig.self_param.id)
                 )
             });
         let self_ty = type_map.lookup_def_type(self_def).unwrap_or_else(|| {
             panic!(
                 "backend lower_method missing self type {:?}",
-                method_def.sig.self_param.def_id
+                def_table.def_id(method_def.sig.self_param.id)
             )
         });
         let self_ty_id = match method_def.sig.self_param.mode {
-            ParamMode::In | ParamMode::Sink => {
+            ast::ParamMode::In | ast::ParamMode::Sink => {
                 let value_ty = type_lowerer.lower_type(&self_ty);
                 if self_ty.is_scalar() {
                     value_ty
@@ -289,7 +297,7 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
                     type_lowerer.ptr_to(value_ty)
                 }
             }
-            ParamMode::Out | ParamMode::InOut => {
+            ast::ParamMode::Out | ast::ParamMode::InOut => {
                 let value_ty = type_lowerer.lower_type(&self_ty);
                 type_lowerer.ptr_to(value_ty)
             }
@@ -298,20 +306,28 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
         let mut param_defs = Vec::with_capacity(method_def.sig.params.len() + 1);
         let mut param_tys = Vec::with_capacity(method_def.sig.params.len() + 1);
         let mut param_modes = Vec::with_capacity(method_def.sig.params.len() + 1);
-        param_defs.push(method_def.sig.self_param.def_id);
+        param_defs.push(def_table.def_id(method_def.sig.self_param.id));
         param_tys.push(self_ty_id);
         param_modes.push(method_def.sig.self_param.mode.clone());
 
         // Convert each method parameter to SSA types.
         for param in &method_def.sig.params {
-            let def = def_table.lookup_def(param.def_id).unwrap_or_else(|| {
-                panic!("backend lower_method missing param def {:?}", param.def_id)
-            });
+            let def = def_table
+                .lookup_def(def_table.def_id(param.id))
+                .unwrap_or_else(|| {
+                    panic!(
+                        "backend lower_method missing param def {:?}",
+                        def_table.def_id(param.id)
+                    )
+                });
             let param_ty = type_map.lookup_def_type(def).unwrap_or_else(|| {
-                panic!("backend lower_method missing param type {:?}", param.def_id)
+                panic!(
+                    "backend lower_method missing param type {:?}",
+                    def_table.def_id(param.id)
+                )
             });
             let param_ty_id = match param.mode {
-                ParamMode::In | ParamMode::Sink => {
+                ast::ParamMode::In | ast::ParamMode::Sink => {
                     let value_ty = type_lowerer.lower_type(&param_ty);
                     if param_ty.is_scalar() {
                         value_ty
@@ -319,12 +335,12 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
                         type_lowerer.ptr_to(value_ty)
                     }
                 }
-                ParamMode::Out | ParamMode::InOut => {
+                ast::ParamMode::Out | ast::ParamMode::InOut => {
                     let value_ty = type_lowerer.lower_type(&param_ty);
                     type_lowerer.ptr_to(value_ty)
                 }
             };
-            param_defs.push(param.def_id);
+            param_defs.push(def_table.def_id(param.id));
             param_tys.push(param_ty_id);
             param_modes.push(param.mode.clone());
         }
@@ -390,7 +406,7 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
             lowering_plans,
             param_defs: Vec::new(),
             param_tys: vec![param_ptr],
-            param_modes: vec![ParamMode::In],
+            param_modes: vec![ast::ParamMode::In],
             loop_stack: Vec::new(),
             drop_manager: DropManager::new(),
             drop_glue,
@@ -481,7 +497,7 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
             let param_ty = self.def_type(def_id);
             let value_ty = self.type_lowerer.lower_type(&param_ty);
             let local = match mode {
-                ParamMode::In | ParamMode::Sink => {
+                ast::ParamMode::In | ast::ParamMode::Sink => {
                     if param_ty.is_scalar() {
                         LocalValue::value(*value, value_ty)
                     } else {
@@ -495,10 +511,10 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
                         LocalValue::addr(slot.addr, value_ty)
                     }
                 }
-                ParamMode::Out | ParamMode::InOut => LocalValue::addr(*value, value_ty),
+                ast::ParamMode::Out | ast::ParamMode::InOut => LocalValue::addr(*value, value_ty),
             };
             self.locals.insert(def_id, local);
-            if matches!(mode, ParamMode::Sink) {
+            if matches!(mode, ast::ParamMode::Sink) {
                 self.set_drop_flag_for_def(def_id, true);
             }
         }
@@ -524,7 +540,7 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
         }
     }
 
-    pub(super) fn param_mode_for(&self, def_id: DefId) -> Option<ParamMode> {
+    pub(super) fn param_mode_for(&self, def_id: DefId) -> Option<ast::ParamMode> {
         self.param_defs
             .iter()
             .position(|id| *id == def_id)

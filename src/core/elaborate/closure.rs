@@ -47,7 +47,7 @@ use crate::core::diag::Span;
 use crate::core::resolve::{DefId, DefKind, TypeAttrs};
 use crate::core::semck::closure::capture::CaptureMode;
 use crate::core::symtab::SymbolTable;
-use crate::core::tree::normalized as norm;
+use crate::core::tree as ast;
 use crate::core::tree::semantic as sem;
 use crate::core::tree::{NodeId, ParamMode};
 use crate::core::types::{StructField, Type, TypeId};
@@ -161,9 +161,9 @@ impl<'a> Elaborator<'a> {
         &mut self,
         ident: &str,
         def_id: DefId,
-        params: &[norm::Param],
-        return_ty: &norm::TypeExpr,
-        body: &norm::Expr,
+        params: &[ast::Param],
+        return_ty: &ast::TypeExpr,
+        body: &ast::Expr,
         span: Span,
         expr_id: NodeId,
     ) {
@@ -246,13 +246,14 @@ impl<'a> Elaborator<'a> {
             .collect();
         let type_def = sem::TypeDef {
             id: self.node_id_gen.new_id(),
-            def_id: type_def_id,
             attrs: Vec::new(),
             name: type_name.clone(),
             type_params: Vec::new(),
             kind: sem::TypeDefKind::Struct { fields },
             span,
         };
+        self.def_table
+            .record_def_node(type_def_id, type_def.id, span);
         self.closure_types.push(type_def);
 
         let closure_fields: Vec<StructField> = captures
@@ -296,9 +297,9 @@ impl<'a> Elaborator<'a> {
         &mut self,
         ident: &str,
         def_id: DefId,
-        params: &[norm::Param],
-        return_ty: &norm::TypeExpr,
-        body: &norm::Expr,
+        params: &[ast::Param],
+        return_ty: &ast::TypeExpr,
+        body: &ast::Expr,
         span: Span,
         expr_id: NodeId,
     ) -> ClosureInfo {
@@ -334,10 +335,11 @@ impl<'a> Elaborator<'a> {
 
         let self_param = sem::SelfParam {
             id: self.node_id_gen.new_id(),
-            def_id: self_def_id,
             mode: ParamMode::In,
             span,
         };
+        self.def_table
+            .record_def_node(info.self_def_id, self_param.id, span);
         let method_id = self.node_id_gen.new_id();
         self.insert_node_type_for(
             method_id,
@@ -380,7 +382,7 @@ impl<'a> Elaborator<'a> {
     /// can be resolved to the closure's struct type.
     pub(super) fn record_closure_binding(
         &mut self,
-        pattern: &norm::BindPattern,
+        pattern: &ast::BindPattern,
         closure_def_id: DefId,
         info: &ClosureInfo,
     ) {
@@ -392,16 +394,15 @@ impl<'a> Elaborator<'a> {
         }
     }
 
-    fn collect_bind_pattern_defs(&self, pattern: &norm::BindPattern, out: &mut Vec<DefId>) {
+    fn collect_bind_pattern_defs(&self, pattern: &ast::BindPattern, out: &mut Vec<DefId>) {
         match &pattern.kind {
-            norm::BindPatternKind::Name { def_id, .. } => out.push(*def_id),
-            norm::BindPatternKind::Array { patterns }
-            | norm::BindPatternKind::Tuple { patterns } => {
+            ast::BindPatternKind::Name { .. } => out.push(self.def_id_for(pattern.id)),
+            ast::BindPatternKind::Array { patterns } | ast::BindPatternKind::Tuple { patterns } => {
                 for pattern in patterns {
                     self.collect_bind_pattern_defs(pattern, out);
                 }
             }
-            norm::BindPatternKind::Struct { fields, .. } => {
+            ast::BindPatternKind::Struct { fields, .. } => {
                 for field in fields {
                     self.collect_bind_pattern_defs(&field.pattern, out);
                 }
@@ -420,27 +421,24 @@ impl<'a> Elaborator<'a> {
     ///
     /// Handles direct closure literals, variables bound to closures, and
     /// move/implicit-move wrappers around either.
-    pub(super) fn closure_call_info(
-        &mut self,
-        callee: &norm::Expr,
-    ) -> Option<(DefId, ClosureInfo)> {
+    pub(super) fn closure_call_info(&mut self, callee: &ast::Expr) -> Option<(DefId, ClosureInfo)> {
         match &callee.kind {
-            norm::ExprKind::Closure {
+            ast::ExprKind::Closure {
                 ident,
-                def_id,
                 params,
                 return_ty,
                 body,
                 captures: _,
             } => {
-                if self.is_captureless_closure(*def_id) {
+                let def_id = self.def_id_for(callee.id);
+                if self.is_captureless_closure(def_id) {
                     return None;
                 }
                 Some((
-                    *def_id,
+                    def_id,
                     self.ensure_closure_info(
                         ident,
-                        *def_id,
+                        def_id,
                         params,
                         return_ty,
                         body,
@@ -449,16 +447,17 @@ impl<'a> Elaborator<'a> {
                     ),
                 ))
             }
-            norm::ExprKind::Var { def_id, .. } => {
+            ast::ExprKind::Var { .. } => {
+                let def_id = self.def_id_for(callee.id);
                 self.closure_bindings
-                    .get(def_id)
+                    .get(&def_id)
                     .and_then(|closure_def_id| {
                         self.closure_info
                             .get(closure_def_id)
                             .map(|info| (*closure_def_id, info.clone()))
                     })
             }
-            norm::ExprKind::Move { expr } | norm::ExprKind::ImplicitMove { expr } => {
+            ast::ExprKind::Move { expr } | ast::ExprKind::ImplicitMove { expr } => {
                 self.closure_call_info(expr)
             }
             _ => None,

@@ -6,11 +6,10 @@
 use std::collections::HashMap;
 
 use crate::core::analysis::dataflow::solve_forward;
-use crate::core::resolve::DefId;
+use crate::core::resolve::{DefId, DefTable};
 use crate::core::semck::closure::capture::{CaptureMode, ClosureCapture};
-use crate::core::tree::cfg::{AstBlockId, TreeCfg, TreeCfgItem, TreeCfgNode};
-use crate::core::tree::normalized::{BindPatternKind, Expr, ExprKind, StmtExprKind};
-use crate::core::types::TypeId;
+use crate::core::tree::cfg::{AstBlockId, Cfg, CfgItem, CfgNode};
+use crate::core::tree::{BindPatternKind, Expr, ExprKind, StmtExprKind};
 
 use super::{CaptureMap, ClosureBindings};
 
@@ -37,8 +36,9 @@ pub(super) fn build_capture_map(
 }
 
 pub(super) fn analyze_closure_bindings(
-    cfg: &TreeCfg<'_, TypeId>,
+    cfg: &Cfg<'_>,
     capture_map: &HashMap<DefId, CaptureMap>,
+    def_table: &DefTable,
 ) -> ClosureBindingAnalysis {
     let entry_state = HashMap::new();
     let bottom = HashMap::new();
@@ -50,7 +50,9 @@ pub(super) fn analyze_closure_bindings(
         entry_state,
         bottom,
         merge_closure_bindings,
-        |block_id, in_state| apply_block_bindings(&cfg.nodes[block_id.0], in_state, capture_map),
+        |block_id, in_state| {
+            apply_block_bindings(&cfg.nodes[block_id.0], in_state, capture_map, def_table)
+        },
     );
 
     ClosureBindingAnalysis {
@@ -88,23 +90,25 @@ fn merge_mode(current: CaptureMode, incoming: CaptureMode) -> CaptureMode {
 }
 
 fn apply_block_bindings(
-    node: &TreeCfgNode<'_, TypeId>,
+    node: &CfgNode<'_>,
     in_state: &ClosureBindings,
     capture_map: &HashMap<DefId, CaptureMap>,
+    def_table: &DefTable,
 ) -> ClosureBindings {
     let mut state = in_state.clone();
     for item in &node.items {
-        apply_item_bindings(&mut state, item, capture_map);
+        apply_item_bindings(&mut state, item, capture_map, def_table);
     }
     state
 }
 
 pub(super) fn apply_item_bindings(
     state: &mut ClosureBindings,
-    item: &TreeCfgItem<'_, TypeId>,
+    item: &CfgItem<'_>,
     capture_map: &HashMap<DefId, CaptureMap>,
+    def_table: &DefTable,
 ) {
-    let TreeCfgItem::Stmt(stmt) = item else {
+    let CfgItem::Stmt(stmt) = item else {
         return;
     };
 
@@ -112,19 +116,23 @@ pub(super) fn apply_item_bindings(
     match &stmt.kind {
         StmtExprKind::LetBind { pattern, value, .. }
         | StmtExprKind::VarBind { pattern, value, .. } => {
-            if let BindPatternKind::Name { def_id, .. } = &pattern.kind {
-                if let Some(captures) = closure_value_captures(value, state, capture_map) {
-                    state.insert(*def_id, captures);
+            if let BindPatternKind::Name { .. } = &pattern.kind {
+                let def_id = def_table.def_id(pattern.id);
+                if let Some(captures) = closure_value_captures(value, state, capture_map, def_table)
+                {
+                    state.insert(def_id, captures);
                 } else {
-                    state.remove(def_id);
+                    state.remove(&def_id);
                 }
             }
         }
         StmtExprKind::Assign {
             assignee, value, ..
         } => {
-            if let ExprKind::Var { def_id, .. } = assignee.kind {
-                if let Some(captures) = closure_value_captures(value, state, capture_map) {
+            if let ExprKind::Var { .. } = assignee.kind {
+                let def_id = def_table.def_id(assignee.id);
+                if let Some(captures) = closure_value_captures(value, state, capture_map, def_table)
+                {
                     state.insert(def_id, captures);
                 } else {
                     state.remove(&def_id);
@@ -139,13 +147,16 @@ fn closure_value_captures(
     expr: &Expr,
     state: &ClosureBindings,
     capture_map: &HashMap<DefId, CaptureMap>,
+    def_table: &DefTable,
 ) -> Option<CaptureMap> {
     match &expr.kind {
-        ExprKind::Closure { def_id, .. } => capture_map.get(def_id).cloned(),
-        ExprKind::Var { def_id, .. } => state.get(def_id).cloned(),
+        ExprKind::Closure { .. } => capture_map.get(&def_table.def_id(expr.id)).cloned(),
+        ExprKind::Var { .. } => state.get(&def_table.def_id(expr.id)).cloned(),
         ExprKind::Move { expr }
         | ExprKind::ImplicitMove { expr }
-        | ExprKind::Coerce { expr, .. } => closure_value_captures(expr, state, capture_map),
+        | ExprKind::Coerce { expr, .. } => {
+            closure_value_captures(expr, state, capture_map, def_table)
+        }
         _ => None,
     }
 }

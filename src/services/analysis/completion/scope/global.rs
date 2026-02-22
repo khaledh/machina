@@ -6,8 +6,7 @@
 use std::collections::{HashMap, HashSet};
 
 use crate::core::resolve::DefKind;
-use crate::core::tree::NodeId;
-use crate::core::tree::resolved as res;
+use crate::core::tree::{NodeId, TopLevelItem, TypeDefKind};
 use crate::services::analysis::results::{CompletionItem, CompletionKind};
 
 pub(super) fn global_scope(
@@ -16,30 +15,30 @@ pub(super) fn global_scope(
     let mut allowed_nodes = HashSet::new();
     for item in &resolved.module.top_level_items {
         match item {
-            res::TopLevelItem::ProtocolDef(protocol_def) => {
+            TopLevelItem::ProtocolDef(protocol_def) => {
                 allowed_nodes.insert(protocol_def.id);
             }
-            res::TopLevelItem::TraitDef(trait_def) => {
+            TopLevelItem::TraitDef(trait_def) => {
                 allowed_nodes.insert(trait_def.id);
             }
-            res::TopLevelItem::TypeDef(type_def) => {
+            TopLevelItem::TypeDef(type_def) => {
                 allowed_nodes.insert(type_def.id);
-                if let res::TypeDefKind::Enum { variants } = &type_def.kind {
+                if let TypeDefKind::Enum { variants } = &type_def.kind {
                     for variant in variants {
                         allowed_nodes.insert(variant.id);
                     }
                 }
             }
-            res::TopLevelItem::TypestateDef(typestate_def) => {
+            TopLevelItem::TypestateDef(typestate_def) => {
                 allowed_nodes.insert(typestate_def.id);
             }
-            res::TopLevelItem::FuncDecl(func_decl) => {
+            TopLevelItem::FuncDecl(func_decl) => {
                 allowed_nodes.insert(func_decl.id);
             }
-            res::TopLevelItem::FuncDef(func_def) => {
+            TopLevelItem::FuncDef(func_def) => {
                 allowed_nodes.insert(func_def.id);
             }
-            res::TopLevelItem::MethodBlock(_) | res::TopLevelItem::ClosureDef(_) => {}
+            TopLevelItem::MethodBlock(_) | TopLevelItem::ClosureDef(_) => {}
         }
     }
 

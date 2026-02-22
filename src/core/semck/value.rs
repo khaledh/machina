@@ -3,13 +3,13 @@ use crate::core::diag::Span;
 use crate::core::resolve::DefId;
 use crate::core::semck::{SEK, SemCheckError};
 use crate::core::tree::RefinementKind;
-use crate::core::tree::normalized::{
+use crate::core::tree::visit::{Visitor, walk_expr, walk_stmt_expr};
+use crate::core::tree::{
     BinaryOp, BindPatternKind, Expr, ExprKind, FuncDef, FunctionSig, StmtExpr, StmtExprKind,
     TypeDef, TypeDefKind, TypeExpr, TypeExprKind, UnaryOp,
 };
-use crate::core::tree::visit::{Visitor, walk_expr, walk_stmt_expr};
 use crate::core::typecheck::type_map::resolve_type_expr;
-use crate::core::types::{Type, TypeId};
+use crate::core::types::Type;
 use std::collections::HashMap;
 
 pub(super) fn check(ctx: &NormalizedContext) -> Vec<SemCheckError> {
@@ -85,7 +85,7 @@ impl<'a> ValueChecker<'a> {
                 op: UnaryOp::Neg,
                 expr,
             } => self.const_int_value(expr).map(|value| -value),
-            ExprKind::Var { def_id, .. } => self.lookup_const(*def_id),
+            ExprKind::Var { .. } => self.lookup_const(self.ctx.def_table.def_id(expr.id)),
             ExprKind::Move { expr } => self.const_int_value(expr),
             _ => None,
         }
@@ -247,7 +247,12 @@ impl<'a> ValueChecker<'a> {
         let Some(lit_value) = int_lit_value(expr) else {
             return;
         };
-        let Type::Int { signed, bits, .. } = *self.ctx.type_map.type_table().get(expr.ty) else {
+        let Type::Int { signed, bits, .. } = *self
+            .ctx
+            .type_map
+            .type_table()
+            .get(self.ctx.type_map.type_of(expr.id))
+        else {
             return;
         };
         let min = if signed {
@@ -344,7 +349,11 @@ impl<'a> ValueChecker<'a> {
             StmtExprKind::Assign {
                 assignee, value, ..
             } => {
-                let assignee_ty = self.ctx.type_map.type_table().get(assignee.ty);
+                let assignee_ty = self
+                    .ctx
+                    .type_map
+                    .type_table()
+                    .get(self.ctx.type_map.type_of(assignee.id));
                 self.check_range_binding_value(value, assignee_ty);
             }
             _ => {}
@@ -355,20 +364,20 @@ impl<'a> ValueChecker<'a> {
         match &stmt.kind {
             StmtExprKind::LetBind { pattern, value, .. }
             | StmtExprKind::VarBind { pattern, value, .. } => {
-                if let BindPatternKind::Name { def_id, .. } = &pattern.kind {
+                if let BindPatternKind::Name { .. } = &pattern.kind {
                     let const_value = self.const_int_value(value);
-                    self.set_const(*def_id, const_value);
+                    self.set_const(self.ctx.def_table.def_id(pattern.id), const_value);
                 }
             }
-            StmtExprKind::VarDecl { def_id, .. } => {
-                self.set_const(*def_id, None);
+            StmtExprKind::VarDecl { .. } => {
+                self.set_const(self.ctx.def_table.def_id(stmt.id), None);
             }
             StmtExprKind::Assign {
                 assignee, value, ..
             } => {
-                if let ExprKind::Var { def_id, .. } = assignee.kind {
+                if let ExprKind::Var { .. } = &assignee.kind {
                     let const_value = self.const_int_value(value);
-                    self.set_const(def_id, const_value);
+                    self.set_const(self.ctx.def_table.def_id(assignee.id), const_value);
                 }
             }
             _ => {}
@@ -383,7 +392,7 @@ impl<'a> ValueChecker<'a> {
     }
 }
 
-impl Visitor<DefId, TypeId> for ValueChecker<'_> {
+impl Visitor for ValueChecker<'_> {
     fn visit_func_def(&mut self, func_def: &FuncDef) {
         let return_ty = self
             .resolve_type(&func_def.sig.ret_ty_expr)

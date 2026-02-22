@@ -72,7 +72,6 @@ impl<'a> Parser<'a> {
         self.consume(&TK::RBrace)?;
         Ok(ProtocolDef {
             id: self.id_gen.new_id(),
-            def_id: (),
             name,
             messages,
             request_contracts,
@@ -227,7 +226,6 @@ impl<'a> Parser<'a> {
                 id: self.id_gen.new_id(),
                 kind: TypeExprKind::Named {
                     ident: msg_name.clone(),
-                    def_id: (),
                     type_args: Vec::new(),
                 },
                 span: msg_span,
@@ -236,7 +234,6 @@ impl<'a> Parser<'a> {
         message_aliases.insert(msg_name.clone(), self.clone_type_expr_with_new_ids(&msg_ty));
         messages.push(ProtocolMessage {
             id: self.id_gen.new_id(),
-            def_id: (),
             name: msg_name,
             ty: msg_ty,
             span: msg_span,
@@ -295,11 +292,7 @@ impl<'a> Parser<'a> {
         ty: &TypeExpr,
         messages: &HashMap<String, TypeExpr>,
     ) -> TypeExpr {
-        if let TypeExprKind::Named {
-            ident,
-            type_args,
-            def_id: _,
-        } = &ty.kind
+        if let TypeExprKind::Named { ident, type_args } = &ty.kind
             && type_args.is_empty()
             && let Some(alias) = messages.get(ident)
         {
@@ -327,7 +320,6 @@ impl<'a> Parser<'a> {
         }
         roles.push(ProtocolRole {
             id,
-            def_id: (),
             name: role_name.to_string(),
             states: Vec::new(),
             span,
@@ -365,7 +357,6 @@ impl<'a> Parser<'a> {
 
         Ok(TypeDef {
             id: self.id_gen.new_id(),
-            def_id: (),
             attrs,
             name,
             type_params,
@@ -437,7 +428,6 @@ impl<'a> Parser<'a> {
         self.consume(&TK::RBrace)?;
         Ok(TraitDef {
             id: self.id_gen.new_id(),
-            def_id: (),
             attrs,
             name,
             methods,
@@ -495,7 +485,6 @@ impl<'a> Parser<'a> {
         self.consume(&TK::RBrace)?;
         Ok(TypestateDef {
             id: self.id_gen.new_id(),
-            def_id: (),
             name,
             role_impls,
             items,
@@ -513,7 +502,6 @@ impl<'a> Parser<'a> {
             }
             Ok(TypestateRoleImpl {
                 id: parser.id_gen.new_id(),
-                def_id: (),
                 path,
                 span: parser.close(marker),
             })
@@ -620,7 +608,6 @@ impl<'a> Parser<'a> {
             param: Param {
                 id: self.id_gen.new_id(),
                 ident: binding,
-                def_id: (),
                 typ: request_ty,
                 mode: ParamMode::In,
                 span: self.close(marker),
@@ -655,12 +642,10 @@ impl<'a> Parser<'a> {
                 Param {
                     id: self.id_gen.new_id(),
                     ident: pending_ident,
-                    def_id: (),
                     typ: TypeExpr {
                         id: self.id_gen.new_id(),
                         kind: TypeExprKind::Named {
                             ident: "Pending".to_string(),
-                            def_id: (),
                             type_args: vec![response_ty.clone()],
                         },
                         span: pending_span,
@@ -671,7 +656,6 @@ impl<'a> Parser<'a> {
                 Param {
                     id: self.id_gen.new_id(),
                     ident: "__response".to_string(),
-                    def_id: (),
                     typ: response_ty,
                     mode: ParamMode::In,
                     span: response_span,
@@ -697,7 +681,6 @@ impl<'a> Parser<'a> {
             return Ok(Param {
                 id: self.id_gen.new_id(),
                 ident,
-                def_id: (),
                 // `on Ping(p)` shorthand: payload type defaults to selector type.
                 typ: self.clone_type_expr_with_new_ids(selector_ty),
                 mode: ParamMode::In,
@@ -713,7 +696,6 @@ impl<'a> Parser<'a> {
             kind: TypeExprKind::Named {
                 // Internal marker consumed by typestate desugaring.
                 ident: "stay".to_string(),
-                def_id: (),
                 type_args: Vec::new(),
             },
             span,
@@ -784,7 +766,6 @@ impl<'a> Parser<'a> {
 
         Ok(FuncDef {
             id: self.id_gen.new_id(),
-            def_id: (),
             attrs: Vec::new(),
             sig,
             body,

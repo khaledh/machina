@@ -48,19 +48,15 @@ impl DefTableBuilder {
         self.node_def.insert(node_id, def_id);
     }
 
-    pub fn finish(self) -> (DefTable, NodeDefLookup) {
-        let node_def = self.node_def;
-        (
-            DefTable {
-                defs: self.defs,
-                node_def: node_def.clone(),
-                def_node: self.def_node,
-                def_span: self.def_span,
-                def_location_overrides: self.def_location_overrides,
-                source_path: None,
-            },
-            NodeDefLookup { node_def },
-        )
+    pub fn finish(self) -> DefTable {
+        DefTable {
+            defs: self.defs,
+            node_def: self.node_def,
+            def_node: self.def_node,
+            def_span: self.def_span,
+            def_location_overrides: self.def_location_overrides,
+            source_path: None,
+        }
     }
 }
 
@@ -88,18 +84,16 @@ impl DefTable {
         }
     }
 
+    // --- Defs ---
+
+    pub fn record_def_node(&mut self, def_id: DefId, node_id: NodeId, span: Span) {
+        self.node_def.insert(node_id, def_id);
+        self.def_node.insert(def_id, node_id);
+        self.def_span.insert(def_id, span);
+    }
+
     pub fn lookup_def(&self, def_id: DefId) -> Option<&Def> {
         self.defs.get(def_id.0 as usize)
-    }
-
-    pub fn lookup_node_def_id(&self, node_id: NodeId) -> Option<DefId> {
-        self.node_def.get(&node_id).copied()
-    }
-
-    pub fn node_def_entries(&self) -> impl Iterator<Item = (NodeId, DefId)> + '_ {
-        self.node_def
-            .iter()
-            .map(|(node_id, def_id)| (*node_id, *def_id))
     }
 
     pub fn lookup_def_node_id(&self, def_id: DefId) -> Option<NodeId> {
@@ -108,6 +102,10 @@ impl DefTable {
 
     pub fn lookup_def_span(&self, def_id: DefId) -> Option<Span> {
         self.def_span.get(&def_id).copied()
+    }
+
+    pub fn set_def_location(&mut self, def_id: DefId, location: DefLocation) {
+        self.def_location_overrides.insert(def_id, location);
     }
 
     pub fn lookup_def_location(&self, def_id: DefId) -> Option<DefLocation> {
@@ -121,6 +119,32 @@ impl DefTable {
         })
     }
 
+    // --- Uses ---
+
+    pub fn record_use(&mut self, node_id: NodeId, def_id: DefId) {
+        self.node_def.insert(node_id, def_id);
+    }
+
+    pub fn lookup_node_def_id(&self, node_id: NodeId) -> Option<DefId> {
+        self.node_def.get(&node_id).copied()
+    }
+
+    pub fn lookup_type_def_id(&self, type_name: &str) -> Option<DefId> {
+        self.defs
+            .iter()
+            .find(|def| def.name == type_name && matches!(def.kind, DefKind::TypeDef { .. }))
+            .map(|def| def.id)
+    }
+
+    pub fn def_id(&self, node_id: NodeId) -> DefId {
+        self.node_def
+            .get(&node_id)
+            .copied()
+            .unwrap_or_else(|| panic!("missing def_id for node {node_id}"))
+    }
+
+    // --- Source path ---
+
     pub fn source_path(&self) -> Option<&Path> {
         self.source_path.as_deref()
     }
@@ -129,21 +153,14 @@ impl DefTable {
         self.source_path = source_path;
     }
 
-    pub fn set_def_location(&mut self, def_id: DefId, location: DefLocation) {
-        self.def_location_overrides.insert(def_id, location);
-    }
+    // --- Other def properties ---
 
     pub fn is_intrinsic(&self, def_id: DefId) -> bool {
         self.lookup_def(def_id)
             .is_some_and(|def| def.is_intrinsic())
     }
 
-    pub fn lookup_type_def_id(&self, name: &str) -> Option<DefId> {
-        self.defs
-            .iter()
-            .find(|def| def.name == name && matches!(def.kind, DefKind::TypeDef { .. }))
-            .map(|def| def.id)
-    }
+    // --- NRVO eligibility ---
 
     pub fn mark_nrvo_eligible(&mut self, def_id: DefId) {
         if let Some(def) = self.defs.iter_mut().find(|def| def.id == def_id)
@@ -179,8 +196,16 @@ impl DefTable {
         id
     }
 
+    // -- Bulk access ---
+
     pub fn defs(&self) -> &[Def] {
         &self.defs
+    }
+
+    pub fn node_def_entries(&self) -> impl Iterator<Item = (NodeId, DefId)> + '_ {
+        self.node_def
+            .iter()
+            .map(|(node_id, def_id)| (*node_id, *def_id))
     }
 }
 
@@ -252,7 +277,7 @@ mod tests {
             NodeId(1),
             Span::default(),
         );
-        let (mut table, _) = builder.finish();
+        let mut table = builder.finish();
         let source_path = PathBuf::from("main.mc");
         table.set_source_path(Some(source_path.clone()));
 

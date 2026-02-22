@@ -16,9 +16,8 @@
 
 use crate::core::elaborate::elaborator::Elaborator;
 use crate::core::machine::request_site::labeled_request_site_key;
-use crate::core::tree::normalized as norm;
+use crate::core::tree as ast;
 use crate::core::tree::semantic as sem;
-use crate::core::tree::{CoerceKind, ParamMode};
 use crate::core::typecheck::type_map::{CallParam, CallSig};
 
 impl<'a> Elaborator<'a> {
@@ -26,7 +25,7 @@ impl<'a> Elaborator<'a> {
     ///
     /// Dispatches to specialized handlers based on expression kind,
     /// with lvalue and closure cases taking priority.
-    pub(in crate::core::elaborate) fn elab_value(&mut self, expr: &norm::Expr) -> sem::ValueExpr {
+    pub(in crate::core::elaborate) fn elab_value(&mut self, expr: &ast::Expr) -> sem::ValueExpr {
         if let Some(value) = self.elab_lvalue_expr(expr) {
             return value;
         }
@@ -44,7 +43,7 @@ impl<'a> Elaborator<'a> {
         sem::ValueExpr {
             id: expr.id,
             kind,
-            ty: expr.ty,
+            ty: self.type_id_for(expr.id),
             span: expr.span,
         }
     }
@@ -53,12 +52,12 @@ impl<'a> Elaborator<'a> {
     ///
     /// Wraps the place in either a Load (for copies) or ImplicitMove
     /// (when semck determined the value should be moved).
-    fn elab_lvalue_expr(&mut self, expr: &norm::Expr) -> Option<sem::ValueExpr> {
+    fn elab_lvalue_expr(&mut self, expr: &ast::Expr) -> Option<sem::ValueExpr> {
         match &expr.kind {
-            norm::ExprKind::Var { .. }
-            | norm::ExprKind::TupleField { .. }
-            | norm::ExprKind::StructField { .. }
-            | norm::ExprKind::Deref { .. } => {
+            ast::ExprKind::Var { .. }
+            | ast::ExprKind::TupleField { .. }
+            | ast::ExprKind::StructField { .. }
+            | ast::ExprKind::Deref { .. } => {
                 let place = self.elab_place(expr);
                 let place_ty = place.ty;
                 if self.implicit_moves.contains(&expr.id) {
@@ -78,9 +77,12 @@ impl<'a> Elaborator<'a> {
                     expr.span,
                 ))
             }
-            norm::ExprKind::ArrayIndex { target, .. }
+            ast::ExprKind::ArrayIndex { target, .. }
                 if !matches!(
-                    self.type_map.type_table().get(target.ty).peel_heap(),
+                    self.type_map
+                        .type_table()
+                        .get(self.type_id_for(target.id))
+                        .peel_heap(),
                     crate::core::types::Type::Map { .. }
                 ) =>
             {
@@ -103,7 +105,7 @@ impl<'a> Elaborator<'a> {
                     expr.span,
                 ))
             }
-            norm::ExprKind::Move { expr: inner } => {
+            ast::ExprKind::Move { expr: inner } => {
                 let place = self.elab_place(inner);
                 let place_ty = place.ty;
                 Some(sem::ValueExpr {
@@ -115,7 +117,7 @@ impl<'a> Elaborator<'a> {
                     span: expr.span,
                 })
             }
-            norm::ExprKind::ImplicitMove { expr: inner } => {
+            ast::ExprKind::ImplicitMove { expr: inner } => {
                 let place = self.elab_place(inner);
                 let place_ty = place.ty;
                 Some(sem::ValueExpr {
@@ -136,10 +138,9 @@ impl<'a> Elaborator<'a> {
     /// The closure's struct type and invoke method are created lazily via
     /// `ensure_closure_info`. The closure literal becomes a struct literal
     /// that initializes each capture field.
-    fn elab_closure_expr(&mut self, expr: &norm::Expr) -> Option<sem::ValueExpr> {
-        let norm::ExprKind::Closure {
+    fn elab_closure_expr(&mut self, expr: &ast::Expr) -> Option<sem::ValueExpr> {
+        let ast::ExprKind::Closure {
             ident,
-            def_id,
             params,
             return_ty,
             body,
@@ -149,19 +150,20 @@ impl<'a> Elaborator<'a> {
             return None;
         };
 
-        if self.is_captureless_closure(*def_id) {
+        let def_id = self.def_id_for(expr.id);
+        if self.is_captureless_closure(def_id) {
             // Captureless closures become top-level functions referenced by def id.
-            self.ensure_closure_func(ident, *def_id, params, return_ty, body, expr.span, expr.id);
+            self.ensure_closure_func(ident, def_id, params, return_ty, body, expr.span, expr.id);
             return Some(sem::ValueExpr {
                 id: expr.id,
-                kind: sem::ValueExprKind::ClosureRef { def_id: *def_id },
-                ty: expr.ty,
+                kind: sem::ValueExprKind::ClosureRef { def_id },
+                ty: self.type_id_for(expr.id),
                 span: expr.span,
             });
         }
 
         let info =
-            self.ensure_closure_info(ident, *def_id, params, return_ty, body, expr.span, expr.id);
+            self.ensure_closure_info(ident, def_id, params, return_ty, body, expr.span, expr.id);
         let ty_id = self.insert_synth_node_type(expr.id, info.ty.clone());
         let fields = info
             .captures
@@ -184,10 +186,10 @@ impl<'a> Elaborator<'a> {
         })
     }
 
-    fn elab_call_kind(&mut self, expr: &norm::Expr) -> Option<sem::ValueExprKind> {
+    fn elab_call_kind(&mut self, expr: &ast::Expr) -> Option<sem::ValueExprKind> {
         match &expr.kind {
-            norm::ExprKind::Call { callee, args } => Some(self.elab_call_expr(expr, callee, args)),
-            norm::ExprKind::MethodCall {
+            ast::ExprKind::Call { callee, args } => Some(self.elab_call_expr(expr, callee, args)),
+            ast::ExprKind::MethodCall {
                 callee,
                 method_name,
                 args,
@@ -198,9 +200,9 @@ impl<'a> Elaborator<'a> {
 
     fn elab_call_expr(
         &mut self,
-        expr: &norm::Expr,
-        callee: &norm::Expr,
-        args: &[norm::CallArg],
+        expr: &ast::Expr,
+        callee: &ast::Expr,
+        args: &[ast::CallArg],
     ) -> sem::ValueExprKind {
         let call_sig = self.get_call_sig(expr.id);
 
@@ -219,7 +221,7 @@ impl<'a> Elaborator<'a> {
             let plan_sig = CallSig {
                 def_id: Some(closure_def_id),
                 receiver: Some(CallParam {
-                    mode: ParamMode::In,
+                    mode: ast::ParamMode::In,
                     ty: info.ty.clone(),
                 }),
                 params: call_sig.params.clone(),
@@ -261,10 +263,10 @@ impl<'a> Elaborator<'a> {
 
     fn elab_method_call_expr(
         &mut self,
-        expr: &norm::Expr,
-        callee: &norm::Expr,
+        expr: &ast::Expr,
+        callee: &ast::Expr,
         method_name: &str,
-        args: &[norm::CallArg],
+        args: &[ast::CallArg],
     ) -> sem::ValueExprKind {
         if method_name == "len" && args.is_empty() {
             let place = self.elab_place(callee);
@@ -298,34 +300,34 @@ impl<'a> Elaborator<'a> {
         }
     }
 
-    fn elab_simple_value_kind(&mut self, expr: &norm::Expr) -> sem::ValueExprKind {
+    fn elab_simple_value_kind(&mut self, expr: &ast::Expr) -> sem::ValueExprKind {
         match &expr.kind {
-            norm::ExprKind::Block { items, tail } => sem::ValueExprKind::Block {
+            ast::ExprKind::Block { items, tail } => sem::ValueExprKind::Block {
                 items: items
                     .iter()
                     .map(|item| self.elab_block_item(item))
                     .collect(),
                 tail: tail.as_ref().map(|value| Box::new(self.elab_value(value))),
             },
-            norm::ExprKind::UnitLit => sem::ValueExprKind::UnitLit,
-            norm::ExprKind::IntLit(value) => sem::ValueExprKind::IntLit(*value),
-            norm::ExprKind::BoolLit(value) => sem::ValueExprKind::BoolLit(*value),
-            norm::ExprKind::CharLit(value) => sem::ValueExprKind::CharLit(*value),
-            norm::ExprKind::StringLit { value } => sem::ValueExprKind::StringLit {
+            ast::ExprKind::UnitLit => sem::ValueExprKind::UnitLit,
+            ast::ExprKind::IntLit(value) => sem::ValueExprKind::IntLit(*value),
+            ast::ExprKind::BoolLit(value) => sem::ValueExprKind::BoolLit(*value),
+            ast::ExprKind::CharLit(value) => sem::ValueExprKind::CharLit(*value),
+            ast::ExprKind::StringLit { value } => sem::ValueExprKind::StringLit {
                 value: value.clone(),
             },
-            norm::ExprKind::StringFmt { segments } => sem::ValueExprKind::StringFmt {
+            ast::ExprKind::StringFmt { segments } => sem::ValueExprKind::StringFmt {
                 plan: self.elab_string_fmt_plan(segments),
             },
-            norm::ExprKind::ArrayLit { elem_ty, init } => sem::ValueExprKind::ArrayLit {
+            ast::ExprKind::ArrayLit { elem_ty, init } => sem::ValueExprKind::ArrayLit {
                 elem_ty: elem_ty.clone(),
                 init: self.elab_array_lit_init(init),
             },
-            norm::ExprKind::SetLit { elem_ty, elems } => sem::ValueExprKind::SetLit {
+            ast::ExprKind::SetLit { elem_ty, elems } => sem::ValueExprKind::SetLit {
                 elem_ty: elem_ty.clone(),
                 elems: elems.iter().map(|elem| self.elab_value(elem)).collect(),
             },
-            norm::ExprKind::MapLit {
+            ast::ExprKind::MapLit {
                 key_ty,
                 value_ty,
                 entries,
@@ -341,17 +343,17 @@ impl<'a> Elaborator<'a> {
                     })
                     .collect(),
             },
-            norm::ExprKind::TupleLit(items) => sem::ValueExprKind::TupleLit(
+            ast::ExprKind::TupleLit(items) => sem::ValueExprKind::TupleLit(
                 items.iter().map(|item| self.elab_value(item)).collect(),
             ),
-            norm::ExprKind::StructLit { name, fields, .. } => sem::ValueExprKind::StructLit {
+            ast::ExprKind::StructLit { name, fields, .. } => sem::ValueExprKind::StructLit {
                 name: name.clone(),
                 fields: fields
                     .iter()
                     .map(|field| self.elab_struct_lit_field(field))
                     .collect(),
             },
-            norm::ExprKind::EnumVariant {
+            ast::ExprKind::EnumVariant {
                 enum_name,
                 variant,
                 payload,
@@ -361,23 +363,23 @@ impl<'a> Elaborator<'a> {
                 variant: variant.clone(),
                 payload: payload.iter().map(|value| self.elab_value(value)).collect(),
             },
-            norm::ExprKind::StructUpdate { target, fields } => sem::ValueExprKind::StructUpdate {
+            ast::ExprKind::StructUpdate { target, fields } => sem::ValueExprKind::StructUpdate {
                 target: Box::new(self.elab_value(target)),
                 fields: fields
                     .iter()
                     .map(|field| self.elab_struct_update_field(field))
                     .collect(),
             },
-            norm::ExprKind::BinOp { left, op, right } => sem::ValueExprKind::BinOp {
+            ast::ExprKind::BinOp { left, op, right } => sem::ValueExprKind::BinOp {
                 left: Box::new(self.elab_value(left)),
                 op: *op,
                 right: Box::new(self.elab_value(right)),
             },
-            norm::ExprKind::UnaryOp { op, expr } => sem::ValueExprKind::UnaryOp {
+            ast::ExprKind::UnaryOp { op, expr } => sem::ValueExprKind::UnaryOp {
                 op: *op,
                 expr: Box::new(self.elab_value(expr)),
             },
-            norm::ExprKind::Try {
+            ast::ExprKind::Try {
                 fallible_expr,
                 on_error,
             } => {
@@ -395,10 +397,10 @@ impl<'a> Elaborator<'a> {
                         .map(|expr| Box::new(self.elab_value(expr))),
                 }
             }
-            norm::ExprKind::HeapAlloc { expr } => sem::ValueExprKind::HeapAlloc {
+            ast::ExprKind::HeapAlloc { expr } => sem::ValueExprKind::HeapAlloc {
                 expr: Box::new(self.elab_value(expr)),
             },
-            norm::ExprKind::If {
+            ast::ExprKind::If {
                 cond,
                 then_body,
                 else_body,
@@ -407,14 +409,18 @@ impl<'a> Elaborator<'a> {
                 then_body: Box::new(self.elab_value(then_body)),
                 else_body: Box::new(self.elab_value(else_body)),
             },
-            norm::ExprKind::Range { start, end } => sem::ValueExprKind::Range {
+            ast::ExprKind::Range { start, end } => sem::ValueExprKind::Range {
                 start: Box::new(self.elab_value(start)),
                 end: Box::new(self.elab_value(end)),
             },
-            norm::ExprKind::Slice { target, start, end } => {
+            ast::ExprKind::Slice { target, start, end } => {
                 let target_place = self.elab_place(target);
                 let target_ty = self.type_map.type_table().get(target_place.ty).clone();
-                let slice_ty = self.type_map.type_table().get(expr.ty).clone();
+                let slice_ty = self
+                    .type_map
+                    .type_table()
+                    .get(self.type_id_for(expr.id))
+                    .clone();
                 let plan = self.build_slice_plan(&target_ty, &slice_ty);
                 self.record_slice_plan(expr.id, plan);
 
@@ -424,9 +430,12 @@ impl<'a> Elaborator<'a> {
                     end: end.as_ref().map(|expr| Box::new(self.elab_value(expr))),
                 }
             }
-            norm::ExprKind::ArrayIndex { target, indices }
+            ast::ExprKind::ArrayIndex { target, indices }
                 if matches!(
-                    self.type_map.type_table().get(target.ty).peel_heap(),
+                    self.type_map
+                        .type_table()
+                        .get(self.type_id_for(target.id))
+                        .peel_heap(),
                     crate::core::types::Type::Map { .. }
                 ) =>
             {
@@ -438,7 +447,7 @@ impl<'a> Elaborator<'a> {
                     key: Box::new(self.elab_value(key_expr)),
                 }
             }
-            norm::ExprKind::Match { scrutinee, arms } => {
+            ast::ExprKind::Match { scrutinee, arms } => {
                 // Elaborate the scrutinee first so match planning can use the
                 // semantically-correct scrutinee type (including place-based deref behavior).
                 let sem_scrutinee = self.elab_value(scrutinee);
@@ -451,10 +460,21 @@ impl<'a> Elaborator<'a> {
                     arms: arms.iter().map(|arm| self.elab_match_arm(arm)).collect(),
                 }
             }
-            norm::ExprKind::Coerce { kind, expr: inner } => {
-                if matches!(kind, CoerceKind::ArrayToSlice | CoerceKind::DynArrayToSlice) {
-                    let target_ty = self.type_map.type_table().get(inner.ty).clone();
-                    let slice_ty = self.type_map.type_table().get(expr.ty).clone();
+            ast::ExprKind::Coerce { kind, expr: inner } => {
+                if matches!(
+                    kind,
+                    ast::CoerceKind::ArrayToSlice | ast::CoerceKind::DynArrayToSlice
+                ) {
+                    let target_ty = self
+                        .type_map
+                        .type_table()
+                        .get(self.type_id_for(inner.id))
+                        .clone();
+                    let slice_ty = self
+                        .type_map
+                        .type_table()
+                        .get(self.type_id_for(expr.id))
+                        .clone();
                     let plan = self.build_slice_plan(&target_ty, &slice_ty);
                     self.record_slice_plan(expr.id, plan);
                 }
@@ -463,12 +483,12 @@ impl<'a> Elaborator<'a> {
                     expr: Box::new(self.elab_value(inner)),
                 }
             }
-            norm::ExprKind::Emit { kind } => match kind {
-                norm::EmitKind::Send { to, payload } => sem::ValueExprKind::EmitSend {
+            ast::ExprKind::Emit { kind } => match kind {
+                ast::EmitKind::Send { to, payload } => sem::ValueExprKind::EmitSend {
                     to: Box::new(self.elab_value(to)),
                     payload: Box::new(self.elab_value(payload)),
                 },
-                norm::EmitKind::Request {
+                ast::EmitKind::Request {
                     to,
                     payload,
                     request_site_label,
@@ -483,27 +503,27 @@ impl<'a> Elaborator<'a> {
                         .unwrap_or(expr.id.0 as u64),
                 },
             },
-            norm::ExprKind::Reply { cap, value } => sem::ValueExprKind::Reply {
+            ast::ExprKind::Reply { cap, value } => sem::ValueExprKind::Reply {
                 cap: Box::new(self.elab_value(cap)),
                 value: Box::new(self.elab_value(value)),
             },
-            norm::ExprKind::AddrOf { expr } => sem::ValueExprKind::AddrOf {
+            ast::ExprKind::AddrOf { expr } => sem::ValueExprKind::AddrOf {
                 place: Box::new(self.elab_place(expr)),
             },
-            norm::ExprKind::Call { .. }
-            | norm::ExprKind::MethodCall { .. }
-            | norm::ExprKind::Closure { .. }
-            | norm::ExprKind::Move { .. }
-            | norm::ExprKind::ImplicitMove { .. }
-            | norm::ExprKind::Var { .. }
-            | norm::ExprKind::TupleField { .. }
-            | norm::ExprKind::StructField { .. }
-            | norm::ExprKind::Deref { .. } => unreachable!("handled earlier"),
-            norm::ExprKind::ArrayIndex { .. } => unreachable!("handled earlier"),
+            ast::ExprKind::Call { .. }
+            | ast::ExprKind::MethodCall { .. }
+            | ast::ExprKind::Closure { .. }
+            | ast::ExprKind::Move { .. }
+            | ast::ExprKind::ImplicitMove { .. }
+            | ast::ExprKind::Var { .. }
+            | ast::ExprKind::TupleField { .. }
+            | ast::ExprKind::StructField { .. }
+            | ast::ExprKind::Deref { .. } => unreachable!("handled earlier"),
+            ast::ExprKind::ArrayIndex { .. } => unreachable!("handled earlier"),
         }
     }
 
-    fn elab_match_arm(&mut self, arm: &norm::MatchArm) -> sem::MatchArm {
+    fn elab_match_arm(&mut self, arm: &ast::MatchArm) -> sem::MatchArm {
         sem::MatchArm {
             id: arm.id,
             pattern: arm.pattern.clone(),
@@ -512,18 +532,18 @@ impl<'a> Elaborator<'a> {
         }
     }
 
-    fn elab_array_lit_init(&mut self, init: &norm::ArrayLitInit) -> sem::ArrayLitInit {
+    fn elab_array_lit_init(&mut self, init: &ast::ArrayLitInit) -> sem::ArrayLitInit {
         match init {
-            norm::ArrayLitInit::Elems(elems) => {
+            ast::ArrayLitInit::Elems(elems) => {
                 sem::ArrayLitInit::Elems(elems.iter().map(|elem| self.elab_value(elem)).collect())
             }
-            norm::ArrayLitInit::Repeat(elem, count) => {
+            ast::ArrayLitInit::Repeat(elem, count) => {
                 sem::ArrayLitInit::Repeat(Box::new(self.elab_value(elem)), *count)
             }
         }
     }
 
-    fn elab_struct_lit_field(&mut self, field: &norm::StructLitField) -> sem::StructLitField {
+    fn elab_struct_lit_field(&mut self, field: &ast::StructLitField) -> sem::StructLitField {
         sem::StructLitField {
             name: field.name.clone(),
             value: self.elab_value(&field.value),
@@ -533,7 +553,7 @@ impl<'a> Elaborator<'a> {
 
     fn elab_struct_update_field(
         &mut self,
-        field: &norm::StructUpdateField,
+        field: &ast::StructUpdateField,
     ) -> sem::StructUpdateField {
         sem::StructUpdateField {
             name: field.name.clone(),

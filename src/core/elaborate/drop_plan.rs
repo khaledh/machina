@@ -4,9 +4,9 @@
 //! SSA lowering can emit drops without re-deriving semantic intent.
 
 use crate::core::resolve::{DefId, DefTable};
+use crate::core::tree as ast;
 use crate::core::tree::semantic as sem;
 use crate::core::tree::semantic::{DropGuard, DropItem, DropPlanMap, DropScopePlan};
-use crate::core::tree::{NodeId, ParamMode};
 use crate::core::typecheck::type_map::TypeMap;
 
 pub fn build_drop_plans(
@@ -63,7 +63,7 @@ impl<'a> DropPlanBuilder<'a> {
         self.scope_stack.push(DropScopePlan::default());
     }
 
-    fn exit_scope(&mut self, id: NodeId) {
+    fn exit_scope(&mut self, id: ast::NodeId) {
         let scope = self
             .scope_stack
             .pop()
@@ -131,11 +131,11 @@ impl<'a> DropPlanBuilder<'a> {
         self.enter_scope();
 
         for param in &func_def.sig.params {
-            if param.mode != ParamMode::Sink {
+            if param.mode != ast::ParamMode::Sink {
                 continue;
             }
             // Sink params can be moved; guard drops on the liveness flag.
-            self.register_def_drop(param.def_id, DropGuard::IfInitialized);
+            self.register_def_drop(self.def_table.def_id(param.id), DropGuard::IfInitialized);
         }
 
         self.visit_value_expr(&func_def.body);
@@ -148,17 +148,20 @@ impl<'a> DropPlanBuilder<'a> {
         self.enter_scope();
 
         let self_param = &method_def.sig.self_param;
-        if self_param.mode == ParamMode::Sink {
+        if self_param.mode == ast::ParamMode::Sink {
             // Sink receiver can be moved; guard drops on the liveness flag.
-            self.register_def_drop(self_param.def_id, DropGuard::IfInitialized);
+            self.register_def_drop(
+                self.def_table.def_id(self_param.id),
+                DropGuard::IfInitialized,
+            );
         }
 
         for param in &method_def.sig.params {
-            if param.mode != ParamMode::Sink {
+            if param.mode != ast::ParamMode::Sink {
                 continue;
             }
             // Sink params can be moved; guard drops on the liveness flag.
-            self.register_def_drop(param.def_id, DropGuard::IfInitialized);
+            self.register_def_drop(self.def_table.def_id(param.id), DropGuard::IfInitialized);
         }
 
         self.visit_value_expr(&method_def.body);

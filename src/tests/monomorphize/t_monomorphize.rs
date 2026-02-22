@@ -4,7 +4,7 @@ use crate::core::monomorphize::{monomorphize_resolved, monomorphize_resolved_wit
 use crate::core::parse::Parser;
 use crate::core::resolve::DefTable;
 use crate::core::resolve::resolve;
-use crate::core::tree::resolved as res;
+use crate::core::tree::{FuncDef, MethodItem, Module, TopLevelItem};
 use crate::core::typecheck::type_check;
 
 fn resolve_context(source: &str) -> (crate::core::context::ResolvedContext, DefTable) {
@@ -22,15 +22,11 @@ fn resolve_context(source: &str) -> (crate::core::context::ResolvedContext, DefT
     (resolved_context, def_table)
 }
 
-fn find_func_def<'a>(
-    module: &'a res::Module,
-    def_table: &DefTable,
-    name: &str,
-) -> Option<&'a res::FuncDef> {
+fn find_func_def<'a>(module: &'a Module, def_table: &DefTable, name: &str) -> Option<&'a FuncDef> {
     module.top_level_items.iter().find_map(|item| {
-        if let res::TopLevelItem::FuncDef(func_def) = item {
+        if let TopLevelItem::FuncDef(func_def) = item {
             let def_name = def_table
-                .lookup_def(func_def.def_id)
+                .lookup_def(def_table.def_id(func_def.id))
                 .map(|def| def.name.as_str());
             if def_name == Some(name) {
                 return Some(func_def);
@@ -40,18 +36,18 @@ fn find_func_def<'a>(
     })
 }
 
-fn count_method_defs(module: &res::Module, method_name: &str) -> usize {
+fn count_method_defs(module: &Module, method_name: &str) -> usize {
     module
         .top_level_items
         .iter()
         .filter_map(|item| match item {
-            res::TopLevelItem::MethodBlock(block) => Some(block),
+            TopLevelItem::MethodBlock(block) => Some(block),
             _ => None,
         })
         .flat_map(|block| block.method_items.iter())
         .filter(|item| match item {
-            res::MethodItem::Def(def) => def.sig.name == method_name,
-            res::MethodItem::Decl(decl) => decl.sig.name == method_name,
+            MethodItem::Def(def) => def.sig.name == method_name,
+            MethodItem::Decl(decl) => decl.sig.name == method_name,
         })
         .count()
 }
@@ -78,10 +74,10 @@ fn test_monomorphize_allows_multiple_instantiations() {
         .top_level_items
         .iter()
         .filter(|item| {
-            if let res::TopLevelItem::FuncDef(func_def) = item {
+            if let TopLevelItem::FuncDef(func_def) = item {
                 let name = monomorphized
                     .def_table
-                    .lookup_def(func_def.def_id)
+                    .lookup_def(monomorphized.def_table.def_id(func_def.id))
                     .map(|def| def.name.as_str());
                 return name == Some("id");
             }
@@ -164,10 +160,10 @@ fn test_monomorphize_reuses_duplicate_instantiation_requests() {
         .top_level_items
         .iter()
         .filter(|item| {
-            if let res::TopLevelItem::FuncDef(func_def) = item {
+            if let TopLevelItem::FuncDef(func_def) = item {
                 let name = monomorphized
                     .def_table
-                    .lookup_def(func_def.def_id)
+                    .lookup_def(monomorphized.def_table.def_id(func_def.id))
                     .map(|def| def.name.as_str());
                 return name == Some("id");
             }

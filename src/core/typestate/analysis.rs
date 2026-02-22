@@ -6,7 +6,7 @@
 use std::collections::HashSet;
 
 use crate::core::resolve::{REK, ResolveError};
-use crate::core::tree::parsed::{
+use crate::core::tree::{
     FuncDef, StructDefField, TypeExpr, TypeExprKind, TypestateDef, TypestateFields, TypestateItem,
     TypestateOnHandler, TypestateState, TypestateStateItem,
 };

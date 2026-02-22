@@ -1,11 +1,12 @@
 //! Function/method/closure signature collection helpers.
 
 use super::*;
+use crate::core::tree::{FunctionSig, Param, TypeExprKind};
 
 impl<'a> ConstraintCollector<'a> {
     pub(super) fn collect_closure_signature(
         &mut self,
-        params: &[crate::core::tree::resolved::Param],
+        params: &[Param],
         return_ty: &TypeExpr,
     ) -> Option<ClosureSigInfo> {
         let mut fn_params = Vec::with_capacity(params.len());
@@ -39,10 +40,7 @@ impl<'a> ConstraintCollector<'a> {
         })
     }
 
-    pub(super) fn collect_function_signature(
-        &self,
-        sig: &crate::core::tree::resolved::FunctionSig,
-    ) -> Option<Type> {
+    pub(super) fn collect_function_signature(&self, sig: &FunctionSig) -> Option<Type> {
         let params = self.resolve_fn_params(&sig.params)?;
         self.resolve_fn_type(params, &sig.ret_ty_expr)
     }
@@ -63,10 +61,7 @@ impl<'a> ConstraintCollector<'a> {
         self.resolve_fn_type(params, &sig.ret_ty_expr)
     }
 
-    fn resolve_fn_params(
-        &self,
-        params: &[crate::core::tree::resolved::Param],
-    ) -> Option<Vec<crate::core::types::FnParam>> {
+    fn resolve_fn_params(&self, params: &[Param]) -> Option<Vec<crate::core::types::FnParam>> {
         params
             .iter()
             .map(|param| {
@@ -94,8 +89,5 @@ impl<'a> ConstraintCollector<'a> {
 }
 
 fn is_infer_type_expr(type_expr: &TypeExpr) -> bool {
-    matches!(
-        type_expr.kind,
-        crate::core::tree::resolved::TypeExprKind::Infer
-    )
+    matches!(type_expr.kind, TypeExprKind::Infer)
 }

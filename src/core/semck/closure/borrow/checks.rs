@@ -10,12 +10,11 @@ use crate::core::diag::Span;
 use crate::core::resolve::DefId;
 use crate::core::semck::closure::capture::CaptureMode;
 use crate::core::semck::{SEK, SemCheckError, push_error};
+use crate::core::tree::ArrayLitInit;
 use crate::core::tree::NodeId;
-use crate::core::tree::cfg::{TreeCfgBuilder, TreeCfgItem, TreeCfgTerminator};
-use crate::core::tree::normalized::ArrayLitInit;
-use crate::core::tree::normalized::{CallArg, Expr, ExprKind, FuncDef, ParamMode, StmtExprKind};
+use crate::core::tree::cfg::{CfgBuilder, CfgItem, CfgTerminator};
 use crate::core::tree::visit::{Visitor, walk_expr};
-use crate::core::types::TypeId;
+use crate::core::tree::{CallArg, Expr, ExprKind, FuncDef, ParamMode, StmtExprKind};
 
 use super::bindings::{analyze_closure_bindings, apply_item_bindings};
 use super::collect::{collect_expr_var_uses, collect_item_var_uses, lvalue_base_def_id};
@@ -29,9 +28,9 @@ pub(super) fn check_func_def(
     errors: &mut Vec<SemCheckError>,
 ) {
     // Build flow-sensitive closure bindings and liveness for this function.
-    let cfg = TreeCfgBuilder::<TypeId>::new().build_from_expr(&func_def.body);
-    let bindings = analyze_closure_bindings(&cfg, capture_map);
-    let liveness = analyze_closure_liveness(&cfg);
+    let cfg = CfgBuilder::new().build_from_expr(&func_def.body);
+    let bindings = analyze_closure_bindings(&cfg, capture_map, &ctx.def_table);
+    let liveness = analyze_closure_liveness(&cfg, &ctx.def_table);
     let ret_expr_id = return_expr_id(func_def);
 
     for (block_idx, node) in cfg.nodes.iter().enumerate() {
@@ -39,7 +38,7 @@ pub(super) fn check_func_def(
 
         for (item_idx, item) in node.items.iter().enumerate() {
             let mut active_closures = liveness.live_after[block_idx][item_idx].clone();
-            collect_item_var_uses(item, &mut active_closures);
+            collect_item_var_uses(item, &ctx.def_table, &mut active_closures);
             active_closures.retain(|def_id| state.contains_key(def_id));
 
             if !active_closures.is_empty() {
@@ -51,20 +50,20 @@ pub(super) fn check_func_def(
             }
 
             // Captured closures cannot escape via return/store/arg.
-            check_item_for_escapes(item, &state, capture_map, errors);
+            check_item_for_escapes(ctx, item, &state, capture_map, errors);
 
-            if let TreeCfgItem::Expr(expr) = item
+            if let CfgItem::Expr(expr) = item
                 && Some(expr.id) == ret_expr_id
             {
-                check_return_expr(expr, &state, capture_map, errors);
+                check_return_expr(ctx, expr, &state, capture_map, errors);
             }
 
-            apply_item_bindings(&mut state, item, capture_map);
+            apply_item_bindings(&mut state, item, capture_map, &ctx.def_table);
         }
 
-        if let TreeCfgTerminator::If { cond, .. } = &node.term {
+        if let CfgTerminator::If { cond, .. } = &node.term {
             let mut active_closures = liveness.live_out[block_idx].clone();
-            collect_expr_var_uses(cond, &mut active_closures);
+            collect_expr_var_uses(cond, &ctx.def_table, &mut active_closures);
             active_closures.retain(|def_id| state.contains_key(def_id));
 
             if !active_closures.is_empty() {
@@ -94,7 +93,7 @@ pub(super) fn check_func_def(
                     }
                 }
             }
-            check_expr_for_escapes(cond, &state, capture_map, errors);
+            check_expr_for_escapes(ctx, cond, &state, capture_map, errors);
         }
     }
 }
@@ -135,7 +134,7 @@ fn borrowed_bases_for_active(
 
 fn check_item_for_conflicts(
     ctx: &NormalizedContext,
-    item: &TreeCfgItem<'_, TypeId>,
+    item: &CfgItem<'_>,
     borrowed_bases: &HashMap<DefId, CaptureMode>,
     errors: &mut Vec<SemCheckError>,
 ) {
@@ -158,7 +157,7 @@ fn check_item_for_conflicts(
         // Mutable borrow: any use of the base is illegal.
         let mut visitor = MutBorrowConflictVisitor::new(ctx, borrowed_bases, errors);
         match item {
-            TreeCfgItem::Stmt(stmt) => match &stmt.kind {
+            CfgItem::Stmt(stmt) => match &stmt.kind {
                 StmtExprKind::LetBind { value, .. } | StmtExprKind::VarBind { value, .. } => {
                     visitor.visit_expr(value);
                 }
@@ -187,14 +186,14 @@ fn check_item_for_conflicts(
                     }
                 }
             },
-            TreeCfgItem::Expr(expr) => visitor.visit_expr(expr),
+            CfgItem::Expr(expr) => visitor.visit_expr(expr),
         }
     }
 
     if !borrowed_imm.is_empty() {
         // Immutable borrow: allow reads, forbid writes/moves.
         match item {
-            TreeCfgItem::Stmt(stmt) => match &stmt.kind {
+            CfgItem::Stmt(stmt) => match &stmt.kind {
                 StmtExprKind::LetBind { value, .. } | StmtExprKind::VarBind { value, .. } => {
                     let mut visitor = ImmBorrowConflictVisitor::new(ctx, &borrowed_imm, errors);
                     visitor.visit_expr(value);
@@ -228,7 +227,7 @@ fn check_item_for_conflicts(
                     }
                 }
             },
-            TreeCfgItem::Expr(expr) => {
+            CfgItem::Expr(expr) => {
                 let mut visitor = ImmBorrowConflictVisitor::new(ctx, &borrowed_imm, errors);
                 visitor.visit_expr(expr);
             }
@@ -242,7 +241,7 @@ fn check_write_target(
     borrowed_imm: &HashSet<DefId>,
     errors: &mut Vec<SemCheckError>,
 ) {
-    if let Some(def_id) = lvalue_base_def_id(expr)
+    if let Some(def_id) = lvalue_base_def_id(expr, &ctx.def_table)
         && borrowed_imm.contains(&def_id)
     {
         let name = def_name(ctx, def_id);
@@ -291,10 +290,10 @@ impl<'a> MutBorrowConflictVisitor<'a> {
     }
 }
 
-impl Visitor<DefId, TypeId> for MutBorrowConflictVisitor<'_> {
+impl Visitor for MutBorrowConflictVisitor<'_> {
     fn visit_expr(&mut self, expr: &Expr) {
-        if let ExprKind::Var { def_id, .. } = expr.kind {
-            self.note_use(def_id, expr.span);
+        if let ExprKind::Var { .. } = expr.kind {
+            self.note_use(self.ctx.def_table.def_id(expr.id), expr.span);
         }
         if matches!(expr.kind, ExprKind::Closure { .. }) {
             return;
@@ -351,7 +350,7 @@ impl<'a> ImmBorrowConflictVisitor<'a> {
     }
 
     fn check_move_target(&mut self, expr: &Expr, span: Span) {
-        let Some(def_id) = lvalue_base_def_id(expr) else {
+        let Some(def_id) = lvalue_base_def_id(expr, &self.ctx.def_table) else {
             return;
         };
         if !self.borrowed_bases.contains(&def_id) {
@@ -362,7 +361,7 @@ impl<'a> ImmBorrowConflictVisitor<'a> {
     }
 }
 
-impl Visitor<DefId, TypeId> for ImmBorrowConflictVisitor<'_> {
+impl Visitor for ImmBorrowConflictVisitor<'_> {
     fn visit_expr(&mut self, expr: &Expr) {
         match &expr.kind {
             ExprKind::Move { expr: inner } | ExprKind::ImplicitMove { expr: inner } => {
@@ -390,15 +389,16 @@ impl Visitor<DefId, TypeId> for ImmBorrowConflictVisitor<'_> {
 // ======================================================================
 
 fn check_item_for_escapes(
-    item: &TreeCfgItem<'_, TypeId>,
+    ctx: &NormalizedContext,
+    item: &CfgItem<'_>,
     state: &ClosureBindings,
     capture_map: &HashMap<DefId, CaptureMap>,
     errors: &mut Vec<SemCheckError>,
 ) {
     match item {
-        TreeCfgItem::Stmt(stmt) => match &stmt.kind {
+        CfgItem::Stmt(stmt) => match &stmt.kind {
             StmtExprKind::LetBind { value, .. } | StmtExprKind::VarBind { value, .. } => {
-                check_expr_for_escapes(value, state, capture_map, errors);
+                check_expr_for_escapes(ctx, value, state, capture_map, errors);
             }
             StmtExprKind::VarDecl { .. } => {}
             StmtExprKind::Assign {
@@ -408,44 +408,46 @@ fn check_item_for_escapes(
                 assignee, value, ..
             } => {
                 if !matches!(assignee.kind, ExprKind::Var { .. })
-                    && is_captured_closure_value(value, state, capture_map)
+                    && is_captured_closure_value(ctx, value, state, capture_map)
                 {
                     push_error(errors, value.span, SEK::ClosureEscapeStore);
                 }
-                check_expr_for_escapes(value, state, capture_map, errors);
+                check_expr_for_escapes(ctx, value, state, capture_map, errors);
             }
             StmtExprKind::While { cond, body } => {
-                check_expr_for_escapes(cond, state, capture_map, errors);
-                check_expr_for_escapes(body, state, capture_map, errors);
+                check_expr_for_escapes(ctx, cond, state, capture_map, errors);
+                check_expr_for_escapes(ctx, body, state, capture_map, errors);
             }
             StmtExprKind::For { iter, body, .. } => {
-                check_expr_for_escapes(iter, state, capture_map, errors);
-                check_expr_for_escapes(body, state, capture_map, errors);
+                check_expr_for_escapes(ctx, iter, state, capture_map, errors);
+                check_expr_for_escapes(ctx, body, state, capture_map, errors);
             }
             StmtExprKind::Break | StmtExprKind::Continue => {}
             StmtExprKind::Return { value } => {
                 if let Some(value) = value {
-                    check_expr_for_escapes(value, state, capture_map, errors);
+                    check_expr_for_escapes(ctx, value, state, capture_map, errors);
                 }
             }
         },
-        TreeCfgItem::Expr(expr) => {
-            check_expr_for_escapes(expr, state, capture_map, errors);
+        CfgItem::Expr(expr) => {
+            check_expr_for_escapes(ctx, expr, state, capture_map, errors);
         }
     }
 }
 
 fn check_expr_for_escapes(
+    ctx: &NormalizedContext,
     expr: &Expr,
     state: &ClosureBindings,
     capture_map: &HashMap<DefId, CaptureMap>,
     errors: &mut Vec<SemCheckError>,
 ) {
-    let mut visitor = ClosureEscapeVisitor::new(state, capture_map, errors);
+    let mut visitor = ClosureEscapeVisitor::new(ctx, state, capture_map, errors);
     visitor.visit_expr(expr);
 }
 
 fn check_return_expr(
+    ctx: &NormalizedContext,
     expr: &Expr,
     state: &ClosureBindings,
     capture_map: &HashMap<DefId, CaptureMap>,
@@ -454,7 +456,7 @@ fn check_return_expr(
     match &expr.kind {
         ExprKind::Block { tail, .. } => {
             if let Some(tail) = tail {
-                check_return_expr(tail, state, capture_map, errors);
+                check_return_expr(ctx, tail, state, capture_map, errors);
             }
         }
         ExprKind::If {
@@ -462,16 +464,16 @@ fn check_return_expr(
             else_body,
             ..
         } => {
-            check_return_expr(then_body, state, capture_map, errors);
-            check_return_expr(else_body, state, capture_map, errors);
+            check_return_expr(ctx, then_body, state, capture_map, errors);
+            check_return_expr(ctx, else_body, state, capture_map, errors);
         }
         ExprKind::Match { arms, .. } => {
             for arm in arms {
-                check_return_expr(&arm.body, state, capture_map, errors);
+                check_return_expr(ctx, &arm.body, state, capture_map, errors);
             }
         }
         _ => {
-            if is_captured_closure_value(expr, state, capture_map) {
+            if is_captured_closure_value(ctx, expr, state, capture_map) {
                 push_error(errors, expr.span, SEK::ClosureEscapeReturn);
             }
         }
@@ -479,6 +481,7 @@ fn check_return_expr(
 }
 
 struct ClosureEscapeVisitor<'a> {
+    ctx: &'a NormalizedContext,
     state: &'a ClosureBindings,
     capture_map: &'a HashMap<DefId, CaptureMap>,
     errors: &'a mut Vec<SemCheckError>,
@@ -486,11 +489,13 @@ struct ClosureEscapeVisitor<'a> {
 
 impl<'a> ClosureEscapeVisitor<'a> {
     fn new(
+        ctx: &'a NormalizedContext,
         state: &'a ClosureBindings,
         capture_map: &'a HashMap<DefId, CaptureMap>,
         errors: &'a mut Vec<SemCheckError>,
     ) -> Self {
         Self {
+            ctx,
             state,
             capture_map,
             errors,
@@ -498,19 +503,19 @@ impl<'a> ClosureEscapeVisitor<'a> {
     }
 
     fn check_store_value(&mut self, expr: &Expr) {
-        if is_captured_closure_value(expr, self.state, self.capture_map) {
+        if is_captured_closure_value(self.ctx, expr, self.state, self.capture_map) {
             self.errors.push(SEK::ClosureEscapeStore.at(expr.span));
         }
     }
 
     fn check_arg_value(&mut self, expr: &Expr) {
-        if is_captured_closure_value(expr, self.state, self.capture_map) {
+        if is_captured_closure_value(self.ctx, expr, self.state, self.capture_map) {
             self.errors.push(SEK::ClosureEscapeArg.at(expr.span));
         }
     }
 }
 
-impl Visitor<DefId, TypeId> for ClosureEscapeVisitor<'_> {
+impl Visitor for ClosureEscapeVisitor<'_> {
     fn visit_expr(&mut self, expr: &Expr) {
         match &expr.kind {
             ExprKind::Call { callee, args } => {
@@ -577,19 +582,25 @@ impl Visitor<DefId, TypeId> for ClosureEscapeVisitor<'_> {
 }
 
 fn is_captured_closure_value(
+    ctx: &NormalizedContext,
     expr: &Expr,
     state: &ClosureBindings,
     capture_map: &HashMap<DefId, CaptureMap>,
 ) -> bool {
     match &expr.kind {
-        ExprKind::Closure { def_id, .. } => capture_map.contains_key(def_id),
-        ExprKind::Var { def_id, .. } => state
-            .get(def_id)
-            .map(|captures| !captures.is_empty())
-            .unwrap_or(false),
+        ExprKind::Closure { .. } => {
+            let def_id = ctx.def_table.def_id(expr.id);
+            capture_map.contains_key(&def_id)
+        }
+        ExprKind::Var { .. } => {
+            let def_id = ctx.def_table.def_id(expr.id);
+            state
+                .get(&def_id)
+                .is_some_and(|captures| !captures.is_empty())
+        }
         ExprKind::Move { expr }
         | ExprKind::ImplicitMove { expr }
-        | ExprKind::Coerce { expr, .. } => is_captured_closure_value(expr, state, capture_map),
+        | ExprKind::Coerce { expr, .. } => is_captured_closure_value(ctx, expr, state, capture_map),
         _ => false,
     }
 }

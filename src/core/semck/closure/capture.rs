@@ -10,15 +10,14 @@ use crate::core::context::NormalizedContext;
 use crate::core::diag::Span;
 use crate::core::resolve::{DefId, DefKind};
 use crate::core::semck::{SEK, SemCheckError};
-use crate::core::tree::normalized::{
-    BindPattern, BindPatternKind, CallArg, CaptureSpec, Expr, ExprKind, MatchPattern,
-    MatchPatternBinding, Param, ParamMode, StmtExpr, StmtExprKind,
-};
 use crate::core::tree::visit::{
     Visitor, walk_bind_pattern, walk_expr, walk_match_pattern, walk_match_pattern_binding,
     walk_match_pattern_bindings, walk_stmt_expr,
 };
-use crate::core::types::TypeId;
+use crate::core::tree::{
+    BindPattern, BindPatternKind, CallArg, CaptureSpec, Expr, ExprKind, MatchPattern,
+    MatchPatternBinding, Param, ParamMode, StmtExpr, StmtExprKind,
+};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum CaptureMode {
@@ -53,17 +52,16 @@ struct ClosureCaptureChecker<'a> {
     captures: HashMap<DefId, Vec<ClosureCapture>>,
 }
 
-impl<'a> Visitor<DefId, TypeId> for ClosureCaptureChecker<'a> {
+impl<'a> Visitor for ClosureCaptureChecker<'a> {
     fn visit_expr(&mut self, expr: &Expr) {
         match &expr.kind {
             ExprKind::Closure {
-                def_id,
                 captures,
                 params,
                 body,
                 ..
             } => {
-                self.check_closure_expr(*def_id, captures, params, body);
+                self.check_closure_expr(self.ctx.def_table.def_id(expr.id), captures, params, body);
             }
             _ => walk_expr(self, expr),
         }
@@ -89,16 +87,16 @@ impl<'a> ClosureCaptureChecker<'a> {
         // Start with local defs (params + bindings) so we only capture outer defs.
         let mut locals = HashSet::new();
         for param in params {
-            locals.insert(param.def_id);
+            locals.insert(self.ctx.def_table.def_id(param.id));
         }
-        let mut collector = LocalCollector::new(&mut locals);
+        let mut collector = LocalCollector::new(&self.ctx.def_table, &mut locals);
         collector.visit_expr(body);
 
         // Seed explicit move captures, then scan for inferred borrows.
         let mut capture_modes = HashMap::new();
         for spec in captures {
-            let CaptureSpec::Move { def_id, .. } = spec;
-            capture_modes.insert(*def_id, CaptureMode::Move);
+            let CaptureSpec::Move { id, .. } = spec;
+            capture_modes.insert(self.ctx.def_table.def_id(*id), CaptureMode::Move);
         }
         let mut used = HashSet::new();
         CaptureScan::new(self, &locals, &mut capture_modes, &mut used).visit_expr(body);
@@ -106,7 +104,7 @@ impl<'a> ClosureCaptureChecker<'a> {
         // Check for unused move captures.
         for spec in captures {
             let (spec_def_id, span) = match spec {
-                CaptureSpec::Move { def_id, span, .. } => (*def_id, *span),
+                CaptureSpec::Move { id, span, .. } => (self.ctx.def_table.def_id(*id), *span),
             };
             if !used.contains(&spec_def_id) {
                 let name = self.def_name(spec_def_id);
@@ -188,7 +186,7 @@ impl<'a> ClosureCaptureChecker<'a> {
         captures: &mut HashMap<DefId, CaptureMode>,
         span: Span,
     ) -> Option<DefId> {
-        let Some(def_id) = Self::lvalue_base_def_id(expr) else {
+        let Some(def_id) = self.lvalue_base_def_id(expr) else {
             panic!("compiler bug: expected lvalue base for write at {}", span);
         };
         self.maybe_capture(def_id, locals, captures, CaptureMode::MutBorrow);
@@ -202,7 +200,7 @@ impl<'a> ClosureCaptureChecker<'a> {
         captures: &mut HashMap<DefId, CaptureMode>,
         span: Span,
     ) -> Option<DefId> {
-        let Some(def_id) = Self::lvalue_base_def_id(expr) else {
+        let Some(def_id) = self.lvalue_base_def_id(expr) else {
             panic!("compiler bug: expected lvalue base for move at {}", span);
         };
         if self.maybe_capture(def_id, locals, captures, CaptureMode::ImmBorrow) {
@@ -259,17 +257,17 @@ impl<'a> ClosureCaptureChecker<'a> {
             .unwrap_or_else(|| format!("def#{}", def_id.0))
     }
 
-    fn lvalue_base_def_id(expr: &Expr) -> Option<DefId> {
+    fn lvalue_base_def_id(&self, expr: &Expr) -> Option<DefId> {
         // Walk through projections to find the base def for mutation/move checks.
         match &expr.kind {
-            ExprKind::Var { def_id, .. } => Some(*def_id),
+            ExprKind::Var { .. } => Some(self.ctx.def_table.def_id(expr.id)),
             ExprKind::ArrayIndex { target, .. }
             | ExprKind::TupleField { target, .. }
             | ExprKind::StructField { target, .. }
             | ExprKind::Slice { target, .. }
             | ExprKind::Coerce { expr: target, .. }
             | ExprKind::Move { expr: target }
-            | ExprKind::ImplicitMove { expr: target } => Self::lvalue_base_def_id(target),
+            | ExprKind::ImplicitMove { expr: target } => self.lvalue_base_def_id(target),
             _ => None,
         }
     }
@@ -278,16 +276,17 @@ impl<'a> ClosureCaptureChecker<'a> {
 // --- Local Collector ---
 
 struct LocalCollector<'a> {
+    def_table: &'a crate::core::resolve::DefTable,
     locals: &'a mut HashSet<DefId>,
 }
 
 impl<'a> LocalCollector<'a> {
-    fn new(locals: &'a mut HashSet<DefId>) -> Self {
-        Self { locals }
+    fn new(def_table: &'a crate::core::resolve::DefTable, locals: &'a mut HashSet<DefId>) -> Self {
+        Self { def_table, locals }
     }
 }
 
-impl<'a> Visitor<DefId, TypeId> for LocalCollector<'a> {
+impl<'a> Visitor for LocalCollector<'a> {
     fn visit_expr(&mut self, expr: &Expr) {
         // Skip nested closures: they have their own capture sets.
         if matches!(expr.kind, ExprKind::Closure { .. }) {
@@ -298,25 +297,23 @@ impl<'a> Visitor<DefId, TypeId> for LocalCollector<'a> {
 
     fn visit_stmt_expr(&mut self, stmt: &StmtExpr) {
         // VarDecl introduces a local binding even without an initializer.
-        if let StmtExprKind::VarDecl { def_id, .. } = &stmt.kind {
-            self.locals.insert(*def_id);
+        if let StmtExprKind::VarDecl { .. } = &stmt.kind {
+            self.locals.insert(self.def_table.def_id(stmt.id));
         }
         walk_stmt_expr(self, stmt);
     }
 
     fn visit_bind_pattern(&mut self, pattern: &BindPattern) {
         // Pattern bindings (let/var/for) create local defs.
-        if let BindPatternKind::Name { def_id, .. } = &pattern.kind {
-            self.locals.insert(*def_id);
+        if let BindPatternKind::Name { .. } = &pattern.kind {
+            self.locals.insert(self.def_table.def_id(pattern.id));
         }
         walk_bind_pattern(self, pattern);
     }
 
     fn visit_match_pattern(&mut self, pattern: &MatchPattern) {
-        if let MatchPattern::Binding { def_id, .. } | MatchPattern::TypedBinding { def_id, .. } =
-            pattern
-        {
-            self.locals.insert(*def_id);
+        if let MatchPattern::Binding { id, .. } | MatchPattern::TypedBinding { id, .. } = pattern {
+            self.locals.insert(self.def_table.def_id(*id));
         }
         walk_match_pattern(self, pattern);
         walk_match_pattern_bindings(self, pattern);
@@ -324,8 +321,8 @@ impl<'a> Visitor<DefId, TypeId> for LocalCollector<'a> {
 
     fn visit_match_pattern_binding(&mut self, binding: &MatchPatternBinding) {
         // Enum variant bindings are another source of local defs.
-        if let MatchPatternBinding::Named { def_id, .. } = binding {
-            self.locals.insert(*def_id);
+        if let MatchPatternBinding::Named { id, .. } = binding {
+            self.locals.insert(self.def_table.def_id(*id));
         }
         walk_match_pattern_binding(self, binding);
     }
@@ -356,14 +353,15 @@ impl<'a, 'b> CaptureScan<'a, 'b> {
     }
 }
 
-impl<'a, 'b> Visitor<DefId, TypeId> for CaptureScan<'a, 'b> {
+impl<'a, 'b> Visitor for CaptureScan<'a, 'b> {
     fn visit_expr(&mut self, expr: &Expr) {
         match &expr.kind {
-            ExprKind::Var { def_id, .. } => {
-                self.used.insert(*def_id);
+            ExprKind::Var { .. } => {
+                let def_id = self.checker.ctx.def_table.def_id(expr.id);
+                self.used.insert(def_id);
                 // Any outer var use becomes a capture.
                 self.checker.maybe_capture(
-                    *def_id,
+                    def_id,
                     self.locals,
                     self.captures,
                     CaptureMode::ImmBorrow,
@@ -381,15 +379,18 @@ impl<'a, 'b> Visitor<DefId, TypeId> for CaptureScan<'a, 'b> {
                 return;
             }
             ExprKind::Closure {
-                def_id,
                 captures,
                 params,
                 body,
                 ..
             } => {
                 // Nested closure: compute captures separately and stop traversal here.
-                self.checker
-                    .check_closure_expr(*def_id, captures, params, body);
+                self.checker.check_closure_expr(
+                    self.checker.ctx.def_table.def_id(expr.id),
+                    captures,
+                    params,
+                    body,
+                );
                 return;
             }
             ExprKind::Call { args, .. } => {

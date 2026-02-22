@@ -4,16 +4,13 @@ use std::path::PathBuf;
 
 use crate::core::capsule::ModuleId;
 use crate::core::diag::Span;
+use crate::core::protocol::ProtocolIndex;
 use crate::core::resolve::{DefId, DefTable};
 use crate::core::semck::closure::capture::ClosureCapture;
 use crate::core::symtab::SymbolTable;
-use crate::core::tree::normalized::Module as NormalizedModule;
-use crate::core::tree::parsed::Module as ParsedModule;
-use crate::core::tree::resolved::Module as ResolvedModule;
 use crate::core::tree::semantic::Module as SemanticModule;
 use crate::core::tree::semantic::{DropPlanMap, LoweringPlanMap, MachinePlanMap};
-use crate::core::tree::typed::Module as TypedModule;
-use crate::core::tree::{NodeId, NodeIdGen};
+use crate::core::tree::{Module, NodeId, NodeIdGen, TypeExpr};
 use crate::core::typecheck::type_map::{CallSigMap, GenericInstMap, TypeMap};
 use crate::core::types::Type;
 
@@ -26,7 +23,7 @@ pub struct ResolvedTables {
     pub typestate_role_impls: Vec<TypestateRoleImplBinding>,
     /// Canonical protocol facts extracted from resolved protocol definitions
     /// and typestate role bindings.
-    pub protocol_index: crate::core::protocol::ProtocolIndex,
+    pub protocol_index: ProtocolIndex,
 }
 
 #[derive(Debug, Clone)]
@@ -45,7 +42,7 @@ pub struct TypestatePeerRoleBinding {
     pub field_name: String,
     pub role_name: String,
     pub role_def_id: Option<DefId>,
-    pub field_ty: crate::core::tree::parsed::TypeExpr,
+    pub field_ty: TypeExpr,
     pub span: Span,
 }
 
@@ -223,7 +220,7 @@ impl DerefMut for SemanticPayload {
 
 #[derive(Clone)]
 pub struct ParsedContext {
-    pub module: ParsedModule,
+    pub module: Module,
     pub node_id_gen: NodeIdGen,
     pub source_path: Option<PathBuf>,
 }
@@ -232,7 +229,7 @@ pub struct ParsedContext {
 pub type ResolveStageInput = ParsedContext;
 
 impl ParsedContext {
-    pub fn new(module: ParsedModule, node_id_gen: NodeIdGen) -> Self {
+    pub fn new(module: Module, node_id_gen: NodeIdGen) -> Self {
         Self {
             module,
             node_id_gen,
@@ -245,24 +242,28 @@ impl ParsedContext {
         self
     }
 
-    pub fn with_def_table(
-        self,
-        mut def_table: DefTable,
-        module: ResolvedModule,
-    ) -> ResolvedContext {
+    pub fn with_def_table(self, mut def_table: DefTable) -> ResolvedContext {
+        let ParsedContext {
+            module,
+            node_id_gen,
+            ..
+        } = self;
+
         if def_table.source_path().is_none() {
             def_table.set_source_path(self.source_path.clone());
         }
+
         let symbols = SymbolTable::new(&module, &def_table);
+
         ResolvedContext {
             module,
             payload: ResolvedTables {
                 def_table,
                 def_owners: HashMap::new(),
                 symbols,
-                node_id_gen: self.node_id_gen,
+                node_id_gen,
                 typestate_role_impls: Vec::new(),
-                protocol_index: crate::core::protocol::ProtocolIndex::default(),
+                protocol_index: ProtocolIndex::default(),
             },
         }
     }
@@ -270,7 +271,7 @@ impl ParsedContext {
 
 #[derive(Clone)]
 pub struct ResolvedContext {
-    pub module: ResolvedModule,
+    pub module: Module,
     pub payload: ResolvedTables,
 }
 
@@ -290,12 +291,12 @@ impl ResolvedContext {
         type_map: TypeMap,
         call_sigs: CallSigMap,
         generic_insts: GenericInstMap,
-        module: TypedModule,
     ) -> TypeCheckedContext {
+        let ResolvedContext { module, payload } = self;
         TypeCheckedContext {
             module,
             payload: TypedTables {
-                resolved: self.payload,
+                resolved: payload,
                 type_map,
                 call_sigs,
                 generic_insts,
@@ -320,7 +321,7 @@ impl DerefMut for ResolvedContext {
 
 #[derive(Clone)]
 pub struct TypeCheckedContext {
-    pub module: TypedModule,
+    pub module: Module,
     pub payload: TypedTables,
 }
 
@@ -346,7 +347,7 @@ impl DerefMut for TypeCheckedContext {
 #[derive(Clone)]
 /// Internal semcheck intermediate after typed->normalized lowering.
 pub struct NormalizedContext {
-    pub module: NormalizedModule,
+    pub module: Module,
     pub payload: TypedTables,
 }
 
@@ -392,7 +393,7 @@ impl DerefMut for NormalizedContext {
 
 #[derive(Debug, Clone)]
 pub struct SemanticCheckedContext {
-    pub module: NormalizedModule,
+    pub module: Module,
     pub payload: SemCheckedPayload,
 }
 

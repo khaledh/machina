@@ -16,15 +16,13 @@ use crate::core::context::NormalizedContext;
 use crate::core::resolve::DefId;
 use crate::core::semck::liveness_util;
 use crate::core::semck::{SEK, SemCheckError, push_error};
-use crate::core::tree::cfg::{
-    AstBlockId, TreeCfg, TreeCfgBuilder, TreeCfgItem, TreeCfgNode, TreeCfgTerminator,
-};
-use crate::core::tree::normalized::{
+use crate::core::tree::cfg::{AstBlockId, Cfg, CfgBuilder, CfgItem, CfgNode, CfgTerminator};
+use crate::core::tree::visit::{Visitor, walk_expr};
+use crate::core::tree::{
     BindPattern, BindPatternKind, CallArg, Expr, ExprKind, FuncDef, ParamMode, StmtExpr,
     StmtExprKind,
 };
-use crate::core::tree::visit::{Visitor, walk_expr};
-use crate::core::types::{Type, TypeId};
+use crate::core::types::Type;
 
 pub(super) fn check(ctx: &NormalizedContext) -> Vec<SemCheckError> {
     let mut errors = Vec::new();
@@ -43,7 +41,7 @@ pub(super) fn check(ctx: &NormalizedContext) -> Vec<SemCheckError> {
 /// Then walk each block, checking for conflicts where a borrowed base is
 /// mutated/moved while a slice borrowing it is still live.
 fn check_func_def(ctx: &NormalizedContext, func_def: &FuncDef, errors: &mut Vec<SemCheckError>) {
-    let cfg = TreeCfgBuilder::<TypeId>::new().build_from_expr(&func_def.body);
+    let cfg = CfgBuilder::new().build_from_expr(&func_def.body);
     let liveness = analyze_slice_liveness(&cfg, ctx);
     let bindings = analyze_slice_bindings(&cfg, ctx);
 
@@ -66,7 +64,7 @@ fn check_func_def(ctx: &NormalizedContext, func_def: &FuncDef, errors: &mut Vec<
             apply_item_bindings(&mut state, item, ctx);
         }
 
-        if let TreeCfgTerminator::If { cond, .. } = &node.term {
+        if let CfgTerminator::If { cond, .. } = &node.term {
             let mut active_slices = liveness.live_out[block_idx].clone();
             collect_expr_slice_uses(cond, ctx, &mut active_slices);
 
@@ -96,12 +94,12 @@ fn borrowed_bases_for_active(
 
 fn check_item_for_conflicts(
     ctx: &NormalizedContext,
-    item: &TreeCfgItem<'_, TypeId>,
+    item: &CfgItem<'_>,
     borrowed_bases: &HashSet<DefId>,
     errors: &mut Vec<SemCheckError>,
 ) {
     match item {
-        TreeCfgItem::Stmt(stmt) => match &stmt.kind {
+        CfgItem::Stmt(stmt) => match &stmt.kind {
             StmtExprKind::LetBind { value, .. } | StmtExprKind::VarBind { value, .. } => {
                 let mut visitor = BorrowConflictVisitor::new(ctx, borrowed_bases, errors);
                 visitor.visit_expr(value);
@@ -135,7 +133,7 @@ fn check_item_for_conflicts(
                 }
             }
         },
-        TreeCfgItem::Expr(expr) => {
+        CfgItem::Expr(expr) => {
             let mut visitor = BorrowConflictVisitor::new(ctx, borrowed_bases, errors);
             visitor.visit_expr(expr);
         }
@@ -168,10 +166,7 @@ struct SliceBindingAnalysis {
 }
 
 /// Forward dataflow: track slice -> base bindings through the CFG.
-fn analyze_slice_bindings(
-    cfg: &TreeCfg<'_, TypeId>,
-    ctx: &NormalizedContext,
-) -> SliceBindingAnalysis {
+fn analyze_slice_bindings(cfg: &Cfg<'_>, ctx: &NormalizedContext) -> SliceBindingAnalysis {
     let entry_state = HashMap::new();
     let bottom = HashMap::new();
 
@@ -204,7 +199,7 @@ fn merge_slice_bindings(states: &[SliceBindings]) -> SliceBindings {
 }
 
 fn apply_block_bindings(
-    node: &TreeCfgNode<'_, TypeId>,
+    node: &CfgNode<'_>,
     in_state: &SliceBindings,
     ctx: &NormalizedContext,
 ) -> SliceBindings {
@@ -215,24 +210,21 @@ fn apply_block_bindings(
     state
 }
 
-fn apply_item_bindings(
-    state: &mut SliceBindings,
-    item: &TreeCfgItem<'_, TypeId>,
-    ctx: &NormalizedContext,
-) {
-    let TreeCfgItem::Stmt(stmt) = item else {
+fn apply_item_bindings(state: &mut SliceBindings, item: &CfgItem<'_>, ctx: &NormalizedContext) {
+    let CfgItem::Stmt(stmt) = item else {
         return;
     };
 
     match &stmt.kind {
         StmtExprKind::LetBind { pattern, value, .. }
         | StmtExprKind::VarBind { pattern, value, .. } => {
-            if let BindPatternKind::Name { def_id, .. } = &pattern.kind
-                && let Some(def) = ctx.def_table.lookup_def(*def_id)
+            if let BindPatternKind::Name { .. } = &pattern.kind
+                && let Some(def) = ctx.def_table.lookup_def(ctx.def_table.def_id(pattern.id))
                 && matches!(ctx.type_map.lookup_def_type(def), Some(Type::Slice { .. }))
             {
+                let slice_def_id = ctx.def_table.def_id(pattern.id);
                 let bases = slice_bases_for_value(value, state, ctx);
-                update_slice_binding(state, *def_id, bases);
+                update_slice_binding(state, slice_def_id, bases);
             }
         }
         StmtExprKind::Assign {
@@ -241,12 +233,13 @@ fn apply_item_bindings(
         | StmtExprKind::CompoundAssign {
             assignee, value, ..
         } => {
-            if let ExprKind::Var { def_id, .. } = assignee.kind
-                && let Some(def) = ctx.def_table.lookup_def(def_id)
+            if let ExprKind::Var { .. } = &assignee.kind
+                && let Some(def) = ctx.def_table.lookup_def(ctx.def_table.def_id(assignee.id))
                 && matches!(ctx.type_map.lookup_def_type(def), Some(Type::Slice { .. }))
             {
+                let slice_def_id = ctx.def_table.def_id(assignee.id);
                 let bases = slice_bases_for_value(value, state, ctx);
-                update_slice_binding(state, def_id, bases);
+                update_slice_binding(state, slice_def_id, bases);
             }
         }
         _ => {}
@@ -321,12 +314,12 @@ fn slice_bases_for_slice_target(
 
 fn slice_def_from_expr(expr: &Expr, ctx: &NormalizedContext) -> Option<DefId> {
     match &expr.kind {
-        ExprKind::Var { def_id, .. } => {
-            let ty = ctx.type_map.type_table().get(expr.ty);
+        ExprKind::Var { .. } => {
+            let ty = ctx.type_map.lookup_node_type(expr.id)?;
             if !matches!(ty, Type::Slice { .. }) {
                 return None;
             }
-            Some(*def_id)
+            Some(ctx.def_table.def_id(expr.id))
         }
         ExprKind::Move { expr } => slice_def_from_expr(expr, ctx),
         ExprKind::Coerce { expr, .. } => slice_def_from_expr(expr, ctx),
@@ -344,7 +337,7 @@ struct SliceLiveness {
 }
 
 /// Backward dataflow: compute which slice locals are live at each point.
-fn analyze_slice_liveness(cfg: &TreeCfg<'_, TypeId>, ctx: &NormalizedContext) -> SliceLiveness {
+fn analyze_slice_liveness(cfg: &Cfg<'_>, ctx: &NormalizedContext) -> SliceLiveness {
     let analysis = liveness_util::analyze_liveness(
         cfg,
         |term, uses| add_terminator_uses(term, ctx, uses),
@@ -359,25 +352,25 @@ fn analyze_slice_liveness(cfg: &TreeCfg<'_, TypeId>, ctx: &NormalizedContext) ->
 
 /// Add slice uses from the block terminator (if condition).
 fn add_terminator_uses(
-    term: &TreeCfgTerminator<'_, TypeId>,
+    term: &CfgTerminator<'_>,
     ctx: &NormalizedContext,
     uses: &mut HashSet<DefId>,
 ) {
-    if let TreeCfgTerminator::If { cond, .. } = term {
+    if let CfgTerminator::If { cond, .. } = term {
         collect_expr_slice_uses(cond, ctx, uses);
     }
 }
 
 /// Collect defs and uses of slice locals from an item.
 fn collect_item_defs_uses(
-    item: &TreeCfgItem<'_, TypeId>,
+    item: &CfgItem<'_>,
     ctx: &NormalizedContext,
     defs: &mut HashSet<DefId>,
     uses: &mut HashSet<DefId>,
 ) {
     match item {
-        TreeCfgItem::Stmt(stmt) => collect_stmt_defs_uses(stmt, ctx, defs, uses),
-        TreeCfgItem::Expr(expr) => collect_expr_slice_uses(expr, ctx, uses),
+        CfgItem::Stmt(stmt) => collect_stmt_defs_uses(stmt, ctx, defs, uses),
+        CfgItem::Expr(expr) => collect_expr_slice_uses(expr, ctx, uses),
     }
 }
 
@@ -406,7 +399,10 @@ fn collect_stmt_defs_uses(
 /// Collect slice-typed definitions from a pattern.
 fn collect_pattern_defs(pattern: &BindPattern, ctx: &NormalizedContext, defs: &mut HashSet<DefId>) {
     match &pattern.kind {
-        BindPatternKind::Name { def_id, .. } => add_def_if_slice(*def_id, ctx, defs),
+        BindPatternKind::Name { .. } => {
+            let def_id = ctx.def_table.def_id(pattern.id);
+            add_def_if_slice(def_id, ctx, defs);
+        }
         BindPatternKind::Array { patterns } | BindPatternKind::Tuple { patterns } => {
             for pattern in patterns {
                 collect_pattern_defs(pattern, ctx, defs);
@@ -422,7 +418,8 @@ fn collect_pattern_defs(pattern: &BindPattern, ctx: &NormalizedContext, defs: &m
 
 /// Collect slice-typed definitions from an assignment target.
 fn collect_assignee_defs(assignee: &Expr, ctx: &NormalizedContext, defs: &mut HashSet<DefId>) {
-    if let ExprKind::Var { def_id, .. } = assignee.kind {
+    if let ExprKind::Var { .. } = &assignee.kind {
+        let def_id = ctx.def_table.def_id(assignee.id);
         add_def_if_slice(def_id, ctx, defs);
     }
 }
@@ -441,14 +438,10 @@ fn add_def_if_slice(def_id: DefId, ctx: &NormalizedContext, defs: &mut HashSet<D
 }
 
 /// Collect slice local uses from an item.
-fn collect_item_slice_uses(
-    item: &TreeCfgItem<'_, TypeId>,
-    ctx: &NormalizedContext,
-    uses: &mut HashSet<DefId>,
-) {
+fn collect_item_slice_uses(item: &CfgItem<'_>, ctx: &NormalizedContext, uses: &mut HashSet<DefId>) {
     match item {
-        TreeCfgItem::Stmt(stmt) => collect_stmt_slice_uses(stmt, ctx, uses),
-        TreeCfgItem::Expr(expr) => collect_expr_slice_uses(expr, ctx, uses),
+        CfgItem::Stmt(stmt) => collect_stmt_slice_uses(stmt, ctx, uses),
+        CfgItem::Expr(expr) => collect_expr_slice_uses(expr, ctx, uses),
     }
 }
 
@@ -524,7 +517,7 @@ struct SliceUseCollector<'a> {
     uses: &'a mut HashSet<DefId>,
 }
 
-impl Visitor<DefId, TypeId> for SliceUseCollector<'_> {
+impl Visitor for SliceUseCollector<'_> {
     fn visit_expr(&mut self, expr: &Expr) {
         if let Some(def_id) = slice_use_def(expr, self.ctx) {
             self.uses.insert(def_id);
@@ -535,14 +528,14 @@ impl Visitor<DefId, TypeId> for SliceUseCollector<'_> {
 
 /// If expr is a slice-typed variable use, return its DefId.
 fn slice_use_def(expr: &Expr, ctx: &NormalizedContext) -> Option<DefId> {
-    let ExprKind::Var { def_id, .. } = expr.kind else {
+    let ExprKind::Var { .. } = &expr.kind else {
         return None;
     };
-    let ty = ctx.type_map.type_table().get(expr.ty);
+    let ty = ctx.type_map.lookup_node_type(expr.id)?;
     if !matches!(ty, Type::Slice { .. }) {
         return None;
     }
-    Some(def_id)
+    Some(ctx.def_table.def_id(expr.id))
 }
 
 // ============================================================================
@@ -604,7 +597,7 @@ impl<'a> BorrowConflictVisitor<'a> {
     }
 }
 
-impl Visitor<DefId, TypeId> for BorrowConflictVisitor<'_> {
+impl Visitor for BorrowConflictVisitor<'_> {
     fn visit_expr(&mut self, expr: &Expr) {
         match &expr.kind {
             // Moving a borrowed base is a conflict.
@@ -636,7 +629,7 @@ impl Visitor<DefId, TypeId> for BorrowConflictVisitor<'_> {
 #[allow(clippy::only_used_in_recursion)]
 fn base_def_id(expr: &Expr, ctx: &NormalizedContext) -> Option<DefId> {
     match &expr.kind {
-        ExprKind::Var { def_id, .. } => Some(*def_id),
+        ExprKind::Var { .. } => Some(ctx.def_table.def_id(expr.id)),
         ExprKind::ArrayIndex { target, .. }
         | ExprKind::TupleField { target, .. }
         | ExprKind::StructField { target, .. }

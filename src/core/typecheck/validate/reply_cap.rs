@@ -1,10 +1,12 @@
 use std::collections::HashMap;
 
 use crate::core::analysis::dataflow::{DataflowGraph, solve_forward};
-use crate::core::resolve::DefId;
-use crate::core::tree::cfg::{AstBlockId, TreeCfgBuilder, TreeCfgItem, TreeCfgNode};
+use crate::core::resolve::{DefId, DefTable};
+use crate::core::tree::cfg::{AstBlockId, Cfg, CfgBuilder, CfgItem, CfgNode};
 use crate::core::tree::visit::{self, Visitor};
-use crate::core::tree::{ExprKind, MethodItem, NodeId};
+use crate::core::tree::{
+    Expr, ExprKind, MethodBlock, MethodDef, MethodItem, Module, NodeId, StmtExpr,
+};
 use crate::core::typecheck::engine::TypecheckEngine;
 use crate::core::typecheck::errors::{TEK, TypeCheckError};
 use crate::core::typecheck::type_map::resolve_type_expr;
@@ -35,11 +37,16 @@ pub(super) fn check_reply_cap_usage(engine: &TypecheckEngine) -> Vec<TypeCheckEr
                 method_def,
             );
             errors.extend(check_handler_reply_calls(
+                &engine.context().def_table,
                 method_def,
                 &cap_params,
                 node_types,
             ));
-            errors.extend(check_handler_reply_cap_linearity(method_def, &cap_params));
+            errors.extend(check_handler_reply_cap_linearity(
+                &engine.context().def_table,
+                method_def,
+                &cap_params,
+            ));
         }
     }
 
@@ -53,15 +60,15 @@ struct ReplyOutsideHandlerCollector {
     in_typestate_handler: bool,
 }
 
-impl Visitor<DefId, ()> for ReplyOutsideHandlerCollector {
-    fn visit_method_block(&mut self, method_block: &crate::core::tree::resolved::MethodBlock) {
+impl Visitor for ReplyOutsideHandlerCollector {
+    fn visit_method_block(&mut self, method_block: &MethodBlock) {
         let prev = self.in_typestate_method_block;
         self.in_typestate_method_block = method_block.type_name.starts_with("__ts_");
         visit::walk_method_block(self, method_block);
         self.in_typestate_method_block = prev;
     }
 
-    fn visit_method_def(&mut self, method_def: &crate::core::tree::resolved::MethodDef) {
+    fn visit_method_def(&mut self, method_def: &MethodDef) {
         let prev = self.in_typestate_handler;
         self.in_typestate_handler =
             self.in_typestate_method_block && method_def.sig.name.starts_with("__ts_on_");
@@ -69,7 +76,7 @@ impl Visitor<DefId, ()> for ReplyOutsideHandlerCollector {
         self.in_typestate_handler = prev;
     }
 
-    fn visit_expr(&mut self, expr: &crate::core::tree::resolved::Expr) {
+    fn visit_expr(&mut self, expr: &Expr) {
         if matches!(expr.kind, ExprKind::Reply { .. }) && !self.in_typestate_handler {
             self.errors
                 .push(TEK::ReplyOutsideHandler.at(expr.span).into());
@@ -88,8 +95,8 @@ struct ReplyCapParam {
 
 fn collect_handler_reply_caps(
     def_table: &crate::core::resolve::DefTable,
-    module: &crate::core::tree::resolved::Module,
-    method_def: &crate::core::tree::resolved::MethodDef,
+    module: &Module,
+    method_def: &MethodDef,
 ) -> Vec<ReplyCapParam> {
     let mut caps = Vec::new();
     for param in &method_def.sig.params {
@@ -98,7 +105,7 @@ fn collect_handler_reply_caps(
         };
         if let Type::ReplyCap { response_tys } = param_ty {
             caps.push(ReplyCapParam {
-                def_id: param.def_id,
+                def_id: def_table.def_id(param.id),
                 name: param.ident.clone(),
                 response_tys,
                 span: param.span,
@@ -113,12 +120,12 @@ struct ReplySite {
     span: crate::core::diag::Span,
     cap_node: NodeId,
     cap_span: crate::core::diag::Span,
-    cap_def_id: Option<DefId>,
     value_node: NodeId,
 }
 
 fn check_handler_reply_calls(
-    method_def: &crate::core::tree::resolved::MethodDef,
+    def_table: &crate::core::resolve::DefTable,
+    method_def: &MethodDef,
     cap_params: &[ReplyCapParam],
     node_types: &HashMap<NodeId, Type>,
 ) -> Vec<TypeCheckError> {
@@ -141,7 +148,7 @@ fn check_handler_reply_calls(
             continue;
         };
 
-        let Some(cap_def_id) = site.cap_def_id else {
+        let Some(cap_def_id) = def_table.lookup_node_def_id(site.cap_node) else {
             crate::core::typecheck::tc_push_error!(
                 errors,
                 site.cap_span,
@@ -186,14 +193,15 @@ enum ReplyCapFlowState {
 }
 
 fn check_handler_reply_cap_linearity(
-    method_def: &crate::core::tree::resolved::MethodDef,
+    def_table: &crate::core::resolve::DefTable,
+    method_def: &MethodDef,
     cap_params: &[ReplyCapParam],
 ) -> Vec<TypeCheckError> {
     if cap_params.is_empty() {
         return Vec::new();
     }
 
-    let cfg = TreeCfgBuilder::new().build_from_expr(&method_def.body);
+    let cfg = CfgBuilder::new().build_from_expr(&method_def.body);
     if cfg.num_nodes() == 0 {
         return Vec::new();
     }
@@ -204,7 +212,7 @@ fn check_handler_reply_cap_linearity(
         let consumes_by_node: Vec<Vec<crate::core::diag::Span>> = cfg
             .nodes
             .iter()
-            .map(|node| collect_reply_consume_spans_for_cap(node, cap.def_id))
+            .map(|node| collect_reply_consume_spans_for_cap(node, cap.def_id, def_table))
             .collect();
 
         let dataflow = solve_forward(
@@ -276,20 +284,21 @@ fn check_handler_reply_cap_linearity(
 }
 
 fn collect_reply_consume_spans_for_cap(
-    node: &TreeCfgNode<'_>,
+    node: &CfgNode<'_>,
     cap_def_id: DefId,
+    def_table: &DefTable,
 ) -> Vec<crate::core::diag::Span> {
     let mut out = Vec::new();
     for item in &node.items {
         let mut sites = Vec::new();
         match item {
-            TreeCfgItem::Stmt(stmt) => collect_reply_sites_from_stmt(stmt, &mut sites),
-            TreeCfgItem::Expr(expr) => collect_reply_sites_from_expr(expr, &mut sites),
+            CfgItem::Stmt(stmt) => collect_reply_sites_from_stmt(stmt, &mut sites),
+            CfgItem::Expr(expr) => collect_reply_sites_from_expr(expr, &mut sites),
         }
         out.extend(
             sites
                 .into_iter()
-                .filter(|site| site.cap_def_id == Some(cap_def_id))
+                .filter(|site| def_table.lookup_node_def_id(site.cap_node) == Some(cap_def_id))
                 .map(|site| site.span),
         );
     }
@@ -328,7 +337,7 @@ fn apply_reply_cap_consume(state: ReplyCapFlowState) -> ReplyCapFlowState {
     }
 }
 
-fn reachable_cfg_nodes(cfg: &crate::core::tree::cfg::TreeCfg<'_>, entry: AstBlockId) -> Vec<bool> {
+fn reachable_cfg_nodes(cfg: &Cfg<'_>, entry: AstBlockId) -> Vec<bool> {
     let mut reachable = vec![false; cfg.num_nodes()];
     if cfg.num_nodes() == 0 {
         return reachable;
@@ -345,18 +354,12 @@ fn reachable_cfg_nodes(cfg: &crate::core::tree::cfg::TreeCfg<'_>, entry: AstBloc
     reachable
 }
 
-fn collect_reply_sites_from_stmt(
-    stmt: &crate::core::tree::resolved::StmtExpr,
-    out: &mut Vec<ReplySite>,
-) {
+fn collect_reply_sites_from_stmt(stmt: &StmtExpr, out: &mut Vec<ReplySite>) {
     let mut collector = ReplySiteCollector { out };
     collector.visit_stmt_expr(stmt);
 }
 
-fn collect_reply_sites_from_expr(
-    expr: &crate::core::tree::resolved::Expr,
-    out: &mut Vec<ReplySite>,
-) {
+fn collect_reply_sites_from_expr(expr: &Expr, out: &mut Vec<ReplySite>) {
     let mut collector = ReplySiteCollector { out };
     collector.visit_expr(expr);
 }
@@ -365,18 +368,13 @@ struct ReplySiteCollector<'a> {
     out: &'a mut Vec<ReplySite>,
 }
 
-impl Visitor<DefId, ()> for ReplySiteCollector<'_> {
-    fn visit_expr(&mut self, expr: &crate::core::tree::resolved::Expr) {
+impl Visitor for ReplySiteCollector<'_> {
+    fn visit_expr(&mut self, expr: &Expr) {
         if let ExprKind::Reply { cap, value } = &expr.kind {
-            let cap_def_id = match &cap.kind {
-                ExprKind::Var { def_id, .. } => Some(*def_id),
-                _ => None,
-            };
             self.out.push(ReplySite {
                 span: expr.span,
                 cap_node: cap.id,
                 cap_span: cap.span,
-                cap_def_id,
                 value_node: value.id,
             });
         }

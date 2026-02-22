@@ -1,5 +1,4 @@
 use super::*;
-use crate::core::tree::parsed::{TypeParam, TypeParamBound};
 
 impl<'a> Parser<'a> {
     // --- Functions ---
@@ -13,7 +12,6 @@ impl<'a> Parser<'a> {
             self.advance();
             Ok(TopLevelItem::FuncDecl(FuncDecl {
                 id: self.id_gen.new_id(),
-                def_id: (),
                 attrs,
                 sig,
                 span: self.close(marker),
@@ -31,7 +29,6 @@ impl<'a> Parser<'a> {
 
             Ok(TopLevelItem::FuncDef(FuncDef {
                 id: self.id_gen.new_id(),
-                def_id: (),
                 attrs,
                 sig,
                 body,
@@ -85,7 +82,6 @@ impl<'a> Parser<'a> {
                 Some(TypeParamBound {
                     id: parser.id_gen.new_id(),
                     name,
-                    def_id: (),
                     span: parser.close(bound_marker),
                 })
             } else {
@@ -95,7 +91,6 @@ impl<'a> Parser<'a> {
                 id: parser.id_gen.new_id(),
                 ident,
                 bound,
-                def_id: (),
                 span: parser.close(marker),
             })
         })?;
@@ -152,7 +147,6 @@ impl<'a> Parser<'a> {
             self.advance();
             Ok(vec![MethodItem::Decl(MethodDecl {
                 id: self.id_gen.new_id(),
-                def_id: (),
                 attrs,
                 sig,
                 span: self.close(marker),
@@ -170,7 +164,6 @@ impl<'a> Parser<'a> {
 
             Ok(vec![MethodItem::Def(MethodDef {
                 id: self.id_gen.new_id(),
-                def_id: (),
                 attrs,
                 sig,
                 body,
@@ -194,7 +187,6 @@ impl<'a> Parser<'a> {
         self.advance();
         let self_param = SelfParam {
             id: self.id_gen.new_id(),
-            def_id: (),
             mode: self_mode,
             span: self.close(self_marker),
         };
@@ -254,7 +246,6 @@ impl<'a> Parser<'a> {
                         type_params: Vec::new(),
                         self_param: SelfParam {
                             id: self.id_gen.new_id(),
-                            def_id: (),
                             mode: ParamMode::In,
                             span: self.close(accessor_marker),
                         },
@@ -274,7 +265,6 @@ impl<'a> Parser<'a> {
                         self.advance();
                         getter = Some(MethodItem::Decl(MethodDecl {
                             id: self.id_gen.new_id(),
-                            def_id: (),
                             attrs: accessor_attrs,
                             sig,
                             span: self.close(accessor_marker),
@@ -293,7 +283,6 @@ impl<'a> Parser<'a> {
 
                         getter = Some(MethodItem::Def(MethodDef {
                             id: self.id_gen.new_id(),
-                            def_id: (),
                             attrs: accessor_attrs,
                             sig,
                             body,
@@ -314,7 +303,6 @@ impl<'a> Parser<'a> {
                     // Setter takes one param of the property type and returns unit.
                     let param = Param {
                         id: self.id_gen.new_id(),
-                        def_id: (),
                         ident: param_name,
                         mode: ParamMode::In,
                         typ: self.clone_type_expr_with_new_ids(&prop_ty),
@@ -326,7 +314,6 @@ impl<'a> Parser<'a> {
                         type_params: Vec::new(),
                         self_param: SelfParam {
                             id: self.id_gen.new_id(),
-                            def_id: (),
                             mode: ParamMode::InOut,
                             span: self.close(accessor_marker),
                         },
@@ -346,7 +333,6 @@ impl<'a> Parser<'a> {
                         self.advance();
                         setter = Some(MethodItem::Decl(MethodDecl {
                             id: self.id_gen.new_id(),
-                            def_id: (),
                             attrs: accessor_attrs,
                             sig,
                             span: self.close(accessor_marker),
@@ -365,7 +351,6 @@ impl<'a> Parser<'a> {
 
                         setter = Some(MethodItem::Def(MethodDef {
                             id: self.id_gen.new_id(),
-                            def_id: (),
                             attrs: accessor_attrs,
                             sig,
                             body,
@@ -437,7 +422,6 @@ impl<'a> Parser<'a> {
             id: self.id_gen.new_id(),
             kind: TypeExprKind::Named {
                 ident: "()".to_string(),
-                def_id: (),
                 type_args: Vec::new(),
             },
             span: self.close(self.mark()),
@@ -458,13 +442,8 @@ impl<'a> Parser<'a> {
                     .map(|variant| self.clone_type_expr_with_new_ids(variant))
                     .collect(),
             },
-            TypeExprKind::Named {
-                ident,
-                def_id,
-                type_args,
-            } => TypeExprKind::Named {
+            TypeExprKind::Named { ident, type_args } => TypeExprKind::Named {
                 ident: ident.clone(),
-                def_id: *def_id,
                 type_args: type_args
                     .iter()
                     .map(|arg| self.clone_type_expr_with_new_ids(arg))
@@ -565,7 +544,6 @@ impl<'a> Parser<'a> {
                     items: Vec::new(),
                     tail: Some(Box::new(body)),
                 },
-                ty: (),
                 span,
             };
         }
@@ -575,13 +553,11 @@ impl<'a> Parser<'a> {
             id: self.id_gen.new_id(),
             kind: ExprKind::Closure {
                 ident: ident.clone(),
-                def_id: (),
                 captures,
                 params: params.clone(),
                 return_ty: return_ty.clone(),
                 body: Box::new(body.clone()), // TODO: see if we can restructure this to avoid cloning
             },
-            ty: (),
             span: self.close(marker),
         };
 
@@ -599,12 +575,7 @@ impl<'a> Parser<'a> {
             let ident = parser.parse_ident()?;
             let id = parser.id_gen.new_id();
             let span = parser.close(marker);
-            Ok(CaptureSpec::Move {
-                id,
-                ident,
-                def_id: (),
-                span,
-            })
+            Ok(CaptureSpec::Move { id, ident, span })
         })?;
         self.consume(&TK::RBracket)?;
         Ok(captures)
@@ -628,7 +599,6 @@ impl<'a> Parser<'a> {
         Ok(Param {
             id: self.id_gen.new_id(),
             ident: name,
-            def_id: (),
             typ,
             mode,
             span: self.close(marker),
@@ -649,7 +619,6 @@ impl<'a> Parser<'a> {
         Ok(Param {
             id: self.id_gen.new_id(),
             ident: name,
-            def_id: (),
             typ,
             mode,
             span: self.close(marker),
@@ -684,7 +653,6 @@ impl<'a> Parser<'a> {
                 id: self.id_gen.new_id(),
                 kind: TypeExprKind::Named {
                     ident: "()".to_string(),
-                    def_id: (),
                     type_args: Vec::new(),
                 },
                 span: self.close(self.mark()),

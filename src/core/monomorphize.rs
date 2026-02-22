@@ -3,12 +3,10 @@ use std::collections::{HashMap, HashSet};
 use crate::core::capsule::ModuleId;
 use crate::core::context::{ResolvedContext, TypeCheckedContext};
 use crate::core::diag::{Span, SpannedError};
-use crate::core::resolve::{DefId, DefKind, DefTable, ImportedFacts, attach_def_owners};
-use crate::core::tree::map::TreeMapper;
-use crate::core::tree::resolved as res;
-use crate::core::tree::typed::build_module as build_typed_module;
+use crate::core::resolve::{DefId, DefTable, ImportedFacts, attach_def_owners};
+use crate::core::tree::visit::{self, Visitor};
 use crate::core::tree::visit_mut::{VisitorMut, walk_expr, walk_type_expr};
-use crate::core::tree::{NodeId, NodeIdGen, ParamMode, RefinementKind};
+use crate::core::tree::*;
 use crate::core::typecheck::TypeCheckError;
 use crate::core::typecheck::type_check_with_imported_facts;
 use crate::core::typecheck::type_map::{CallSigMap, GenericInst, GenericInstMap, TypeMap};
@@ -212,120 +210,180 @@ pub(crate) fn monomorphize_with_plan(
 
     for mut item in module.top_level_items.into_iter() {
         match &mut item {
-            res::TopLevelItem::FuncDef(func_def) => {
+            TopLevelItem::FuncDef(func_def) => {
                 if func_def.sig.type_params.is_empty() {
                     rewrite_calls_in_item(&mut item, &call_inst_map);
                     new_items.push(item);
                     continue;
                 }
 
-                if let Some(insts) = insts_by_def.get(&func_def.def_id) {
+                let func_def_id = def_table.def_id(func_def.id);
+                if let Some(insts) = insts_by_def.get(&func_def_id) {
                     for inst in insts {
                         let mut cloned = func_def.clone();
-                        if let Some(new_def_id) = inst_to_def.get(&InstKey {
-                            def_id: func_def.def_id,
-                            type_args: inst.type_args.clone(),
-                        }) {
-                            cloned.def_id = *new_def_id;
-                        }
+                        let new_def_id = *inst_to_def
+                            .get(&InstKey {
+                                def_id: func_def_id,
+                                type_args: inst.type_args.clone(),
+                            })
+                            .expect("compiler bug: missing instantiated def id for function");
                         apply_inst_to_func_def(&mut cloned, inst, &def_table, &mut node_id_gen)?;
-                        let mut cloned_item = res::TopLevelItem::FuncDef(cloned);
+
+                        let mut cloned_item = TopLevelItem::FuncDef(cloned);
                         cloned_item = remap_local_defs_in_item(cloned_item, &mut def_table);
                         rewrite_calls_in_item(&mut cloned_item, &call_inst_map);
+
+                        let old_node_ids = collect_node_ids_in_top_level_item(&cloned_item);
                         reseed_ids_in_item(&mut cloned_item, &mut node_id_gen);
+
+                        let new_node_ids = collect_node_ids_in_top_level_item(&cloned_item);
+                        replay_node_def_mappings(&mut def_table, &old_node_ids, &new_node_ids);
+                        register_item_def_id(&mut def_table, &cloned_item, new_def_id);
+
                         new_items.push(cloned_item);
                     }
                 }
             }
-            res::TopLevelItem::FuncDecl(func_decl) => {
+            TopLevelItem::FuncDecl(func_decl) => {
                 if func_decl.sig.type_params.is_empty() {
                     rewrite_calls_in_item(&mut item, &call_inst_map);
                     new_items.push(item);
                     continue;
                 }
 
-                if let Some(insts) = insts_by_def.get(&func_decl.def_id) {
+                let func_decl_id = def_table.def_id(func_decl.id);
+                if let Some(insts) = insts_by_def.get(&func_decl_id) {
                     for inst in insts {
                         let mut cloned = func_decl.clone();
-                        if let Some(new_def_id) = inst_to_def.get(&InstKey {
-                            def_id: func_decl.def_id,
-                            type_args: inst.type_args.clone(),
-                        }) {
-                            cloned.def_id = *new_def_id;
-                        }
+                        let new_def_id = *inst_to_def
+                            .get(&InstKey {
+                                def_id: func_decl_id,
+                                type_args: inst.type_args.clone(),
+                            })
+                            .expect("compiler bug: missing instantiated def id for function decl");
                         apply_inst_to_func_decl(&mut cloned, inst, &def_table, &mut node_id_gen)?;
-                        let mut cloned_item = res::TopLevelItem::FuncDecl(cloned);
+
+                        let mut cloned_item = TopLevelItem::FuncDecl(cloned);
                         cloned_item = remap_local_defs_in_item(cloned_item, &mut def_table);
                         rewrite_calls_in_item(&mut cloned_item, &call_inst_map);
+
+                        let old_node_ids = collect_node_ids_in_top_level_item(&cloned_item);
                         reseed_ids_in_item(&mut cloned_item, &mut node_id_gen);
+
+                        let new_node_ids = collect_node_ids_in_top_level_item(&cloned_item);
+                        replay_node_def_mappings(&mut def_table, &old_node_ids, &new_node_ids);
+                        register_item_def_id(&mut def_table, &cloned_item, new_def_id);
+
                         new_items.push(cloned_item);
                     }
                 }
             }
-            res::TopLevelItem::MethodBlock(method_block) => {
+            TopLevelItem::MethodBlock(method_block) => {
                 let mut kept_items = Vec::with_capacity(method_block.method_items.len());
                 for mut method_item in method_block.method_items.drain(..) {
                     match &mut method_item {
-                        res::MethodItem::Def(method_def) => {
+                        MethodItem::Def(method_def) => {
                             if method_def.sig.type_params.is_empty() {
                                 rewrite_calls_in_method_item(&mut method_item, &call_inst_map);
                                 kept_items.push(method_item);
                                 continue;
                             }
-                            if let Some(insts) = insts_by_def.get(&method_def.def_id) {
+                            let method_def_id = def_table.def_id(method_def.id);
+                            if let Some(insts) = insts_by_def.get(&method_def_id) {
                                 for inst in insts {
                                     let mut cloned = method_def.clone();
-                                    if let Some(new_def_id) = inst_to_def.get(&InstKey {
-                                        def_id: method_def.def_id,
-                                        type_args: inst.type_args.clone(),
-                                    }) {
-                                        cloned.def_id = *new_def_id;
-                                    }
+                                    let new_def_id = *inst_to_def
+                                        .get(&InstKey {
+                                            def_id: method_def_id,
+                                            type_args: inst.type_args.clone(),
+                                        })
+                                        .expect(
+                                            "compiler bug: missing instantiated def id for method",
+                                        );
                                     apply_inst_to_method_def(
                                         &mut cloned,
                                         inst,
                                         &def_table,
                                         &mut node_id_gen,
                                     )?;
-                                    let mut cloned_item = res::MethodItem::Def(cloned);
+
+                                    let mut cloned_item = MethodItem::Def(cloned);
                                     cloned_item = remap_local_defs_in_method_item(
                                         cloned_item,
                                         &mut def_table,
                                     );
                                     rewrite_calls_in_method_item(&mut cloned_item, &call_inst_map);
+
+                                    let old_node_ids =
+                                        collect_node_ids_in_method_item(&cloned_item);
                                     reseed_ids_in_method_item(&mut cloned_item, &mut node_id_gen);
+
+                                    let new_node_ids =
+                                        collect_node_ids_in_method_item(&cloned_item);
+                                    replay_node_def_mappings(
+                                        &mut def_table,
+                                        &old_node_ids,
+                                        &new_node_ids,
+                                    );
+                                    register_method_item_def_id(
+                                        &mut def_table,
+                                        &cloned_item,
+                                        new_def_id,
+                                    );
+
                                     kept_items.push(cloned_item);
                                 }
                             }
                         }
-                        res::MethodItem::Decl(method_decl) => {
+                        MethodItem::Decl(method_decl) => {
                             if method_decl.sig.type_params.is_empty() {
                                 rewrite_calls_in_method_item(&mut method_item, &call_inst_map);
                                 kept_items.push(method_item);
                                 continue;
                             }
-                            if let Some(insts) = insts_by_def.get(&method_decl.def_id) {
+                            let method_decl_id = def_table.def_id(method_decl.id);
+                            if let Some(insts) = insts_by_def.get(&method_decl_id) {
                                 for inst in insts {
                                     let mut cloned = method_decl.clone();
-                                    if let Some(new_def_id) = inst_to_def.get(&InstKey {
-                                        def_id: method_decl.def_id,
-                                        type_args: inst.type_args.clone(),
-                                    }) {
-                                        cloned.def_id = *new_def_id;
-                                    }
+                                    let new_def_id = *inst_to_def
+                                        .get(&InstKey {
+                                            def_id: method_decl_id,
+                                            type_args: inst.type_args.clone(),
+                                        })
+                                        .expect(
+                                            "compiler bug: missing instantiated def id for method decl",
+                                        );
                                     apply_inst_to_method_decl(
                                         &mut cloned,
                                         inst,
                                         &def_table,
                                         &mut node_id_gen,
                                     )?;
-                                    let mut cloned_item = res::MethodItem::Decl(cloned);
+
+                                    let mut cloned_item = MethodItem::Decl(cloned);
                                     cloned_item = remap_local_defs_in_method_item(
                                         cloned_item,
                                         &mut def_table,
                                     );
                                     rewrite_calls_in_method_item(&mut cloned_item, &call_inst_map);
+
+                                    let old_node_ids =
+                                        collect_node_ids_in_method_item(&cloned_item);
                                     reseed_ids_in_method_item(&mut cloned_item, &mut node_id_gen);
+
+                                    let new_node_ids =
+                                        collect_node_ids_in_method_item(&cloned_item);
+                                    replay_node_def_mappings(
+                                        &mut def_table,
+                                        &old_node_ids,
+                                        &new_node_ids,
+                                    );
+                                    register_method_item_def_id(
+                                        &mut def_table,
+                                        &cloned_item,
+                                        new_def_id,
+                                    );
+
                                     kept_items.push(cloned_item);
                                 }
                             }
@@ -405,7 +463,7 @@ pub(crate) fn build_retype_context(
     module.top_level_items = module
         .top_level_items
         .into_iter()
-        .map(|item| retype_sparse_item(item, retype_def_ids))
+        .map(|item| retype_sparse_item(item, retype_def_ids, &monomorphized_context.def_table))
         .collect();
 
     let mut ctx = monomorphized_context.clone();
@@ -414,34 +472,33 @@ pub(crate) fn build_retype_context(
 }
 
 fn retype_sparse_item(
-    item: res::TopLevelItem,
+    item: TopLevelItem,
     retype_def_ids: &HashSet<DefId>,
-) -> res::TopLevelItem {
+    def_table: &DefTable,
+) -> TopLevelItem {
     match item {
-        res::TopLevelItem::FuncDef(func_def) => {
-            if retype_def_ids.contains(&func_def.def_id) {
-                res::TopLevelItem::FuncDef(func_def)
+        TopLevelItem::FuncDef(func_def) => {
+            if retype_def_ids.contains(&def_table.def_id(func_def.id)) {
+                TopLevelItem::FuncDef(func_def)
             } else {
-                res::TopLevelItem::FuncDecl(res::FuncDecl {
+                TopLevelItem::FuncDecl(FuncDecl {
                     id: func_def.id,
-                    def_id: func_def.def_id,
                     attrs: func_def.attrs,
                     sig: func_def.sig,
                     span: func_def.span,
                 })
             }
         }
-        res::TopLevelItem::MethodBlock(mut method_block) => {
+        TopLevelItem::MethodBlock(mut method_block) => {
             method_block.method_items = method_block
                 .method_items
                 .into_iter()
                 .map(|method_item| match method_item {
-                    res::MethodItem::Def(method_def)
-                        if !retype_def_ids.contains(&method_def.def_id) =>
+                    MethodItem::Def(method_def)
+                        if !retype_def_ids.contains(&def_table.def_id(method_def.id)) =>
                     {
-                        res::MethodItem::Decl(res::MethodDecl {
+                        MethodItem::Decl(MethodDecl {
                             id: method_def.id,
-                            def_id: method_def.def_id,
                             attrs: method_def.attrs,
                             sig: method_def.sig,
                             span: method_def.span,
@@ -450,7 +507,7 @@ fn retype_sparse_item(
                     other => other,
                 })
                 .collect();
-            res::TopLevelItem::MethodBlock(method_block)
+            TopLevelItem::MethodBlock(method_block)
         }
         other => other,
     }
@@ -482,13 +539,11 @@ fn merge_typecheck_results(
         }
     }
 
-    // Rebuild typed tree using merged side tables against monomorphized module.
-    let typed_module = build_typed_module(&merged_type_map, &monomorphized_context.module);
+    // The tree carries no type payload; keep the monomorphized module.
     monomorphized_context.clone().with_type_map(
         merged_type_map,
         merged_call_sigs,
         merged_generic_insts,
-        typed_module,
     )
 }
 
@@ -534,191 +589,373 @@ struct CallInstRewriter<'a> {
     call_inst_map: &'a HashMap<NodeId, DefId>,
 }
 
-impl<'a> VisitorMut<DefId, ()> for CallInstRewriter<'a> {
-    fn visit_expr(&mut self, expr: &mut res::Expr) {
+impl<'a> VisitorMut for CallInstRewriter<'a> {
+    fn visit_expr(&mut self, expr: &mut Expr) {
         walk_expr(self, expr);
-        if let res::ExprKind::Call { callee, .. } = &mut expr.kind {
-            if let Some(new_def_id) = self.call_inst_map.get(&expr.id) {
-                if let res::ExprKind::Var { def_id, .. } = &mut callee.kind {
-                    *def_id = *new_def_id;
-                }
-            }
+        let _ = self.call_inst_map.get(&expr.id);
+    }
+}
+
+fn register_item_def_id(def_table: &mut DefTable, item: &TopLevelItem, def_id: DefId) {
+    let (node_id, span) = match item {
+        TopLevelItem::FuncDef(func_def) => (func_def.id, func_def.span),
+        TopLevelItem::FuncDecl(func_decl) => (func_decl.id, func_decl.span),
+        _ => return,
+    };
+    def_table.record_use(node_id, def_id);
+    def_table.record_def_node(def_id, node_id, span);
+}
+
+fn register_method_item_def_id(def_table: &mut DefTable, item: &MethodItem, def_id: DefId) {
+    let (node_id, span) = match item {
+        MethodItem::Def(method_def) => (method_def.id, method_def.span),
+        MethodItem::Decl(method_decl) => (method_decl.id, method_decl.span),
+    };
+    def_table.record_use(node_id, def_id);
+    def_table.record_def_node(def_id, node_id, span);
+}
+
+fn replay_node_def_mappings(def_table: &mut DefTable, old_ids: &[NodeId], new_ids: &[NodeId]) {
+    assert_eq!(
+        old_ids.len(),
+        new_ids.len(),
+        "compiler bug: reseed changed node visitation shape ({} -> {})",
+        old_ids.len(),
+        new_ids.len()
+    );
+    for (old_id, new_id) in old_ids.iter().zip(new_ids) {
+        if let Some(def_id) = def_table.lookup_node_def_id(*old_id) {
+            def_table.record_use(*new_id, def_id);
         }
     }
 }
 
-fn rewrite_calls_in_item(item: &mut res::TopLevelItem, call_inst_map: &HashMap<NodeId, DefId>) {
+fn collect_node_ids_in_top_level_item(item: &TopLevelItem) -> Vec<NodeId> {
+    let mut collector = NodeIdCollector { ids: Vec::new() };
+    match item {
+        TopLevelItem::ProtocolDef(protocol_def) => collector.visit_protocol_def(protocol_def),
+        TopLevelItem::TraitDef(trait_def) => collector.visit_trait_def(trait_def),
+        TopLevelItem::TypeDef(type_def) => collector.visit_type_def(type_def),
+        TopLevelItem::TypestateDef(typestate_def) => collector.visit_typestate_def(typestate_def),
+        TopLevelItem::FuncDecl(func_decl) => collector.visit_func_decl(func_decl),
+        TopLevelItem::FuncDef(func_def) => collector.visit_func_def(func_def),
+        TopLevelItem::MethodBlock(method_block) => collector.visit_method_block(method_block),
+        TopLevelItem::ClosureDef(closure_def) => collector.visit_closure_def(closure_def),
+    }
+    collector.ids
+}
+
+fn collect_node_ids_in_method_item(item: &MethodItem) -> Vec<NodeId> {
+    let mut collector = NodeIdCollector { ids: Vec::new() };
+    match item {
+        MethodItem::Decl(method_decl) => collector.visit_method_decl(method_decl),
+        MethodItem::Def(method_def) => collector.visit_method_def(method_def),
+    }
+    collector.ids
+}
+
+struct NodeIdCollector {
+    ids: Vec<NodeId>,
+}
+
+impl Visitor for NodeIdCollector {
+    fn visit_protocol_def(&mut self, protocol_def: &ProtocolDef) {
+        self.ids.push(protocol_def.id);
+        visit::walk_protocol_def(self, protocol_def);
+    }
+
+    fn visit_protocol_role(&mut self, role: &ProtocolRole) {
+        self.ids.push(role.id);
+        visit::walk_protocol_role(self, role);
+    }
+
+    fn visit_protocol_message(&mut self, message: &ProtocolMessage) {
+        self.ids.push(message.id);
+        visit::walk_protocol_message(self, message);
+    }
+
+    fn visit_protocol_request_contract(&mut self, contract: &ProtocolRequestContract) {
+        self.ids.push(contract.id);
+        visit::walk_protocol_request_contract(self, contract);
+    }
+
+    fn visit_protocol_state(&mut self, state: &ProtocolState) {
+        self.ids.push(state.id);
+        visit::walk_protocol_state(self, state);
+    }
+
+    fn visit_protocol_transition(&mut self, transition: &ProtocolTransition) {
+        self.ids.push(transition.id);
+        visit::walk_protocol_transition(self, transition);
+    }
+
+    fn visit_protocol_trigger(&mut self, trigger: &ProtocolTrigger) {
+        visit::walk_protocol_trigger(self, trigger);
+    }
+
+    fn visit_protocol_effect(&mut self, effect: &ProtocolEffect) {
+        visit::walk_protocol_effect(self, effect);
+    }
+
+    fn visit_trait_def(&mut self, trait_def: &TraitDef) {
+        self.ids.push(trait_def.id);
+        visit::walk_trait_def(self, trait_def);
+    }
+
+    fn visit_trait_method(&mut self, method: &TraitMethod) {
+        self.ids.push(method.id);
+        visit::walk_trait_method(self, method);
+    }
+
+    fn visit_trait_property(&mut self, property: &TraitProperty) {
+        self.ids.push(property.id);
+        visit::walk_trait_property(self, property);
+    }
+
+    fn visit_typestate_def(&mut self, typestate_def: &TypestateDef) {
+        self.ids.push(typestate_def.id);
+        visit::walk_typestate_def(self, typestate_def);
+    }
+
+    fn visit_typestate_role_impl(&mut self, role_impl: &TypestateRoleImpl) {
+        self.ids.push(role_impl.id);
+        visit::walk_typestate_role_impl(self, role_impl);
+    }
+
+    fn visit_typestate_fields(&mut self, fields: &TypestateFields) {
+        self.ids.push(fields.id);
+        visit::walk_typestate_fields(self, fields);
+    }
+
+    fn visit_typestate_state(&mut self, state: &TypestateState) {
+        self.ids.push(state.id);
+        visit::walk_typestate_state(self, state);
+    }
+
+    fn visit_typestate_on_handler(&mut self, handler: &TypestateOnHandler) {
+        self.ids.push(handler.id);
+        visit::walk_typestate_on_handler(self, handler);
+    }
+
+    fn visit_type_def(&mut self, type_def: &TypeDef) {
+        self.ids.push(type_def.id);
+        visit::walk_type_def(self, type_def);
+    }
+
+    fn visit_struct_def_field(&mut self, field: &StructDefField) {
+        self.ids.push(field.id);
+        visit::walk_struct_def_field(self, field);
+    }
+
+    fn visit_enum_def_variant(&mut self, variant: &EnumDefVariant) {
+        self.ids.push(variant.id);
+        visit::walk_enum_def_variant(self, variant);
+    }
+
+    fn visit_type_expr(&mut self, type_expr: &TypeExpr) {
+        self.ids.push(type_expr.id);
+        visit::walk_type_expr(self, type_expr);
+    }
+
+    fn visit_func_decl(&mut self, func_decl: &FuncDecl) {
+        self.ids.push(func_decl.id);
+        visit::walk_func_decl(self, func_decl);
+    }
+
+    fn visit_func_def(&mut self, func_def: &FuncDef) {
+        self.ids.push(func_def.id);
+        visit::walk_func_def(self, func_def);
+    }
+
+    fn visit_type_param(&mut self, param: &TypeParam) {
+        self.ids.push(param.id);
+        visit::walk_type_param(self, param);
+    }
+
+    fn visit_self_param(&mut self, self_param: &SelfParam) {
+        self.ids.push(self_param.id);
+        visit::walk_self_param(self, self_param);
+    }
+
+    fn visit_param(&mut self, param: &Param) {
+        self.ids.push(param.id);
+        visit::walk_param(self, param);
+    }
+
+    fn visit_method_block(&mut self, method_block: &MethodBlock) {
+        self.ids.push(method_block.id);
+        visit::walk_method_block(self, method_block);
+    }
+
+    fn visit_method_decl(&mut self, method_decl: &MethodDecl) {
+        self.ids.push(method_decl.id);
+        visit::walk_method_decl(self, method_decl);
+    }
+
+    fn visit_method_def(&mut self, method_def: &MethodDef) {
+        self.ids.push(method_def.id);
+        visit::walk_method_def(self, method_def);
+    }
+
+    fn visit_closure_def(&mut self, closure_def: &ClosureDef) {
+        self.ids.push(closure_def.id);
+        visit::walk_closure_def(self, closure_def);
+    }
+
+    fn visit_stmt_expr(&mut self, stmt: &StmtExpr) {
+        self.ids.push(stmt.id);
+        if let StmtExprKind::VarDecl { .. } = &stmt.kind {
+            self.ids.push(stmt.id);
+        }
+        visit::walk_stmt_expr(self, stmt);
+    }
+
+    fn visit_bind_pattern(&mut self, pattern: &BindPattern) {
+        self.ids.push(pattern.id);
+        visit::walk_bind_pattern(self, pattern);
+    }
+
+    fn visit_match_arm(&mut self, arm: &MatchArm) {
+        self.ids.push(arm.id);
+        visit::walk_match_arm(self, arm);
+    }
+
+    fn visit_match_pattern(&mut self, pattern: &MatchPattern) {
+        match pattern {
+            MatchPattern::Binding { id, .. } | MatchPattern::TypedBinding { id, .. } => {
+                self.ids.push(*id);
+            }
+            MatchPattern::EnumVariant { id, .. } => self.ids.push(*id),
+            _ => {}
+        }
+        visit::walk_match_pattern(self, pattern);
+    }
+
+    fn visit_match_pattern_binding(&mut self, binding: &MatchPatternBinding) {
+        if let MatchPatternBinding::Named { id, .. } = binding {
+            self.ids.push(*id);
+        }
+        visit::walk_match_pattern_binding(self, binding);
+    }
+
+    fn visit_expr(&mut self, expr: &Expr) {
+        self.ids.push(expr.id);
+        if let ExprKind::Closure { captures, .. } = &expr.kind {
+            for capture in captures {
+                let CaptureSpec::Move { id, .. } = capture;
+                self.ids.push(*id);
+            }
+        }
+        visit::walk_expr(self, expr);
+    }
+}
+
+fn rewrite_calls_in_item(item: &mut TopLevelItem, call_inst_map: &HashMap<NodeId, DefId>) {
     let mut rewriter = CallInstRewriter { call_inst_map };
     match item {
-        res::TopLevelItem::FuncDef(func_def) => rewriter.visit_func_def(func_def),
-        res::TopLevelItem::FuncDecl(func_decl) => rewriter.visit_func_decl(func_decl),
-        res::TopLevelItem::MethodBlock(method_block) => rewriter.visit_method_block(method_block),
-        res::TopLevelItem::ClosureDef(closure_def) => rewriter.visit_closure_def(closure_def),
-        res::TopLevelItem::ProtocolDef(_)
-        | res::TopLevelItem::TypeDef(_)
-        | res::TopLevelItem::TraitDef(_)
-        | res::TopLevelItem::TypestateDef(_) => {}
+        TopLevelItem::FuncDef(func_def) => rewriter.visit_func_def(func_def),
+        TopLevelItem::FuncDecl(func_decl) => rewriter.visit_func_decl(func_decl),
+        TopLevelItem::MethodBlock(method_block) => rewriter.visit_method_block(method_block),
+        TopLevelItem::ClosureDef(closure_def) => rewriter.visit_closure_def(closure_def),
+        TopLevelItem::ProtocolDef(_)
+        | TopLevelItem::TypeDef(_)
+        | TopLevelItem::TraitDef(_)
+        | TopLevelItem::TypestateDef(_) => {}
     }
 }
 
-fn rewrite_calls_in_method_item(
-    item: &mut res::MethodItem,
-    call_inst_map: &HashMap<NodeId, DefId>,
-) {
+fn rewrite_calls_in_method_item(item: &mut MethodItem, call_inst_map: &HashMap<NodeId, DefId>) {
     let mut rewriter = CallInstRewriter { call_inst_map };
     match item {
-        res::MethodItem::Def(method_def) => rewriter.visit_method_def(method_def),
-        res::MethodItem::Decl(method_decl) => rewriter.visit_method_decl(method_decl),
+        MethodItem::Def(method_def) => rewriter.visit_method_def(method_def),
+        MethodItem::Decl(method_decl) => rewriter.visit_method_decl(method_decl),
     }
 }
 
-struct ClosureDefCollector<'a> {
-    defs: &'a mut HashSet<DefId>,
+fn remap_local_defs_in_item(item: TopLevelItem, def_table: &mut DefTable) -> TopLevelItem {
+    let node_ids = collect_node_ids_in_top_level_item(&item);
+    remap_local_defs_for_nodes(def_table, &node_ids);
+    item
 }
 
-impl<'a> VisitorMut<DefId, ()> for ClosureDefCollector<'a> {
-    fn visit_expr(&mut self, expr: &mut res::Expr) {
-        walk_expr(self, expr);
-        if let res::ExprKind::Closure { def_id, .. } = &expr.kind {
-            self.defs.insert(*def_id);
-        }
-    }
+fn remap_local_defs_in_method_item(item: MethodItem, def_table: &mut DefTable) -> MethodItem {
+    let node_ids = collect_node_ids_in_method_item(&item);
+    remap_local_defs_for_nodes(def_table, &node_ids);
+    item
 }
 
-struct LocalDefRemapper<'a> {
-    def_table: &'a mut DefTable,
-    remap: HashMap<DefId, DefId>,
-    closure_defs: HashSet<DefId>,
-}
+fn remap_local_defs_for_nodes(def_table: &mut DefTable, node_ids: &[NodeId]) {
+    let node_set: HashSet<NodeId> = node_ids.iter().copied().collect();
+    let mut old_to_new = HashMap::<DefId, DefId>::new();
 
-impl<'a> LocalDefRemapper<'a> {
-    fn new(def_table: &'a mut DefTable, closure_defs: HashSet<DefId>) -> Self {
-        Self {
-            def_table,
-            remap: HashMap::new(),
-            closure_defs,
-        }
-    }
-
-    fn remap_def_id(&mut self, def_id: DefId) -> DefId {
-        if let Some(mapped) = self.remap.get(&def_id) {
-            return *mapped;
-        }
-
-        let Some(def) = self.def_table.lookup_def(def_id) else {
-            return def_id;
+    for node_id in node_ids {
+        let Some(old_def_id) = def_table.lookup_node_def_id(*node_id) else {
+            continue;
         };
-
-        let should_remap = match def.kind {
-            DefKind::Param { .. } | DefKind::LocalVar { .. } | DefKind::TypeParam => true,
-            DefKind::FuncDef { .. } | DefKind::FuncDecl { .. } => {
-                self.closure_defs.contains(&def_id)
-            }
-            _ => false,
+        if old_to_new.contains_key(&old_def_id) {
+            continue;
+        }
+        let Some(def) = def_table.lookup_def(old_def_id) else {
+            continue;
         };
-
-        if !should_remap {
-            return def_id;
+        if !matches!(
+            def.kind,
+            crate::core::resolve::DefKind::Param { .. }
+                | crate::core::resolve::DefKind::LocalVar { .. }
+        ) {
+            continue;
         }
 
-        let new_def_id = self.def_table.add_def(def.name.clone(), def.kind.clone());
-        self.remap.insert(def_id, new_def_id);
-        new_def_id
-    }
-}
+        let name = def.name.clone();
+        let kind = def.kind.clone();
+        let new_def_id = def_table.add_def(name, kind);
+        old_to_new.insert(old_def_id, new_def_id);
 
-impl<'a> TreeMapper for LocalDefRemapper<'a> {
-    type Context = ();
-    type InD = DefId;
-    type InT = ();
-    type OutD = DefId;
-    type OutT = ();
-
-    fn map_def_id(
-        &mut self,
-        _node_id: NodeId,
-        def_id: &Self::InD,
-        _ctx: &mut Self::Context,
-    ) -> Self::OutD {
-        self.remap_def_id(*def_id)
-    }
-
-    fn map_type_payload(
-        &mut self,
-        _node_id: NodeId,
-        _payload: &Self::InT,
-        _ctx: &mut Self::Context,
-    ) -> Self::OutT {
-        ()
-    }
-}
-
-fn remap_local_defs_in_item(
-    mut item: res::TopLevelItem,
-    def_table: &mut DefTable,
-) -> res::TopLevelItem {
-    let mut closure_defs = HashSet::new();
-    {
-        let mut collector = ClosureDefCollector {
-            defs: &mut closure_defs,
-        };
-        match &mut item {
-            res::TopLevelItem::FuncDef(func_def) => collector.visit_func_def(func_def),
-            res::TopLevelItem::FuncDecl(func_decl) => collector.visit_func_decl(func_decl),
-            res::TopLevelItem::MethodBlock(method_block) => {
-                collector.visit_method_block(method_block)
-            }
-            res::TopLevelItem::ClosureDef(closure_def) => collector.visit_closure_def(closure_def),
-            res::TopLevelItem::ProtocolDef(_)
-            | res::TopLevelItem::TypeDef(_)
-            | res::TopLevelItem::TraitDef(_)
-            | res::TopLevelItem::TypestateDef(_) => {}
+        if let Some(def_node) = def_table.lookup_def_node_id(old_def_id)
+            && node_set.contains(&def_node)
+        {
+            let span = def_table.lookup_def_span(old_def_id).unwrap_or_default();
+            def_table.record_def_node(new_def_id, def_node, span);
         }
     }
-    let mut remapper = LocalDefRemapper::new(def_table, closure_defs);
-    remapper.map_top_level_item(&item, &mut ())
-}
 
-fn remap_local_defs_in_method_item(
-    mut item: res::MethodItem,
-    def_table: &mut DefTable,
-) -> res::MethodItem {
-    let mut closure_defs = HashSet::new();
-    {
-        let mut collector = ClosureDefCollector {
-            defs: &mut closure_defs,
-        };
-        collector.visit_method_item(&mut item);
+    if old_to_new.is_empty() {
+        return;
     }
-    let mut remapper = LocalDefRemapper::new(def_table, closure_defs);
-    remapper.map_method_item(&item, &mut ())
+
+    for node_id in node_ids {
+        let Some(old_def_id) = def_table.lookup_node_def_id(*node_id) else {
+            continue;
+        };
+        if let Some(new_def_id) = old_to_new.get(&old_def_id) {
+            def_table.record_use(*node_id, *new_def_id);
+        }
+    }
 }
 
-fn reseed_ids_in_item(item: &mut res::TopLevelItem, node_id_gen: &mut NodeIdGen) {
+fn reseed_ids_in_item(item: &mut TopLevelItem, node_id_gen: &mut NodeIdGen) {
     match item {
-        res::TopLevelItem::ProtocolDef(protocol_def) => {
+        TopLevelItem::ProtocolDef(protocol_def) => {
             protocol_def.id = node_id_gen.new_id();
             reseed_protocol_def(protocol_def, node_id_gen);
         }
-        res::TopLevelItem::FuncDef(func_def) => reseed_func_def(func_def, node_id_gen),
-        res::TopLevelItem::FuncDecl(func_decl) => reseed_func_decl(func_decl, node_id_gen),
-        res::TopLevelItem::MethodBlock(method_block) => {
-            reseed_method_block(method_block, node_id_gen)
-        }
-        res::TopLevelItem::ClosureDef(closure_def) => reseed_closure_def(closure_def, node_id_gen),
-        res::TopLevelItem::TraitDef(trait_def) => reseed_trait_def(trait_def, node_id_gen),
-        res::TopLevelItem::TypestateDef(typestate_def) => {
+        TopLevelItem::FuncDef(func_def) => reseed_func_def(func_def, node_id_gen),
+        TopLevelItem::FuncDecl(func_decl) => reseed_func_decl(func_decl, node_id_gen),
+        TopLevelItem::MethodBlock(method_block) => reseed_method_block(method_block, node_id_gen),
+        TopLevelItem::ClosureDef(closure_def) => reseed_closure_def(closure_def, node_id_gen),
+        TopLevelItem::TraitDef(trait_def) => reseed_trait_def(trait_def, node_id_gen),
+        TopLevelItem::TypestateDef(typestate_def) => {
             typestate_def.id = node_id_gen.new_id();
             reseed_typestate_def(typestate_def, node_id_gen);
         }
-        res::TopLevelItem::TypeDef(type_def) => {
+        TopLevelItem::TypeDef(type_def) => {
             type_def.id = node_id_gen.new_id();
             reseed_type_def(type_def, node_id_gen);
         }
     }
 }
 
-fn reseed_protocol_def(protocol_def: &mut res::ProtocolDef, node_id_gen: &mut NodeIdGen) {
+fn reseed_protocol_def(protocol_def: &mut ProtocolDef, node_id_gen: &mut NodeIdGen) {
     for message in &mut protocol_def.messages {
         message.id = node_id_gen.new_id();
         reseed_type_expr(&mut message.ty, node_id_gen);
@@ -745,7 +982,7 @@ fn reseed_protocol_def(protocol_def: &mut res::ProtocolDef, node_id_gen: &mut No
     }
 }
 
-fn reseed_trait_def(trait_def: &mut res::TraitDef, node_id_gen: &mut NodeIdGen) {
+fn reseed_trait_def(trait_def: &mut TraitDef, node_id_gen: &mut NodeIdGen) {
     trait_def.id = node_id_gen.new_id();
     for method in &mut trait_def.methods {
         method.id = node_id_gen.new_id();
@@ -757,38 +994,38 @@ fn reseed_trait_def(trait_def: &mut res::TraitDef, node_id_gen: &mut NodeIdGen) 
     }
 }
 
-fn reseed_typestate_def(typestate_def: &mut res::TypestateDef, node_id_gen: &mut NodeIdGen) {
+fn reseed_typestate_def(typestate_def: &mut TypestateDef, node_id_gen: &mut NodeIdGen) {
     for role_impl in &mut typestate_def.role_impls {
         role_impl.id = node_id_gen.new_id();
     }
     for item in &mut typestate_def.items {
         match item {
-            res::TypestateItem::Fields(fields) => reseed_typestate_fields(fields, node_id_gen),
-            res::TypestateItem::Constructor(constructor) => {
+            TypestateItem::Fields(fields) => reseed_typestate_fields(fields, node_id_gen),
+            TypestateItem::Constructor(constructor) => {
                 reseed_func_def(constructor, node_id_gen);
             }
-            res::TypestateItem::Handler(handler) => {
+            TypestateItem::Handler(handler) => {
                 reseed_typestate_on_handler(handler, node_id_gen);
             }
-            res::TypestateItem::State(state) => reseed_typestate_state(state, node_id_gen),
+            TypestateItem::State(state) => reseed_typestate_state(state, node_id_gen),
         }
     }
 }
 
-fn reseed_typestate_state(state: &mut res::TypestateState, node_id_gen: &mut NodeIdGen) {
+fn reseed_typestate_state(state: &mut TypestateState, node_id_gen: &mut NodeIdGen) {
     state.id = node_id_gen.new_id();
     for item in &mut state.items {
         match item {
-            res::TypestateStateItem::Fields(fields) => reseed_typestate_fields(fields, node_id_gen),
-            res::TypestateStateItem::Method(method) => reseed_func_def(method, node_id_gen),
-            res::TypestateStateItem::Handler(handler) => {
+            TypestateStateItem::Fields(fields) => reseed_typestate_fields(fields, node_id_gen),
+            TypestateStateItem::Method(method) => reseed_func_def(method, node_id_gen),
+            TypestateStateItem::Handler(handler) => {
                 reseed_typestate_on_handler(handler, node_id_gen);
             }
         }
     }
 }
 
-fn reseed_typestate_on_handler(handler: &mut res::TypestateOnHandler, node_id_gen: &mut NodeIdGen) {
+fn reseed_typestate_on_handler(handler: &mut TypestateOnHandler, node_id_gen: &mut NodeIdGen) {
     handler.id = node_id_gen.new_id();
     reseed_type_expr(&mut handler.selector_ty, node_id_gen);
     for param in &mut handler.params {
@@ -801,7 +1038,7 @@ fn reseed_typestate_on_handler(handler: &mut res::TypestateOnHandler, node_id_ge
     reseed_expr(&mut handler.body, node_id_gen);
 }
 
-fn reseed_typestate_fields(fields: &mut res::TypestateFields, node_id_gen: &mut NodeIdGen) {
+fn reseed_typestate_fields(fields: &mut TypestateFields, node_id_gen: &mut NodeIdGen) {
     fields.id = node_id_gen.new_id();
     for field in &mut fields.fields {
         field.id = node_id_gen.new_id();
@@ -809,49 +1046,49 @@ fn reseed_typestate_fields(fields: &mut res::TypestateFields, node_id_gen: &mut 
     }
 }
 
-fn reseed_ids_in_method_item(item: &mut res::MethodItem, node_id_gen: &mut NodeIdGen) {
+fn reseed_ids_in_method_item(item: &mut MethodItem, node_id_gen: &mut NodeIdGen) {
     match item {
-        res::MethodItem::Def(method_def) => reseed_method_def(method_def, node_id_gen),
-        res::MethodItem::Decl(method_decl) => reseed_method_decl(method_decl, node_id_gen),
+        MethodItem::Def(method_def) => reseed_method_def(method_def, node_id_gen),
+        MethodItem::Decl(method_decl) => reseed_method_decl(method_decl, node_id_gen),
     }
 }
 
-fn reseed_func_def(func_def: &mut res::FuncDef, node_id_gen: &mut NodeIdGen) {
+fn reseed_func_def(func_def: &mut FuncDef, node_id_gen: &mut NodeIdGen) {
     func_def.id = node_id_gen.new_id();
     reseed_func_sig(&mut func_def.sig, node_id_gen);
     reseed_expr(&mut func_def.body, node_id_gen);
 }
 
-fn reseed_func_decl(func_decl: &mut res::FuncDecl, node_id_gen: &mut NodeIdGen) {
+fn reseed_func_decl(func_decl: &mut FuncDecl, node_id_gen: &mut NodeIdGen) {
     func_decl.id = node_id_gen.new_id();
     reseed_func_sig(&mut func_decl.sig, node_id_gen);
 }
 
-fn reseed_method_block(method_block: &mut res::MethodBlock, node_id_gen: &mut NodeIdGen) {
+fn reseed_method_block(method_block: &mut MethodBlock, node_id_gen: &mut NodeIdGen) {
     method_block.id = node_id_gen.new_id();
     for item in &mut method_block.method_items {
         reseed_ids_in_method_item(item, node_id_gen);
     }
 }
 
-fn reseed_method_def(method_def: &mut res::MethodDef, node_id_gen: &mut NodeIdGen) {
+fn reseed_method_def(method_def: &mut MethodDef, node_id_gen: &mut NodeIdGen) {
     method_def.id = node_id_gen.new_id();
     reseed_method_sig(&mut method_def.sig, node_id_gen);
     reseed_expr(&mut method_def.body, node_id_gen);
 }
 
-fn reseed_method_decl(method_decl: &mut res::MethodDecl, node_id_gen: &mut NodeIdGen) {
+fn reseed_method_decl(method_decl: &mut MethodDecl, node_id_gen: &mut NodeIdGen) {
     method_decl.id = node_id_gen.new_id();
     reseed_method_sig(&mut method_decl.sig, node_id_gen);
 }
 
-fn reseed_closure_def(closure_def: &mut res::ClosureDef, node_id_gen: &mut NodeIdGen) {
+fn reseed_closure_def(closure_def: &mut ClosureDef, node_id_gen: &mut NodeIdGen) {
     closure_def.id = node_id_gen.new_id();
     reseed_closure_sig(&mut closure_def.sig, node_id_gen);
     reseed_expr(&mut closure_def.body, node_id_gen);
 }
 
-fn reseed_func_sig(func_sig: &mut res::FunctionSig, node_id_gen: &mut NodeIdGen) {
+fn reseed_func_sig(func_sig: &mut FunctionSig, node_id_gen: &mut NodeIdGen) {
     for param in &mut func_sig.type_params {
         reseed_type_param(param, node_id_gen);
     }
@@ -861,7 +1098,7 @@ fn reseed_func_sig(func_sig: &mut res::FunctionSig, node_id_gen: &mut NodeIdGen)
     reseed_type_expr(&mut func_sig.ret_ty_expr, node_id_gen);
 }
 
-fn reseed_method_sig(method_sig: &mut res::MethodSig, node_id_gen: &mut NodeIdGen) {
+fn reseed_method_sig(method_sig: &mut MethodSig, node_id_gen: &mut NodeIdGen) {
     method_sig.self_param.id = node_id_gen.new_id();
     for param in &mut method_sig.type_params {
         reseed_type_param(param, node_id_gen);
@@ -872,35 +1109,35 @@ fn reseed_method_sig(method_sig: &mut res::MethodSig, node_id_gen: &mut NodeIdGe
     reseed_type_expr(&mut method_sig.ret_ty_expr, node_id_gen);
 }
 
-fn reseed_closure_sig(closure_sig: &mut res::ClosureSig, node_id_gen: &mut NodeIdGen) {
+fn reseed_closure_sig(closure_sig: &mut ClosureSig, node_id_gen: &mut NodeIdGen) {
     for param in &mut closure_sig.params {
         reseed_param(param, node_id_gen);
     }
     reseed_type_expr(&mut closure_sig.return_ty, node_id_gen);
 }
 
-fn reseed_param(param: &mut res::Param, node_id_gen: &mut NodeIdGen) {
+fn reseed_param(param: &mut Param, node_id_gen: &mut NodeIdGen) {
     param.id = node_id_gen.new_id();
     reseed_type_expr(&mut param.typ, node_id_gen);
 }
 
-fn reseed_type_param(param: &mut res::TypeParam, node_id_gen: &mut NodeIdGen) {
+fn reseed_type_param(param: &mut TypeParam, node_id_gen: &mut NodeIdGen) {
     param.id = node_id_gen.new_id();
     if let Some(bound) = &mut param.bound {
         bound.id = node_id_gen.new_id();
     }
 }
 
-fn reseed_type_def(type_def: &mut res::TypeDef, node_id_gen: &mut NodeIdGen) {
+fn reseed_type_def(type_def: &mut TypeDef, node_id_gen: &mut NodeIdGen) {
     match &mut type_def.kind {
-        res::TypeDefKind::Alias { aliased_ty } => reseed_type_expr(aliased_ty, node_id_gen),
-        res::TypeDefKind::Struct { fields } => {
+        TypeDefKind::Alias { aliased_ty } => reseed_type_expr(aliased_ty, node_id_gen),
+        TypeDefKind::Struct { fields } => {
             for field in fields {
                 field.id = node_id_gen.new_id();
                 reseed_type_expr(&mut field.ty, node_id_gen);
             }
         }
-        res::TypeDefKind::Enum { variants } => {
+        TypeDefKind::Enum { variants } => {
             for variant in variants {
                 variant.id = node_id_gen.new_id();
                 for payload in &mut variant.payload {
@@ -911,44 +1148,44 @@ fn reseed_type_def(type_def: &mut res::TypeDef, node_id_gen: &mut NodeIdGen) {
     }
 }
 
-fn reseed_type_expr(type_expr: &mut res::TypeExpr, node_id_gen: &mut NodeIdGen) {
+fn reseed_type_expr(type_expr: &mut TypeExpr, node_id_gen: &mut NodeIdGen) {
     type_expr.id = node_id_gen.new_id();
     match &mut type_expr.kind {
-        res::TypeExprKind::Infer => {}
-        res::TypeExprKind::Union { variants } => {
+        TypeExprKind::Infer => {}
+        TypeExprKind::Union { variants } => {
             for variant in variants {
                 reseed_type_expr(variant, node_id_gen);
             }
         }
-        res::TypeExprKind::Named { type_args, .. } => {
+        TypeExprKind::Named { type_args, .. } => {
             for arg in type_args {
                 reseed_type_expr(arg, node_id_gen);
             }
         }
-        res::TypeExprKind::Refined { base_ty_expr, .. } => {
+        TypeExprKind::Refined { base_ty_expr, .. } => {
             reseed_type_expr(base_ty_expr, node_id_gen);
         }
-        res::TypeExprKind::Array { elem_ty_expr, .. } => {
+        TypeExprKind::Array { elem_ty_expr, .. } => {
             reseed_type_expr(elem_ty_expr, node_id_gen);
         }
-        res::TypeExprKind::DynArray { elem_ty_expr } => {
+        TypeExprKind::DynArray { elem_ty_expr } => {
             reseed_type_expr(elem_ty_expr, node_id_gen);
         }
-        res::TypeExprKind::Tuple { field_ty_exprs } => {
+        TypeExprKind::Tuple { field_ty_exprs } => {
             for field in field_ty_exprs {
                 reseed_type_expr(field, node_id_gen);
             }
         }
-        res::TypeExprKind::Slice { elem_ty_expr } => {
+        TypeExprKind::Slice { elem_ty_expr } => {
             reseed_type_expr(elem_ty_expr, node_id_gen);
         }
-        res::TypeExprKind::Heap { elem_ty_expr } => {
+        TypeExprKind::Heap { elem_ty_expr } => {
             reseed_type_expr(elem_ty_expr, node_id_gen);
         }
-        res::TypeExprKind::Ref { elem_ty_expr, .. } => {
+        TypeExprKind::Ref { elem_ty_expr, .. } => {
             reseed_type_expr(elem_ty_expr, node_id_gen);
         }
-        res::TypeExprKind::Fn {
+        TypeExprKind::Fn {
             params,
             ret_ty_expr,
         } => {
@@ -960,15 +1197,15 @@ fn reseed_type_expr(type_expr: &mut res::TypeExpr, node_id_gen: &mut NodeIdGen) 
     }
 }
 
-fn reseed_stmt_expr(stmt: &mut res::StmtExpr, node_id_gen: &mut NodeIdGen) {
+fn reseed_stmt_expr(stmt: &mut StmtExpr, node_id_gen: &mut NodeIdGen) {
     stmt.id = node_id_gen.new_id();
     match &mut stmt.kind {
-        res::StmtExprKind::LetBind {
+        StmtExprKind::LetBind {
             pattern,
             decl_ty,
             value,
         }
-        | res::StmtExprKind::VarBind {
+        | StmtExprKind::VarBind {
             pattern,
             decl_ty,
             value,
@@ -979,26 +1216,26 @@ fn reseed_stmt_expr(stmt: &mut res::StmtExpr, node_id_gen: &mut NodeIdGen) {
             }
             reseed_expr(value, node_id_gen);
         }
-        res::StmtExprKind::VarDecl { decl_ty, .. } => {
+        StmtExprKind::VarDecl { decl_ty, .. } => {
             reseed_type_expr(decl_ty, node_id_gen);
         }
-        res::StmtExprKind::Assign {
+        StmtExprKind::Assign {
             assignee, value, ..
         } => {
             reseed_expr(assignee, node_id_gen);
             reseed_expr(value, node_id_gen);
         }
-        res::StmtExprKind::CompoundAssign {
+        StmtExprKind::CompoundAssign {
             assignee, value, ..
         } => {
             reseed_expr(assignee, node_id_gen);
             reseed_expr(value, node_id_gen);
         }
-        res::StmtExprKind::While { cond, body } => {
+        StmtExprKind::While { cond, body } => {
             reseed_expr(cond, node_id_gen);
             reseed_expr(body, node_id_gen);
         }
-        res::StmtExprKind::For {
+        StmtExprKind::For {
             pattern,
             iter,
             body,
@@ -1007,8 +1244,8 @@ fn reseed_stmt_expr(stmt: &mut res::StmtExpr, node_id_gen: &mut NodeIdGen) {
             reseed_expr(iter, node_id_gen);
             reseed_expr(body, node_id_gen);
         }
-        res::StmtExprKind::Break | res::StmtExprKind::Continue => {}
-        res::StmtExprKind::Return { value } => {
+        StmtExprKind::Break | StmtExprKind::Continue => {}
+        StmtExprKind::Return { value } => {
             if let Some(value) = value {
                 reseed_expr(value, node_id_gen);
             }
@@ -1016,16 +1253,18 @@ fn reseed_stmt_expr(stmt: &mut res::StmtExpr, node_id_gen: &mut NodeIdGen) {
     }
 }
 
-fn reseed_bind_pattern(pattern: &mut res::BindPattern, node_id_gen: &mut NodeIdGen) {
+fn reseed_bind_pattern(pattern: &mut BindPattern, node_id_gen: &mut NodeIdGen) {
     pattern.id = node_id_gen.new_id();
     match &mut pattern.kind {
-        res::BindPatternKind::Name { .. } => {}
-        res::BindPatternKind::Array { patterns } | res::BindPatternKind::Tuple { patterns } => {
+        BindPatternKind::Name { .. } => {
+            pattern.id = node_id_gen.new_id();
+        }
+        BindPatternKind::Array { patterns } | BindPatternKind::Tuple { patterns } => {
             for pattern in patterns {
                 reseed_bind_pattern(pattern, node_id_gen);
             }
         }
-        res::BindPatternKind::Struct { fields, .. } => {
+        BindPatternKind::Struct { fields, .. } => {
             for field in fields {
                 reseed_bind_pattern(&mut field.pattern, node_id_gen);
             }
@@ -1033,95 +1272,93 @@ fn reseed_bind_pattern(pattern: &mut res::BindPattern, node_id_gen: &mut NodeIdG
     }
 }
 
-fn reseed_match_arm(arm: &mut res::MatchArm, node_id_gen: &mut NodeIdGen) {
+fn reseed_match_arm(arm: &mut MatchArm, node_id_gen: &mut NodeIdGen) {
     arm.id = node_id_gen.new_id();
     reseed_match_pattern(&mut arm.pattern, node_id_gen);
     reseed_expr(&mut arm.body, node_id_gen);
 }
 
-fn reseed_match_pattern(pattern: &mut res::MatchPattern, node_id_gen: &mut NodeIdGen) {
+fn reseed_match_pattern(pattern: &mut MatchPattern, node_id_gen: &mut NodeIdGen) {
     match pattern {
-        res::MatchPattern::Binding { id, .. } => *id = node_id_gen.new_id(),
-        res::MatchPattern::TypedBinding { id, ty_expr, .. } => {
+        MatchPattern::Binding { id, .. } => *id = node_id_gen.new_id(),
+        MatchPattern::TypedBinding { id, ty_expr, .. } => {
             *id = node_id_gen.new_id();
             reseed_type_expr(ty_expr, node_id_gen);
         }
-        res::MatchPattern::Tuple { patterns, .. } => {
+        MatchPattern::Tuple { patterns, .. } => {
             for pattern in patterns {
                 reseed_match_pattern(pattern, node_id_gen);
             }
         }
-        res::MatchPattern::EnumVariant { bindings, .. } => {
+        MatchPattern::EnumVariant { id, bindings, .. } => {
+            *id = node_id_gen.new_id();
             for binding in bindings {
                 reseed_match_pattern_binding(binding, node_id_gen);
             }
         }
-        res::MatchPattern::Wildcard { .. }
-        | res::MatchPattern::BoolLit { .. }
-        | res::MatchPattern::IntLit { .. } => {}
+        MatchPattern::Wildcard { .. }
+        | MatchPattern::BoolLit { .. }
+        | MatchPattern::IntLit { .. } => {}
     }
 }
 
-fn reseed_match_pattern_binding(
-    binding: &mut res::MatchPatternBinding,
-    node_id_gen: &mut NodeIdGen,
-) {
-    if let res::MatchPatternBinding::Named { id, .. } = binding {
+fn reseed_match_pattern_binding(binding: &mut MatchPatternBinding, node_id_gen: &mut NodeIdGen) {
+    if let MatchPatternBinding::Named { id, .. } = binding {
         *id = node_id_gen.new_id();
     }
 }
 
-fn reseed_struct_lit_field(field: &mut res::StructLitField, node_id_gen: &mut NodeIdGen) {
+fn reseed_struct_lit_field(field: &mut StructLitField, node_id_gen: &mut NodeIdGen) {
     field.id = node_id_gen.new_id();
     reseed_expr(&mut field.value, node_id_gen);
 }
 
-fn reseed_struct_update_field(field: &mut res::StructUpdateField, node_id_gen: &mut NodeIdGen) {
+fn reseed_struct_update_field(field: &mut StructUpdateField, node_id_gen: &mut NodeIdGen) {
     field.id = node_id_gen.new_id();
     reseed_expr(&mut field.value, node_id_gen);
 }
 
-fn reseed_capture_spec(spec: &mut res::CaptureSpec, node_id_gen: &mut NodeIdGen) {
+fn reseed_capture_spec(spec: &mut CaptureSpec, node_id_gen: &mut NodeIdGen) {
     match spec {
-        res::CaptureSpec::Move { id, .. } => *id = node_id_gen.new_id(),
+        CaptureSpec::Move { id, .. } => *id = node_id_gen.new_id(),
     }
 }
 
-fn reseed_expr(expr: &mut res::Expr, node_id_gen: &mut NodeIdGen) {
+fn reseed_expr(expr: &mut Expr, node_id_gen: &mut NodeIdGen) {
     expr.id = node_id_gen.new_id();
     match &mut expr.kind {
-        res::ExprKind::Block { items, tail } => {
+        ExprKind::Block { items, tail } => {
             for item in items {
                 match item {
-                    res::BlockItem::Stmt(stmt) => reseed_stmt_expr(stmt, node_id_gen),
-                    res::BlockItem::Expr(expr) => reseed_expr(expr, node_id_gen),
+                    BlockItem::Stmt(stmt) => reseed_stmt_expr(stmt, node_id_gen),
+                    BlockItem::Expr(expr) => reseed_expr(expr, node_id_gen),
                 }
             }
             if let Some(tail) = tail {
                 reseed_expr(tail, node_id_gen);
             }
         }
-        res::ExprKind::StringFmt { segments } => {
+        ExprKind::StringFmt { segments } => {
             for segment in segments {
-                if let res::StringFmtSegment::Expr { expr, .. } = segment {
+                if let StringFmtSegment::Expr { expr, .. } = segment {
                     reseed_expr(expr, node_id_gen);
                 }
             }
         }
-        res::ExprKind::ArrayLit { init, elem_ty } => {
+        ExprKind::ArrayLit { init, elem_ty } => {
             if let Some(elem_ty) = elem_ty {
                 reseed_type_expr(elem_ty, node_id_gen);
             }
             match init {
-                res::ArrayLitInit::Elems(elems) => {
+                ArrayLitInit::Elems(elems) => {
                     for elem in elems {
                         reseed_expr(elem, node_id_gen);
                     }
                 }
-                res::ArrayLitInit::Repeat(expr, _) => reseed_expr(expr, node_id_gen),
+                ArrayLitInit::Repeat(expr, _) => reseed_expr(expr, node_id_gen),
             }
         }
-        res::ExprKind::SetLit { elem_ty, elems } => {
+        ExprKind::SetLit { elem_ty, elems } => {
             if let Some(elem_ty) = elem_ty {
                 reseed_type_expr(elem_ty, node_id_gen);
             }
@@ -1129,7 +1366,7 @@ fn reseed_expr(expr: &mut res::Expr, node_id_gen: &mut NodeIdGen) {
                 reseed_expr(elem, node_id_gen);
             }
         }
-        res::ExprKind::MapLit {
+        ExprKind::MapLit {
             key_ty,
             value_ty,
             entries,
@@ -1146,35 +1383,35 @@ fn reseed_expr(expr: &mut res::Expr, node_id_gen: &mut NodeIdGen) {
                 reseed_expr(&mut entry.value, node_id_gen);
             }
         }
-        res::ExprKind::TupleLit(fields) => {
+        ExprKind::TupleLit(fields) => {
             for field in fields {
                 reseed_expr(field, node_id_gen);
             }
         }
-        res::ExprKind::StructLit { fields, .. } => {
+        ExprKind::StructLit { fields, .. } => {
             for field in fields {
                 reseed_struct_lit_field(field, node_id_gen);
             }
         }
-        res::ExprKind::EnumVariant { payload, .. } => {
+        ExprKind::EnumVariant { payload, .. } => {
             for expr in payload {
                 reseed_expr(expr, node_id_gen);
             }
         }
-        res::ExprKind::StructUpdate { target, fields } => {
+        ExprKind::StructUpdate { target, fields } => {
             reseed_expr(target, node_id_gen);
             for field in fields {
                 reseed_struct_update_field(field, node_id_gen);
             }
         }
-        res::ExprKind::BinOp { left, right, .. } => {
+        ExprKind::BinOp { left, right, .. } => {
             reseed_expr(left, node_id_gen);
             reseed_expr(right, node_id_gen);
         }
-        res::ExprKind::UnaryOp { expr, .. } => {
+        ExprKind::UnaryOp { expr, .. } => {
             reseed_expr(expr, node_id_gen);
         }
-        res::ExprKind::Try {
+        ExprKind::Try {
             fallible_expr,
             on_error,
         } => {
@@ -1183,24 +1420,24 @@ fn reseed_expr(expr: &mut res::Expr, node_id_gen: &mut NodeIdGen) {
                 reseed_expr(handler, node_id_gen);
             }
         }
-        res::ExprKind::HeapAlloc { expr }
-        | res::ExprKind::Move { expr }
-        | res::ExprKind::AddrOf { expr }
-        | res::ExprKind::Deref { expr }
-        | res::ExprKind::ImplicitMove { expr }
-        | res::ExprKind::Coerce { expr, .. } => {
+        ExprKind::HeapAlloc { expr }
+        | ExprKind::Move { expr }
+        | ExprKind::AddrOf { expr }
+        | ExprKind::Deref { expr }
+        | ExprKind::ImplicitMove { expr }
+        | ExprKind::Coerce { expr, .. } => {
             reseed_expr(expr, node_id_gen);
         }
-        res::ExprKind::ArrayIndex { target, indices } => {
+        ExprKind::ArrayIndex { target, indices } => {
             reseed_expr(target, node_id_gen);
             for index in indices {
                 reseed_expr(index, node_id_gen);
             }
         }
-        res::ExprKind::TupleField { target, .. } | res::ExprKind::StructField { target, .. } => {
+        ExprKind::TupleField { target, .. } | ExprKind::StructField { target, .. } => {
             reseed_expr(target, node_id_gen);
         }
-        res::ExprKind::If {
+        ExprKind::If {
             cond,
             then_body,
             else_body,
@@ -1209,11 +1446,11 @@ fn reseed_expr(expr: &mut res::Expr, node_id_gen: &mut NodeIdGen) {
             reseed_expr(then_body, node_id_gen);
             reseed_expr(else_body, node_id_gen);
         }
-        res::ExprKind::Range { start, end } => {
+        ExprKind::Range { start, end } => {
             reseed_expr(start, node_id_gen);
             reseed_expr(end, node_id_gen);
         }
-        res::ExprKind::Slice { target, start, end } => {
+        ExprKind::Slice { target, start, end } => {
             reseed_expr(target, node_id_gen);
             if let Some(start) = start {
                 reseed_expr(start, node_id_gen);
@@ -1222,27 +1459,27 @@ fn reseed_expr(expr: &mut res::Expr, node_id_gen: &mut NodeIdGen) {
                 reseed_expr(end, node_id_gen);
             }
         }
-        res::ExprKind::Match { scrutinee, arms } => {
+        ExprKind::Match { scrutinee, arms } => {
             reseed_expr(scrutinee, node_id_gen);
             for arm in arms {
                 reseed_match_arm(arm, node_id_gen);
             }
         }
-        res::ExprKind::Call { callee, args } => {
+        ExprKind::Call { callee, args } => {
             reseed_expr(callee, node_id_gen);
             for arg in args {
                 reseed_expr(&mut arg.expr, node_id_gen);
             }
         }
-        res::ExprKind::MethodCall { callee, args, .. } => {
+        ExprKind::MethodCall { callee, args, .. } => {
             reseed_expr(callee, node_id_gen);
             for arg in args {
                 reseed_expr(&mut arg.expr, node_id_gen);
             }
         }
-        res::ExprKind::Emit { kind } => match kind {
-            res::EmitKind::Send { to, payload }
-            | res::EmitKind::Request {
+        ExprKind::Emit { kind } => match kind {
+            EmitKind::Send { to, payload }
+            | EmitKind::Request {
                 to,
                 payload,
                 request_site_label: _,
@@ -1251,11 +1488,11 @@ fn reseed_expr(expr: &mut res::Expr, node_id_gen: &mut NodeIdGen) {
                 reseed_expr(payload, node_id_gen);
             }
         },
-        res::ExprKind::Reply { cap, value } => {
+        ExprKind::Reply { cap, value } => {
             reseed_expr(cap, node_id_gen);
             reseed_expr(value, node_id_gen);
         }
-        res::ExprKind::Closure {
+        ExprKind::Closure {
             params,
             return_ty,
             body,
@@ -1271,17 +1508,17 @@ fn reseed_expr(expr: &mut res::Expr, node_id_gen: &mut NodeIdGen) {
             reseed_type_expr(return_ty, node_id_gen);
             reseed_expr(body, node_id_gen);
         }
-        res::ExprKind::UnitLit
-        | res::ExprKind::IntLit(_)
-        | res::ExprKind::BoolLit(_)
-        | res::ExprKind::CharLit(_)
-        | res::ExprKind::StringLit { .. }
-        | res::ExprKind::Var { .. } => {}
+        ExprKind::UnitLit
+        | ExprKind::IntLit(_)
+        | ExprKind::BoolLit(_)
+        | ExprKind::CharLit(_)
+        | ExprKind::StringLit { .. }
+        | ExprKind::Var { .. } => {}
     }
 }
 
 fn apply_inst_to_func_def(
-    func_def: &mut res::FuncDef,
+    func_def: &mut FuncDef,
     inst: &GenericInst,
     def_table: &DefTable,
     node_id_gen: &mut NodeIdGen,
@@ -1294,7 +1531,7 @@ fn apply_inst_to_func_def(
 }
 
 fn apply_inst_to_func_decl(
-    func_decl: &mut res::FuncDecl,
+    func_decl: &mut FuncDecl,
     inst: &GenericInst,
     def_table: &DefTable,
     node_id_gen: &mut NodeIdGen,
@@ -1307,7 +1544,7 @@ fn apply_inst_to_func_decl(
 }
 
 fn apply_inst_to_method_def(
-    method_def: &mut res::MethodDef,
+    method_def: &mut MethodDef,
     inst: &GenericInst,
     def_table: &DefTable,
     node_id_gen: &mut NodeIdGen,
@@ -1320,7 +1557,7 @@ fn apply_inst_to_method_def(
 }
 
 fn apply_inst_to_method_decl(
-    method_decl: &mut res::MethodDecl,
+    method_decl: &mut MethodDecl,
     inst: &GenericInst,
     def_table: &DefTable,
     node_id_gen: &mut NodeIdGen,
@@ -1333,7 +1570,7 @@ fn apply_inst_to_method_decl(
 }
 
 fn build_subst(
-    type_params: &[res::TypeParam],
+    type_params: &[TypeParam],
     inst: &GenericInst,
     def_table: &DefTable,
 ) -> Result<HashMap<DefId, Type>, MonomorphizeError> {
@@ -1350,7 +1587,7 @@ fn build_subst(
     Ok(type_params
         .iter()
         .zip(inst.type_args.iter().cloned())
-        .map(|(param, ty)| (param.def_id, ty))
+        .map(|(param, ty)| (def_table.def_id(param.id), ty))
         .collect())
 }
 
@@ -1384,23 +1621,24 @@ impl<'a> TypeExprSubstitutor<'a> {
     }
 }
 
-impl<'a> VisitorMut<DefId, ()> for TypeExprSubstitutor<'a> {
-    fn visit_type_expr(&mut self, type_expr: &mut res::TypeExpr) {
+impl<'a> VisitorMut for TypeExprSubstitutor<'a> {
+    fn visit_type_expr(&mut self, type_expr: &mut TypeExpr) {
         if self.error.is_some() {
             return;
         }
 
-        if let res::TypeExprKind::Named { def_id, .. } = &type_expr.kind {
-            if let Some(ty) = self.subst.get(def_id) {
-                match type_expr_from_type(ty, self.def_table, self.node_id_gen, type_expr.span) {
-                    Ok(new_expr) => {
-                        *type_expr = new_expr;
-                        return;
-                    }
-                    Err(err) => {
-                        self.error = Some(err);
-                        return;
-                    }
+        if let TypeExprKind::Named { .. } = &type_expr.kind
+            && let Some(def_id) = self.def_table.lookup_node_def_id(type_expr.id)
+            && let Some(ty) = self.subst.get(&def_id)
+        {
+            match type_expr_from_type(ty, self.def_table, self.node_id_gen, type_expr.span) {
+                Ok(new_expr) => {
+                    *type_expr = new_expr;
+                    return;
+                }
+                Err(err) => {
+                    self.error = Some(err);
+                    return;
                 }
             }
         }
@@ -1414,7 +1652,7 @@ fn type_expr_from_type(
     def_table: &DefTable,
     node_id_gen: &mut NodeIdGen,
     span: Span,
-) -> Result<res::TypeExpr, MonomorphizeError> {
+) -> Result<TypeExpr, MonomorphizeError> {
     let id = node_id_gen.new_id();
     let kind = match ty {
         Type::Unit => {
@@ -1451,7 +1689,7 @@ fn type_expr_from_type(
                 return named_type_expr(name, def_table, node_id_gen, span);
             }
             let base_expr = named_type_expr(name, def_table, node_id_gen, span)?;
-            res::TypeExprKind::Refined {
+            TypeExprKind::Refined {
                 base_ty_expr: Box::new(base_expr),
                 refinements,
             }
@@ -1465,18 +1703,15 @@ fn type_expr_from_type(
         Type::String => {
             return named_type_expr("string", def_table, node_id_gen, span);
         }
-        Type::Array { elem_ty, dims } => res::TypeExprKind::Array {
+        Type::Array { elem_ty, dims } => TypeExprKind::Array {
             elem_ty_expr: Box::new(type_expr_from_type(elem_ty, def_table, node_id_gen, span)?),
             dims: dims.clone(),
         },
-        Type::DynArray { elem_ty } => res::TypeExprKind::DynArray {
+        Type::DynArray { elem_ty } => TypeExprKind::DynArray {
             elem_ty_expr: Box::new(type_expr_from_type(elem_ty, def_table, node_id_gen, span)?),
         },
-        Type::Pending { response_tys } => res::TypeExprKind::Named {
+        Type::Pending { response_tys } => TypeExprKind::Named {
             ident: "Pending".to_string(),
-            def_id: def_table
-                .lookup_type_def_id("Pending")
-                .ok_or(MonomorphizeErrorKind::UnsupportedType.at(span))?,
             type_args: vec![response_set_type_arg_expr(
                 response_tys,
                 def_table,
@@ -1484,11 +1719,8 @@ fn type_expr_from_type(
                 span,
             )?],
         },
-        Type::ReplyCap { response_tys } => res::TypeExprKind::Named {
+        Type::ReplyCap { response_tys } => TypeExprKind::Named {
             ident: "ReplyCap".to_string(),
-            def_id: def_table
-                .lookup_type_def_id("ReplyCap")
-                .ok_or(MonomorphizeErrorKind::UnsupportedType.at(span))?,
             type_args: vec![response_set_type_arg_expr(
                 response_tys,
                 def_table,
@@ -1496,36 +1728,30 @@ fn type_expr_from_type(
                 span,
             )?],
         },
-        Type::Set { elem_ty } => res::TypeExprKind::Named {
+        Type::Set { elem_ty } => TypeExprKind::Named {
             ident: "set".to_string(),
-            def_id: def_table
-                .lookup_type_def_id("set")
-                .ok_or(MonomorphizeErrorKind::UnsupportedType.at(span))?,
             type_args: vec![type_expr_from_type(elem_ty, def_table, node_id_gen, span)?],
         },
-        Type::Map { key_ty, value_ty } => res::TypeExprKind::Named {
+        Type::Map { key_ty, value_ty } => TypeExprKind::Named {
             ident: "map".to_string(),
-            def_id: def_table
-                .lookup_type_def_id("map")
-                .ok_or(MonomorphizeErrorKind::UnsupportedType.at(span))?,
             type_args: vec![
                 type_expr_from_type(key_ty, def_table, node_id_gen, span)?,
                 type_expr_from_type(value_ty, def_table, node_id_gen, span)?,
             ],
         },
-        Type::Tuple { field_tys } => res::TypeExprKind::Tuple {
+        Type::Tuple { field_tys } => TypeExprKind::Tuple {
             field_ty_exprs: field_tys
                 .iter()
                 .map(|ty| type_expr_from_type(ty, def_table, node_id_gen, span))
                 .collect::<Result<Vec<_>, _>>()?,
         },
-        Type::Slice { elem_ty } => res::TypeExprKind::Slice {
+        Type::Slice { elem_ty } => TypeExprKind::Slice {
             elem_ty_expr: Box::new(type_expr_from_type(elem_ty, def_table, node_id_gen, span)?),
         },
-        Type::Heap { elem_ty } => res::TypeExprKind::Heap {
+        Type::Heap { elem_ty } => TypeExprKind::Heap {
             elem_ty_expr: Box::new(type_expr_from_type(elem_ty, def_table, node_id_gen, span)?),
         },
-        Type::Ref { mutable, elem_ty } => res::TypeExprKind::Ref {
+        Type::Ref { mutable, elem_ty } => TypeExprKind::Ref {
             mutable: *mutable,
             elem_ty_expr: Box::new(type_expr_from_type(elem_ty, def_table, node_id_gen, span)?),
         },
@@ -1539,18 +1765,18 @@ fn type_expr_from_type(
                         FnParamMode::Out => ParamMode::Out,
                         FnParamMode::Sink => ParamMode::Sink,
                     };
-                    Ok(res::FnTypeParam {
+                    Ok(FnTypeParam {
                         mode,
                         ty_expr: type_expr_from_type(&param.ty, def_table, node_id_gen, span)?,
                     })
                 })
                 .collect::<Result<Vec<_>, _>>()?;
-            res::TypeExprKind::Fn {
+            TypeExprKind::Fn {
                 params,
                 ret_ty_expr: Box::new(type_expr_from_type(ret_ty, def_table, node_id_gen, span)?),
             }
         }
-        Type::ErrorUnion { ok_ty, err_tys } => res::TypeExprKind::Union {
+        Type::ErrorUnion { ok_ty, err_tys } => TypeExprKind::Union {
             variants: std::iter::once(ok_ty.as_ref())
                 .chain(err_tys.iter())
                 .map(|ty| type_expr_from_type(ty, def_table, node_id_gen, span))
@@ -1565,7 +1791,7 @@ fn type_expr_from_type(
         }
     };
 
-    Ok(res::TypeExpr { id, kind, span })
+    Ok(TypeExpr { id, kind, span })
 }
 
 fn response_set_type_arg_expr(
@@ -1573,7 +1799,7 @@ fn response_set_type_arg_expr(
     def_table: &DefTable,
     node_id_gen: &mut NodeIdGen,
     span: Span,
-) -> Result<res::TypeExpr, MonomorphizeError> {
+) -> Result<TypeExpr, MonomorphizeError> {
     if response_tys.len() <= 1 {
         return type_expr_from_type(
             response_tys
@@ -1584,9 +1810,9 @@ fn response_set_type_arg_expr(
             span,
         );
     }
-    Ok(res::TypeExpr {
+    Ok(TypeExpr {
         id: node_id_gen.new_id(),
-        kind: res::TypeExprKind::Union {
+        kind: TypeExprKind::Union {
             variants: response_tys
                 .iter()
                 .map(|ty| type_expr_from_type(ty, def_table, node_id_gen, span))
@@ -1601,18 +1827,17 @@ fn named_type_expr(
     def_table: &DefTable,
     node_id_gen: &mut NodeIdGen,
     span: Span,
-) -> Result<res::TypeExpr, MonomorphizeError> {
-    let def_id = def_table.lookup_type_def_id(name).ok_or_else(|| {
-        MonomorphizeErrorKind::UnknownType {
+) -> Result<TypeExpr, MonomorphizeError> {
+    if def_table.lookup_type_def_id(name).is_none() {
+        return Err(MonomorphizeErrorKind::UnknownType {
             name: name.to_string(),
         }
-        .at(span)
-    })?;
-    Ok(res::TypeExpr {
+        .at(span));
+    }
+    Ok(TypeExpr {
         id: node_id_gen.new_id(),
-        kind: res::TypeExprKind::Named {
+        kind: TypeExprKind::Named {
             ident: name.to_string(),
-            def_id,
             type_args: Vec::new(),
         },
         span,

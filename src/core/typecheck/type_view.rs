@@ -6,7 +6,7 @@
 use std::collections::{HashMap, HashSet};
 
 use crate::core::resolve::DefTable;
-use crate::core::tree::resolved as res;
+use crate::core::tree::TypeDefKind;
 use crate::core::typecheck::nominal::{
     EnumVariantView, EnumView, ExpansionState, NominalKey, StructFieldView, StructView, TypeView,
 };
@@ -60,15 +60,15 @@ impl<'a, M: TypeDefLookup> TypeViewResolver<'a, M> {
     }
 
     fn shallow_view_for_key(&self, key: &NominalKey) -> Option<TypeView> {
-        let type_def = self.module.type_def_by_id(key.def_id)?;
+        let type_def = self.module.type_def_by_id(self.def_table, key.def_id)?;
         match &type_def.kind {
-            res::TypeDefKind::Struct { .. } => Some(TypeView::Struct(StructView {
+            TypeDefKind::Struct { .. } => Some(TypeView::Struct(StructView {
                 key: key.clone(),
                 name: type_def.name.clone(),
                 fields: Vec::new(),
                 state: ExpansionState::Shallow,
             })),
-            res::TypeDefKind::Enum { .. } => Some(TypeView::Enum(EnumView {
+            TypeDefKind::Enum { .. } => Some(TypeView::Enum(EnumView {
                 key: key.clone(),
                 name: type_def.name.clone(),
                 variants: Vec::new(),

@@ -13,8 +13,7 @@
 //!   helper like `foo_to_bar`. If it has value-dependent behavior, add a rule
 //!   in `value_rules_for` as well.
 
-use crate::core::tree::UnaryOp;
-use crate::core::tree::resolved::{Expr, ExprKind};
+use crate::core::tree::{Expr, ExprKind, UnaryOp};
 use crate::core::types::{EnumVariant, StructField, Type};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

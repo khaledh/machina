@@ -13,10 +13,7 @@ use crate::core::context::{ResolvedContext, ResolvedTables, TypeCheckedContext, 
 use crate::core::diag::Span;
 use crate::core::resolve::{Def, DefId, DefTable};
 use crate::core::symtab::SymbolTable;
-use crate::core::tree::NodeId;
-use crate::core::tree::NodeIdGen;
-use crate::core::tree::resolved::Module as ResolvedModule;
-use crate::core::tree::typed::Module as TypedModule;
+use crate::core::tree::{Module, NodeId, NodeIdGen};
 use crate::core::typecheck::type_map::{CallSig, CallSigMap, GenericInstMap, TypeMap};
 use crate::core::types::Type;
 use crate::services::analysis::snapshot::FileId;
@@ -39,7 +36,7 @@ impl ParsedModuleResult {
 #[derive(Clone)]
 pub struct ResolvedModuleResult {
     pub module_id: ModuleId,
-    pub module: ResolvedModule,
+    pub module: Module,
     pub def_table: DefTable,
     pub def_owners: HashMap<DefId, ModuleId>,
     pub symbols: SymbolTable,
@@ -92,7 +89,7 @@ impl ResolvedModuleResult {
 #[derive(Clone)]
 pub struct TypedModuleResult {
     pub module_id: ModuleId,
-    pub module: TypedModule,
+    pub module: Module,
     pub def_table: DefTable,
     pub def_owners: HashMap<DefId, ModuleId>,
     pub type_map: TypeMap,

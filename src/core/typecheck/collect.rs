@@ -13,10 +13,10 @@
 use std::collections::{BTreeMap, HashMap, HashSet};
 
 use crate::core::diag::Span;
-use crate::core::resolve::{DefId, ImportedCallableSig, ImportedFacts, ImportedTraitSig};
+use crate::core::resolve::{DefId, DefTable, ImportedCallableSig, ImportedFacts, ImportedTraitSig};
 use crate::core::tree::ParamMode;
-use crate::core::tree::resolved::{
-    Attribute, EnumDefVariant, FunctionSig, MethodItem, MethodSig, Param, StructDefField,
+use crate::core::tree::{
+    Attribute, EnumDefVariant, FunctionSig, MethodItem, MethodSig, Param, StructDefField, TypeDef,
     TypeDefKind, TypeParam,
 };
 use crate::core::typecheck::engine::{
@@ -54,8 +54,10 @@ impl<'a> ResolvedTypeLookup<'a> {
 }
 
 impl TypeDefLookup for ResolvedTypeLookup<'_> {
-    fn type_def_by_id(&self, def_id: DefId) -> Option<&crate::core::tree::resolved::TypeDef> {
-        self.context.module.type_def_by_id(def_id)
+    fn type_def_by_id(&self, _def_table: &DefTable, def_id: DefId) -> Option<&TypeDef> {
+        self.context
+            .module
+            .type_def_by_id(&self.context.def_table, def_id)
     }
 
     fn imported_type_by_id(&self, def_id: DefId) -> Option<&Type> {
@@ -144,8 +146,16 @@ fn collect_type_defs(
 ) {
     let type_lookup = ResolvedTypeLookup::new(ctx, &imported_facts.type_defs_by_def);
     for type_def in ctx.module.type_defs() {
-        type_symbols.insert(type_def.name.clone(), type_def.def_id);
-        record_generic_env(type_def.def_id, &type_def.type_params, generic_envs);
+        let Some(type_def_id) = ctx.def_table.lookup_node_def_id(type_def.id) else {
+            continue;
+        };
+        type_symbols.insert(type_def.name.clone(), type_def_id);
+        record_generic_env(
+            type_def_id,
+            &ctx.def_table,
+            &type_def.type_params,
+            generic_envs,
+        );
 
         if !type_def.type_params.is_empty() {
             // Generic type definitions are instantiated in later passes.
@@ -274,7 +284,10 @@ fn collect_trait_sigs(
         trait_sigs.insert(
             trait_def.name.clone(),
             CollectedTraitSig {
-                def_id: trait_def.def_id,
+                def_id: match ctx.def_table.lookup_node_def_id(trait_def.id) {
+                    Some(def_id) => def_id,
+                    None => continue,
+                },
                 methods,
                 properties,
                 span: trait_def.span,
@@ -302,10 +315,14 @@ fn collect_function_sigs(
 ) {
     let mut overloads = Vec::new();
     for func_decl in ctx.module.func_decls() {
-        overloads.push((func_decl.def_id, func_decl.sig.clone()));
+        if let Some(def_id) = ctx.def_table.lookup_node_def_id(func_decl.id) {
+            overloads.push((def_id, func_decl.sig.clone()));
+        }
     }
     for func_def in ctx.module.func_defs() {
-        overloads.push((func_def.def_id, func_def.sig.clone()));
+        if let Some(def_id) = ctx.def_table.lookup_node_def_id(func_def.id) {
+            overloads.push((def_id, func_def.sig.clone()));
+        }
     }
 
     for (def_id, sig) in overloads {
@@ -453,17 +470,20 @@ fn collect_method_sigs(
         for method_item in &method_block.method_items {
             let (def_id, sig, attrs, span) = match method_item {
                 MethodItem::Decl(method_decl) => (
-                    method_decl.def_id,
+                    ctx.def_table.lookup_node_def_id(method_decl.id),
                     method_decl.sig.clone(),
                     method_decl.attrs.clone(),
                     method_decl.span,
                 ),
                 MethodItem::Def(method_def) => (
-                    method_def.def_id,
+                    ctx.def_table.lookup_node_def_id(method_def.id),
                     method_def.sig.clone(),
                     method_def.attrs.clone(),
                     method_def.span,
                 ),
+            };
+            let Some(def_id) = def_id else {
+                continue;
             };
             let accessor_kind = property_accessor_kind(&attrs);
 
@@ -633,7 +653,7 @@ fn collect_callable_sig(
     let type_param_map = if sig.type_params.is_empty() {
         None
     } else {
-        let map = type_param_map(&sig.type_params);
+        let map = type_param_map(&ctx.def_table, &sig.type_params);
         generic_envs.insert(def_id, map.clone());
         Some(map)
     };
@@ -671,7 +691,11 @@ fn collect_callable_sig(
             .filter_map(|type_param| {
                 let var = type_param_map
                     .as_ref()
-                    .and_then(|map| map.get(&type_param.def_id))
+                    .and_then(|map| {
+                        ctx.def_table
+                            .lookup_node_def_id(type_param.id)
+                            .and_then(|def_id| map.get(&def_id))
+                    })
                     .copied()?;
                 Some((var.index(), type_param.ident.clone()))
             })
@@ -691,7 +715,7 @@ fn collect_trait_method_sig(
     let type_param_map = if sig.type_params.is_empty() {
         None
     } else {
-        Some(type_param_map(&sig.type_params))
+        Some(type_param_map(&ctx.def_table, &sig.type_params))
     };
 
     let params = match build_param_sigs(ctx, imported_facts, &sig.params, type_param_map.as_ref()) {
@@ -800,7 +824,8 @@ fn build_param_sigs(
             resolve_type_expr_with_params(&ctx.def_table, &type_lookup, &param.typ, type_params)?;
         let name = ctx
             .def_table
-            .lookup_def(param.def_id)
+            .lookup_node_def_id(param.id)
+            .and_then(|def_id| ctx.def_table.lookup_def(def_id))
             .map(|def| def.name.clone())
             .unwrap_or_else(|| param.ident.clone());
         out.push(CollectedParamSig {
@@ -814,20 +839,28 @@ fn build_param_sigs(
 
 fn record_generic_env(
     owner: DefId,
+    def_table: &crate::core::resolve::DefTable,
     type_params: &[TypeParam],
     generic_envs: &mut HashMap<DefId, HashMap<DefId, TyVarId>>,
 ) {
     if type_params.is_empty() {
         return;
     }
-    generic_envs.insert(owner, type_param_map(type_params));
+    generic_envs.insert(owner, type_param_map(def_table, type_params));
 }
 
-fn type_param_map(type_params: &[TypeParam]) -> HashMap<DefId, TyVarId> {
+fn type_param_map(
+    def_table: &crate::core::resolve::DefTable,
+    type_params: &[TypeParam],
+) -> HashMap<DefId, TyVarId> {
     type_params
         .iter()
         .enumerate()
-        .map(|(index, param)| (param.def_id, TyVarId::new(index as u32)))
+        .filter_map(|(index, param)| {
+            def_table
+                .lookup_node_def_id(param.id)
+                .map(|def_id| (def_id, TyVarId::new(index as u32)))
+        })
         .collect()
 }
 

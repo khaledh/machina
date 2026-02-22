@@ -3,12 +3,9 @@ use std::collections::{HashMap, HashSet};
 use crate::core::context::NormalizedContext;
 use crate::core::resolve::DefId;
 use crate::core::semck::liveness_util;
-use crate::core::tree::cfg::{TreeCfg, TreeCfgItem, TreeCfgTerminator};
-use crate::core::tree::normalized::{
-    BindPattern, BindPatternKind, Expr, ExprKind, StmtExpr, StmtExprKind,
-};
+use crate::core::tree::cfg::{Cfg, CfgItem, CfgTerminator};
 use crate::core::tree::visit::{Visitor, walk_expr};
-use crate::core::types::TypeId;
+use crate::core::tree::{BindPattern, BindPatternKind, Expr, ExprKind, StmtExpr, StmtExprKind};
 
 // ============================================================================
 // Public API
@@ -24,7 +21,7 @@ pub struct AstLiveness {
 
 /// Compute liveness for heap-owned locals on the AST CFG. This keeps the analysis
 /// lightweight and scoped to the move-checker (we only track heap uses).
-pub fn analyze(cfg: &TreeCfg<'_, TypeId>, ctx: &NormalizedContext) -> AstLiveness {
+pub fn analyze(cfg: &Cfg<'_>, ctx: &NormalizedContext) -> AstLiveness {
     let analysis = liveness_util::analyze_liveness(
         cfg,
         |term, uses| add_terminator_uses(term, ctx, uses),
@@ -41,13 +38,13 @@ pub fn analyze(cfg: &TreeCfg<'_, TypeId>, ctx: &NormalizedContext) -> AstLivenes
 /// Count heap-owned variable uses within one AST item. This lets move_check
 /// avoid implicit moves when a single item uses the same binding multiple times.
 pub(crate) fn heap_use_counts_for_item(
-    item: &TreeCfgItem<'_, TypeId>,
+    item: &CfgItem<'_>,
     ctx: &NormalizedContext,
 ) -> HashMap<DefId, usize> {
     let mut counts = HashMap::new();
     match item {
-        TreeCfgItem::Stmt(stmt) => collect_stmt_uses(stmt, ctx, &mut counts),
-        TreeCfgItem::Expr(expr) => collect_expr_uses(expr, ctx, &mut counts),
+        CfgItem::Stmt(stmt) => collect_stmt_uses(stmt, ctx, &mut counts),
+        CfgItem::Expr(expr) => collect_expr_uses(expr, ctx, &mut counts),
     }
     counts
 }
@@ -77,11 +74,11 @@ impl HeapUseAccumulator for HashMap<DefId, usize> {
 // ============================================================================
 
 fn add_terminator_uses(
-    term: &TreeCfgTerminator<'_, TypeId>,
+    term: &CfgTerminator<'_>,
     ctx: &NormalizedContext,
     uses: &mut HashSet<DefId>,
 ) {
-    if let TreeCfgTerminator::If { cond, .. } = term {
+    if let CfgTerminator::If { cond, .. } = term {
         collect_expr_uses(cond, ctx, uses);
     }
 }
@@ -91,14 +88,14 @@ fn add_terminator_uses(
 // ============================================================================
 
 fn collect_item_defs_uses(
-    item: &TreeCfgItem<'_, TypeId>,
+    item: &CfgItem<'_>,
     ctx: &NormalizedContext,
     defs: &mut HashSet<DefId>,
     uses: &mut HashSet<DefId>,
 ) {
     match item {
-        TreeCfgItem::Stmt(stmt) => collect_stmt_defs_uses(stmt, ctx, defs, uses),
-        TreeCfgItem::Expr(expr) => collect_expr_uses(expr, ctx, uses),
+        CfgItem::Stmt(stmt) => collect_stmt_defs_uses(stmt, ctx, defs, uses),
+        CfgItem::Expr(expr) => collect_expr_uses(expr, ctx, uses),
     }
 }
 
@@ -129,7 +126,10 @@ fn collect_stmt_defs_uses(
 
 fn collect_pattern_defs(pattern: &BindPattern, ctx: &NormalizedContext, defs: &mut HashSet<DefId>) {
     match &pattern.kind {
-        BindPatternKind::Name { def_id, .. } => add_def_if_heap(*def_id, ctx, defs),
+        BindPatternKind::Name { .. } => {
+            let def_id = ctx.def_table.def_id(pattern.id);
+            add_def_if_heap(def_id, ctx, defs);
+        }
         BindPatternKind::Array { patterns } | BindPatternKind::Tuple { patterns } => {
             for pattern in patterns {
                 collect_pattern_defs(pattern, ctx, defs);
@@ -145,7 +145,8 @@ fn collect_pattern_defs(pattern: &BindPattern, ctx: &NormalizedContext, defs: &m
 
 fn collect_assignee_defs(assignee: &Expr, ctx: &NormalizedContext, defs: &mut HashSet<DefId>) {
     // Only a plain variable counts as a definition; projections are treated as uses.
-    if let ExprKind::Var { def_id, .. } = assignee.kind {
+    if let ExprKind::Var { .. } = assignee.kind {
+        let def_id = ctx.def_table.def_id(assignee.id);
         add_def_if_heap(def_id, ctx, defs);
     }
 }
@@ -242,7 +243,7 @@ struct HeapUseCollector<'a, A> {
     acc: &'a mut A,
 }
 
-impl<A: HeapUseAccumulator> Visitor<DefId, TypeId> for HeapUseCollector<'_, A> {
+impl<A: HeapUseAccumulator> Visitor for HeapUseCollector<'_, A> {
     fn visit_expr(&mut self, expr: &Expr) {
         if let Some(def_id) = heap_use_def(expr, self.ctx) {
             self.acc.record(def_id);
@@ -253,11 +254,12 @@ impl<A: HeapUseAccumulator> Visitor<DefId, TypeId> for HeapUseCollector<'_, A> {
 
 /// Returns the DefId if `expr` is a plain heap variable read.
 fn heap_use_def(expr: &Expr, ctx: &NormalizedContext) -> Option<DefId> {
-    let ExprKind::Var { def_id, .. } = expr.kind else {
+    let ExprKind::Var { .. } = expr.kind else {
         return None;
     };
-    if !ctx.type_map.type_table().get(expr.ty).is_heap() {
+    let ty = ctx.type_map.lookup_node_type(expr.id)?;
+    if !ty.is_heap() {
         return None;
     }
-    Some(def_id)
+    Some(ctx.def_table.def_id(expr.id))
 }

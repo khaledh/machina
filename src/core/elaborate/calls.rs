@@ -12,7 +12,7 @@
 //! By computing this plan during elaboration, lowering can emit call code
 //! without re-examining signatures or type information.
 
-use crate::core::tree::normalized as norm;
+use crate::core::tree as ast;
 use crate::core::tree::semantic as sem;
 use crate::core::tree::{CallArgMode, NodeId, ParamMode};
 use crate::core::typecheck::type_map::{CallParam, CallSig};
@@ -451,7 +451,7 @@ impl<'a> Elaborator<'a> {
     }
 
     /// Elaborate a call argument using the parameter's passing mode.
-    pub(super) fn elab_call_arg(&mut self, param: &CallParam, arg: &norm::CallArg) -> sem::CallArg {
+    pub(super) fn elab_call_arg(&mut self, param: &CallParam, arg: &ast::CallArg) -> sem::CallArg {
         self.elab_call_arg_mode(param.mode.clone(), arg)
     }
 
@@ -464,7 +464,7 @@ impl<'a> Elaborator<'a> {
     pub(super) fn elab_call_arg_mode(
         &mut self,
         mode: ParamMode,
-        arg: &norm::CallArg,
+        arg: &ast::CallArg,
     ) -> sem::CallArg {
         match mode {
             ParamMode::In => sem::CallArg::In {
@@ -472,7 +472,7 @@ impl<'a> Elaborator<'a> {
                 span: arg.span,
             },
             ParamMode::InOut => {
-                if matches!(arg.expr.kind, norm::ExprKind::Slice { .. }) {
+                if matches!(arg.expr.kind, ast::ExprKind::Slice { .. }) {
                     return sem::CallArg::In {
                         expr: self.elab_value(&arg.expr),
                         span: arg.span,
@@ -498,7 +498,7 @@ impl<'a> Elaborator<'a> {
                         sem::ValueExprKind::Move {
                             place: Box::new(place),
                         },
-                        arg.expr.ty,
+                        self.type_id_for(arg.expr.id),
                         arg.expr.span,
                     )
                 } else {
@@ -515,7 +515,7 @@ impl<'a> Elaborator<'a> {
     pub(super) fn elab_method_receiver(
         &mut self,
         receiver: &CallParam,
-        callee: &norm::Expr,
+        callee: &ast::Expr,
     ) -> sem::MethodReceiver {
         match receiver.mode {
             ParamMode::InOut => sem::MethodReceiver::PlaceExpr(self.elab_place(callee)),

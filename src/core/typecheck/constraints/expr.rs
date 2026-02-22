@@ -1,6 +1,7 @@
 //! Expression constraint collection for typecheck constraints pass.
 
 use super::*;
+use crate::core::tree::{ArrayLitInit, Param, StructLitField};
 
 impl<'a> ConstraintCollector<'a> {
     pub(super) fn collect_expr(&mut self, expr: &Expr, expected: Option<Type>) -> Type {
@@ -86,13 +87,15 @@ impl<'a> ConstraintCollector<'a> {
                     ConstraintReason::Expr(expr.id, expr.span),
                 );
             }
-            ExprKind::Var { def_id, .. } => {
-                let def_ty = self.def_term(*def_id);
-                self.push_eq(
-                    expr_ty.clone(),
-                    def_ty,
-                    ConstraintReason::Expr(expr.id, expr.span),
-                );
+            ExprKind::Var { .. } => {
+                if let Some(def_id) = self.lookup_def_id(expr.id) {
+                    let def_ty = self.def_term(def_id);
+                    self.push_eq(
+                        expr_ty.clone(),
+                        def_ty,
+                        ConstraintReason::Expr(expr.id, expr.span),
+                    );
+                }
             }
             ExprKind::Block { items, tail } => {
                 for item in items {
@@ -438,25 +441,26 @@ impl<'a> ConstraintCollector<'a> {
                 self.collect_try(expr, &expr_ty, fallible_expr, on_error);
             }
             ExprKind::Closure {
-                def_id,
                 params,
                 return_ty,
                 body,
                 ..
             } => {
-                self.collect_closure(expr, &expr_ty, *def_id, params, return_ty, body);
+                self.collect_closure(
+                    expr,
+                    &expr_ty,
+                    self.ctx.def_table.def_id(expr.id),
+                    params,
+                    return_ty,
+                    body,
+                );
             }
         }
 
         expr_ty
     }
 
-    fn collect_array_lit(
-        &mut self,
-        expr: &Expr,
-        expr_ty: &Type,
-        init: &crate::core::tree::resolved::ArrayLitInit,
-    ) {
+    fn collect_array_lit(&mut self, expr: &Expr, expr_ty: &Type, init: &ArrayLitInit) {
         // Resolve explicit element type annotation once (shared by both sub-arms).
         let elem_term = if let ExprKind::ArrayLit {
             elem_ty: Some(explicit_elem_ty),
@@ -470,7 +474,7 @@ impl<'a> ConstraintCollector<'a> {
         };
 
         match init {
-            crate::core::tree::resolved::ArrayLitInit::Elems(elems) => {
+            ArrayLitInit::Elems(elems) => {
                 for elem in elems {
                     let value_ty = self.collect_expr(elem, Some(elem_term.clone()));
                     self.push_assignable(
@@ -485,7 +489,7 @@ impl<'a> ConstraintCollector<'a> {
                     ConstraintReason::Expr(expr.id, expr.span),
                 );
             }
-            crate::core::tree::resolved::ArrayLitInit::Repeat(value, count) => {
+            ArrayLitInit::Repeat(value, count) => {
                 let value_ty = self.collect_expr(value, Some(elem_term.clone()));
                 self.push_assignable(
                     value_ty,
@@ -507,7 +511,7 @@ impl<'a> ConstraintCollector<'a> {
         expr_ty: &Type,
         name: &str,
         type_args: &[TypeExpr],
-        fields: &[crate::core::tree::resolved::StructLitField],
+        fields: &[StructLitField],
         expected: &Option<Type>,
     ) {
         // Resolve nominal struct type (including generic instantiation)
@@ -762,7 +766,7 @@ impl<'a> ConstraintCollector<'a> {
         expr: &Expr,
         expr_ty: &Type,
         def_id: DefId,
-        params: &[crate::core::tree::resolved::Param],
+        params: &[Param],
         return_ty: &TypeExpr,
         body: &Expr,
     ) {
@@ -788,7 +792,8 @@ impl<'a> ConstraintCollector<'a> {
 
         self.enter_callable(def_id, return_term.clone(), expr.span);
         for (index, param) in params.iter().enumerate() {
-            let param_term = self.def_term(param.def_id);
+            let param_def_id = self.ctx.def_table.def_id(param.id);
+            let param_term = self.def_term(param_def_id);
             let sig_param_ty = closure_sig
                 .as_ref()
                 .and_then(|sig| sig.param_tys.get(index))
@@ -797,20 +802,20 @@ impl<'a> ConstraintCollector<'a> {
                 self.push_eq(
                     param_term.clone(),
                     param_ty,
-                    ConstraintReason::Decl(param.def_id, param.span),
+                    ConstraintReason::Decl(param_def_id, param.span),
                 );
             } else if let Ok(param_ty) = self.resolve_type_in_scope(&param.typ) {
                 self.push_eq(
                     param_term.clone(),
                     param_ty,
-                    ConstraintReason::Decl(param.def_id, param.span),
+                    ConstraintReason::Decl(param_def_id, param.span),
                 );
             }
             let node_term = self.node_term(param.id);
             self.push_eq(
                 node_term,
                 param_term,
-                ConstraintReason::Decl(param.def_id, param.span),
+                ConstraintReason::Decl(param_def_id, param.span),
             );
         }
         let body_ty = self.collect_expr(body, Some(return_term.clone()));

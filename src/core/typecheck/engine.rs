@@ -41,16 +41,6 @@ pub(crate) struct TcState {
     pub(crate) constrain: constraints::ConstrainOutput,
     pub(crate) solve: solver::SolveOutput,
     pub(crate) finalize: Option<finalize::FinalizeOutput>,
-    #[allow(dead_code)]
-    pub(crate) diag_ctx: DiagCtx,
-}
-
-/// Lightweight context attached to diagnostics during collection/solving.
-#[derive(Debug, Default)]
-#[allow(dead_code)]
-pub(crate) struct DiagCtx {
-    pub(crate) current_span: Option<Span>,
-    pub(crate) current_name: Option<String>,
 }
 
 /// Type-check pipeline phases.
@@ -143,6 +133,7 @@ pub(crate) fn lookup_property<'a>(
 pub(crate) struct TypecheckEngine {
     env: TcEnv,
     state: TcState,
+    partial_mode: bool,
     #[allow(dead_code)]
     type_vars: typesys::TypeVarStore,
 }
@@ -163,6 +154,7 @@ impl TypecheckEngine {
                 generic_envs: HashMap::new(),
             },
             state: TcState::default(),
+            partial_mode: false,
             type_vars: typesys::TypeVarStore::default(),
         }
     }
@@ -180,6 +172,7 @@ impl TypecheckEngine {
     }
 
     pub(crate) fn run_partial(mut self) -> TypecheckOutput {
+        self.partial_mode = true;
         // Keep strict phase order, but continue through failures so analysis
         // can still materialize a best-effort typed context.
         let _ = self.run_phase(TcPhase::Collect, collect::run);
@@ -231,5 +224,9 @@ impl TypecheckEngine {
 
     pub(crate) fn context(&self) -> &ResolvedContext {
         &self.env.context
+    }
+
+    pub(crate) fn is_partial_mode(&self) -> bool {
+        self.partial_mode
     }
 }

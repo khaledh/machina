@@ -5,10 +5,9 @@
 //! still potentially used.
 use std::collections::HashSet;
 
-use crate::core::resolve::DefId;
-use crate::core::tree::cfg::{TreeCfg, TreeCfgItem, TreeCfgTerminator};
-use crate::core::tree::normalized::{StmtExpr, StmtExprKind};
-use crate::core::types::TypeId;
+use crate::core::resolve::{DefId, DefTable};
+use crate::core::tree::cfg::{Cfg, CfgItem, CfgTerminator};
+use crate::core::tree::{StmtExpr, StmtExprKind};
 
 use super::collect::{
     collect_assignee_defs, collect_bind_pattern_defs, collect_expr_var_uses, collect_stmt_var_uses,
@@ -20,9 +19,12 @@ pub(super) struct ClosureLiveness {
     pub(super) live_after: Vec<Vec<HashSet<DefId>>>,
 }
 
-pub(super) fn analyze_closure_liveness(cfg: &TreeCfg<'_, TypeId>) -> ClosureLiveness {
-    let analysis =
-        liveness_util::analyze_liveness(cfg, add_terminator_uses, collect_item_defs_uses);
+pub(super) fn analyze_closure_liveness(cfg: &Cfg<'_>, def_table: &DefTable) -> ClosureLiveness {
+    let analysis = liveness_util::analyze_liveness(
+        cfg,
+        |term, uses| add_terminator_uses(term, def_table, uses),
+        |item, defs, uses| collect_item_defs_uses(item, def_table, defs, uses),
+    );
 
     ClosureLiveness {
         live_out: analysis.live_out,
@@ -30,36 +32,42 @@ pub(super) fn analyze_closure_liveness(cfg: &TreeCfg<'_, TypeId>) -> ClosureLive
     }
 }
 
-fn add_terminator_uses(term: &TreeCfgTerminator<'_, TypeId>, uses: &mut HashSet<DefId>) {
-    if let TreeCfgTerminator::If { cond, .. } = term {
-        collect_expr_var_uses(cond, uses);
+fn add_terminator_uses(term: &CfgTerminator<'_>, def_table: &DefTable, uses: &mut HashSet<DefId>) {
+    if let CfgTerminator::If { cond, .. } = term {
+        collect_expr_var_uses(cond, def_table, uses);
     }
 }
 
 fn collect_item_defs_uses(
-    item: &TreeCfgItem<'_, TypeId>,
+    item: &CfgItem<'_>,
+    def_table: &DefTable,
     defs: &mut HashSet<DefId>,
     uses: &mut HashSet<DefId>,
 ) {
     match item {
-        TreeCfgItem::Stmt(stmt) => collect_stmt_defs_uses(stmt, defs, uses),
-        TreeCfgItem::Expr(expr) => collect_expr_var_uses(expr, uses),
+        CfgItem::Stmt(stmt) => collect_stmt_defs_uses(stmt, def_table, defs, uses),
+        CfgItem::Expr(expr) => collect_expr_var_uses(expr, def_table, uses),
     }
 }
 
-fn collect_stmt_defs_uses(stmt: &StmtExpr, defs: &mut HashSet<DefId>, uses: &mut HashSet<DefId>) {
-    collect_stmt_var_uses(stmt, uses);
+fn collect_stmt_defs_uses(
+    stmt: &StmtExpr,
+    def_table: &DefTable,
+    defs: &mut HashSet<DefId>,
+    uses: &mut HashSet<DefId>,
+) {
+    collect_stmt_var_uses(stmt, def_table, uses);
     match &stmt.kind {
         StmtExprKind::LetBind { pattern, .. } | StmtExprKind::VarBind { pattern, .. } => {
-            collect_bind_pattern_defs(pattern, defs);
+            collect_bind_pattern_defs(pattern, def_table, defs);
         }
         StmtExprKind::VarDecl { .. } => {}
         StmtExprKind::Assign { assignee, .. } | StmtExprKind::CompoundAssign { assignee, .. } => {
-            collect_assignee_defs(assignee, defs);
+            collect_assignee_defs(assignee, def_table, defs);
         }
         StmtExprKind::While { .. } => {}
         StmtExprKind::For { pattern, .. } => {
-            collect_bind_pattern_defs(pattern, defs);
+            collect_bind_pattern_defs(pattern, def_table, defs);
         }
         StmtExprKind::Break | StmtExprKind::Continue => {}
         StmtExprKind::Return { .. } => {}

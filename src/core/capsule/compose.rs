@@ -5,14 +5,12 @@
 
 use std::collections::{HashMap, HashSet};
 
-use crate::core::capsule::ModuleId;
 use crate::core::capsule::bind::{AliasSymbols, CapsuleBindings};
-use crate::core::capsule::{CapsuleError, ModulePath, RequireKind};
+use crate::core::capsule::{CapsuleError, ModuleId, ModulePath, RequireKind};
 use crate::core::context::CapsuleParsedContext;
 use crate::core::diag::Span;
-use crate::core::tree::NodeId;
-use crate::core::tree::parsed::{self, Module};
 use crate::core::tree::visit_mut::{self, VisitorMut};
+use crate::core::tree::*;
 
 /// Merge prelude declarations ahead of user declarations.
 pub(crate) fn merge_modules(prelude_module: &Module, user_module: &Module) -> Module {
@@ -148,7 +146,7 @@ fn validate_symbol_imports(
     errors
 }
 
-fn has_public_attr(attrs: &[parsed::Attribute]) -> bool {
+fn has_public_attr(attrs: &[Attribute]) -> bool {
     attrs
         .iter()
         .any(|attr| attr.name == "public" || attr.name == "opaque")
@@ -193,25 +191,25 @@ fn collect_conflicting_public_exports(program: &CapsuleParsedContext) -> Conflic
         let module_path = parsed.source.path.clone();
         for item in &parsed.module.top_level_items {
             match item {
-                parsed::TopLevelItem::FuncDecl(func_decl) if has_public_attr(&func_decl.attrs) => {
+                TopLevelItem::FuncDecl(func_decl) if has_public_attr(&func_decl.attrs) => {
                     callable_origins
                         .entry(func_decl.sig.name.clone())
                         .or_default()
                         .insert(module_path.clone());
                 }
-                parsed::TopLevelItem::FuncDef(func_def) if has_public_attr(&func_def.attrs) => {
+                TopLevelItem::FuncDef(func_def) if has_public_attr(&func_def.attrs) => {
                     callable_origins
                         .entry(func_def.sig.name.clone())
                         .or_default()
                         .insert(module_path.clone());
                 }
-                parsed::TopLevelItem::TypeDef(type_def) if has_public_attr(&type_def.attrs) => {
+                TopLevelItem::TypeDef(type_def) if has_public_attr(&type_def.attrs) => {
                     type_origins
                         .entry(type_def.name.clone())
                         .or_default()
                         .insert(module_path.clone());
                 }
-                parsed::TopLevelItem::TraitDef(trait_def) if has_public_attr(&trait_def.attrs) => {
+                TopLevelItem::TraitDef(trait_def) if has_public_attr(&trait_def.attrs) => {
                     trait_origins
                         .entry(trait_def.name.clone())
                         .or_default()
@@ -259,16 +257,16 @@ pub(crate) fn flatten_capsule_module(
     flatten_capsule(program).map(|flattened| flattened.module)
 }
 
-fn top_level_item_id(item: &parsed::TopLevelItem) -> NodeId {
+fn top_level_item_id(item: &TopLevelItem) -> NodeId {
     match item {
-        parsed::TopLevelItem::ProtocolDef(protocol_def) => protocol_def.id,
-        parsed::TopLevelItem::TraitDef(trait_def) => trait_def.id,
-        parsed::TopLevelItem::TypeDef(type_def) => type_def.id,
-        parsed::TopLevelItem::TypestateDef(typestate_def) => typestate_def.id,
-        parsed::TopLevelItem::FuncDecl(func_decl) => func_decl.id,
-        parsed::TopLevelItem::FuncDef(func_def) => func_def.id,
-        parsed::TopLevelItem::MethodBlock(method_block) => method_block.id,
-        parsed::TopLevelItem::ClosureDef(closure_def) => closure_def.id,
+        TopLevelItem::ProtocolDef(protocol_def) => protocol_def.id,
+        TopLevelItem::TraitDef(trait_def) => trait_def.id,
+        TopLevelItem::TypeDef(type_def) => type_def.id,
+        TopLevelItem::TypestateDef(typestate_def) => typestate_def.id,
+        TopLevelItem::FuncDecl(func_decl) => func_decl.id,
+        TopLevelItem::FuncDef(func_def) => func_def.id,
+        TopLevelItem::MethodBlock(method_block) => method_block.id,
+        TopLevelItem::ClosureDef(closure_def) => closure_def.id,
     }
 }
 
@@ -295,38 +293,38 @@ impl ExpectedMemberKind {
     }
 }
 
-impl VisitorMut<()> for ModuleAliasCallRewriter<'_> {
-    fn visit_method_block(&mut self, method_block: &mut parsed::MethodBlock) {
+impl VisitorMut for ModuleAliasCallRewriter<'_> {
+    fn visit_method_block(&mut self, method_block: &mut MethodBlock) {
         if let Some(trait_name) = &mut method_block.trait_name {
             self.rewrite_qualified_name(trait_name, method_block.span, ExpectedMemberKind::Trait);
         }
         visit_mut::walk_method_block(self, method_block);
     }
 
-    fn visit_expr(&mut self, expr: &mut parsed::Expr) {
+    fn visit_expr(&mut self, expr: &mut Expr) {
         visit_mut::walk_expr(self, expr);
 
-        if let parsed::ExprKind::Call { callee, .. } = &mut expr.kind {
-            if let parsed::ExprKind::Var { ident, .. } = &mut callee.kind
+        if let ExprKind::Call { callee, .. } = &mut expr.kind {
+            if let ExprKind::Var { ident, .. } = &mut callee.kind
                 && let Some(new_name) = self.rewrite_qualified_callable_name(ident, expr.span)
             {
                 *ident = new_name;
             }
         }
 
-        if let parsed::ExprKind::Var { ident, .. } = &mut expr.kind
+        if let ExprKind::Var { ident, .. } = &mut expr.kind
             && let Some(new_name) = self.rewrite_qualified_callable_name(ident, expr.span)
         {
             *ident = new_name;
         }
 
         match &expr.kind {
-            parsed::ExprKind::MethodCall {
+            ExprKind::MethodCall {
                 callee,
                 method_name,
                 args,
             } => {
-                let parsed::ExprKind::Var { ident: alias, .. } = &callee.kind else {
+                let ExprKind::Var { ident: alias, .. } = &callee.kind else {
                     return;
                 };
                 let Some(symbols) = self.alias_symbols.get(alias) else {
@@ -347,7 +345,7 @@ impl VisitorMut<()> for ModuleAliasCallRewriter<'_> {
                 }
 
                 let mut function_callee = (**callee).clone();
-                if let parsed::ExprKind::Var { ident, .. } = &mut function_callee.kind {
+                if let ExprKind::Var { ident, .. } = &mut function_callee.kind {
                     *ident = if self
                         .conflicts
                         .contains_callable(&symbols.module_path, method_name)
@@ -358,13 +356,13 @@ impl VisitorMut<()> for ModuleAliasCallRewriter<'_> {
                     };
                 }
 
-                expr.kind = parsed::ExprKind::Call {
+                expr.kind = ExprKind::Call {
                     callee: Box::new(function_callee),
                     args: args.clone(),
                 };
             }
-            parsed::ExprKind::StructField { target, field } => {
-                let parsed::ExprKind::Var { ident: alias, .. } = &target.kind else {
+            ExprKind::StructField { target, field } => {
+                let ExprKind::Var { ident: alias, .. } = &target.kind else {
                     return;
                 };
                 let Some(symbols) = self.alias_symbols.get(alias) else {
@@ -385,7 +383,7 @@ impl VisitorMut<()> for ModuleAliasCallRewriter<'_> {
                 }
 
                 let mut function_ref = (**target).clone();
-                if let parsed::ExprKind::Var { ident, .. } = &mut function_ref.kind {
+                if let ExprKind::Var { ident, .. } = &mut function_ref.kind {
                     *ident = if self
                         .conflicts
                         .contains_callable(&symbols.module_path, field)
@@ -401,17 +399,17 @@ impl VisitorMut<()> for ModuleAliasCallRewriter<'_> {
         }
     }
 
-    fn visit_type_expr(&mut self, type_expr: &mut parsed::TypeExpr) {
+    fn visit_type_expr(&mut self, type_expr: &mut TypeExpr) {
         visit_mut::walk_type_expr(self, type_expr);
 
-        let parsed::TypeExprKind::Named { ident, .. } = &mut type_expr.kind else {
+        let TypeExprKind::Named { ident, .. } = &mut type_expr.kind else {
             return;
         };
 
         self.rewrite_qualified_name(ident, type_expr.span, ExpectedMemberKind::Type);
     }
 
-    fn visit_type_param(&mut self, param: &mut parsed::TypeParam) {
+    fn visit_type_param(&mut self, param: &mut TypeParam) {
         let Some(bound) = &mut param.bound else {
             return;
         };
@@ -561,7 +559,7 @@ fn mangle_dependency_symbols(
 
     for item in &mut module.top_level_items {
         match item {
-            parsed::TopLevelItem::FuncDecl(func_decl) => {
+            TopLevelItem::FuncDecl(func_decl) => {
                 let old = func_decl.sig.name.clone();
                 if !is_public_item(&func_decl.attrs)
                     || conflicts.contains_callable(module_path, &old)
@@ -571,7 +569,7 @@ fn mangle_dependency_symbols(
                     value_renames.insert(old, new_name);
                 }
             }
-            parsed::TopLevelItem::FuncDef(func_def) => {
+            TopLevelItem::FuncDef(func_def) => {
                 let old = func_def.sig.name.clone();
                 if !is_public_item(&func_def.attrs)
                     || conflicts.contains_callable(module_path, &old)
@@ -581,7 +579,7 @@ fn mangle_dependency_symbols(
                     value_renames.insert(old, new_name);
                 }
             }
-            parsed::TopLevelItem::TypeDef(type_def) => {
+            TopLevelItem::TypeDef(type_def) => {
                 let old = type_def.name.clone();
                 if !is_public_item(&type_def.attrs) || conflicts.contains_type(module_path, &old) {
                     let new_name = mangled_module_symbol(module_path, &old);
@@ -589,7 +587,7 @@ fn mangle_dependency_symbols(
                     type_renames.insert(old, new_name);
                 }
             }
-            parsed::TopLevelItem::TraitDef(trait_def) => {
+            TopLevelItem::TraitDef(trait_def) => {
                 let old = trait_def.name.clone();
                 if !is_public_item(&trait_def.attrs) || conflicts.contains_trait(module_path, &old)
                 {
@@ -616,7 +614,7 @@ fn mangle_dependency_symbols(
     renamer.visit_module(module);
 }
 
-fn is_public_item(attrs: &[parsed::Attribute]) -> bool {
+fn is_public_item(attrs: &[Attribute]) -> bool {
     attrs
         .iter()
         .any(|attr| attr.name == "public" || attr.name == "opaque")
@@ -681,16 +679,15 @@ impl PrivateSymbolRenamer {
         self.trait_renames.get(name).cloned()
     }
 
-    fn bind_pattern_names(&mut self, pattern: &parsed::BindPattern) {
+    fn bind_pattern_names(&mut self, pattern: &BindPattern) {
         match &pattern.kind {
-            parsed::BindPatternKind::Name { ident, .. } => self.bind_value_name(ident),
-            parsed::BindPatternKind::Array { patterns }
-            | parsed::BindPatternKind::Tuple { patterns } => {
+            BindPatternKind::Name { ident, .. } => self.bind_value_name(ident),
+            BindPatternKind::Array { patterns } | BindPatternKind::Tuple { patterns } => {
                 for child in patterns {
                     self.bind_pattern_names(child);
                 }
             }
-            parsed::BindPatternKind::Struct { fields, .. } => {
+            BindPatternKind::Struct { fields, .. } => {
                 for field in fields {
                     self.bind_pattern_names(&field.pattern);
                 }
@@ -699,8 +696,8 @@ impl PrivateSymbolRenamer {
     }
 }
 
-impl VisitorMut<()> for PrivateSymbolRenamer {
-    fn visit_func_sig(&mut self, func_sig: &mut parsed::FunctionSig) {
+impl VisitorMut for PrivateSymbolRenamer {
+    fn visit_func_sig(&mut self, func_sig: &mut FunctionSig) {
         self.push_type_scope();
         for type_param in &func_sig.type_params {
             self.bind_type_param(&type_param.ident);
@@ -712,7 +709,7 @@ impl VisitorMut<()> for PrivateSymbolRenamer {
         self.pop_type_scope();
     }
 
-    fn visit_method_sig(&mut self, method_sig: &mut parsed::MethodSig) {
+    fn visit_method_sig(&mut self, method_sig: &mut MethodSig) {
         self.push_type_scope();
         for type_param in &method_sig.type_params {
             self.bind_type_param(&type_param.ident);
@@ -724,7 +721,7 @@ impl VisitorMut<()> for PrivateSymbolRenamer {
         self.pop_type_scope();
     }
 
-    fn visit_method_block(&mut self, method_block: &mut parsed::MethodBlock) {
+    fn visit_method_block(&mut self, method_block: &mut MethodBlock) {
         if let Some(new_name) = self.type_renames.get(&method_block.type_name) {
             method_block.type_name = new_name.clone();
         }
@@ -736,16 +733,16 @@ impl VisitorMut<()> for PrivateSymbolRenamer {
         visit_mut::walk_method_block(self, method_block);
     }
 
-    fn visit_type_expr(&mut self, type_expr: &mut parsed::TypeExpr) {
+    fn visit_type_expr(&mut self, type_expr: &mut TypeExpr) {
         visit_mut::walk_type_expr(self, type_expr);
-        if let parsed::TypeExprKind::Named { ident, .. } = &mut type_expr.kind
+        if let TypeExprKind::Named { ident, .. } = &mut type_expr.kind
             && let Some(new_name) = self.type_rename_for_use(ident)
         {
             *ident = new_name;
         }
     }
 
-    fn visit_type_param(&mut self, param: &mut parsed::TypeParam) {
+    fn visit_type_param(&mut self, param: &mut TypeParam) {
         if let Some(bound) = &mut param.bound
             && let Some(new_name) = self.trait_rename_for_use(&bound.name)
         {
@@ -753,8 +750,8 @@ impl VisitorMut<()> for PrivateSymbolRenamer {
         }
     }
 
-    fn visit_bind_pattern(&mut self, pattern: &mut parsed::BindPattern) {
-        if let parsed::BindPatternKind::Struct { name, .. } = &mut pattern.kind
+    fn visit_bind_pattern(&mut self, pattern: &mut BindPattern) {
+        if let BindPatternKind::Struct { name, .. } = &mut pattern.kind
             && let Some(new_name) = self.type_renames.get(name)
         {
             *name = new_name.clone();
@@ -762,8 +759,8 @@ impl VisitorMut<()> for PrivateSymbolRenamer {
         visit_mut::walk_bind_pattern(self, pattern);
     }
 
-    fn visit_match_pattern(&mut self, pattern: &mut parsed::MatchPattern) {
-        if let parsed::MatchPattern::EnumVariant {
+    fn visit_match_pattern(&mut self, pattern: &mut MatchPattern) {
+        if let MatchPattern::EnumVariant {
             enum_name: Some(enum_name),
             ..
         } = pattern
@@ -774,14 +771,14 @@ impl VisitorMut<()> for PrivateSymbolRenamer {
         visit_mut::walk_match_pattern(self, pattern);
     }
 
-    fn visit_stmt_expr(&mut self, stmt: &mut parsed::StmtExpr) {
+    fn visit_stmt_expr(&mut self, stmt: &mut StmtExpr) {
         match &mut stmt.kind {
-            parsed::StmtExprKind::LetBind {
+            StmtExprKind::LetBind {
                 pattern,
                 decl_ty,
                 value,
             }
-            | parsed::StmtExprKind::VarBind {
+            | StmtExprKind::VarBind {
                 pattern,
                 decl_ty,
                 value,
@@ -793,29 +790,29 @@ impl VisitorMut<()> for PrivateSymbolRenamer {
                 self.visit_bind_pattern(pattern);
                 self.bind_pattern_names(pattern);
             }
-            parsed::StmtExprKind::VarDecl { ident, decl_ty, .. } => {
+            StmtExprKind::VarDecl { ident, decl_ty } => {
                 self.visit_type_expr(decl_ty);
                 self.bind_value_name(ident);
             }
-            parsed::StmtExprKind::Assign {
+            StmtExprKind::Assign {
                 assignee, value, ..
             } => {
                 self.visit_expr(assignee);
                 self.visit_expr(value);
             }
-            parsed::StmtExprKind::CompoundAssign {
+            StmtExprKind::CompoundAssign {
                 assignee, value, ..
             } => {
                 self.visit_expr(assignee);
                 self.visit_expr(value);
             }
-            parsed::StmtExprKind::While { cond, body } => {
+            StmtExprKind::While { cond, body } => {
                 self.visit_expr(cond);
                 self.push_value_scope();
                 self.visit_expr(body);
                 self.pop_value_scope();
             }
-            parsed::StmtExprKind::For {
+            StmtExprKind::For {
                 pattern,
                 iter,
                 body,
@@ -827,8 +824,8 @@ impl VisitorMut<()> for PrivateSymbolRenamer {
                 self.visit_expr(body);
                 self.pop_value_scope();
             }
-            parsed::StmtExprKind::Break | parsed::StmtExprKind::Continue => {}
-            parsed::StmtExprKind::Return { value } => {
+            StmtExprKind::Break | StmtExprKind::Continue => {}
+            StmtExprKind::Return { value } => {
                 if let Some(value) = value {
                     self.visit_expr(value);
                 }
@@ -836,9 +833,9 @@ impl VisitorMut<()> for PrivateSymbolRenamer {
         }
     }
 
-    fn visit_expr(&mut self, expr: &mut parsed::Expr) {
+    fn visit_expr(&mut self, expr: &mut Expr) {
         match &mut expr.kind {
-            parsed::ExprKind::Block { items, tail } => {
+            ExprKind::Block { items, tail } => {
                 self.push_value_scope();
                 for item in items {
                     self.visit_block_item(item);
@@ -848,24 +845,24 @@ impl VisitorMut<()> for PrivateSymbolRenamer {
                 }
                 self.pop_value_scope();
             }
-            parsed::ExprKind::Var { ident, .. } => {
+            ExprKind::Var { ident, .. } => {
                 if let Some(new_name) = self.value_rename_for_use(ident) {
                     *ident = new_name;
                 }
             }
-            parsed::ExprKind::StructLit { name, .. } => {
+            ExprKind::StructLit { name, .. } => {
                 if let Some(new_name) = self.type_renames.get(name) {
                     *name = new_name.clone();
                 }
                 visit_mut::walk_expr(self, expr);
             }
-            parsed::ExprKind::EnumVariant { enum_name, .. } => {
+            ExprKind::EnumVariant { enum_name, .. } => {
                 if let Some(new_name) = self.type_renames.get(enum_name) {
                     *enum_name = new_name.clone();
                 }
                 visit_mut::walk_expr(self, expr);
             }
-            parsed::ExprKind::Closure {
+            ExprKind::Closure {
                 captures,
                 params,
                 return_ty,
@@ -875,7 +872,7 @@ impl VisitorMut<()> for PrivateSymbolRenamer {
                 self.push_value_scope();
                 self.push_type_scope();
                 for capture in captures {
-                    let parsed::CaptureSpec::Move { ident, .. } = capture;
+                    let CaptureSpec::Move { ident, .. } = capture;
                     self.bind_value_name(ident);
                 }
                 for param in params {
@@ -891,7 +888,7 @@ impl VisitorMut<()> for PrivateSymbolRenamer {
         }
     }
 
-    fn visit_func_def(&mut self, func_def: &mut parsed::FuncDef) {
+    fn visit_func_def(&mut self, func_def: &mut FuncDef) {
         self.visit_func_sig(&mut func_def.sig);
         self.push_value_scope();
         for param in &func_def.sig.params {
@@ -901,7 +898,7 @@ impl VisitorMut<()> for PrivateSymbolRenamer {
         self.pop_value_scope();
     }
 
-    fn visit_method_def(&mut self, method_def: &mut parsed::MethodDef) {
+    fn visit_method_def(&mut self, method_def: &mut MethodDef) {
         self.visit_method_sig(&mut method_def.sig);
         self.push_value_scope();
         self.bind_value_name("self");

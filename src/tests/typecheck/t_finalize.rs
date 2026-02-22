@@ -65,7 +65,7 @@ fn test_finalize_records_nominal_keys_for_generic_instantiations() {
         .type_defs()
         .into_iter()
         .find(|type_def| type_def.name == "Box")
-        .map(|type_def| type_def.def_id)
+        .map(|type_def| checked.def_table.def_id(type_def.id))
         .expect("missing Box type def");
     let main_body = &checked
         .module
@@ -75,21 +75,18 @@ fn test_finalize_records_nominal_keys_for_generic_instantiations() {
         .expect("missing main")
         .body;
     let local_b_def_id = match &main_body.kind {
-        crate::core::tree::typed::ExprKind::Block { items, .. } => items
+        crate::core::tree::ExprKind::Block { items, .. } => items
             .iter()
             .find_map(|item| {
-                let crate::core::tree::typed::BlockItem::Stmt(stmt) = item else {
+                let crate::core::tree::BlockItem::Stmt(stmt) = item else {
                     return None;
                 };
-                let crate::core::tree::typed::StmtExprKind::LetBind { pattern, .. } = &stmt.kind
-                else {
+                let crate::core::tree::StmtExprKind::LetBind { pattern, .. } = &stmt.kind else {
                     return None;
                 };
                 match &pattern.kind {
-                    crate::core::tree::typed::BindPatternKind::Name { ident, def_id }
-                        if ident == "b" =>
-                    {
-                        Some(*def_id)
+                    crate::core::tree::BindPatternKind::Name { ident } if ident == "b" => {
+                        Some(checked.def_table.def_id(pattern.id))
                     }
                     _ => None,
                 }

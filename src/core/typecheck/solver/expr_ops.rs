@@ -6,10 +6,11 @@
 use std::collections::HashSet;
 
 use crate::core::diag::Span;
-use crate::core::tree::NodeId;
+use crate::core::tree::{BinaryOp, NodeId, UnaryOp};
 use crate::core::typecheck::capability::ensure_equatable;
 use crate::core::typecheck::constraints::ExprObligation;
 use crate::core::typecheck::errors::{TEK, TypeCheckError};
+use crate::core::typecheck::solver::term_utils;
 use crate::core::typecheck::unify::TcUnifier;
 use crate::core::types::Type;
 
@@ -27,19 +28,19 @@ pub(super) fn try_check_expr_obligation_ops(
             right,
             ..
         } => {
-            let left_ty = super::term_utils::resolve_term_for_diagnostics(left, unifier);
-            let right_ty = super::term_utils::resolve_term_for_diagnostics(right, unifier);
+            let left_ty = term_utils::resolve_term_for_diagnostics(left, unifier);
+            let right_ty = term_utils::resolve_term_for_diagnostics(right, unifier);
             match op {
-                crate::core::tree::resolved::BinaryOp::Add
-                | crate::core::tree::resolved::BinaryOp::Sub
-                | crate::core::tree::resolved::BinaryOp::Mul
-                | crate::core::tree::resolved::BinaryOp::Div
-                | crate::core::tree::resolved::BinaryOp::Mod
-                | crate::core::tree::resolved::BinaryOp::BitOr
-                | crate::core::tree::resolved::BinaryOp::BitXor
-                | crate::core::tree::resolved::BinaryOp::BitAnd
-                | crate::core::tree::resolved::BinaryOp::Shl
-                | crate::core::tree::resolved::BinaryOp::Shr => {
+                BinaryOp::Add
+                | BinaryOp::Sub
+                | BinaryOp::Mul
+                | BinaryOp::Div
+                | BinaryOp::Mod
+                | BinaryOp::BitOr
+                | BinaryOp::BitXor
+                | BinaryOp::BitAnd
+                | BinaryOp::Shl
+                | BinaryOp::Shr => {
                     if let Some(err) =
                         first_non_int_operand(&left_ty, &right_ty, op_span(obligation))
                     {
@@ -47,8 +48,7 @@ pub(super) fn try_check_expr_obligation_ops(
                         covered_exprs.insert(*expr_id);
                     }
                 }
-                crate::core::tree::resolved::BinaryOp::Eq
-                | crate::core::tree::resolved::BinaryOp::Ne => {
+                BinaryOp::Eq | BinaryOp::Ne => {
                     if let Some(err) =
                         first_non_equatable_cmp_operand(&left_ty, &right_ty, op_span(obligation))
                     {
@@ -56,10 +56,7 @@ pub(super) fn try_check_expr_obligation_ops(
                         covered_exprs.insert(*expr_id);
                     }
                 }
-                crate::core::tree::resolved::BinaryOp::Lt
-                | crate::core::tree::resolved::BinaryOp::Gt
-                | crate::core::tree::resolved::BinaryOp::LtEq
-                | crate::core::tree::resolved::BinaryOp::GtEq => {
+                BinaryOp::Lt | BinaryOp::Gt | BinaryOp::LtEq | BinaryOp::GtEq => {
                     if let Some(err) =
                         first_non_int_cmp_operand(&left_ty, &right_ty, op_span(obligation))
                     {
@@ -67,8 +64,7 @@ pub(super) fn try_check_expr_obligation_ops(
                         covered_exprs.insert(*expr_id);
                     }
                 }
-                crate::core::tree::resolved::BinaryOp::LogicalAnd
-                | crate::core::tree::resolved::BinaryOp::LogicalOr => {
+                BinaryOp::LogicalAnd | BinaryOp::LogicalOr => {
                     if let Some(err) =
                         first_non_bool_operand(&left_ty, &right_ty, op_span(obligation))
                     {
@@ -86,12 +82,11 @@ pub(super) fn try_check_expr_obligation_ops(
             span,
             ..
         } => {
-            let operand_ty = super::term_utils::resolve_term_for_diagnostics(operand, unifier);
+            let operand_ty = term_utils::resolve_term_for_diagnostics(operand, unifier);
             match op {
-                crate::core::tree::resolved::UnaryOp::Neg
-                | crate::core::tree::resolved::UnaryOp::BitNot => {
-                    if !super::term_utils::is_int_like(&operand_ty)
-                        && !super::term_utils::is_unresolved(&operand_ty)
+                UnaryOp::Neg | UnaryOp::BitNot => {
+                    if !term_utils::is_int_like(&operand_ty)
+                        && !term_utils::is_unresolved(&operand_ty)
                     {
                         crate::core::typecheck::tc_push_error!(
                             errors,
@@ -101,8 +96,8 @@ pub(super) fn try_check_expr_obligation_ops(
                         covered_exprs.insert(*expr_id);
                     }
                 }
-                crate::core::tree::resolved::UnaryOp::LogicalNot => {
-                    if operand_ty != Type::Bool && !super::term_utils::is_unresolved(&operand_ty) {
+                UnaryOp::LogicalNot => {
+                    if operand_ty != Type::Bool && !term_utils::is_unresolved(&operand_ty) {
                         crate::core::typecheck::tc_push_error!(
                             errors,
                             *span,
@@ -126,20 +121,20 @@ fn op_span(obligation: &ExprObligation) -> Span {
 }
 
 fn first_non_int_operand(left: &Type, right: &Type, span: Span) -> Option<TypeCheckError> {
-    if !super::term_utils::is_int_like(left) && !super::term_utils::is_unresolved(left) {
+    if !term_utils::is_int_like(left) && !term_utils::is_unresolved(left) {
         return Some(TEK::ArithOperandNotInt(left.clone()).at(span).into());
     }
-    if !super::term_utils::is_int_like(right) && !super::term_utils::is_unresolved(right) {
+    if !term_utils::is_int_like(right) && !term_utils::is_unresolved(right) {
         return Some(TEK::ArithOperandNotInt(right.clone()).at(span).into());
     }
     None
 }
 
 fn first_non_int_cmp_operand(left: &Type, right: &Type, span: Span) -> Option<TypeCheckError> {
-    if !super::term_utils::is_int_like(left) && !super::term_utils::is_unresolved(left) {
+    if !term_utils::is_int_like(left) && !term_utils::is_unresolved(left) {
         return Some(TEK::CmpOperandNotInt(left.clone()).at(span).into());
     }
-    if !super::term_utils::is_int_like(right) && !super::term_utils::is_unresolved(right) {
+    if !term_utils::is_int_like(right) && !term_utils::is_unresolved(right) {
         return Some(TEK::CmpOperandNotInt(right.clone()).at(span).into());
     }
     None
@@ -150,7 +145,7 @@ fn first_non_equatable_cmp_operand(
     right: &Type,
     span: Span,
 ) -> Option<TypeCheckError> {
-    if !super::term_utils::is_unresolved(left)
+    if !term_utils::is_unresolved(left)
         && let Err(failure) = ensure_equatable(left)
     {
         return Some(
@@ -159,7 +154,7 @@ fn first_non_equatable_cmp_operand(
                 .into(),
         );
     }
-    if !super::term_utils::is_unresolved(right)
+    if !term_utils::is_unresolved(right)
         && let Err(failure) = ensure_equatable(right)
     {
         return Some(
@@ -172,10 +167,10 @@ fn first_non_equatable_cmp_operand(
 }
 
 fn first_non_bool_operand(left: &Type, right: &Type, span: Span) -> Option<TypeCheckError> {
-    if *left != Type::Bool && !super::term_utils::is_unresolved(left) {
+    if *left != Type::Bool && !term_utils::is_unresolved(left) {
         return Some(TEK::LogicalOperandNotBoolean(left.clone()).at(span).into());
     }
-    if *right != Type::Bool && !super::term_utils::is_unresolved(right) {
+    if *right != Type::Bool && !term_utils::is_unresolved(right) {
         return Some(TEK::LogicalOperandNotBoolean(right.clone()).at(span).into());
     }
     None

@@ -2,6 +2,7 @@
 
 use crate::core::diag::Span;
 use crate::core::resolve::{DefId, DefTable, UNKNOWN_DEF_ID};
+use crate::core::tree::{Module, NodeId};
 use crate::services::analysis::pipeline::LookupState;
 use crate::services::analysis::results::Location;
 use crate::services::analysis::snapshot::{AnalysisSnapshot, FileId};
@@ -72,12 +73,12 @@ pub(crate) fn def_location_at_span(
 /// definition. When multiple nodes share the same minimal width (e.g. a name
 /// node and its parent decl), we break ties by preferring the latest start
 /// offset — which corresponds to the most specific (innermost) node.
-fn best_def_use_at_span<D, T>(
-    module: &crate::core::tree::Module<D, T>,
-    def_table: &crate::core::resolve::DefTable,
-    poisoned_nodes: &std::collections::HashSet<crate::core::tree::NodeId>,
+fn best_def_use_at_span(
+    module: &Module,
+    def_table: &DefTable,
+    poisoned_nodes: &std::collections::HashSet<NodeId>,
     query_span: Span,
-) -> Option<(crate::core::tree::NodeId, DefId)> {
+) -> Option<(NodeId, DefId)> {
     let spans = node_span_map(module);
     let mut candidates = Vec::new();
     for (node_id, span) in spans {
@@ -87,7 +88,7 @@ fn best_def_use_at_span<D, T>(
         candidates.push((node_id, span));
     }
 
-    // Narrow to smallest width, then latest start offset among those.
+    // Narrow to the smallest width, then latest start offset among those.
     let min_width = candidates
         .iter()
         .map(|(_, span)| span.end.offset.saturating_sub(span.start.offset))

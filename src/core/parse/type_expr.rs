@@ -1,5 +1,4 @@
 use super::*;
-use crate::core::tree::RefinementKind;
 
 impl<'a> Parser<'a> {
     pub(super) fn parse_type_expr(&mut self) -> Result<TypeExpr, ParseError> {
@@ -161,7 +160,6 @@ impl<'a> Parser<'a> {
                     id: self.id_gen.new_id(),
                     kind: TypeExprKind::Named {
                         ident: "()".to_string(),
-                        def_id: (),
                         type_args: Vec::new(),
                     },
                     span: self.close(marker),
@@ -181,11 +179,7 @@ impl<'a> Parser<'a> {
                 let type_args = self.parse_type_args()?;
                 Ok(TypeExpr {
                     id: self.id_gen.new_id(),
-                    kind: TypeExprKind::Named {
-                        ident,
-                        def_id: (),
-                        type_args,
-                    },
+                    kind: TypeExprKind::Named { ident, type_args },
                     span: self.close(marker),
                 })
             }
@@ -196,7 +190,6 @@ impl<'a> Parser<'a> {
                     id: self.id_gen.new_id(),
                     kind: TypeExprKind::Named {
                         ident: "set".to_string(),
-                        def_id: (),
                         type_args,
                     },
                     span: self.close(marker),
@@ -209,7 +202,6 @@ impl<'a> Parser<'a> {
                     id: self.id_gen.new_id(),
                     kind: TypeExprKind::Named {
                         ident: "map".to_string(),
-                        def_id: (),
                         type_args,
                     },
                     span: self.close(marker),

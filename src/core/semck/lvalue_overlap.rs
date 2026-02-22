@@ -8,9 +8,8 @@ use crate::core::context::NormalizedContext;
 use crate::core::diag::Span;
 use crate::core::resolve::DefId;
 use crate::core::semck::{SEK, SemCheckError};
-use crate::core::tree::normalized::{CallArg, Expr, ExprKind, FuncDef, ParamMode};
 use crate::core::tree::visit::{Visitor, walk_expr};
-use crate::core::types::TypeId;
+use crate::core::tree::{CallArg, Expr, ExprKind, FuncDef, ParamMode};
 
 /// An argument access: its mode, lvalue path, and source location.
 struct ArgAccess {
@@ -129,8 +128,8 @@ impl<'a> LvalueOverlapChecker<'a> {
     /// Returns None for non-lvalue expressions (e.g., literals, calls).
     fn lvalue_path(&self, expr: &Expr) -> Option<LvaluePath> {
         match &expr.kind {
-            ExprKind::Var { def_id, .. } => Some(LvaluePath {
-                base: *def_id,
+            ExprKind::Var { .. } => Some(LvaluePath {
+                base: self.ctx.def_table.def_id(expr.id),
                 projections: Vec::new(),
             }),
             ExprKind::StructField { target, field } => {
@@ -307,7 +306,7 @@ impl<'a> LvalueOverlapChecker<'a> {
     }
 }
 
-impl Visitor<DefId, TypeId> for LvalueOverlapChecker<'_> {
+impl Visitor for LvalueOverlapChecker<'_> {
     fn visit_func_def(&mut self, func_def: &FuncDef) {
         self.visit_expr(&func_def.body);
     }

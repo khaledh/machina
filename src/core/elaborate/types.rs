@@ -32,7 +32,7 @@ impl<'a> Elaborator<'a> {
                     span
                 )
             }
-            Type::Unit => self.named_type_expr("()", span),
+            Type::Unit => self.named_type_expr("()"),
             Type::Int {
                 signed,
                 bits,
@@ -62,11 +62,11 @@ impl<'a> Elaborator<'a> {
                     refinements.push(RefinementKind::NonZero);
                 }
                 if refinements.is_empty() {
-                    self.named_type_expr(name, span)
+                    self.named_type_expr(name)
                 } else {
                     let base_expr = sem::TypeExpr {
                         id: self.node_id_gen.new_id(),
-                        kind: self.named_type_expr(name, span),
+                        kind: self.named_type_expr(name),
                         span,
                     };
                     sem::TypeExprKind::Refined {
@@ -75,9 +75,9 @@ impl<'a> Elaborator<'a> {
                     }
                 }
             }
-            Type::Bool => self.named_type_expr("bool", span),
-            Type::Char => self.named_type_expr("char", span),
-            Type::String => self.named_type_expr("string", span),
+            Type::Bool => self.named_type_expr("bool"),
+            Type::Char => self.named_type_expr("char"),
+            Type::String => self.named_type_expr("string"),
             Type::ErrorUnion { ok_ty, err_tys } => sem::TypeExprKind::Union {
                 variants: std::iter::once(ok_ty.as_ref())
                     .chain(err_tys.iter())
@@ -96,36 +96,18 @@ impl<'a> Elaborator<'a> {
             },
             Type::Pending { response_tys } => sem::TypeExprKind::Named {
                 ident: "Pending".to_string(),
-                def_id: self
-                    .def_table
-                    .lookup_type_def_id("Pending")
-                    .unwrap_or_else(|| {
-                        panic!("compiler bug: missing def id for type Pending at {}", span)
-                    }),
                 type_args: vec![self.response_set_type_arg_expr(response_tys, span)],
             },
             Type::ReplyCap { response_tys } => sem::TypeExprKind::Named {
                 ident: "ReplyCap".to_string(),
-                def_id: self
-                    .def_table
-                    .lookup_type_def_id("ReplyCap")
-                    .unwrap_or_else(|| {
-                        panic!("compiler bug: missing def id for type ReplyCap at {}", span)
-                    }),
                 type_args: vec![self.response_set_type_arg_expr(response_tys, span)],
             },
             Type::Set { elem_ty } => sem::TypeExprKind::Named {
                 ident: "set".to_string(),
-                def_id: self.def_table.lookup_type_def_id("set").unwrap_or_else(|| {
-                    panic!("compiler bug: missing def id for type set at {}", span)
-                }),
                 type_args: vec![self.type_expr_from_type(elem_ty, span)],
             },
             Type::Map { key_ty, value_ty } => sem::TypeExprKind::Named {
                 ident: "map".to_string(),
-                def_id: self.def_table.lookup_type_def_id("map").unwrap_or_else(|| {
-                    panic!("compiler bug: missing def id for type map at {}", span)
-                }),
                 type_args: vec![
                     self.type_expr_from_type(key_ty, span),
                     self.type_expr_from_type(value_ty, span),
@@ -137,7 +119,7 @@ impl<'a> Elaborator<'a> {
                     .map(|field| self.type_expr_from_type(field, span))
                     .collect(),
             },
-            Type::Struct { name, .. } | Type::Enum { name, .. } => self.named_type_expr(name, span),
+            Type::Struct { name, .. } | Type::Enum { name, .. } => self.named_type_expr(name),
             Type::Slice { elem_ty } => sem::TypeExprKind::Slice {
                 elem_ty_expr: Box::new(self.type_expr_from_type(elem_ty, span)),
             },
@@ -168,15 +150,9 @@ impl<'a> Elaborator<'a> {
         sem::TypeExpr { id, kind, span }
     }
 
-    fn named_type_expr(&self, name: &str, span: Span) -> sem::TypeExprKind {
-        // Resolve a builtin/nominal type name into its DefId.
-        let def_id = self
-            .def_table
-            .lookup_type_def_id(name)
-            .unwrap_or_else(|| panic!("compiler bug: missing def id for type {name} at {}", span));
+    fn named_type_expr(&self, name: &str) -> sem::TypeExprKind {
         sem::TypeExprKind::Named {
             ident: name.to_string(),
-            def_id,
             type_args: Vec::new(),
         }
     }

@@ -11,7 +11,7 @@ use std::collections::HashMap;
 
 use crate::core::capsule::{ModuleId, ModulePath, RequireKind};
 use crate::core::context::CapsuleParsedContext;
-use crate::core::tree::parsed;
+use crate::core::tree::{Attribute, Module, TopLevelItem};
 
 #[derive(Clone, Copy, Default)]
 pub(crate) struct MemberAttrs {
@@ -32,23 +32,23 @@ pub(crate) struct ModuleExports {
 }
 
 impl ModuleExports {
-    fn from_module(module: &parsed::Module) -> Self {
+    fn from_module(module: &Module) -> Self {
         let mut out = Self::default();
         for item in &module.top_level_items {
             match item {
-                parsed::TopLevelItem::FuncDecl(func_decl) => {
+                TopLevelItem::FuncDecl(func_decl) => {
                     let member = out.callables.entry(func_decl.sig.name.clone()).or_default();
                     member.public |= has_public_attr(&func_decl.attrs);
                 }
-                parsed::TopLevelItem::FuncDef(func_def) => {
+                TopLevelItem::FuncDef(func_def) => {
                     let member = out.callables.entry(func_def.sig.name.clone()).or_default();
                     member.public |= has_public_attr(&func_def.attrs);
                 }
-                parsed::TopLevelItem::TypeDef(type_def) => {
+                TopLevelItem::TypeDef(type_def) => {
                     out.types
                         .insert(type_def.name.clone(), type_member_attrs(&type_def.attrs));
                 }
-                parsed::TopLevelItem::TraitDef(trait_def) => {
+                TopLevelItem::TraitDef(trait_def) => {
                     let member = out.traits.entry(trait_def.name.clone()).or_default();
                     member.public |= has_public_attr(&trait_def.attrs);
                 }
@@ -127,13 +127,13 @@ impl CapsuleBindings {
     }
 }
 
-fn has_public_attr(attrs: &[parsed::Attribute]) -> bool {
+fn has_public_attr(attrs: &[Attribute]) -> bool {
     attrs
         .iter()
         .any(|attr| attr.name == "public" || attr.name == "opaque")
 }
 
-fn type_member_attrs(attrs: &[parsed::Attribute]) -> TypeMemberAttrs {
+fn type_member_attrs(attrs: &[Attribute]) -> TypeMemberAttrs {
     TypeMemberAttrs {
         public: has_public_attr(attrs),
         opaque: attrs.iter().any(|attr| attr.name == "opaque"),

@@ -2,10 +2,9 @@ use std::collections::{HashMap, HashSet};
 
 use crate::core::machine::naming::parse_generated_handler_site_label;
 use crate::core::protocol::event_extract::extract_emit_from_expr;
-use crate::core::resolve::DefId;
-use crate::core::tree::NodeId;
+use crate::core::resolve::DefTable;
 use crate::core::tree::visit::{self, Visitor};
-use crate::core::tree::{ExprKind, MethodItem};
+use crate::core::tree::{EmitKind, Expr, ExprKind, MethodBlock, MethodItem, Module, NodeId};
 use crate::core::typecheck::engine::TypecheckEngine;
 use crate::core::typecheck::errors::{TEK, TypeCheckError};
 use crate::core::typecheck::type_map::resolve_type_expr;
@@ -307,9 +306,9 @@ pub(super) fn check_typestate_handler_overlap(engine: &TypecheckEngine) -> Vec<T
 }
 
 fn collect_handler_response_patterns(
-    def_table: &crate::core::resolve::DefTable,
-    module: &crate::core::tree::resolved::Module,
-    method_block: &crate::core::tree::resolved::MethodBlock,
+    def_table: &DefTable,
+    module: &Module,
+    method_block: &MethodBlock,
 ) -> Vec<HandlerResponsePattern> {
     let mut out = Vec::new();
     for method_item in &method_block.method_items {
@@ -481,8 +480,8 @@ struct TypestateRequestCollector<'a> {
     sites: Vec<RequestSiteShape>,
 }
 
-impl Visitor<DefId, ()> for TypestateRequestCollector<'_> {
-    fn visit_method_block(&mut self, method_block: &crate::core::tree::resolved::MethodBlock) {
+impl Visitor for TypestateRequestCollector<'_> {
+    fn visit_method_block(&mut self, method_block: &MethodBlock) {
         let prev = self.current_typestate.clone();
         self.current_typestate =
             parse_typestate_and_state_from_generated_state(&method_block.type_name)
@@ -491,11 +490,11 @@ impl Visitor<DefId, ()> for TypestateRequestCollector<'_> {
         self.current_typestate = prev;
     }
 
-    fn visit_expr(&mut self, expr: &crate::core::tree::resolved::Expr) {
+    fn visit_expr(&mut self, expr: &Expr) {
         if let Some(typestate_name) = &self.current_typestate
             && let ExprKind::Emit {
                 kind:
-                    crate::core::tree::EmitKind::Request {
+                    EmitKind::Request {
                         payload,
                         request_site_label,
                         ..
@@ -654,8 +653,8 @@ struct TypestateEmitCollector<'a> {
     emits_by_state: HashMap<TypestateStateKey, Vec<EmitPayload>>,
 }
 
-impl Visitor<DefId, ()> for TypestateEmitCollector<'_> {
-    fn visit_method_block(&mut self, method_block: &crate::core::tree::resolved::MethodBlock) {
+impl Visitor for TypestateEmitCollector<'_> {
+    fn visit_method_block(&mut self, method_block: &MethodBlock) {
         let prev = self.current_state.clone();
         self.current_state = parse_typestate_and_state_from_generated_state(
             &method_block.type_name,
@@ -674,7 +673,7 @@ impl Visitor<DefId, ()> for TypestateEmitCollector<'_> {
         self.current_state = prev;
     }
 
-    fn visit_expr(&mut self, expr: &crate::core::tree::resolved::Expr) {
+    fn visit_expr(&mut self, expr: &Expr) {
         if let Some(state_key) = &self.current_state
             && let Some(emit) =
                 extract_emit_from_expr(expr, |node_id| self.node_types.get(&node_id).cloned())

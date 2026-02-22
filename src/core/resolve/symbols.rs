@@ -23,15 +23,15 @@ pub enum SymbolKind {
     },
     TypeAlias {
         def_id: DefId,
-        ty_expr: TypeExpr<()>,
+        ty_expr: TypeExpr,
     },
     StructDef {
         def_id: DefId,
-        fields: Vec<StructDefField<()>>,
+        fields: Vec<StructDefField>,
     },
     EnumDef {
         def_id: DefId,
-        variants: Vec<EnumDefVariant<()>>,
+        variants: Vec<EnumDefVariant>,
     },
     TraitDef {
         def_id: DefId,

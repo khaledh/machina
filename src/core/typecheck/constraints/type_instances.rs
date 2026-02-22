@@ -9,7 +9,10 @@ impl<'a> ConstraintCollector<'a> {
         type_args: &[TypeExpr],
         expected: Option<&Type>,
     ) -> Option<Type> {
-        let type_def = self.ctx.module.type_def_by_id(def_id)?;
+        let type_def = self
+            .ctx
+            .module
+            .type_def_by_id(&self.ctx.def_table, def_id)?;
         if type_args.is_empty()
             && let Some(expected_ty) = expected
             && nominal_base_name(expected_ty).is_some_and(|name| name == type_def.name.as_str())
@@ -43,7 +46,7 @@ impl<'a> ConstraintCollector<'a> {
         type_args: &[TypeExpr],
         expected: Option<&Type>,
     ) -> Option<Type> {
-        let def_id = self.ctx.def_table.lookup_node_def_id(expr.id)?;
+        let def_id = self.lookup_def_id(expr.id)?;
         self.resolve_type_instance_with_args(def_id, type_args, expected)
     }
 
@@ -59,7 +62,7 @@ impl<'a> ConstraintCollector<'a> {
             .type_defs()
             .into_iter()
             .find(|type_def| type_def.name == type_name)
-            .map(|type_def| type_def.def_id)?;
+            .map(|type_def| self.ctx.def_table.def_id(type_def.id))?;
         self.resolve_type_instance_with_args(def_id, type_args, expected)
     }
 }

@@ -25,7 +25,6 @@ impl<'a> Parser<'a> {
                 scrutinee: Box::new(scrutinee),
                 arms,
             },
-            ty: (),
             span: self.close(marker),
         })
     }
@@ -94,7 +93,6 @@ impl<'a> Parser<'a> {
             return Ok(MatchPattern::TypedBinding {
                 id: self.id_gen.new_id(),
                 ident,
-                def_id: (),
                 ty_expr,
                 span: self.close(marker),
             });
@@ -154,7 +152,6 @@ impl<'a> Parser<'a> {
                 return Ok(MatchPattern::TypedBinding {
                     id: parser.id_gen.new_id(),
                     ident,
-                    def_id: (),
                     ty_expr,
                     span: parser.close(marker),
                 });
@@ -166,7 +163,6 @@ impl<'a> Parser<'a> {
             Ok(MatchPattern::Binding {
                 id: parser.id_gen.new_id(),
                 ident,
-                def_id: (),
                 span: parser.close(marker),
             })
         };
@@ -218,7 +214,6 @@ impl<'a> Parser<'a> {
             Ok(MatchPatternBinding::Named {
                 id: parser.id_gen.new_id(),
                 ident,
-                def_id: (),
                 span: parser.close(marker),
             })
         };

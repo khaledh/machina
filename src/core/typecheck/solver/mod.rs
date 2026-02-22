@@ -30,7 +30,7 @@ use crate::core::capsule::ModuleId;
 use crate::core::diag::Span;
 use crate::core::resolve::{DefId, DefKind, DefTable};
 use crate::core::tree::NodeId;
-use crate::core::tree::resolved::{BindPattern, BindPatternKind};
+use crate::core::tree::{BindPattern, BindPatternKind};
 use crate::core::typecheck::capability::ensure_hashable;
 use crate::core::typecheck::constraints::{
     ConstrainOutput, Constraint, ConstraintReason, ExprObligation,
@@ -206,6 +206,7 @@ fn prepass_pattern_obligations(
         &engine.context().def_table,
         &engine.context().def_owners,
         engine.context(),
+        engine.is_partial_mode(),
     );
 }
 
@@ -391,6 +392,7 @@ fn solve_pattern_stage(
         &engine.context().def_table,
         &engine.context().def_owners,
         engine.context(),
+        engine.is_partial_mode(),
     );
     for (pattern_id, err, span) in deferred_pattern_errors {
         if !covered_patterns.contains(&pattern_id) {
@@ -641,7 +643,7 @@ fn check_unresolved_local_infer_vars(
             pattern, span, ..
         } = obligation
         {
-            collect_pattern_bind_decl_spans(pattern, *span, &mut decl_spans);
+            collect_pattern_bind_decl_spans(pattern, *span, def_table, &mut decl_spans);
         }
     }
 
@@ -698,20 +700,21 @@ fn spans_share_context(a: Span, b: Span) -> bool {
 fn collect_pattern_bind_decl_spans(
     pattern: &BindPattern,
     span: Span,
+    def_table: &DefTable,
     out: &mut HashMap<DefId, Span>,
 ) {
     match &pattern.kind {
-        BindPatternKind::Name { def_id, .. } => {
-            out.entry(*def_id).or_insert(span);
+        BindPatternKind::Name { .. } => {
+            out.entry(def_table.def_id(pattern.id)).or_insert(span);
         }
         BindPatternKind::Array { patterns } | BindPatternKind::Tuple { patterns } => {
             for child in patterns {
-                collect_pattern_bind_decl_spans(child, child.span, out);
+                collect_pattern_bind_decl_spans(child, child.span, def_table, out);
             }
         }
         BindPatternKind::Struct { fields, .. } => {
             for field in fields {
-                collect_pattern_bind_decl_spans(&field.pattern, field.span, out);
+                collect_pattern_bind_decl_spans(&field.pattern, field.span, def_table, out);
             }
         }
     }

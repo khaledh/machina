@@ -12,11 +12,11 @@ use crate::core::api;
 use crate::core::capsule::compose::merge_modules;
 use crate::core::capsule::{self, ModuleId, ModulePath};
 use crate::core::context::{
-    ImportEnv, ModuleExportFacts, ResolvedContext, import_env_from_requires,
+    ImportEnv, ModuleExportFacts, ParsedContext, ResolvedContext, import_env_from_requires,
     module_export_facts_from_def_table,
 };
 use crate::core::resolve::{DefId, DefKind, DefLocation, GlobalDefId};
-use crate::core::tree::NodeIdGen;
+use crate::core::tree::{Module, NodeIdGen};
 use crate::services::analysis::diagnostics::{
     ANALYSIS_FILE_ID_KEY, ANALYSIS_FILE_PATH_KEY, Diagnostic, DiagnosticValue,
 };
@@ -42,7 +42,7 @@ pub(crate) struct ProgramPipelineResult {
 
 #[derive(Clone)]
 struct ParsedPrelude {
-    module: crate::core::tree::parsed::Module,
+    module: Module,
     next_node_id_gen: NodeIdGen,
 }
 
@@ -230,9 +230,9 @@ pub(crate) fn resolve_imported_symbol_target_from_import_env(
 }
 
 fn module_with_implicit_prelude(
-    parsed: &crate::core::capsule::ParsedModule,
-    prelude_module: Option<&crate::core::tree::parsed::Module>,
-) -> crate::core::tree::parsed::Module {
+    parsed: &capsule::ParsedModule,
+    prelude_module: Option<&Module>,
+) -> Module {
     let Some(prelude_module) = prelude_module else {
         return parsed.module.clone();
     };
@@ -243,7 +243,7 @@ fn module_with_implicit_prelude(
     }
 }
 
-fn is_std_prelude_decl(parsed: &crate::core::capsule::ParsedModule) -> bool {
+fn is_std_prelude_decl(parsed: &capsule::ParsedModule) -> bool {
     matches!(
         parsed.source.path.segments(),
         [std_seg, prelude_seg] if std_seg == "std" && prelude_seg == "prelude_decl"
@@ -277,7 +277,7 @@ fn prelude_decl_path() -> PathBuf {
 }
 
 fn apply_prelude_runtime_def_locations(
-    parsed: &crate::core::capsule::ParsedModule,
+    parsed: &capsule::ParsedModule,
     resolved: &mut ResolvedContext,
 ) {
     if is_std_prelude_decl(parsed) {
@@ -314,8 +314,7 @@ fn build_prelude_runtime_locations() -> HashMap<String, DefLocation> {
     let Ok((module, id_gen)) = api::parse_module_with_id_gen(&prelude_src, NodeIdGen::new()) else {
         return HashMap::new();
     };
-    let parsed = crate::core::context::ParsedContext::new(module, id_gen)
-        .with_source_path(prelude_decl_path());
+    let parsed = ParsedContext::new(module, id_gen).with_source_path(prelude_decl_path());
     let resolved = api::resolve_stage_partial(parsed, HashMap::new(), HashMap::new());
     let mut locations = HashMap::new();
     for def in resolved.context.def_table.defs() {

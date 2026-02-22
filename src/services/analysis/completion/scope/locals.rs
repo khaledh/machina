@@ -7,15 +7,17 @@ use std::collections::HashMap;
 
 use crate::core::diag::{Position, Span};
 use crate::core::resolve::DefId;
-use crate::core::tree::resolved as res;
-use crate::core::tree::{BlockItem, StmtExprKind};
+use crate::core::tree::{
+    BlockItem, ClosureDef, Expr, ExprKind, FuncDef, MethodDef, MethodItem, Module, StmtExprKind,
+    TopLevelItem,
+};
 use crate::services::analysis::results::CompletionItem;
 use crate::services::analysis::syntax_index::position_leq;
 
 use super::global::completion_kind_for_def;
 
 pub(super) fn collect_local_scopes(
-    module: &res::Module,
+    module: &Module,
     def_table: &crate::core::resolve::DefTable,
     cursor: Position,
 ) -> Vec<HashMap<String, CompletionItem>> {
@@ -26,24 +28,8 @@ pub(super) fn collect_local_scopes(
     collector.into_scopes()
 }
 
-pub(super) fn enclosing_callable_def_id(
-    module: &crate::core::tree::typed::Module,
-    cursor: Position,
-) -> Option<DefId> {
-    let mut best: Option<(DefId, Span)> = None;
-    for callable in module.callables() {
-        let span = callable.span();
-        if !span_contains_pos(span, cursor) {
-            continue;
-        }
-        let replace = best
-            .as_ref()
-            .is_none_or(|(_, best_span)| span_width(span) <= span_width(*best_span));
-        if replace {
-            best = Some((callable.def_id(), span));
-        }
-    }
-    best.map(|(def_id, _)| def_id)
+pub(super) fn enclosing_callable_def_id(_module: &Module, _cursor: Position) -> Option<DefId> {
+    None
 }
 
 struct LocalScopeCollector<'a> {
@@ -71,11 +57,11 @@ impl<'a> LocalScopeCollector<'a> {
         self.collect_expr(callable.body());
     }
 
-    fn collect_expr(&mut self, expr: &res::Expr) {
+    fn collect_expr(&mut self, expr: &Expr) {
         if !self.span_contains_pos(expr.span) {
             return;
         }
-        if let res::ExprKind::Block { items, tail } = &expr.kind {
+        if let ExprKind::Block { items, tail } = &expr.kind {
             self.push_scope();
             for item in items {
                 match item {
@@ -106,7 +92,7 @@ impl<'a> LocalScopeCollector<'a> {
         }
 
         match &expr.kind {
-            res::ExprKind::If {
+            ExprKind::If {
                 cond,
                 then_body,
                 else_body,
@@ -119,7 +105,7 @@ impl<'a> LocalScopeCollector<'a> {
                     self.collect_expr(else_body);
                 }
             }
-            res::ExprKind::Match { scrutinee, arms } => {
+            ExprKind::Match { scrutinee, arms } => {
                 if self.span_contains_pos(scrutinee.span) {
                     self.collect_expr(scrutinee);
                     return;
@@ -134,11 +120,11 @@ impl<'a> LocalScopeCollector<'a> {
                     return;
                 }
             }
-            res::ExprKind::Closure { params, body, .. } => {
+            ExprKind::Closure { params, body, .. } => {
                 if self.span_contains_pos(body.span) {
                     self.push_scope();
                     for param in params {
-                        self.insert_def(param.def_id);
+                        self.insert_def(self.def_table.def_id(param.id));
                     }
                     self.collect_expr(body);
                 }
@@ -147,7 +133,7 @@ impl<'a> LocalScopeCollector<'a> {
         }
     }
 
-    fn collect_stmt_at_cursor(&mut self, stmt: &crate::core::tree::StmtExpr<DefId>) {
+    fn collect_stmt_at_cursor(&mut self, stmt: &crate::core::tree::StmtExpr) {
         match &stmt.kind {
             StmtExprKind::LetBind { value, .. } | StmtExprKind::VarBind { value, .. } => {
                 if self.span_contains_pos(value.span) {
@@ -199,22 +185,22 @@ impl<'a> LocalScopeCollector<'a> {
         }
     }
 
-    fn collect_stmt_bindings(&mut self, stmt: &crate::core::tree::StmtExpr<DefId>) {
+    fn collect_stmt_bindings(&mut self, stmt: &crate::core::tree::StmtExpr) {
         match &stmt.kind {
             StmtExprKind::LetBind { pattern, .. } | StmtExprKind::VarBind { pattern, .. } => {
                 self.collect_bind_pattern_bindings(pattern);
             }
-            StmtExprKind::VarDecl { def_id, .. } => {
-                self.insert_def(*def_id);
+            StmtExprKind::VarDecl { .. } => {
+                self.insert_def(self.def_table.def_id(stmt.id));
             }
             _ => {}
         }
     }
 
-    fn collect_bind_pattern_bindings(&mut self, pattern: &crate::core::tree::BindPattern<DefId>) {
+    fn collect_bind_pattern_bindings(&mut self, pattern: &crate::core::tree::BindPattern) {
         match &pattern.kind {
-            crate::core::tree::BindPatternKind::Name { def_id, .. } => {
-                self.insert_def(*def_id);
+            crate::core::tree::BindPatternKind::Name { .. } => {
+                self.insert_def(self.def_table.def_id(pattern.id));
             }
             crate::core::tree::BindPatternKind::Array { patterns }
             | crate::core::tree::BindPatternKind::Tuple { patterns } => {
@@ -230,11 +216,11 @@ impl<'a> LocalScopeCollector<'a> {
         }
     }
 
-    fn collect_match_pattern_bindings(&mut self, pattern: &crate::core::tree::MatchPattern<DefId>) {
+    fn collect_match_pattern_bindings(&mut self, pattern: &crate::core::tree::MatchPattern) {
         match pattern {
-            crate::core::tree::MatchPattern::Binding { def_id, .. }
-            | crate::core::tree::MatchPattern::TypedBinding { def_id, .. } => {
-                self.insert_def(*def_id);
+            crate::core::tree::MatchPattern::Binding { id, .. }
+            | crate::core::tree::MatchPattern::TypedBinding { id, .. } => {
+                self.insert_def(self.def_table.def_id(*id));
             }
             crate::core::tree::MatchPattern::Tuple { patterns, .. } => {
                 for sub in patterns {
@@ -243,8 +229,8 @@ impl<'a> LocalScopeCollector<'a> {
             }
             crate::core::tree::MatchPattern::EnumVariant { bindings, .. } => {
                 for binding in bindings {
-                    if let crate::core::tree::MatchPatternBinding::Named { def_id, .. } = binding {
-                        self.insert_def(*def_id);
+                    if let crate::core::tree::MatchPatternBinding::Named { id, .. } = binding {
+                        self.insert_def(self.def_table.def_id(*id));
                     }
                 }
             }
@@ -256,24 +242,24 @@ impl<'a> LocalScopeCollector<'a> {
         match callable {
             CallableAtCursor::Func(def) => {
                 for type_param in &def.sig.type_params {
-                    self.insert_def(type_param.def_id);
+                    self.insert_def(self.def_table.def_id(type_param.id));
                 }
                 for param in &def.sig.params {
-                    self.insert_def(param.def_id);
+                    self.insert_def(self.def_table.def_id(param.id));
                 }
             }
             CallableAtCursor::Method(def) => {
                 for type_param in &def.sig.type_params {
-                    self.insert_def(type_param.def_id);
+                    self.insert_def(self.def_table.def_id(type_param.id));
                 }
-                self.insert_def(def.sig.self_param.def_id);
+                self.insert_def(self.def_table.def_id(def.sig.self_param.id));
                 for param in &def.sig.params {
-                    self.insert_def(param.def_id);
+                    self.insert_def(self.def_table.def_id(param.id));
                 }
             }
             CallableAtCursor::Closure(def) => {
                 for param in &def.sig.params {
-                    self.insert_def(param.def_id);
+                    self.insert_def(self.def_table.def_id(param.id));
                 }
             }
         }
@@ -310,9 +296,9 @@ impl<'a> LocalScopeCollector<'a> {
 }
 
 enum CallableAtCursor<'a> {
-    Func(&'a res::FuncDef),
-    Method(&'a res::MethodDef),
-    Closure(&'a res::ClosureDef),
+    Func(&'a FuncDef),
+    Method(&'a MethodDef),
+    Closure(&'a ClosureDef),
 }
 
 impl<'a> CallableAtCursor<'a> {
@@ -324,7 +310,7 @@ impl<'a> CallableAtCursor<'a> {
         }
     }
 
-    fn body(&self) -> &'a res::Expr {
+    fn body(&self) -> &'a Expr {
         match self {
             Self::Func(def) => &def.body,
             Self::Method(def) => &def.body,
@@ -333,21 +319,21 @@ impl<'a> CallableAtCursor<'a> {
     }
 }
 
-fn containing_callable(module: &res::Module, cursor: Position) -> Option<CallableAtCursor<'_>> {
+fn containing_callable(module: &Module, cursor: Position) -> Option<CallableAtCursor<'_>> {
     let mut best: Option<CallableAtCursor<'_>> = None;
     for item in &module.top_level_items {
         match item {
-            res::TopLevelItem::FuncDef(def) => {
+            TopLevelItem::FuncDef(def) => {
                 choose_smallest_callable(&mut best, CallableAtCursor::Func(def), cursor);
             }
-            res::TopLevelItem::MethodBlock(block) => {
+            TopLevelItem::MethodBlock(block) => {
                 for method in &block.method_items {
-                    if let res::MethodItem::Def(def) = method {
+                    if let MethodItem::Def(def) = method {
                         choose_smallest_callable(&mut best, CallableAtCursor::Method(def), cursor);
                     }
                 }
             }
-            res::TopLevelItem::ClosureDef(def) => {
+            TopLevelItem::ClosureDef(def) => {
                 choose_smallest_callable(&mut best, CallableAtCursor::Closure(def), cursor);
             }
             _ => {}

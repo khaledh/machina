@@ -8,7 +8,7 @@ use std::collections::{HashMap, HashSet};
 use crate::core::context::TypestateRoleImplBinding;
 use crate::core::diag::Span;
 use crate::core::resolve::{DefId, DefTable};
-use crate::core::tree::resolved::{Module as ResolvedModule, ProtocolDef};
+use crate::core::tree::{Module, ProtocolDef};
 use crate::core::typecheck::type_map::resolve_type_expr;
 use crate::core::types::Type;
 
@@ -108,7 +108,7 @@ pub struct TypestateProtocolPeerBindingFact {
 }
 
 pub fn build_protocol_index(
-    module: &ResolvedModule,
+    module: &Module,
     def_table: &DefTable,
     role_impls: &[TypestateRoleImplBinding],
 ) -> ProtocolIndex {
@@ -158,7 +158,7 @@ pub fn build_protocol_index(
 }
 
 fn build_protocol_fact(
-    module: &ResolvedModule,
+    module: &Module,
     def_table: &DefTable,
     protocol: &ProtocolDef,
 ) -> ProtocolFact {

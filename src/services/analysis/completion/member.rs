@@ -6,7 +6,7 @@
 
 use crate::core::capsule::ModuleId;
 use crate::core::resolve::{DefId, UNKNOWN_DEF_ID};
-use crate::core::tree::resolved as res;
+use crate::core::tree::{MethodItem, TopLevelItem, TypeDefKind};
 use crate::core::types::Type;
 use crate::services::analysis::results::{CompletionItem, CompletionKind};
 
@@ -51,20 +51,23 @@ pub(super) fn qualified_path_completions(
 
     for item in &resolved.module.top_level_items {
         match item {
-            res::TopLevelItem::ProtocolDef(protocol_def) if protocol_def.name == *owner_name => {
+            TopLevelItem::ProtocolDef(protocol_def) if protocol_def.name == *owner_name => {
                 return protocol_def
                     .roles
                     .iter()
                     .map(|role| CompletionItem {
                         label: role.name.clone(),
                         kind: CompletionKind::EnumVariant,
-                        def_id: role.def_id,
+                        def_id: resolved
+                            .def_table
+                            .lookup_node_def_id(role.id)
+                            .unwrap_or(UNKNOWN_DEF_ID),
                         detail: Some("protocol role".to_string()),
                     })
                     .collect();
             }
-            res::TopLevelItem::TypeDef(type_def) if type_def.name == *owner_name => {
-                if let res::TypeDefKind::Enum { variants } = &type_def.kind {
+            TopLevelItem::TypeDef(type_def) if type_def.name == *owner_name => {
+                if let TypeDefKind::Enum { variants } = &type_def.kind {
                     return variants
                         .iter()
                         .map(|variant| CompletionItem {
@@ -157,8 +160,16 @@ fn nominal_method_completions(
         }
         for item in &block.method_items {
             let (def_id, name, attrs) = match item {
-                res::MethodItem::Decl(decl) => (decl.def_id, decl.sig.name.clone(), &decl.attrs),
-                res::MethodItem::Def(def) => (def.def_id, def.sig.name.clone(), &def.attrs),
+                MethodItem::Decl(decl) => (
+                    resolved.def_table.def_id(decl.id),
+                    decl.sig.name.clone(),
+                    &decl.attrs,
+                ),
+                MethodItem::Def(def) => (
+                    resolved.def_table.def_id(def.id),
+                    def.sig.name.clone(),
+                    &def.attrs,
+                ),
             };
             if !method_accessible(resolved, def_id, caller_def_id) {
                 continue;

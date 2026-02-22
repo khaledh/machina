@@ -2,8 +2,7 @@ use std::collections::HashSet;
 
 use crate::core::analysis::dataflow::solve_backward;
 use crate::core::resolve::DefId;
-use crate::core::tree::cfg::{TreeCfg, TreeCfgItem, TreeCfgNode, TreeCfgTerminator};
-use crate::core::types::TypeId;
+use crate::core::tree::cfg::{Cfg, CfgItem, CfgNode, CfgTerminator};
 
 pub(crate) struct LivenessResult {
     pub(crate) live_in: Vec<HashSet<DefId>>,
@@ -12,13 +11,13 @@ pub(crate) struct LivenessResult {
 }
 
 pub(crate) fn analyze_liveness<AT, CI>(
-    cfg: &TreeCfg<'_, TypeId>,
+    cfg: &Cfg<'_>,
     add_terminator_uses: AT,
     collect_item_defs_uses: CI,
 ) -> LivenessResult
 where
-    AT: Fn(&TreeCfgTerminator<'_, TypeId>, &mut HashSet<DefId>),
-    CI: Fn(&TreeCfgItem<'_, TypeId>, &mut HashSet<DefId>, &mut HashSet<DefId>),
+    AT: Fn(&CfgTerminator<'_>, &mut HashSet<DefId>),
+    CI: Fn(&CfgItem<'_>, &mut HashSet<DefId>, &mut HashSet<DefId>),
 {
     let entry = HashSet::new();
     let bottom = HashSet::new();
@@ -68,14 +67,14 @@ where
 }
 
 fn compute_live_in<AT, CI>(
-    node: &TreeCfgNode<'_, TypeId>,
+    node: &CfgNode<'_>,
     live_out: &HashSet<DefId>,
     add_terminator_uses: &AT,
     collect_item_defs_uses: &CI,
 ) -> HashSet<DefId>
 where
-    AT: Fn(&TreeCfgTerminator<'_, TypeId>, &mut HashSet<DefId>),
-    CI: Fn(&TreeCfgItem<'_, TypeId>, &mut HashSet<DefId>, &mut HashSet<DefId>),
+    AT: Fn(&CfgTerminator<'_>, &mut HashSet<DefId>),
+    CI: Fn(&CfgItem<'_>, &mut HashSet<DefId>, &mut HashSet<DefId>),
 {
     let mut live = live_out.clone();
     add_terminator_uses(&node.term, &mut live);
@@ -86,14 +85,14 @@ where
 }
 
 fn compute_live_after<AT, CI>(
-    node: &TreeCfgNode<'_, TypeId>,
+    node: &CfgNode<'_>,
     live_out: &HashSet<DefId>,
     add_terminator_uses: &AT,
     collect_item_defs_uses: &CI,
 ) -> Vec<HashSet<DefId>>
 where
-    AT: Fn(&TreeCfgTerminator<'_, TypeId>, &mut HashSet<DefId>),
-    CI: Fn(&TreeCfgItem<'_, TypeId>, &mut HashSet<DefId>, &mut HashSet<DefId>),
+    AT: Fn(&CfgTerminator<'_>, &mut HashSet<DefId>),
+    CI: Fn(&CfgItem<'_>, &mut HashSet<DefId>, &mut HashSet<DefId>),
 {
     let mut live = live_out.clone();
     add_terminator_uses(&node.term, &mut live);
@@ -106,11 +105,11 @@ where
 }
 
 fn apply_item_defs_uses<CI>(
-    item: &TreeCfgItem<'_, TypeId>,
+    item: &CfgItem<'_>,
     live: &mut HashSet<DefId>,
     collect_item_defs_uses: &CI,
 ) where
-    CI: Fn(&TreeCfgItem<'_, TypeId>, &mut HashSet<DefId>, &mut HashSet<DefId>),
+    CI: Fn(&CfgItem<'_>, &mut HashSet<DefId>, &mut HashSet<DefId>),
 {
     let mut defs = HashSet::new();
     let mut uses = HashSet::new();

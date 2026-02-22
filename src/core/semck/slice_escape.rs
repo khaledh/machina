@@ -1,12 +1,9 @@
 use crate::core::context::NormalizedContext;
 use crate::core::diag::Span;
-use crate::core::resolve::DefId;
 use crate::core::semck::{SEK, SemCheckError};
-use crate::core::tree::normalized::{
-    ArrayLitInit, Expr, ExprKind, FuncDef, StmtExpr, StmtExprKind,
-};
 use crate::core::tree::visit::{Visitor, walk_expr, walk_stmt_expr};
-use crate::core::types::{Type, TypeId};
+use crate::core::tree::{ArrayLitInit, Expr, ExprKind, FuncDef, StmtExpr, StmtExprKind};
+use crate::core::types::Type;
 
 pub(super) fn check(ctx: &NormalizedContext) -> Vec<SemCheckError> {
     let mut checker = SliceEscapeChecker::new(ctx);
@@ -29,7 +26,10 @@ impl<'a> SliceEscapeChecker<'a> {
 
     fn is_slice_expr(&self, expr: &Expr) -> bool {
         matches!(
-            self.ctx.type_map.type_table().get(expr.ty),
+            self.ctx
+                .type_map
+                .type_table()
+                .get(self.ctx.type_map.type_of(expr.id)),
             Type::Slice { .. }
         )
     }
@@ -56,7 +56,7 @@ impl<'a> SliceEscapeChecker<'a> {
     }
 }
 
-impl Visitor<DefId, TypeId> for SliceEscapeChecker<'_> {
+impl Visitor for SliceEscapeChecker<'_> {
     fn visit_func_def(&mut self, func_def: &FuncDef) {
         self.visit_expr(&func_def.body);
 

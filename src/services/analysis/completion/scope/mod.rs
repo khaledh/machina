@@ -29,7 +29,7 @@ pub(super) fn scope_completions(
 }
 
 pub(super) fn enclosing_callable_def_id(
-    module: &crate::core::tree::typed::Module,
+    module: &crate::core::tree::Module,
     cursor: Position,
 ) -> Option<DefId> {
     locals::enclosing_callable_def_id(module, cursor)

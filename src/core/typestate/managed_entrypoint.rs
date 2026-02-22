@@ -31,7 +31,6 @@ fn wrap_main_with_managed_runtime(main: &mut FuncDef, node_id_gen: &mut NodeIdGe
         Expr {
             id: node_id_gen.new_id(),
             kind: ExprKind::UnitLit,
-            ty: (),
             span,
         },
     );
@@ -50,7 +49,6 @@ fn wrap_main_with_managed_runtime(main: &mut FuncDef, node_id_gen: &mut NodeIdGe
             op: crate::core::tree::BinaryOp::Eq,
             right: Box::new(int_expr(1, node_id_gen, span)),
         },
-        ty: (),
         span,
     };
     let runtime_available_cond = Expr {
@@ -60,7 +58,6 @@ fn wrap_main_with_managed_runtime(main: &mut FuncDef, node_id_gen: &mut NodeIdGe
             op: crate::core::tree::BinaryOp::Ne,
             right: Box::new(int_expr(0, node_id_gen, span)),
         },
-        ty: (),
         span,
     };
     // Auto-drive policy for `@machines`:
@@ -73,78 +70,65 @@ fn wrap_main_with_managed_runtime(main: &mut FuncDef, node_id_gen: &mut NodeIdGe
             then_body: Box::new(Expr {
                 id: node_id_gen.new_id(),
                 kind: ExprKind::Block {
-                    items: vec![parsed::BlockItem::Stmt(StmtExpr {
+                    items: vec![BlockItem::Stmt(StmtExpr {
                         id: node_id_gen.new_id(),
                         kind: StmtExprKind::While {
                             cond: Box::new(Expr {
                                 id: node_id_gen.new_id(),
                                 kind: ExprKind::BoolLit(true),
-                                ty: (),
                                 span,
                             }),
                             body: Box::new(Expr {
                                 id: node_id_gen.new_id(),
                                 kind: ExprKind::Block {
                                     items: vec![
-                                        parsed::BlockItem::Stmt(let_bind_stmt(
+                                        BlockItem::Stmt(let_bind_stmt(
                                             "__mc_step_status",
                                             step_call,
                                             node_id_gen,
                                             span,
                                         )),
-                                        parsed::BlockItem::Expr(Expr {
+                                        BlockItem::Expr(Expr {
                                             id: node_id_gen.new_id(),
                                             kind: ExprKind::If {
                                                 cond: Box::new(step_status_is_did_work),
                                                 then_body: Box::new(Expr {
                                                     id: node_id_gen.new_id(),
                                                     kind: ExprKind::Block {
-                                                        items: vec![parsed::BlockItem::Stmt(
-                                                            StmtExpr {
-                                                                id: node_id_gen.new_id(),
-                                                                kind: StmtExprKind::Continue,
-                                                                ty: (),
-                                                                span,
-                                                            },
-                                                        )],
+                                                        items: vec![BlockItem::Stmt(StmtExpr {
+                                                            id: node_id_gen.new_id(),
+                                                            kind: StmtExprKind::Continue,
+                                                            span,
+                                                        })],
                                                         tail: None,
                                                     },
-                                                    ty: (),
                                                     span,
                                                 }),
                                                 else_body: Box::new(Expr {
                                                     id: node_id_gen.new_id(),
                                                     kind: ExprKind::Block {
-                                                        items: vec![parsed::BlockItem::Stmt(
-                                                            StmtExpr {
-                                                                id: node_id_gen.new_id(),
-                                                                kind: StmtExprKind::Break,
-                                                                ty: (),
-                                                                span,
-                                                            },
-                                                        )],
+                                                        items: vec![BlockItem::Stmt(StmtExpr {
+                                                            id: node_id_gen.new_id(),
+                                                            kind: StmtExprKind::Break,
+                                                            span,
+                                                        })],
                                                         tail: None,
                                                     },
-                                                    ty: (),
                                                     span,
                                                 }),
                                             },
-                                            ty: (),
                                             span,
                                         }),
                                     ],
                                     tail: None,
                                 },
-                                ty: (),
                                 span,
                             }),
                         },
-                        ty: (),
                         span,
                     })],
                     tail: None,
                 },
-                ty: (),
                 span,
             }),
             else_body: Box::new(Expr {
@@ -153,11 +137,9 @@ fn wrap_main_with_managed_runtime(main: &mut FuncDef, node_id_gen: &mut NodeIdGe
                     items: Vec::new(),
                     tail: None,
                 },
-                ty: (),
                 span,
             }),
         },
-        ty: (),
         span,
     };
 
@@ -165,32 +147,24 @@ fn wrap_main_with_managed_runtime(main: &mut FuncDef, node_id_gen: &mut NodeIdGe
         id: node_id_gen.new_id(),
         kind: ExprKind::Block {
             items: vec![
-                parsed::BlockItem::Stmt(let_bind_stmt(
-                    "__mc_rt",
-                    bootstrap_call,
-                    node_id_gen,
-                    span,
-                )),
-                parsed::BlockItem::Stmt(let_bind_stmt(
+                BlockItem::Stmt(let_bind_stmt("__mc_rt", bootstrap_call, node_id_gen, span)),
+                BlockItem::Stmt(let_bind_stmt(
                     "__mc_main_result",
                     original_body,
                     node_id_gen,
                     span,
                 )),
-                parsed::BlockItem::Expr(auto_drive_if),
-                parsed::BlockItem::Expr(shutdown_call),
+                BlockItem::Expr(auto_drive_if),
+                BlockItem::Expr(shutdown_call),
             ],
             tail: Some(Box::new(Expr {
                 id: node_id_gen.new_id(),
                 kind: ExprKind::Var {
                     ident: "__mc_main_result".to_string(),
-                    def_id: (),
                 },
-                ty: (),
                 span,
             })),
         },
-        ty: (),
         span,
     };
 }

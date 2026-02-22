@@ -94,7 +94,7 @@ fn collect_typestate_builders(
             state_name.clone(),
             StatePlanSeed {
                 state_name,
-                state_type_def_id: type_def.def_id,
+                state_type_def_id: def_table.def_id(type_def.id),
                 state_layout_ty,
                 is_final: false,
                 handlers: Vec::new(),
@@ -202,7 +202,7 @@ fn resolve_state_layout_type_id(
     type_map: &TypeMapOverlay,
     type_def: &sem::TypeDef,
 ) -> TypeId {
-    if let Some(def) = def_table.lookup_def(type_def.def_id)
+    if let Some(def) = def_table.lookup_def(def_table.def_id(type_def.id))
         && let Some(id) = type_map.lookup_def_type_id(def)
         && !type_map.type_table().get(id).contains_unresolved()
     {

@@ -6,12 +6,8 @@
 //! - handler command sugar rewrites (`send/request/reply`).
 
 use crate::core::diag::Span;
-use crate::core::tree::NodeIdGen;
-use crate::core::tree::parsed::{
-    self, CallArg, Expr, ExprKind, FuncDef, TypeExpr, TypeExprKind, TypestateOnHandler,
-};
 use crate::core::tree::visit_mut::{self, VisitorMut};
-use crate::core::tree::{CallArgMode, InitInfo, ParamMode};
+use crate::core::tree::*;
 
 use super::{MACHINE_TARGET_ID_HELPER_FN, unit_expr};
 
@@ -24,13 +20,8 @@ pub(super) fn clone_type_expr_with_new_ids(ty: &TypeExpr, node_id_gen: &mut Node
                 .map(|variant| clone_type_expr_with_new_ids(variant, node_id_gen))
                 .collect(),
         },
-        TypeExprKind::Named {
-            ident,
-            def_id,
-            type_args,
-        } => TypeExprKind::Named {
+        TypeExprKind::Named { ident, type_args } => TypeExprKind::Named {
             ident: ident.clone(),
-            def_id: *def_id,
             type_args: type_args
                 .iter()
                 .map(|arg| clone_type_expr_with_new_ids(arg, node_id_gen))
@@ -75,7 +66,7 @@ pub(super) fn clone_type_expr_with_new_ids(ty: &TypeExpr, node_id_gen: &mut Node
         } => TypeExprKind::Fn {
             params: params
                 .iter()
-                .map(|param| parsed::FnTypeParam {
+                .map(|param| FnTypeParam {
                     mode: param.mode.clone(),
                     ty_expr: clone_type_expr_with_new_ids(&param.ty_expr, node_id_gen),
                 })
@@ -91,14 +82,10 @@ pub(super) fn clone_type_expr_with_new_ids(ty: &TypeExpr, node_id_gen: &mut Node
     }
 }
 
-pub(super) fn clone_param_with_new_ids(
-    param: &parsed::Param,
-    node_id_gen: &mut NodeIdGen,
-) -> parsed::Param {
-    parsed::Param {
+pub(super) fn clone_param_with_new_ids(param: &Param, node_id_gen: &mut NodeIdGen) -> Param {
+    Param {
         id: node_id_gen.new_id(),
         ident: param.ident.clone(),
-        def_id: (),
         typ: clone_type_expr_with_new_ids(&param.typ, node_id_gen),
         mode: param.mode.clone(),
         span: param.span,
@@ -121,10 +108,9 @@ pub(super) fn lower_handler_to_method_source(
     // downstream machine-plan synthesis can recover deterministic site filters.
     let name = format!("__ts_on_{}{}", *next_index, provenance_site_suffix);
     *next_index += 1;
-    let mut params = vec![parsed::Param {
+    let mut params = vec![Param {
         id: node_id_gen.new_id(),
         ident: "__event".to_string(),
-        def_id: (),
         typ: handler.selector_ty.clone(),
         mode: ParamMode::In,
         span: handler.selector_ty.span,
@@ -134,15 +120,13 @@ pub(super) fn lower_handler_to_method_source(
         // `for RequestType(binding)` handlers need response correlation id at
         // runtime so lowering can recover the originating request payload.
         // We model this via a hidden `Pending<Selector>` parameter.
-        params.push(parsed::Param {
+        params.push(Param {
             id: node_id_gen.new_id(),
             ident: "__pending".to_string(),
-            def_id: (),
             typ: TypeExpr {
                 id: node_id_gen.new_id(),
                 kind: TypeExprKind::Named {
                     ident: "Pending".to_string(),
-                    def_id: (),
                     type_args: vec![handler.selector_ty.clone()],
                 },
                 span: handler.selector_ty.span,
@@ -164,9 +148,8 @@ pub(super) fn lower_handler_to_method_source(
     }
     FuncDef {
         id: handler.id,
-        def_id: (),
         attrs: Vec::new(),
-        sig: parsed::FunctionSig {
+        sig: FunctionSig {
             name,
             type_params: Vec::new(),
             params,
@@ -203,7 +186,6 @@ fn rewrite_handler_return_type(
             id: node_id_gen.new_id(),
             kind: TypeExprKind::Named {
                 ident: state_name.to_string(),
-                def_id: (),
                 type_args: Vec::new(),
             },
             span,
@@ -251,9 +233,7 @@ fn inject_self_tail_for_stay(body: &mut Expr, node_id_gen: &mut NodeIdGen) {
             id: node_id_gen.new_id(),
             kind: ExprKind::Var {
                 ident: "self".to_string(),
-                def_id: (),
             },
-            ty: (),
             span: body.span,
         }));
     }
@@ -278,9 +258,7 @@ impl HandlerCommandSugarRewriter<'_> {
                     id: self.node_id_gen.new_id(),
                     kind: ExprKind::Var {
                         ident: MACHINE_TARGET_ID_HELPER_FN.to_string(),
-                        def_id: (),
                     },
-                    ty: (),
                     span,
                 }),
                 args: vec![CallArg {
@@ -290,13 +268,12 @@ impl HandlerCommandSugarRewriter<'_> {
                     span,
                 }],
             },
-            ty: (),
             span,
         }
     }
 }
 
-impl VisitorMut<()> for HandlerCommandSugarRewriter<'_> {
+impl VisitorMut for HandlerCommandSugarRewriter<'_> {
     fn visit_expr(&mut self, expr: &mut Expr) {
         visit_mut::walk_expr(self, expr);
 
@@ -341,12 +318,12 @@ impl VisitorMut<()> for HandlerCommandSugarRewriter<'_> {
                     std::mem::replace(callee, Box::new(unit_expr(self.node_id_gen, expr.span)));
                 let to = self.wrap_machine_target_id(*dst);
                 let kind = if method_name == "send" {
-                    parsed::EmitKind::Send {
+                    EmitKind::Send {
                         to: Box::new(to),
                         payload: Box::new(payload),
                     }
                 } else {
-                    parsed::EmitKind::Request {
+                    EmitKind::Request {
                         to: Box::new(to),
                         payload: Box::new(payload),
                         request_site_label: None,
@@ -381,12 +358,12 @@ impl VisitorMut<()> for HandlerCommandSugarRewriter<'_> {
             .expr;
         let to = self.wrap_machine_target_id(to);
         let kind = if command == "send" {
-            parsed::EmitKind::Send {
+            EmitKind::Send {
                 to: Box::new(to),
                 payload: Box::new(payload),
             }
         } else {
-            parsed::EmitKind::Request {
+            EmitKind::Request {
                 to: Box::new(to),
                 payload: Box::new(payload),
                 request_site_label,

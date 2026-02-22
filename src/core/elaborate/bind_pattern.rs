@@ -1,20 +1,20 @@
 use crate::core::elaborate::elaborator::Elaborator;
-use crate::core::tree::normalized as norm;
+use crate::core::tree as ast;
 use crate::core::tree::semantic as sem;
 use crate::core::types::Type;
 
 impl<'a> Elaborator<'a> {
     pub(super) fn elab_bind_pattern(
         &mut self,
-        pattern: &norm::BindPattern,
+        pattern: &ast::BindPattern,
         ty: &Type,
     ) -> sem::BindPattern {
         let kind = match &pattern.kind {
-            norm::BindPatternKind::Name { ident, def_id } => sem::BindPatternKind::Name {
+            ast::BindPatternKind::Name { ident } => sem::BindPatternKind::Name {
                 ident: ident.clone(),
-                def_id: *def_id,
+                def_id: self.def_table.def_id(pattern.id),
             },
-            norm::BindPatternKind::Array { patterns } => {
+            ast::BindPatternKind::Array { patterns } => {
                 let elem_ty = ty
                     .array_item_type()
                     .unwrap_or_else(|| panic!("compiler bug: array pattern on non-array type"));
@@ -24,7 +24,7 @@ impl<'a> Elaborator<'a> {
                     .collect();
                 sem::BindPatternKind::Array { patterns }
             }
-            norm::BindPatternKind::Tuple { patterns } => {
+            ast::BindPatternKind::Tuple { patterns } => {
                 let Type::Tuple { field_tys } = ty else {
                     panic!("compiler bug: tuple pattern on non-tuple type");
                 };
@@ -43,7 +43,7 @@ impl<'a> Elaborator<'a> {
                     .collect();
                 sem::BindPatternKind::Tuple { fields }
             }
-            norm::BindPatternKind::Struct { name, fields } => {
+            ast::BindPatternKind::Struct { name, fields } => {
                 let Type::Struct {
                     fields: struct_fields,
                     ..

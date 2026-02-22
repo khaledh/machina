@@ -3,8 +3,8 @@ use std::collections::HashSet;
 use crate::core::context::NormalizedContext;
 use crate::core::diag::Span;
 use crate::core::semck::{SEK, SemCheckError, push_error};
-use crate::core::tree::normalized::{Expr, MatchArm};
-use crate::core::tree::resolved::MatchPattern;
+use crate::core::tree::MatchPattern;
+use crate::core::tree::{Expr, MatchArm};
 use crate::core::typecheck::type_map::resolve_type_expr;
 use crate::core::types::{EnumVariant, Type};
 
@@ -24,7 +24,10 @@ pub(super) fn check_match(
         errors.push(SEK::WildcardArmNotLast.at(pattern_span(&arm.pattern)));
     }
 
-    let scrutinee_ty = ctx.type_map.type_table().get(scrutinee.ty);
+    let scrutinee_ty = ctx
+        .type_map
+        .type_table()
+        .get(ctx.type_map.type_of(scrutinee.id));
     let peeled_ty = scrutinee_ty.peel_heap();
 
     let rule = MatchRuleKind::for_type(&peeled_ty);
@@ -191,6 +194,7 @@ impl<'a> UnionRule<'a> {
                     let arm_ty = ctx
                         .type_map
                         .lookup_node_type(ty_expr.id)
+                        .filter(|ty| !matches!(ty, Type::Unknown))
                         .or_else(|| resolve_type_expr(&ctx.def_table, &ctx.module, ty_expr).ok());
                     let Some(arm_ty) = arm_ty else {
                         continue;

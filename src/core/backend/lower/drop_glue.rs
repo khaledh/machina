@@ -5,7 +5,7 @@ use crate::core::backend::lower::lowerer::FuncLowerer;
 use crate::core::backend::lower::{LowerToIrError, LoweredFunction};
 use crate::core::ir::Terminator;
 use crate::core::resolve::{DefId, DefTable};
-use crate::core::tree::resolved as res;
+use crate::core::tree as ast;
 use crate::core::tree::semantic as sem;
 use crate::core::typecheck::nominal::NominalKey;
 use crate::core::typecheck::nominal::TypeView;
@@ -45,17 +45,17 @@ impl DropGlueRegistry {
                 // Generic type defs are instantiated on demand.
                 continue;
             }
-            let key = NominalKey::new(type_def.def_id, Vec::new());
+            let type_def_id = def_table.def_id(type_def.id);
+            let key = NominalKey::new(type_def_id, Vec::new());
             let ty = view_resolver
                 .view_of_key(&key)
                 .map(type_from_view)
                 .or_else(|| {
                     // Keep fallback behavior for non-nominal aliases.
-                    let type_expr = res::TypeExpr {
+                    let type_expr = ast::TypeExpr {
                         id: type_def.id,
-                        kind: res::TypeExprKind::Named {
+                        kind: ast::TypeExprKind::Named {
                             ident: type_def.name.clone(),
-                            def_id: type_def.def_id,
                             type_args: Vec::new(),
                         },
                         span: type_def.span,

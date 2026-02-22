@@ -6,7 +6,7 @@
 //! - typestate-name demangling
 
 use crate::core::resolve::{DefId, DefKind, DefTable};
-use crate::core::tree::typed as typed_tree;
+use crate::core::tree::{CallableRef, Module, Param, ParamMode, TypeExpr, TypeExprKind, TypeParam};
 use crate::core::typecheck::type_map::TypeMap;
 use crate::core::types::{Type, TypeRenderConfig, render_type};
 
@@ -19,7 +19,7 @@ pub(super) struct CallableSignature {
 
 pub(super) fn format_source_callable_signature(
     def_id: Option<DefId>,
-    typed_module: Option<&typed_tree::Module>,
+    typed_module: Option<&Module>,
     type_map: Option<&TypeMap>,
     def_table: &DefTable,
     demangler: &TypestateNameDemangler,
@@ -39,28 +39,22 @@ pub(super) fn format_source_callable_signature(
     let callable = typed_module
         .callables()
         .into_iter()
-        .find(|callable| match callable {
-            typed_tree::CallableRef::FuncDecl(func_decl) => func_decl.def_id == def_id,
-            typed_tree::CallableRef::FuncDef(func_def) => func_def.def_id == def_id,
-            typed_tree::CallableRef::MethodDecl { method_decl, .. } => method_decl.def_id == def_id,
-            typed_tree::CallableRef::MethodDef { method_def, .. } => method_def.def_id == def_id,
-            typed_tree::CallableRef::ClosureDef(closure_def) => closure_def.def_id == def_id,
-        })?;
+        .find(|callable| def_table.def_id(callable.id()) == def_id)?;
 
-    let map_type_params = |params: &[typed_tree::TypeParam]| {
+    let map_type_params = |params: &[TypeParam]| {
         params
             .iter()
             .map(|param| param.ident.clone())
             .collect::<Vec<_>>()
     };
-    let map_params = |params: &[typed_tree::Param]| {
+    let map_params = |params: &[Param]| {
         params
             .iter()
             .map(|param| {
                 (
                     param.ident.clone(),
                     param.mode.clone(),
-                    param.def_id,
+                    def_table.def_id(param.id),
                     param.typ.clone(),
                 )
             })
@@ -70,34 +64,29 @@ pub(super) fn format_source_callable_signature(
     let (name, type_params, params_src): (
         String,
         Vec<String>,
-        Vec<(
-            String,
-            crate::core::tree::ParamMode,
-            DefId,
-            typed_tree::TypeExpr,
-        )>,
+        Vec<(String, ParamMode, DefId, TypeExpr)>,
     ) = match callable {
-        typed_tree::CallableRef::FuncDecl(func_decl) => (
+        CallableRef::FuncDecl(func_decl) => (
             func_decl.sig.name.clone(),
             map_type_params(&func_decl.sig.type_params),
             map_params(&func_decl.sig.params),
         ),
-        typed_tree::CallableRef::FuncDef(func_def) => (
+        CallableRef::FuncDef(func_def) => (
             func_def.sig.name.clone(),
             map_type_params(&func_def.sig.type_params),
             map_params(&func_def.sig.params),
         ),
-        typed_tree::CallableRef::MethodDecl { method_decl, .. } => (
+        CallableRef::MethodDecl { method_decl, .. } => (
             method_decl.sig.name.clone(),
             map_type_params(&method_decl.sig.type_params),
             map_params(&method_decl.sig.params),
         ),
-        typed_tree::CallableRef::MethodDef { method_def, .. } => (
+        CallableRef::MethodDef { method_def, .. } => (
             method_def.sig.name.clone(),
             map_type_params(&method_def.sig.type_params),
             map_params(&method_def.sig.params),
         ),
-        typed_tree::CallableRef::ClosureDef(closure_def) => (
+        CallableRef::ClosureDef(closure_def) => (
             "<closure>".to_string(),
             Vec::new(),
             map_params(&closure_def.sig.params),
@@ -127,10 +116,10 @@ pub(super) fn format_source_callable_signature(
     for (idx, (param_name, mode, param_def_id, param_ty_expr)) in params_src.into_iter().enumerate()
     {
         let mode_prefix = match mode {
-            crate::core::tree::ParamMode::In => "",
-            crate::core::tree::ParamMode::InOut => "inout ",
-            crate::core::tree::ParamMode::Out => "out ",
-            crate::core::tree::ParamMode::Sink => "sink ",
+            ParamMode::In => "",
+            ParamMode::InOut => "inout ",
+            ParamMode::Out => "out ",
+            ParamMode::Sink => "sink ",
         };
         let param_ty =
             format_type_expr_for_signature(&param_ty_expr, demangler).unwrap_or_else(|| {
@@ -165,10 +154,10 @@ pub(super) fn format_source_callable_signature(
 }
 
 fn format_type_expr_for_signature(
-    ty_expr: &typed_tree::TypeExpr,
+    ty_expr: &TypeExpr,
     demangler: &TypestateNameDemangler,
 ) -> Option<String> {
-    use crate::core::tree::TypeExprKind;
+    use TypeExprKind;
     Some(match &ty_expr.kind {
         TypeExprKind::Infer => "_".to_string(),
         TypeExprKind::Named {
@@ -226,10 +215,10 @@ fn format_type_expr_for_signature(
                 .filter_map(|param| {
                     let ty = format_type_expr_for_signature(&param.ty_expr, demangler)?;
                     let mode = match param.mode {
-                        crate::core::tree::ParamMode::In => "",
-                        crate::core::tree::ParamMode::InOut => "inout ",
-                        crate::core::tree::ParamMode::Out => "out ",
-                        crate::core::tree::ParamMode::Sink => "sink ",
+                        ParamMode::In => "",
+                        ParamMode::InOut => "inout ",
+                        ParamMode::Out => "out ",
+                        ParamMode::Sink => "sink ",
                     };
                     Some(format!("{mode}{ty}"))
                 })

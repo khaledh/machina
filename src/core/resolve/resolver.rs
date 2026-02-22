@@ -7,16 +7,14 @@ use crate::core::context::{
     module_export_facts_from_def_table,
 };
 use crate::core::diag::Span;
-use crate::core::resolve::def_table::{DefTable, DefTableBuilder, NodeDefLookup};
+use crate::core::resolve::def_table::{DefTable, DefTableBuilder};
 use crate::core::resolve::errors::{ResolveError, ResolveErrorKind as REK};
 use crate::core::resolve::symbols::{Scope, Symbol, SymbolKind};
 use crate::core::resolve::{
     Def, DefId, DefIdGen, DefKind, FuncAttrs, TraitAttrs, TypeAttrs, Visibility,
 };
-use crate::core::tree::ParamMode;
-use crate::core::tree::parsed::*;
-use crate::core::tree::resolved::builder::build_module;
 use crate::core::tree::visit::*;
+use crate::core::tree::*;
 use crate::core::types::{BUILTIN_TYPES, Type};
 use crate::core::typestate::TypestateRoleImplRef;
 
@@ -775,10 +773,7 @@ impl SymbolResolver {
         );
     }
 
-    pub fn resolve_partial(
-        &mut self,
-        module: &Module,
-    ) -> (DefTable, NodeDefLookup, Vec<ResolveError>) {
+    pub fn resolve_partial(&mut self, module: &Module) -> (DefTable, Vec<ResolveError>) {
         self.with_scope(|resolver| {
             // global scope
 
@@ -793,7 +788,6 @@ impl SymbolResolver {
                             id: NodeId(0),
                             kind: TypeExprKind::Named {
                                 ident: ty_name.clone(),
-                                def_id: (),
                                 type_args: Vec::new(),
                             },
                             span: Span::default(),
@@ -807,7 +801,6 @@ impl SymbolResolver {
                     id: NodeId(0),
                     kind: TypeExprKind::Named {
                         ident: "set".to_string(),
-                        def_id: (),
                         type_args: Vec::new(),
                     },
                     span: Span::default(),
@@ -819,7 +812,6 @@ impl SymbolResolver {
                     id: NodeId(0),
                     kind: TypeExprKind::Named {
                         ident: "map".to_string(),
-                        def_id: (),
                         type_args: Vec::new(),
                     },
                     span: Span::default(),
@@ -832,7 +824,6 @@ impl SymbolResolver {
                         id: NodeId(0),
                         kind: TypeExprKind::Named {
                             ident: "Pending".to_string(),
-                            def_id: (),
                             type_args: Vec::new(),
                         },
                         span: Span::default(),
@@ -845,7 +836,6 @@ impl SymbolResolver {
                         id: NodeId(0),
                         kind: TypeExprKind::Named {
                             ident: "ReplyCap".to_string(),
-                            def_id: (),
                             type_args: Vec::new(),
                         },
                         span: Span::default(),
@@ -859,9 +849,9 @@ impl SymbolResolver {
             resolver.bind_typestate_role_impls(module);
         });
 
-        let (def_table, node_def_lookup) = std::mem::take(&mut self.def_table_builder).finish();
+        let def_table = std::mem::take(&mut self.def_table_builder).finish();
         let errors = std::mem::take(&mut self.errors);
-        (def_table, node_def_lookup, errors)
+        (def_table, errors)
     }
 
     fn bind_typestate_role_impls(&mut self, module: &Module) {
@@ -998,7 +988,6 @@ impl SymbolResolver {
             TypeExprKind::Named {
                 ident,
                 type_args,
-                def_id: _,
             } if ident == "Machine" && type_args.len() == 1
         )
     }
@@ -1026,18 +1015,6 @@ impl SymbolResolver {
             }
         }
         peers
-    }
-
-    pub fn resolve(
-        &mut self,
-        module: &Module,
-    ) -> Result<(DefTable, NodeDefLookup), Vec<ResolveError>> {
-        let (def_table, node_def_lookup, errors) = self.resolve_partial(module);
-        if errors.is_empty() {
-            Ok((def_table, node_def_lookup))
-        } else {
-            Err(errors)
-        }
     }
 
     fn check_lvalue_mutability(&mut self, expr: &Expr) {
@@ -1088,9 +1065,7 @@ impl SymbolResolver {
 
     fn check_bind_pattern(&mut self, pattern: &BindPattern, is_mutable: bool) {
         match &pattern.kind {
-            BindPatternKind::Name {
-                ident: var_name, ..
-            } => {
+            BindPatternKind::Name { ident: var_name } => {
                 let def_id = self.def_id_gen.new_id();
                 let def = Def {
                     id: def_id,
@@ -1340,7 +1315,7 @@ impl SymbolResolver {
     }
 }
 
-impl Visitor<()> for SymbolResolver {
+impl Visitor for SymbolResolver {
     fn visit_protocol_def(&mut self, protocol_def: &ProtocolDef) {
         let mut local_roles = HashSet::new();
         for role in &protocol_def.roles {
@@ -1667,11 +1642,7 @@ impl Visitor<()> for SymbolResolver {
                 self.check_bind_pattern(pattern, true);
             }
 
-            StmtExprKind::VarDecl {
-                ident,
-                decl_ty,
-                def_id: _,
-            } => {
+            StmtExprKind::VarDecl { ident, decl_ty } => {
                 let def_id = self.def_id_gen.new_id();
                 let def = Def {
                     id: def_id,
@@ -2033,10 +2004,8 @@ pub fn resolve_with_imports_and_symbols_and_typestate_roles_partial(
     resolver.imported_modules = imported_modules;
     resolver.imported_symbols = imported_symbols;
     resolver.set_typestate_role_impls(typestate_role_impls);
-    let (def_table, node_def_lookup, errors) = resolver.resolve_partial(&ast_context.module);
+    let (def_table, errors) = resolver.resolve_partial(&ast_context.module);
 
-    // Build resolved tree from parsed tree + NodeDefLookup
-    let resolved_module = build_module(&node_def_lookup, &ast_context.module);
     let imported_facts = ImportedFacts {
         callable_sigs_by_def: std::mem::take(&mut resolver.imported_callable_sigs),
         type_defs_by_def: std::mem::take(&mut resolver.imported_type_defs),
@@ -2044,7 +2013,7 @@ pub fn resolve_with_imports_and_symbols_and_typestate_roles_partial(
     };
 
     ResolveOutput {
-        context: ast_context.with_def_table(def_table, resolved_module),
+        context: ast_context.with_def_table(def_table),
         imported_facts,
         errors,
     }

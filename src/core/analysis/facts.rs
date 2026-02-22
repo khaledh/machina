@@ -262,6 +262,15 @@ impl DefTableOverlay {
         def_id
     }
 
+    pub fn record_def_node(
+        &mut self,
+        def_id: DefId,
+        node_id: NodeId,
+        span: crate::core::diag::Span,
+    ) {
+        self.working.record_def_node(def_id, node_id, span);
+    }
+
     pub fn origin_for_def(&self, def_id: DefId) -> Option<FactOrigin> {
         if let Some(origin) = self.def_origin.get(&def_id) {
             Some(origin.clone())

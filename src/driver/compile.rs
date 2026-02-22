@@ -7,18 +7,15 @@ use crate::core::api::{
 };
 use crate::core::backend;
 use crate::core::backend::regalloc::arm64::Arm64Target;
-use crate::core::capsule;
-use crate::core::capsule::ModuleId;
 use crate::core::capsule::compose::{flatten_capsule, merge_modules};
+use crate::core::capsule::{self, ModuleId};
 use crate::core::context::{CapsuleParsedContext, ParsedContext};
 use crate::core::diag::CompileError;
 use crate::core::ir::format::{format_func_with_comments_and_names, format_globals};
 use crate::core::lexer::{LexError, Lexer, Token};
 use crate::core::monomorphize;
 use crate::core::nrvo::NrvoAnalyzer;
-use crate::core::tree::NodeId;
-use crate::core::tree::NodeIdGen;
-use crate::core::tree::parsed::Module as ParsedModule;
+use crate::core::tree::{Module, NodeId, NodeIdGen};
 
 #[derive(Debug)]
 pub struct CompileOptions {
@@ -374,7 +371,7 @@ fn parse_with_id_gen(
     source: &str,
     id_gen: NodeIdGen,
     experimental_typestate: bool,
-) -> Result<(ParsedModule, NodeIdGen), Vec<CompileError>> {
+) -> Result<(Module, NodeIdGen), Vec<CompileError>> {
     parse_module_with_id_gen_and_options(
         source,
         id_gen,
