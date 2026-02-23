@@ -1,8 +1,8 @@
 use clap::Parser as ClapParser;
 use machina::core::capsule::CapsuleError;
-use machina::core::diag::{CompileError, Position, Span, format_error};
+use machina::core::diag::{CompileError, Span, format_error};
 use machina::driver::compile::{CompileOptions, check_with_path, compile_with_path};
-use machina::services::analysis::db::AnalysisDb;
+use machina::driver::query::{QueryLookupKind as DriverQueryLookupKind, run_query};
 use machina::services::analysis::diagnostics::Diagnostic;
 use machina::services::analysis::diagnostics::DiagnosticPhase;
 use std::ffi::OsStr;
@@ -123,6 +123,23 @@ enum QueryLookupKind {
     CodeActions,
 }
 
+impl From<QueryLookupKind> for DriverQueryLookupKind {
+    fn from(value: QueryLookupKind) -> Self {
+        match value {
+            QueryLookupKind::Def => DriverQueryLookupKind::Def,
+            QueryLookupKind::Type => DriverQueryLookupKind::Type,
+            QueryLookupKind::Hover => DriverQueryLookupKind::Hover,
+            QueryLookupKind::Completions => DriverQueryLookupKind::Completions,
+            QueryLookupKind::Signature => DriverQueryLookupKind::Signature,
+            QueryLookupKind::References => DriverQueryLookupKind::References,
+            QueryLookupKind::Rename => DriverQueryLookupKind::Rename,
+            QueryLookupKind::DocumentSymbols => DriverQueryLookupKind::DocumentSymbols,
+            QueryLookupKind::SemanticTokens => DriverQueryLookupKind::SemanticTokens,
+            QueryLookupKind::CodeActions => DriverQueryLookupKind::CodeActions,
+        }
+    }
+}
+
 #[derive(clap::ValueEnum, Clone, Copy, PartialEq, Eq)]
 enum ExperimentalFeature {
     Typestate,
@@ -193,7 +210,7 @@ fn main() {
             new_name,
         } => {
             let input_path = PathBuf::from(input);
-            match run_query(&input_path, &pos, kind, new_name.as_deref()) {
+            match run_query(&input_path, &pos, kind.into(), new_name.as_deref()) {
                 Ok(0) => {}
                 Ok(_) => std::process::exit(1),
                 Err(message) => {
@@ -450,287 +467,6 @@ fn print_structured_diag(source: &str, diag: Diagnostic) {
     };
     let message = format!("[{phase}:{}] {}", diag.code, diag.message);
     println!("{}", format_error(source, diag.span, message));
-}
-
-fn run_query(
-    input_path: &Path,
-    pos: &str,
-    kind: QueryLookupKind,
-    new_name: Option<&str>,
-) -> Result<usize, String> {
-    let source = std::fs::read_to_string(input_path)
-        .map_err(|e| format!("failed to read {}: {e}", input_path.display()))?;
-    let (line, col) = parse_pos_arg(pos)?;
-    let position = position_from_line_col(&source, line, col)?;
-    let query_span = Span {
-        start: position,
-        end: position,
-    };
-
-    let mut db = AnalysisDb::new();
-    let file_id = db.upsert_disk_text(input_path.to_path_buf(), source.as_str());
-
-    match kind {
-        QueryLookupKind::Def => {
-            let def_id = db
-                .def_at_file(file_id, query_span)
-                .map_err(|_| "analysis query cancelled".to_string())?;
-            if let Some(def_id) = def_id {
-                println!("def {}", def_id.0);
-                Ok(0)
-            } else {
-                println!("[NONE] no definition at {line}:{col}");
-                Ok(1)
-            }
-        }
-        QueryLookupKind::Type => {
-            let ty = db
-                .type_at_file(file_id, query_span)
-                .map_err(|_| "analysis query cancelled".to_string())?;
-            if let Some(ty) = ty {
-                println!("{ty}");
-                Ok(0)
-            } else {
-                println!("[NONE] no type at {line}:{col}");
-                Ok(1)
-            }
-        }
-        QueryLookupKind::Hover => {
-            let hover = db
-                .hover_at_file(file_id, query_span)
-                .map_err(|_| "analysis query cancelled".to_string())?;
-            if let Some(hover) = hover {
-                println!("{}", hover.display);
-                Ok(0)
-            } else {
-                println!("[NONE] no hover info at {line}:{col}");
-                Ok(1)
-            }
-        }
-        QueryLookupKind::Completions => {
-            let items = db
-                .completions_at_file(file_id, query_span)
-                .map_err(|_| "analysis query cancelled".to_string())?;
-            if items.is_empty() {
-                println!("[NONE] no completions at {line}:{col}");
-                return Ok(1);
-            }
-            for item in items {
-                if let Some(detail) = item.detail {
-                    println!("{} ({detail})", item.label);
-                } else {
-                    println!("{}", item.label);
-                }
-            }
-            Ok(0)
-        }
-        QueryLookupKind::Signature => {
-            let sig = db
-                .signature_help_at_file(file_id, query_span)
-                .map_err(|_| "analysis query cancelled".to_string())?;
-            if let Some(sig) = sig {
-                println!("{}", sig.label);
-                println!("active_parameter={}", sig.active_parameter);
-                Ok(0)
-            } else {
-                println!("[NONE] no signature info at {line}:{col}");
-                Ok(1)
-            }
-        }
-        QueryLookupKind::References => {
-            let def_id = db
-                .def_at_file(file_id, query_span)
-                .map_err(|_| "analysis query cancelled".to_string())?;
-            let Some(def_id) = def_id else {
-                println!("[NONE] no definition at {line}:{col}");
-                return Ok(1);
-            };
-
-            let refs = db
-                .references(def_id)
-                .map_err(|_| "analysis query cancelled".to_string())?;
-            if refs.is_empty() {
-                println!("[NONE] no references for def {}", def_id.0);
-                return Ok(1);
-            }
-            println!("def {} references {}", def_id.0, refs.len());
-            for loc in refs {
-                println!(
-                    "{}",
-                    format_location(&loc.path, loc.file_id.0 as u64, loc.span)
-                );
-            }
-            Ok(0)
-        }
-        QueryLookupKind::Rename => {
-            let Some(new_name) = new_name else {
-                return Err("`--new-name` is required for `--kind rename`".to_string());
-            };
-            let def_id = db
-                .def_at_file(file_id, query_span)
-                .map_err(|_| "analysis query cancelled".to_string())?;
-            let Some(def_id) = def_id else {
-                println!("[NONE] no definition at {line}:{col}");
-                return Ok(1);
-            };
-
-            let plan = db
-                .rename_plan(def_id, new_name)
-                .map_err(|_| "analysis query cancelled".to_string())?;
-            let old_name = plan.old_name.as_deref().unwrap_or("<unknown>");
-            let can_apply = plan.can_apply();
-            println!(
-                "rename {} {} -> {} (edits: {}, conflicts: {}, can_apply: {})",
-                plan.def_id.0,
-                old_name,
-                plan.new_name,
-                plan.edits.len(),
-                plan.conflicts.len(),
-                can_apply
-            );
-            for conflict in &plan.conflicts {
-                match conflict.existing_def {
-                    Some(existing) => {
-                        println!("conflict [{}]: {}", existing.0, conflict.message);
-                    }
-                    None => println!("conflict: {}", conflict.message),
-                }
-            }
-            for edit in &plan.edits {
-                println!(
-                    "edit {} => `{}`",
-                    format_location(
-                        &edit.location.path,
-                        edit.location.file_id.0 as u64,
-                        edit.location.span
-                    ),
-                    edit.replacement
-                );
-            }
-            if can_apply { Ok(0) } else { Ok(1) }
-        }
-        QueryLookupKind::DocumentSymbols => {
-            let symbols = db
-                .document_symbols_at_file(file_id)
-                .map_err(|_| "analysis query cancelled".to_string())?;
-            if symbols.is_empty() {
-                println!("[NONE] no document symbols");
-                return Ok(1);
-            }
-            for sym in symbols {
-                println!(
-                    "{} [{}] {}",
-                    sym.name,
-                    sym.def_id.0,
-                    format_location(&Some(input_path.to_path_buf()), file_id.0 as u64, sym.span)
-                );
-            }
-            Ok(0)
-        }
-        QueryLookupKind::SemanticTokens => {
-            let tokens = db
-                .semantic_tokens_at_file(file_id)
-                .map_err(|_| "analysis query cancelled".to_string())?;
-            if tokens.is_empty() {
-                println!("[NONE] no semantic tokens");
-                return Ok(1);
-            }
-            for token in tokens {
-                println!(
-                    "{:?} [{}] {}",
-                    token.kind,
-                    token.def_id.0,
-                    format_location(
-                        &Some(input_path.to_path_buf()),
-                        file_id.0 as u64,
-                        token.span
-                    )
-                );
-            }
-            Ok(0)
-        }
-        QueryLookupKind::CodeActions => {
-            let actions = db
-                .code_actions_at_file(file_id, query_span)
-                .map_err(|_| "analysis query cancelled".to_string())?;
-            if actions.is_empty() {
-                println!("[NONE] no code actions at {line}:{col}");
-                return Ok(1);
-            }
-            for action in actions {
-                println!("{} [{}]", action.title, action.diagnostic_code);
-                for edit in action.edits {
-                    println!(
-                        "  edit {} => `{}`",
-                        format_location(
-                            &Some(input_path.to_path_buf()),
-                            file_id.0 as u64,
-                            edit.span
-                        ),
-                        edit.new_text
-                    );
-                }
-            }
-            Ok(0)
-        }
-    }
-}
-
-fn format_location(path: &Option<PathBuf>, file_id: u64, span: Span) -> String {
-    let base = path
-        .as_ref()
-        .map(|p| p.display().to_string())
-        .unwrap_or_else(|| format!("<file:{file_id}>"));
-    format!(
-        "{}:{}:{}-{}:{}",
-        base, span.start.line, span.start.column, span.end.line, span.end.column
-    )
-}
-
-fn parse_pos_arg(pos: &str) -> Result<(usize, usize), String> {
-    let (line, col) = pos
-        .split_once(':')
-        .ok_or_else(|| format!("invalid --pos format `{pos}`; expected line:col"))?;
-    let line = line
-        .parse::<usize>()
-        .map_err(|_| format!("invalid line in --pos `{pos}`"))?;
-    let col = col
-        .parse::<usize>()
-        .map_err(|_| format!("invalid column in --pos `{pos}`"))?;
-    if line == 0 || col == 0 {
-        return Err(format!("--pos must be 1-based, got `{pos}`"));
-    }
-    Ok((line, col))
-}
-
-fn position_from_line_col(source: &str, line: usize, col: usize) -> Result<Position, String> {
-    let mut curr_line = 1usize;
-    let mut curr_col = 1usize;
-    for (offset, ch) in source.char_indices() {
-        if curr_line == line && curr_col == col {
-            return Ok(Position {
-                offset,
-                line,
-                column: col,
-            });
-        }
-        if ch == '\n' {
-            curr_line += 1;
-            curr_col = 1;
-        } else {
-            curr_col += 1;
-        }
-    }
-    if curr_line == line && curr_col == col {
-        return Ok(Position {
-            offset: source.len(),
-            line,
-            column: col,
-        });
-    }
-    Err(format!(
-        "position {line}:{col} is outside source range (line={curr_line}, col={curr_col})"
-    ))
 }
 
 fn default_exe_path(input_path: &Path) -> PathBuf {
