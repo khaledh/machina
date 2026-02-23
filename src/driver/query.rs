@@ -28,6 +28,33 @@ struct QueryRequest {
     file_id: crate::services::analysis::snapshot::FileId,
 }
 
+struct QueryPrinter<'a> {
+    req: &'a QueryRequest,
+}
+
+impl<'a> QueryPrinter<'a> {
+    fn new(req: &'a QueryRequest) -> Self {
+        Self { req }
+    }
+
+    fn none_at(&self, what: &str) -> usize {
+        println!("[NONE] no {what} at {}:{}", self.req.line, self.req.col);
+        1
+    }
+
+    fn location(&self, path: Option<&Path>, file_id: u64, span: Span) -> String {
+        format_location(path, file_id, span)
+    }
+
+    fn input_location(&self, span: Span) -> String {
+        self.location(
+            Some(self.req.input_path.as_path()),
+            self.req.file_id.0 as u64,
+            span,
+        )
+    }
+}
+
 /// Execute a single query at a source location and print user-facing output.
 pub fn run_query(
     input_path: &Path,
@@ -85,43 +112,46 @@ fn dispatch_query_kind(
 }
 
 fn run_def_query(db: &mut AnalysisDb, req: &QueryRequest) -> Result<usize, String> {
-    let def_id = def_at_query_point(db, req)?;
-    if let Some(def_id) = def_id {
-        println!("def {}", def_id.0);
-        Ok(0)
-    } else {
-        println!("[NONE] no definition at {}:{}", req.line, req.col);
-        Ok(1)
-    }
+    run_optional_query(
+        req,
+        "definition",
+        || def_at_query_point(db, req),
+        |def_id| {
+            println!("def {}", def_id.0);
+            Ok(0)
+        },
+    )
 }
 
 fn run_type_query(db: &mut AnalysisDb, req: &QueryRequest) -> Result<usize, String> {
-    let ty = map_query_cancelled(db.type_at_file(req.file_id, req.span))?;
-    if let Some(ty) = ty {
-        println!("{ty}");
-        Ok(0)
-    } else {
-        println!("[NONE] no type at {}:{}", req.line, req.col);
-        Ok(1)
-    }
+    run_optional_query(
+        req,
+        "type",
+        || map_query_cancelled(db.type_at_file(req.file_id, req.span)),
+        |ty| {
+            println!("{ty}");
+            Ok(0)
+        },
+    )
 }
 
 fn run_hover_query(db: &mut AnalysisDb, req: &QueryRequest) -> Result<usize, String> {
-    let hover = map_query_cancelled(db.hover_at_file(req.file_id, req.span))?;
-    if let Some(hover) = hover {
-        println!("{}", hover.display);
-        Ok(0)
-    } else {
-        println!("[NONE] no hover info at {}:{}", req.line, req.col);
-        Ok(1)
-    }
+    run_optional_query(
+        req,
+        "hover info",
+        || map_query_cancelled(db.hover_at_file(req.file_id, req.span)),
+        |hover| {
+            println!("{}", hover.display);
+            Ok(0)
+        },
+    )
 }
 
 fn run_completions_query(db: &mut AnalysisDb, req: &QueryRequest) -> Result<usize, String> {
+    let printer = QueryPrinter::new(req);
     let items = map_query_cancelled(db.completions_at_file(req.file_id, req.span))?;
     if items.is_empty() {
-        println!("[NONE] no completions at {}:{}", req.line, req.col);
-        return Ok(1);
+        return Ok(printer.none_at("completions"));
     }
     for item in items {
         if let Some(detail) = item.detail {
@@ -134,22 +164,23 @@ fn run_completions_query(db: &mut AnalysisDb, req: &QueryRequest) -> Result<usiz
 }
 
 fn run_signature_query(db: &mut AnalysisDb, req: &QueryRequest) -> Result<usize, String> {
-    let sig = map_query_cancelled(db.signature_help_at_file(req.file_id, req.span))?;
-    if let Some(sig) = sig {
-        println!("{}", sig.label);
-        println!("active_parameter={}", sig.active_parameter);
-        Ok(0)
-    } else {
-        println!("[NONE] no signature info at {}:{}", req.line, req.col);
-        Ok(1)
-    }
+    run_optional_query(
+        req,
+        "signature info",
+        || map_query_cancelled(db.signature_help_at_file(req.file_id, req.span)),
+        |sig| {
+            println!("{}", sig.label);
+            println!("active_parameter={}", sig.active_parameter);
+            Ok(0)
+        },
+    )
 }
 
 fn run_references_query(db: &mut AnalysisDb, req: &QueryRequest) -> Result<usize, String> {
+    let printer = QueryPrinter::new(req);
     let def_id = def_at_query_point(db, req)?;
     let Some(def_id) = def_id else {
-        println!("[NONE] no definition at {}:{}", req.line, req.col);
-        return Ok(1);
+        return Ok(printer.none_at("definition"));
     };
 
     let refs = map_query_cancelled(db.references(def_id))?;
@@ -161,7 +192,7 @@ fn run_references_query(db: &mut AnalysisDb, req: &QueryRequest) -> Result<usize
     for loc in refs {
         println!(
             "{}",
-            format_location(&loc.path, loc.file_id.0 as u64, loc.span)
+            printer.location(loc.path.as_deref(), loc.file_id.0 as u64, loc.span)
         );
     }
     Ok(0)
@@ -172,13 +203,13 @@ fn run_rename_query(
     req: &QueryRequest,
     new_name: Option<&str>,
 ) -> Result<usize, String> {
+    let printer = QueryPrinter::new(req);
     let Some(new_name) = new_name else {
         return Err("`--new-name` is required for `--kind rename`".to_string());
     };
     let def_id = def_at_query_point(db, req)?;
     let Some(def_id) = def_id else {
-        println!("[NONE] no definition at {}:{}", req.line, req.col);
-        return Ok(1);
+        return Ok(printer.none_at("definition"));
     };
 
     let plan = map_query_cancelled(db.rename_plan(def_id, new_name))?;
@@ -202,8 +233,8 @@ fn run_rename_query(
     for edit in &plan.edits {
         println!(
             "edit {} => `{}`",
-            format_location(
-                &edit.location.path,
+            printer.location(
+                edit.location.path.as_deref(),
                 edit.location.file_id.0 as u64,
                 edit.location.span
             ),
@@ -214,6 +245,7 @@ fn run_rename_query(
 }
 
 fn run_document_symbols_query(db: &mut AnalysisDb, req: &QueryRequest) -> Result<usize, String> {
+    let printer = QueryPrinter::new(req);
     let symbols = map_query_cancelled(db.document_symbols_at_file(req.file_id))?;
     if symbols.is_empty() {
         println!("[NONE] no document symbols");
@@ -224,17 +256,14 @@ fn run_document_symbols_query(db: &mut AnalysisDb, req: &QueryRequest) -> Result
             "{} [{}] {}",
             sym.name,
             sym.def_id.0,
-            format_location(
-                &Some(req.input_path.clone()),
-                req.file_id.0 as u64,
-                sym.span
-            )
+            printer.input_location(sym.span)
         );
     }
     Ok(0)
 }
 
 fn run_semantic_tokens_query(db: &mut AnalysisDb, req: &QueryRequest) -> Result<usize, String> {
+    let printer = QueryPrinter::new(req);
     let tokens = map_query_cancelled(db.semantic_tokens_at_file(req.file_id))?;
     if tokens.is_empty() {
         println!("[NONE] no semantic tokens");
@@ -245,32 +274,24 @@ fn run_semantic_tokens_query(db: &mut AnalysisDb, req: &QueryRequest) -> Result<
             "{:?} [{}] {}",
             token.kind,
             token.def_id.0,
-            format_location(
-                &Some(req.input_path.clone()),
-                req.file_id.0 as u64,
-                token.span
-            )
+            printer.input_location(token.span)
         );
     }
     Ok(0)
 }
 
 fn run_code_actions_query(db: &mut AnalysisDb, req: &QueryRequest) -> Result<usize, String> {
+    let printer = QueryPrinter::new(req);
     let actions = map_query_cancelled(db.code_actions_at_file(req.file_id, req.span))?;
     if actions.is_empty() {
-        println!("[NONE] no code actions at {}:{}", req.line, req.col);
-        return Ok(1);
+        return Ok(printer.none_at("code actions"));
     }
     for action in actions {
         println!("{} [{}]", action.title, action.diagnostic_code);
         for edit in action.edits {
             println!(
                 "  edit {} => `{}`",
-                format_location(
-                    &Some(req.input_path.clone()),
-                    req.file_id.0 as u64,
-                    edit.span
-                ),
+                printer.input_location(edit.span),
                 edit.new_text
             );
         }
@@ -278,9 +299,8 @@ fn run_code_actions_query(db: &mut AnalysisDb, req: &QueryRequest) -> Result<usi
     Ok(0)
 }
 
-fn format_location(path: &Option<PathBuf>, file_id: u64, span: Span) -> String {
+fn format_location(path: Option<&Path>, file_id: u64, span: Span) -> String {
     let base = path
-        .as_ref()
         .map(|p| p.display().to_string())
         .unwrap_or_else(|| format!("<file:{file_id}>"));
     format!(
@@ -291,6 +311,20 @@ fn format_location(path: &Option<PathBuf>, file_id: u64, span: Span) -> String {
 
 fn def_at_query_point(db: &mut AnalysisDb, req: &QueryRequest) -> Result<Option<DefId>, String> {
     map_query_cancelled(db.def_at_file(req.file_id, req.span))
+}
+
+fn run_optional_query<T>(
+    req: &QueryRequest,
+    none_message: &str,
+    query: impl FnOnce() -> Result<Option<T>, String>,
+    on_some: impl FnOnce(T) -> Result<usize, String>,
+) -> Result<usize, String> {
+    let printer = QueryPrinter::new(req);
+    let value = query()?;
+    match value {
+        Some(value) => on_some(value),
+        None => Ok(printer.none_at(none_message)),
+    }
 }
 
 fn map_query_cancelled<T>(result: QueryResult<T>) -> Result<T, String> {
