@@ -1,7 +1,9 @@
 use std::path::{Path, PathBuf};
 
 use crate::core::diag::{Position, Span};
+use crate::core::resolve::def::DefId;
 use crate::services::analysis::db::AnalysisDb;
+use crate::services::analysis::query::QueryResult;
 
 #[derive(Debug, Clone, Copy)]
 pub enum QueryLookupKind {
@@ -83,9 +85,7 @@ fn dispatch_query_kind(
 }
 
 fn run_def_query(db: &mut AnalysisDb, req: &QueryRequest) -> Result<usize, String> {
-    let def_id = db
-        .def_at_file(req.file_id, req.span)
-        .map_err(|_| "analysis query cancelled".to_string())?;
+    let def_id = def_at_query_point(db, req)?;
     if let Some(def_id) = def_id {
         println!("def {}", def_id.0);
         Ok(0)
@@ -96,9 +96,7 @@ fn run_def_query(db: &mut AnalysisDb, req: &QueryRequest) -> Result<usize, Strin
 }
 
 fn run_type_query(db: &mut AnalysisDb, req: &QueryRequest) -> Result<usize, String> {
-    let ty = db
-        .type_at_file(req.file_id, req.span)
-        .map_err(|_| "analysis query cancelled".to_string())?;
+    let ty = map_query_cancelled(db.type_at_file(req.file_id, req.span))?;
     if let Some(ty) = ty {
         println!("{ty}");
         Ok(0)
@@ -109,9 +107,7 @@ fn run_type_query(db: &mut AnalysisDb, req: &QueryRequest) -> Result<usize, Stri
 }
 
 fn run_hover_query(db: &mut AnalysisDb, req: &QueryRequest) -> Result<usize, String> {
-    let hover = db
-        .hover_at_file(req.file_id, req.span)
-        .map_err(|_| "analysis query cancelled".to_string())?;
+    let hover = map_query_cancelled(db.hover_at_file(req.file_id, req.span))?;
     if let Some(hover) = hover {
         println!("{}", hover.display);
         Ok(0)
@@ -122,9 +118,7 @@ fn run_hover_query(db: &mut AnalysisDb, req: &QueryRequest) -> Result<usize, Str
 }
 
 fn run_completions_query(db: &mut AnalysisDb, req: &QueryRequest) -> Result<usize, String> {
-    let items = db
-        .completions_at_file(req.file_id, req.span)
-        .map_err(|_| "analysis query cancelled".to_string())?;
+    let items = map_query_cancelled(db.completions_at_file(req.file_id, req.span))?;
     if items.is_empty() {
         println!("[NONE] no completions at {}:{}", req.line, req.col);
         return Ok(1);
@@ -140,9 +134,7 @@ fn run_completions_query(db: &mut AnalysisDb, req: &QueryRequest) -> Result<usiz
 }
 
 fn run_signature_query(db: &mut AnalysisDb, req: &QueryRequest) -> Result<usize, String> {
-    let sig = db
-        .signature_help_at_file(req.file_id, req.span)
-        .map_err(|_| "analysis query cancelled".to_string())?;
+    let sig = map_query_cancelled(db.signature_help_at_file(req.file_id, req.span))?;
     if let Some(sig) = sig {
         println!("{}", sig.label);
         println!("active_parameter={}", sig.active_parameter);
@@ -154,17 +146,13 @@ fn run_signature_query(db: &mut AnalysisDb, req: &QueryRequest) -> Result<usize,
 }
 
 fn run_references_query(db: &mut AnalysisDb, req: &QueryRequest) -> Result<usize, String> {
-    let def_id = db
-        .def_at_file(req.file_id, req.span)
-        .map_err(|_| "analysis query cancelled".to_string())?;
+    let def_id = def_at_query_point(db, req)?;
     let Some(def_id) = def_id else {
         println!("[NONE] no definition at {}:{}", req.line, req.col);
         return Ok(1);
     };
 
-    let refs = db
-        .references(def_id)
-        .map_err(|_| "analysis query cancelled".to_string())?;
+    let refs = map_query_cancelled(db.references(def_id))?;
     if refs.is_empty() {
         println!("[NONE] no references for def {}", def_id.0);
         return Ok(1);
@@ -187,17 +175,13 @@ fn run_rename_query(
     let Some(new_name) = new_name else {
         return Err("`--new-name` is required for `--kind rename`".to_string());
     };
-    let def_id = db
-        .def_at_file(req.file_id, req.span)
-        .map_err(|_| "analysis query cancelled".to_string())?;
+    let def_id = def_at_query_point(db, req)?;
     let Some(def_id) = def_id else {
         println!("[NONE] no definition at {}:{}", req.line, req.col);
         return Ok(1);
     };
 
-    let plan = db
-        .rename_plan(def_id, new_name)
-        .map_err(|_| "analysis query cancelled".to_string())?;
+    let plan = map_query_cancelled(db.rename_plan(def_id, new_name))?;
     let old_name = plan.old_name.as_deref().unwrap_or("<unknown>");
     let can_apply = plan.can_apply();
     println!(
@@ -230,9 +214,7 @@ fn run_rename_query(
 }
 
 fn run_document_symbols_query(db: &mut AnalysisDb, req: &QueryRequest) -> Result<usize, String> {
-    let symbols = db
-        .document_symbols_at_file(req.file_id)
-        .map_err(|_| "analysis query cancelled".to_string())?;
+    let symbols = map_query_cancelled(db.document_symbols_at_file(req.file_id))?;
     if symbols.is_empty() {
         println!("[NONE] no document symbols");
         return Ok(1);
@@ -253,9 +235,7 @@ fn run_document_symbols_query(db: &mut AnalysisDb, req: &QueryRequest) -> Result
 }
 
 fn run_semantic_tokens_query(db: &mut AnalysisDb, req: &QueryRequest) -> Result<usize, String> {
-    let tokens = db
-        .semantic_tokens_at_file(req.file_id)
-        .map_err(|_| "analysis query cancelled".to_string())?;
+    let tokens = map_query_cancelled(db.semantic_tokens_at_file(req.file_id))?;
     if tokens.is_empty() {
         println!("[NONE] no semantic tokens");
         return Ok(1);
@@ -276,9 +256,7 @@ fn run_semantic_tokens_query(db: &mut AnalysisDb, req: &QueryRequest) -> Result<
 }
 
 fn run_code_actions_query(db: &mut AnalysisDb, req: &QueryRequest) -> Result<usize, String> {
-    let actions = db
-        .code_actions_at_file(req.file_id, req.span)
-        .map_err(|_| "analysis query cancelled".to_string())?;
+    let actions = map_query_cancelled(db.code_actions_at_file(req.file_id, req.span))?;
     if actions.is_empty() {
         println!("[NONE] no code actions at {}:{}", req.line, req.col);
         return Ok(1);
@@ -309,6 +287,14 @@ fn format_location(path: &Option<PathBuf>, file_id: u64, span: Span) -> String {
         "{}:{}:{}-{}:{}",
         base, span.start.line, span.start.column, span.end.line, span.end.column
     )
+}
+
+fn def_at_query_point(db: &mut AnalysisDb, req: &QueryRequest) -> Result<Option<DefId>, String> {
+    map_query_cancelled(db.def_at_file(req.file_id, req.span))
+}
+
+fn map_query_cancelled<T>(result: QueryResult<T>) -> Result<T, String> {
+    result.map_err(|_| "analysis query cancelled".to_string())
 }
 
 fn parse_pos_arg(pos: &str) -> Result<(usize, usize), String> {
