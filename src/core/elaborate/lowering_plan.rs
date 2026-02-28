@@ -240,6 +240,9 @@ impl<'a> LoweringPlanBuilder<'a> {
                     self.visit_value_expr(value);
                 }
             }
+            sem::StmtExprKind::Defer { .. } | sem::StmtExprKind::Using { .. } => {
+                unreachable!("syntax desugar must remove defer/using before lowering planning");
+            }
             sem::StmtExprKind::VarDecl { .. }
             | sem::StmtExprKind::Break
             | sem::StmtExprKind::Continue => {}
@@ -455,6 +458,9 @@ impl<'a> LoweringPlanBuilder<'a> {
             | sem::StmtExprKind::For { .. }
             | sem::StmtExprKind::Break
             | sem::StmtExprKind::Continue => false,
+            sem::StmtExprKind::Defer { .. } | sem::StmtExprKind::Using { .. } => {
+                unreachable!("syntax desugar must remove defer/using before linearity checks");
+            }
         }
     }
 

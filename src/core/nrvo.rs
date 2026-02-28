@@ -174,6 +174,9 @@ impl NrvoSafetyChecker {
             SEK::Return { value } => value
                 .as_deref()
                 .is_none_or(|expr| self.check_expr(expr, true)),
+            SEK::Defer { .. } | SEK::Using { .. } => {
+                unreachable!("syntax desugar must remove defer/using before nrvo analysis");
+            }
         }
     }
 

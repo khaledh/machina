@@ -33,9 +33,11 @@ use crate::core::analysis::facts::SyntheticReason;
 use crate::core::diag::Span;
 use crate::core::elaborate::elaborator::Elaborator;
 use crate::core::resolve::{DefId, DefKind};
-use crate::core::tree::BinaryOp;
 use crate::core::tree::semantic as sem;
+use crate::core::tree::{BinaryOp, ParamMode};
 use crate::core::types::Type;
+use std::collections::HashMap;
+use std::ops::{Deref, DerefMut};
 
 /// Metadata for a synthesized local variable in the desugared loop.
 struct ForLocal {
@@ -45,11 +47,56 @@ struct ForLocal {
     pattern: sem::BindPattern,
 }
 
-pub(super) fn run(elaborator: &mut Elaborator<'_>, module: &mut sem::Module) {
-    elaborator.desugar_module(module);
+/// Known `using` cleanup entrypoints keyed by resource type name.
+struct UsingCleanupMethods {
+    close_ignore_error_by_type: HashMap<String, DefId>,
 }
 
-impl<'a> Elaborator<'a> {
+struct SyntaxDesugarCtx<'a, 'b> {
+    elaborator: &'a mut Elaborator<'b>,
+    cleanup_methods: UsingCleanupMethods,
+}
+
+impl<'a, 'b> Deref for SyntaxDesugarCtx<'a, 'b> {
+    type Target = Elaborator<'b>;
+
+    fn deref(&self) -> &Self::Target {
+        self.elaborator
+    }
+}
+
+impl<'a, 'b> DerefMut for SyntaxDesugarCtx<'a, 'b> {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        self.elaborator
+    }
+}
+
+pub(super) fn run(elaborator: &mut Elaborator<'_>, module: &mut sem::Module) {
+    let mut ctx = SyntaxDesugarCtx {
+        elaborator,
+        cleanup_methods: collect_using_cleanup_methods(module),
+    };
+    ctx.desugar_module(module);
+}
+
+fn collect_using_cleanup_methods(module: &sem::Module) -> UsingCleanupMethods {
+    let mut close_ignore_error_by_type = HashMap::new();
+    for block in module.method_blocks() {
+        for item in &block.method_items {
+            let sem::MethodItem::Def(def) = item else {
+                continue;
+            };
+            if def.sig.name == "close_ignore_error" {
+                close_ignore_error_by_type.insert(block.type_name.clone(), def.def_id);
+            }
+        }
+    }
+    UsingCleanupMethods {
+        close_ignore_error_by_type,
+    }
+}
+
+impl<'a, 'b> SyntaxDesugarCtx<'a, 'b> {
     fn desugar_module(&mut self, module: &mut sem::Module) {
         for item in &mut module.top_level_items {
             self.desugar_top_level_item(item);
@@ -215,6 +262,7 @@ impl<'a> Elaborator<'a> {
 
     fn desugar_block_items(&mut self, items: &mut Vec<sem::BlockItem>) {
         let mut rewritten = Vec::with_capacity(items.len());
+        let mut deferred = Vec::new();
         for item in items.drain(..) {
             match item {
                 sem::BlockItem::Expr(mut expr) => {
@@ -233,10 +281,28 @@ impl<'a> Elaborator<'a> {
                             self.desugar_value_expr(&mut expr);
                             rewritten.push(sem::BlockItem::Expr(expr));
                         }
+                        sem::StmtExprKind::Defer { value } => {
+                            deferred.push((**value).clone());
+                        }
+                        sem::StmtExprKind::Using {
+                            pattern,
+                            value,
+                            body,
+                        } => {
+                            let mut expr = self.desugar_using_stmt(&stmt, pattern, value, body);
+                            self.desugar_value_expr(&mut expr);
+                            rewritten.push(sem::BlockItem::Expr(expr));
+                        }
                         _ => rewritten.push(sem::BlockItem::Stmt(stmt)),
                     }
                 }
             }
+        }
+        // V1 executes deferred work on ordinary block fallthrough. We will
+        // thread the same cleanup set through early-exit paths in the next
+        // slice once control-transfer lowering is wired in.
+        for value in deferred.into_iter().rev() {
+            rewritten.push(sem::BlockItem::Expr(value));
         }
         *items = rewritten;
     }
@@ -258,6 +324,13 @@ impl<'a> Elaborator<'a> {
             }
             sem::StmtExprKind::For { iter, body, .. } => {
                 self.desugar_value_expr(iter);
+                self.desugar_value_expr(body);
+            }
+            sem::StmtExprKind::Defer { value } => {
+                self.desugar_value_expr(value);
+            }
+            sem::StmtExprKind::Using { value, body, .. } => {
+                self.desugar_value_expr(value);
                 self.desugar_value_expr(body);
             }
             sem::StmtExprKind::Return { value } => {
@@ -295,6 +368,41 @@ impl<'a> Elaborator<'a> {
                 self.desugar_place_expr(place)
             }
         }
+    }
+
+    fn desugar_using_stmt(
+        &mut self,
+        stmt: &sem::StmtExpr,
+        pattern: &sem::BindPattern,
+        value: &sem::ValueExpr,
+        body: &sem::ValueExpr,
+    ) -> sem::ValueExpr {
+        let cleanup = self
+            .make_using_cleanup_expr(pattern, value, stmt.span)
+            .unwrap_or_else(|| {
+                panic!(
+                    "compiler bug: missing `close_ignore_error` cleanup for using-bound type {}",
+                    self.type_map.type_table().get(value.ty)
+                )
+            });
+
+        // `using` lowers to a dedicated block so the binding and its deferred
+        // cleanup stay scoped to the body region.
+        let items = vec![
+            sem::BlockItem::Stmt(self.make_let_bind_stmt(
+                pattern.clone(),
+                value.clone(),
+                stmt.span,
+            )),
+            sem::BlockItem::Stmt(self.make_stmt(
+                sem::StmtExprKind::Defer {
+                    value: Box::new(cleanup),
+                },
+                stmt.span,
+            )),
+            sem::BlockItem::Expr(body.clone()),
+        ];
+        self.make_block_expr(items, stmt.span)
     }
 
     fn desugar_value_expr(&mut self, expr: &mut sem::ValueExpr) {
@@ -430,6 +538,52 @@ impl<'a> Elaborator<'a> {
             | sem::ValueExprKind::StringFmt { .. }
             | sem::ValueExprKind::ClosureRef { .. } => {}
         }
+    }
+
+    fn make_using_cleanup_expr(
+        &mut self,
+        pattern: &sem::BindPattern,
+        value: &sem::ValueExpr,
+        span: Span,
+    ) -> Option<sem::ValueExpr> {
+        let (ident, def_id) = match &pattern.kind {
+            sem::BindPatternKind::Name { ident, def_id } => (ident.clone(), *def_id),
+            _ => return None,
+        };
+        let Type::Struct { name, .. } = self.type_map.type_table().get(value.ty).clone() else {
+            return None;
+        };
+        let method_def_id = *self.cleanup_methods.close_ignore_error_by_type.get(&name)?;
+
+        let receiver_ty = self.type_map.type_table().get(value.ty).clone();
+        let receiver_place = self.make_place_expr(
+            sem::PlaceExprKind::Var { ident, def_id },
+            receiver_ty.clone(),
+            span,
+        );
+        let receiver_value = self.make_load_expr(receiver_place, receiver_ty, span);
+        let expr_id = self.node_id_gen.new_id();
+        let ty_id = self.insert_synth_node_type(expr_id, Type::Unit);
+        self.record_call_plan(
+            expr_id,
+            sem::CallPlan {
+                target: sem::CallTarget::Direct(method_def_id),
+                args: vec![sem::ArgLowering::Direct(sem::CallInput::Receiver)],
+                drop_mask: vec![false],
+                input_modes: vec![ParamMode::Sink],
+                has_receiver: true,
+            },
+        );
+        Some(sem::ValueExpr {
+            id: expr_id,
+            kind: sem::ValueExprKind::MethodCall {
+                receiver: sem::MethodReceiver::ValueExpr(Box::new(receiver_value)),
+                method_name: "close_ignore_error".to_string(),
+                args: vec![],
+            },
+            ty: ty_id,
+            span,
+        })
     }
 
     fn new_for_local(&mut self, suffix: &str, ty: Type, is_mutable: bool, span: Span) -> ForLocal {

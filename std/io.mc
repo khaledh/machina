@@ -136,6 +136,12 @@ fn file_close(fd: u64) -> () | IoError {
     }
 }
 
+// Scoped cleanup uses a best-effort close path so `using` can guarantee
+// resource release without introducing scope-exit error propagation in v1.
+fn file_close_ignore_error(fd: u64) {
+    __rt_file_close(fd);
+}
+
 // Text read-all currently goes through a dedicated runtime helper so std::io
 // can expose a simple API without re-implementing string accumulation policy at
 // every callsite.
@@ -203,6 +209,10 @@ ReadFile :: {
     fn close(sink self) -> () | IoError {
         file_close(self._fd)
     }
+
+    fn close_ignore_error(sink self) {
+        file_close_ignore_error(self._fd);
+    }
 }
 
 WriteFile :: {
@@ -219,6 +229,10 @@ WriteFile :: {
     @public
     fn close(sink self) -> () | IoError {
         file_close(self._fd)
+    }
+
+    fn close_ignore_error(sink self) {
+        file_close_ignore_error(self._fd);
     }
 }
 
@@ -237,6 +251,10 @@ ReadWriteFile :: {
     fn close(sink self) -> () | IoError {
         file_close(self._fd)
     }
+
+    fn close_ignore_error(sink self) {
+        file_close_ignore_error(self._fd);
+    }
 }
 
 TextReader :: {
@@ -248,6 +266,10 @@ TextReader :: {
     @public
     fn close(sink self) -> () | IoError {
         file_close(self._fd)
+    }
+
+    fn close_ignore_error(sink self) {
+        file_close_ignore_error(self._fd);
     }
 }
 
@@ -261,6 +283,10 @@ BinaryReader :: {
     fn close(sink self) -> () | IoError {
         file_close(self._fd)
     }
+
+    fn close_ignore_error(sink self) {
+        file_close_ignore_error(self._fd);
+    }
 }
 
 TextWriter :: {
@@ -273,6 +299,10 @@ TextWriter :: {
     fn close(sink self) -> () | IoError {
         file_close(self._fd)
     }
+
+    fn close_ignore_error(sink self) {
+        file_close_ignore_error(self._fd);
+    }
 }
 
 BinaryWriter :: {
@@ -284,6 +314,10 @@ BinaryWriter :: {
     @public
     fn close(sink self) -> () | IoError {
         file_close(self._fd)
+    }
+
+    fn close_ignore_error(sink self) {
+        file_close_ignore_error(self._fd);
     }
 }
 
@@ -302,6 +336,10 @@ TextFile :: {
     fn close(sink self) -> () | IoError {
         file_close(self._fd)
     }
+
+    fn close_ignore_error(sink self) {
+        file_close_ignore_error(self._fd);
+    }
 }
 
 BinaryFile :: {
@@ -318,5 +356,9 @@ BinaryFile :: {
     @public
     fn close(sink self) -> () | IoError {
         file_close(self._fd)
+    }
+
+    fn close_ignore_error(sink self) {
+        file_close_ignore_error(self._fd);
     }
 }

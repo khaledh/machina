@@ -31,6 +31,14 @@ pub fn format_semantic_stmt_compact(stmt: &sem::StmtExpr) -> String {
             format_semantic_bind_pattern_compact(pattern),
             format_semantic_value_expr_compact(iter)
         ),
+        sem::StmtExprKind::Defer { value } => {
+            format!("defer {}", format_semantic_value_expr_compact(value))
+        }
+        sem::StmtExprKind::Using { pattern, value, .. } => format!(
+            "using {} = {}",
+            format_semantic_bind_pattern_compact(pattern),
+            format_semantic_value_expr_compact(value)
+        ),
         sem::StmtExprKind::Break => "break".to_string(),
         sem::StmtExprKind::Continue => "continue".to_string(),
         sem::StmtExprKind::Return { value } => match value {

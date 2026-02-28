@@ -1713,7 +1713,9 @@ impl Visitor for SymbolResolver {
                             is_mutable: false,
                         },
                     };
-                    resolver.def_table_builder.record_def(def, stmt.id, stmt.span);
+                    resolver
+                        .def_table_builder
+                        .record_def(def, stmt.id, stmt.span);
                     resolver.insert_symbol(
                         ident,
                         Symbol {

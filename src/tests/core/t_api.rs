@@ -2113,6 +2113,50 @@ fn main() -> u64 {
 }
 
 #[test]
+fn elaborate_output_has_no_defer_or_using_after_syntax_desugar_pass() {
+    let source = r#"
+type Resource = {
+    id: u64,
+}
+
+Resource :: {
+    fn close_ignore_error(sink self) {
+    }
+}
+
+fn make_resource() -> Resource {
+    Resource { id: 1 }
+}
+
+fn main() {
+    using resource = make_resource() {
+        let n = resource.id;
+    }
+}
+"#;
+    let parsed = parsed_context(source);
+    let resolved =
+        resolve_stage_with_policy(parsed, ResolveInputs::default(), FrontendPolicy::Strict);
+    let resolved_ctx = resolved
+        .context
+        .expect("resolve should succeed for using desugar test");
+    let typed = typecheck_stage_with_policy(
+        resolved_ctx,
+        resolved.imported_facts,
+        FrontendPolicy::Strict,
+    )
+    .context
+    .expect("typecheck should succeed for using desugar test");
+    let sem_checked =
+        semcheck_stage(typed).expect("semcheck should succeed for using desugar test");
+    let semantic = elaborate_stage(sem_checked);
+    assert!(
+        !semantic_module_has_defer_or_using(&semantic.module),
+        "semantic module should not contain StmtExprKind::Defer/Using after elaborate pipeline"
+    );
+}
+
+#[test]
 fn typestate_elaborate_builds_machine_descriptor_with_fallback_rows() {
     let source = r#"
 type Ping = {}
@@ -2305,6 +2349,13 @@ fn semantic_module_has_for(module: &sem::Module) -> bool {
     module.top_level_items.iter().any(top_level_item_has_for)
 }
 
+fn semantic_module_has_defer_or_using(module: &sem::Module) -> bool {
+    module
+        .top_level_items
+        .iter()
+        .any(top_level_item_has_defer_or_using)
+}
+
 fn top_level_item_has_for(item: &sem::TopLevelItem) -> bool {
     match item {
         sem::TopLevelItem::FuncDef(def) => value_has_for(&def.body),
@@ -2316,6 +2367,23 @@ fn top_level_item_has_for(item: &sem::TopLevelItem) -> bool {
                 sem::MethodItem::Decl(_) => None,
             })
             .any(|def| value_has_for(&def.body)),
+        sem::TopLevelItem::TraitDef(_)
+        | sem::TopLevelItem::TypeDef(_)
+        | sem::TopLevelItem::FuncDecl(_) => false,
+    }
+}
+
+fn top_level_item_has_defer_or_using(item: &sem::TopLevelItem) -> bool {
+    match item {
+        sem::TopLevelItem::FuncDef(def) => value_has_defer_or_using(&def.body),
+        sem::TopLevelItem::MethodBlock(block) => block
+            .method_items
+            .iter()
+            .filter_map(|item| match item {
+                sem::MethodItem::Def(def) => Some(def),
+                sem::MethodItem::Decl(_) => None,
+            })
+            .any(|def| value_has_defer_or_using(&def.body)),
         sem::TopLevelItem::TraitDef(_)
         | sem::TopLevelItem::TypeDef(_)
         | sem::TopLevelItem::FuncDecl(_) => false,
@@ -2404,10 +2472,119 @@ fn value_has_for(value: &sem::ValueExpr) -> bool {
     }
 }
 
+fn value_has_defer_or_using(value: &sem::ValueExpr) -> bool {
+    match &value.kind {
+        sem::ValueExprKind::Block { items, tail } => {
+            items.iter().any(block_item_has_defer_or_using)
+                || tail
+                    .as_ref()
+                    .is_some_and(|tail| value_has_defer_or_using(tail))
+        }
+        sem::ValueExprKind::If {
+            cond,
+            then_body,
+            else_body,
+        } => {
+            value_has_defer_or_using(cond)
+                || value_has_defer_or_using(then_body)
+                || value_has_defer_or_using(else_body)
+        }
+        sem::ValueExprKind::Match { scrutinee, arms } => {
+            value_has_defer_or_using(scrutinee)
+                || arms.iter().any(|arm| value_has_defer_or_using(&arm.body))
+        }
+        sem::ValueExprKind::Call { callee, args } => {
+            value_has_defer_or_using(callee) || args.iter().any(call_arg_has_defer_or_using)
+        }
+        sem::ValueExprKind::MethodCall { receiver, args, .. } => {
+            let receiver_has = match receiver {
+                sem::MethodReceiver::ValueExpr(value) => value_has_defer_or_using(value),
+                sem::MethodReceiver::PlaceExpr(_) => false,
+            };
+            receiver_has || args.iter().any(call_arg_has_defer_or_using)
+        }
+        sem::ValueExprKind::EmitSend { to, payload }
+        | sem::ValueExprKind::EmitRequest { to, payload, .. } => {
+            value_has_defer_or_using(to) || value_has_defer_or_using(payload)
+        }
+        sem::ValueExprKind::Reply { cap, value } => {
+            value_has_defer_or_using(cap) || value_has_defer_or_using(value)
+        }
+        sem::ValueExprKind::StructLit { fields, .. } => fields
+            .iter()
+            .any(|field| value_has_defer_or_using(&field.value)),
+        sem::ValueExprKind::StructUpdate { target, fields } => {
+            value_has_defer_or_using(target)
+                || fields
+                    .iter()
+                    .any(|field| value_has_defer_or_using(&field.value))
+        }
+        sem::ValueExprKind::EnumVariant { payload, .. } | sem::ValueExprKind::TupleLit(payload) => {
+            payload.iter().any(value_has_defer_or_using)
+        }
+        sem::ValueExprKind::ArrayLit { init, .. } => match init {
+            sem::ArrayLitInit::Elems(elems) => elems.iter().any(value_has_defer_or_using),
+            sem::ArrayLitInit::Repeat(value, _) => value_has_defer_or_using(value),
+        },
+        sem::ValueExprKind::SetLit { elems, .. } => elems.iter().any(value_has_defer_or_using),
+        sem::ValueExprKind::MapLit { entries, .. } => entries.iter().any(|entry| {
+            value_has_defer_or_using(&entry.key) || value_has_defer_or_using(&entry.value)
+        }),
+        sem::ValueExprKind::UnaryOp { expr, .. }
+        | sem::ValueExprKind::HeapAlloc { expr }
+        | sem::ValueExprKind::Coerce { expr, .. } => value_has_defer_or_using(expr),
+        sem::ValueExprKind::Try {
+            fallible_expr,
+            on_error,
+        } => {
+            value_has_defer_or_using(fallible_expr)
+                || on_error
+                    .as_ref()
+                    .is_some_and(|handler| value_has_defer_or_using(handler))
+        }
+        sem::ValueExprKind::BinOp { left, right, .. } => {
+            value_has_defer_or_using(left) || value_has_defer_or_using(right)
+        }
+        sem::ValueExprKind::Range { start, end } => {
+            value_has_defer_or_using(start) || value_has_defer_or_using(end)
+        }
+        sem::ValueExprKind::Slice { start, end, .. } => {
+            start
+                .as_ref()
+                .is_some_and(|start| value_has_defer_or_using(start))
+                || end
+                    .as_ref()
+                    .is_some_and(|end| value_has_defer_or_using(end))
+        }
+        sem::ValueExprKind::MapGet { target, key } => {
+            value_has_defer_or_using(target) || value_has_defer_or_using(key)
+        }
+        sem::ValueExprKind::UnitLit
+        | sem::ValueExprKind::IntLit(_)
+        | sem::ValueExprKind::BoolLit(_)
+        | sem::ValueExprKind::CharLit(_)
+        | sem::ValueExprKind::StringLit { .. }
+        | sem::ValueExprKind::StringFmt { .. }
+        | sem::ValueExprKind::Move { .. }
+        | sem::ValueExprKind::ImplicitMove { .. }
+        | sem::ValueExprKind::AddrOf { .. }
+        | sem::ValueExprKind::Load { .. }
+        | sem::ValueExprKind::Len { .. }
+        | sem::ValueExprKind::ClosureRef { .. } => false,
+    }
+}
+
 fn block_item_has_for(item: &sem::BlockItem) -> bool {
     match item {
         sem::BlockItem::Stmt(stmt) => stmt_has_for(stmt),
         sem::BlockItem::Expr(expr) => value_has_for(expr),
+    }
+}
+
+fn block_item_has_defer_or_using(item: &sem::BlockItem) -> bool {
+    match item {
+        sem::BlockItem::Stmt(stmt) => stmt_has_defer_or_using(stmt),
+        sem::BlockItem::Expr(expr) => value_has_defer_or_using(expr),
     }
 }
 
@@ -2422,6 +2599,30 @@ fn stmt_has_for(stmt: &sem::StmtExpr) -> bool {
         sem::StmtExprKind::Return { value } => {
             value.as_ref().is_some_and(|value| value_has_for(value))
         }
+        sem::StmtExprKind::Defer { value } => value_has_for(value),
+        sem::StmtExprKind::Using { value, body, .. } => value_has_for(value) || value_has_for(body),
+        sem::StmtExprKind::VarDecl { .. }
+        | sem::StmtExprKind::Break
+        | sem::StmtExprKind::Continue => false,
+    }
+}
+
+fn stmt_has_defer_or_using(stmt: &sem::StmtExpr) -> bool {
+    match &stmt.kind {
+        sem::StmtExprKind::Defer { .. } | sem::StmtExprKind::Using { .. } => true,
+        sem::StmtExprKind::LetBind { value, .. } | sem::StmtExprKind::VarBind { value, .. } => {
+            value_has_defer_or_using(value)
+        }
+        sem::StmtExprKind::Assign { value, .. } => value_has_defer_or_using(value),
+        sem::StmtExprKind::While { cond, body } => {
+            value_has_defer_or_using(cond) || value_has_defer_or_using(body)
+        }
+        sem::StmtExprKind::For { iter, body, .. } => {
+            value_has_defer_or_using(iter) || value_has_defer_or_using(body)
+        }
+        sem::StmtExprKind::Return { value } => value
+            .as_ref()
+            .is_some_and(|value| value_has_defer_or_using(value)),
         sem::StmtExprKind::VarDecl { .. }
         | sem::StmtExprKind::Break
         | sem::StmtExprKind::Continue => false,
@@ -2431,6 +2632,15 @@ fn stmt_has_for(stmt: &sem::StmtExpr) -> bool {
 fn call_arg_has_for(arg: &sem::CallArg) -> bool {
     match arg {
         sem::CallArg::In { expr, .. } | sem::CallArg::Sink { expr, .. } => value_has_for(expr),
+        sem::CallArg::InOut { .. } | sem::CallArg::Out { .. } => false,
+    }
+}
+
+fn call_arg_has_defer_or_using(arg: &sem::CallArg) -> bool {
+    match arg {
+        sem::CallArg::In { expr, .. } | sem::CallArg::Sink { expr, .. } => {
+            value_has_defer_or_using(expr)
+        }
         sem::CallArg::InOut { .. } | sem::CallArg::Out { .. } => false,
     }
 }

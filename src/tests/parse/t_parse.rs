@@ -275,7 +275,10 @@ fn test_parse_using_statement_with_block_body() {
             assert!(body_tail.is_none(), "expected using body without tail");
             assert_eq!(body_items.len(), 1);
             assert!(
-                matches!(block_stmt_at(body_items, 0).kind, StmtExprKind::LetBind { .. }),
+                matches!(
+                    block_stmt_at(body_items, 0).kind,
+                    StmtExprKind::LetBind { .. }
+                ),
                 "expected using body to contain let statement"
             );
         }

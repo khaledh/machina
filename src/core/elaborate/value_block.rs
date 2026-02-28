@@ -90,12 +90,21 @@ impl<'a> Elaborator<'a> {
                     body: Box::new(self.elab_value(body)),
                 }
             }
-            ast::StmtExprKind::Defer { .. } => {
-                panic!("defer lowering is not implemented yet")
-            }
-            ast::StmtExprKind::Using { .. } => {
-                panic!("using lowering is not implemented yet")
-            }
+            ast::StmtExprKind::Defer { value } => sem::StmtExprKind::Defer {
+                value: Box::new(self.elab_value(value)),
+            },
+            ast::StmtExprKind::Using { ident, value, body } => sem::StmtExprKind::Using {
+                pattern: sem::BindPattern {
+                    id: stmt.id,
+                    kind: sem::BindPatternKind::Name {
+                        ident: ident.clone(),
+                        def_id: self.def_id_for(stmt.id),
+                    },
+                    span: stmt.span,
+                },
+                value: Box::new(self.elab_value(value)),
+                body: Box::new(self.elab_value(body)),
+            },
             ast::StmtExprKind::Break => sem::StmtExprKind::Break,
             ast::StmtExprKind::Continue => sem::StmtExprKind::Continue,
             ast::StmtExprKind::Return { value } => sem::StmtExprKind::Return {

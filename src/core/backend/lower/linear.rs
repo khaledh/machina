@@ -362,6 +362,9 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
                     stmt.kind, stmt.span
                 );
             }
+            sem::StmtExprKind::Defer { .. } | sem::StmtExprKind::Using { .. } => {
+                unreachable!("syntax desugar must remove defer/using before backend lowering");
+            }
         }
     }
 

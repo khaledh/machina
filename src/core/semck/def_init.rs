@@ -390,6 +390,7 @@ impl<'a> DefCollector<'a> {
                 self.collect_expr(value);
             }
             StmtExprKind::Using { value, body, .. } => {
+                self.defs.insert(self.def_table.def_id(stmt.id));
                 self.collect_expr(value);
                 self.collect_expr(body);
             }
@@ -530,6 +531,8 @@ impl<'a> DefSpanCollector<'a> {
                 self.collect_expr(value);
             }
             StmtExprKind::Using { value, body, .. } => {
+                let def_id = self.def_table.def_id(stmt.id);
+                self.spans.entry(def_id).or_insert(stmt.span);
                 self.collect_expr(value);
                 self.collect_expr(body);
             }
@@ -684,6 +687,8 @@ impl<'a> DefInitChecker<'a> {
             }
             StmtExprKind::Using { value, body, .. } => {
                 self.check_expr(value);
+                self.initialized
+                    .mark_full(self.ctx.def_table.def_id(stmt.id));
                 self.check_expr(body);
             }
             StmtExprKind::Break | StmtExprKind::Continue => {}

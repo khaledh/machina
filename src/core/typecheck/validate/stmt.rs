@@ -62,13 +62,7 @@ fn bare_try_in_expr(expr: &Expr) -> bool {
 
     impl Visitor for BareTryFinder {
         fn visit_expr(&mut self, expr: &Expr) {
-            if matches!(
-                expr.kind,
-                ExprKind::Try {
-                    on_error: None,
-                    ..
-                }
-            ) {
+            if matches!(expr.kind, ExprKind::Try { on_error: None, .. }) {
                 // Stop at the first unhandled `?`; we only need a yes/no answer.
                 self.0 = true;
                 return;

@@ -344,6 +344,14 @@ pub enum StmtExprKind {
         iter: Box<ValueExpr>,
         body: Box<ValueExpr>,
     },
+    Defer {
+        value: Box<ValueExpr>,
+    },
+    Using {
+        pattern: BindPattern,
+        value: Box<ValueExpr>,
+        body: Box<ValueExpr>,
+    },
     Break,
     Continue,
     Return {

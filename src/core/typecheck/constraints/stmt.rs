@@ -179,7 +179,16 @@ impl<'a> ConstraintCollector<'a> {
                 let _ = self.collect_expr(value, None);
             }
             StmtExprKind::Using { value, body, .. } => {
-                let _ = self.collect_expr(value, None);
+                // `using name = expr { ... }` introduces a scoped immutable
+                // binding whose type matches the initializer.
+                let value_ty = self.collect_expr(value, None);
+                let def_id = self.ctx.def_table.def_id(stmt.id);
+                let def_term = self.def_term(def_id);
+                self.push_eq(
+                    def_term,
+                    value_ty,
+                    ConstraintReason::Stmt(stmt.id, stmt.span),
+                );
                 self.collect_expr(body, Some(Type::Unit));
             }
             StmtExprKind::Break => {

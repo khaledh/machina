@@ -246,6 +246,9 @@ impl<'a> DropPlanBuilder<'a> {
                 // Return exits all scopes in the function.
                 self.plans.insert_depth(stmt.id, 0);
             }
+            sem::StmtExprKind::Defer { .. } | sem::StmtExprKind::Using { .. } => {
+                unreachable!("syntax desugar must remove defer/using before drop planning");
+            }
         }
     }
 
