@@ -52,9 +52,21 @@ struct UsingCleanupMethods {
     close_ignore_error_by_type: HashMap<String, DefId>,
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum CleanupBoundary {
+    Normal,
+    Loop,
+}
+
+struct CleanupFrame {
+    deferred: Vec<sem::ValueExpr>,
+    boundary: CleanupBoundary,
+}
+
 struct SyntaxDesugarCtx<'a, 'b> {
     elaborator: &'a mut Elaborator<'b>,
     cleanup_methods: UsingCleanupMethods,
+    cleanup_frames: Vec<CleanupFrame>,
 }
 
 impl<'a, 'b> Deref for SyntaxDesugarCtx<'a, 'b> {
@@ -75,6 +87,7 @@ pub(super) fn run(elaborator: &mut Elaborator<'_>, module: &mut sem::Module) {
     let mut ctx = SyntaxDesugarCtx {
         elaborator,
         cleanup_methods: collect_using_cleanup_methods(module),
+        cleanup_frames: Vec::new(),
     };
     ctx.desugar_module(module);
 }
@@ -116,6 +129,37 @@ impl<'a, 'b> SyntaxDesugarCtx<'a, 'b> {
             sem::TopLevelItem::TraitDef(_)
             | sem::TopLevelItem::TypeDef(_)
             | sem::TopLevelItem::FuncDecl(_) => {}
+        }
+    }
+
+    fn collect_cleanup_for_return(&self) -> Vec<sem::ValueExpr> {
+        self.cleanup_frames
+            .iter()
+            .rev()
+            .flat_map(|frame| frame.deferred.iter().rev().cloned())
+            .collect()
+    }
+
+    fn collect_cleanup_for_loop_exit(&self) -> Vec<sem::ValueExpr> {
+        let mut values = Vec::new();
+        for frame in self.cleanup_frames.iter().rev() {
+            values.extend(frame.deferred.iter().rev().cloned());
+            if frame.boundary == CleanupBoundary::Loop {
+                break;
+            }
+        }
+        values
+    }
+
+    fn append_cleanup_before_stmt(
+        &self,
+        rewritten: &mut Vec<sem::BlockItem>,
+        cleanup: Vec<sem::ValueExpr>,
+    ) {
+        // Cleanup runs in LIFO order before the control transfer leaves the
+        // scopes represented by the active cleanup frames.
+        for value in cleanup {
+            rewritten.push(sem::BlockItem::Expr(value));
         }
     }
 
@@ -260,9 +304,13 @@ impl<'a, 'b> SyntaxDesugarCtx<'a, 'b> {
         self.make_block_expr(items, span)
     }
 
-    fn desugar_block_items(&mut self, items: &mut Vec<sem::BlockItem>) {
+    fn desugar_block_items(&mut self, items: &mut Vec<sem::BlockItem>, boundary: CleanupBoundary) {
+        let frame_start = self.cleanup_frames.len();
+        self.cleanup_frames.push(CleanupFrame {
+            deferred: Vec::new(),
+            boundary,
+        });
         let mut rewritten = Vec::with_capacity(items.len());
-        let mut deferred = Vec::new();
         for item in items.drain(..) {
             match item {
                 sem::BlockItem::Expr(mut expr) => {
@@ -282,7 +330,11 @@ impl<'a, 'b> SyntaxDesugarCtx<'a, 'b> {
                             rewritten.push(sem::BlockItem::Expr(expr));
                         }
                         sem::StmtExprKind::Defer { value } => {
-                            deferred.push((**value).clone());
+                            self.cleanup_frames
+                                .last_mut()
+                                .expect("cleanup frame must exist while desugaring a block")
+                                .deferred
+                                .push((**value).clone());
                         }
                         sem::StmtExprKind::Using {
                             pattern,
@@ -293,17 +345,35 @@ impl<'a, 'b> SyntaxDesugarCtx<'a, 'b> {
                             self.desugar_value_expr(&mut expr);
                             rewritten.push(sem::BlockItem::Expr(expr));
                         }
+                        sem::StmtExprKind::Return { .. } => {
+                            self.append_cleanup_before_stmt(
+                                &mut rewritten,
+                                self.collect_cleanup_for_return(),
+                            );
+                            rewritten.push(sem::BlockItem::Stmt(stmt));
+                        }
+                        sem::StmtExprKind::Break | sem::StmtExprKind::Continue => {
+                            self.append_cleanup_before_stmt(
+                                &mut rewritten,
+                                self.collect_cleanup_for_loop_exit(),
+                            );
+                            rewritten.push(sem::BlockItem::Stmt(stmt));
+                        }
                         _ => rewritten.push(sem::BlockItem::Stmt(stmt)),
                     }
                 }
             }
         }
-        // V1 executes deferred work on ordinary block fallthrough. We will
-        // thread the same cleanup set through early-exit paths in the next
-        // slice once control-transfer lowering is wired in.
-        for value in deferred.into_iter().rev() {
+        let frame = self
+            .cleanup_frames
+            .pop()
+            .expect("cleanup frame must exist while finishing a block");
+        // Ordinary block fallthrough runs only the defers registered in this
+        // block. Outer frames stay active for their own surrounding scopes.
+        for value in frame.deferred.into_iter().rev() {
             rewritten.push(sem::BlockItem::Expr(value));
         }
+        debug_assert_eq!(self.cleanup_frames.len(), frame_start);
         *items = rewritten;
     }
 
@@ -320,11 +390,11 @@ impl<'a, 'b> SyntaxDesugarCtx<'a, 'b> {
             }
             sem::StmtExprKind::While { cond, body } => {
                 self.desugar_value_expr(cond);
-                self.desugar_value_expr(body);
+                self.desugar_loop_body(body);
             }
             sem::StmtExprKind::For { iter, body, .. } => {
                 self.desugar_value_expr(iter);
-                self.desugar_value_expr(body);
+                self.desugar_loop_body(body);
             }
             sem::StmtExprKind::Defer { value } => {
                 self.desugar_value_expr(value);
@@ -408,7 +478,7 @@ impl<'a, 'b> SyntaxDesugarCtx<'a, 'b> {
     fn desugar_value_expr(&mut self, expr: &mut sem::ValueExpr) {
         match &mut expr.kind {
             sem::ValueExprKind::Block { items, tail } => {
-                self.desugar_block_items(items);
+                self.desugar_block_items(items, CleanupBoundary::Normal);
                 if let Some(tail) = tail {
                     self.desugar_value_expr(tail);
                 }
@@ -537,6 +607,18 @@ impl<'a, 'b> SyntaxDesugarCtx<'a, 'b> {
             | sem::ValueExprKind::StringLit { .. }
             | sem::ValueExprKind::StringFmt { .. }
             | sem::ValueExprKind::ClosureRef { .. } => {}
+        }
+    }
+
+    fn desugar_loop_body(&mut self, body: &mut sem::ValueExpr) {
+        match &mut body.kind {
+            sem::ValueExprKind::Block { items, tail } => {
+                self.desugar_block_items(items, CleanupBoundary::Loop);
+                if let Some(tail) = tail {
+                    self.desugar_value_expr(tail);
+                }
+            }
+            _ => self.desugar_value_expr(body),
         }
     }
 

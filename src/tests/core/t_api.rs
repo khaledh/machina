@@ -2157,6 +2157,86 @@ fn main() {
 }
 
 #[test]
+fn elaborate_runs_using_cleanup_before_nested_return() {
+    let semantic = elaborate_typestate_semantic(
+        r#"
+type Resource = {
+    id: u64,
+}
+
+Resource :: {
+    fn close_ignore_error(sink self) {
+    }
+}
+
+fn make_resource() -> Resource {
+    Resource { id: 1 }
+}
+
+fn main() {
+    using resource = make_resource() {
+        if true {
+            return;
+        } else {
+            let n = resource.id;
+            n;
+        }
+    }
+}
+"#,
+    );
+
+    assert!(
+        semantic_module_has_cleanup_before_control_transfer(
+            &semantic.module,
+            ControlTransferKind::Return,
+        ),
+        "syntax desugar should stage using cleanup before nested return"
+    );
+}
+
+#[test]
+fn elaborate_runs_using_cleanup_before_nested_continue() {
+    let semantic = elaborate_typestate_semantic(
+        r#"
+type Resource = {
+    id: u64,
+}
+
+Resource :: {
+    fn close_ignore_error(sink self) {
+    }
+}
+
+fn make_resource() -> Resource {
+    Resource { id: 1 }
+}
+
+fn main() {
+    while true {
+        using resource = make_resource() {
+            if true {
+                continue;
+            } else {
+                let n = resource.id;
+                n;
+            }
+        }
+    }
+}
+"#,
+    );
+
+    assert!(
+        semantic_module_has_cleanup_before_control_transfer(
+            &semantic.module,
+            ControlTransferKind::Continue,
+        ),
+        "syntax desugar should stage using cleanup before nested continue"
+    );
+}
+
+#[test]
 fn typestate_elaborate_builds_machine_descriptor_with_fallback_rows() {
     let source = r#"
 type Ping = {}
@@ -2356,6 +2436,22 @@ fn semantic_module_has_defer_or_using(module: &sem::Module) -> bool {
         .any(top_level_item_has_defer_or_using)
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum ControlTransferKind {
+    Return,
+    Continue,
+}
+
+fn semantic_module_has_cleanup_before_control_transfer(
+    module: &sem::Module,
+    kind: ControlTransferKind,
+) -> bool {
+    module
+        .top_level_items
+        .iter()
+        .any(|item| top_level_item_has_cleanup_before_control_transfer(item, kind))
+}
+
 fn top_level_item_has_for(item: &sem::TopLevelItem) -> bool {
     match item {
         sem::TopLevelItem::FuncDef(def) => value_has_for(&def.body),
@@ -2384,6 +2480,28 @@ fn top_level_item_has_defer_or_using(item: &sem::TopLevelItem) -> bool {
                 sem::MethodItem::Decl(_) => None,
             })
             .any(|def| value_has_defer_or_using(&def.body)),
+        sem::TopLevelItem::TraitDef(_)
+        | sem::TopLevelItem::TypeDef(_)
+        | sem::TopLevelItem::FuncDecl(_) => false,
+    }
+}
+
+fn top_level_item_has_cleanup_before_control_transfer(
+    item: &sem::TopLevelItem,
+    kind: ControlTransferKind,
+) -> bool {
+    match item {
+        sem::TopLevelItem::FuncDef(def) => {
+            value_has_cleanup_before_control_transfer(&def.body, kind)
+        }
+        sem::TopLevelItem::MethodBlock(block) => block
+            .method_items
+            .iter()
+            .filter_map(|item| match item {
+                sem::MethodItem::Def(def) => Some(def),
+                sem::MethodItem::Decl(_) => None,
+            })
+            .any(|def| value_has_cleanup_before_control_transfer(&def.body, kind)),
         sem::TopLevelItem::TraitDef(_)
         | sem::TopLevelItem::TypeDef(_)
         | sem::TopLevelItem::FuncDecl(_) => false,
@@ -2574,6 +2692,137 @@ fn value_has_defer_or_using(value: &sem::ValueExpr) -> bool {
     }
 }
 
+fn value_has_cleanup_before_control_transfer(
+    value: &sem::ValueExpr,
+    kind: ControlTransferKind,
+) -> bool {
+    match &value.kind {
+        sem::ValueExprKind::Block { items, tail } => {
+            block_has_cleanup_before_control_transfer(items, kind)
+                || tail
+                    .as_ref()
+                    .is_some_and(|tail| value_has_cleanup_before_control_transfer(tail, kind))
+        }
+        sem::ValueExprKind::If {
+            cond,
+            then_body,
+            else_body,
+        } => {
+            value_has_cleanup_before_control_transfer(cond, kind)
+                || value_has_cleanup_before_control_transfer(then_body, kind)
+                || value_has_cleanup_before_control_transfer(else_body, kind)
+        }
+        sem::ValueExprKind::Match { scrutinee, arms } => {
+            value_has_cleanup_before_control_transfer(scrutinee, kind)
+                || arms
+                    .iter()
+                    .any(|arm| value_has_cleanup_before_control_transfer(&arm.body, kind))
+        }
+        sem::ValueExprKind::Call { callee, args } => {
+            value_has_cleanup_before_control_transfer(callee, kind)
+                || args
+                    .iter()
+                    .any(|arg| call_arg_has_cleanup_before_control_transfer(arg, kind))
+        }
+        sem::ValueExprKind::MethodCall { receiver, args, .. } => {
+            let receiver_has = match receiver {
+                sem::MethodReceiver::ValueExpr(value) => {
+                    value_has_cleanup_before_control_transfer(value, kind)
+                }
+                sem::MethodReceiver::PlaceExpr(_) => false,
+            };
+            receiver_has
+                || args
+                    .iter()
+                    .any(|arg| call_arg_has_cleanup_before_control_transfer(arg, kind))
+        }
+        sem::ValueExprKind::EmitSend { to, payload }
+        | sem::ValueExprKind::EmitRequest { to, payload, .. } => {
+            value_has_cleanup_before_control_transfer(to, kind)
+                || value_has_cleanup_before_control_transfer(payload, kind)
+        }
+        sem::ValueExprKind::Reply { cap, value } => {
+            value_has_cleanup_before_control_transfer(cap, kind)
+                || value_has_cleanup_before_control_transfer(value, kind)
+        }
+        sem::ValueExprKind::StructLit { fields, .. } => fields
+            .iter()
+            .any(|field| value_has_cleanup_before_control_transfer(&field.value, kind)),
+        sem::ValueExprKind::StructUpdate { target, fields } => {
+            value_has_cleanup_before_control_transfer(target, kind)
+                || fields
+                    .iter()
+                    .any(|field| value_has_cleanup_before_control_transfer(&field.value, kind))
+        }
+        sem::ValueExprKind::EnumVariant { payload, .. } | sem::ValueExprKind::TupleLit(payload) => {
+            payload
+                .iter()
+                .any(|value| value_has_cleanup_before_control_transfer(value, kind))
+        }
+        sem::ValueExprKind::ArrayLit { init, .. } => match init {
+            sem::ArrayLitInit::Elems(elems) => elems
+                .iter()
+                .any(|value| value_has_cleanup_before_control_transfer(value, kind)),
+            sem::ArrayLitInit::Repeat(value, _) => {
+                value_has_cleanup_before_control_transfer(value, kind)
+            }
+        },
+        sem::ValueExprKind::SetLit { elems, .. } => elems
+            .iter()
+            .any(|value| value_has_cleanup_before_control_transfer(value, kind)),
+        sem::ValueExprKind::MapLit { entries, .. } => entries.iter().any(|entry| {
+            value_has_cleanup_before_control_transfer(&entry.key, kind)
+                || value_has_cleanup_before_control_transfer(&entry.value, kind)
+        }),
+        sem::ValueExprKind::UnaryOp { expr, .. }
+        | sem::ValueExprKind::HeapAlloc { expr }
+        | sem::ValueExprKind::Coerce { expr, .. } => {
+            value_has_cleanup_before_control_transfer(expr, kind)
+        }
+        sem::ValueExprKind::Try {
+            fallible_expr,
+            on_error,
+        } => {
+            value_has_cleanup_before_control_transfer(fallible_expr, kind)
+                || on_error
+                    .as_ref()
+                    .is_some_and(|handler| value_has_cleanup_before_control_transfer(handler, kind))
+        }
+        sem::ValueExprKind::BinOp { left, right, .. } => {
+            value_has_cleanup_before_control_transfer(left, kind)
+                || value_has_cleanup_before_control_transfer(right, kind)
+        }
+        sem::ValueExprKind::Range { start, end } => {
+            value_has_cleanup_before_control_transfer(start, kind)
+                || value_has_cleanup_before_control_transfer(end, kind)
+        }
+        sem::ValueExprKind::Slice { start, end, .. } => {
+            start
+                .as_ref()
+                .is_some_and(|start| value_has_cleanup_before_control_transfer(start, kind))
+                || end
+                    .as_ref()
+                    .is_some_and(|end| value_has_cleanup_before_control_transfer(end, kind))
+        }
+        sem::ValueExprKind::MapGet { target, key } => {
+            value_has_cleanup_before_control_transfer(target, kind)
+                || value_has_cleanup_before_control_transfer(key, kind)
+        }
+        sem::ValueExprKind::UnitLit
+        | sem::ValueExprKind::IntLit(_)
+        | sem::ValueExprKind::BoolLit(_)
+        | sem::ValueExprKind::CharLit(_)
+        | sem::ValueExprKind::StringLit { .. }
+        | sem::ValueExprKind::StringFmt { .. }
+        | sem::ValueExprKind::Move { .. }
+        | sem::ValueExprKind::ImplicitMove { .. }
+        | sem::ValueExprKind::AddrOf { .. }
+        | sem::ValueExprKind::Load { .. }
+        | sem::ValueExprKind::Len { .. }
+        | sem::ValueExprKind::ClosureRef { .. } => false,
+    }
+}
+
 fn block_item_has_for(item: &sem::BlockItem) -> bool {
     match item {
         sem::BlockItem::Stmt(stmt) => stmt_has_for(stmt),
@@ -2586,6 +2835,21 @@ fn block_item_has_defer_or_using(item: &sem::BlockItem) -> bool {
         sem::BlockItem::Stmt(stmt) => stmt_has_defer_or_using(stmt),
         sem::BlockItem::Expr(expr) => value_has_defer_or_using(expr),
     }
+}
+
+fn block_has_cleanup_before_control_transfer(
+    items: &[sem::BlockItem],
+    kind: ControlTransferKind,
+) -> bool {
+    items.windows(2).any(|window| match window {
+        [sem::BlockItem::Expr(expr), sem::BlockItem::Stmt(stmt)] => {
+            expr_is_close_ignore_error(expr) && stmt_matches_control_transfer(stmt, kind)
+        }
+        _ => false,
+    }) || items.iter().any(|item| match item {
+        sem::BlockItem::Stmt(stmt) => stmt_has_cleanup_before_control_transfer(stmt, kind),
+        sem::BlockItem::Expr(expr) => value_has_cleanup_before_control_transfer(expr, kind),
+    })
 }
 
 fn stmt_has_for(stmt: &sem::StmtExpr) -> bool {
@@ -2629,6 +2893,41 @@ fn stmt_has_defer_or_using(stmt: &sem::StmtExpr) -> bool {
     }
 }
 
+fn stmt_has_cleanup_before_control_transfer(
+    stmt: &sem::StmtExpr,
+    kind: ControlTransferKind,
+) -> bool {
+    match &stmt.kind {
+        sem::StmtExprKind::LetBind { value, .. } | sem::StmtExprKind::VarBind { value, .. } => {
+            value_has_cleanup_before_control_transfer(value, kind)
+        }
+        sem::StmtExprKind::Assign { value, .. } => {
+            value_has_cleanup_before_control_transfer(value, kind)
+        }
+        sem::StmtExprKind::While { cond, body } => {
+            value_has_cleanup_before_control_transfer(cond, kind)
+                || value_has_cleanup_before_control_transfer(body, kind)
+        }
+        sem::StmtExprKind::For { iter, body, .. } => {
+            value_has_cleanup_before_control_transfer(iter, kind)
+                || value_has_cleanup_before_control_transfer(body, kind)
+        }
+        sem::StmtExprKind::Return { value } => value
+            .as_ref()
+            .is_some_and(|value| value_has_cleanup_before_control_transfer(value, kind)),
+        sem::StmtExprKind::Defer { value } => {
+            value_has_cleanup_before_control_transfer(value, kind)
+        }
+        sem::StmtExprKind::Using { value, body, .. } => {
+            value_has_cleanup_before_control_transfer(value, kind)
+                || value_has_cleanup_before_control_transfer(body, kind)
+        }
+        sem::StmtExprKind::VarDecl { .. }
+        | sem::StmtExprKind::Break
+        | sem::StmtExprKind::Continue => false,
+    }
+}
+
 fn call_arg_has_for(arg: &sem::CallArg) -> bool {
     match arg {
         sem::CallArg::In { expr, .. } | sem::CallArg::Sink { expr, .. } => value_has_for(expr),
@@ -2643,4 +2942,33 @@ fn call_arg_has_defer_or_using(arg: &sem::CallArg) -> bool {
         }
         sem::CallArg::InOut { .. } | sem::CallArg::Out { .. } => false,
     }
+}
+
+fn call_arg_has_cleanup_before_control_transfer(
+    arg: &sem::CallArg,
+    kind: ControlTransferKind,
+) -> bool {
+    match arg {
+        sem::CallArg::In { expr, .. } | sem::CallArg::Sink { expr, .. } => {
+            value_has_cleanup_before_control_transfer(expr, kind)
+        }
+        sem::CallArg::InOut { .. } | sem::CallArg::Out { .. } => false,
+    }
+}
+
+fn expr_is_close_ignore_error(expr: &sem::ValueExpr) -> bool {
+    matches!(
+        &expr.kind,
+        sem::ValueExprKind::MethodCall { method_name, .. } if method_name == "close_ignore_error"
+    )
+}
+
+fn stmt_matches_control_transfer(stmt: &sem::StmtExpr, kind: ControlTransferKind) -> bool {
+    matches!(
+        (&stmt.kind, kind),
+        (
+            sem::StmtExprKind::Return { .. },
+            ControlTransferKind::Return
+        ) | (sem::StmtExprKind::Continue, ControlTransferKind::Continue)
+    )
 }
