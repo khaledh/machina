@@ -152,6 +152,13 @@ pub(super) fn rewrite_machine_request_method_destinations(
                 collect_machine_bindings_from_expr(iter, out);
                 collect_machine_bindings_from_expr(body, out);
             }
+            StmtExprKind::Defer { value } => {
+                collect_machine_bindings_from_expr(value, out);
+            }
+            StmtExprKind::Using { value, body, .. } => {
+                collect_machine_bindings_from_expr(value, out);
+                collect_machine_bindings_from_expr(body, out);
+            }
             StmtExprKind::Return { value } => {
                 if let Some(value) = value {
                     collect_machine_bindings_from_expr(value, out);

@@ -33,6 +33,14 @@ impl<'a> Parser<'a> {
                     let stmt = self.parse_for()?;
                     items.push(BlockItem::Stmt(stmt));
                 }
+                TK::KwDefer => {
+                    let stmt = self.parse_defer()?;
+                    items.push(BlockItem::Stmt(stmt));
+                }
+                TK::KwUsing => {
+                    let stmt = self.parse_using()?;
+                    items.push(BlockItem::Stmt(stmt));
+                }
                 TK::KwBreak => {
                     let stmt = self.parse_break()?;
                     items.push(BlockItem::Stmt(stmt));
@@ -246,6 +254,48 @@ impl<'a> Parser<'a> {
             kind: StmtExprKind::For {
                 pattern,
                 iter: Box::new(iter),
+                body: Box::new(body),
+            },
+            span: self.close(marker),
+        })
+    }
+
+    pub(super) fn parse_defer(&mut self) -> Result<StmtExpr, ParseError> {
+        let marker = self.mark();
+
+        self.consume_keyword(TK::KwDefer)?;
+        let value = self.parse_expr(0)?;
+        self.consume(&TK::Semicolon)?;
+
+        Ok(StmtExpr {
+            id: self.id_gen.new_id(),
+            kind: StmtExprKind::Defer {
+                value: Box::new(value),
+            },
+            span: self.close(marker),
+        })
+    }
+
+    pub(super) fn parse_using(&mut self) -> Result<StmtExpr, ParseError> {
+        let marker = self.mark();
+
+        self.consume_keyword(TK::KwUsing)?;
+        let ident = self.parse_ident()?;
+        self.consume(&TK::Equals)?;
+        let allow_struct_lit = self.allow_struct_lit;
+        let allow_ternary_block_branch = self.allow_ternary_block_branch;
+        self.allow_struct_lit = false;
+        self.allow_ternary_block_branch = false;
+        let value = self.parse_expr(0)?;
+        self.allow_struct_lit = allow_struct_lit;
+        self.allow_ternary_block_branch = allow_ternary_block_branch;
+        let body = self.parse_block()?;
+
+        Ok(StmtExpr {
+            id: self.id_gen.new_id(),
+            kind: StmtExprKind::Using {
+                ident,
+                value: Box::new(value),
                 body: Box::new(body),
             },
             span: self.close(marker),

@@ -125,6 +125,15 @@ fn check_item_for_conflicts(
                 visitor.visit_expr(iter);
                 visitor.visit_expr(body);
             }
+            StmtExprKind::Defer { value } => {
+                let mut visitor = BorrowConflictVisitor::new(ctx, borrowed_bases, errors);
+                visitor.visit_expr(value);
+            }
+            StmtExprKind::Using { value, body, .. } => {
+                let mut visitor = BorrowConflictVisitor::new(ctx, borrowed_bases, errors);
+                visitor.visit_expr(value);
+                visitor.visit_expr(body);
+            }
             StmtExprKind::Break | StmtExprKind::Continue => {}
             StmtExprKind::Return { value } => {
                 if let Some(value) = value {
@@ -390,7 +399,10 @@ fn collect_stmt_defs_uses(
         StmtExprKind::Assign { assignee, .. } | StmtExprKind::CompoundAssign { assignee, .. } => {
             collect_assignee_defs(assignee, ctx, defs);
         }
-        StmtExprKind::While { .. } | StmtExprKind::For { .. } => {}
+        StmtExprKind::While { .. }
+        | StmtExprKind::For { .. }
+        | StmtExprKind::Defer { .. }
+        | StmtExprKind::Using { .. } => {}
         StmtExprKind::Break | StmtExprKind::Continue => {}
         StmtExprKind::Return { .. } => {}
     }
@@ -467,6 +479,13 @@ fn collect_stmt_slice_uses(stmt: &StmtExpr, ctx: &NormalizedContext, uses: &mut 
         }
         StmtExprKind::For { iter, body, .. } => {
             collect_expr_slice_uses(iter, ctx, uses);
+            collect_expr_slice_uses(body, ctx, uses);
+        }
+        StmtExprKind::Defer { value } => {
+            collect_expr_slice_uses(value, ctx, uses);
+        }
+        StmtExprKind::Using { value, body, .. } => {
+            collect_expr_slice_uses(value, ctx, uses);
             collect_expr_slice_uses(body, ctx, uses);
         }
         StmtExprKind::Break | StmtExprKind::Continue => {}

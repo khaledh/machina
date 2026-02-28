@@ -386,6 +386,13 @@ impl<'a> DefCollector<'a> {
                 self.collect_expr(iter);
                 self.collect_expr(body);
             }
+            StmtExprKind::Defer { value } => {
+                self.collect_expr(value);
+            }
+            StmtExprKind::Using { value, body, .. } => {
+                self.collect_expr(value);
+                self.collect_expr(body);
+            }
             StmtExprKind::Break | StmtExprKind::Continue => {}
             StmtExprKind::Return { value } => {
                 if let Some(value) = value {
@@ -517,6 +524,13 @@ impl<'a> DefSpanCollector<'a> {
             } => {
                 self.collect_pattern(pattern);
                 self.collect_expr(iter);
+                self.collect_expr(body);
+            }
+            StmtExprKind::Defer { value } => {
+                self.collect_expr(value);
+            }
+            StmtExprKind::Using { value, body, .. } => {
+                self.collect_expr(value);
                 self.collect_expr(body);
             }
             StmtExprKind::Break | StmtExprKind::Continue => {}
@@ -663,6 +677,13 @@ impl<'a> DefInitChecker<'a> {
             }
             StmtExprKind::For { iter, body, .. } => {
                 self.check_expr(iter);
+                self.check_expr(body);
+            }
+            StmtExprKind::Defer { value } => {
+                self.check_expr(value);
+            }
+            StmtExprKind::Using { value, body, .. } => {
+                self.check_expr(value);
                 self.check_expr(body);
             }
             StmtExprKind::Break | StmtExprKind::Continue => {}

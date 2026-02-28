@@ -621,6 +621,13 @@ pub fn walk_stmt_expr<V: VisitorMut + ?Sized>(v: &mut V, stmt: &mut StmtExpr) {
             v.visit_expr(iter);
             v.visit_expr(body);
         }
+        StmtExprKind::Defer { value } => {
+            v.visit_expr(value);
+        }
+        StmtExprKind::Using { value, body, .. } => {
+            v.visit_expr(value);
+            v.visit_expr(body);
+        }
         StmtExprKind::Break | StmtExprKind::Continue => {}
         StmtExprKind::Return { value } => {
             if let Some(value) = value {

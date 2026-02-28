@@ -204,6 +204,13 @@ impl<'a> CfgBuilder<'a> {
 
                 exit_bb
             }
+            StmtExprKind::Using { body, .. } => {
+                self.push_item(curr_bb, CfgItem::Stmt(stmt));
+                let body_range = self.build_block_expr(body);
+                self.set_term(curr_bb, CfgTerminator::Goto(body_range.entry));
+                self.push_edge(curr_bb, body_range.entry);
+                body_range.exit
+            }
             StmtExprKind::Break => {
                 self.push_item(curr_bb, CfgItem::Stmt(stmt));
                 if let Some(loop_ctx) = self.loop_stack.last().copied() {

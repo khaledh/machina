@@ -157,6 +157,8 @@ AssignOp           ::= "=" | "+=" | "-=" | "*=" | "/=" | "%="
 # Loops
 While              ::= "while" Expr Block
 For                ::= "for" Pattern "in" (RangeExpr | Expr) Block
+Defer              ::= "defer" Expr ";"
+Using              ::= "using" Identifier "=" Expr Block
 
 # Control flow (statements)
 Break              ::= "break" ";"

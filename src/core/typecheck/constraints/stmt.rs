@@ -175,6 +175,13 @@ impl<'a> ConstraintCollector<'a> {
                 self.collect_expr(body, Some(Type::Unit));
                 self.exit_loop();
             }
+            StmtExprKind::Defer { value } => {
+                let _ = self.collect_expr(value, None);
+            }
+            StmtExprKind::Using { value, body, .. } => {
+                let _ = self.collect_expr(value, None);
+                self.collect_expr(body, Some(Type::Unit));
+            }
             StmtExprKind::Break => {
                 self.out.control_facts.push(ControlFact::Break {
                     stmt_id: stmt.id,
@@ -235,7 +242,11 @@ impl<'a> ConstraintCollector<'a> {
             StmtExprKind::LetBind { value, .. }
             | StmtExprKind::VarBind { value, .. }
             | StmtExprKind::Assign { value, .. }
-            | StmtExprKind::CompoundAssign { value, .. } => self.expr_has_return(value),
+            | StmtExprKind::CompoundAssign { value, .. }
+            | StmtExprKind::Defer { value, .. } => self.expr_has_return(value),
+            StmtExprKind::Using { value, body, .. } => {
+                self.expr_has_return(value) || self.expr_has_return(body)
+            }
             _ => false,
         }
     }

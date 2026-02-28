@@ -32,6 +32,11 @@ pub struct Parser<'a> {
     curr_token: &'a Token,
     id_gen: NodeIdGen,
     allow_struct_lit: bool,
+    // `?` can start either ternary (`cond ? a : b`) or postfix try (`expr?`).
+    // `using name = expr { ... }` is followed by a block, so it temporarily
+    // disables `{ ... }` as a ternary branch starter while parsing the
+    // initializer. Other ternary forms remain available.
+    allow_ternary_block_branch: bool,
     // Avoid treating `..` as a range when parsing slice bounds.
     allow_range_expr: bool,
     closure_base: Option<String>,
@@ -48,6 +53,7 @@ impl<'a> Parser<'a> {
             curr_token: &tokens[0],
             id_gen: NodeIdGen::new(),
             allow_struct_lit: true,
+            allow_ternary_block_branch: true,
             allow_range_expr: true,
             closure_base: None,
             closure_index: 0,
@@ -71,6 +77,7 @@ impl<'a> Parser<'a> {
             curr_token: &tokens[0],
             id_gen,
             allow_struct_lit: true,
+            allow_ternary_block_branch: true,
             allow_range_expr: true,
             closure_base: None,
             closure_index: 0,

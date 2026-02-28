@@ -65,6 +65,10 @@ pub enum TokenKind {
     KwWhile,
     #[display("for")]
     KwFor,
+    #[display("defer")]
+    KwDefer,
+    #[display("using")]
+    KwUsing,
     #[display("break")]
     KwBreak,
     #[display("continue")]
@@ -565,6 +569,8 @@ impl<'a> Lexer<'a> {
                         "match" => TokenKind::KwMatch,
                         "while" => TokenKind::KwWhile,
                         "for" => TokenKind::KwFor,
+                        "defer" => TokenKind::KwDefer,
+                        "using" => TokenKind::KwUsing,
                         "break" => TokenKind::KwBreak,
                         "continue" => TokenKind::KwContinue,
                         "return" => TokenKind::KwReturn,

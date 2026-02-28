@@ -823,6 +823,16 @@ impl VisitorMut for PrivateSymbolRenamer {
                 self.visit_expr(body);
                 self.pop_value_scope();
             }
+            StmtExprKind::Defer { value } => {
+                self.visit_expr(value);
+            }
+            StmtExprKind::Using { ident, value, body } => {
+                self.visit_expr(value);
+                self.push_value_scope();
+                self.bind_value_name(ident);
+                self.visit_expr(body);
+                self.pop_value_scope();
+            }
             StmtExprKind::Break | StmtExprKind::Continue => {}
             StmtExprKind::Return { value } => {
                 if let Some(value) = value {

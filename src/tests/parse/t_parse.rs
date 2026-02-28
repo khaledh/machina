@@ -221,6 +221,97 @@ fn test_parse_multi_index_expr() {
 }
 
 #[test]
+fn test_parse_defer_statement() {
+    let source = r#"
+        fn demo() {
+            defer cleanup();
+        }
+    "#;
+
+    let funcs = parse_source(source).expect("Failed to parse");
+    let func = &funcs[0];
+    let (items, tail) = block_parts(&func.body);
+    assert!(tail.is_none(), "expected no block tail");
+    assert_eq!(items.len(), 1);
+
+    let stmt = block_stmt_at(items, 0);
+    match &stmt.kind {
+        StmtExprKind::Defer { value } => match &value.kind {
+            ExprKind::Call { callee, .. } => match &callee.kind {
+                ExprKind::Var { ident, .. } => assert_eq!(ident, "cleanup"),
+                _ => panic!("expected deferred callee var"),
+            },
+            _ => panic!("expected deferred call expression"),
+        },
+        _ => panic!("expected defer statement"),
+    }
+}
+
+#[test]
+fn test_parse_using_statement_with_block_body() {
+    let source = r#"
+        fn demo() {
+            using file = open_read("notes.txt")? {
+                let text = file.text().read_all()?;
+            }
+        }
+    "#;
+
+    let funcs = parse_source(source).expect("Failed to parse");
+    let func = &funcs[0];
+    let (items, tail) = block_parts(&func.body);
+    assert!(tail.is_none(), "expected no block tail");
+    assert_eq!(items.len(), 1);
+
+    let stmt = block_stmt_at(items, 0);
+    match &stmt.kind {
+        StmtExprKind::Using { ident, value, body } => {
+            assert_eq!(ident, "file");
+            assert!(
+                matches!(value.kind, ExprKind::Try { .. }),
+                "expected using initializer to preserve `?` expression"
+            );
+            let (body_items, body_tail) = block_parts(body);
+            assert!(body_tail.is_none(), "expected using body without tail");
+            assert_eq!(body_items.len(), 1);
+            assert!(
+                matches!(block_stmt_at(body_items, 0).kind, StmtExprKind::LetBind { .. }),
+                "expected using body to contain let statement"
+            );
+        }
+        _ => panic!("expected using statement"),
+    }
+}
+
+#[test]
+fn test_parse_using_initializer_still_allows_non_block_ternary() {
+    let source = r#"
+        fn demo(flag: bool) {
+            using value = flag ? 1 : 2 {
+                let copy = value;
+            }
+        }
+    "#;
+
+    let funcs = parse_source(source).expect("Failed to parse");
+    let func = &funcs[0];
+    let (items, tail) = block_parts(&func.body);
+    assert!(tail.is_none(), "expected no block tail");
+    assert_eq!(items.len(), 1);
+
+    let stmt = block_stmt_at(items, 0);
+    match &stmt.kind {
+        StmtExprKind::Using { value, .. } => {
+            assert!(
+                matches!(value.kind, ExprKind::If { .. }),
+                "expected ternary initializer to parse as if expression"
+            );
+        }
+        _ => panic!("expected using statement"),
+    }
+}
+
+#[test]
 fn test_parse_nested_array_literal() {
     let source = r#"
         fn test() -> u64 {

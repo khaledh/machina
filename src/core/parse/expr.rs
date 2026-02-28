@@ -177,9 +177,12 @@ impl<'a> Parser<'a> {
 
     fn should_parse_ternary_question(&self) -> bool {
         self.curr_token.kind == TK::Question
-            && self
-                .peek()
-                .is_some_and(|token| Self::is_expr_start_token(&token.kind))
+            && self.peek().is_some_and(|token| {
+                if token.kind == TK::LBrace && !self.allow_ternary_block_branch {
+                    return false;
+                }
+                Self::is_expr_start_token(&token.kind)
+            })
     }
 
     fn is_expr_start_token(token: &TokenKind) -> bool {

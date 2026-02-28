@@ -179,6 +179,13 @@ fn check_item_for_conflicts(
                     visitor.visit_expr(iter);
                     visitor.visit_expr(body);
                 }
+                StmtExprKind::Defer { value } => {
+                    visitor.visit_expr(value);
+                }
+                StmtExprKind::Using { value, body, .. } => {
+                    visitor.visit_expr(value);
+                    visitor.visit_expr(body);
+                }
                 StmtExprKind::Break | StmtExprKind::Continue => {}
                 StmtExprKind::Return { value } => {
                     if let Some(value) = value {
@@ -217,6 +224,15 @@ fn check_item_for_conflicts(
                 StmtExprKind::For { iter, body, .. } => {
                     let mut visitor = ImmBorrowConflictVisitor::new(ctx, &borrowed_imm, errors);
                     visitor.visit_expr(iter);
+                    visitor.visit_expr(body);
+                }
+                StmtExprKind::Defer { value } => {
+                    let mut visitor = ImmBorrowConflictVisitor::new(ctx, &borrowed_imm, errors);
+                    visitor.visit_expr(value);
+                }
+                StmtExprKind::Using { value, body, .. } => {
+                    let mut visitor = ImmBorrowConflictVisitor::new(ctx, &borrowed_imm, errors);
+                    visitor.visit_expr(value);
                     visitor.visit_expr(body);
                 }
                 StmtExprKind::Break | StmtExprKind::Continue => {}
@@ -420,6 +436,13 @@ fn check_item_for_escapes(
             }
             StmtExprKind::For { iter, body, .. } => {
                 check_expr_for_escapes(ctx, iter, state, capture_map, errors);
+                check_expr_for_escapes(ctx, body, state, capture_map, errors);
+            }
+            StmtExprKind::Defer { value } => {
+                check_expr_for_escapes(ctx, value, state, capture_map, errors);
+            }
+            StmtExprKind::Using { value, body, .. } => {
+                check_expr_for_escapes(ctx, value, state, capture_map, errors);
                 check_expr_for_escapes(ctx, body, state, capture_map, errors);
             }
             StmtExprKind::Break | StmtExprKind::Continue => {}

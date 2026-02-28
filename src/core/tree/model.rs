@@ -802,6 +802,14 @@ pub enum StmtExprKind {
         iter: Box<Expr>,
         body: Box<Expr>,
     },
+    Defer {
+        value: Box<Expr>,
+    },
+    Using {
+        ident: String,
+        value: Box<Expr>,
+        body: Box<Expr>,
+    },
     Break,
     Continue,
     Return {

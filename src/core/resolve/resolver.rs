@@ -1698,6 +1698,36 @@ impl Visitor for SymbolResolver {
                     resolver.visit_expr(body);
                 });
             }
+            StmtExprKind::Defer { value } => {
+                self.visit_expr(value);
+            }
+            StmtExprKind::Using { ident, value, body } => {
+                self.visit_expr(value);
+                self.with_scope(|resolver| {
+                    let def_id = resolver.def_id_gen.new_id();
+                    let def = Def {
+                        id: def_id,
+                        name: ident.clone(),
+                        kind: DefKind::LocalVar {
+                            nrvo_eligible: false,
+                            is_mutable: false,
+                        },
+                    };
+                    resolver.def_table_builder.record_def(def, stmt.id, stmt.span);
+                    resolver.insert_symbol(
+                        ident,
+                        Symbol {
+                            name: ident.clone(),
+                            kind: SymbolKind::Var {
+                                def_id,
+                                is_mutable: false,
+                            },
+                        },
+                        stmt.span,
+                    );
+                    resolver.visit_expr(body);
+                });
+            }
             StmtExprKind::Break | StmtExprKind::Continue => {}
             StmtExprKind::Return { value } => {
                 if let Some(value) = value {

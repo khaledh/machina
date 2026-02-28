@@ -82,6 +82,13 @@ pub(super) fn collect_stmt_var_uses(
             collect_expr_var_uses(iter, def_table, uses);
             collect_expr_var_uses(body, def_table, uses);
         }
+        StmtExprKind::Defer { value } => {
+            collect_expr_var_uses(value, def_table, uses);
+        }
+        StmtExprKind::Using { value, body, .. } => {
+            collect_expr_var_uses(value, def_table, uses);
+            collect_expr_var_uses(body, def_table, uses);
+        }
         StmtExprKind::Break | StmtExprKind::Continue => {}
         StmtExprKind::Return { value } => {
             if let Some(value) = value {

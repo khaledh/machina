@@ -902,6 +902,21 @@ impl StmtExpr {
                 writeln!(f, "{}Body:", pad1)?;
                 body.fmt_with_indent(f, level + 2)?;
             }
+            StmtExprKind::Defer { value } => {
+                let pad1 = indent(level + 1);
+                writeln!(f, "{}Defer [{}]", pad, self.id)?;
+                writeln!(f, "{}Value:", pad1)?;
+                value.fmt_with_indent(f, level + 2)?;
+            }
+            StmtExprKind::Using { ident, value, body } => {
+                let pad1 = indent(level + 1);
+                writeln!(f, "{}Using [{}]", pad, self.id)?;
+                writeln!(f, "{}Ident: {}", pad1, ident)?;
+                writeln!(f, "{}Value:", pad1)?;
+                value.fmt_with_indent(f, level + 2)?;
+                writeln!(f, "{}Body:", pad1)?;
+                body.fmt_with_indent(f, level + 2)?;
+            }
             StmtExprKind::Break => {
                 writeln!(f, "{}Break [{}]", pad, self.id)?;
             }

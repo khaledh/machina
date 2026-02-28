@@ -65,10 +65,11 @@ fn collect_stmt_defs_uses(
         StmtExprKind::Assign { assignee, .. } | StmtExprKind::CompoundAssign { assignee, .. } => {
             collect_assignee_defs(assignee, def_table, defs);
         }
-        StmtExprKind::While { .. } => {}
+        StmtExprKind::While { .. } | StmtExprKind::Defer { .. } => {}
         StmtExprKind::For { pattern, .. } => {
             collect_bind_pattern_defs(pattern, def_table, defs);
         }
+        StmtExprKind::Using { .. } => {}
         StmtExprKind::Break | StmtExprKind::Continue => {}
         StmtExprKind::Return { .. } => {}
     }

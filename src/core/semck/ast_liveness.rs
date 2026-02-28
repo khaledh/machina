@@ -118,6 +118,8 @@ fn collect_stmt_defs_uses(
         }
         StmtExprKind::While { .. }
         | StmtExprKind::For { .. }
+        | StmtExprKind::Defer { .. }
+        | StmtExprKind::Using { .. }
         | StmtExprKind::Break
         | StmtExprKind::Continue
         | StmtExprKind::Return { .. } => {}
@@ -189,6 +191,13 @@ fn collect_stmt_uses<A: HeapUseAccumulator>(stmt: &StmtExpr, ctx: &NormalizedCon
         }
         StmtExprKind::For { iter, body, .. } => {
             collect_expr_uses(iter, ctx, acc);
+            collect_expr_uses(body, ctx, acc);
+        }
+        StmtExprKind::Defer { value } => {
+            collect_expr_uses(value, ctx, acc);
+        }
+        StmtExprKind::Using { value, body, .. } => {
+            collect_expr_uses(value, ctx, acc);
             collect_expr_uses(body, ctx, acc);
         }
         StmtExprKind::Break | StmtExprKind::Continue => {}

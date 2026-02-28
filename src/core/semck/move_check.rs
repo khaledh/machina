@@ -408,6 +408,13 @@ impl<'a> Visitor for MoveVisitor<'a> {
             StmtExprKind::For { iter, .. } => {
                 self.visit_expr(iter);
             }
+            StmtExprKind::Defer { value } => {
+                self.visit_expr(value);
+            }
+            StmtExprKind::Using { value, body, .. } => {
+                self.visit_expr(value);
+                self.visit_expr(body);
+            }
             StmtExprKind::Break | StmtExprKind::Continue => {}
             StmtExprKind::Return { value } => {
                 if let Some(value) = value {

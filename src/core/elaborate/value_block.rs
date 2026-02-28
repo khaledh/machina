@@ -90,6 +90,12 @@ impl<'a> Elaborator<'a> {
                     body: Box::new(self.elab_value(body)),
                 }
             }
+            ast::StmtExprKind::Defer { .. } => {
+                panic!("defer lowering is not implemented yet")
+            }
+            ast::StmtExprKind::Using { .. } => {
+                panic!("using lowering is not implemented yet")
+            }
             ast::StmtExprKind::Break => sem::StmtExprKind::Break,
             ast::StmtExprKind::Continue => sem::StmtExprKind::Continue,
             ast::StmtExprKind::Return { value } => sem::StmtExprKind::Return {
