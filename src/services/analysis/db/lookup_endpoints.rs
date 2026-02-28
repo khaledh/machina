@@ -23,7 +23,9 @@ impl super::AnalysisDb {
 
     pub fn def_at_file(&mut self, file_id: FileId, query_span: Span) -> QueryResult<Option<DefId>> {
         let state = self.lookup_state_for_file(file_id)?;
-        Ok(def_at_span(&state, query_span))
+        let snapshot = self.snapshot();
+        let source = snapshot.text(file_id);
+        Ok(def_at_span(&state, query_span, source.as_deref()))
     }
 
     pub fn def_location_at_path(
@@ -45,7 +47,14 @@ impl super::AnalysisDb {
     ) -> QueryResult<Option<Location>> {
         let snapshot = self.snapshot();
         let state = self.lookup_state_for_file(file_id)?;
-        Ok(def_location_at_span(&snapshot, file_id, &state, query_span))
+        let source = snapshot.text(file_id);
+        Ok(def_location_at_span(
+            &snapshot,
+            file_id,
+            &state,
+            query_span,
+            source.as_deref(),
+        ))
     }
 
     pub fn type_at_path(&mut self, path: &Path, query_span: Span) -> QueryResult<Option<Type>> {

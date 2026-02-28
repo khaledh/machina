@@ -16,7 +16,7 @@ pub(crate) use hover::hover_at_span_in_file;
 pub(crate) use semantic_tokens::semantic_tokens;
 pub(crate) use signature_help::signature_help_at_span;
 
-use crate::core::diag::Span;
+use crate::core::diag::{Position, Span};
 use crate::core::resolve::DefTable;
 use crate::core::types::Type;
 use crate::services::analysis::code_actions::code_actions_for_diagnostic_with_source;
@@ -67,6 +67,151 @@ pub(crate) fn code_actions_for_range(
 }
 
 // --- Shared utilities used by hover and signature_help submodules ---
+
+#[derive(Clone, Debug)]
+pub(super) struct IdentifierToken {
+    pub ident: String,
+    pub span: Span,
+    pub offset: usize,
+}
+
+/// Normalize a point/span hover or lookup position to the enclosing
+/// identifier token when possible. Editor-originated queries often arrive as
+/// zero-width point spans, while most tree lookups behave more predictably on
+/// token spans.
+pub(super) fn identifier_token_at_span(
+    source: Option<&str>,
+    query_span: Span,
+) -> Option<IdentifierToken> {
+    let source = source?;
+    let offset = offset_from_position(source, query_span.start)?;
+    identifier_at_offset(source, offset)
+}
+
+/// Extract the identifier token surrounding the given byte offset, or `None`
+/// if the offset is on whitespace, punctuation, or a language keyword.
+fn identifier_at_offset(source: &str, offset: usize) -> Option<IdentifierToken> {
+    if source.is_empty() {
+        return None;
+    }
+    let mut idx = offset.min(source.len());
+    while idx > 0 && !source.is_char_boundary(idx) {
+        idx -= 1;
+    }
+    let bytes = source.as_bytes();
+    let is_ident = |b: u8| b == b'_' || b.is_ascii_alphanumeric();
+
+    if idx > 0
+        && !is_ident(bytes[idx.saturating_sub(1)])
+        && (idx >= bytes.len() || !is_ident(bytes[idx]))
+    {
+        return None;
+    }
+
+    let mut start = idx;
+    while start > 0 && is_ident(bytes[start - 1]) {
+        start -= 1;
+    }
+    let mut end = idx;
+    while end < bytes.len() && is_ident(bytes[end]) {
+        end += 1;
+    }
+    if start >= end {
+        return None;
+    }
+    let ident = source[start..end].to_string();
+    if is_keyword_ident(&ident) {
+        return None;
+    }
+    Some(IdentifierToken {
+        ident,
+        span: Span {
+            start: position_at_offset(source, start),
+            end: position_at_offset(source, end),
+        },
+        offset: idx,
+    })
+}
+
+/// Convert a 1-based line/column position to a byte offset. Uses the
+/// pre-computed offset when available; otherwise falls back to a line/column
+/// scan (LSP query spans carry line/column but set offset=0).
+pub(super) fn offset_from_position(source: &str, position: Position) -> Option<usize> {
+    if position.offset > 0 && position.offset <= source.len() {
+        return Some(position.offset);
+    }
+    let target_line = position.line.max(1);
+    let target_col = position.column.max(1);
+    let mut line = 1usize;
+    let mut col = 1usize;
+    for (idx, ch) in source.char_indices() {
+        if line == target_line && col == target_col {
+            return Some(idx);
+        }
+        if ch == '\n' {
+            line += 1;
+            col = 1;
+        } else {
+            col += 1;
+        }
+    }
+    if line == target_line && col == target_col {
+        return Some(source.len());
+    }
+    None
+}
+
+fn position_at_offset(source: &str, offset: usize) -> Position {
+    let mut line = 1usize;
+    let mut column = 1usize;
+    for ch in source[..offset].chars() {
+        if ch == '\n' {
+            line += 1;
+            column = 1;
+        } else {
+            column += 1;
+        }
+    }
+    Position {
+        offset,
+        line,
+        column,
+    }
+}
+
+fn is_keyword_ident(ident: &str) -> bool {
+    matches!(
+        ident,
+        "fn" | "let"
+            | "var"
+            | "if"
+            | "else"
+            | "while"
+            | "for"
+            | "in"
+            | "match"
+            | "return"
+            | "break"
+            | "continue"
+            | "type"
+            | "trait"
+            | "requires"
+            | "state"
+            | "fields"
+            | "typestate"
+            | "true"
+            | "false"
+            | "use"
+            | "as"
+            | "protocol"
+            | "role"
+            | "msg"
+            | "on"
+            | "effects"
+            | "emit"
+            | "self"
+    )
+}
 
 /// Translates compiler-internal mangled typestate names back to user-facing
 /// qualified names for display purposes.

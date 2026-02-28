@@ -6,9 +6,11 @@
 use std::hash::{Hash, Hasher};
 use std::path::{Path, PathBuf};
 
+use crate::core::api::lookup_strict_frontend_with_path;
 use crate::core::capsule::{self, CapsuleError, ModuleLoader, ModulePath};
-use crate::core::diag::Span;
+use crate::core::diag::{CompileError, Span};
 use crate::services::analysis::diagnostics::{ANALYSIS_FILE_PATH_KEY, Diagnostic, DiagnosticValue};
+use crate::services::analysis::pipeline::LookupState;
 use crate::services::analysis::snapshot::{AnalysisSnapshot, FileId};
 
 pub(crate) struct SnapshotOverlayLoader {
@@ -122,4 +124,23 @@ pub(crate) fn frontend_error_diagnostics(error: CapsuleError) -> Vec<Diagnostic>
         }
         _ => vec![frontend_diag(error.to_string(), Span::default())],
     }
+}
+
+pub(crate) fn strict_frontend_lookup_state_with_path(
+    source: &str,
+    source_path: &Path,
+    inject_prelude: bool,
+    experimental_typestate: bool,
+) -> Result<LookupState, Vec<CompileError>> {
+    let (resolved, typed) = lookup_strict_frontend_with_path(
+        source,
+        source_path,
+        inject_prelude,
+        experimental_typestate,
+    )?;
+    Ok(LookupState {
+        resolved: Some(resolved),
+        typed: Some(typed),
+        poisoned_nodes: Default::default(),
+    })
 }

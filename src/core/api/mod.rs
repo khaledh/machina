@@ -3,6 +3,8 @@
 //! This facade provides a stable, typed entrypoint surface for stage execution
 //! so batch compilation and IDE analysis can share the same stage contracts.
 
+mod strict_frontend;
+
 use std::collections::{HashMap, HashSet};
 
 use thiserror::Error;
@@ -26,6 +28,11 @@ use crate::core::typecheck::{
     type_check_with_imported_facts,
 };
 use crate::core::typestate::{self, TypestateRoleImplRef};
+
+pub(crate) use strict_frontend::{
+    StrictFrontendOptions, build_strict_frontend_input, run_strict_frontend,
+};
+pub use strict_frontend::{check_strict_frontend_with_path, lookup_strict_frontend_with_path};
 
 #[derive(Debug, Error)]
 pub enum ParseModuleError {

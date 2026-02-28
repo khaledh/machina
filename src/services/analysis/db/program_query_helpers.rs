@@ -24,7 +24,8 @@ impl super::AnalysisDb {
         let Some(entry_state) = module_states.get(&entry_module_id) else {
             return Ok(None);
         };
-        let Some(def_id) = def_at_span(entry_state, query_span) else {
+        let source = snapshot.text(file_id);
+        let Some(def_id) = def_at_span(entry_state, query_span, source.as_deref()) else {
             return Ok(None);
         };
         let Some(entry_resolved) = entry_state.resolved.as_ref() else {
@@ -92,12 +93,23 @@ impl super::AnalysisDb {
         };
         let snapshot = self.snapshot();
         let source = snapshot.text(file_id);
-        Ok(hover_at_span_in_file(
+        let hover = hover_at_span_in_file(
             &state,
             query_span,
             snapshot.path(file_id),
             source.as_deref(),
-        ))
+        );
+        if hover.as_ref().is_some_and(hover_needs_strict_fallback)
+            && let Some(strict_state) = self.strict_lookup_state_for_program_file(file_id)?
+        {
+            return Ok(hover_at_span_in_file(
+                &strict_state,
+                query_span,
+                snapshot.path(file_id),
+                source.as_deref(),
+            ));
+        }
+        Ok(hover)
     }
 
     pub fn completions_at_program_file(
@@ -144,4 +156,8 @@ impl super::AnalysisDb {
         // useful by trying the file-local pipeline.
         self.signature_help_at_file(file_id, query_span)
     }
+}
+
+fn hover_needs_strict_fallback(info: &HoverInfo) -> bool {
+    info.ty.as_ref().is_some_and(Type::contains_unresolved)
 }

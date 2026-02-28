@@ -156,7 +156,22 @@ impl AnalysisDb {
         &mut self,
         file_id: FileId,
     ) -> QueryResult<Vec<Diagnostic>> {
-        Ok(self.program_pipeline_for_file(file_id)?.diagnostics)
+        let program_diagnostics = self.program_pipeline_for_file(file_id)?.diagnostics;
+        if program_diagnostics.is_empty() {
+            return Ok(program_diagnostics);
+        }
+
+        // Prefer a clean strict frontend result when available, but only when
+        // the current document is the sole overlay. If dependency overlays are
+        // active, the program-aware pipeline remains the source of truth.
+        if self
+            .strict_lookup_state_for_program_file(file_id)?
+            .is_some()
+        {
+            return Ok(Vec::new());
+        }
+
+        Ok(program_diagnostics)
     }
 
     pub fn poisoned_nodes_for_path(&mut self, path: &Path) -> QueryResult<HashSet<NodeId>> {

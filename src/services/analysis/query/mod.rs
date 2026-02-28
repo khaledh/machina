@@ -23,6 +23,7 @@ pub enum QueryKind {
     SemcheckModule,
     Diagnostics,
     LookupState,
+    StrictLookupState,
     ProgramPipeline,
 }
 

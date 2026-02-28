@@ -130,6 +130,14 @@ impl SourceStore {
             .or_else(|| self.disk_text.get(&file_id).cloned())
     }
 
+    /// Returns `true` when strict single-file frontend fallback is safe for
+    /// `file_id`, i.e. every active overlay belongs to that same file.
+    pub fn supports_isolated_file_frontend(&self, file_id: FileId) -> bool {
+        self.overlays
+            .keys()
+            .all(|overlay_id| *overlay_id == file_id)
+    }
+
     /// Materialize an immutable snapshot where overlays shadow disk text.
     pub fn snapshot(&self) -> AnalysisSnapshot {
         let mut file_text = self.disk_text.clone();

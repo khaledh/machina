@@ -8,10 +8,19 @@ use crate::services::analysis::results::Location;
 use crate::services::analysis::snapshot::{AnalysisSnapshot, FileId};
 use crate::services::analysis::syntax_index::{node_span_map, span_contains_span};
 
+use super::identifier_token_at_span;
+
 /// Resolve the definition under `query_span`. Prefers role-binding matches
 /// over AST node matches — generated typestate items may carry synthetic
 /// spans that shadow the original role reference.
-pub(crate) fn def_at_span(state: &LookupState, query_span: Span) -> Option<DefId> {
+pub(crate) fn def_at_span(
+    state: &LookupState,
+    query_span: Span,
+    source: Option<&str>,
+) -> Option<DefId> {
+    let query_span = identifier_token_at_span(source, query_span)
+        .map(|token| token.span)
+        .unwrap_or(query_span);
     let resolved = state.resolved.as_ref()?;
     if let Some(def_id) = typestate_role_def_at_span(
         &resolved.typestate_role_impls,
@@ -36,7 +45,11 @@ pub(crate) fn def_location_at_span(
     file_id: FileId,
     state: &LookupState,
     query_span: Span,
+    source: Option<&str>,
 ) -> Option<Location> {
+    let query_span = identifier_token_at_span(source, query_span)
+        .map(|token| token.span)
+        .unwrap_or(query_span);
     let resolved = state.resolved.as_ref()?;
     // Try role-binding lookup first — generated typestate items may carry
     // synthetic spans that overlap with the role reference, causing

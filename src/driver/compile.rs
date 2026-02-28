@@ -1,24 +1,19 @@
 use std::collections::{HashMap, HashSet};
-use std::path::{Path, PathBuf};
+use std::path::Path;
 
 use crate::core::api::{
-    FrontendPolicy, ParseModuleError, ParseModuleOptions, ResolveInputs, elaborate_stage,
-    parse_module_with_id_gen_and_options, semcheck_stage,
+    StrictFrontendOptions, build_strict_frontend_input, check_strict_frontend_with_path,
+    elaborate_stage, run_strict_frontend, semcheck_stage,
 };
 use crate::core::backend;
 use crate::core::backend::regalloc::arm64::Arm64Target;
-use crate::core::capsule::compose::{flatten_capsule, merge_modules};
-use crate::core::capsule::{self, ModuleId};
-use crate::core::context::{
-    AnalyzedContext, CapsuleParsedContext, ParsedContext, ResolvedContext, TypeCheckedContext,
-};
+use crate::core::context::{AnalyzedContext, ResolvedContext, TypeCheckedContext};
 use crate::core::diag::CompileError;
 use crate::core::ir::format::{format_func_with_comments_and_names, format_globals};
 use crate::core::lexer::{LexError, Lexer, Token};
-use crate::core::monomorphize;
 use crate::core::nrvo::NrvoAnalyzer;
 use crate::core::resolve::DefId;
-use crate::core::tree::{Module, NodeId, NodeIdGen};
+use crate::core::tree::Module;
 
 #[derive(Debug)]
 pub struct CompileOptions {
@@ -69,18 +64,6 @@ impl DumpFlags {
     }
 }
 
-#[derive(Debug, Clone, Copy)]
-struct FrontendBuildOptions {
-    inject_prelude: bool,
-    experimental_typestate: bool,
-}
-
-struct ParsedStageOutput {
-    module: Module,
-    id_gen: NodeIdGen,
-    top_level_owners: HashMap<NodeId, ModuleId>,
-}
-
 struct TypedStageOutput {
     resolved_context: ResolvedContext,
     typed_context: TypeCheckedContext,
@@ -93,16 +76,7 @@ pub fn check_with_path(
     inject_prelude: bool,
     experimental_typestate: bool,
 ) -> Result<(), Vec<CompileError>> {
-    let parsed = build_frontend_input(
-        source,
-        Some(source_path),
-        FrontendBuildOptions {
-            inject_prelude,
-            experimental_typestate,
-        },
-    )?;
-    let _ = run_frontend_strict(parsed)?;
-    Ok(())
+    check_strict_frontend_with_path(source, source_path, inject_prelude, experimental_typestate)
 }
 
 pub fn compile(source: &str, opts: &CompileOptions) -> Result<CompileOutput, Vec<CompileError>> {
@@ -118,10 +92,10 @@ pub fn compile_with_path(
 
     dump_tokens_stage(source, dump)?;
 
-    let parsed = build_frontend_input(
+    let parsed = build_strict_frontend_input(
         source,
         source_path,
-        FrontendBuildOptions {
+        StrictFrontendOptions {
             inject_prelude: opts.inject_prelude,
             experimental_typestate: opts.experimental_typestate,
         },
@@ -129,7 +103,11 @@ pub fn compile_with_path(
 
     dump_ast_stage(&parsed.module, dump);
 
-    let typed = run_frontend_strict(parsed)?;
+    let (resolved_context, typed_context) = run_strict_frontend(parsed)?;
+    let typed = TypedStageOutput {
+        resolved_context,
+        typed_context,
+    };
 
     dump_def_table_stage(&typed.resolved_context, dump);
     dump_type_map_stage(&typed.typed_context, dump);
@@ -246,72 +224,6 @@ fn dump_asm_stage(asm: &str, dump: DumpFlags) {
     println!("--------------------------------");
     println!("{}", asm);
     println!("--------------------------------");
-}
-
-fn build_frontend_input(
-    source: &str,
-    source_path: Option<&Path>,
-    opts: FrontendBuildOptions,
-) -> Result<ParsedStageOutput, Vec<CompileError>> {
-    let (user_module, id_gen, top_level_owners) = if let Some(path) = source_path {
-        let capsule = capsule::discover_and_parse_capsule_with_options(
-            source,
-            path,
-            capsule::CapsuleParseOptions {
-                experimental_typestate: opts.experimental_typestate,
-            },
-        )
-        .map_err(|e| vec![e.into()])?;
-        let program_context = CapsuleParsedContext::new(capsule);
-        let flattened = flatten_capsule(&program_context)
-            .map_err(|errs| errs.into_iter().map(CompileError::from).collect::<Vec<_>>())?;
-        (
-            flattened.module,
-            program_context.next_node_id_gen().clone(),
-            flattened.top_level_owners,
-        )
-    } else {
-        let id_gen = NodeIdGen::new();
-        let (module, id_gen) = parse_with_id_gen(source, id_gen, opts.experimental_typestate)?;
-        (module, id_gen, HashMap::new())
-    };
-
-    let (module, id_gen) = if opts.inject_prelude {
-        inject_prelude_module(user_module, id_gen, opts.experimental_typestate)?
-    } else {
-        (user_module, id_gen)
-    };
-
-    Ok(ParsedStageOutput {
-        module,
-        id_gen,
-        top_level_owners,
-    })
-}
-
-fn inject_prelude_module(
-    user_module: Module,
-    id_gen: NodeIdGen,
-    experimental_typestate: bool,
-) -> Result<(Module, NodeIdGen), Vec<CompileError>> {
-    let prelude_path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .join("std")
-        .join("prelude_decl.mc");
-    let prelude_src = std::fs::read_to_string(&prelude_path)
-        .map_err(|e| vec![CompileError::Io(prelude_path.clone(), e)])?;
-    let (prelude_module, id_gen) = parse_with_id_gen(&prelude_src, id_gen, experimental_typestate)?;
-    Ok((merge_modules(&prelude_module, &user_module), id_gen))
-}
-
-fn run_frontend_strict(parsed: ParsedStageOutput) -> Result<TypedStageOutput, Vec<CompileError>> {
-    let ast_context = ParsedContext::new(parsed.module, parsed.id_gen);
-    let (resolved_context, typed_context) =
-        resolve_and_typecheck_strict(ast_context, &parsed.top_level_owners)?;
-
-    Ok(TypedStageOutput {
-        resolved_context,
-        typed_context,
-    })
 }
 
 fn run_semantic_stage(typed: TypedStageOutput) -> Result<AnalyzedContext, Vec<CompileError>> {
@@ -456,73 +368,6 @@ fn format_ir_stage(
 }
 
 // --- std parsed-tree injection ---
-
-fn parse_with_id_gen(
-    source: &str,
-    id_gen: NodeIdGen,
-    experimental_typestate: bool,
-) -> Result<(Module, NodeIdGen), Vec<CompileError>> {
-    parse_module_with_id_gen_and_options(
-        source,
-        id_gen,
-        ParseModuleOptions {
-            experimental_typestate,
-        },
-    )
-    .map_err(|e| match e {
-        ParseModuleError::Lex(e) => vec![e.into()],
-        ParseModuleError::Parse(e) => vec![e.into()],
-    })
-}
-
-fn resolve_and_typecheck_strict(
-    ast_context: ParsedContext,
-    top_level_owners: &HashMap<NodeId, ModuleId>,
-) -> Result<(ResolvedContext, TypeCheckedContext), Vec<CompileError>> {
-    // Phase 1: resolve + initial strict typecheck on the flattened module.
-    let first_pass = crate::core::api::resolve_typecheck_pipeline_with_policy(
-        ast_context,
-        ResolveInputs::default(),
-        Some(top_level_owners),
-        FrontendPolicy::Strict,
-    );
-    if !first_pass.resolve_errors.is_empty() {
-        return Err(first_pass
-            .resolve_errors
-            .into_iter()
-            .map(CompileError::from)
-            .collect());
-    }
-    if !first_pass.type_errors.is_empty() {
-        return Err(first_pass
-            .type_errors
-            .into_iter()
-            .map(CompileError::from)
-            .collect());
-    }
-
-    // Extract strict-pass products (safe because we already checked errors).
-    let resolved_context = first_pass
-        .resolved_context
-        .expect("strict resolve should produce context when no errors");
-    let typed_context = first_pass
-        .typed_context
-        .expect("strict typecheck should produce context when no errors");
-
-    // Phase 2: monomorphize + sparse retype (internally handled by core).
-    let (resolved_context, typed_context, _mono_stats) =
-        monomorphize::monomorphize(resolved_context, typed_context, Some(top_level_owners))
-            .map_err(|e| match e {
-                monomorphize::MonomorphizePipelineError::Monomorphize(err) => {
-                    vec![CompileError::from(err)]
-                }
-                monomorphize::MonomorphizePipelineError::Retype(errors) => errors
-                    .into_iter()
-                    .map(CompileError::from)
-                    .collect::<Vec<CompileError>>(),
-            })?;
-    Ok((resolved_context, typed_context))
-}
 
 #[cfg(test)]
 #[path = "../tests/t_compile.rs"]

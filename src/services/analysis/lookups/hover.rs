@@ -7,7 +7,7 @@
 
 use std::path::Path;
 
-use crate::core::diag::{Position, Span};
+use crate::core::diag::Span;
 use crate::core::resolve::{DefId, DefTable, UNKNOWN_DEF_ID};
 use crate::core::tree::Module;
 use crate::core::typecheck::type_map::TypeMap;
@@ -18,9 +18,9 @@ use crate::services::analysis::syntax_index::{
     call_site_at_span, node_at_span, node_span_map, span_contains_span,
 };
 
-use super::TypestateNameDemangler;
 use super::callable_signature::format_source_callable_signature;
 use super::definition::typestate_role_def_at_span;
+use super::{TypestateNameDemangler, identifier_token_at_span};
 
 pub(crate) fn hover_at_span_in_file(
     state: &LookupState,
@@ -28,36 +28,53 @@ pub(crate) fn hover_at_span_in_file(
     current_file_path: Option<&Path>,
     source_text: Option<&str>,
 ) -> Option<HoverInfo> {
-    // Resolve the byte offset and extract the identifier token under the
-    // cursor. If source is available but no identifier is found (e.g. the
-    // cursor is on whitespace or a keyword), bail early.
-    let query_offset =
-        source_text.and_then(|source| offset_from_position(source, query_span.start));
-    let query_ident = source_text
-        .and_then(|source| query_offset.and_then(|offset| identifier_at_offset(source, offset)));
-    if source_text.is_some() && query_ident.is_none() {
+    // Editor hover requests usually arrive as zero-width point spans. Expand
+    // those points to the enclosing identifier token first so downstream node
+    // and def lookups compete on the actual symbol span rather than a single
+    // cursor position.
+    let token = identifier_token_at_span(source_text, query_span);
+    let normalized_query_span = token.as_ref().map(|token| token.span).unwrap_or(query_span);
+    let query_ident = token.as_ref().map(|token| token.ident.clone());
+    if source_text.is_some() && token.is_none() {
         return None;
     }
 
     if state.typed.is_some() {
-        try_call_site_hover(state, query_span, query_ident.as_deref())
+        try_call_site_hover(state, normalized_query_span, query_ident.as_deref())
             .or_else(|| {
-                try_node_hover(state, query_span, current_file_path, query_ident.as_deref())
+                try_node_hover(
+                    state,
+                    normalized_query_span,
+                    current_file_path,
+                    query_ident.as_deref(),
+                )
             })
-            .or_else(|| try_typestate_role_hover(state, query_span, query_ident.as_deref()))
             .or_else(|| {
-                try_def_table_hover(state, query_span, current_file_path, query_ident.as_deref())
+                try_typestate_role_hover(state, normalized_query_span, query_ident.as_deref())
+            })
+            .or_else(|| {
+                try_def_table_hover(
+                    state,
+                    normalized_query_span,
+                    current_file_path,
+                    query_ident.as_deref(),
+                )
             })
             .or_else(|| {
                 try_syntactic_field_hover(
-                    query_span,
+                    normalized_query_span,
                     source_text,
-                    query_offset,
+                    token.as_ref().map(|token| token.offset),
                     query_ident.as_deref(),
                 )
             })
     } else {
-        try_resolved_hover(state, query_span, current_file_path, query_ident.as_deref())
+        try_resolved_hover(
+            state,
+            normalized_query_span,
+            current_file_path,
+            query_ident.as_deref(),
+        )
     }
 }
 
@@ -497,99 +514,6 @@ fn def_name_matches_query(
     demangled
         .rsplit_once("::")
         .is_some_and(|(_, tail)| tail == query_ident)
-}
-
-// --- Source text helpers ---
-
-/// Extract the identifier token surrounding the given byte offset, or `None`
-/// if the offset is on whitespace, punctuation, or a language keyword.
-fn identifier_at_offset(source: &str, offset: usize) -> Option<String> {
-    if source.is_empty() {
-        return None;
-    }
-    let mut idx = offset.min(source.len());
-    while idx > 0 && !source.is_char_boundary(idx) {
-        idx -= 1;
-    }
-    let bytes = source.as_bytes();
-    let is_ident = |b: u8| b == b'_' || b.is_ascii_alphanumeric();
-
-    if idx > 0
-        && !is_ident(bytes[idx.saturating_sub(1)])
-        && (idx >= bytes.len() || !is_ident(bytes[idx]))
-    {
-        return None;
-    }
-
-    let mut start = idx;
-    while start > 0 && is_ident(bytes[start - 1]) {
-        start -= 1;
-    }
-    let mut end = idx;
-    while end < bytes.len() && is_ident(bytes[end]) {
-        end += 1;
-    }
-    if start >= end {
-        return None;
-    }
-    let ident = source[start..end].to_string();
-    if is_keyword_ident(&ident) {
-        return None;
-    }
-    Some(ident)
-}
-
-/// Convert a 1-based line/column position to a byte offset. Uses the
-/// pre-computed offset when available; otherwise falls back to a line/column
-/// scan (LSP query spans carry line/column but set offset=0).
-fn offset_from_position(source: &str, position: Position) -> Option<usize> {
-    if position.offset > 0 && position.offset <= source.len() {
-        return Some(position.offset);
-    }
-    let target_line = position.line.max(1);
-    let target_col = position.column.max(1);
-    let mut line = 1usize;
-    let mut col = 1usize;
-    for (idx, ch) in source.char_indices() {
-        if line == target_line && col == target_col {
-            return Some(idx);
-        }
-        if ch == '\n' {
-            line += 1;
-            col = 1;
-        } else {
-            col += 1;
-        }
-    }
-    if line == target_line && col == target_col {
-        return Some(source.len());
-    }
-    None
-}
-
-fn is_keyword_ident(ident: &str) -> bool {
-    matches!(
-        ident,
-        "fn" | "let"
-            | "var"
-            | "if"
-            | "else"
-            | "while"
-            | "for"
-            | "in"
-            | "match"
-            | "return"
-            | "break"
-            | "continue"
-            | "type"
-            | "trait"
-            | "requires"
-            | "state"
-            | "fields"
-            | "typestate"
-            | "true"
-            | "false"
-    )
 }
 
 /// Try to extract a `name: Type` hover from the raw source line when AST-level

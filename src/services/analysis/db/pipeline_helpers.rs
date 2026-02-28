@@ -1,7 +1,9 @@
 //! Pipeline and lookup helper methods for `AnalysisDb`.
 
 use crate::core::capsule::ModuleId;
-use crate::services::analysis::frontend_support::stable_source_revision;
+use crate::services::analysis::frontend_support::{
+    stable_source_revision, strict_frontend_lookup_state_with_path,
+};
 use crate::services::analysis::pipeline::{
     LookupState, run_module_pipeline_with_query_input, to_lookup_state,
 };
@@ -70,6 +72,46 @@ impl super::AnalysisDb {
         Ok(program
             .entry_module_id
             .and_then(|entry| program.module_states.get(&entry).cloned()))
+    }
+
+    pub(super) fn strict_lookup_state_for_program_file(
+        &mut self,
+        file_id: FileId,
+    ) -> QueryResult<Option<LookupState>> {
+        if !self.sources.supports_isolated_file_frontend(file_id) {
+            return Ok(None);
+        }
+
+        let snapshot = self.snapshot();
+        let Some(source) = snapshot.text(file_id) else {
+            return Ok(None);
+        };
+        let Some(path) = snapshot.path(file_id).map(|p| p.to_path_buf()) else {
+            return Ok(None);
+        };
+
+        let revision = snapshot.revision();
+        let module_id = ModuleId(file_id.0);
+        let query_input = if self.experimental_typestate { 1 } else { 0 };
+        let key = QueryKey::with_input(
+            QueryKind::StrictLookupState,
+            module_id,
+            revision,
+            query_input,
+        );
+        let experimental_typestate = self.experimental_typestate;
+
+        self.execute_query(key, move |_rt| {
+            Ok(
+                strict_frontend_lookup_state_with_path(
+                    &source,
+                    &path,
+                    true,
+                    experimental_typestate,
+                )
+                .ok(),
+            )
+        })
     }
 
     pub(super) fn program_pipeline_for_file(

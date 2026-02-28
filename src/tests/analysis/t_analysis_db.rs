@@ -179,6 +179,27 @@ fn main() -> u64 { id(1) }
 }
 
 #[test]
+fn def_at_returns_definition_for_point_query_inside_identifier() {
+    let mut db = AnalysisDb::new();
+    let source = r#"
+fn id(x: u64) -> u64 { x }
+fn main() -> u64 { id(1) }
+"#;
+    let file_id = db.upsert_disk_text(PathBuf::from("examples/lookup_point.mc"), source);
+
+    let offset = source.rfind("id(1)").expect("expected call site") + 1;
+    let point = Span {
+        start: position_at(source, offset),
+        end: position_at(source, offset),
+    };
+    let def_id = db
+        .def_at_file(file_id, point)
+        .expect("def_at point query should succeed");
+
+    assert!(def_id.is_some(), "expected def lookup at point query");
+}
+
+#[test]
 fn def_at_still_works_with_unrelated_resolve_error() {
     let mut db = AnalysisDb::new();
     let source = r#"
@@ -234,6 +255,33 @@ fn main() -> u64 { id(1) }
         .def_location_at_file(file_id, use_span)
         .expect("definition location query should succeed")
         .expect("expected definition location");
+
+    assert_eq!(location.file_id, file_id);
+    assert_eq!(location.span.start.line, 2);
+    assert_eq!(location.span.start.column, 1);
+}
+
+#[test]
+fn def_location_point_query_points_to_declaration_site() {
+    let mut db = AnalysisDb::new();
+    let source = r#"
+fn id(x: u64) -> u64 { x }
+fn main() -> u64 { id(1) }
+"#;
+    let file_id = db.upsert_disk_text(
+        PathBuf::from("examples/lookup_def_location_point.mc"),
+        source,
+    );
+
+    let offset = source.rfind("id(1)").expect("expected call site") + 1;
+    let point = Span {
+        start: position_at(source, offset),
+        end: position_at(source, offset),
+    };
+    let location = db
+        .def_location_at_file(file_id, point)
+        .expect("definition location point query should succeed")
+        .expect("expected definition location for point query");
 
     assert_eq!(location.file_id, file_id);
     assert_eq!(location.span.start.line, 2);
@@ -2786,6 +2834,90 @@ fn diagnostics_for_program_file_typestate_connection_example_is_clean_when_enabl
     assert!(
         diagnostics.is_empty(),
         "expected no diagnostics for typestate example in program mode, got: {diagnostics:#?}"
+    );
+}
+
+#[test]
+fn diagnostics_for_program_file_std_io_file_read_stdout_example_is_clean() {
+    let mut db = AnalysisDb::new();
+
+    let path = PathBuf::from("examples/basics/file_read_stdout.mc");
+    let source = std::fs::read_to_string(&path).expect("failed to read std::io example");
+    let file_id = db.upsert_disk_text(path, source.clone());
+
+    let diagnostics = db
+        .diagnostics_for_program_file(file_id)
+        .expect("program diagnostics query should succeed");
+    assert!(
+        diagnostics.is_empty(),
+        "expected no diagnostics for std::io example in program mode, got: {diagnostics:#?}"
+    );
+}
+
+#[test]
+fn hover_at_program_file_std_io_writer_shows_text_writer() {
+    let mut db = AnalysisDb::new();
+
+    let path = PathBuf::from("examples/basics/file_read_stdout.mc");
+    let source = std::fs::read_to_string(&path).expect("failed to read std::io example");
+    let file_id = db.upsert_disk_text(path, source.clone());
+    let binding_start = source.find("let writer").expect("expected writer binding") + 4;
+    let binding_end = binding_start + "writer".len();
+    let span = Span {
+        start: position_at(&source, binding_start),
+        end: position_at(&source, binding_end),
+    };
+
+    let hover = db
+        .hover_at_program_file(file_id, span)
+        .expect("program hover query should succeed")
+        .expect("expected hover for writer binding");
+    assert!(
+        hover.display.contains("TextWriter"),
+        "expected writer hover to mention TextWriter, got: {}",
+        hover.display
+    );
+}
+
+#[test]
+fn hover_at_program_file_std_io_point_hover_shows_text_writer() {
+    let mut db = AnalysisDb::new();
+
+    let path = PathBuf::from("examples/basics/file_read_stdout.mc");
+    let source = std::fs::read_to_string(&path).expect("failed to read std::io example");
+    let file_id = db.upsert_disk_text(path, source.clone());
+
+    let writer_offset = source
+        .find("let writer =")
+        .expect("expected writer binding")
+        + "let ".len();
+    let writer_point = Span {
+        start: position_at(&source, writer_offset),
+        end: position_at(&source, writer_offset),
+    };
+    let writer_hover = db
+        .hover_at_program_file(file_id, writer_point)
+        .expect("program hover query should succeed")
+        .expect("expected point hover for writer binding");
+    assert!(
+        writer_hover.display.contains("TextWriter"),
+        "expected writer point hover to mention TextWriter, got: {}",
+        writer_hover.display
+    );
+
+    let text_offset = source.find(".text()").expect("expected text call") + ".".len();
+    let text_point = Span {
+        start: position_at(&source, text_offset),
+        end: position_at(&source, text_offset),
+    };
+    let text_hover = db
+        .hover_at_program_file(file_id, text_point)
+        .expect("program hover query should succeed")
+        .expect("expected point hover for text method");
+    assert!(
+        text_hover.display.contains("TextWriter"),
+        "expected text point hover to mention TextWriter, got: {}",
+        text_hover.display
     );
 }
 
