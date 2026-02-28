@@ -4,7 +4,9 @@
 //! branching (may introduce control flow), so lowering can dispatch directly.
 
 use crate::core::tree::NodeId;
-use crate::core::tree::semantic::{CallPlanMap, IndexPlanMap, MatchPlanMap, SlicePlanMap};
+use crate::core::tree::semantic::{
+    CallPlanMap, IndexPlanMap, MatchPlanMap, SlicePlanMap, ValueExpr,
+};
 use std::collections::HashMap;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -20,6 +22,7 @@ pub struct LoweringPlanMap {
     pub index_plans: IndexPlanMap,
     pub match_plans: MatchPlanMap,
     pub slice_plans: SlicePlanMap,
+    pub try_cleanup_plans: HashMap<NodeId, Vec<ValueExpr>>,
 }
 
 impl LoweringPlanMap {
@@ -50,6 +53,10 @@ impl LoweringPlanMap {
         node: NodeId,
     ) -> Option<crate::core::tree::semantic::SlicePlan> {
         self.slice_plans.get(&node).cloned()
+    }
+
+    pub fn lookup_try_cleanup_plan(&self, node: NodeId) -> Option<Vec<ValueExpr>> {
+        self.try_cleanup_plans.get(&node).cloned()
     }
 
     pub fn insert_value_plan(&mut self, node: NodeId, plan: LoweringPlan) {

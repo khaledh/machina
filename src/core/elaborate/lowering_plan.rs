@@ -14,6 +14,7 @@ pub fn build_lowering_plans(
     index_plans: &sem::IndexPlanMap,
     match_plans: &sem::MatchPlanMap,
     slice_plans: &sem::SlicePlanMap,
+    try_cleanup_plans: &std::collections::HashMap<NodeId, Vec<sem::ValueExpr>>,
 ) -> sem::LoweringPlanMap {
     let mut builder = LoweringPlanBuilder {
         call_plans,
@@ -27,6 +28,7 @@ pub fn build_lowering_plans(
         index_plans: index_plans.clone(),
         match_plans: match_plans.clone(),
         slice_plans: slice_plans.clone(),
+        try_cleanup_plans: try_cleanup_plans.clone(),
     }
 }
 

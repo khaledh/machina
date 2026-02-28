@@ -309,6 +309,16 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
 
         join.restore_locals(self);
         self.builder.select_block(err_dispatch_bb);
+        if let Some(cleanup) = self.try_cleanup_plan(expr.id) {
+            // Cleanup runs before the propagated error returns from the
+            // current callable, matching the scoped `defer` execution model.
+            for cleanup_expr in cleanup {
+                match self.lower_value_expr(&cleanup_expr)? {
+                    BranchResult::Value(_) => {}
+                    BranchResult::Return => return Ok(BranchResult::Return),
+                }
+            }
+        }
         if return_union_matches_operand {
             self.emit_root_return(Some(union_value))?;
         } else {

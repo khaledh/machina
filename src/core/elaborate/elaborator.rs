@@ -117,6 +117,7 @@ pub struct Elaborator<'a> {
     index_plans: sem::IndexPlanMap,
     match_plans: sem::MatchPlanMap,
     slice_plans: sem::SlicePlanMap,
+    try_cleanup_plans: std::collections::HashMap<NodeId, Vec<sem::ValueExpr>>,
 }
 
 impl<'a> Elaborator<'a> {
@@ -151,6 +152,7 @@ impl<'a> Elaborator<'a> {
             index_plans: HashMap::new(),
             match_plans: HashMap::new(),
             slice_plans: HashMap::new(),
+            try_cleanup_plans: HashMap::new(),
         }
     }
 
@@ -167,6 +169,7 @@ impl<'a> Elaborator<'a> {
         self.index_plans.clear();
         self.match_plans.clear();
         self.slice_plans.clear();
+        self.try_cleanup_plans.clear();
     }
 
     /// Pass 1 core elaboration: normalize-level desugaring + place/value
@@ -346,6 +349,14 @@ impl<'a> Elaborator<'a> {
         self.slice_plans.insert(node_id, plan);
     }
 
+    pub(super) fn record_try_cleanup_plan(
+        &mut self,
+        node_id: NodeId,
+        cleanup: Vec<sem::ValueExpr>,
+    ) {
+        self.try_cleanup_plans.insert(node_id, cleanup);
+    }
+
     /// Borrow all plan side tables as a single bundle.
     pub(super) fn lowering_plan_tables(
         &self,
@@ -354,12 +365,14 @@ impl<'a> Elaborator<'a> {
         &sem::IndexPlanMap,
         &sem::MatchPlanMap,
         &sem::SlicePlanMap,
+        &std::collections::HashMap<NodeId, Vec<sem::ValueExpr>>,
     ) {
         (
             &self.call_plans,
             &self.index_plans,
             &self.match_plans,
             &self.slice_plans,
+            &self.try_cleanup_plans,
         )
     }
 

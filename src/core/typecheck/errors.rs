@@ -44,11 +44,6 @@ pub enum TypeCheckErrorKind {
     #[error("`defer` cannot use bare `?`; handle the error inside the deferred expression")]
     DeferBareTry,
 
-    #[error(
-        "`?` is not yet supported inside a scope with active `defer`/`using` cleanup; handle the error explicitly before leaving the scope"
-    )]
-    TryInCleanupScope,
-
     #[error("`or` handler must be callable, found {0}")]
     TryHandlerNotCallable(Type),
 

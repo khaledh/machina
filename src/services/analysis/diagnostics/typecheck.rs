@@ -250,7 +250,6 @@ macro_rules! with_typecheck_variants {
             TryReturnTypeNotErrorUnion,
             DeferExprFallible,
             DeferBareTry,
-            TryInCleanupScope,
             TryHandlerNotCallable,
             TryHandlerArity,
             TryHandlerArgTypeMismatch,

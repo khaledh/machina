@@ -143,6 +143,44 @@ fn test_std_io_file_open_read_write_close_roundtrip() {
     assert_eq!(stdout, "abc\n\n", "unexpected stdout: {stdout}");
 }
 
+#[test]
+fn test_defer_runs_before_try_propagates_error() {
+    let run = run_program(
+        "defer_try_cleanup",
+        r#"
+            requires {
+                std::io::println
+            }
+
+            type AppError = {
+                code: u64,
+            }
+
+            fn cleanup() {
+                println("cleanup");
+            }
+
+            fn fail() -> u64 | AppError {
+                AppError { code: 9 }
+            }
+
+            fn main() -> () | AppError {
+                defer cleanup();
+                let _value = fail()?;
+                ()
+            }
+        "#,
+    );
+    assert_ne!(
+        run.status.code(),
+        Some(0),
+        "propagated error should not exit successfully"
+    );
+
+    let stdout = String::from_utf8_lossy(&run.stdout);
+    assert_eq!(stdout, "cleanup\n", "unexpected stdout: {stdout}");
+}
+
 fn with_temp_program(
     name: &str,
     entry_source: &str,

@@ -151,6 +151,10 @@ impl<'a, 'b> SyntaxDesugarCtx<'a, 'b> {
         values
     }
 
+    fn collect_cleanup_for_try_propagate(&self) -> Vec<sem::ValueExpr> {
+        self.collect_cleanup_for_return()
+    }
+
     fn append_cleanup_before_stmt(
         &self,
         rewritten: &mut Vec<sem::BlockItem>,
@@ -530,6 +534,14 @@ impl<'a, 'b> SyntaxDesugarCtx<'a, 'b> {
                 self.desugar_value_expr(fallible_expr);
                 if let Some(handler) = on_error {
                     self.desugar_value_expr(handler);
+                } else {
+                    let cleanup = self.collect_cleanup_for_try_propagate();
+                    if !cleanup.is_empty() {
+                        // Bare `?` still returns from the surrounding callable,
+                        // so record the active cleanup set for backend return
+                        // lowering instead of rewriting the expression shape.
+                        self.record_try_cleanup_plan(expr.id, cleanup);
+                    }
                 }
             }
             sem::ValueExprKind::UnaryOp { expr, .. }

@@ -152,6 +152,11 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
             .unwrap_or_else(|| panic!("backend missing slice plan {:?}", node_id))
     }
 
+    /// Fetches any cleanup expressions that must run before `?` propagates.
+    pub(super) fn try_cleanup_plan(&self, node_id: NodeId) -> Option<Vec<sem::ValueExpr>> {
+        self.lowering_plans.lookup_try_cleanup_plan(node_id)
+    }
+
     /// Creates a new function lowerer for the given semantic function definition.
     ///
     /// Initializes the type context, extracts the function signature, and prepares

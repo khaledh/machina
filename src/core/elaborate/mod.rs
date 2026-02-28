@@ -94,9 +94,16 @@ pub fn elaborate(ctx: ElaborateStageInput) -> ElaborateStageOutput {
     );
 
     let module = pipeline::run(&mut elaborator, &module);
-    let (call_plans, index_plans, match_plans, slice_plans) = elaborator.lowering_plan_tables();
-    let lowering_plans =
-        build_lowering_plans(&module, call_plans, index_plans, match_plans, slice_plans);
+    let (call_plans, index_plans, match_plans, slice_plans, try_cleanup_plans) =
+        elaborator.lowering_plan_tables();
+    let lowering_plans = build_lowering_plans(
+        &module,
+        call_plans,
+        index_plans,
+        match_plans,
+        slice_plans,
+        try_cleanup_plans,
+    );
     let drop_plans = build_drop_plans(&module, &def_table, &type_map);
     let machine_plans = build_machine_plans(&module, &def_table, &type_map, &typestate_role_impls);
 
