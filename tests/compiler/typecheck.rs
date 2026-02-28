@@ -105,6 +105,44 @@ fn test_type_of_intrinsic_handles_generic_struct_values() {
     );
 }
 
+#[test]
+fn test_std_io_file_open_read_write_close_roundtrip() {
+    let run = run_program(
+        "std_io_file_roundtrip",
+        r#"
+            requires {
+                std::io::TextReader
+                std::io::TextWriter
+                std::io::open_read
+                std::io::open_write
+                std::io::IoError
+                std::io::println
+            }
+
+            fn main() -> () | IoError {
+                let path = "/tmp/machina_io_roundtrip_test.txt";
+
+                let raw_writer = open_write(path)?;
+                let writer: TextWriter = raw_writer.text();
+                writer.write_all("abc\n")?;
+                writer.close()?;
+
+                let raw_reader = open_read(path)?;
+                let reader: TextReader = raw_reader.text();
+                var text: string;
+                reader.read_all(out text)?;
+                reader.close()?;
+
+                println(text);
+            }
+        "#,
+    );
+    assert_eq!(run.status.code(), Some(0));
+
+    let stdout = String::from_utf8_lossy(&run.stdout);
+    assert_eq!(stdout, "abc\n\n", "unexpected stdout: {stdout}");
+}
+
 fn with_temp_program(
     name: &str,
     entry_source: &str,

@@ -129,6 +129,7 @@ fn runtime_sources(repo_root: &Path) -> Vec<PathBuf> {
     vec![
         repo_root.join("runtime").join("alloc.c"),
         repo_root.join("runtime").join("conv.c"),
+        repo_root.join("runtime").join("dyn_array.c"),
         repo_root.join("runtime").join("hash_table.c"),
         repo_root.join("runtime").join("map_table.c"),
         repo_root.join("runtime").join("machine").join("runtime.c"),
@@ -141,6 +142,7 @@ fn runtime_sources(repo_root: &Path) -> Vec<PathBuf> {
         repo_root.join("runtime").join("machine").join("emit.c"),
         repo_root.join("runtime").join("set.c"),
         repo_root.join("runtime").join("mem.c"),
+        repo_root.join("runtime").join("io.c"),
         repo_root.join("runtime").join("print.c"),
         repo_root.join("runtime").join("string.c"),
         repo_root.join("runtime").join("trap.c"),

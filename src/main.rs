@@ -611,6 +611,7 @@ const RUNTIME_SOURCE_FILES: &[&str] = &[
     "machine/pending.c",
     "machine/emit.c",
     "mem.c",
+    "io.c",
     "print.c",
     "set.c",
     "string.c",

@@ -11,6 +11,30 @@ fn __rt_memset(inout buf: u8[], value: u8);
 @runtime
 fn __rt_string_from_bytes(out dst: string, bytes: u8[]);
 
+@runtime
+fn __rt_file_last_errno() -> u64;
+
+@runtime
+fn __rt_file_open_read(path: string) -> u64;
+
+@runtime
+fn __rt_file_open_write(path: string) -> u64;
+
+@runtime
+fn __rt_file_open_rw(path: string) -> u64;
+
+@runtime
+fn __rt_file_read(fd: u64, inout buf: u8[]) -> u64;
+
+@runtime
+fn __rt_file_read_all_text(out dst: string, fd: u64);
+
+@runtime
+fn __rt_file_write(fd: u64, data: u8[]) -> u64;
+
+@runtime
+fn __rt_file_close(fd: u64) -> u64;
+
 @intrinsic
 fn type_of<T>(value: T) -> string;
 
