@@ -38,6 +38,12 @@ pub enum TypeCheckErrorKind {
     #[error("`?` requires an error-union return type, found {0}")]
     TryReturnTypeNotErrorUnion(Type),
 
+    #[error("`defer` expression must be non-fallible, found {0}")]
+    DeferExprFallible(Type),
+
+    #[error("`defer` cannot use bare `?`; handle the error inside the deferred expression")]
+    DeferBareTry,
+
     #[error("`or` handler must be callable, found {0}")]
     TryHandlerNotCallable(Type),
 

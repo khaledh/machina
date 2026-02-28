@@ -81,3 +81,56 @@ fn test_validate_return_value_missing() {
             .any(|err| matches!(err.kind(), TypeCheckErrorKind::ReturnValueMissing(_, ..)))
     );
 }
+
+#[test]
+fn test_validate_defer_rejects_fallible_expression() {
+    let source = r#"
+        type IoError = {
+            code: u64,
+        }
+
+        fn close() -> () | IoError {
+            IoError { code: 1 }
+        }
+
+        fn test() {
+            defer close();
+        }
+    "#;
+
+    let result = run_validate(source);
+    assert!(result.is_err());
+    let errors = result.expect_err("expected error");
+    assert!(
+        errors
+            .iter()
+            .any(|err| matches!(err.kind(), TypeCheckErrorKind::DeferExprFallible(_)))
+    );
+}
+
+#[test]
+fn test_validate_defer_rejects_bare_try() {
+    let source = r#"
+        type IoError = {
+            code: u64,
+        }
+
+        fn close() -> () | IoError {
+            IoError { code: 1 }
+        }
+
+        fn test() -> () | IoError {
+            defer close()?;
+            ()
+        }
+    "#;
+
+    let result = run_validate(source);
+    assert!(result.is_err());
+    let errors = result.expect_err("expected error");
+    assert!(
+        errors
+            .iter()
+            .any(|err| matches!(err.kind(), TypeCheckErrorKind::DeferBareTry))
+    );
+}

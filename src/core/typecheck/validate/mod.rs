@@ -8,12 +8,16 @@ use crate::core::typecheck::errors::TypeCheckErrorKind;
 mod control;
 mod protocol;
 mod reply_cap;
+mod stmt;
 
 /// Pass 4: semantic checks that are not pure type equalities/assignability.
 pub(crate) fn run(engine: &mut TypecheckEngine) -> Result<(), Vec<TypeCheckError>> {
     let mut errors = Vec::new();
 
     errors.extend(control::check_control_facts(engine));
+    // Stmt-level rules sit here because they depend on solved types, but
+    // do not need the heavier semantic passes downstream.
+    errors.extend(stmt::check_stmt_semantics(engine));
     errors.extend(protocol::check_protocol_shape_conformance(engine));
     errors.extend(protocol::check_typestate_handler_overlap(engine));
     errors.extend(protocol::check_typestate_request_response_shape(engine));
