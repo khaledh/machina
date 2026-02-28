@@ -198,6 +198,22 @@ impl<'a> MoveVisitor<'a> {
         }
     }
 
+    /// Process a sink argument/receiver. Named values still need move
+    /// tracking, but temporaries can be consumed directly because they do not
+    /// leave a reusable binding behind.
+    fn handle_sink_target(&mut self, expr: &Expr) {
+        match &expr.kind {
+            ExprKind::Var { .. } => self.handle_move_target(expr),
+            // Projections still require moving the whole owner explicitly.
+            ExprKind::ArrayIndex { .. }
+            | ExprKind::TupleField { .. }
+            | ExprKind::StructField { .. } => self.err(expr.span, SEK::InvalidMoveTarget),
+            // Rvalues like calls/tries/blocks are fine to consume directly;
+            // just validate any nested uses they contain.
+            _ => self.visit_expr(expr),
+        }
+    }
+
     /// Process an explicit move capture: validate and mark the base as moved.
     fn handle_move_capture(&mut self, def_id: DefId, span: Span) {
         let Some(def) = self.ctx.def_table.lookup_def(def_id) else {
@@ -473,7 +489,7 @@ impl<'a> Visitor for MoveVisitor<'a> {
                                 self.visit_out_arg(arg_expr);
                             }
                             ParamMode::Sink => {
-                                self.handle_move_target(arg_expr);
+                                self.handle_sink_target(arg_expr);
                             }
                         }
                     }
@@ -495,7 +511,7 @@ impl<'a> Visitor for MoveVisitor<'a> {
                                 self.visit_out_arg(callee);
                             }
                             ParamMode::Sink => {
-                                self.handle_move_target(callee);
+                                self.handle_sink_target(callee);
                             }
                         }
                     } else {
@@ -512,7 +528,7 @@ impl<'a> Visitor for MoveVisitor<'a> {
                                 self.visit_out_arg(arg_expr);
                             }
                             ParamMode::Sink => {
-                                self.handle_move_target(arg_expr);
+                                self.handle_sink_target(arg_expr);
                             }
                         }
                     }

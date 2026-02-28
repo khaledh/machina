@@ -144,6 +144,43 @@ fn test_std_io_file_open_read_write_close_roundtrip() {
 }
 
 #[test]
+fn test_std_io_using_auto_closes_text_handles() {
+    let run = run_program(
+        "std_io_using_roundtrip",
+        r#"
+            requires {
+                std::io::IoError
+                std::io::open_read
+                std::io::open_write
+                std::io::println
+            }
+
+            fn main() -> () | IoError {
+                let path = "/tmp/machina_io_using_roundtrip_test.txt";
+
+                // The writer is scoped to this block and closes automatically
+                // when `using` exits.
+                using writer = open_write(path)?.text() {
+                    writer.write_all("abc\n")?;
+                }
+
+                // Reopen the same path to confirm the first handle really
+                // closed and the contents are visible to the next user.
+                using reader = open_read(path)?.text() {
+                    var text: string;
+                    reader.read_all(out text)?;
+                    println(text);
+                }
+            }
+        "#,
+    );
+    assert_eq!(run.status.code(), Some(0));
+
+    let stdout = String::from_utf8_lossy(&run.stdout);
+    assert_eq!(stdout, "abc\n\n", "unexpected stdout: {stdout}");
+}
+
+#[test]
 fn test_defer_runs_before_try_propagates_error() {
     let run = run_program(
         "defer_try_cleanup",
