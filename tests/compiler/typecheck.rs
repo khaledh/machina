@@ -181,6 +181,43 @@ fn test_std_io_using_auto_closes_text_handles() {
 }
 
 #[test]
+fn test_std_io_text_adapter_on_temporary_open_handle() {
+    let run = run_program(
+        "std_io_temporary_text_adapter",
+        r#"
+            requires {
+                std::io::IoError
+                std::io::open_read
+                std::io::open_write
+                std::io::println
+            }
+
+            fn main() -> () | IoError {
+                let path = "/tmp/machina_io_temporary_adapter_test.txt";
+
+                // Opening and immediately adapting the temporary read/write
+                // handle should be allowed even though `text()` consumes the
+                // intermediate file value.
+                let writer = open_write(path)?.text();
+                writer.write_all("temporary\n")?;
+                writer.close()?;
+
+                let reader = open_read(path)?.text();
+                var text: string;
+                reader.read_all(out text)?;
+                reader.close()?;
+
+                println(text);
+            }
+        "#,
+    );
+    assert_eq!(run.status.code(), Some(0));
+
+    let stdout = String::from_utf8_lossy(&run.stdout);
+    assert_eq!(stdout, "temporary\n\n", "unexpected stdout: {stdout}");
+}
+
+#[test]
 fn test_defer_runs_before_try_propagates_error() {
     let run = run_program(
         "defer_try_cleanup",
