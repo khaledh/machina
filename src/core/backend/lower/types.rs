@@ -119,35 +119,10 @@ impl<'a> TypeLowerer<'a> {
 
             // String is lowered as a struct with pointer, length, and capacity.
             Type::String => {
-                let byte = self.lower_type(&Type::Int {
-                    signed: false,
-                    bits: 8,
-                    bounds: None,
-                    nonzero: false,
-                });
-                let ptr = self.ir_type_cache.add(IrTypeKind::Ptr { elem: byte });
-                let u32 = self.lower_type(&Type::Int {
-                    signed: false,
-                    bits: 32,
-                    bounds: None,
-                    nonzero: false,
-                });
-                let fields = vec![
-                    IrStructField {
-                        name: "ptr".to_string(),
-                        ty: ptr,
-                    },
-                    IrStructField {
-                        name: "len".to_string(),
-                        ty: u32,
-                    },
-                    IrStructField {
-                        name: "cap".to_string(),
-                        ty: u32,
-                    },
-                ];
-                self.ir_type_cache
-                    .add_named(IrTypeKind::Struct { fields }, "string".to_string())
+                let byte = self.lower_type(&Type::uint(8));
+                let ptr = self.ptr_to(byte);
+                let u32 = self.lower_type(&Type::uint(32));
+                self.lower_ptr_len_cap_struct(Some("string"), ptr, u32)
             }
 
             // Slice is lowered as a struct { ptr, len } with a typed pointer.
@@ -155,17 +130,7 @@ impl<'a> TypeLowerer<'a> {
                 let elem = self.lower_type(elem_ty);
                 let ptr = self.ptr_to(elem);
                 let u64 = self.lower_type(&Type::uint(64));
-                let fields = vec![
-                    IrStructField {
-                        name: "ptr".to_string(),
-                        ty: ptr,
-                    },
-                    IrStructField {
-                        name: "len".to_string(),
-                        ty: u64,
-                    },
-                ];
-                self.ir_type_cache.add(IrTypeKind::Struct { fields })
+                self.lower_ptr_len_struct(ptr, u64)
             }
 
             // Dyn-array is lowered as { ptr, len, cap } with string-like u32 len/cap.
@@ -173,42 +138,14 @@ impl<'a> TypeLowerer<'a> {
                 let elem = self.lower_type(elem_ty);
                 let ptr = self.ptr_to(elem);
                 let u32 = self.lower_type(&Type::uint(32));
-                let fields = vec![
-                    IrStructField {
-                        name: "ptr".to_string(),
-                        ty: ptr,
-                    },
-                    IrStructField {
-                        name: "len".to_string(),
-                        ty: u32,
-                    },
-                    IrStructField {
-                        name: "cap".to_string(),
-                        ty: u32,
-                    },
-                ];
-                self.ir_type_cache.add(IrTypeKind::Struct { fields })
+                self.lower_ptr_len_cap_struct(None, ptr, u32)
             }
             // Set is lowered as { ptr, len, cap } like dyn-array storage.
             Type::Set { elem_ty } => {
                 let elem = self.lower_type(elem_ty);
                 let ptr = self.ptr_to(elem);
                 let u32 = self.lower_type(&Type::uint(32));
-                let fields = vec![
-                    IrStructField {
-                        name: "ptr".to_string(),
-                        ty: ptr,
-                    },
-                    IrStructField {
-                        name: "len".to_string(),
-                        ty: u32,
-                    },
-                    IrStructField {
-                        name: "cap".to_string(),
-                        ty: u32,
-                    },
-                ];
-                self.ir_type_cache.add(IrTypeKind::Struct { fields })
+                self.lower_ptr_len_cap_struct(None, ptr, u32)
             }
             // Map is lowered as { ptr, len, cap } with pointer to key/value pairs.
             Type::Map { key_ty, value_ty } => {
@@ -219,21 +156,7 @@ impl<'a> TypeLowerer<'a> {
                 });
                 let ptr = self.ptr_to(pair);
                 let u32 = self.lower_type(&Type::uint(32));
-                let fields = vec![
-                    IrStructField {
-                        name: "ptr".to_string(),
-                        ty: ptr,
-                    },
-                    IrStructField {
-                        name: "len".to_string(),
-                        ty: u32,
-                    },
-                    IrStructField {
-                        name: "cap".to_string(),
-                        ty: u32,
-                    },
-                ];
-                self.ir_type_cache.add(IrTypeKind::Struct { fields })
+                self.lower_ptr_len_cap_struct(None, ptr, u32)
             }
 
             // Compound types: recursively convert element/field types.
@@ -271,18 +194,12 @@ impl<'a> TypeLowerer<'a> {
                 let placeholder = self.ir_type_cache.add_placeholder_named(name.clone());
                 self.by_type.insert(ty.clone(), placeholder);
                 let layout = self.enum_layout_for_type(ty);
-                let fields = vec![
-                    IrStructField {
-                        name: "tag".to_string(),
-                        ty: layout.tag_ty,
+                self.ir_type_cache.update_kind(
+                    placeholder,
+                    IrTypeKind::Struct {
+                        fields: self.tagged_payload_fields(layout.tag_ty, layout.blob_ty),
                     },
-                    IrStructField {
-                        name: "payload".to_string(),
-                        ty: layout.blob_ty,
-                    },
-                ];
-                self.ir_type_cache
-                    .update_kind(placeholder, IrTypeKind::Struct { fields });
+                );
                 placeholder
             }
             Type::ErrorUnion { .. } => {
@@ -290,18 +207,12 @@ impl<'a> TypeLowerer<'a> {
                 let placeholder = self.ir_type_cache.add_placeholder_named(name);
                 self.by_type.insert(ty.clone(), placeholder);
                 let layout = self.enum_layout_for_type(ty);
-                let fields = vec![
-                    IrStructField {
-                        name: "tag".to_string(),
-                        ty: layout.tag_ty,
+                self.ir_type_cache.update_kind(
+                    placeholder,
+                    IrTypeKind::Struct {
+                        fields: self.tagged_payload_fields(layout.tag_ty, layout.blob_ty),
                     },
-                    IrStructField {
-                        name: "payload".to_string(),
-                        ty: layout.blob_ty,
-                    },
-                ];
-                self.ir_type_cache
-                    .update_kind(placeholder, IrTypeKind::Struct { fields });
+                );
                 placeholder
             }
 
@@ -336,6 +247,62 @@ impl<'a> TypeLowerer<'a> {
         let id = self.ir_type_cache.add(IrTypeKind::Ptr { elem });
         self.ptr_cache.insert(elem, id);
         id
+    }
+
+    fn lower_ptr_len_struct(&mut self, ptr_ty: IrTypeId, len_ty: IrTypeId) -> IrTypeId {
+        self.ir_type_cache.add(IrTypeKind::Struct {
+            fields: vec![
+                IrStructField {
+                    name: "ptr".to_string(),
+                    ty: ptr_ty,
+                },
+                IrStructField {
+                    name: "len".to_string(),
+                    ty: len_ty,
+                },
+            ],
+        })
+    }
+
+    fn lower_ptr_len_cap_struct(
+        &mut self,
+        name: Option<&str>,
+        ptr_ty: IrTypeId,
+        len_ty: IrTypeId,
+    ) -> IrTypeId {
+        let fields = vec![
+            IrStructField {
+                name: "ptr".to_string(),
+                ty: ptr_ty,
+            },
+            IrStructField {
+                name: "len".to_string(),
+                ty: len_ty,
+            },
+            IrStructField {
+                name: "cap".to_string(),
+                ty: len_ty,
+            },
+        ];
+        if let Some(name) = name {
+            self.ir_type_cache
+                .add_named(IrTypeKind::Struct { fields }, name.to_string())
+        } else {
+            self.ir_type_cache.add(IrTypeKind::Struct { fields })
+        }
+    }
+
+    fn tagged_payload_fields(&self, tag_ty: IrTypeId, blob_ty: IrTypeId) -> Vec<IrStructField> {
+        vec![
+            IrStructField {
+                name: "tag".to_string(),
+                ty: tag_ty,
+            },
+            IrStructField {
+                name: "payload".to_string(),
+                ty: blob_ty,
+            },
+        ]
     }
 
     /// Returns the internal formatter struct type (fmt { ptr, len, cap }).

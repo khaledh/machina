@@ -108,6 +108,35 @@ fn test_lower_slice_type() {
 }
 
 #[test]
+fn test_lower_collection_header_types() {
+    let ctx = analyze(indoc! {"
+        fn main() -> u64 {
+            0
+        }
+    "});
+
+    let mut type_lowerer = TypeLowerer::new(&ctx.type_map);
+    let set_ir = type_lowerer.lower_type(&Type::Set {
+        elem_ty: Box::new(Type::uint(64)),
+    });
+    let map_ir = type_lowerer.lower_type(&Type::Map {
+        key_ty: Box::new(Type::uint(64)),
+        value_ty: Box::new(Type::Bool),
+    });
+
+    for ir_ty in [set_ir, map_ir] {
+        let IrTypeKind::Struct { fields } = type_lowerer.ir_type_cache.kind(ir_ty) else {
+            panic!("expected collection header to lower to a struct");
+        };
+        assert_eq!(fields.len(), 3);
+        assert_eq!(fields[0].name, "ptr");
+        assert_eq!(fields[1].name, "len");
+        assert_eq!(fields[2].name, "cap");
+        assert_eq!(fields[1].ty, fields[2].ty);
+    }
+}
+
+#[test]
 fn test_lower_fn_type() {
     let ctx = analyze(indoc! {"
         fn main() -> u64 {
