@@ -8,9 +8,57 @@ use crate::core::ir::{BinOp, Callee, CastKind, IrTypeId, RuntimeFn, Terminator, 
 use crate::core::resolve::DefKind;
 use crate::core::tree::semantic as sem;
 use crate::core::tree::{BinaryOp, CoerceKind, ParamMode, UnaryOp};
-use crate::core::types::Type;
+use crate::core::types::{Type, TypeId};
 
 impl<'a, 'g> FuncLowerer<'a, 'g> {
+    fn store_tuple_items(
+        &mut self,
+        tuple_ty: TypeId,
+        slot_addr: ValueId,
+        items: &[sem::ValueExpr],
+    ) -> Result<bool, LowerToIrError> {
+        for (i, elem_expr) in items.iter().enumerate() {
+            let Some(value) = self.lower_value_expr_opt(elem_expr)? else {
+                return Ok(false);
+            };
+            let field_ty = self.lower_tuple_field_ty(tuple_ty, i);
+            self.store_field(slot_addr, i, field_ty, value);
+        }
+        Ok(true)
+    }
+
+    fn store_struct_lit_fields(
+        &mut self,
+        struct_ty: TypeId,
+        slot_addr: ValueId,
+        fields: &[sem::StructLitField],
+    ) -> Result<bool, LowerToIrError> {
+        for field in fields.iter() {
+            let Some(value) = self.lower_value_expr_opt(&field.value)? else {
+                return Ok(false);
+            };
+            let (field_index, field_ty) = self.lower_struct_field_ty(struct_ty, &field.name);
+            self.store_field(slot_addr, field_index, field_ty, value);
+        }
+        Ok(true)
+    }
+
+    fn store_struct_update_fields(
+        &mut self,
+        struct_ty: TypeId,
+        slot_addr: ValueId,
+        fields: &[sem::StructUpdateField],
+    ) -> Result<bool, LowerToIrError> {
+        for field in fields.iter() {
+            let Some(value) = self.lower_value_expr_opt(&field.value)? else {
+                return Ok(false);
+            };
+            let (field_index, field_ty) = self.lower_struct_field_ty(struct_ty, &field.name);
+            self.store_field(slot_addr, field_index, field_ty, value);
+        }
+        Ok(true)
+    }
+
     /// Lowers a linear value expression directly from the semantic tree.
     ///
     /// This avoids constructing a parallel linear AST for the common cases.
@@ -603,13 +651,8 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
     ) -> Result<BranchResult, LowerToIrError> {
         let tuple_ty = self.type_lowerer.lower_type_id(expr.ty);
         let slot = self.alloc_value_slot(tuple_ty);
-
-        for (i, elem_expr) in items.iter().enumerate() {
-            let Some(value) = self.lower_value_expr_opt(elem_expr)? else {
-                return Ok(BranchResult::Return);
-            };
-            let field_ty = self.lower_tuple_field_ty(expr.ty, i);
-            self.store_field(slot.addr, i, field_ty, value);
+        if !self.store_tuple_items(expr.ty, slot.addr, items)? {
+            return Ok(BranchResult::Return);
         }
 
         Ok(self.load_slot(&slot).into())
@@ -622,13 +665,8 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
     ) -> Result<BranchResult, LowerToIrError> {
         let struct_ty = self.type_lowerer.lower_type_id(expr.ty);
         let slot = self.alloc_value_slot(struct_ty);
-
-        for field in fields.iter() {
-            let Some(value) = self.lower_value_expr_opt(&field.value)? else {
-                return Ok(BranchResult::Return);
-            };
-            let (field_index, field_ty) = self.lower_struct_field_ty(expr.ty, &field.name);
-            self.store_field(slot.addr, field_index, field_ty, value);
+        if !self.store_struct_lit_fields(expr.ty, slot.addr, fields)? {
+            return Ok(BranchResult::Return);
         }
 
         Ok(self.load_slot(&slot).into())
@@ -651,12 +689,8 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
         self.store_value_into_addr(slot.addr, base_value, base_ty, struct_ty);
 
         // Overwrite the updated fields
-        for field in fields.iter() {
-            let Some(value) = self.lower_value_expr_opt(&field.value)? else {
-                return Ok(BranchResult::Return);
-            };
-            let (field_index, field_ty) = self.lower_struct_field_ty(expr.ty, &field.name);
-            self.store_field(slot.addr, field_index, field_ty, value);
+        if !self.store_struct_update_fields(expr.ty, slot.addr, fields)? {
+            return Ok(BranchResult::Return);
         }
 
         Ok(self.load_slot(&slot).into())
