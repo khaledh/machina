@@ -178,6 +178,16 @@ rules.
 
 `using` is a convenience form for a resource binding with automatic cleanup.
 
+The initializer may produce a temporary that is immediately consumed by the
+bound value. For example, the following is valid and should not require an
+intermediate `let`:
+
+```machina
+using writer = io::open_write(path)?.text() {
+    writer.write_all("hello\n")?;
+}
+```
+
 ### Lowering
 
 ```machina
@@ -281,12 +291,21 @@ Lower `using` to:
 2. synthesized `defer` statement that invokes cleanup
 3. `using` body inside the same synthesized block
 
-Lower `defer` into an explicit per-scope cleanup stack during normalization or
-elaboration.
+Implement `defer` using scope-aware cleanup tracking in elaborate, not in the
+parser.
 
-The compiler already models scope-aware control flow and drop-like behavior in
-later stages; `defer` should integrate there rather than being emitted as naive
-duplicated cleanup statements.
+Current implementation direction:
+
+1. syntax desugar lowers `using` to a scoped `let + defer`
+2. elaborate tracks active defers per lexical block
+3. `return`, `break`, and `continue` get cleanup expressions inserted directly
+   before the control transfer
+4. bare `?` records the active cleanup set in a side table
+5. backend try-propagation lowering emits that cleanup before returning the
+   propagated error
+
+This keeps cleanup semantics explicit without cloning arbitrary subtrees for
+each control-flow shape.
 
 ## Control Flow Behavior
 
