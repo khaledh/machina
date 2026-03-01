@@ -29,6 +29,31 @@ fn drop_def_for_place_expr(place: &sem::PlaceExpr) -> Option<DefId> {
     }
 }
 
+#[derive(Clone, Copy)]
+enum CollectionReceiverKind {
+    DynArray,
+    Set,
+    Map,
+}
+
+impl CollectionReceiverKind {
+    fn label(self) -> &'static str {
+        match self {
+            Self::DynArray => "dyn-array",
+            Self::Set => "set",
+            Self::Map => "map",
+        }
+    }
+
+    fn matches(self, ty: &Type) -> bool {
+        match self {
+            Self::DynArray => matches!(ty, Type::DynArray { .. }),
+            Self::Set => matches!(ty, Type::Set { .. }),
+            Self::Map => matches!(ty, Type::Map { .. }),
+        }
+    }
+}
+
 impl<'a, 'g> FuncLowerer<'a, 'g> {
     fn render_type_for_type_of(ty: &Type, overrides: Option<&BTreeMap<u32, String>>) -> String {
         render_type(
@@ -754,7 +779,11 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
         }
     }
 
-    fn resolve_dyn_array_receiver(&mut self, receiver_value: &CallInputValue) -> (ValueId, Type) {
+    fn resolve_collection_receiver(
+        &mut self,
+        receiver_value: &CallInputValue,
+        kind: CollectionReceiverKind,
+    ) -> (ValueId, Type) {
         let (_base_ty, deref_count) = receiver_value.ty.peel_heap_with_count();
         let (mut addr, ty) = if receiver_value.is_addr {
             let mut addr = receiver_value.value;
@@ -763,8 +792,9 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
                 let elem_ty = match curr_ty {
                     Type::Heap { elem_ty } | Type::Ref { elem_ty, .. } => elem_ty,
                     other => panic!(
-                        "backend dyn-array receiver expects heap/ref, got {:?}",
-                        other
+                        "backend {} receiver expects heap/ref, got {:?}",
+                        kind.label(),
+                        other,
                     ),
                 };
                 let elem_ir_ty = self.type_lowerer.lower_type(&elem_ty);
@@ -781,100 +811,33 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
             )
         };
 
-        let Type::DynArray { .. } = ty else {
+        if !kind.matches(&ty) {
             panic!(
-                "backend dyn-array receiver resolved to non-dyn-array {:?}",
-                receiver_value.ty
+                "backend {} receiver resolved to mismatched type {:?}",
+                kind.label(),
+                receiver_value.ty,
             );
-        };
+        }
 
-        // Value receivers of plain dyn-array type need a temporary slot so
-        // field loads/indexing can treat the base as an address.
+        // Plain value receivers need a temporary slot so collection runtime
+        // helpers can uniformly treat the base as an address.
         if !receiver_value.is_addr && deref_count == 0 {
             addr = self.materialize_value_addr(addr, &ty);
         }
 
         (addr, ty)
+    }
+
+    fn resolve_dyn_array_receiver(&mut self, receiver_value: &CallInputValue) -> (ValueId, Type) {
+        self.resolve_collection_receiver(receiver_value, CollectionReceiverKind::DynArray)
     }
 
     fn resolve_set_receiver(&mut self, receiver_value: &CallInputValue) -> (ValueId, Type) {
-        let (_base_ty, deref_count) = receiver_value.ty.peel_heap_with_count();
-        let (mut addr, ty) = if receiver_value.is_addr {
-            let mut addr = receiver_value.value;
-            let mut curr_ty = receiver_value.ty.clone();
-            for _ in 0..deref_count {
-                let elem_ty = match curr_ty {
-                    Type::Heap { elem_ty } | Type::Ref { elem_ty, .. } => elem_ty,
-                    other => panic!("backend set receiver expects heap/ref, got {:?}", other),
-                };
-                let elem_ir_ty = self.type_lowerer.lower_type(&elem_ty);
-                let ptr_ir_ty = self.type_lowerer.ptr_to(elem_ir_ty);
-                addr = self.builder.load(addr, ptr_ir_ty);
-                curr_ty = (*elem_ty).clone();
-            }
-            (addr, curr_ty)
-        } else {
-            self.resolve_deref_base_value(
-                receiver_value.value,
-                receiver_value.ty.clone(),
-                deref_count,
-            )
-        };
-
-        let Type::Set { .. } = ty else {
-            panic!(
-                "backend set receiver resolved to non-set {:?}",
-                receiver_value.ty
-            );
-        };
-
-        // Value receivers of plain set type need a temporary slot so field
-        // loads/mutations can treat the base as an address.
-        if !receiver_value.is_addr && deref_count == 0 {
-            addr = self.materialize_value_addr(addr, &ty);
-        }
-
-        (addr, ty)
+        self.resolve_collection_receiver(receiver_value, CollectionReceiverKind::Set)
     }
 
     fn resolve_map_receiver(&mut self, receiver_value: &CallInputValue) -> (ValueId, Type) {
-        let (_base_ty, deref_count) = receiver_value.ty.peel_heap_with_count();
-        let (mut addr, ty) = if receiver_value.is_addr {
-            let mut addr = receiver_value.value;
-            let mut curr_ty = receiver_value.ty.clone();
-            for _ in 0..deref_count {
-                let elem_ty = match curr_ty {
-                    Type::Heap { elem_ty } | Type::Ref { elem_ty, .. } => elem_ty,
-                    other => panic!("backend map receiver expects heap/ref, got {:?}", other),
-                };
-                let elem_ir_ty = self.type_lowerer.lower_type(&elem_ty);
-                let ptr_ir_ty = self.type_lowerer.ptr_to(elem_ir_ty);
-                addr = self.builder.load(addr, ptr_ir_ty);
-                curr_ty = (*elem_ty).clone();
-            }
-            (addr, curr_ty)
-        } else {
-            self.resolve_deref_base_value(
-                receiver_value.value,
-                receiver_value.ty.clone(),
-                deref_count,
-            )
-        };
-
-        let Type::Map { .. } = ty else {
-            panic!(
-                "backend map receiver resolved to non-map {:?}",
-                receiver_value.ty
-            );
-        };
-
-        // Value receivers of plain map type need a temporary slot so field
-        // loads/mutations can treat the base as an address.
-        if !receiver_value.is_addr && deref_count == 0 {
-            addr = self.materialize_value_addr(addr, &ty);
-        }
-
-        (addr, ty)
+        self.resolve_collection_receiver(receiver_value, CollectionReceiverKind::Map)
     }
 
     pub(super) fn lower_call_args_from_plan(
