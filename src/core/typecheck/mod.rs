@@ -8,7 +8,7 @@ mod engine;
 mod errors;
 mod finalize;
 mod imported;
-mod infer_unify;
+mod infer;
 pub(crate) mod nominal;
 mod nominal_infer;
 mod property_access;
@@ -22,7 +22,7 @@ mod validate;
 
 pub use engine::TypecheckOutput;
 pub use errors::{TEK, TypeCheckError, TypeCheckErrorKind};
-pub use infer_unify::{Unifier, UnifyError};
+pub use infer::{InferUnifier, InferUnifyError};
 
 use crate::core::context::{TypecheckStageInput, TypecheckStageOutput};
 use crate::core::resolve::ImportedFacts;
@@ -72,5 +72,5 @@ mod tests_parity;
 mod tests_typecheck;
 
 #[cfg(test)]
-#[path = "../../tests/typecheck/t_unify.rs"]
-mod tests_unify;
+#[path = "../../tests/typecheck/t_infer_unify.rs"]
+mod tests_infer_unify;

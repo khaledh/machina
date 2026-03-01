@@ -1,7 +1,10 @@
-//! Type unification for local type inference.
+//! Type unification for local, substitution-style inference.
 //!
-//! This module implements the unification algorithm used during type checking
-//! to solve type constraints and infer types.
+//! This module is intentionally separate from `solver::unify` / `TcUnifier`.
+//! `InferUnifier` is a lightweight Robinson unifier used in places like
+//! finalize-time generic argument inference, where we only need a fresh
+//! substitution and do not want to depend on the checker's `TypeVarStore`
+//! rigidity and inference-variable rules.
 
 use std::collections::HashMap;
 
@@ -9,7 +12,7 @@ use crate::core::types::{TyVarId, Type};
 
 /// Errors that can occur during type unification.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub enum UnifyError {
+pub enum InferUnifyError {
     /// The occurs check failed, indicating an infinite type.
     /// This happens when trying to unify a type variable with a type that contains
     /// that same variable (e.g., unifying `T` with `Array<T>` would create an infinite type).
@@ -37,7 +40,7 @@ impl Subst {
     /// Binds a type variable to a type.
     ///
     /// This is private to prevent external code from creating invalid cycles.
-    /// Use `Unifier::unify` instead, which performs proper occurs checking.
+    /// Use `InferUnifier::unify` instead, which performs proper occurs checking.
     fn insert(&mut self, var: TyVarId, ty: Type) {
         self.map.insert(var, ty);
     }
@@ -67,12 +70,12 @@ impl Subst {
 /// Manages the generation of fresh type variables and maintains the substitution
 /// of solved type variables. Uses Robinson's unification algorithm with an occurs check.
 #[derive(Debug, Default)]
-pub struct Unifier {
+pub struct InferUnifier {
     next_var: u32,
     subst: Subst,
 }
 
-impl Unifier {
+impl InferUnifier {
     pub fn new() -> Self {
         Self::default()
     }
@@ -99,7 +102,7 @@ impl Unifier {
     /// This is the main entry point for unification. It applies the current substitution
     /// to both types before attempting to unify them, ensuring we work with the most
     /// up-to-date type information.
-    pub fn unify(&mut self, left: &Type, right: &Type) -> Result<(), UnifyError> {
+    pub fn unify(&mut self, left: &Type, right: &Type) -> Result<(), InferUnifyError> {
         let left = self.apply(left);
         let right = self.apply(right);
         self.unify_inner(left, right)
@@ -113,7 +116,7 @@ impl Unifier {
         left: &Type,
         right: &Type,
         is_infer: fn(TyVarId) -> bool,
-    ) -> Result<(), UnifyError> {
+    ) -> Result<(), InferUnifyError> {
         let left = self.apply(left);
         let right = self.apply(right);
         self.unify_infer_inner(left, right, is_infer)
@@ -124,7 +127,7 @@ impl Unifier {
     /// This implements the core unification algorithm using structural recursion.
     /// It handles type variables specially via `bind_var`, and recursively unifies
     /// compound types by matching their structure.
-    fn unify_inner(&mut self, left: Type, right: Type) -> Result<(), UnifyError> {
+    fn unify_inner(&mut self, left: Type, right: Type) -> Result<(), InferUnifyError> {
         // Fast path: identical types always unify
         if left == right {
             return Ok(());
@@ -147,7 +150,7 @@ impl Unifier {
             ) => {
                 // Check parameter count matches
                 if l_params.len() != r_params.len() {
-                    return Err(UnifyError::Mismatch(
+                    return Err(InferUnifyError::Mismatch(
                         Type::Fn {
                             params: l_params,
                             ret_ty: l_ret,
@@ -162,7 +165,7 @@ impl Unifier {
                 // Unify each parameter (checking mode and type)
                 for (l_param, r_param) in l_params.iter().zip(r_params.iter()) {
                     if l_param.mode != r_param.mode {
-                        return Err(UnifyError::Mismatch(
+                        return Err(InferUnifyError::Mismatch(
                             Type::Fn {
                                 params: l_params,
                                 ret_ty: l_ret,
@@ -195,7 +198,7 @@ impl Unifier {
                 },
             ) => {
                 if l_dims != r_dims {
-                    return Err(UnifyError::Mismatch(
+                    return Err(InferUnifyError::Mismatch(
                         Type::Array {
                             elem_ty: l_elem,
                             dims: l_dims,
@@ -214,7 +217,7 @@ impl Unifier {
             // Tuple types: must have same arity and unify field-wise
             (Type::Tuple { field_tys: l }, Type::Tuple { field_tys: r }) => {
                 if l.len() != r.len() {
-                    return Err(UnifyError::Mismatch(
+                    return Err(InferUnifyError::Mismatch(
                         Type::Tuple { field_tys: l },
                         Type::Tuple { field_tys: r },
                     ));
@@ -241,7 +244,7 @@ impl Unifier {
                 },
             ) => {
                 if l_mut != r_mut {
-                    return Err(UnifyError::Mismatch(
+                    return Err(InferUnifyError::Mismatch(
                         Type::Ref {
                             mutable: l_mut,
                             elem_ty: l_elem,
@@ -256,7 +259,7 @@ impl Unifier {
             }
 
             // All other combinations are incompatible
-            (left, right) => Err(UnifyError::Mismatch(left, right)),
+            (left, right) => Err(InferUnifyError::Mismatch(left, right)),
         }
     }
 
@@ -265,7 +268,7 @@ impl Unifier {
         left: Type,
         right: Type,
         is_infer: fn(TyVarId) -> bool,
-    ) -> Result<(), UnifyError> {
+    ) -> Result<(), InferUnifyError> {
         if left == right {
             return Ok(());
         }
@@ -273,9 +276,11 @@ impl Unifier {
         match (left, right) {
             (Type::Var(var), ty) if is_infer(var) => self.bind_var(var, ty),
             (ty, Type::Var(var)) if is_infer(var) => self.bind_var(var, ty),
-            (Type::Var(l), Type::Var(r)) => Err(UnifyError::Mismatch(Type::Var(l), Type::Var(r))),
+            (Type::Var(l), Type::Var(r)) => {
+                Err(InferUnifyError::Mismatch(Type::Var(l), Type::Var(r)))
+            }
             (Type::Var(var), ty) | (ty, Type::Var(var)) => {
-                Err(UnifyError::Mismatch(Type::Var(var), ty))
+                Err(InferUnifyError::Mismatch(Type::Var(var), ty))
             }
 
             (
@@ -289,7 +294,7 @@ impl Unifier {
                 },
             ) => {
                 if l_params.len() != r_params.len() {
-                    return Err(UnifyError::Mismatch(
+                    return Err(InferUnifyError::Mismatch(
                         Type::Fn {
                             params: l_params,
                             ret_ty: l_ret,
@@ -303,7 +308,7 @@ impl Unifier {
 
                 for (l_param, r_param) in l_params.iter().zip(r_params.iter()) {
                     if l_param.mode != r_param.mode {
-                        return Err(UnifyError::Mismatch(
+                        return Err(InferUnifyError::Mismatch(
                             Type::Fn {
                                 params: l_params,
                                 ret_ty: l_ret,
@@ -333,7 +338,7 @@ impl Unifier {
                 },
             ) => {
                 if l_dims != r_dims {
-                    return Err(UnifyError::Mismatch(
+                    return Err(InferUnifyError::Mismatch(
                         Type::Array {
                             elem_ty: l_elem,
                             dims: l_dims,
@@ -354,7 +359,7 @@ impl Unifier {
             }
             (Type::Tuple { field_tys: l }, Type::Tuple { field_tys: r }) => {
                 if l.len() != r.len() {
-                    return Err(UnifyError::Mismatch(
+                    return Err(InferUnifyError::Mismatch(
                         Type::Tuple { field_tys: l },
                         Type::Tuple { field_tys: r },
                     ));
@@ -375,7 +380,7 @@ impl Unifier {
                 },
             ) => {
                 if l_name != r_name || l_fields.len() != r_fields.len() {
-                    return Err(UnifyError::Mismatch(
+                    return Err(InferUnifyError::Mismatch(
                         Type::Struct {
                             name: l_name,
                             fields: l_fields,
@@ -388,7 +393,7 @@ impl Unifier {
                 }
                 for (l_field, r_field) in l_fields.iter().zip(r_fields.iter()) {
                     if l_field.name != r_field.name {
-                        return Err(UnifyError::Mismatch(
+                        return Err(InferUnifyError::Mismatch(
                             Type::Struct {
                                 name: l_name.clone(),
                                 fields: l_fields.clone(),
@@ -414,7 +419,7 @@ impl Unifier {
                 },
             ) => {
                 if l_name != r_name || l_variants.len() != r_variants.len() {
-                    return Err(UnifyError::Mismatch(
+                    return Err(InferUnifyError::Mismatch(
                         Type::Enum {
                             name: l_name,
                             variants: l_variants,
@@ -429,7 +434,7 @@ impl Unifier {
                     if l_variant.name != r_variant.name
                         || l_variant.payload.len() != r_variant.payload.len()
                     {
-                        return Err(UnifyError::Mismatch(
+                        return Err(InferUnifyError::Mismatch(
                             Type::Enum {
                                 name: l_name.clone(),
                                 variants: l_variants.clone(),
@@ -463,7 +468,7 @@ impl Unifier {
                 },
             ) => {
                 if l_mut != r_mut {
-                    return Err(UnifyError::Mismatch(
+                    return Err(InferUnifyError::Mismatch(
                         Type::Ref {
                             mutable: l_mut,
                             elem_ty: l_elem,
@@ -476,7 +481,7 @@ impl Unifier {
                 }
                 self.unify_infer(&l_elem, &r_elem, is_infer)
             }
-            (l, r) => Err(UnifyError::Mismatch(l, r)),
+            (l, r) => Err(InferUnifyError::Mismatch(l, r)),
         }
     }
 
@@ -486,7 +491,7 @@ impl Unifier {
     /// 1. If the variable already has a binding, unify the existing binding with the new type
     /// 2. If binding a variable to itself, succeed immediately (idempotent)
     /// 3. Perform the occurs check to prevent infinite types, then create the binding
-    fn bind_var(&mut self, var: TyVarId, ty: Type) -> Result<(), UnifyError> {
+    fn bind_var(&mut self, var: TyVarId, ty: Type) -> Result<(), InferUnifyError> {
         // If variable is already bound, unify with existing binding
         if let Some(existing) = self.subst.get(var).cloned() {
             return self.unify(&existing, &ty);
@@ -499,7 +504,7 @@ impl Unifier {
 
         // Occurs check: prevent infinite types like T = Array<T>
         if self.occurs_in(var, &ty) {
-            return Err(UnifyError::OccursCheckFailed(var, ty));
+            return Err(InferUnifyError::OccursCheckFailed(var, ty));
         }
 
         self.subst.insert(var, ty);

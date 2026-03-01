@@ -1,9 +1,9 @@
-use crate::core::typecheck::{Unifier, UnifyError};
+use crate::core::typecheck::{InferUnifier, InferUnifyError};
 use crate::core::types::{FnParam, FnParamMode, Type};
 
 #[test]
 fn test_unify_var_with_concrete() {
-    let mut unifier = Unifier::new();
+    let mut unifier = InferUnifier::new();
     let var = unifier.new_var();
     unifier
         .unify(&Type::Var(var), &Type::uint(64))
@@ -13,7 +13,7 @@ fn test_unify_var_with_concrete() {
 
 #[test]
 fn test_unify_var_with_var() {
-    let mut unifier = Unifier::new();
+    let mut unifier = InferUnifier::new();
     let v1 = unifier.new_var();
     let v2 = unifier.new_var();
     unifier
@@ -24,19 +24,19 @@ fn test_unify_var_with_var() {
 
 #[test]
 fn test_unify_occurs_check() {
-    let mut unifier = Unifier::new();
+    let mut unifier = InferUnifier::new();
     let v1 = unifier.new_var();
     let ty = Type::Array {
         elem_ty: Box::new(Type::Var(v1)),
         dims: vec![1],
     };
     let err = unifier.unify(&Type::Var(v1), &ty).unwrap_err();
-    assert!(matches!(err, UnifyError::OccursCheckFailed(_, _)));
+    assert!(matches!(err, InferUnifyError::OccursCheckFailed(_, _)));
 }
 
 #[test]
 fn test_unify_fn_types() {
-    let mut unifier = Unifier::new();
+    let mut unifier = InferUnifier::new();
     let v1 = unifier.new_var();
     let v2 = unifier.new_var();
     let left = Type::Fn {
@@ -60,14 +60,14 @@ fn test_unify_fn_types() {
 
 #[test]
 fn test_unify_mismatch() {
-    let mut unifier = Unifier::new();
+    let mut unifier = InferUnifier::new();
     let err = unifier.unify(&Type::uint(32), &Type::uint(64)).unwrap_err();
-    assert!(matches!(err, UnifyError::Mismatch(_, _)));
+    assert!(matches!(err, InferUnifyError::Mismatch(_, _)));
 }
 
 #[test]
 fn test_unify_array_matching_dims() {
-    let mut unifier = Unifier::new();
+    let mut unifier = InferUnifier::new();
     let v1 = unifier.new_var();
     let left = Type::Array {
         elem_ty: Box::new(Type::Var(v1)),
@@ -83,7 +83,7 @@ fn test_unify_array_matching_dims() {
 
 #[test]
 fn test_unify_array_mismatching_dims() {
-    let mut unifier = Unifier::new();
+    let mut unifier = InferUnifier::new();
     let left = Type::Array {
         elem_ty: Box::new(Type::uint(32)),
         dims: vec![10],
@@ -93,12 +93,12 @@ fn test_unify_array_mismatching_dims() {
         dims: vec![20],
     };
     let err = unifier.unify(&left, &right).unwrap_err();
-    assert!(matches!(err, UnifyError::Mismatch(_, _)));
+    assert!(matches!(err, InferUnifyError::Mismatch(_, _)));
 }
 
 #[test]
 fn test_unify_tuple_matching_arity() {
-    let mut unifier = Unifier::new();
+    let mut unifier = InferUnifier::new();
     let v1 = unifier.new_var();
     let v2 = unifier.new_var();
     let left = Type::Tuple {
@@ -114,7 +114,7 @@ fn test_unify_tuple_matching_arity() {
 
 #[test]
 fn test_unify_tuple_mismatching_arity() {
-    let mut unifier = Unifier::new();
+    let mut unifier = InferUnifier::new();
     let left = Type::Tuple {
         field_tys: vec![Type::uint(32)],
     };
@@ -122,12 +122,12 @@ fn test_unify_tuple_mismatching_arity() {
         field_tys: vec![Type::uint(32), Type::uint(64)],
     };
     let err = unifier.unify(&left, &right).unwrap_err();
-    assert!(matches!(err, UnifyError::Mismatch(_, _)));
+    assert!(matches!(err, InferUnifyError::Mismatch(_, _)));
 }
 
 #[test]
 fn test_unify_range_types() {
-    let mut unifier = Unifier::new();
+    let mut unifier = InferUnifier::new();
     let v1 = unifier.new_var();
     let left = Type::Range {
         elem_ty: Box::new(Type::Var(v1)),
@@ -141,7 +141,7 @@ fn test_unify_range_types() {
 
 #[test]
 fn test_unify_slice_types() {
-    let mut unifier = Unifier::new();
+    let mut unifier = InferUnifier::new();
     let v1 = unifier.new_var();
     let left = Type::Slice {
         elem_ty: Box::new(Type::Var(v1)),
@@ -155,7 +155,7 @@ fn test_unify_slice_types() {
 
 #[test]
 fn test_unify_heap_types() {
-    let mut unifier = Unifier::new();
+    let mut unifier = InferUnifier::new();
     let v1 = unifier.new_var();
     let left = Type::Heap {
         elem_ty: Box::new(Type::Var(v1)),
@@ -169,7 +169,7 @@ fn test_unify_heap_types() {
 
 #[test]
 fn test_unify_ref_matching_mutability() {
-    let mut unifier = Unifier::new();
+    let mut unifier = InferUnifier::new();
     let v1 = unifier.new_var();
     let left = Type::Ref {
         mutable: true,
@@ -185,7 +185,7 @@ fn test_unify_ref_matching_mutability() {
 
 #[test]
 fn test_unify_ref_mismatching_mutability() {
-    let mut unifier = Unifier::new();
+    let mut unifier = InferUnifier::new();
     let left = Type::Ref {
         mutable: true,
         elem_ty: Box::new(Type::uint(32)),
@@ -195,12 +195,12 @@ fn test_unify_ref_mismatching_mutability() {
         elem_ty: Box::new(Type::uint(32)),
     };
     let err = unifier.unify(&left, &right).unwrap_err();
-    assert!(matches!(err, UnifyError::Mismatch(_, _)));
+    assert!(matches!(err, InferUnifyError::Mismatch(_, _)));
 }
 
 #[test]
 fn test_unify_fn_mismatching_arity() {
-    let mut unifier = Unifier::new();
+    let mut unifier = InferUnifier::new();
     let left = Type::Fn {
         params: vec![FnParam {
             mode: FnParamMode::In,
@@ -222,12 +222,12 @@ fn test_unify_fn_mismatching_arity() {
         ret_ty: Box::new(Type::uint(64)),
     };
     let err = unifier.unify(&left, &right).unwrap_err();
-    assert!(matches!(err, UnifyError::Mismatch(_, _)));
+    assert!(matches!(err, InferUnifyError::Mismatch(_, _)));
 }
 
 #[test]
 fn test_unify_fn_mismatching_param_mode() {
-    let mut unifier = Unifier::new();
+    let mut unifier = InferUnifier::new();
     let left = Type::Fn {
         params: vec![FnParam {
             mode: FnParamMode::In,
@@ -243,12 +243,12 @@ fn test_unify_fn_mismatching_param_mode() {
         ret_ty: Box::new(Type::uint(64)),
     };
     let err = unifier.unify(&left, &right).unwrap_err();
-    assert!(matches!(err, UnifyError::Mismatch(_, _)));
+    assert!(matches!(err, InferUnifyError::Mismatch(_, _)));
 }
 
 #[test]
 fn test_unify_transitive() {
-    let mut unifier = Unifier::new();
+    let mut unifier = InferUnifier::new();
     let v1 = unifier.new_var();
     let v2 = unifier.new_var();
     let v3 = unifier.new_var();
@@ -272,29 +272,29 @@ fn test_unify_transitive() {
 
 #[test]
 fn test_unify_occurs_check_in_tuple() {
-    let mut unifier = Unifier::new();
+    let mut unifier = InferUnifier::new();
     let v1 = unifier.new_var();
     let ty = Type::Tuple {
         field_tys: vec![Type::uint(32), Type::Var(v1)],
     };
     let err = unifier.unify(&Type::Var(v1), &ty).unwrap_err();
-    assert!(matches!(err, UnifyError::OccursCheckFailed(_, _)));
+    assert!(matches!(err, InferUnifyError::OccursCheckFailed(_, _)));
 }
 
 #[test]
 fn test_unify_occurs_check_in_slice() {
-    let mut unifier = Unifier::new();
+    let mut unifier = InferUnifier::new();
     let v1 = unifier.new_var();
     let ty = Type::Slice {
         elem_ty: Box::new(Type::Var(v1)),
     };
     let err = unifier.unify(&Type::Var(v1), &ty).unwrap_err();
-    assert!(matches!(err, UnifyError::OccursCheckFailed(_, _)));
+    assert!(matches!(err, InferUnifyError::OccursCheckFailed(_, _)));
 }
 
 #[test]
 fn test_unify_identical_types() {
-    let mut unifier = Unifier::new();
+    let mut unifier = InferUnifier::new();
     let ty = Type::Tuple {
         field_tys: vec![Type::uint(32), Type::uint(64)],
     };
@@ -305,7 +305,7 @@ fn test_unify_identical_types() {
 
 #[test]
 fn test_unify_nested_structures() {
-    let mut unifier = Unifier::new();
+    let mut unifier = InferUnifier::new();
     let v1 = unifier.new_var();
     let left = Type::Slice {
         elem_ty: Box::new(Type::Array {
@@ -325,7 +325,7 @@ fn test_unify_nested_structures() {
 
 #[test]
 fn test_unify_var_with_itself() {
-    let mut unifier = Unifier::new();
+    let mut unifier = InferUnifier::new();
     let v1 = unifier.new_var();
     // Unifying a variable with itself should succeed (idempotent)
     unifier

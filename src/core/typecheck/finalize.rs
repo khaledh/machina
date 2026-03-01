@@ -11,7 +11,7 @@ use crate::core::resolve::DefId;
 use crate::core::tree::NodeId;
 use crate::core::tree::visit::Visitor;
 use crate::core::tree::*;
-use crate::core::typecheck::Unifier;
+use crate::core::typecheck::InferUnifier;
 use crate::core::typecheck::builtin_methods;
 use crate::core::typecheck::constraints::{CallCallee, ExprObligation};
 use crate::core::typecheck::engine::TypecheckEngine;
@@ -613,7 +613,7 @@ fn instantiate_call_sig(
         };
     }
 
-    let mut unifier = Unifier::new();
+    let mut unifier = InferUnifier::new();
     for (param, arg_ty) in sig.params.iter().zip(arg_types.iter()) {
         let _ = unifier.unify(&param.ty, arg_ty);
     }
