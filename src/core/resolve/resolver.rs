@@ -2,9 +2,9 @@ use std::collections::{HashMap, HashSet};
 
 use crate::core::capsule::{ModuleId, RequireKind};
 use crate::core::context::{
-    CapsuleResolveStageInput, CapsuleResolveStageOutput, ImportEnv, ModuleExportFacts,
-    ParsedContext, ResolveStageInput, ResolveStageOutput, import_env_from_requires,
-    module_export_facts_from_def_table,
+    CapsuleResolveStageInput, CapsuleResolveStageOutput, ImportEnv, ImportedSymbolBinding,
+    ModuleExportFacts, ParsedContext, ResolveStageInput, ResolveStageOutput,
+    import_env_from_requires, module_export_facts_from_def_table,
 };
 use crate::core::diag::Span;
 use crate::core::resolve::def_table::{DefTable, DefTableBuilder};
@@ -91,6 +91,26 @@ impl ImportedSymbol {
 
     pub fn has_trait(&self) -> bool {
         self.trait_source.is_some() || self.trait_sig.is_some()
+    }
+
+    pub fn from_binding(
+        binding: &ImportedSymbolBinding,
+        callable_sigs: Vec<ImportedCallableSig>,
+        type_ty: Option<Type>,
+        trait_sig: Option<ImportedTraitSig>,
+    ) -> Option<Self> {
+        if binding.is_empty() {
+            return None;
+        }
+
+        Some(Self {
+            callable_sigs,
+            callable_sources: binding.callables.clone(),
+            type_ty,
+            type_source: binding.type_def,
+            trait_sig,
+            trait_source: binding.trait_def,
+        })
     }
 }
 
