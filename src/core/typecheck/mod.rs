@@ -10,6 +10,7 @@ mod finalize;
 mod imported;
 mod infer_unify;
 pub(crate) mod nominal;
+mod nominal_infer;
 mod property_access;
 mod solver;
 pub mod type_map;
