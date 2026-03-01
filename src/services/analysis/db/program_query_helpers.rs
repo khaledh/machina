@@ -9,7 +9,7 @@ use crate::services::analysis::lookups::{
     def_at_span, hover_at_span_in_file, hover_for_resolved_target, location_for_resolved_target,
     signature_help_for_resolved_target_at_call_site, type_at_span,
 };
-use crate::services::analysis::program_pipeline::resolve_imported_symbol_target_from_import_env;
+use crate::services::analysis::program_pipeline::resolve_imported_symbol_id_from_import_env;
 use crate::services::analysis::query::QueryResult;
 use crate::services::analysis::results::{
     CompletionItem, DefTarget, HoverInfo, Location, SignatureHelp,
@@ -374,8 +374,14 @@ fn imported_or_local_def_target(
     }
 
     let local_def = resolved.def_table.lookup_def(def_id)?;
-    let target =
-        resolve_imported_symbol_target_from_import_env(module_id, local_def, import_env_by_module)
-            .unwrap_or_else(|| GlobalDefId::new(module_id, def_id));
+    if let Some(symbol_id) =
+        resolve_imported_symbol_id_from_import_env(module_id, local_def, import_env_by_module)
+        && let Some(target) =
+            def_target_for_symbol_id_in_states(snapshot, module_states, origin_file_id, &symbol_id)
+    {
+        return Some(target);
+    }
+
+    let target = GlobalDefId::new(module_id, def_id);
     global_def_target(snapshot, origin_file_id, module_states, target)
 }

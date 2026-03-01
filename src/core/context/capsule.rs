@@ -98,8 +98,11 @@ pub struct ImportedSymbolBinding {
     pub module_id: ModuleId,
     pub module_path: ModulePath,
     pub callables: Vec<GlobalDefId>,
+    pub callable_symbols: Vec<SymbolId>,
     pub type_def: Option<GlobalDefId>,
+    pub type_symbol: Option<SymbolId>,
     pub trait_def: Option<GlobalDefId>,
+    pub trait_symbol: Option<SymbolId>,
 }
 
 impl ImportedSymbolBinding {
@@ -188,16 +191,29 @@ pub fn imported_symbol_binding_from_exports(
     dep_exports: &ModuleExportFacts,
     member: &str,
 ) -> ImportedSymbolBinding {
+    let callables = dep_exports
+        .callables
+        .get(member)
+        .cloned()
+        .unwrap_or_default();
     ImportedSymbolBinding {
         module_id: dep_module_id,
         module_path: dep_module_path.clone(),
-        callables: dep_exports
-            .callables
-            .get(member)
-            .cloned()
-            .unwrap_or_default(),
+        callable_symbols: callables
+            .iter()
+            .filter_map(|source| dep_exports.symbols_by_def.get(source).cloned())
+            .collect(),
+        callables,
         type_def: dep_exports.types.get(member).copied(),
+        type_symbol: dep_exports
+            .types
+            .get(member)
+            .and_then(|source| dep_exports.symbols_by_def.get(source).cloned()),
         trait_def: dep_exports.traits.get(member).copied(),
+        trait_symbol: dep_exports
+            .traits
+            .get(member)
+            .and_then(|source| dep_exports.symbols_by_def.get(source).cloned()),
     }
 }
 

@@ -131,13 +131,18 @@ impl ImportedSymbol {
         Some(Self {
             callable_sigs,
             callable_sources: binding.callables.clone(),
-            callable_symbols: HashMap::new(),
+            callable_symbols: binding
+                .callables
+                .iter()
+                .cloned()
+                .zip(binding.callable_symbols.iter().cloned())
+                .collect(),
             type_ty,
             type_source: binding.type_def,
-            type_symbol: None,
+            type_symbol: binding.type_symbol.clone(),
             trait_sig,
             trait_source: binding.trait_def,
-            trait_symbol: None,
+            trait_symbol: binding.trait_symbol.clone(),
         })
     }
 }

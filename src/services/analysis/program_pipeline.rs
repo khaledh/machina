@@ -14,7 +14,8 @@ use crate::core::capsule::{self, ModuleId, ModulePath};
 use crate::core::context::{
     ImportEnv, ModuleExportFacts, ParsedContext, ResolvedContext, import_env_from_requires,
 };
-use crate::core::resolve::{DefId, DefKind, DefLocation, GlobalDefId};
+use crate::core::resolve::{DefId, DefKind, DefLocation};
+use crate::core::symbol_id::SymbolId;
 use crate::core::tree::{Module, NodeIdGen};
 use crate::services::analysis::diagnostics::{
     ANALYSIS_FILE_ID_KEY, ANALYSIS_FILE_PATH_KEY, Diagnostic, DiagnosticValue,
@@ -192,17 +193,19 @@ pub(crate) fn run_program_pipeline_for_file_with_options(
     })
 }
 
-pub(crate) fn resolve_imported_symbol_target_from_import_env(
+pub(crate) fn resolve_imported_symbol_id_from_import_env(
     module_id: ModuleId,
     local_def: &crate::core::resolve::Def,
     import_env_by_module: &HashMap<ModuleId, ImportEnv>,
-) -> Option<GlobalDefId> {
+) -> Option<SymbolId> {
     let import_env = import_env_by_module.get(&module_id)?;
     let binding = import_env.symbol_aliases.get(&local_def.name)?;
     let target = match local_def.kind {
-        DefKind::FuncDef { .. } | DefKind::FuncDecl { .. } => binding.callables.first().copied(),
-        DefKind::TypeDef { .. } => binding.type_def,
-        DefKind::TraitDef { .. } => binding.trait_def,
+        DefKind::FuncDef { .. } | DefKind::FuncDecl { .. } => {
+            binding.callable_symbols.first().cloned()
+        }
+        DefKind::TypeDef { .. } => binding.type_symbol.clone(),
+        DefKind::TraitDef { .. } => binding.trait_symbol.clone(),
         _ => None,
     };
     if target.is_some() {
@@ -210,20 +213,20 @@ pub(crate) fn resolve_imported_symbol_target_from_import_env(
     }
 
     // Partial/errored resolve may classify imported symbol aliases conservatively.
-    // If the import binding has only one possible export target, use it.
+    // If the import binding has only one possible canonical target, use it.
     let mut candidates = Vec::new();
-    if let Some(callable) = binding.callables.first().copied() {
+    if let Some(callable) = binding.callable_symbols.first().cloned() {
         candidates.push(callable);
     }
-    if let Some(type_def) = binding.type_def {
-        candidates.push(type_def);
+    if let Some(type_symbol) = binding.type_symbol.clone() {
+        candidates.push(type_symbol);
     }
-    if let Some(trait_def) = binding.trait_def {
-        candidates.push(trait_def);
+    if let Some(trait_symbol) = binding.trait_symbol.clone() {
+        candidates.push(trait_symbol);
     }
     candidates.dedup();
     if candidates.len() == 1 {
-        return candidates.first().copied();
+        return candidates.into_iter().next();
     }
     None
 }
