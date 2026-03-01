@@ -10,12 +10,10 @@
 //! declaration-only pass so downstream phases can reason over a stable symbol
 //! environment.
 
-use std::collections::{BTreeMap, HashMap, HashSet};
+use std::collections::{HashMap, HashSet};
 
 use crate::core::diag::Span;
-use crate::core::resolve::{
-    DefId, DefTable, ImportedCallableSig, ImportedFacts, ImportedParamSig, ImportedTraitSig,
-};
+use crate::core::resolve::{DefId, DefTable, ImportedFacts};
 use crate::core::tree::ParamMode;
 use crate::core::tree::{
     Attribute, EnumDefVariant, FunctionSig, MethodItem, MethodSig, Param, StructDefField, TypeDef,
@@ -26,6 +24,7 @@ use crate::core::typecheck::engine::{
     CollectedTraitPropertySig, CollectedTraitSig, TypecheckEngine,
 };
 use crate::core::typecheck::errors::{TEK, TypeCheckError};
+use crate::core::typecheck::imported::{extend_imported_function_sigs, extend_imported_trait_sigs};
 use crate::core::typecheck::type_map::{
     TypeDefLookup, resolve_return_type_expr_with_params, resolve_type_expr,
     resolve_type_expr_with_params,
@@ -296,7 +295,7 @@ fn collect_trait_sigs(
             },
         );
     }
-    collect_imported_trait_sigs(ctx, imported_facts, trait_sigs);
+    extend_imported_trait_sigs(ctx, imported_facts, trait_sigs);
 }
 
 fn collect_function_sigs(
@@ -331,118 +330,7 @@ fn collect_function_sigs(
             errors,
         );
     }
-    collect_imported_function_sigs(ctx, imported_facts, func_sigs);
-}
-
-/// Imported aliases are synthetic local defs; this pass reconstructs the same
-/// collected callable environment shape used for local functions.
-fn collect_imported_function_sigs(
-    ctx: &crate::core::context::ResolvedContext,
-    imported_facts: &ImportedFacts,
-    func_sigs: &mut HashMap<String, Vec<CollectedCallableSig>>,
-) {
-    // Imported callable aliases already have local synthetic defs in the
-    // def-table, so we only need to rehydrate their source-backed payloads.
-    for (def_id, imported_sigs) in imported_facts.callable_entries() {
-        let Some(def) = ctx.def_table.lookup_def(def_id) else {
-            continue;
-        };
-        let out = func_sigs.entry(def.name.clone()).or_default();
-        for imported in imported_sigs {
-            out.push(imported_callable_sig_to_collected(def_id, imported));
-        }
-    }
-}
-
-fn collect_imported_trait_sigs(
-    ctx: &crate::core::context::ResolvedContext,
-    imported_facts: &ImportedFacts,
-    trait_sigs: &mut HashMap<String, CollectedTraitSig>,
-) {
-    // Traits follow the same pattern: alias-local def id, source-keyed payload.
-    for (def_id, imported) in imported_facts.trait_entries() {
-        let Some(def) = ctx.def_table.lookup_def(def_id) else {
-            continue;
-        };
-        trait_sigs.insert(
-            def.name.clone(),
-            imported_trait_sig_to_collected(def_id, imported),
-        );
-    }
-}
-
-fn imported_callable_sig_to_collected(
-    def_id: DefId,
-    imported: &ImportedCallableSig,
-) -> CollectedCallableSig {
-    CollectedCallableSig {
-        def_id,
-        params: imported_params_to_collected(&imported.params),
-        ret_ty: imported.ret_ty.clone(),
-        type_param_count: 0,
-        type_param_var_names: BTreeMap::new(),
-        type_param_bounds: Vec::new(),
-        self_mode: None,
-        impl_trait: None,
-    }
-}
-
-fn imported_trait_sig_to_collected(
-    def_id: DefId,
-    imported: &ImportedTraitSig,
-) -> CollectedTraitSig {
-    let methods = imported
-        .methods
-        .iter()
-        .map(|(name, method)| {
-            (
-                name.clone(),
-                CollectedTraitMethodSig {
-                    name: method.name.clone(),
-                    params: imported_params_to_collected(&method.params),
-                    ret_ty: method.ret_ty.clone(),
-                    type_param_count: method.type_param_count,
-                    type_param_bounds: method.type_param_bounds.clone(),
-                    self_mode: method.self_mode.clone(),
-                    span: Span::default(),
-                },
-            )
-        })
-        .collect();
-    let properties = imported
-        .properties
-        .iter()
-        .map(|(name, property)| {
-            (
-                name.clone(),
-                CollectedTraitPropertySig {
-                    name: property.name.clone(),
-                    ty: property.ty.clone(),
-                    has_get: property.has_get,
-                    has_set: property.has_set,
-                    span: Span::default(),
-                },
-            )
-        })
-        .collect();
-    CollectedTraitSig {
-        def_id,
-        methods,
-        properties,
-        span: Span::default(),
-    }
-}
-
-fn imported_params_to_collected(params: &[ImportedParamSig]) -> Vec<CollectedParamSig> {
-    params
-        .iter()
-        .enumerate()
-        .map(|(index, param)| CollectedParamSig {
-            name: format!("arg{index}"),
-            ty: param.ty.clone(),
-            mode: param.mode.clone(),
-        })
-        .collect()
+    extend_imported_function_sigs(ctx, imported_facts, func_sigs);
 }
 
 fn collect_method_sigs(

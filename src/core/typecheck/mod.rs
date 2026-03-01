@@ -7,6 +7,7 @@ mod constraints;
 mod engine;
 mod errors;
 mod finalize;
+mod imported;
 mod infer_unify;
 pub(crate) mod nominal;
 mod property_access;
