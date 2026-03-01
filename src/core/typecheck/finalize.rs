@@ -384,33 +384,21 @@ fn selected_imported_callable(
     ret_ty: &Type,
 ) -> Option<SelectedCallable> {
     let imported_facts = &engine.env().imported_facts;
-    let candidates = imported_facts.callable_sources(local_def_id)?;
+    let candidates = imported_facts.callable_symbols(local_def_id)?;
     if candidates.len() <= 1 {
-        let source = candidates.first().copied()?;
-        return Some(
-            imported_facts
-                .callable_symbol_by_source(source)
-                .cloned()
-                .map(SelectedCallable::Canonical)
-                .unwrap_or(SelectedCallable::Global(source)),
-        );
+        let symbol = candidates.first()?.clone();
+        return Some(SelectedCallable::Canonical(symbol));
     }
 
     // Imported overload aliases still resolve to a local synthetic def id in
     // the solver, so finalize matches the chosen param/return shape back to a
     // concrete exported source callable.
-    let source = candidates.iter().copied().find(|source| {
+    let symbol = candidates.iter().find(|symbol| {
         imported_facts
-            .callable_sig_by_source(*source)
+            .callable_sig_by_symbol(symbol)
             .is_some_and(|sig| callable_sig_matches_call(sig, params, ret_ty))
     })?;
-    Some(
-        imported_facts
-            .callable_symbol_by_source(source)
-            .cloned()
-            .map(SelectedCallable::Canonical)
-            .unwrap_or(SelectedCallable::Global(source)),
-    )
+    Some(SelectedCallable::Canonical(symbol.clone()))
 }
 
 fn callable_sig_matches_call(
