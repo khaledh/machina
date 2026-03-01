@@ -30,6 +30,33 @@ fn drop_def_for_place_expr(place: &sem::PlaceExpr) -> Option<DefId> {
 }
 
 impl<'a, 'g> FuncLowerer<'a, 'g> {
+    fn ensure_call_input_addr(&mut self, arg: &mut CallInputValue) -> ValueId {
+        if arg.is_addr {
+            arg.value
+        } else {
+            let addr = self.materialize_value_addr(arg.value, &arg.ty);
+            arg.value = addr;
+            arg.is_addr = true;
+            addr
+        }
+    }
+
+    fn runtime_size_const(&mut self, ty: &Type) -> ValueId {
+        let ir_ty = self.type_lowerer.lower_type(ty);
+        let layout = self.type_lowerer.ir_type_cache.layout(ir_ty);
+        let u64_ty = self.type_lowerer.lower_type(&Type::uint(64));
+        self.builder
+            .const_int(layout.size() as i128, false, 64, u64_ty)
+    }
+
+    fn runtime_align_const(&mut self, ty: &Type) -> ValueId {
+        let ir_ty = self.type_lowerer.lower_type(ty);
+        let layout = self.type_lowerer.ir_type_cache.layout(ir_ty);
+        let u64_ty = self.type_lowerer.lower_type(&Type::uint(64));
+        self.builder
+            .const_int(layout.align() as i128, false, 64, u64_ty)
+    }
+
     fn render_type_for_type_of(ty: &Type, overrides: Option<&BTreeMap<u32, String>>) -> String {
         render_type(
             ty,
@@ -524,25 +551,9 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
                     panic!("backend dyn-array append expects dyn-array receiver");
                 };
 
-                let arg = &mut arg_values[0];
-                let elem_addr = if arg.is_addr {
-                    arg.value
-                } else {
-                    let addr = self.materialize_value_addr(arg.value, &arg.ty);
-                    arg.value = addr;
-                    arg.is_addr = true;
-                    addr
-                };
-
-                let elem_ir_ty = self.type_lowerer.lower_type(&elem_ty);
-                let layout = self.type_lowerer.ir_type_cache.layout(elem_ir_ty);
-                let u64_ty = self.type_lowerer.lower_type(&Type::uint(64));
-                let size_val = self
-                    .builder
-                    .const_int(layout.size() as i128, false, 64, u64_ty);
-                let align_val = self
-                    .builder
-                    .const_int(layout.align() as i128, false, 64, u64_ty);
+                let elem_addr = self.ensure_call_input_addr(&mut arg_values[0]);
+                let size_val = self.runtime_size_const(&elem_ty);
+                let align_val = self.runtime_align_const(&elem_ty);
                 let ret_ty = self.type_lowerer.lower_type_id(expr.ty);
                 let result = self.builder.call(
                     Callee::Runtime(RuntimeFn::DynArrayAppendElem),
@@ -567,24 +578,9 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
                 let Type::Set { elem_ty } = set_ty else {
                     panic!("backend set insert expects set receiver");
                 };
-                let arg = &mut arg_values[0];
-                let elem_addr = if arg.is_addr {
-                    arg.value
-                } else {
-                    let addr = self.materialize_value_addr(arg.value, &arg.ty);
-                    arg.value = addr;
-                    arg.is_addr = true;
-                    addr
-                };
-                let elem_ir_ty = self.type_lowerer.lower_type(&elem_ty);
-                let layout = self.type_lowerer.ir_type_cache.layout(elem_ir_ty);
-                let u64_ty = self.type_lowerer.lower_type(&Type::uint(64));
-                let size_val = self
-                    .builder
-                    .const_int(layout.size() as i128, false, 64, u64_ty);
-                let align_val = self
-                    .builder
-                    .const_int(layout.align() as i128, false, 64, u64_ty);
+                let elem_addr = self.ensure_call_input_addr(&mut arg_values[0]);
+                let size_val = self.runtime_size_const(&elem_ty);
+                let align_val = self.runtime_align_const(&elem_ty);
                 let ret_ty = self.type_lowerer.lower_type_id(expr.ty);
                 let result = self.builder.call(
                     Callee::Runtime(RuntimeFn::SetInsertElem),
@@ -608,21 +604,8 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
                 let Type::Set { elem_ty } = set_ty else {
                     panic!("backend set method expects set receiver");
                 };
-                let arg = &mut arg_values[0];
-                let elem_addr = if arg.is_addr {
-                    arg.value
-                } else {
-                    let addr = self.materialize_value_addr(arg.value, &arg.ty);
-                    arg.value = addr;
-                    arg.is_addr = true;
-                    addr
-                };
-                let elem_ir_ty = self.type_lowerer.lower_type(&elem_ty);
-                let layout = self.type_lowerer.ir_type_cache.layout(elem_ir_ty);
-                let u64_ty = self.type_lowerer.lower_type(&Type::uint(64));
-                let size_val = self
-                    .builder
-                    .const_int(layout.size() as i128, false, 64, u64_ty);
+                let elem_addr = self.ensure_call_input_addr(&mut arg_values[0]);
+                let size_val = self.runtime_size_const(&elem_ty);
                 let ret_ty = self.type_lowerer.lower_type_id(expr.ty);
                 let runtime = match intrinsic {
                     sem::IntrinsicCall::SetContains => RuntimeFn::SetContainsElem,
@@ -670,37 +653,10 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
                     panic!("backend map insert expects map receiver");
                 };
 
-                let key_arg = &mut arg_values[0];
-                let key_addr = if key_arg.is_addr {
-                    key_arg.value
-                } else {
-                    let addr = self.materialize_value_addr(key_arg.value, &key_arg.ty);
-                    key_arg.value = addr;
-                    key_arg.is_addr = true;
-                    addr
-                };
-
-                let value_arg = &mut arg_values[1];
-                let value_addr = if value_arg.is_addr {
-                    value_arg.value
-                } else {
-                    let addr = self.materialize_value_addr(value_arg.value, &value_arg.ty);
-                    value_arg.value = addr;
-                    value_arg.is_addr = true;
-                    addr
-                };
-
-                let key_ir_ty = self.type_lowerer.lower_type(&key_ty);
-                let key_layout = self.type_lowerer.ir_type_cache.layout(key_ir_ty);
-                let value_ir_ty = self.type_lowerer.lower_type(&value_ty);
-                let value_layout = self.type_lowerer.ir_type_cache.layout(value_ir_ty);
-                let u64_ty = self.type_lowerer.lower_type(&Type::uint(64));
-                let key_size = self
-                    .builder
-                    .const_int(key_layout.size() as i128, false, 64, u64_ty);
-                let value_size =
-                    self.builder
-                        .const_int(value_layout.size() as i128, false, 64, u64_ty);
+                let key_addr = self.ensure_call_input_addr(&mut arg_values[0]);
+                let value_addr = self.ensure_call_input_addr(&mut arg_values[1]);
+                let key_size = self.runtime_size_const(&key_ty);
+                let value_size = self.runtime_size_const(&value_ty);
                 let ret_ty = self.type_lowerer.lower_type_id(expr.ty);
                 let result = self.builder.call(
                     Callee::Runtime(RuntimeFn::MapInsertOrAssign),
@@ -724,26 +680,9 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
                 let Type::Map { key_ty, value_ty } = map_ty else {
                     panic!("backend map method expects map receiver");
                 };
-                let key_arg = &mut arg_values[0];
-                let key_addr = if key_arg.is_addr {
-                    key_arg.value
-                } else {
-                    let addr = self.materialize_value_addr(key_arg.value, &key_arg.ty);
-                    key_arg.value = addr;
-                    key_arg.is_addr = true;
-                    addr
-                };
-                let key_ir_ty = self.type_lowerer.lower_type(&key_ty);
-                let key_layout = self.type_lowerer.ir_type_cache.layout(key_ir_ty);
-                let value_ir_ty = self.type_lowerer.lower_type(&value_ty);
-                let value_layout = self.type_lowerer.ir_type_cache.layout(value_ir_ty);
-                let u64_ty = self.type_lowerer.lower_type(&Type::uint(64));
-                let key_size = self
-                    .builder
-                    .const_int(key_layout.size() as i128, false, 64, u64_ty);
-                let value_size =
-                    self.builder
-                        .const_int(value_layout.size() as i128, false, 64, u64_ty);
+                let key_addr = self.ensure_call_input_addr(&mut arg_values[0]);
+                let key_size = self.runtime_size_const(&key_ty);
+                let value_size = self.runtime_size_const(&value_ty);
                 let runtime = match intrinsic {
                     sem::IntrinsicCall::MapContainsKey => RuntimeFn::MapContainsKey,
                     sem::IntrinsicCall::MapRemove => RuntimeFn::MapRemoveKey,
@@ -773,28 +712,12 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
                     panic!("backend map get expects map receiver");
                 };
 
-                let key_arg = &mut arg_values[0];
-                let key_addr = if key_arg.is_addr {
-                    key_arg.value
-                } else {
-                    let addr = self.materialize_value_addr(key_arg.value, &key_arg.ty);
-                    key_arg.value = addr;
-                    key_arg.is_addr = true;
-                    addr
-                };
+                let key_addr = self.ensure_call_input_addr(&mut arg_values[0]);
                 let value_ir_ty = self.type_lowerer.lower_type(&value_ty);
                 let value_slot = self.alloc_value_slot(value_ir_ty);
 
-                let key_ir_ty = self.type_lowerer.lower_type(&key_ty);
-                let key_layout = self.type_lowerer.ir_type_cache.layout(key_ir_ty);
-                let value_layout = self.type_lowerer.ir_type_cache.layout(value_ir_ty);
-                let u64_ty = self.type_lowerer.lower_type(&Type::uint(64));
-                let key_size = self
-                    .builder
-                    .const_int(key_layout.size() as i128, false, 64, u64_ty);
-                let value_size =
-                    self.builder
-                        .const_int(value_layout.size() as i128, false, 64, u64_ty);
+                let key_size = self.runtime_size_const(&key_ty);
+                let value_size = self.runtime_size_const(&value_ty);
 
                 let bool_ty = self.type_lowerer.lower_type(&Type::Bool);
                 let hit = self.builder.call(
