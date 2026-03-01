@@ -380,9 +380,9 @@ fn hash_imported_symbols(
     for alias in aliases {
         alias.hash(hasher);
         if let Some(symbol) = imported_symbols.get(alias) {
-            symbol.has_callable.hash(hasher);
-            symbol.has_type.hash(hasher);
-            symbol.has_trait.hash(hasher);
+            symbol.has_callable().hash(hasher);
+            symbol.has_type().hash(hasher);
+            symbol.has_trait().hash(hasher);
             for source in &symbol.callable_sources {
                 (*source).hash(hasher);
             }

@@ -115,9 +115,9 @@ impl ProgramImportFactsCache {
         imported_symbols: &HashMap<String, ImportedSymbol>,
     ) -> bool {
         imported_symbols.values().any(|imported| {
-            (imported.has_type && imported.type_ty.is_none())
-                || (imported.has_trait && imported.trait_sig.is_none())
-                || (imported.has_callable && imported.callable_sigs.is_empty())
+            (imported.has_type() && imported.type_ty.is_none())
+                || (imported.has_trait() && imported.trait_sig.is_none())
+                || (imported.has_callable() && imported.callable_sigs.is_empty())
         })
     }
 

@@ -26,13 +26,10 @@ pub struct ImportedModule {
 
 #[derive(Clone, Debug, Default)]
 pub struct ImportedSymbol {
-    pub has_callable: bool,
     pub callable_sigs: Vec<ImportedCallableSig>,
     pub callable_sources: Vec<GlobalDefId>,
-    pub has_type: bool,
     pub type_ty: Option<Type>,
     pub type_source: Option<GlobalDefId>,
-    pub has_trait: bool,
     pub trait_sig: Option<ImportedTraitSig>,
     pub trait_source: Option<GlobalDefId>,
 }
@@ -71,20 +68,29 @@ impl ImportedSymbol {
         }
 
         Some(Self {
-            has_callable,
             callable_sigs: if has_callable {
                 callable_sigs
             } else {
                 Vec::new()
             },
             callable_sources: exports.callables.get(member).cloned().unwrap_or_default(),
-            has_type,
             type_ty: if has_type { type_ty } else { None },
             type_source: exports.types.get(member).copied(),
-            has_trait,
             trait_sig: if has_trait { trait_sig } else { None },
             trait_source: exports.traits.get(member).copied(),
         })
+    }
+
+    pub fn has_callable(&self) -> bool {
+        !self.callable_sources.is_empty() || !self.callable_sigs.is_empty()
+    }
+
+    pub fn has_type(&self) -> bool {
+        self.type_source.is_some() || self.type_ty.is_some()
+    }
+
+    pub fn has_trait(&self) -> bool {
+        self.trait_source.is_some() || self.trait_sig.is_some()
     }
 }
 
@@ -682,7 +688,7 @@ impl SymbolResolver {
     fn populate_imported_symbol_aliases(&mut self) {
         let aliases = self.imported_symbols.clone();
         for (alias, imported) in aliases {
-            if imported.has_callable {
+            if imported.has_callable() {
                 let def_id = self.add_built_in_symbol(&alias, false, |def_id| SymbolKind::Func {
                     overloads: vec![def_id],
                 });
@@ -700,7 +706,7 @@ impl SymbolResolver {
                 continue;
             }
 
-            if imported.has_type {
+            if imported.has_type() {
                 let def_id =
                     self.add_built_in_symbol(&alias, false, |def_id| SymbolKind::TypeAlias {
                         def_id,
@@ -724,7 +730,7 @@ impl SymbolResolver {
                 continue;
             }
 
-            if imported.has_trait {
+            if imported.has_trait() {
                 let def_id = self
                     .add_built_in_symbol(&alias, false, |def_id| SymbolKind::TraitDef { def_id });
                 self.imported_defs.insert(
