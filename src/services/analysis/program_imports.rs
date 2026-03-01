@@ -8,9 +8,10 @@ use crate::core::context::{
     import_env_from_requires, module_export_facts_from_def_table,
 };
 use crate::core::resolve::{
-    GlobalDefId, ImportedCallableSig, ImportedModule, ImportedParamSig, ImportedSymbol,
-    ImportedTraitMethodSig, ImportedTraitPropertySig, ImportedTraitSig,
+    ImportedCallableSig, ImportedModule, ImportedParamSig, ImportedSymbol, ImportedTraitMethodSig,
+    ImportedTraitPropertySig, ImportedTraitSig,
 };
+use crate::core::symbol_id::SymbolId;
 use crate::core::tree::{MethodSig, ParamMode, TopLevelItem};
 use crate::core::typecheck::type_map::{
     resolve_return_type_expr_with_params, resolve_type_def_with_args, resolve_type_expr_with_params,
@@ -20,9 +21,9 @@ use crate::core::types::{FnParamMode, TyVarId, Type};
 #[derive(Default)]
 pub(crate) struct ProgramImportFactsCache {
     export_facts_by_module: HashMap<ModuleId, ModuleExportFacts>,
-    callable_sigs_by_def: HashMap<GlobalDefId, ImportedCallableSig>,
-    type_tys_by_def: HashMap<GlobalDefId, Type>,
-    trait_sigs_by_def: HashMap<GlobalDefId, ImportedTraitSig>,
+    callable_sigs_by_symbol: HashMap<SymbolId, ImportedCallableSig>,
+    type_tys_by_symbol: HashMap<SymbolId, Type>,
+    trait_sigs_by_symbol: HashMap<SymbolId, ImportedTraitSig>,
 }
 
 impl ProgramImportFactsCache {
@@ -57,16 +58,28 @@ impl ProgramImportFactsCache {
             let callable_sigs = binding
                 .callables
                 .iter()
-                .filter_map(|def_id| self.callable_sigs_by_def.get(def_id))
+                .filter_map(|def_id| {
+                    exports
+                        .and_then(|facts| facts.symbols_by_def.get(def_id))
+                        .and_then(|symbol_id| self.callable_sigs_by_symbol.get(symbol_id))
+                })
                 .cloned()
                 .collect();
             let type_ty = binding
                 .type_def
-                .and_then(|def_id| self.type_tys_by_def.get(&def_id))
+                .and_then(|def_id| {
+                    exports
+                        .and_then(|facts| facts.symbols_by_def.get(&def_id))
+                        .and_then(|symbol_id| self.type_tys_by_symbol.get(symbol_id))
+                })
                 .cloned();
             let trait_sig = binding
                 .trait_def
-                .and_then(|def_id| self.trait_sigs_by_def.get(&def_id))
+                .and_then(|def_id| {
+                    exports
+                        .and_then(|facts| facts.symbols_by_def.get(&def_id))
+                        .and_then(|symbol_id| self.trait_sigs_by_symbol.get(symbol_id))
+                })
                 .cloned();
             if binding.is_empty() {
                 continue;
@@ -140,7 +153,7 @@ impl ProgramImportFactsCache {
                     &resolved.symbol_ids,
                 )
             });
-        self.callable_sigs_by_def
+        self.callable_sigs_by_symbol
             .extend(collect_public_callable_sigs_resolved(module_id, resolved));
     }
 
@@ -149,20 +162,20 @@ impl ProgramImportFactsCache {
     }
 
     pub(crate) fn ingest_typed(&mut self, module_id: ModuleId, typed: &TypeCheckedContext) {
-        self.callable_sigs_by_def
+        self.callable_sigs_by_symbol
             .extend(collect_public_callable_sigs(module_id, typed));
-        self.type_tys_by_def
+        self.type_tys_by_symbol
             .extend(collect_public_type_tys(module_id, typed));
-        self.trait_sigs_by_def
+        self.trait_sigs_by_symbol
             .extend(collect_public_trait_sigs(module_id, typed));
     }
 }
 
 fn collect_public_callable_sigs(
-    module_id: ModuleId,
+    _module_id: ModuleId,
     typed: &TypeCheckedContext,
-) -> HashMap<GlobalDefId, ImportedCallableSig> {
-    let mut out = HashMap::<GlobalDefId, ImportedCallableSig>::new();
+) -> HashMap<SymbolId, ImportedCallableSig> {
+    let mut out = HashMap::<SymbolId, ImportedCallableSig>::new();
     for item in &typed.module.top_level_items {
         let callable = match item {
             TopLevelItem::FuncDecl(decl) => Some(typed.def_table.def_id(decl.id)),
@@ -184,9 +197,11 @@ fn collect_public_callable_sigs(
         let Type::Fn { params, ret_ty } = def_ty else {
             continue;
         };
-        let global_def = GlobalDefId::new(module_id, def_id);
+        let Some(symbol_id) = typed.symbol_ids.lookup_symbol_id(def_id).cloned() else {
+            continue;
+        };
         out.insert(
-            global_def,
+            symbol_id,
             ImportedCallableSig {
                 params: params
                     .into_iter()
@@ -203,10 +218,10 @@ fn collect_public_callable_sigs(
 }
 
 fn collect_public_callable_sigs_resolved(
-    module_id: ModuleId,
+    _module_id: ModuleId,
     resolved: &ResolvedContext,
-) -> HashMap<GlobalDefId, ImportedCallableSig> {
-    let mut out = HashMap::<GlobalDefId, ImportedCallableSig>::new();
+) -> HashMap<SymbolId, ImportedCallableSig> {
+    let mut out = HashMap::<SymbolId, ImportedCallableSig>::new();
     for item in &resolved.module.top_level_items {
         let callable = match item {
             TopLevelItem::FuncDecl(decl) => Some((resolved.def_table.def_id(decl.id), &decl.sig)),
@@ -253,19 +268,19 @@ fn collect_public_callable_sigs_resolved(
             continue;
         };
 
-        out.insert(
-            GlobalDefId::new(module_id, def_id),
-            ImportedCallableSig { params, ret_ty },
-        );
+        let Some(symbol_id) = resolved.symbol_ids.lookup_symbol_id(def_id).cloned() else {
+            continue;
+        };
+        out.insert(symbol_id, ImportedCallableSig { params, ret_ty });
     }
     out
 }
 
 fn collect_public_type_tys(
-    module_id: ModuleId,
+    _module_id: ModuleId,
     typed: &TypeCheckedContext,
-) -> HashMap<GlobalDefId, Type> {
-    let mut out = HashMap::<GlobalDefId, Type>::new();
+) -> HashMap<SymbolId, Type> {
+    let mut out = HashMap::<SymbolId, Type>::new();
     for type_def in typed.module.type_defs() {
         if !type_def.type_params.is_empty() {
             continue;
@@ -281,16 +296,19 @@ fn collect_public_type_tys(
         else {
             continue;
         };
-        out.insert(GlobalDefId::new(module_id, type_def_id), ty);
+        let Some(symbol_id) = typed.symbol_ids.lookup_symbol_id(type_def_id).cloned() else {
+            continue;
+        };
+        out.insert(symbol_id, ty);
     }
     out
 }
 
 fn collect_public_trait_sigs(
-    module_id: ModuleId,
+    _module_id: ModuleId,
     typed: &TypeCheckedContext,
-) -> HashMap<GlobalDefId, ImportedTraitSig> {
-    let mut out = HashMap::<GlobalDefId, ImportedTraitSig>::new();
+) -> HashMap<SymbolId, ImportedTraitSig> {
+    let mut out = HashMap::<SymbolId, ImportedTraitSig>::new();
     for trait_def in typed.module.trait_defs() {
         let def_id = typed.def_table.def_id(trait_def.id);
         let Some(def) = typed.def_table.lookup_def(def_id) else {
@@ -325,8 +343,11 @@ fn collect_public_trait_sigs(
             );
         }
 
+        let Some(symbol_id) = typed.symbol_ids.lookup_symbol_id(def_id).cloned() else {
+            continue;
+        };
         out.insert(
-            GlobalDefId::new(module_id, def_id),
+            symbol_id,
             ImportedTraitSig {
                 methods,
                 properties,
