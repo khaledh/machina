@@ -8,7 +8,7 @@ use crate::core::symbol_id::SymbolId;
 use crate::services::analysis::frontend_support::{
     stable_source_revision, strict_frontend_lookup_state_with_path,
 };
-use crate::services::analysis::lookups::resolved_target_def_id;
+use crate::services::analysis::lookups::{ResolvedSymbolTarget, resolved_target_def_id};
 use crate::services::analysis::pipeline::{
     LookupState, run_module_pipeline_with_query_input, to_lookup_state,
 };
@@ -19,12 +19,6 @@ use crate::services::analysis::query::{QueryKey, QueryKind, QueryResult};
 use crate::services::analysis::results::DefTarget;
 use crate::services::analysis::snapshot::AnalysisSnapshot;
 use crate::services::analysis::snapshot::FileId;
-
-pub(crate) struct ResolvedSymbolTarget {
-    pub target: DefTarget,
-    pub state: LookupState,
-    pub local_def_id: DefId,
-}
 
 impl super::AnalysisDb {
     pub(super) fn lookup_state_for_target(

@@ -2291,13 +2291,12 @@ fn hover_for_symbol_id_in_program_matches_source_definition_render() {
         .def_target_for_symbol_id_in_program(entry_id, &symbol_id)
         .expect("canonical symbol lookup should succeed")
         .expect("expected target for imported println");
-    let target_state = db
-        .lookup_state_for_target(entry_id, &target)
-        .expect("target lookup state query should succeed")
-        .expect("expected target lookup state");
-    let rendered =
-        crate::services::analysis::lookups::hover_for_symbol_id_in_state(&target_state, &symbol_id)
-            .expect("expected hover render for canonical symbol");
+    let resolved_target = db
+        .resolve_target_in_program(entry_id, target)
+        .expect("target resolution query should succeed")
+        .expect("expected resolved target");
+    let rendered = crate::services::analysis::lookups::hover_for_resolved_target(&resolved_target)
+        .expect("expected hover render for canonical symbol");
 
     assert_eq!(rendered.def_name.as_deref(), Some("println"));
     assert_eq!(rendered.display, "fn println(s: string) -> ()");
