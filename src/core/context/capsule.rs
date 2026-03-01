@@ -110,19 +110,19 @@ impl ImportedSymbolBinding {
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ExportedCallable {
-    pub global_def_id: GlobalDefId,
+    pub source: GlobalDefId,
     pub symbol_id: Option<SymbolId>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ExportedType {
-    pub global_def_id: GlobalDefId,
+    pub source: GlobalDefId,
     pub symbol_id: Option<SymbolId>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ExportedTrait {
-    pub global_def_id: GlobalDefId,
+    pub source: GlobalDefId,
     pub symbol_id: Option<SymbolId>,
 }
 
@@ -174,13 +174,13 @@ pub fn module_export_facts_from_def_table(
                     .entry(def.name.clone())
                     .or_default()
                     .push(ExportedCallable {
-                        global_def_id,
+                        source: global_def_id,
                         symbol_id,
                     });
             }
             DefKind::TypeDef { .. } => {
                 facts.types.entry(def.name.clone()).or_insert(ExportedType {
-                    global_def_id,
+                    source: global_def_id,
                     symbol_id,
                 });
             }
@@ -189,7 +189,7 @@ pub fn module_export_facts_from_def_table(
                     .traits
                     .entry(def.name.clone())
                     .or_insert(ExportedTrait {
-                        global_def_id,
+                        source: global_def_id,
                         symbol_id,
                     });
             }
@@ -197,7 +197,7 @@ pub fn module_export_facts_from_def_table(
         }
     }
     for overloads in facts.callables.values_mut() {
-        overloads.sort_by_key(|item| item.global_def_id.def_id);
+        overloads.sort_by_key(|item| item.source.def_id);
         overloads.dedup();
     }
     facts
