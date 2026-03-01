@@ -51,16 +51,9 @@ impl ProgramImportFactsCache {
             let Some(dep_exports) = self.export_facts_by_module.get(&dep_id) else {
                 continue;
             };
-            let mut members = std::collections::HashSet::new();
-            members.extend(dep_exports.callables.keys().cloned());
-            members.extend(dep_exports.types.keys().cloned());
-            members.extend(dep_exports.traits.keys().cloned());
             out.insert(
                 req.alias.clone(),
-                ImportedModule {
-                    path: req.module_path.to_string(),
-                    members,
-                },
+                ImportedModule::from_exports(&req.module_path.to_string(), dep_exports),
             );
         }
 
@@ -98,47 +91,19 @@ impl ProgramImportFactsCache {
             let dep_callable_sigs = self.callable_sigs_by_module.get(&dep_id);
             let dep_type_tys = self.type_tys_by_module.get(&dep_id);
             let dep_trait_sigs = self.trait_sigs_by_module.get(&dep_id);
-            let has_callable = dep_exports
-                .callables
-                .get(member)
-                .is_some_and(|overloads| !overloads.is_empty());
-            let has_type = dep_exports.types.contains_key(member);
-            let has_trait = dep_exports.traits.contains_key(member);
-            let imported = ImportedSymbol {
-                has_callable,
-                callable_sigs: if has_callable {
-                    dep_callable_sigs
-                        .and_then(|module_sigs| module_sigs.get(member))
-                        .cloned()
-                        .unwrap_or_default()
-                } else {
-                    Vec::new()
-                },
-                callable_sources: dep_exports
-                    .callables
-                    .get(member)
-                    .cloned()
-                    .unwrap_or_default(),
-                has_type,
-                type_ty: if has_type {
-                    dep_type_tys
-                        .and_then(|module_types| module_types.get(member))
-                        .cloned()
-                } else {
-                    None
-                },
-                type_source: dep_exports.types.get(member).copied(),
-                has_trait,
-                trait_sig: if has_trait {
-                    dep_trait_sigs
-                        .and_then(|module_traits| module_traits.get(member))
-                        .cloned()
-                } else {
-                    None
-                },
-                trait_source: dep_exports.traits.get(member).copied(),
-            };
-            if imported.has_callable || imported.has_type || imported.has_trait {
+            let callable_sigs = dep_callable_sigs
+                .and_then(|module_sigs| module_sigs.get(member))
+                .cloned()
+                .unwrap_or_default();
+            let type_ty = dep_type_tys
+                .and_then(|module_types| module_types.get(member))
+                .cloned();
+            let trait_sig = dep_trait_sigs
+                .and_then(|module_traits| module_traits.get(member))
+                .cloned();
+            if let Some(imported) =
+                ImportedSymbol::from_exports(dep_exports, member, callable_sigs, type_ty, trait_sig)
+            {
                 out.insert(req.alias.clone(), imported);
             }
         }

@@ -37,6 +37,57 @@ pub struct ImportedSymbol {
     pub trait_source: Option<GlobalDefId>,
 }
 
+impl ImportedModule {
+    pub fn from_exports(module_path: &str, exports: &ModuleExportFacts) -> Self {
+        let mut members = HashSet::new();
+        members.extend(exports.callables.keys().cloned());
+        members.extend(exports.types.keys().cloned());
+        members.extend(exports.traits.keys().cloned());
+        Self {
+            path: module_path.to_string(),
+            members,
+        }
+    }
+}
+
+impl ImportedSymbol {
+    /// Build a symbol-import view from capsule/module export facts plus any
+    /// already-materialized signature/type payloads for that member.
+    pub fn from_exports(
+        exports: &ModuleExportFacts,
+        member: &str,
+        callable_sigs: Vec<ImportedCallableSig>,
+        type_ty: Option<Type>,
+        trait_sig: Option<ImportedTraitSig>,
+    ) -> Option<Self> {
+        let has_callable = exports
+            .callables
+            .get(member)
+            .is_some_and(|overloads| !overloads.is_empty());
+        let has_type = exports.types.contains_key(member);
+        let has_trait = exports.traits.contains_key(member);
+        if !has_callable && !has_type && !has_trait {
+            return None;
+        }
+
+        Some(Self {
+            has_callable,
+            callable_sigs: if has_callable {
+                callable_sigs
+            } else {
+                Vec::new()
+            },
+            callable_sources: exports.callables.get(member).cloned().unwrap_or_default(),
+            has_type,
+            type_ty: if has_type { type_ty } else { None },
+            type_source: exports.types.get(member).copied(),
+            has_trait,
+            trait_sig: if has_trait { trait_sig } else { None },
+            trait_source: exports.traits.get(member).copied(),
+        })
+    }
+}
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ImportedCallableSig {
     pub params: Vec<ImportedParamSig>,
@@ -2150,14 +2201,11 @@ pub fn resolve_program(
             }
             let alias = req.alias.clone();
             if let Some(dep_id) = program.capsule.by_path.get(&req.module_path)
-                && let Some(dep_module) = program.module(*dep_id)
+                && let Some(dep_exports) = export_facts_by_module.get(dep_id)
             {
                 imported_modules.insert(
                     alias,
-                    ImportedModule {
-                        path: req.module_path.to_string(),
-                        members: module_exported_members(&dep_module.module),
-                    },
+                    ImportedModule::from_exports(&req.module_path.to_string(), dep_exports),
                 );
             }
         }
@@ -2175,25 +2223,9 @@ pub fn resolve_program(
             let Some(member) = &req.member else {
                 continue;
             };
-            let imported = ImportedSymbol {
-                has_callable: dep_exports
-                    .callables
-                    .get(member)
-                    .is_some_and(|overloads| !overloads.is_empty()),
-                callable_sigs: Vec::new(),
-                callable_sources: dep_exports
-                    .callables
-                    .get(member)
-                    .cloned()
-                    .unwrap_or_default(),
-                has_type: dep_exports.types.contains_key(member),
-                type_ty: None,
-                type_source: dep_exports.types.get(member).copied(),
-                has_trait: dep_exports.traits.contains_key(member),
-                trait_sig: None,
-                trait_source: dep_exports.traits.get(member).copied(),
-            };
-            if imported.has_callable || imported.has_type || imported.has_trait {
+            if let Some(imported) =
+                ImportedSymbol::from_exports(dep_exports, member, Vec::new(), None, None)
+            {
                 imported_symbols.insert(req.alias.clone(), imported);
             }
         }
@@ -2251,32 +2283,4 @@ fn top_level_item_id(item: &TopLevelItem) -> crate::core::tree::NodeId {
         TopLevelItem::MethodBlock(method_block) => method_block.id,
         TopLevelItem::ClosureDef(closure_def) => closure_def.id,
     }
-}
-
-fn module_exported_members(module: &Module) -> HashSet<String> {
-    let mut members = HashSet::new();
-    for item in &module.top_level_items {
-        match item {
-            TopLevelItem::ProtocolDef(protocol_def) => {
-                members.insert(protocol_def.name.clone());
-            }
-            TopLevelItem::TraitDef(trait_def) => {
-                members.insert(trait_def.name.clone());
-            }
-            TopLevelItem::TypeDef(type_def) => {
-                members.insert(type_def.name.clone());
-            }
-            TopLevelItem::TypestateDef(typestate_def) => {
-                members.insert(typestate_def.name.clone());
-            }
-            TopLevelItem::FuncDecl(func_decl) => {
-                members.insert(func_decl.sig.name.clone());
-            }
-            TopLevelItem::FuncDef(func_def) => {
-                members.insert(func_def.sig.name.clone());
-            }
-            TopLevelItem::MethodBlock(_) | TopLevelItem::ClosureDef(_) => {}
-        }
-    }
-    members
 }
