@@ -125,7 +125,8 @@ pub(crate) fn run_program_pipeline_for_file_with_options(
                 .unwrap_or_else(|| program_context.next_node_id_gen().clone());
             let parsed_context =
                 crate::core::context::ParsedContext::new(parsed_module, node_id_gen)
-                    .with_source_path(parsed.source.file_path.clone());
+                    .with_source_path(parsed.source.file_path.clone())
+                    .with_module_path(parsed.source.path.clone());
             let imported_modules = import_facts.imported_modules_for(&program_context, module_id);
             let imported_symbols = import_facts.imported_symbols_for(&program_context, module_id);
             let skip_typecheck = ProgramImportFactsCache::should_skip_typecheck(&imported_symbols);

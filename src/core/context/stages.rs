@@ -2,12 +2,13 @@ use std::collections::{HashMap, HashSet};
 use std::ops::{Deref, DerefMut};
 use std::path::PathBuf;
 
-use crate::core::capsule::ModuleId;
+use crate::core::capsule::{ModuleId, ModulePath};
 use crate::core::codegen_names::CodegenNameTable;
 use crate::core::diag::Span;
 use crate::core::protocol::ProtocolIndex;
 use crate::core::resolve::{DefId, DefTable};
 use crate::core::semck::closure::capture::ClosureCapture;
+use crate::core::symbol_id::SymbolIdTable;
 use crate::core::tree::semantic::Module as SemanticModule;
 use crate::core::tree::semantic::{DropPlanMap, LoweringPlanMap, MachinePlanMap};
 use crate::core::tree::{Module, NodeId, NodeIdGen, TypeExpr};
@@ -17,7 +18,9 @@ use crate::core::types::Type;
 #[derive(Debug, Clone)]
 pub struct ResolvedTables {
     pub def_table: DefTable,
+    pub module_path: Option<ModulePath>,
     pub def_owners: HashMap<DefId, ModuleId>,
+    pub symbol_ids: SymbolIdTable,
     pub symbols: CodegenNameTable,
     pub node_id_gen: NodeIdGen,
     pub typestate_role_impls: Vec<TypestateRoleImplBinding>,
@@ -223,6 +226,7 @@ pub struct ParsedContext {
     pub module: Module,
     pub node_id_gen: NodeIdGen,
     pub source_path: Option<PathBuf>,
+    pub module_path: Option<ModulePath>,
 }
 
 /// Stage contract alias: resolve input.
@@ -234,6 +238,7 @@ impl ParsedContext {
             module,
             node_id_gen,
             source_path: None,
+            module_path: None,
         }
     }
 
@@ -242,24 +247,36 @@ impl ParsedContext {
         self
     }
 
+    pub fn with_module_path(mut self, module_path: ModulePath) -> Self {
+        self.module_path = Some(module_path);
+        self
+    }
+
     pub fn with_def_table(self, mut def_table: DefTable) -> ResolvedContext {
         let ParsedContext {
             module,
             node_id_gen,
-            ..
+            source_path,
+            module_path,
         } = self;
 
         if def_table.source_path().is_none() {
-            def_table.set_source_path(self.source_path.clone());
+            def_table.set_source_path(source_path);
         }
 
         let symbols = CodegenNameTable::new(&module, &def_table);
+        let symbol_ids = module_path
+            .as_ref()
+            .map(|module_path| SymbolIdTable::from_module(module_path, &module, &def_table))
+            .unwrap_or_default();
 
         ResolvedContext {
             module,
             payload: ResolvedTables {
                 def_table,
+                module_path,
                 def_owners: HashMap::new(),
+                symbol_ids,
                 symbols,
                 node_id_gen,
                 typestate_role_impls: Vec::new(),

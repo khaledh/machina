@@ -23,7 +23,9 @@ pub fn normalize(ctx: SemCheckStageInput) -> SemCheckNormalizedContext {
     } = payload;
     let crate::core::context::ResolvedTables {
         def_table,
+        module_path,
         def_owners,
+        symbol_ids,
         symbols,
         node_id_gen,
         typestate_role_impls,
@@ -49,7 +51,9 @@ pub fn normalize(ctx: SemCheckStageInput) -> SemCheckNormalizedContext {
         payload: crate::core::context::TypedTables {
             resolved: crate::core::context::ResolvedTables {
                 def_table,
+                module_path,
                 def_owners,
+                symbol_ids,
                 symbols,
                 node_id_gen,
                 typestate_role_impls,

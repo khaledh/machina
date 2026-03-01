@@ -73,7 +73,9 @@ pub fn elaborate(ctx: ElaborateStageInput) -> ElaborateStageOutput {
     } = typed;
     let crate::core::context::ResolvedTables {
         def_table,
+        module_path,
         def_owners,
+        symbol_ids,
         symbols,
         node_id_gen,
         typestate_role_impls,
@@ -116,7 +118,9 @@ pub fn elaborate(ctx: ElaborateStageInput) -> ElaborateStageOutput {
             typed: crate::core::context::TypedTables {
                 resolved: crate::core::context::ResolvedTables {
                     def_table: def_table.into_inner(),
+                    module_path,
                     def_owners,
+                    symbol_ids,
                     symbols,
                     node_id_gen,
                     typestate_role_impls,

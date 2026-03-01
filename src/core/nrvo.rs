@@ -35,7 +35,9 @@ impl NrvoAnalyzer {
         } = typed;
         let crate::core::context::ResolvedTables {
             def_table,
+            module_path,
             def_owners,
+            symbol_ids,
             symbols,
             node_id_gen,
             typestate_role_impls,
@@ -54,7 +56,9 @@ impl NrvoAnalyzer {
                 typed: crate::core::context::TypedTables {
                     resolved: crate::core::context::ResolvedTables {
                         def_table,
+                        module_path,
                         def_owners,
+                        symbol_ids,
                         symbols,
                         node_id_gen,
                         typestate_role_impls,

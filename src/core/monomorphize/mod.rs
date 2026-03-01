@@ -137,7 +137,9 @@ pub(crate) fn monomorphize_with_plan(
         payload: tables,
     } = ctx;
     let mut def_table = tables.def_table;
+    let module_path = tables.module_path;
     let def_owners = tables.def_owners;
+    let symbol_ids = tables.symbol_ids;
     let mut node_id_gen = tables.node_id_gen;
     let typestate_role_impls = tables.typestate_role_impls;
     let protocol_index = tables.protocol_index;
@@ -153,7 +155,9 @@ pub(crate) fn monomorphize_with_plan(
                 module,
                 payload: crate::core::context::ResolvedTables {
                     def_table,
+                    module_path,
                     def_owners,
+                    symbol_ids,
                     symbols,
                     node_id_gen,
                     typestate_role_impls,
@@ -424,7 +428,9 @@ pub(crate) fn monomorphize_with_plan(
             module,
             payload: crate::core::context::ResolvedTables {
                 def_table,
+                module_path,
                 def_owners,
+                symbol_ids,
                 symbols,
                 node_id_gen,
                 typestate_role_impls,

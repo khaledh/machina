@@ -9,10 +9,13 @@
 //! indexing. `SymbolId` is the semantic layer that tooling and cross-module
 //! facts can converge on over time.
 
+use std::collections::HashMap;
 use std::fmt;
 
 use crate::core::capsule::ModulePath;
+use crate::core::resolve::{DefId, DefTable};
 use crate::core::tree::ParamMode;
+use crate::core::tree::{MethodItem, Module, TopLevelItem};
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct SymbolId {
@@ -61,6 +64,8 @@ pub struct SymbolSegment {
 pub enum SymbolNs {
     /// Functions, locals, globals, and other value-level defs.
     Value,
+    /// Protocol definitions.
+    Protocol,
     /// Nominal type definitions.
     Type,
     /// Trait definitions.
@@ -155,6 +160,18 @@ pub enum TypeKey {
     },
 }
 
+/// Module-local view of currently-known semantic symbol ids.
+///
+/// This table is intentionally conservative in the first migration step:
+/// overloaded callables still share a base `SymbolId` until callable
+/// disambiguators are threaded through resolution/type checking. The reverse
+/// lookup therefore remains one-to-many for now.
+#[derive(Debug, Clone, Default)]
+pub struct SymbolIdTable {
+    by_def: HashMap<DefId, SymbolId>,
+    defs_by_symbol: HashMap<SymbolId, Vec<DefId>>,
+}
+
 impl SymbolId {
     pub fn new(module: ModulePath, path: SymbolPath, ns: SymbolNs) -> Self {
         Self {
@@ -168,6 +185,150 @@ impl SymbolId {
     pub fn with_disambiguator(mut self, disambiguator: SymbolDisambiguator) -> Self {
         self.disambiguator = Some(disambiguator);
         self
+    }
+}
+
+impl SymbolIdTable {
+    pub fn from_module(module_path: &ModulePath, module: &Module, def_table: &DefTable) -> Self {
+        let mut table = Self::default();
+
+        for item in &module.top_level_items {
+            match item {
+                TopLevelItem::ProtocolDef(protocol_def) => {
+                    table.record(
+                        def_table.lookup_node_def_id(protocol_def.id),
+                        SymbolId::new(
+                            module_path.clone(),
+                            SymbolPath::from_names([protocol_def.name.as_str()]),
+                            SymbolNs::Protocol,
+                        ),
+                    );
+                    for role in &protocol_def.roles {
+                        table.record(
+                            def_table.lookup_node_def_id(role.id),
+                            SymbolId::new(
+                                module_path.clone(),
+                                SymbolPath::from_names([
+                                    protocol_def.name.as_str(),
+                                    role.name.as_str(),
+                                ]),
+                                SymbolNs::Role,
+                            ),
+                        );
+                    }
+                }
+                TopLevelItem::TraitDef(trait_def) => {
+                    table.record(
+                        def_table.lookup_node_def_id(trait_def.id),
+                        SymbolId::new(
+                            module_path.clone(),
+                            SymbolPath::from_names([trait_def.name.as_str()]),
+                            SymbolNs::Trait,
+                        ),
+                    );
+                }
+                TopLevelItem::TypeDef(type_def) => {
+                    table.record(
+                        def_table.lookup_node_def_id(type_def.id),
+                        SymbolId::new(
+                            module_path.clone(),
+                            SymbolPath::from_names([type_def.name.as_str()]),
+                            SymbolNs::Type,
+                        ),
+                    );
+                    if let crate::core::tree::TypeDefKind::Enum { variants } = &type_def.kind {
+                        for variant in variants {
+                            table.record(
+                                def_table.lookup_node_def_id(variant.id),
+                                SymbolId::new(
+                                    module_path.clone(),
+                                    SymbolPath::from_names([
+                                        type_def.name.as_str(),
+                                        variant.name.as_str(),
+                                    ]),
+                                    SymbolNs::Variant,
+                                ),
+                            );
+                        }
+                    }
+                }
+                TopLevelItem::FuncDecl(func_decl) => {
+                    table.record_callable(
+                        def_table.lookup_node_def_id(func_decl.id),
+                        module_path,
+                        &[func_decl.sig.name.as_str()],
+                        SymbolNs::Value,
+                    );
+                }
+                TopLevelItem::FuncDef(func_def) => {
+                    table.record_callable(
+                        def_table.lookup_node_def_id(func_def.id),
+                        module_path,
+                        &[func_def.sig.name.as_str()],
+                        SymbolNs::Value,
+                    );
+                }
+                TopLevelItem::MethodBlock(method_block) => {
+                    for method_item in &method_block.method_items {
+                        let (method_id, method_name) = match method_item {
+                            MethodItem::Decl(method_decl) => {
+                                (method_decl.id, method_decl.sig.name.as_str())
+                            }
+                            MethodItem::Def(method_def) => {
+                                (method_def.id, method_def.sig.name.as_str())
+                            }
+                        };
+                        table.record_callable(
+                            def_table.lookup_node_def_id(method_id),
+                            module_path,
+                            &[method_block.type_name.as_str(), method_name],
+                            SymbolNs::Method,
+                        );
+                    }
+                }
+                _ => {}
+            }
+        }
+
+        table
+    }
+
+    pub fn lookup_symbol_id(&self, def_id: DefId) -> Option<&SymbolId> {
+        self.by_def.get(&def_id)
+    }
+
+    pub fn lookup_local_def_ids(&self, symbol_id: &SymbolId) -> Option<&[DefId]> {
+        self.defs_by_symbol.get(symbol_id).map(Vec::as_slice)
+    }
+
+    fn record(&mut self, def_id: Option<DefId>, symbol_id: SymbolId) {
+        let Some(def_id) = def_id else {
+            return;
+        };
+        self.by_def.insert(def_id, symbol_id.clone());
+        self.defs_by_symbol
+            .entry(symbol_id)
+            .or_default()
+            .push(def_id);
+    }
+
+    fn record_callable(
+        &mut self,
+        def_id: Option<DefId>,
+        module_path: &ModulePath,
+        path_segments: &[&str],
+        ns: SymbolNs,
+    ) {
+        // Callable overloads still share the same base `SymbolId` until we
+        // thread canonical callable disambiguators through the frontend.
+        self.record(
+            def_id,
+            SymbolId::new(
+                module_path.clone(),
+                SymbolPath::from_names(path_segments.iter().copied()),
+                ns,
+            ),
+        );
     }
 }
 
@@ -187,3 +348,7 @@ impl fmt::Display for SymbolId {
         }
     }
 }
+
+#[cfg(test)]
+#[path = "../tests/core/t_symbol_id.rs"]
+mod tests;

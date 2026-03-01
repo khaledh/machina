@@ -8,11 +8,12 @@
 use std::collections::HashMap;
 use std::path::PathBuf;
 
-use crate::core::capsule::{ModuleId, ParsedModule};
+use crate::core::capsule::{ModuleId, ModulePath, ParsedModule};
 use crate::core::codegen_names::CodegenNameTable;
 use crate::core::context::{ResolvedContext, ResolvedTables, TypeCheckedContext, TypedTables};
 use crate::core::diag::Span;
 use crate::core::resolve::{Def, DefId, DefTable};
+use crate::core::symbol_id::SymbolIdTable;
 use crate::core::tree::{Module, NodeId, NodeIdGen};
 use crate::core::typecheck::type_map::{CallSig, CallSigMap, GenericInstMap, TypeMap};
 use crate::core::types::Type;
@@ -38,7 +39,9 @@ pub struct ResolvedModuleResult {
     pub module_id: ModuleId,
     pub module: Module,
     pub def_table: DefTable,
+    pub module_path: Option<ModulePath>,
     pub def_owners: HashMap<DefId, ModuleId>,
+    pub symbol_ids: SymbolIdTable,
     pub symbols: CodegenNameTable,
     pub node_id_gen: NodeIdGen,
     pub typestate_role_impls: Vec<crate::core::context::TypestateRoleImplBinding>,
@@ -53,7 +56,9 @@ impl ResolvedModuleResult {
         } = context;
         let ResolvedTables {
             def_table,
+            module_path,
             def_owners,
+            symbol_ids,
             symbols,
             node_id_gen,
             typestate_role_impls,
@@ -63,7 +68,9 @@ impl ResolvedModuleResult {
             module_id,
             module,
             def_table,
+            module_path,
             def_owners,
+            symbol_ids,
             symbols,
             node_id_gen,
             typestate_role_impls,
@@ -76,7 +83,9 @@ impl ResolvedModuleResult {
             module: self.module,
             payload: ResolvedTables {
                 def_table: self.def_table,
+                module_path: self.module_path,
                 def_owners: self.def_owners,
+                symbol_ids: self.symbol_ids,
                 symbols: self.symbols,
                 node_id_gen: self.node_id_gen,
                 typestate_role_impls: self.typestate_role_impls,
@@ -91,7 +100,9 @@ pub struct TypedModuleResult {
     pub module_id: ModuleId,
     pub module: Module,
     pub def_table: DefTable,
+    pub module_path: Option<ModulePath>,
     pub def_owners: HashMap<DefId, ModuleId>,
+    pub symbol_ids: SymbolIdTable,
     pub type_map: TypeMap,
     pub call_sigs: CallSigMap,
     pub generic_insts: GenericInstMap,
@@ -243,7 +254,9 @@ impl TypedModuleResult {
         } = tables;
         let ResolvedTables {
             def_table,
+            module_path,
             def_owners,
+            symbol_ids,
             symbols,
             node_id_gen,
             typestate_role_impls,
@@ -253,7 +266,9 @@ impl TypedModuleResult {
             module_id,
             module,
             def_table,
+            module_path,
             def_owners,
+            symbol_ids,
             type_map,
             call_sigs,
             generic_insts,
@@ -270,7 +285,9 @@ impl TypedModuleResult {
             payload: TypedTables {
                 resolved: ResolvedTables {
                     def_table: self.def_table,
+                    module_path: self.module_path,
                     def_owners: self.def_owners,
+                    symbol_ids: self.symbol_ids,
                     symbols: self.symbols,
                     node_id_gen: self.node_id_gen,
                     typestate_role_impls: self.typestate_role_impls,

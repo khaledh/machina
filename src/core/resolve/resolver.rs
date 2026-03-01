@@ -2282,7 +2282,8 @@ pub fn resolve_program(
             parsed_module.module.clone(),
             program.next_node_id_gen().clone(),
         )
-        .with_source_path(parsed_module.source.file_path.clone());
+        .with_source_path(parsed_module.source.file_path.clone())
+        .with_module_path(parsed_module.source.path.clone());
         match resolve_with_imports_and_symbols(parsed_context, imported_modules, imported_symbols) {
             Ok(resolved_context) => {
                 let module_exports = module_export_facts_from_def_table(
