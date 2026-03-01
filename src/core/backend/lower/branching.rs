@@ -1,13 +1,31 @@
 //! Branching (multi-block) lowering routines.
 
 use crate::core::backend::lower::LowerToIrError;
+use crate::core::backend::lower::join::JoinSession;
 use crate::core::backend::lower::lowerer::{BranchResult, FuncLowerer, LoopContext, StmtOutcome};
 use crate::core::backend::lower::r#match::MatchLowerer;
 use crate::core::ir::IrTypeId;
-use crate::core::ir::{Callee, CastKind, CmpOp, ConstValue, SwitchCase, Terminator, ValueId};
+use crate::core::ir::{
+    BlockId, Callee, CastKind, CmpOp, ConstValue, SwitchCase, Terminator, ValueId,
+};
 use crate::core::resolve::DefId;
 use crate::core::tree::{BinaryOp, semantic as sem};
-use crate::core::types::Type;
+use crate::core::types::{Type, TypeId};
+
+struct TryLoweringSetup {
+    union_value: ValueId,
+    union_ty: Type,
+    ok_ty: Type,
+    join_expr_ty: TypeId,
+    union_addr: ValueId,
+    tag: ValueId,
+    blob_ty: IrTypeId,
+    ok_payload_ty: IrTypeId,
+    ok_payload_offset: u64,
+    ok_bb: BlockId,
+    err_bb: BlockId,
+    join: JoinSession,
+}
 
 impl<'a, 'g> FuncLowerer<'a, 'g> {
     /// Lowers a branching expression, potentially creating multiple basic blocks.
@@ -210,66 +228,18 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
             BranchResult::Return => return Ok(BranchResult::Return),
         };
 
-        let union_ty = self.type_map.type_table().get(inner.ty).clone();
-        let Type::ErrorUnion { ok_ty, err_tys } = &union_ty else {
+        let setup = self.lower_try_setup(expr, inner, union_value)?;
+        let Type::ErrorUnion { err_tys, .. } = &setup.union_ty else {
             panic!(
                 "backend try operator expects error union operand, found {:?}",
-                union_ty
+                setup.union_ty
             );
-        };
-        let try_result_ty = self.type_map.type_table().get(expr.ty).clone();
-        // Some statement-level `expr?;` forms can reach lowering with an
-        // unresolved try-result type variable even though the operand's ok type
-        // is concrete. Fall back to the operand ok type so lowering remains
-        // deterministic instead of panicking on unresolved backend type ids.
-        let join_expr_ty = if try_result_ty.contains_unresolved() {
-            self.type_map
-                .type_table()
-                .lookup_id(ok_ty)
-                .unwrap_or(expr.ty)
-        } else {
-            expr.ty
         };
 
         // Fast path: when operand and function return unions are identical,
         // propagation can return the original union value directly.
-        let return_union_matches_operand = union_ty == self.ret_ty;
-
-        let union_ir_ty = self.type_lowerer.lower_type_id(inner.ty);
-        let union_slot = self.materialize_value_slot(union_value, union_ir_ty);
-        let (tag_ty, blob_ty, ok_payload_ty, ok_payload_offset, err_variants) = {
-            let layout = self.type_lowerer.enum_layout(inner.ty);
-            let ok_variant = layout
-                .variants
-                .first()
-                .unwrap_or_else(|| panic!("backend try missing ok variant in {:?}", union_ty));
-            if ok_variant.field_tys.len() != 1 || ok_variant.field_offsets.len() != 1 {
-                panic!(
-                    "backend try expects single-payload ok variant, found {:?}",
-                    ok_variant.field_tys
-                );
-            }
-            (
-                layout.tag_ty,
-                layout.blob_ty,
-                ok_variant.field_tys[0],
-                ok_variant.field_offsets[0],
-                layout
-                    .variants
-                    .iter()
-                    .skip(1)
-                    .map(|variant| {
-                        if variant.field_tys.len() != 1 || variant.field_offsets.len() != 1 {
-                            panic!(
-                                "backend try expects single-payload error variant, found {:?}",
-                                variant.field_tys
-                            );
-                        }
-                        (variant.tag, variant.field_tys[0], variant.field_offsets[0])
-                    })
-                    .collect::<Vec<_>>(),
-            )
-        };
+        let return_union_matches_operand = setup.union_ty == self.ret_ty;
+        let err_variants = self.try_err_variants(inner.ty, &setup.union_ty);
 
         if err_variants.len() != err_tys.len() {
             panic!(
@@ -279,36 +249,8 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
             );
         }
 
-        let tag = self.load_field(union_slot.addr, 0, tag_ty);
-        let tag_zero = self.builder.const_int(0, false, 32, tag_ty);
-        let bool_ty = self.type_lowerer.lower_type(&Type::Bool);
-        let is_ok = self.builder.cmp(CmpOp::Eq, tag, tag_zero, bool_ty);
-
-        let ok_bb = self.builder.add_block();
-        let err_dispatch_bb = self.builder.add_block();
-        let join_expr = sem::ValueExpr {
-            ty: join_expr_ty,
-            ..expr.clone()
-        };
-        let join = self.begin_join(&join_expr);
-
-        self.builder.terminate(Terminator::CondBr {
-            cond: is_ok,
-            then_bb: ok_bb,
-            then_args: Vec::new(),
-            else_bb: err_dispatch_bb,
-            else_args: Vec::new(),
-        });
-
-        self.builder.select_block(ok_bb);
-        let ok_value =
-            self.load_union_payload(union_slot.addr, blob_ty, ok_payload_ty, ok_payload_offset);
-        let try_sem_ty = self.type_map.type_table().get(join_expr_ty).clone();
-        let ok_coerced = self.coerce_value(ok_value, ok_ty, &try_sem_ty);
-        join.emit_branch(self, ok_coerced, expr.span)?;
-
-        join.restore_locals(self);
-        self.builder.select_block(err_dispatch_bb);
+        self.lower_try_ok_path(&setup, expr.span)?;
+        self.enter_try_error_path(&setup);
         if let Some(cleanup) = self.try_cleanup_plan(expr.id) {
             // Cleanup runs before the propagated error returns from the
             // current callable, matching the scoped `defer` execution model.
@@ -320,19 +262,19 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
             }
         }
         if return_union_matches_operand {
-            self.emit_root_return(Some(union_value))?;
+            self.emit_root_return(Some(setup.union_value))?;
         } else {
             self.lower_try_error_return_cases(
-                union_slot.addr,
-                blob_ty,
-                tag,
+                setup.union_addr,
+                setup.blob_ty,
+                setup.tag,
                 err_tys,
                 &err_variants,
             )?;
         }
 
-        let join_value = join.join_value();
-        join.finalize(self);
+        let join_value = setup.join.join_value();
+        setup.join.finalize(self);
         Ok(BranchResult::Value(join_value))
     }
 
@@ -347,6 +289,44 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
             BranchResult::Return => return Ok(BranchResult::Return),
         };
 
+        let setup = self.lower_try_setup(expr, fallible_expr, union_value)?;
+        self.lower_try_ok_path(&setup, expr.span)?;
+        self.enter_try_error_path(&setup);
+        let handler_value = match self.lower_value_expr(handler_expr)? {
+            BranchResult::Value(value) => value,
+            BranchResult::Return => return Ok(BranchResult::Return),
+        };
+        let call_plan = self.call_plan(expr.id);
+        let mut handler_args = vec![crate::core::backend::lower::lowerer::CallInputValue {
+            value: setup.union_value,
+            ty: setup.union_ty.clone(),
+            is_addr: false,
+            drop_def: None,
+        }];
+        let call_args = self.lower_call_args_from_plan(
+            expr.id,
+            expr.span,
+            &call_plan,
+            None,
+            &mut handler_args,
+        )?;
+        let result_ir_ty = self.type_lowerer.lower_type_id(setup.join_expr_ty);
+        let handled = self
+            .builder
+            .call(Callee::Value(handler_value), call_args, result_ir_ty);
+        setup.join.emit_branch(self, handled, expr.span)?;
+
+        let join_value = setup.join.join_value();
+        setup.join.finalize(self);
+        Ok(BranchResult::Value(join_value))
+    }
+
+    fn lower_try_setup(
+        &mut self,
+        expr: &sem::ValueExpr,
+        fallible_expr: &sem::ValueExpr,
+        union_value: ValueId,
+    ) -> Result<TryLoweringSetup, LowerToIrError> {
         let union_ty = self.type_map.type_table().get(fallible_expr.ty).clone();
         let Type::ErrorUnion { ok_ty, .. } = &union_ty else {
             panic!(
@@ -354,37 +334,12 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
                 union_ty
             );
         };
-        let try_result_ty = self.type_map.type_table().get(expr.ty).clone();
-        let join_expr_ty = if try_result_ty.contains_unresolved() {
-            self.type_map
-                .type_table()
-                .lookup_id(ok_ty)
-                .unwrap_or(expr.ty)
-        } else {
-            expr.ty
-        };
-
+        let ok_ty = ok_ty.as_ref().clone();
+        let join_expr_ty = self.try_join_expr_ty(expr.ty, &ok_ty);
         let union_ir_ty = self.type_lowerer.lower_type_id(fallible_expr.ty);
         let union_slot = self.materialize_value_slot(union_value, union_ir_ty);
-        let (tag_ty, blob_ty, ok_payload_ty, ok_payload_offset) = {
-            let layout = self.type_lowerer.enum_layout(fallible_expr.ty);
-            let ok_variant = layout
-                .variants
-                .first()
-                .unwrap_or_else(|| panic!("backend try missing ok variant in {:?}", union_ty));
-            if ok_variant.field_tys.len() != 1 || ok_variant.field_offsets.len() != 1 {
-                panic!(
-                    "backend try expects single-payload ok variant, found {:?}",
-                    ok_variant.field_tys
-                );
-            }
-            (
-                layout.tag_ty,
-                layout.blob_ty,
-                ok_variant.field_tys[0],
-                ok_variant.field_offsets[0],
-            )
-        };
+        let (tag_ty, blob_ty, ok_payload_ty, ok_payload_offset) =
+            self.try_ok_variant_layout(fallible_expr.ty, &union_ty);
 
         let tag = self.load_field(union_slot.addr, 0, tag_ty);
         let tag_zero = self.builder.const_int(0, false, 32, tag_ty);
@@ -407,42 +362,104 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
             else_args: Vec::new(),
         });
 
-        self.builder.select_block(ok_bb);
-        let ok_value =
-            self.load_union_payload(union_slot.addr, blob_ty, ok_payload_ty, ok_payload_offset);
-        let try_sem_ty = self.type_map.type_table().get(join_expr_ty).clone();
-        let ok_coerced = self.coerce_value(ok_value, ok_ty, &try_sem_ty);
-        join.emit_branch(self, ok_coerced, expr.span)?;
+        Ok(TryLoweringSetup {
+            union_value,
+            union_ty,
+            ok_ty,
+            join_expr_ty,
+            union_addr: union_slot.addr,
+            tag,
+            blob_ty,
+            ok_payload_ty,
+            ok_payload_offset,
+            ok_bb,
+            err_bb,
+            join,
+        })
+    }
 
-        join.restore_locals(self);
-        self.builder.select_block(err_bb);
-        let handler_value = match self.lower_value_expr(handler_expr)? {
-            BranchResult::Value(value) => value,
-            BranchResult::Return => return Ok(BranchResult::Return),
-        };
-        let call_plan = self.call_plan(expr.id);
-        let mut handler_args = vec![crate::core::backend::lower::lowerer::CallInputValue {
-            value: union_value,
-            ty: union_ty.clone(),
-            is_addr: false,
-            drop_def: None,
-        }];
-        let call_args = self.lower_call_args_from_plan(
-            expr.id,
-            expr.span,
-            &call_plan,
-            None,
-            &mut handler_args,
-        )?;
-        let result_ir_ty = self.type_lowerer.lower_type_id(join_expr_ty);
-        let handled = self
-            .builder
-            .call(Callee::Value(handler_value), call_args, result_ir_ty);
-        join.emit_branch(self, handled, expr.span)?;
+    fn lower_try_ok_path(
+        &mut self,
+        setup: &TryLoweringSetup,
+        span: crate::core::diag::Span,
+    ) -> Result<(), LowerToIrError> {
+        self.builder.select_block(setup.ok_bb);
+        let ok_value = self.load_union_payload(
+            setup.union_addr,
+            setup.blob_ty,
+            setup.ok_payload_ty,
+            setup.ok_payload_offset,
+        );
+        let try_sem_ty = self.type_map.type_table().get(setup.join_expr_ty).clone();
+        let ok_coerced = self.coerce_value(ok_value, &setup.ok_ty, &try_sem_ty);
+        setup.join.emit_branch(self, ok_coerced, span)
+    }
 
-        let join_value = join.join_value();
-        join.finalize(self);
-        Ok(BranchResult::Value(join_value))
+    fn enter_try_error_path(&mut self, setup: &TryLoweringSetup) {
+        setup.join.restore_locals(self);
+        self.builder.select_block(setup.err_bb);
+    }
+
+    fn try_join_expr_ty(&self, expr_ty: TypeId, ok_ty: &Type) -> TypeId {
+        let try_result_ty = self.type_map.type_table().get(expr_ty).clone();
+        // Some statement-level `expr?;` forms can reach lowering with an
+        // unresolved try-result type variable even though the operand's ok type
+        // is concrete. Fall back to the operand ok type so lowering remains
+        // deterministic instead of panicking on unresolved backend type ids.
+        if try_result_ty.contains_unresolved() {
+            self.type_map
+                .type_table()
+                .lookup_id(ok_ty)
+                .unwrap_or(expr_ty)
+        } else {
+            expr_ty
+        }
+    }
+
+    fn try_ok_variant_layout(
+        &mut self,
+        union_ty_id: TypeId,
+        union_ty: &Type,
+    ) -> (IrTypeId, IrTypeId, IrTypeId, u64) {
+        let layout = self.type_lowerer.enum_layout(union_ty_id);
+        let ok_variant = layout
+            .variants
+            .first()
+            .unwrap_or_else(|| panic!("backend try missing ok variant in {:?}", union_ty));
+        if ok_variant.field_tys.len() != 1 || ok_variant.field_offsets.len() != 1 {
+            panic!(
+                "backend try expects single-payload ok variant, found {:?}",
+                ok_variant.field_tys
+            );
+        }
+        (
+            layout.tag_ty,
+            layout.blob_ty,
+            ok_variant.field_tys[0],
+            ok_variant.field_offsets[0],
+        )
+    }
+
+    fn try_err_variants(
+        &mut self,
+        union_ty_id: TypeId,
+        union_ty: &Type,
+    ) -> Vec<(u32, IrTypeId, u64)> {
+        self.type_lowerer
+            .enum_layout(union_ty_id)
+            .variants
+            .iter()
+            .skip(1)
+            .map(|variant| {
+                if variant.field_tys.len() != 1 || variant.field_offsets.len() != 1 {
+                    panic!(
+                        "backend try expects single-payload error variant in {:?}, found {:?}",
+                        union_ty, variant.field_tys
+                    );
+                }
+                (variant.tag, variant.field_tys[0], variant.field_offsets[0])
+            })
+            .collect()
     }
 
     fn lower_try_error_return_cases(
