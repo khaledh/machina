@@ -17,6 +17,23 @@ This document proposes a long-term symbol identity model for Machina based on a
 canonical, path-based global symbol identifier, while keeping numeric local ids
 as internal storage keys where they are still useful.
 
+## Implementation Status
+
+Current status as of March 1, 2026:
+
+- Phase 1 is complete: `SymbolTable` was renamed to `CodegenNameTable`.
+- Phase 2 is largely complete: `SymbolId`/`SymbolIdTable` exist and loaded module contexts can map local defs to canonical symbol ids.
+- Phase 3 is substantially implemented: selected callable facts now prefer canonical symbol ids, including overloaded imported call sites.
+- Phase 4 is underway: import/export facts carry canonical symbol ids for callable/type/trait payloads, while `GlobalDefId` remains mostly as provenance.
+- Phase 5 is substantially implemented for tooling lookup: hover, signature help, definition, references, and rename now flow through `DefTarget` and canonical symbol lookup helpers.
+- Phase 6 has not started in earnest yet: `GlobalDefId` still has a visible surface in resolver/typecheck/import plumbing.
+
+The remaining high-value work is mostly consolidation:
+
+- make `SymbolId -> source definition/render` the single obvious tooling API
+- attach doc comments through canonical symbol lookup
+- continue shrinking `GlobalDefId` to provenance/internal bridging only
+
 ## Goals
 
 - Define one long-term stable semantic identifier for definitions.
@@ -538,11 +555,18 @@ Add the ability for loaded module contexts / def tables to answer:
 
 ### Phase 5: Tooling and docs
 
+Status: substantially implemented for hover, signature help, definition,
+references, and rename. Documentation comments are still pending.
+
 1. Make hover/signature help render from `SymbolId` target definitions.
 2. Attach documentation comments by `SymbolId`.
 3. Use `SymbolId` in references/rename planning.
 
 ### Phase 6: Reduce `GlobalDefId` surface
+
+Status: not started as a dedicated cleanup phase. `GlobalDefId` is still used
+widely as provenance and as a transitional bridge in core resolve/typecheck
+plumbing.
 
 1. Keep `GlobalDefId` only where it still helps as a compact bridge.
 2. Move public/compiler-service APIs to `SymbolId`.
