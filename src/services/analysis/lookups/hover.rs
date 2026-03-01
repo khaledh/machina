@@ -112,6 +112,18 @@ pub(crate) fn hover_for_def_in_state(state: &LookupState, def_id: DefId) -> Opti
     })
 }
 
+pub(crate) fn hover_for_symbol_id_in_state(
+    state: &LookupState,
+    symbol_id: &crate::core::symbol_id::SymbolId,
+) -> Option<HoverInfo> {
+    let typed = state.typed.as_ref()?;
+    let def_id = typed
+        .symbol_ids
+        .lookup_local_def_ids(symbol_id)
+        .and_then(|defs| (defs.len() == 1).then_some(defs[0]))?;
+    hover_for_def_in_state(state, def_id)
+}
+
 /// Try hover via typed call-site resolution (callee function name at a call
 /// expression).
 fn try_call_site_hover(

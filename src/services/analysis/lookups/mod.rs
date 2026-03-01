@@ -12,9 +12,14 @@ mod signature_help;
 
 pub(crate) use definition::{def_at_span, def_location_at_span};
 pub(crate) use document_symbols::document_symbols;
-pub(crate) use hover::{hover_at_span_in_file, hover_for_def_in_state};
+pub(crate) use hover::{
+    hover_at_span_in_file, hover_for_def_in_state, hover_for_symbol_id_in_state,
+};
 pub(crate) use semantic_tokens::semantic_tokens;
-pub(crate) use signature_help::{signature_help_at_span, signature_help_for_def_at_call_site};
+pub(crate) use signature_help::{
+    signature_help_at_span, signature_help_for_def_at_call_site,
+    signature_help_for_symbol_id_at_call_site,
+};
 
 use crate::core::diag::{Position, Span};
 use crate::core::resolve::DefTable;

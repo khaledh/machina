@@ -2269,6 +2269,41 @@ fn def_target_for_symbol_id_in_program_resolves_imported_overload_target() {
 }
 
 #[test]
+fn hover_for_symbol_id_in_program_matches_source_definition_render() {
+    let entry_path = PathBuf::from("examples/quickstart/hello.mc")
+        .canonicalize()
+        .unwrap();
+    let entry_source = fs::read_to_string(&entry_path).expect("failed to read entry source");
+
+    let mut db = AnalysisDb::new();
+    let entry_id = db.upsert_disk_text(entry_path, entry_source.clone());
+
+    let query_span = span_for_last_substring(&entry_source, "println");
+    let hover = db
+        .hover_at_program_file(entry_id, query_span)
+        .expect("program hover query should succeed")
+        .expect("expected hover info for imported println call");
+    let symbol_id = hover
+        .symbol_id
+        .clone()
+        .expect("hover should expose canonical symbol id");
+    let target = db
+        .def_target_for_symbol_id_in_program(entry_id, &symbol_id)
+        .expect("canonical symbol lookup should succeed")
+        .expect("expected target for imported println");
+    let target_state = db
+        .lookup_state_for_target(entry_id, &target)
+        .expect("target lookup state query should succeed")
+        .expect("expected target lookup state");
+    let rendered =
+        crate::services::analysis::lookups::hover_for_symbol_id_in_state(&target_state, &symbol_id)
+            .expect("expected hover render for canonical symbol");
+
+    assert_eq!(rendered.def_name.as_deref(), Some("println"));
+    assert_eq!(rendered.display, "fn println(s: string) -> ()");
+}
+
+#[test]
 fn def_location_at_program_file_uses_selected_imported_overload_target() {
     let run_id = ANALYSIS_TMP_COUNTER.fetch_add(1, Ordering::Relaxed);
     let temp_dir = std::env::temp_dir().join(format!(
