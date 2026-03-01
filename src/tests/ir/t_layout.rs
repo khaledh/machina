@@ -95,3 +95,37 @@ fn test_layout_blob() {
     assert_eq!(layout.field_offsets(), &[]);
     assert_eq!(layout.stride(), 24);
 }
+
+#[test]
+fn test_scalar_size_and_sret_helpers() {
+    let mut types = IrTypeCache::new();
+    let bool_ty = types.add(IrTypeKind::Bool);
+    let u64_ty = types.add(IrTypeKind::Int {
+        signed: false,
+        bits: 64,
+    });
+    let pair_ty = types.add(IrTypeKind::Struct {
+        fields: vec![
+            IrStructField {
+                name: "a".to_string(),
+                ty: u64_ty,
+            },
+            IrStructField {
+                name: "b".to_string(),
+                ty: u64_ty,
+            },
+            IrStructField {
+                name: "c".to_string(),
+                ty: u64_ty,
+            },
+        ],
+    });
+
+    let bool_layout = types.layout(bool_ty);
+    assert_eq!(types.scalar_size_for_layout(bool_ty, &bool_layout), 1);
+    assert!(!types.needs_sret_for_layout(bool_ty, &bool_layout));
+
+    let pair_layout = types.layout(pair_ty);
+    assert_eq!(types.scalar_size_for_layout(pair_ty, &pair_layout), 24);
+    assert!(types.needs_sret_for_layout(pair_ty, &pair_layout));
+}

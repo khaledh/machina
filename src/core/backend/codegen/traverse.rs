@@ -556,12 +556,8 @@ fn align_to(value: u32, align: u32) -> u32 {
 }
 
 fn needs_sret(types: &mut IrTypeCache, ty: IrTypeId) -> bool {
-    match types.kind(ty) {
-        IrTypeKind::Unit | IrTypeKind::Bool | IrTypeKind::Int { .. } | IrTypeKind::Ptr { .. } => {
-            false
-        }
-        _ => types.layout(ty).size() as u32 > 16,
-    }
+    let layout = types.layout(ty);
+    types.needs_sret_for_layout(ty, &layout)
 }
 
 fn validate_value_types(

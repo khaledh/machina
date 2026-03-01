@@ -120,4 +120,24 @@ impl IrTypeCache {
                 | IrTypeKind::Fn { .. }
         )
     }
+
+    /// Returns the scalar register width used when loading/storing values of
+    /// this type directly. Aggregate types fall back to their full layout size.
+    pub fn scalar_size_for_layout(&self, id: IrTypeId, layout: &IrLayout) -> u32 {
+        match self.kind(id) {
+            IrTypeKind::Unit => 0,
+            IrTypeKind::Bool => 1,
+            IrTypeKind::Int { bits, .. } => (*bits as u32) / 8,
+            IrTypeKind::Ptr { .. } | IrTypeKind::Fn { .. } => 8,
+            _ => layout.size() as u32,
+        }
+    }
+
+    /// Returns whether this type must be passed indirectly via sret on ARM64.
+    pub fn needs_sret_for_layout(&self, id: IrTypeId, layout: &IrLayout) -> bool {
+        !matches!(
+            self.kind(id),
+            IrTypeKind::Unit | IrTypeKind::Bool | IrTypeKind::Int { .. } | IrTypeKind::Ptr { .. }
+        ) && layout.size() as u32 > 16
+    }
 }

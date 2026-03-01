@@ -7,8 +7,8 @@ use crate::core::backend::codegen::graph::CodegenBlockId;
 use crate::core::backend::regalloc::moves::{MoveOp, ParamCopy};
 use crate::core::backend::regalloc::target::PhysReg;
 use crate::core::backend::regalloc::{Location, StackSlotId};
+use crate::core::ir::IrTypeId;
 use crate::core::ir::{CmpOp, ConstValue, GlobalData, Instruction, Terminator, ValueId};
-use crate::core::ir::{IrTypeId, IrTypeKind};
 
 mod frame;
 mod globals;
@@ -225,13 +225,7 @@ impl Arm64Emitter {
     }
 
     fn scalar_size(locs: &LocationResolver, ty: IrTypeId) -> u32 {
-        match locs.types.kind(ty) {
-            IrTypeKind::Unit => 0,
-            IrTypeKind::Bool => 1,
-            IrTypeKind::Int { bits, .. } => (*bits as u32) / 8,
-            IrTypeKind::Ptr { .. } | IrTypeKind::Fn { .. } => 8,
-            _ => locs.layout(ty).size() as u32,
-        }
+        locs.types.scalar_size_for_layout(ty, locs.layout(ty))
     }
 
     fn reg_for_type(locs: &LocationResolver, ty: IrTypeId, reg: PhysReg) -> String {
@@ -366,10 +360,5 @@ impl ConstValueExt for ConstValue {
 }
 
 fn needs_sret(locs: &LocationResolver, ty: IrTypeId) -> bool {
-    match locs.types.kind(ty) {
-        IrTypeKind::Unit | IrTypeKind::Bool | IrTypeKind::Int { .. } | IrTypeKind::Ptr { .. } => {
-            false
-        }
-        _ => locs.layout(ty).size() as u32 > 16,
-    }
+    locs.types.needs_sret_for_layout(ty, locs.layout(ty))
 }
