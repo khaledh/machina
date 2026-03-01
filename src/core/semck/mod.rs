@@ -14,6 +14,7 @@ mod reply_cap;
 mod slice_borrow;
 mod slice_escape;
 mod structural;
+mod typestate_scan;
 mod value;
 
 use std::collections::HashSet;

@@ -10,12 +10,11 @@ use crate::core::analysis::dataflow::{DataflowGraph, solve_forward};
 use crate::core::context::SemCheckNormalizedContext;
 use crate::core::machine::naming::{is_generated_handler_name, is_generated_state_name};
 use crate::core::resolve::{DefId, DefTable};
+use crate::core::semck::typestate_scan::collect_generated_typestate_handlers;
 use crate::core::semck::{SEK, SemCheckError, push_error};
 use crate::core::tree::cfg::{AstBlockId, Cfg, CfgBuilder, CfgItem, CfgNode};
 use crate::core::tree::visit::{self, Visitor};
-use crate::core::tree::{
-    Expr, ExprKind, MethodBlock, MethodDef, MethodItem, Module, NodeId, StmtExpr,
-};
+use crate::core::tree::{Expr, ExprKind, MethodBlock, MethodDef, Module, NodeId, StmtExpr};
 use crate::core::typecheck::type_map::resolve_type_expr;
 use crate::core::types::{Type, TypeAssignability, type_assignable};
 
@@ -26,30 +25,20 @@ pub(super) fn check_reply_cap_usage(ctx: &SemCheckNormalizedContext) -> Vec<SemC
     outside_collector.visit_module(&ctx.module);
     errors.extend(outside_collector.errors);
 
-    for method_block in ctx.module.method_blocks() {
-        if !is_generated_state_name(&method_block.type_name) {
-            continue;
-        }
-        for method_item in &method_block.method_items {
-            let MethodItem::Def(method_def) = method_item else {
-                continue;
-            };
-            if !is_generated_handler_name(&method_def.sig.name) {
-                continue;
-            }
-            let cap_params = collect_handler_reply_caps(&ctx.def_table, &ctx.module, method_def);
-            errors.extend(check_handler_reply_calls(
-                &ctx.def_table,
-                method_def,
-                &cap_params,
-                &ctx.type_map,
-            ));
-            errors.extend(check_handler_reply_cap_linearity(
-                &ctx.def_table,
-                method_def,
-                &cap_params,
-            ));
-        }
+    for handler in collect_generated_typestate_handlers(&ctx.module) {
+        let cap_params =
+            collect_handler_reply_caps(&ctx.def_table, &ctx.module, handler.method_def);
+        errors.extend(check_handler_reply_calls(
+            &ctx.def_table,
+            handler.method_def,
+            &cap_params,
+            &ctx.type_map,
+        ));
+        errors.extend(check_handler_reply_cap_linearity(
+            &ctx.def_table,
+            handler.method_def,
+            &cap_params,
+        ));
     }
 
     errors

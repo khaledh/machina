@@ -12,80 +12,69 @@ use crate::core::context::{
     ProtocolProgressionEvent, ProtocolProgressionFacts, ProtocolProgressionReturnState,
     ProtocolProgressionState, ProtocolProgressionStateKey, SemCheckNormalizedContext,
 };
-use crate::core::machine::naming::{is_generated_handler_name, parse_generated_state_name};
+use crate::core::machine::naming::parse_generated_state_name;
 use crate::core::protocol::event_extract::extract_emit_from_expr;
+use crate::core::semck::typestate_scan::collect_generated_typestate_handlers;
 use crate::core::tree::cfg::{AstBlockId, CfgBuilder, CfgItem};
-use crate::core::tree::{Expr, ExprKind, MethodItem, StmtExprKind};
+use crate::core::tree::{Expr, ExprKind, StmtExprKind};
 use crate::core::typecheck::type_map::resolve_type_expr;
 
 pub(super) fn extract(ctx: &SemCheckNormalizedContext) -> ProtocolProgressionFacts {
     let mut out = ProtocolProgressionFacts::default();
 
-    for method_block in ctx.module.method_blocks() {
-        let Some((typestate_name, state_name)) =
-            parse_generated_state_name(&method_block.type_name)
-        else {
-            continue;
-        };
+    for handler in collect_generated_typestate_handlers(&ctx.module) {
+        let typestate_name = handler.typestate_name;
+        let state_name = handler.state_name;
         let Some(bindings) = ctx.protocol_index.typestate_bindings.get(&typestate_name) else {
             continue;
         };
 
-        for method_item in &method_block.method_items {
-            let MethodItem::Def(method_def) = method_item else {
-                continue;
-            };
-            if !is_generated_handler_name(&method_def.sig.name) {
-                continue;
-            }
-            let Some(selector_param) = method_def.sig.params.first() else {
-                continue;
-            };
-            let Ok(selector_ty) =
-                resolve_type_expr(&ctx.def_table, &ctx.module, &selector_param.typ)
-            else {
-                continue;
+        let Some(selector_param) = handler.method_def.sig.params.first() else {
+            continue;
+        };
+        let Ok(selector_ty) = resolve_type_expr(&ctx.def_table, &ctx.module, &selector_param.typ)
+        else {
+            continue;
+        };
+
+        let base_cfg = build_handler_cfg(ctx, &typestate_name, &handler.method_def.body);
+        for binding in bindings {
+            let method_def_id = ctx.def_table.def_id(handler.method_def.id);
+            let peer_role_by_field: HashMap<&str, &str> = binding
+                .peer_role_bindings
+                .iter()
+                .map(|peer| (peer.field_name.as_str(), peer.role_name.as_str()))
+                .collect();
+            let cfg = bind_cfg_roles(base_cfg.clone(), &peer_role_by_field);
+
+            let fact = ProtocolHandlerProgressionFact {
+                handler_def_id: method_def_id,
+                typestate_name: typestate_name.clone(),
+                entry_state: ProtocolProgressionState {
+                    protocol_name: binding.protocol_name.clone(),
+                    role_name: binding.role_name.clone(),
+                    state_name: state_name.clone(),
+                },
+                selector_ty: selector_ty.clone(),
+                cfg,
+                span: handler.method_def.sig.span,
             };
 
-            let base_cfg = build_handler_cfg(ctx, &typestate_name, &method_def.body);
-            for binding in bindings {
-                let method_def_id = ctx.def_table.def_id(method_def.id);
-                let peer_role_by_field: HashMap<&str, &str> = binding
-                    .peer_role_bindings
-                    .iter()
-                    .map(|peer| (peer.field_name.as_str(), peer.role_name.as_str()))
-                    .collect();
-                let cfg = bind_cfg_roles(base_cfg.clone(), &peer_role_by_field);
-
-                let fact = ProtocolHandlerProgressionFact {
-                    handler_def_id: method_def_id,
+            let fact_idx = out.handlers.len();
+            out.handlers.push(fact);
+            out.by_handler_def
+                .entry(method_def_id)
+                .or_default()
+                .push(fact_idx);
+            out.by_state
+                .entry(ProtocolProgressionStateKey {
                     typestate_name: typestate_name.clone(),
-                    entry_state: ProtocolProgressionState {
-                        protocol_name: binding.protocol_name.clone(),
-                        role_name: binding.role_name.clone(),
-                        state_name: state_name.clone(),
-                    },
-                    selector_ty: selector_ty.clone(),
-                    cfg,
-                    span: method_def.sig.span,
-                };
-
-                let fact_idx = out.handlers.len();
-                out.handlers.push(fact);
-                out.by_handler_def
-                    .entry(method_def_id)
-                    .or_default()
-                    .push(fact_idx);
-                out.by_state
-                    .entry(ProtocolProgressionStateKey {
-                        typestate_name: typestate_name.clone(),
-                        protocol_name: binding.protocol_name.clone(),
-                        role_name: binding.role_name.clone(),
-                        state_name: state_name.clone(),
-                    })
-                    .or_default()
-                    .push(fact_idx);
-            }
+                    protocol_name: binding.protocol_name.clone(),
+                    role_name: binding.role_name.clone(),
+                    state_name: state_name.clone(),
+                })
+                .or_default()
+                .push(fact_idx);
         }
     }
 

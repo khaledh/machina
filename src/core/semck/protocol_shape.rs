@@ -12,6 +12,7 @@ use crate::core::machine::naming::{
 };
 use crate::core::protocol::event_extract::extract_emit_from_expr;
 use crate::core::resolve::DefTable;
+use crate::core::semck::typestate_scan::collect_generated_typestate_handlers;
 use crate::core::semck::{SEK, SemCheckError, push_error};
 use crate::core::tree::visit::{self, Visitor};
 use crate::core::tree::{EmitKind, Expr, ExprKind, MethodBlock, MethodItem, Module};
@@ -252,15 +253,14 @@ pub(super) fn check_typestate_handler_overlap(
     let resolved = ctx;
     let mut errors = Vec::new();
 
-    for method_block in resolved.module.method_blocks() {
-        let Some((typestate_name, state_name)) =
-            parse_generated_state_name(&method_block.type_name)
-        else {
-            continue;
-        };
-
-        let patterns =
-            collect_handler_response_patterns(&resolved.def_table, &resolved.module, method_block);
+    for handler in collect_generated_typestate_handlers(&resolved.module) {
+        let typestate_name = handler.typestate_name;
+        let state_name = handler.state_name;
+        let patterns = collect_handler_response_patterns(
+            &resolved.def_table,
+            &resolved.module,
+            handler.method_block,
+        );
         for i in 0..patterns.len() {
             for j in (i + 1)..patterns.len() {
                 let left = &patterns[i];
@@ -530,52 +530,47 @@ fn collect_provenance_handler_shapes(
     ctx: &SemCheckNormalizedContext,
 ) -> Vec<ProvenanceHandlerShape> {
     let mut out = Vec::new();
-    for method_block in ctx.module.method_blocks() {
-        let Some((typestate_name, _state_name)) =
-            parse_generated_state_name(&method_block.type_name)
-        else {
+    for handler in collect_generated_typestate_handlers(&ctx.module) {
+        // `for RequestType(binding)` handlers lower to:
+        //   (__event, __pending: Pending<Selector>, request_binding, ...)
+        if handler.method_def.sig.params.len() < 3
+            || handler.method_def.sig.params[1].ident != "__pending"
+        {
+            continue;
+        }
+        let Ok(pending_ty) = resolve_type_expr(
+            &ctx.def_table,
+            &ctx.module,
+            &handler.method_def.sig.params[1].typ,
+        ) else {
             continue;
         };
-        for method_item in &method_block.method_items {
-            let MethodItem::Def(method_def) = method_item else {
-                continue;
-            };
-            if !is_generated_handler_name(&method_def.sig.name) {
-                continue;
-            }
-            // `for RequestType(binding)` handlers lower to:
-            //   (__event, __pending: Pending<Selector>, request_binding, ...)
-            if method_def.sig.params.len() < 3 || method_def.sig.params[1].ident != "__pending" {
-                continue;
-            }
-            let Ok(pending_ty) =
-                resolve_type_expr(&ctx.def_table, &ctx.module, &method_def.sig.params[1].typ)
-            else {
-                continue;
-            };
-            let Type::Pending { .. } = pending_ty else {
-                continue;
-            };
-            let Ok(response_ty) =
-                resolve_type_expr(&ctx.def_table, &ctx.module, &method_def.sig.params[0].typ)
-            else {
-                continue;
-            };
-            let Ok(request_ty) =
-                resolve_type_expr(&ctx.def_table, &ctx.module, &method_def.sig.params[2].typ)
-            else {
-                continue;
-            };
+        let Type::Pending { .. } = pending_ty else {
+            continue;
+        };
+        let Ok(response_ty) = resolve_type_expr(
+            &ctx.def_table,
+            &ctx.module,
+            &handler.method_def.sig.params[0].typ,
+        ) else {
+            continue;
+        };
+        let Ok(request_ty) = resolve_type_expr(
+            &ctx.def_table,
+            &ctx.module,
+            &handler.method_def.sig.params[2].typ,
+        ) else {
+            continue;
+        };
 
-            out.push(ProvenanceHandlerShape {
-                typestate_name: typestate_name.clone(),
-                request_ty,
-                response_ty,
-                request_site_label: parse_generated_handler_site_label(&method_def.sig.name)
-                    .map(ToString::to_string),
-                span: method_def.sig.span,
-            });
-        }
+        out.push(ProvenanceHandlerShape {
+            typestate_name: handler.typestate_name,
+            request_ty,
+            response_ty,
+            request_site_label: parse_generated_handler_site_label(&handler.method_def.sig.name)
+                .map(ToString::to_string),
+            span: handler.method_def.sig.span,
+        });
     }
     out
 }
@@ -591,12 +586,9 @@ fn collect_typestate_handler_payloads_by_state(
     typestate_names: &HashSet<String>,
 ) -> HashMap<TypestateStateKey, HashSet<Type>> {
     let mut out = HashMap::<TypestateStateKey, HashSet<Type>>::new();
-    for method_block in ctx.module.method_blocks() {
-        let Some((typestate_name, state_name)) =
-            parse_generated_state_name(&method_block.type_name)
-        else {
-            continue;
-        };
+    for handler in collect_generated_typestate_handlers(&ctx.module) {
+        let typestate_name = handler.typestate_name;
+        let state_name = handler.state_name;
         if !typestate_names.contains(&typestate_name) {
             continue;
         }
@@ -604,22 +596,14 @@ fn collect_typestate_handler_payloads_by_state(
             typestate_name,
             state_name,
         };
-        for method_item in &method_block.method_items {
-            let MethodItem::Def(method_def) = method_item else {
-                continue;
-            };
-            if !is_generated_handler_name(&method_def.sig.name) {
-                continue;
-            }
-            let Some(event_param) = method_def.sig.params.first() else {
-                continue;
-            };
-            let Ok(handler_ty) = resolve_type_expr(&ctx.def_table, &ctx.module, &event_param.typ)
-            else {
-                continue;
-            };
-            out.entry(key.clone()).or_default().insert(handler_ty);
-        }
+        let Some(event_param) = handler.method_def.sig.params.first() else {
+            continue;
+        };
+        let Ok(handler_ty) = resolve_type_expr(&ctx.def_table, &ctx.module, &event_param.typ)
+        else {
+            continue;
+        };
+        out.entry(key).or_default().insert(handler_ty);
     }
     out
 }
