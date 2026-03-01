@@ -1059,7 +1059,7 @@ pub struct StructUpdateField {
 
 // -- Parameter / call modes ---
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub enum ParamMode {
     In,
     InOut,

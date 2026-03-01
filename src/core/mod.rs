@@ -17,6 +17,7 @@ pub mod parse;
 pub mod protocol;
 pub mod resolve;
 pub mod semck;
+pub mod symbol_id;
 pub mod tree;
 pub mod typecheck;
 pub mod types;
