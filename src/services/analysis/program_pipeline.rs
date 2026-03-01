@@ -13,7 +13,6 @@ use crate::core::capsule::compose::merge_modules;
 use crate::core::capsule::{self, ModuleId, ModulePath};
 use crate::core::context::{
     ImportEnv, ModuleExportFacts, ParsedContext, ResolvedContext, import_env_from_requires,
-    module_export_facts_from_def_table,
 };
 use crate::core::resolve::{DefId, DefKind, DefLocation, GlobalDefId};
 use crate::core::tree::{Module, NodeIdGen};
@@ -143,12 +142,11 @@ pub(crate) fn run_program_pipeline_for_file_with_options(
             )?;
             if let Some(resolved) = &mut state.resolved.product {
                 apply_prelude_runtime_def_locations(parsed, resolved);
-                import_facts.ingest_resolved(module_id, resolved);
-                let exports = module_export_facts_from_def_table(
-                    module_id,
-                    Some(parsed.source.path.clone()),
-                    &resolved.def_table,
-                );
+                import_facts.ingest_resolved(module_id, Some(parsed.source.path.clone()), resolved);
+                let exports = import_facts
+                    .export_facts(module_id)
+                    .cloned()
+                    .expect("resolved module should have cached export facts");
                 let import_env =
                     import_env_from_requires(&program_context, module_id, &exports_by_module);
                 exports_by_module.insert(module_id, exports);

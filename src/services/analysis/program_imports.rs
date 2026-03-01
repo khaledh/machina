@@ -1,9 +1,12 @@
 //! Program-aware imported symbol/type/trait fact helpers for analysis.
 
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 
-use crate::core::capsule::{ModuleId, RequireKind};
-use crate::core::context::{CapsuleParsedContext, ResolvedContext, TypeCheckedContext};
+use crate::core::capsule::{ModuleId, ModulePath, RequireKind};
+use crate::core::context::{
+    CapsuleParsedContext, ModuleExportFacts, ResolvedContext, TypeCheckedContext,
+    module_export_facts_from_def_table,
+};
 use crate::core::resolve::{
     ImportedCallableSig, ImportedModule, ImportedParamSig, ImportedSymbol, ImportedTraitMethodSig,
     ImportedTraitPropertySig, ImportedTraitSig,
@@ -16,9 +19,7 @@ use crate::core::types::{FnParamMode, TyVarId, Type};
 
 #[derive(Default)]
 pub(crate) struct ProgramImportFactsCache {
-    public_callables_by_module: HashMap<ModuleId, HashSet<String>>,
-    public_types_by_module: HashMap<ModuleId, HashSet<String>>,
-    public_traits_by_module: HashMap<ModuleId, HashSet<String>>,
+    export_facts_by_module: HashMap<ModuleId, ModuleExportFacts>,
     callable_sigs_by_module: HashMap<ModuleId, HashMap<String, Vec<ImportedCallableSig>>>,
     type_tys_by_module: HashMap<ModuleId, HashMap<String, Type>>,
     trait_sigs_by_module: HashMap<ModuleId, HashMap<String, ImportedTraitSig>>,
@@ -47,25 +48,13 @@ impl ProgramImportFactsCache {
             else {
                 continue;
             };
-            let mut members = HashSet::new();
-            members.extend(
-                self.public_callables_by_module
-                    .get(&dep_id)
-                    .cloned()
-                    .unwrap_or_default(),
-            );
-            members.extend(
-                self.public_types_by_module
-                    .get(&dep_id)
-                    .cloned()
-                    .unwrap_or_default(),
-            );
-            members.extend(
-                self.public_traits_by_module
-                    .get(&dep_id)
-                    .cloned()
-                    .unwrap_or_default(),
-            );
+            let Some(dep_exports) = self.export_facts_by_module.get(&dep_id) else {
+                continue;
+            };
+            let mut members = std::collections::HashSet::new();
+            members.extend(dep_exports.callables.keys().cloned());
+            members.extend(dep_exports.types.keys().cloned());
+            members.extend(dep_exports.traits.keys().cloned());
             out.insert(
                 req.alias.clone(),
                 ImportedModule {
@@ -103,21 +92,18 @@ impl ProgramImportFactsCache {
             else {
                 continue;
             };
+            let Some(dep_exports) = self.export_facts_by_module.get(&dep_id) else {
+                continue;
+            };
             let dep_callable_sigs = self.callable_sigs_by_module.get(&dep_id);
             let dep_type_tys = self.type_tys_by_module.get(&dep_id);
             let dep_trait_sigs = self.trait_sigs_by_module.get(&dep_id);
-            let has_callable = self
-                .public_callables_by_module
-                .get(&dep_id)
-                .is_some_and(|names| names.contains(member));
-            let has_type = self
-                .public_types_by_module
-                .get(&dep_id)
-                .is_some_and(|names| names.contains(member));
-            let has_trait = self
-                .public_traits_by_module
-                .get(&dep_id)
-                .is_some_and(|names| names.contains(member));
+            let has_callable = dep_exports
+                .callables
+                .get(member)
+                .is_some_and(|overloads| !overloads.is_empty());
+            let has_type = dep_exports.types.contains_key(member);
+            let has_trait = dep_exports.traits.contains_key(member);
             let imported = ImportedSymbol {
                 has_callable,
                 callable_sigs: if has_callable {
@@ -163,19 +149,27 @@ impl ProgramImportFactsCache {
         })
     }
 
-    pub(crate) fn ingest_resolved(&mut self, module_id: ModuleId, resolved: &ResolvedContext) {
-        self.public_callables_by_module
+    pub(crate) fn ingest_resolved(
+        &mut self,
+        module_id: ModuleId,
+        module_path: Option<ModulePath>,
+        resolved: &ResolvedContext,
+    ) {
+        // Export facts are the identity-based summary for cross-module imports.
+        // Keep the cache aligned with that core representation instead of
+        // rebuilding separate public-name sets.
+        self.export_facts_by_module
             .entry(module_id)
-            .or_insert_with(|| collect_public_callable_names(resolved));
-        self.public_types_by_module
-            .entry(module_id)
-            .or_insert_with(|| collect_public_type_names(resolved));
-        self.public_traits_by_module
-            .entry(module_id)
-            .or_insert_with(|| collect_public_trait_names(resolved));
+            .or_insert_with(|| {
+                module_export_facts_from_def_table(module_id, module_path, &resolved.def_table)
+            });
         self.callable_sigs_by_module
             .entry(module_id)
             .or_insert_with(|| collect_public_callable_sigs_resolved(resolved));
+    }
+
+    pub(crate) fn export_facts(&self, module_id: ModuleId) -> Option<&ModuleExportFacts> {
+        self.export_facts_by_module.get(&module_id)
     }
 
     pub(crate) fn ingest_typed(&mut self, module_id: ModuleId, typed: &TypeCheckedContext) {
@@ -225,61 +219,6 @@ fn collect_public_callable_sigs(
                     .collect(),
                 ret_ty: *ret_ty,
             });
-    }
-    out
-}
-
-fn collect_public_callable_names(resolved: &ResolvedContext) -> HashSet<String> {
-    let mut out = HashSet::new();
-    for item in &resolved.module.top_level_items {
-        let callable = match item {
-            TopLevelItem::FuncDecl(decl) => {
-                Some((&decl.sig.name, resolved.def_table.def_id(decl.id)))
-            }
-            TopLevelItem::FuncDef(def) => Some((&def.sig.name, resolved.def_table.def_id(def.id))),
-            _ => None,
-        };
-        let Some((name, def_id)) = callable else {
-            continue;
-        };
-        let Some(def) = resolved.def_table.lookup_def(def_id) else {
-            continue;
-        };
-        if def.is_public() {
-            out.insert(name.clone());
-        }
-    }
-    out
-}
-
-fn collect_public_type_names(resolved: &ResolvedContext) -> HashSet<String> {
-    let mut out = HashSet::new();
-    for type_def in resolved.module.type_defs() {
-        let Some(def) = resolved
-            .def_table
-            .lookup_def(resolved.def_table.def_id(type_def.id))
-        else {
-            continue;
-        };
-        if def.is_public() {
-            out.insert(type_def.name.clone());
-        }
-    }
-    out
-}
-
-fn collect_public_trait_names(resolved: &ResolvedContext) -> HashSet<String> {
-    let mut out = HashSet::new();
-    for trait_def in resolved.module.trait_defs() {
-        let Some(def) = resolved
-            .def_table
-            .lookup_def(resolved.def_table.def_id(trait_def.id))
-        else {
-            continue;
-        };
-        if def.is_public() {
-            out.insert(trait_def.name.clone());
-        }
     }
     out
 }
