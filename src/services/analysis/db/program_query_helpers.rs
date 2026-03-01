@@ -6,8 +6,8 @@ use crate::core::symbol_id::SelectedCallable;
 use crate::core::types::Type;
 use crate::services::analysis::db::pipeline_helpers::def_target_for_symbol_id_in_states;
 use crate::services::analysis::lookups::{
-    def_at_span, def_id_for_symbol_id_in_state, hover_at_span_in_file, hover_for_def_in_state,
-    hover_for_symbol_id_in_state, signature_help_for_def_at_call_site,
+    def_at_span, hover_at_span_in_file, hover_for_def_in_state, hover_for_symbol_id_in_state,
+    resolved_target_def_id, signature_help_for_def_at_call_site,
     signature_help_for_symbol_id_at_call_site, type_at_span,
 };
 use crate::services::analysis::program_pipeline::resolve_imported_symbol_target_from_import_env;
@@ -47,11 +47,7 @@ impl super::AnalysisDb {
             let Some(target_state) = self.lookup_state_for_target(file_id, &target)? else {
                 return Ok(None);
             };
-            let target_def_id = target
-                .symbol_id
-                .as_ref()
-                .and_then(|symbol_id| def_id_for_symbol_id_in_state(&target_state, symbol_id))
-                .unwrap_or(target.def_id);
+            let target_def_id = resolved_target_def_id(&target_state, &target);
             if let Some(target_resolved) = target_state.resolved.as_ref()
                 && let Some(loc) = target_resolved.def_table.lookup_def_location(target_def_id)
             {
@@ -79,11 +75,7 @@ impl super::AnalysisDb {
         let Some(target_state) = self.lookup_state_for_target(file_id, &target)? else {
             return Ok(None);
         };
-        let target_def_id = target
-            .symbol_id
-            .as_ref()
-            .and_then(|symbol_id| def_id_for_symbol_id_in_state(&target_state, symbol_id))
-            .unwrap_or(target.def_id);
+        let target_def_id = resolved_target_def_id(&target_state, &target);
         let Some(target_resolved) = target_state.resolved.as_ref() else {
             return Ok(None);
         };

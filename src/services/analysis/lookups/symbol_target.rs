@@ -8,6 +8,7 @@ use crate::core::diag::Span;
 use crate::core::resolve::DefId;
 use crate::core::symbol_id::SymbolId;
 use crate::services::analysis::pipeline::LookupState;
+use crate::services::analysis::results::DefTarget;
 use crate::services::analysis::results::{HoverInfo, SignatureHelp};
 
 pub(crate) fn def_id_for_symbol_id_in_state(
@@ -28,6 +29,14 @@ pub(crate) fn hover_for_symbol_id_in_state(
 ) -> Option<HoverInfo> {
     let def_id = def_id_for_symbol_id_in_state(state, symbol_id)?;
     super::hover::hover_for_def_in_state(state, def_id)
+}
+
+pub(crate) fn resolved_target_def_id(state: &LookupState, target: &DefTarget) -> DefId {
+    target
+        .symbol_id
+        .as_ref()
+        .and_then(|symbol_id| def_id_for_symbol_id_in_state(state, symbol_id))
+        .unwrap_or(target.def_id)
 }
 
 pub(crate) fn signature_help_for_symbol_id_at_call_site(
