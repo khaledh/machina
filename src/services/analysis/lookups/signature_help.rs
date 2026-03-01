@@ -56,6 +56,9 @@ pub(crate) fn signature_help_at_span(
         let help = SignatureHelp {
             label,
             def_id: sig.def_id,
+            symbol_id: sig
+                .def_id
+                .and_then(|id| typed.symbol_ids.lookup_symbol_id(id).cloned()),
             active_parameter: active_parameter_for(params.len()),
             parameters: params,
         };
@@ -94,6 +97,7 @@ pub(crate) fn signature_help_at_span(
         return Some(SignatureHelp {
             label,
             def_id,
+            symbol_id: def_id.and_then(|id| typed.symbol_ids.lookup_symbol_id(id).cloned()),
             active_parameter: active_parameter_for(parameters.len()),
             parameters,
         });
@@ -101,6 +105,7 @@ pub(crate) fn signature_help_at_span(
     provisional.or(Some(SignatureHelp {
         label,
         def_id,
+        symbol_id: def_id.and_then(|id| typed.symbol_ids.lookup_symbol_id(id).cloned()),
         active_parameter: active_parameter_for(parameters.len()),
         parameters,
     }))
@@ -154,6 +159,7 @@ where
     Some(SignatureHelp {
         label: rendered.label,
         def_id: render_def_id,
+        symbol_id: render_def_id.and_then(|id| typed.symbol_ids.lookup_symbol_id(id).cloned()),
         active_parameter: active_parameter_for(rendered.parameters.len()),
         parameters: rendered.parameters,
     })

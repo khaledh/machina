@@ -13,7 +13,7 @@ use crate::core::codegen_names::CodegenNameTable;
 use crate::core::context::{ResolvedContext, ResolvedTables, TypeCheckedContext, TypedTables};
 use crate::core::diag::Span;
 use crate::core::resolve::{Def, DefId, DefTable};
-use crate::core::symbol_id::SymbolIdTable;
+use crate::core::symbol_id::{SymbolId, SymbolIdTable};
 use crate::core::tree::{Module, NodeId, NodeIdGen};
 use crate::core::typecheck::type_map::{CallSig, CallSigMap, GenericInstMap, TypeMap};
 use crate::core::types::Type;
@@ -117,6 +117,7 @@ pub struct HoverInfo {
     pub node_id: NodeId,
     pub span: Span,
     pub def_id: Option<DefId>,
+    pub symbol_id: Option<SymbolId>,
     pub def_name: Option<String>,
     pub ty: Option<Type>,
     pub display: String,
@@ -145,6 +146,7 @@ pub struct CompletionItem {
 pub struct SignatureHelp {
     pub label: String,
     pub def_id: Option<DefId>,
+    pub symbol_id: Option<SymbolId>,
     pub active_parameter: usize,
     pub parameters: Vec<String>,
 }

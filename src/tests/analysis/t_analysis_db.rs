@@ -2098,6 +2098,10 @@ fn hover_at_program_file_uses_selected_imported_overload_signature() {
         .expect("program hover query should succeed")
         .expect("expected hover info for imported println call");
     assert_eq!(hover.def_name.as_deref(), Some("println"));
+    assert_eq!(
+        hover.symbol_id.as_ref().map(ToString::to_string).as_deref(),
+        Some("std.io::println")
+    );
     assert_eq!(hover.display, "fn println(s: string) -> ()");
 }
 
@@ -2586,6 +2590,10 @@ fn println(n: u64) -> u64 { n }
         .signature_help_at_program_file(entry_id, query_span)
         .expect("program signature-help query should succeed")
         .expect("expected signature help for imported overload");
+    assert_eq!(
+        sig.symbol_id.as_ref().map(ToString::to_string).as_deref(),
+        Some("app.dep::println")
+    );
     assert_eq!(sig.label, "fn println(s: string) -> u64");
 
     let _ = fs::remove_dir_all(&temp_dir);
