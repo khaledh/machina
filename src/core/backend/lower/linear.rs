@@ -530,24 +530,10 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
 
         let elem_ir_ty = self.type_lowerer.lower_type(&elem_ty);
         let elem_ptr_ty = self.type_lowerer.ptr_to(elem_ir_ty);
-        let u32_ty = self.type_lowerer.lower_type(&Type::uint(32));
-        let u64_ty = self.type_lowerer.lower_type(&Type::uint(64));
-        let zero_u64 = self.builder.const_int(0, false, 64, u64_ty);
-        let zero_ptr = self.builder.cast(CastKind::IntToPtr, zero_u64, elem_ptr_ty);
-        let zero_u32 = self.builder.const_int(0, false, 32, u32_ty);
+        self.init_empty_hash_collection(slot.addr, elem_ptr_ty);
 
-        // Start with an empty, non-owned set; runtime insert promotes to owned.
-        self.store_field(slot.addr, 0, elem_ptr_ty, zero_ptr);
-        self.store_field(slot.addr, 1, u32_ty, zero_u32);
-        self.store_field(slot.addr, 2, u32_ty, zero_u32);
-
-        let layout = self.type_lowerer.ir_type_cache.layout(elem_ir_ty);
-        let elem_size = self
-            .builder
-            .const_int(layout.size() as i128, false, 64, u64_ty);
-        let elem_align = self
-            .builder
-            .const_int(layout.align() as i128, false, 64, u64_ty);
+        let elem_size = self.runtime_size_const(&elem_ty);
+        let elem_align = self.runtime_align_const(&elem_ty);
         let bool_ty = self.type_lowerer.lower_type(&Type::Bool);
 
         for elem_expr in elems.iter() {
@@ -581,26 +567,10 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
 
         let key_ir_ty = self.type_lowerer.lower_type(&key_ty);
         let key_ptr_ty = self.type_lowerer.ptr_to(key_ir_ty);
-        let u32_ty = self.type_lowerer.lower_type(&Type::uint(32));
-        let u64_ty = self.type_lowerer.lower_type(&Type::uint(64));
-        let zero_u64 = self.builder.const_int(0, false, 64, u64_ty);
-        let zero_ptr = self.builder.cast(CastKind::IntToPtr, zero_u64, key_ptr_ty);
-        let zero_u32 = self.builder.const_int(0, false, 32, u32_ty);
+        self.init_empty_hash_collection(slot.addr, key_ptr_ty);
 
-        // Start with an empty, non-owned map; runtime insert promotes to owned.
-        self.store_field(slot.addr, 0, key_ptr_ty, zero_ptr);
-        self.store_field(slot.addr, 1, u32_ty, zero_u32);
-        self.store_field(slot.addr, 2, u32_ty, zero_u32);
-
-        let key_layout = self.type_lowerer.ir_type_cache.layout(key_ir_ty);
-        let value_ir_ty = self.type_lowerer.lower_type(&value_ty);
-        let value_layout = self.type_lowerer.ir_type_cache.layout(value_ir_ty);
-        let key_size = self
-            .builder
-            .const_int(key_layout.size() as i128, false, 64, u64_ty);
-        let value_size = self
-            .builder
-            .const_int(value_layout.size() as i128, false, 64, u64_ty);
+        let key_size = self.runtime_size_const(&key_ty);
+        let value_size = self.runtime_size_const(&value_ty);
         let bool_ty = self.type_lowerer.lower_type(&Type::Bool);
 
         for entry in entries.iter() {
@@ -964,16 +934,8 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
         let value_ir_ty = self.type_lowerer.lower_type(&value_ty);
         let value_slot = self.alloc_value_slot(value_ir_ty);
 
-        let key_ir_ty = self.type_lowerer.lower_type(&key_ty);
-        let key_layout = self.type_lowerer.ir_type_cache.layout(key_ir_ty);
-        let value_layout = self.type_lowerer.ir_type_cache.layout(value_ir_ty);
-        let u64_ty = self.type_lowerer.lower_type(&Type::uint(64));
-        let key_size = self
-            .builder
-            .const_int(key_layout.size() as i128, false, 64, u64_ty);
-        let value_size = self
-            .builder
-            .const_int(value_layout.size() as i128, false, 64, u64_ty);
+        let key_size = self.runtime_size_const(&key_ty);
+        let value_size = self.runtime_size_const(&value_ty);
 
         let bool_ty = self.type_lowerer.lower_type(&Type::Bool);
         let hit = self.builder.call(

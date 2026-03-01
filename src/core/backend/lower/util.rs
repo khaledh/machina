@@ -2,7 +2,7 @@
 
 use crate::core::backend::lower::LowerToIrError;
 use crate::core::backend::lower::locals::{LocalStorage, LocalValue};
-use crate::core::backend::lower::lowerer::{BaseView, FuncLowerer, LoopContext};
+use crate::core::backend::lower::lowerer::{BaseView, CallInputValue, FuncLowerer, LoopContext};
 use crate::core::diag::Span;
 use crate::core::ir::{
     BinOp, Callee, CastKind, CmpOp, IrTypeId, IrTypeKind, RuntimeFn, Terminator, ValueId,
@@ -14,6 +14,51 @@ use crate::core::types::{Type, TypeAssignability, type_assignable};
 const MACHINE_PAYLOAD_LAYOUT_OWNED_MASK: u64 = 1u64 << 63;
 
 impl<'a, 'g> FuncLowerer<'a, 'g> {
+    /// Ensures a call/runtime argument is backed by an addressable slot.
+    ///
+    /// Collection and runtime helpers uniformly consume pointer inputs, so this
+    /// centralizes the "materialize if needed" step for those paths.
+    pub(super) fn ensure_call_input_addr(&mut self, arg: &mut CallInputValue) -> ValueId {
+        if arg.is_addr {
+            arg.value
+        } else {
+            let addr = self.materialize_value_addr(arg.value, &arg.ty);
+            arg.value = addr;
+            arg.is_addr = true;
+            addr
+        }
+    }
+
+    pub(super) fn runtime_size_const(&mut self, ty: &Type) -> ValueId {
+        let ir_ty = self.type_lowerer.lower_type(ty);
+        let layout = self.type_lowerer.ir_type_cache.layout(ir_ty);
+        let u64_ty = self.type_lowerer.lower_type(&Type::uint(64));
+        self.builder
+            .const_int(layout.size() as i128, false, 64, u64_ty)
+    }
+
+    pub(super) fn runtime_align_const(&mut self, ty: &Type) -> ValueId {
+        let ir_ty = self.type_lowerer.lower_type(ty);
+        let layout = self.type_lowerer.ir_type_cache.layout(ir_ty);
+        let u64_ty = self.type_lowerer.lower_type(&Type::uint(64));
+        self.builder
+            .const_int(layout.align() as i128, false, 64, u64_ty)
+    }
+
+    /// Initializes the common `{ ptr, len, cap }` header used by hash-backed
+    /// collections before runtime insertion promotes them to owned storage.
+    pub(super) fn init_empty_hash_collection(&mut self, slot_addr: ValueId, elem_ptr_ty: IrTypeId) {
+        let u32_ty = self.type_lowerer.lower_type(&Type::uint(32));
+        let u64_ty = self.type_lowerer.lower_type(&Type::uint(64));
+        let zero_u64 = self.builder.const_int(0, false, 64, u64_ty);
+        let zero_ptr = self.builder.cast(CastKind::IntToPtr, zero_u64, elem_ptr_ty);
+        let zero_u32 = self.builder.const_int(0, false, 32, u32_ty);
+
+        self.store_field(slot_addr, 0, elem_ptr_ty, zero_ptr);
+        self.store_field(slot_addr, 1, u32_ty, zero_u32);
+        self.store_field(slot_addr, 2, u32_ty, zero_u32);
+    }
+
     pub(super) fn lookup_local(&self, def_id: DefId) -> LocalValue {
         self.locals
             .get(def_id)

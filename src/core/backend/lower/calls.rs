@@ -30,33 +30,6 @@ fn drop_def_for_place_expr(place: &sem::PlaceExpr) -> Option<DefId> {
 }
 
 impl<'a, 'g> FuncLowerer<'a, 'g> {
-    fn ensure_call_input_addr(&mut self, arg: &mut CallInputValue) -> ValueId {
-        if arg.is_addr {
-            arg.value
-        } else {
-            let addr = self.materialize_value_addr(arg.value, &arg.ty);
-            arg.value = addr;
-            arg.is_addr = true;
-            addr
-        }
-    }
-
-    fn runtime_size_const(&mut self, ty: &Type) -> ValueId {
-        let ir_ty = self.type_lowerer.lower_type(ty);
-        let layout = self.type_lowerer.ir_type_cache.layout(ir_ty);
-        let u64_ty = self.type_lowerer.lower_type(&Type::uint(64));
-        self.builder
-            .const_int(layout.size() as i128, false, 64, u64_ty)
-    }
-
-    fn runtime_align_const(&mut self, ty: &Type) -> ValueId {
-        let ir_ty = self.type_lowerer.lower_type(ty);
-        let layout = self.type_lowerer.ir_type_cache.layout(ir_ty);
-        let u64_ty = self.type_lowerer.lower_type(&Type::uint(64));
-        self.builder
-            .const_int(layout.align() as i128, false, 64, u64_ty)
-    }
-
     fn render_type_for_type_of(ty: &Type, overrides: Option<&BTreeMap<u32, String>>) -> String {
         render_type(
             ty,
