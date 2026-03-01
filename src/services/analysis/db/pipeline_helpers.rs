@@ -8,6 +8,7 @@ use crate::core::symbol_id::SymbolId;
 use crate::services::analysis::frontend_support::{
     stable_source_revision, strict_frontend_lookup_state_with_path,
 };
+use crate::services::analysis::lookups::resolved_target_def_id;
 use crate::services::analysis::pipeline::{
     LookupState, run_module_pipeline_with_query_input, to_lookup_state,
 };
@@ -18,6 +19,12 @@ use crate::services::analysis::query::{QueryKey, QueryKind, QueryResult};
 use crate::services::analysis::results::DefTarget;
 use crate::services::analysis::snapshot::AnalysisSnapshot;
 use crate::services::analysis::snapshot::FileId;
+
+pub(crate) struct ResolvedSymbolTarget {
+    pub target: DefTarget,
+    pub state: LookupState,
+    pub local_def_id: DefId,
+}
 
 impl super::AnalysisDb {
     pub(super) fn lookup_state_for_target(
@@ -197,6 +204,33 @@ impl super::AnalysisDb {
             origin_file_id,
             symbol_id,
         ))
+    }
+
+    pub(crate) fn resolve_symbol_target_in_program(
+        &mut self,
+        origin_file_id: FileId,
+        symbol_id: &SymbolId,
+    ) -> QueryResult<Option<ResolvedSymbolTarget>> {
+        let Some(target) = self.def_target_for_symbol_id_in_program(origin_file_id, symbol_id)?
+        else {
+            return Ok(None);
+        };
+        self.resolve_target_in_program(origin_file_id, target)
+    }
+
+    pub(crate) fn resolve_target_in_program(
+        &mut self,
+        origin_file_id: FileId,
+        target: DefTarget,
+    ) -> QueryResult<Option<ResolvedSymbolTarget>> {
+        let Some(state) = self.lookup_state_for_target(origin_file_id, &target)? else {
+            return Ok(None);
+        };
+        Ok(Some(ResolvedSymbolTarget {
+            local_def_id: resolved_target_def_id(&state, &target),
+            target,
+            state,
+        }))
     }
 }
 

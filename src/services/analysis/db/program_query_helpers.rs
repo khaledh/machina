@@ -7,8 +7,7 @@ use crate::core::types::Type;
 use crate::services::analysis::db::pipeline_helpers::def_target_for_symbol_id_in_states;
 use crate::services::analysis::lookups::{
     def_at_span, hover_at_span_in_file, hover_for_def_in_state, hover_for_symbol_id_in_state,
-    resolved_target_def_id, signature_help_for_def_at_call_site,
-    signature_help_for_symbol_id_at_call_site, type_at_span,
+    signature_help_for_def_at_call_site, signature_help_for_symbol_id_at_call_site, type_at_span,
 };
 use crate::services::analysis::program_pipeline::resolve_imported_symbol_target_from_import_env;
 use crate::services::analysis::query::QueryResult;
@@ -44,15 +43,16 @@ impl super::AnalysisDb {
             true,
             module_states,
         ) {
-            let Some(target_state) = self.lookup_state_for_target(file_id, &target)? else {
+            let Some(resolved_target) = self.resolve_target_in_program(file_id, target)? else {
                 return Ok(None);
             };
-            let target_def_id = resolved_target_def_id(&target_state, &target);
-            if let Some(target_resolved) = target_state.resolved.as_ref()
-                && let Some(loc) = target_resolved.def_table.lookup_def_location(target_def_id)
+            if let Some(target_resolved) = resolved_target.state.resolved.as_ref()
+                && let Some(loc) = target_resolved
+                    .def_table
+                    .lookup_def_location(resolved_target.local_def_id)
             {
                 return Ok(Some(Location {
-                    file_id: target.file_id,
+                    file_id: resolved_target.target.file_id,
                     path: loc.path,
                     span: loc.span,
                 }));
@@ -72,18 +72,20 @@ impl super::AnalysisDb {
         ) else {
             return Ok(None);
         };
-        let Some(target_state) = self.lookup_state_for_target(file_id, &target)? else {
+        let Some(resolved_target) = self.resolve_target_in_program(file_id, target)? else {
             return Ok(None);
         };
-        let target_def_id = resolved_target_def_id(&target_state, &target);
-        let Some(target_resolved) = target_state.resolved.as_ref() else {
+        let Some(target_resolved) = resolved_target.state.resolved.as_ref() else {
             return Ok(None);
         };
-        let Some(loc) = target_resolved.def_table.lookup_def_location(target_def_id) else {
+        let Some(loc) = target_resolved
+            .def_table
+            .lookup_def_location(resolved_target.local_def_id)
+        else {
             return Ok(None);
         };
         Ok(Some(Location {
-            file_id: target.file_id,
+            file_id: resolved_target.target.file_id,
             path: loc.path,
             span: loc.span,
         }))
@@ -192,8 +194,9 @@ impl super::AnalysisDb {
             query_span,
             false,
             &program.module_states,
-        ) && let Some(target_state) = self.lookup_state_for_target(file_id, &target)?
-            && let Some(sig) = target
+        ) && let Some(resolved_target) = self.resolve_target_in_program(file_id, target)?
+            && let Some(sig) = resolved_target
+                .target
                 .symbol_id
                 .as_ref()
                 .and_then(|symbol_id| {
@@ -201,7 +204,7 @@ impl super::AnalysisDb {
                         &state,
                         query_span,
                         source.as_deref(),
-                        &target_state,
+                        &resolved_target.state,
                         symbol_id,
                     )
                 })
@@ -210,8 +213,8 @@ impl super::AnalysisDb {
                         &state,
                         query_span,
                         source.as_deref(),
-                        &target_state,
-                        target.def_id,
+                        &resolved_target.state,
+                        resolved_target.local_def_id,
                     )
                 })
         {
@@ -268,13 +271,13 @@ fn imported_hover_target(
     }
 
     if let Some(symbol_id) = hover.symbol_id.as_ref()
-        && let Some(target) = db
-            .def_target_for_symbol_id_in_program(origin_file_id, symbol_id)
+        && let Some(resolved_target) = db
+            .resolve_symbol_target_in_program(origin_file_id, symbol_id)
             .ok()?
     {
-        let target_state = db.lookup_state_for_target(origin_file_id, &target).ok()??;
-        return hover_for_symbol_id_in_state(&target_state, symbol_id)
-            .or_else(|| hover_for_def_in_state(&target_state, target.def_id));
+        return hover_for_symbol_id_in_state(&resolved_target.state, symbol_id).or_else(|| {
+            hover_for_def_in_state(&resolved_target.state, resolved_target.local_def_id)
+        });
     }
 
     let entry_resolved = state.resolved.as_ref()?;
