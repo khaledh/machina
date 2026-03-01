@@ -9,6 +9,7 @@ mod move_check;
 mod normalize;
 mod protocol_progression;
 mod protocol_progression_check;
+mod protocol_shape;
 mod slice_borrow;
 mod slice_escape;
 mod structural;
@@ -88,6 +89,9 @@ fn sem_check_partial_normalized(
     errors.extend(closure_borrow_errors);
     errors.extend(move_result.errors);
     errors.extend(slice_escape::check(&ctx));
+    errors.extend(protocol_shape::check_protocol_shape_conformance(&ctx));
+    errors.extend(protocol_shape::check_typestate_handler_overlap(&ctx));
+    errors.extend(protocol_shape::check_typestate_request_response_shape(&ctx));
     errors.extend(protocol_progression_check::check(&ctx, &progression_facts));
 
     let mut poisoned_nodes = upstream_poisoned_nodes.clone();

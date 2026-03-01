@@ -3,7 +3,7 @@ use machina::core::capsule::CapsuleError;
 use machina::core::diag::CompileError;
 use machina::core::parse::ParseErrorKind;
 use machina::core::resolve::{ResolveError, ResolveErrorKind};
-use machina::core::typecheck::TypeCheckErrorKind;
+use machina::core::semck::SemCheckErrorKind;
 use machina::driver::compile::{CompileOptions, check_with_path, compile_with_path};
 use std::path::{Path, PathBuf};
 
@@ -375,14 +375,11 @@ typestate Client {
         errors.iter().any(|err| {
             matches!(
                 err,
-                CompileError::TypeCheck(type_err)
-                    if matches!(
-                        type_err.kind(),
-                        TypeCheckErrorKind::TypestateAmbiguousResponseProvenance(..)
-                    )
+                CompileError::SemCheck(sem_err)
+                    if matches!(sem_err.kind(), SemCheckErrorKind::TypestateAmbiguousResponseProvenance(..))
             )
         }),
-        "expected MC-TYPECHECK-TypestateAmbiguousResponseProvenance, got: {errors:?}"
+        "expected MC-SEMCK-TypestateAmbiguousResponseProvenance, got: {errors:?}"
     );
 }
 

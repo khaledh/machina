@@ -6,7 +6,6 @@ use crate::core::typecheck::errors::TypeCheckError;
 use crate::core::typecheck::errors::TypeCheckErrorKind;
 
 mod control;
-mod protocol;
 mod reply_cap;
 mod stmt;
 
@@ -18,9 +17,6 @@ pub(crate) fn run(engine: &mut TypecheckEngine) -> Result<(), Vec<TypeCheckError
     // Stmt-level rules sit here because they depend on solved types, but
     // do not need the heavier semantic passes downstream.
     errors.extend(stmt::check_stmt_semantics(engine));
-    errors.extend(protocol::check_protocol_shape_conformance(engine));
-    errors.extend(protocol::check_typestate_handler_overlap(engine));
-    errors.extend(protocol::check_typestate_request_response_shape(engine));
     errors.extend(reply_cap::check_reply_cap_usage(engine));
 
     if errors.is_empty() {

@@ -5,6 +5,7 @@ use crate::core::parse::PEK;
 use crate::core::resolve::symbols::SymbolKind;
 use crate::core::resolve::{ResolveError, ResolveErrorKind};
 use crate::core::semck::SEK;
+use crate::core::semck::SemCheckError;
 use crate::core::typecheck::{TypeCheckError, TypeCheckErrorKind};
 use crate::core::types::Type;
 use crate::services::analysis::diagnostics::{
@@ -152,7 +153,7 @@ fn typecheck_stable_code_exists_for_newer_variants() {
     let diag = Diagnostic::from_typecheck_error(&err);
     assert_eq!(diag.code, "MC-TYPECHECK-StringFmtExprUnsupportedType");
 
-    let err: TypeCheckError = TypeCheckErrorKind::TypestateOverlappingOnHandlers(
+    let err: SemCheckError = SEK::TypestateOverlappingOnHandlers(
         "Connection".to_string(),
         "AwaitAuth".to_string(),
         Type::Struct {
@@ -166,8 +167,8 @@ fn typecheck_stable_code_exists_for_newer_variants() {
     )
     .at(Span::default())
     .into();
-    let diag = Diagnostic::from_typecheck_error(&err);
-    assert_eq!(diag.code, "MC-TYPECHECK-TypestateOverlappingOnHandlers");
+    let diag = Diagnostic::from_semcheck_error(&err);
+    assert_eq!(diag.code, "MC-SEMCK-TypestateOverlappingOnHandlers");
 }
 
 #[test]

@@ -2961,7 +2961,7 @@ fn main() -> u64 {
     assert!(
         diagnostics
             .iter()
-            .any(|d| d.code == "MC-TYPECHECK-TypestateOverlappingOnHandlers"),
+            .any(|d| d.code == "MC-SEMCK-TypestateOverlappingOnHandlers"),
         "expected typestate handler-overlap diagnostic, got: {diagnostics:#?}"
     );
 }
@@ -3011,7 +3011,7 @@ typestate Client {
     assert!(
         diagnostics
             .iter()
-            .any(|d| d.code == "MC-TYPECHECK-TypestateAmbiguousResponseProvenance"),
+            .any(|d| d.code == "MC-SEMCK-TypestateAmbiguousResponseProvenance"),
         "expected provenance ambiguity diagnostic, got: {diagnostics:#?}"
     );
 }

@@ -2,8 +2,8 @@ use std::collections::{HashMap, HashSet};
 use std::path::Path;
 
 use crate::core::api::{
-    StrictFrontendOptions, build_strict_frontend_input, check_strict_frontend_with_path,
-    elaborate_stage, run_strict_frontend, semcheck_stage,
+    StrictFrontendOptions, build_strict_frontend_input, elaborate_stage, run_strict_frontend,
+    semcheck_stage,
 };
 use crate::core::backend;
 use crate::core::backend::regalloc::arm64::Arm64Target;
@@ -76,7 +76,18 @@ pub fn check_with_path(
     inject_prelude: bool,
     experimental_typestate: bool,
 ) -> Result<(), Vec<CompileError>> {
-    check_strict_frontend_with_path(source, source_path, inject_prelude, experimental_typestate)
+    let parsed = build_strict_frontend_input(
+        source,
+        Some(source_path),
+        StrictFrontendOptions {
+            inject_prelude,
+            experimental_typestate,
+        },
+    )?;
+    let (_resolved, typed) = run_strict_frontend(parsed)?;
+    semcheck_stage(typed)
+        .map(|_| ())
+        .map_err(|errs| errs.into_iter().map(Into::into).collect())
 }
 
 pub fn compile(source: &str, opts: &CompileOptions) -> Result<CompileOutput, Vec<CompileError>> {

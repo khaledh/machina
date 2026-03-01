@@ -169,6 +169,57 @@ pub enum SemCheckErrorKind {
     ClosureEscapeArg,
 
     #[error(
+        "Typestate {0} implementing role {1} state {2} is missing a handler for incoming payload {3}"
+    )]
+    ProtocolStateHandlerMissing(String, String, String, Type),
+
+    #[error(
+        "Typestate {0} implementing role {1} state {2} emits payload {3} which is not allowed by protocol transitions"
+    )]
+    ProtocolStateOutgoingPayloadNotAllowed(String, String, String, Type),
+
+    #[error(
+        "Typestate {0} implementing role {1} state {2} emits payload {3} to `{5}` (bound role `{6}`), expected peer role `{4}`"
+    )]
+    ProtocolStateEmitDestinationRoleMismatch(String, String, String, Type, String, String, String),
+
+    #[error(
+        "Typestate {0} implementing role {1} state {2} emits payload {3} to an unbound destination; expected peer role `{4}`"
+    )]
+    ProtocolStateEmitDestinationRoleUnbound(String, String, String, Type, String),
+
+    #[error(
+        "Typestate {0} implementing role {1} issues request payload {2} to peer role `{3}` without a matching request contract"
+    )]
+    ProtocolRequestContractMissing(String, String, Type, String),
+
+    #[error(
+        "Typestate {0} implementing role {1} issues request payload {2} to peer role `{3}` with ambiguous request contracts"
+    )]
+    ProtocolRequestContractAmbiguous(String, String, Type, String),
+
+    #[error(
+        "Typestate {0} implementing role {1} request payload {2} to peer role `{3}` expects response {4} outside contract responses"
+    )]
+    ProtocolRequestResponseNotInContract(String, String, Type, String, Type),
+
+    #[error(
+        "Typestate {0} state {1} has overlapping `on` handlers for selector {2} on response variants {3:?}"
+    )]
+    TypestateOverlappingOnHandlers(String, String, Type, Vec<Type>),
+
+    #[error(
+        "Typestate {0} state {1} has ambiguous response provenance for selector {2} on variants {3:?}; use request-site labels (for RequestType:label(...)) to disambiguate"
+    )]
+    TypestateAmbiguousResponseProvenance(String, String, Type, Vec<Type>),
+
+    #[error("Typestate {0} request {1}{2} has no handler for expected response variant {3}")]
+    TypestateRequestMissingResponseHandler(String, Type, String, Type),
+
+    #[error("Typestate {0} handler for request {1}{2} uses unsupported response variant {3}")]
+    TypestateHandlerUnsupportedResponseVariant(String, Type, String, Type),
+
+    #[error(
         "Typestate {0} ({1}::{2} state {3}) has handler trigger {4} with no matching protocol transition"
     )]
     ProtocolProgressionMissingTriggerTransition(String, String, String, String, Type),

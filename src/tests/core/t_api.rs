@@ -6,6 +6,7 @@ use crate::core::api::{
 use crate::core::context::ParsedContext;
 use crate::core::machine::request_site::labeled_request_site_key;
 use crate::core::resolve::ResolveErrorKind;
+use crate::core::semck::SemCheckErrorKind;
 use crate::core::tree::semantic as sem;
 use crate::core::tree::visit::{self, Visitor};
 use crate::core::tree::{
@@ -32,6 +33,20 @@ fn parsed_context_typestate(source: &str) -> ParsedContext {
     )
     .expect("parse should succeed for typestate test source");
     ParsedContext::new(module, id_gen)
+}
+
+fn semcheck_errors_typestate(source: &str) -> Vec<crate::core::semck::SemCheckError> {
+    let parsed = parsed_context_typestate(source);
+    let out = resolve_typecheck_pipeline_with_policy(
+        parsed,
+        ResolveInputs::default(),
+        None,
+        FrontendPolicy::Strict,
+    );
+    let typed = out
+        .typed_context
+        .expect("expected typed context before semcheck in typestate api test");
+    semcheck_stage(typed).expect_err("expected semcheck errors for typestate api test")
 }
 
 #[test]
@@ -330,16 +345,17 @@ typestate Gateway : Auth::Client {
         .expect("expected resolved context for protocol conformance test");
     assert_eq!(resolved.typestate_role_impls.len(), 1);
     assert!(resolved.typestate_role_impls[0].role_def_id.is_some());
+    let sem_errors = semcheck_errors_typestate(source);
     assert!(
-        out.type_errors.iter().any(|e| {
+        sem_errors.iter().any(|e| {
             matches!(
                 e.kind(),
-                TypeCheckErrorKind::ProtocolStateHandlerMissing(ts, role, state, _, ..)
+                SemCheckErrorKind::ProtocolStateHandlerMissing(ts, role, state, _)
                     if ts == "Gateway" && role == "Auth::Client" && state == "Awaiting"
             )
         }),
         "expected missing handler protocol conformance error, got {:?}",
-        out.type_errors
+        sem_errors
     );
 }
 
@@ -406,25 +422,17 @@ typestate Gateway : Auth::Client {
     }
 }
 "#;
-    let parsed = parsed_context_typestate(source);
-    let out = resolve_typecheck_pipeline_with_policy(
-        parsed,
-        ResolveInputs::default(),
-        None,
-        FrontendPolicy::Strict,
-    );
+    let sem_errors = semcheck_errors_typestate(source);
     assert!(
-        out.type_errors.iter().any(|e| {
+        sem_errors.iter().any(|e| {
             matches!(
                 e.kind(),
-                TypeCheckErrorKind::ProtocolStateOutgoingPayloadNotAllowed(
-                    ts, role, state, _, ..
-                )
+                SemCheckErrorKind::ProtocolStateOutgoingPayloadNotAllowed(ts, role, state, _)
                     if ts == "Gateway" && role == "Auth::Client" && state == "Idle"
             )
         }),
         "expected outgoing payload protocol conformance error, got {:?}",
-        out.type_errors
+        sem_errors
     );
 }
 
@@ -580,16 +588,17 @@ typestate Gateway : Auth::Client {
     assert_eq!(protocol.request_contracts.len(), 1);
     assert_eq!(protocol.roles.len(), 2);
     assert!(!protocol.roles[0].states.is_empty());
+    let sem_errors = semcheck_errors_typestate(source);
     assert!(
-        out.type_errors.iter().any(|e| {
+        sem_errors.iter().any(|e| {
             matches!(
                 e.kind(),
-                TypeCheckErrorKind::ProtocolStateHandlerMissing(ts, role, state, _, ..)
+                SemCheckErrorKind::ProtocolStateHandlerMissing(ts, role, state, _)
                     if ts == "Gateway" && role == "Auth::Client" && state == "Awaiting"
             )
         }),
         "expected missing handler conformance error from transition surface, got {:?}",
-        out.type_errors
+        sem_errors
     );
 }
 
@@ -657,23 +666,17 @@ typestate Gateway : Auth::Client {
     }
 }
 "#;
-    let parsed = parsed_context_typestate(source);
-    let out = resolve_typecheck_pipeline_with_policy(
-        parsed,
-        ResolveInputs::default(),
-        None,
-        FrontendPolicy::Strict,
-    );
+    let sem_errors = semcheck_errors_typestate(source);
     assert!(
-        out.type_errors.iter().any(|e| {
+        sem_errors.iter().any(|e| {
             matches!(
                 e.kind(),
-                TypeCheckErrorKind::ProtocolStateOutgoingPayloadNotAllowed(ts, role, state, _, ..)
+                SemCheckErrorKind::ProtocolStateOutgoingPayloadNotAllowed(ts, role, state, _)
                     if ts == "Gateway" && role == "Auth::Client" && state == "Idle"
             )
         }),
         "expected state-local outgoing payload protocol conformance error, got {:?}",
-        out.type_errors
+        sem_errors
     );
 }
 
@@ -816,18 +819,12 @@ typestate Gateway : Auth::Client {
     }
 }
 "#;
-    let parsed = parsed_context_typestate(source);
-    let out = resolve_typecheck_pipeline_with_policy(
-        parsed,
-        ResolveInputs::default(),
-        None,
-        FrontendPolicy::Strict,
-    );
+    let sem_errors = semcheck_errors_typestate(source);
     assert!(
-        out.type_errors.iter().any(|e| {
+        sem_errors.iter().any(|e| {
             matches!(
                 e.kind(),
-                TypeCheckErrorKind::ProtocolStateEmitDestinationRoleMismatch(
+                SemCheckErrorKind::ProtocolStateEmitDestinationRoleMismatch(
                     ts, role, state, _, expected, field, bound, ..
                 )
                     if ts == "Gateway"
@@ -839,7 +836,7 @@ typestate Gateway : Auth::Client {
             )
         }),
         "expected destination role mismatch diagnostic, got {:?}",
-        out.type_errors
+        sem_errors
     );
 }
 
@@ -907,18 +904,12 @@ typestate Gateway : Auth::Client {
     }
 }
 "#;
-    let parsed = parsed_context_typestate(source);
-    let out = resolve_typecheck_pipeline_with_policy(
-        parsed,
-        ResolveInputs::default(),
-        None,
-        FrontendPolicy::Strict,
-    );
+    let sem_errors = semcheck_errors_typestate(source);
     assert!(
-        out.type_errors.iter().any(|e| {
+        sem_errors.iter().any(|e| {
             matches!(
                 e.kind(),
-                TypeCheckErrorKind::ProtocolStateEmitDestinationRoleMismatch(
+                SemCheckErrorKind::ProtocolStateEmitDestinationRoleMismatch(
                     ts, role, state, _, expected, field, bound, ..
                 )
                     if ts == "Gateway"
@@ -930,7 +921,7 @@ typestate Gateway : Auth::Client {
             )
         }),
         "expected destination role mismatch diagnostic for handle send, got {:?}",
-        out.type_errors
+        sem_errors
     );
 }
 
@@ -998,18 +989,12 @@ typestate Gateway : Auth::Client {
     }
 }
 "#;
-    let parsed = parsed_context_typestate(source);
-    let out = resolve_typecheck_pipeline_with_policy(
-        parsed,
-        ResolveInputs::default(),
-        None,
-        FrontendPolicy::Strict,
-    );
+    let sem_errors = semcheck_errors_typestate(source);
     assert!(
-        out.type_errors.iter().any(|e| {
+        sem_errors.iter().any(|e| {
             matches!(
                 e.kind(),
-                TypeCheckErrorKind::ProtocolRequestResponseNotInContract(
+                SemCheckErrorKind::ProtocolRequestResponseNotInContract(
                     ts,
                     role,
                     _,
@@ -1021,7 +1006,7 @@ typestate Gateway : Auth::Client {
             )
         }),
         "expected contract response-set violation diagnostic, got {:?}",
-        out.type_errors
+        sem_errors
     );
 }
 
@@ -1090,23 +1075,17 @@ typestate Gateway : Auth::Client {
     }
 }
 "#;
-    let parsed = parsed_context_typestate(source);
-    let out = resolve_typecheck_pipeline_with_policy(
-        parsed,
-        ResolveInputs::default(),
-        None,
-        FrontendPolicy::Strict,
-    );
+    let sem_errors = semcheck_errors_typestate(source);
     assert!(
-        out.type_errors.iter().any(|e| {
+        sem_errors.iter().any(|e| {
             matches!(
                 e.kind(),
-                TypeCheckErrorKind::ProtocolRequestContractAmbiguous(ts, role, _, to_role, ..)
+                SemCheckErrorKind::ProtocolRequestContractAmbiguous(ts, role, _, to_role)
                     if ts == "Gateway" && role == "Auth::Client" && to_role == "Server"
             )
         }),
         "expected ambiguous request-contract diagnostic, got {:?}",
-        out.type_errors
+        sem_errors
     );
 }
 
@@ -1144,24 +1123,17 @@ typestate Gateway : Auth::Server {
     }
 }
 "#;
-    let parsed = parsed_context_typestate(source);
-    let out = resolve_typecheck_pipeline_with_policy(
-        parsed,
-        ResolveInputs::default(),
-        None,
-        FrontendPolicy::Strict,
-    );
+    let sem_errors = semcheck_errors_typestate(source);
     assert!(
-        out.type_errors.iter().any(|e| {
+        sem_errors.iter().any(|e| {
             matches!(
                 e.kind(),
-                TypeCheckErrorKind::ProtocolStateOutgoingPayloadNotAllowed(
-                    ts, role, state, _, ..
-                ) if ts == "Gateway" && role == "Auth::Server" && state == "Ready"
+                SemCheckErrorKind::ProtocolStateOutgoingPayloadNotAllowed(ts, role, state, _)
+                    if ts == "Gateway" && role == "Auth::Server" && state == "Ready"
             )
         }),
         "expected protocol outgoing-payload violation for reply, got {:?}",
-        out.type_errors
+        sem_errors
     );
 }
 
@@ -1379,23 +1351,17 @@ typestate Connection {
     }
 }
 "#;
-    let parsed = parsed_context_typestate(source);
-    let out = resolve_typecheck_pipeline_with_policy(
-        parsed,
-        ResolveInputs::default(),
-        None,
-        FrontendPolicy::Strict,
-    );
+    let sem_errors = semcheck_errors_typestate(source);
     assert!(
-        out.type_errors.iter().any(|e| {
+        sem_errors.iter().any(|e| {
             matches!(
                 e.kind(),
-                TypeCheckErrorKind::TypestateOverlappingOnHandlers(ts, state, _, _, ..)
+                SemCheckErrorKind::TypestateOverlappingOnHandlers(ts, state, _, _)
                     if ts == "Connection" && state == "AwaitAuth"
             )
         }),
         "expected overlapping typestate on-handler error, got {:?}",
-        out.type_errors
+        sem_errors
     );
 }
 
@@ -1500,28 +1466,21 @@ typestate Connection {
     }
 }
 "#;
-    let parsed = parsed_context_typestate(source);
-    let out = resolve_typecheck_pipeline_with_policy(
-        parsed,
-        ResolveInputs::default(),
-        None,
-        FrontendPolicy::Strict,
-    );
+    let sem_errors = semcheck_errors_typestate(source);
     assert!(
-        out.type_errors.iter().any(|e| {
+        sem_errors.iter().any(|e| {
             matches!(
                 e.kind(),
-                TypeCheckErrorKind::TypestateAmbiguousResponseProvenance(
+                SemCheckErrorKind::TypestateAmbiguousResponseProvenance(
                     ts,
                     state,
                     _,
                     _,
-                    ..
                 ) if ts == "Connection" && state == "AwaitAuth"
             )
         }),
         "expected ambiguous provenance diagnostic for mixed labeled/unlabeled handlers, got {:?}",
-        out.type_errors
+        sem_errors
     );
 }
 
@@ -1552,23 +1511,17 @@ typestate Connection {
     }
 }
 "#;
-    let parsed = parsed_context_typestate(source);
-    let out = resolve_typecheck_pipeline_with_policy(
-        parsed,
-        ResolveInputs::default(),
-        None,
-        FrontendPolicy::Strict,
-    );
+    let sem_errors = semcheck_errors_typestate(source);
     assert!(
-        out.type_errors.iter().any(|e| {
+        sem_errors.iter().any(|e| {
             matches!(
                 e.kind(),
-                TypeCheckErrorKind::TypestateRequestMissingResponseHandler(ts, _, _, _, ..)
+                SemCheckErrorKind::TypestateRequestMissingResponseHandler(ts, _, _, _)
                     if ts == "Connection"
             )
         }),
         "expected missing response-variant diagnostic, got {:?}",
-        out.type_errors
+        sem_errors
     );
 }
 
@@ -1599,23 +1552,17 @@ typestate Connection {
     }
 }
 "#;
-    let parsed = parsed_context_typestate(source);
-    let out = resolve_typecheck_pipeline_with_policy(
-        parsed,
-        ResolveInputs::default(),
-        None,
-        FrontendPolicy::Strict,
-    );
+    let sem_errors = semcheck_errors_typestate(source);
     assert!(
-        out.type_errors.iter().any(|e| {
+        sem_errors.iter().any(|e| {
             matches!(
                 e.kind(),
-                TypeCheckErrorKind::TypestateHandlerUnsupportedResponseVariant(ts, _, _, _, ..)
+                SemCheckErrorKind::TypestateHandlerUnsupportedResponseVariant(ts, _, _, _)
                     if ts == "Connection"
             )
         }),
         "expected unsupported response-variant diagnostic, got {:?}",
-        out.type_errors
+        sem_errors
     );
 }
 

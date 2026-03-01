@@ -164,9 +164,18 @@ impl AnalysisDb {
         // Prefer a clean strict frontend result when available, but only when
         // the current document is the sole overlay. If dependency overlays are
         // active, the program-aware pipeline remains the source of truth.
+        //
+        // Semcheck-only diagnostics have no strict-frontend equivalent, so do
+        // not suppress them behind the strict lookup fallback.
         if self
             .strict_lookup_state_for_program_file(file_id)?
             .is_some()
+            && !program_diagnostics.iter().any(|diag| {
+                matches!(
+                    diag.phase,
+                    crate::services::analysis::diagnostics::DiagnosticPhase::Semcheck
+                )
+            })
         {
             return Ok(Vec::new());
         }

@@ -1,17 +1,25 @@
+//! Protocol/typestate shape validation that depends on solved types.
+//!
+//! These checks are semantic rather than inferential: they validate that a
+//! typestate implementation's handlers, emits, and request/response patterns
+//! line up with the protocol facts extracted earlier in the frontend.
+
 use std::collections::{HashMap, HashSet};
 
+use crate::core::context::SemCheckNormalizedContext;
 use crate::core::machine::naming::parse_generated_handler_site_label;
 use crate::core::protocol::event_extract::extract_emit_from_expr;
 use crate::core::resolve::DefTable;
+use crate::core::semck::{SEK, SemCheckError, push_error};
 use crate::core::tree::visit::{self, Visitor};
-use crate::core::tree::{EmitKind, Expr, ExprKind, MethodBlock, MethodItem, Module, NodeId};
-use crate::core::typecheck::engine::TypecheckEngine;
-use crate::core::typecheck::errors::{TEK, TypeCheckError};
+use crate::core::tree::{EmitKind, Expr, ExprKind, MethodBlock, MethodItem, Module};
 use crate::core::typecheck::type_map::resolve_type_expr;
 use crate::core::types::Type;
 
-pub(super) fn check_protocol_shape_conformance(engine: &TypecheckEngine) -> Vec<TypeCheckError> {
-    let resolved = engine.context();
+pub(super) fn check_protocol_shape_conformance(
+    ctx: &SemCheckNormalizedContext,
+) -> Vec<SemCheckError> {
+    let resolved = ctx;
     if resolved.typestate_role_impls.is_empty() {
         return Vec::new();
     }
@@ -22,9 +30,9 @@ pub(super) fn check_protocol_shape_conformance(engine: &TypecheckEngine) -> Vec<
         .map(|binding| binding.typestate_name.clone())
         .collect();
     let handler_payloads_by_state =
-        collect_typestate_handler_payloads_by_state(engine, &typestate_names);
+        collect_typestate_handler_payloads_by_state(ctx, &typestate_names);
     let outgoing_emits_by_state =
-        collect_typestate_outgoing_payloads_by_state(engine, &typestate_names);
+        collect_typestate_outgoing_payloads_by_state(ctx, &typestate_names);
 
     let mut errors = Vec::new();
     for binding in &resolved.typestate_role_impls {
@@ -66,15 +74,15 @@ pub(super) fn check_protocol_shape_conformance(engine: &TypecheckEngine) -> Vec<
                 .unwrap_or_default();
             for required in &state_fact.shape.required_incoming {
                 if !seen_handlers.contains(required) {
-                    crate::core::typecheck::tc_push_error!(
-                        errors,
+                    push_error(
+                        &mut errors,
                         binding.span,
-                        TEK::ProtocolStateHandlerMissing(
+                        SEK::ProtocolStateHandlerMissing(
                             binding.typestate_name.clone(),
                             role_label.clone(),
                             state_fact.name.clone(),
                             required.clone(),
-                        )
+                        ),
                     );
                 }
             }
@@ -102,18 +110,18 @@ fn check_emit_conformance(
     ctx: &EmitCheckCtx<'_>,
     state_fact: &crate::core::protocol::ProtocolStateFact,
     emit: &EmitPayload,
-    errors: &mut Vec<TypeCheckError>,
+    errors: &mut Vec<SemCheckError>,
 ) {
     if !state_fact.shape.allowed_outgoing.contains(&emit.payload_ty) {
-        crate::core::typecheck::tc_push_error!(
+        push_error(
             errors,
             emit.span,
-            TEK::ProtocolStateOutgoingPayloadNotAllowed(
+            SEK::ProtocolStateOutgoingPayloadNotAllowed(
                 ctx.typestate_name.to_string(),
                 ctx.role_label.to_string(),
                 state_fact.name.clone(),
                 emit.payload_ty.clone(),
-            )
+            ),
         );
         return;
     }
@@ -135,24 +143,24 @@ fn check_emit_conformance(
     let Some((field_name, bound_role_name)) =
         resolve_emit_destination_role(emit, ctx.peer_role_by_field)
     else {
-        crate::core::typecheck::tc_push_error!(
+        push_error(
             errors,
             emit.span,
-            TEK::ProtocolStateEmitDestinationRoleUnbound(
+            SEK::ProtocolStateEmitDestinationRoleUnbound(
                 ctx.typestate_name.to_string(),
                 ctx.role_label.to_string(),
                 state_fact.name.clone(),
                 emit.payload_ty.clone(),
                 expected_roles.join(" | "),
-            )
+            ),
         );
         return;
     };
     if !expected_roles.iter().any(|role| role == bound_role_name) {
-        crate::core::typecheck::tc_push_error!(
+        push_error(
             errors,
             emit.span,
-            TEK::ProtocolStateEmitDestinationRoleMismatch(
+            SEK::ProtocolStateEmitDestinationRoleMismatch(
                 ctx.typestate_name.to_string(),
                 ctx.role_label.to_string(),
                 state_fact.name.clone(),
@@ -160,7 +168,7 @@ fn check_emit_conformance(
                 expected_roles.join(" | "),
                 field_name.to_string(),
                 bound_role_name.to_string(),
-            )
+            ),
         );
         return;
     }
@@ -175,7 +183,7 @@ fn check_request_contract(
     _state_fact: &crate::core::protocol::ProtocolStateFact,
     emit: &EmitPayload,
     to_role_name: &str,
-    errors: &mut Vec<TypeCheckError>,
+    errors: &mut Vec<SemCheckError>,
 ) {
     let matching_contracts = matching_request_contracts(
         ctx.protocol_fact,
@@ -184,28 +192,28 @@ fn check_request_contract(
         &emit.payload_ty,
     );
     if matching_contracts.is_empty() {
-        crate::core::typecheck::tc_push_error!(
+        push_error(
             errors,
             emit.span,
-            TEK::ProtocolRequestContractMissing(
+            SEK::ProtocolRequestContractMissing(
                 ctx.typestate_name.to_string(),
                 ctx.role_label.to_string(),
                 emit.payload_ty.clone(),
                 to_role_name.to_string(),
-            )
+            ),
         );
         return;
     }
     if matching_contracts.len() > 1 {
-        crate::core::typecheck::tc_push_error!(
+        push_error(
             errors,
             emit.span,
-            TEK::ProtocolRequestContractAmbiguous(
+            SEK::ProtocolRequestContractAmbiguous(
                 ctx.typestate_name.to_string(),
                 ctx.role_label.to_string(),
                 emit.payload_ty.clone(),
                 to_role_name.to_string(),
-            )
+            ),
         );
         return;
     }
@@ -213,16 +221,16 @@ fn check_request_contract(
     let response_tys = emit.request_response_tys.as_deref().unwrap_or_default();
     for response_ty in response_tys {
         if !contract_responses.contains(response_ty) {
-            crate::core::typecheck::tc_push_error!(
+            push_error(
                 errors,
                 emit.span,
-                TEK::ProtocolRequestResponseNotInContract(
+                SEK::ProtocolRequestResponseNotInContract(
                     ctx.typestate_name.to_string(),
                     ctx.role_label.to_string(),
                     emit.payload_ty.clone(),
                     to_role_name.to_string(),
                     response_ty.clone(),
-                )
+                ),
             );
         }
     }
@@ -236,8 +244,10 @@ struct HandlerResponsePattern {
     span: crate::core::diag::Span,
 }
 
-pub(super) fn check_typestate_handler_overlap(engine: &TypecheckEngine) -> Vec<TypeCheckError> {
-    let resolved = engine.context();
+pub(super) fn check_typestate_handler_overlap(
+    ctx: &SemCheckNormalizedContext,
+) -> Vec<SemCheckError> {
+    let resolved = ctx;
     let mut errors = Vec::new();
 
     for method_block in resolved.module.method_blocks() {
@@ -276,26 +286,26 @@ pub(super) fn check_typestate_handler_overlap(engine: &TypecheckEngine) -> Vec<T
                     continue;
                 }
                 if left.request_site_label.is_none() && right.request_site_label.is_none() {
-                    crate::core::typecheck::tc_push_error!(
-                        errors,
+                    push_error(
+                        &mut errors,
                         right.span,
-                        TEK::TypestateOverlappingOnHandlers(
+                        SEK::TypestateOverlappingOnHandlers(
                             typestate_name.clone(),
                             state_name.clone(),
                             left.selector_ty.clone(),
                             overlap,
-                        )
+                        ),
                     );
                 } else {
-                    crate::core::typecheck::tc_push_error!(
-                        errors,
+                    push_error(
+                        &mut errors,
                         right.span,
-                        TEK::TypestateAmbiguousResponseProvenance(
+                        SEK::TypestateAmbiguousResponseProvenance(
                             typestate_name.clone(),
                             state_name.clone(),
                             left.selector_ty.clone(),
                             overlap,
-                        )
+                        ),
                     );
                 }
             }
@@ -371,10 +381,10 @@ struct ProvenanceHandlerShape {
 }
 
 pub(super) fn check_typestate_request_response_shape(
-    engine: &TypecheckEngine,
-) -> Vec<TypeCheckError> {
-    let request_sites = collect_typestate_request_sites(engine);
-    let handler_shapes = collect_provenance_handler_shapes(engine);
+    ctx: &SemCheckNormalizedContext,
+) -> Vec<SemCheckError> {
+    let request_sites = collect_typestate_request_sites(ctx);
+    let handler_shapes = collect_provenance_handler_shapes(ctx);
     if request_sites.is_empty() && handler_shapes.is_empty() {
         return Vec::new();
     }
@@ -410,15 +420,15 @@ pub(super) fn check_typestate_request_response_shape(
                 }
             });
             if !has_handler {
-                crate::core::typecheck::tc_push_error!(
-                    errors,
+                push_error(
+                    &mut errors,
                     site.span,
-                    TEK::TypestateRequestMissingResponseHandler(
+                    SEK::TypestateRequestMissingResponseHandler(
                         site.typestate_name.clone(),
                         site.request_ty.clone(),
                         label_suffix.clone(),
                         response_ty.clone(),
-                    )
+                    ),
                 );
             }
         }
@@ -448,15 +458,15 @@ pub(super) fn check_typestate_request_response_shape(
             label_matches && site.response_tys.contains(&handler.response_ty)
         });
         if !supported {
-            crate::core::typecheck::tc_push_error!(
-                errors,
+            push_error(
+                &mut errors,
                 handler.span,
-                TEK::TypestateHandlerUnsupportedResponseVariant(
+                SEK::TypestateHandlerUnsupportedResponseVariant(
                     handler.typestate_name.clone(),
                     handler.request_ty.clone(),
                     label_suffix,
                     handler.response_ty.clone(),
-                )
+                ),
             );
         }
     }
@@ -464,18 +474,18 @@ pub(super) fn check_typestate_request_response_shape(
     errors
 }
 
-fn collect_typestate_request_sites(engine: &TypecheckEngine) -> Vec<RequestSiteShape> {
+fn collect_typestate_request_sites(ctx: &SemCheckNormalizedContext) -> Vec<RequestSiteShape> {
     let mut collector = TypestateRequestCollector {
-        node_types: &engine.state().solve.resolved_node_types,
+        type_map: &ctx.type_map,
         current_typestate: None,
         sites: Vec::new(),
     };
-    collector.visit_module(&engine.context().module);
+    collector.visit_module(&ctx.module);
     collector.sites
 }
 
 struct TypestateRequestCollector<'a> {
-    node_types: &'a HashMap<NodeId, Type>,
+    type_map: &'a crate::core::typecheck::type_map::TypeMap,
     current_typestate: Option<String>,
     sites: Vec<RequestSiteShape>,
 }
@@ -500,8 +510,8 @@ impl Visitor for TypestateRequestCollector<'_> {
                         ..
                     },
             } = &expr.kind
-            && let Some(request_ty) = self.node_types.get(&payload.id)
-            && let Some(Type::Pending { response_tys }) = self.node_types.get(&expr.id)
+            && let Some(request_ty) = self.type_map.lookup_node_type(payload.id)
+            && let Some(Type::Pending { response_tys }) = self.type_map.lookup_node_type(expr.id)
         {
             self.sites.push(RequestSiteShape {
                 typestate_name: typestate_name.clone(),
@@ -515,9 +525,11 @@ impl Visitor for TypestateRequestCollector<'_> {
     }
 }
 
-fn collect_provenance_handler_shapes(engine: &TypecheckEngine) -> Vec<ProvenanceHandlerShape> {
+fn collect_provenance_handler_shapes(
+    ctx: &SemCheckNormalizedContext,
+) -> Vec<ProvenanceHandlerShape> {
     let mut out = Vec::new();
-    for method_block in engine.context().module.method_blocks() {
+    for method_block in ctx.module.method_blocks() {
         let Some((typestate_name, _state_name)) =
             parse_typestate_and_state_from_generated_state(&method_block.type_name)
         else {
@@ -535,28 +547,22 @@ fn collect_provenance_handler_shapes(engine: &TypecheckEngine) -> Vec<Provenance
             if method_def.sig.params.len() < 3 || method_def.sig.params[1].ident != "__pending" {
                 continue;
             }
-            let Ok(pending_ty) = resolve_type_expr(
-                &engine.context().def_table,
-                &engine.context().module,
-                &method_def.sig.params[1].typ,
-            ) else {
+            let Ok(pending_ty) =
+                resolve_type_expr(&ctx.def_table, &ctx.module, &method_def.sig.params[1].typ)
+            else {
                 continue;
             };
             let Type::Pending { .. } = pending_ty else {
                 continue;
             };
-            let Ok(response_ty) = resolve_type_expr(
-                &engine.context().def_table,
-                &engine.context().module,
-                &method_def.sig.params[0].typ,
-            ) else {
+            let Ok(response_ty) =
+                resolve_type_expr(&ctx.def_table, &ctx.module, &method_def.sig.params[0].typ)
+            else {
                 continue;
             };
-            let Ok(request_ty) = resolve_type_expr(
-                &engine.context().def_table,
-                &engine.context().module,
-                &method_def.sig.params[2].typ,
-            ) else {
+            let Ok(request_ty) =
+                resolve_type_expr(&ctx.def_table, &ctx.module, &method_def.sig.params[2].typ)
+            else {
                 continue;
             };
 
@@ -580,11 +586,11 @@ struct TypestateStateKey {
 }
 
 fn collect_typestate_handler_payloads_by_state(
-    engine: &TypecheckEngine,
+    ctx: &SemCheckNormalizedContext,
     typestate_names: &HashSet<String>,
 ) -> HashMap<TypestateStateKey, HashSet<Type>> {
     let mut out = HashMap::<TypestateStateKey, HashSet<Type>>::new();
-    for method_block in engine.context().module.method_blocks() {
+    for method_block in ctx.module.method_blocks() {
         let Some((typestate_name, state_name)) =
             parse_typestate_and_state_from_generated_state(&method_block.type_name)
         else {
@@ -607,11 +613,8 @@ fn collect_typestate_handler_payloads_by_state(
             let Some(event_param) = method_def.sig.params.first() else {
                 continue;
             };
-            let Ok(handler_ty) = resolve_type_expr(
-                &engine.context().def_table,
-                &engine.context().module,
-                &event_param.typ,
-            ) else {
+            let Ok(handler_ty) = resolve_type_expr(&ctx.def_table, &ctx.module, &event_param.typ)
+            else {
                 continue;
             };
             out.entry(key.clone()).or_default().insert(handler_ty);
@@ -633,22 +636,22 @@ struct EmitPayload {
 }
 
 fn collect_typestate_outgoing_payloads_by_state(
-    engine: &TypecheckEngine,
+    ctx: &SemCheckNormalizedContext,
     typestate_names: &HashSet<String>,
 ) -> HashMap<TypestateStateKey, Vec<EmitPayload>> {
     let mut collector = TypestateEmitCollector {
         typestate_names,
-        node_types: &engine.state().solve.resolved_node_types,
+        type_map: &ctx.type_map,
         current_state: None,
         emits_by_state: HashMap::new(),
     };
-    collector.visit_module(&engine.context().module);
+    collector.visit_module(&ctx.module);
     collector.emits_by_state
 }
 
 struct TypestateEmitCollector<'a> {
     typestate_names: &'a HashSet<String>,
-    node_types: &'a HashMap<NodeId, Type>,
+    type_map: &'a crate::core::typecheck::type_map::TypeMap,
     current_state: Option<TypestateStateKey>,
     emits_by_state: HashMap<TypestateStateKey, Vec<EmitPayload>>,
 }
@@ -676,7 +679,7 @@ impl Visitor for TypestateEmitCollector<'_> {
     fn visit_expr(&mut self, expr: &Expr) {
         if let Some(state_key) = &self.current_state
             && let Some(emit) =
-                extract_emit_from_expr(expr, |node_id| self.node_types.get(&node_id).cloned())
+                extract_emit_from_expr(expr, |node_id| self.type_map.lookup_node_type(node_id))
         {
             self.emits_by_state
                 .entry(state_key.clone())
