@@ -12,7 +12,6 @@ use crate::core::tree::visit::{self, Visitor};
 use crate::core::tree::{
     EmitKind, Expr, ExprKind, FuncDef, MethodItem, NodeId, NodeIdGen, TopLevelItem, TypeExprKind,
 };
-use crate::core::typecheck::TypeCheckErrorKind;
 use crate::core::types::Type;
 
 fn parsed_context(source: &str) -> ParsedContext {
@@ -1157,22 +1156,16 @@ typestate Gateway {
     }
 }
 "#;
-    let parsed = parsed_context_typestate(source);
-    let out = resolve_typecheck_pipeline_with_policy(
-        parsed,
-        ResolveInputs::default(),
-        None,
-        FrontendPolicy::Strict,
-    );
+    let sem_errors = semcheck_errors_typestate(source);
     assert!(
-        out.type_errors.iter().any(|e| {
+        sem_errors.iter().any(|e| {
             matches!(
                 e.kind(),
-                TypeCheckErrorKind::ReplyCapConsumedMultipleTimes(name, ..) if name == "cap"
+                SemCheckErrorKind::ReplyCapConsumedMultipleTimes(name) if name == "cap"
             )
         }),
         "expected double-consume reply cap error, got {:?}",
-        out.type_errors
+        sem_errors
     );
 }
 
@@ -1199,22 +1192,16 @@ typestate Gateway {
     }
 }
 "#;
-    let parsed = parsed_context_typestate(source);
-    let out = resolve_typecheck_pipeline_with_policy(
-        parsed,
-        ResolveInputs::default(),
-        None,
-        FrontendPolicy::Strict,
-    );
+    let sem_errors = semcheck_errors_typestate(source);
     assert!(
-        out.type_errors.iter().any(|e| {
+        sem_errors.iter().any(|e| {
             matches!(
                 e.kind(),
-                TypeCheckErrorKind::ReplyCapMustBeConsumed(name, ..) if name == "cap"
+                SemCheckErrorKind::ReplyCapMustBeConsumed(name) if name == "cap"
             )
         }),
         "expected missing-consume reply cap error, got {:?}",
-        out.type_errors
+        sem_errors
     );
 }
 
@@ -1238,20 +1225,13 @@ typestate Gateway {
     }
 }
 "#;
-    let parsed = parsed_context_typestate(source);
-    let out = resolve_typecheck_pipeline_with_policy(
-        parsed,
-        ResolveInputs::default(),
-        None,
-        FrontendPolicy::Strict,
-    );
+    let sem_errors = semcheck_errors_typestate(source);
     assert!(
-        out.type_errors.iter().any(|e| matches!(
-            e.kind(),
-            TypeCheckErrorKind::ReplyPayloadNotAllowed(_, _, ..)
-        )),
+        sem_errors
+            .iter()
+            .any(|e| matches!(e.kind(), SemCheckErrorKind::ReplyPayloadNotAllowed(_, _))),
         "expected invalid reply payload error, got {:?}",
-        out.type_errors
+        sem_errors
     );
 }
 
@@ -1273,19 +1253,13 @@ typestate Gateway {
     }
 }
 "#;
-    let parsed = parsed_context_typestate(source);
-    let out = resolve_typecheck_pipeline_with_policy(
-        parsed,
-        ResolveInputs::default(),
-        None,
-        FrontendPolicy::Strict,
-    );
+    let sem_errors = semcheck_errors_typestate(source);
     assert!(
-        out.type_errors
+        sem_errors
             .iter()
-            .any(|e| matches!(e.kind(), TypeCheckErrorKind::ReplyOutsideHandler)),
+            .any(|e| matches!(e.kind(), SemCheckErrorKind::ReplyOutsideHandler)),
         "expected reply outside handler error, got {:?}",
-        out.type_errors
+        sem_errors
     );
 }
 

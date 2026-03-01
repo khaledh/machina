@@ -1,26 +1,31 @@
+//! Reply-capability validation for typestate handlers.
+//!
+//! These checks rely on solved types and CFG/dataflow, but they do not
+//! participate in type inference. That makes them a better fit for semcheck
+//! than for typecheck validation.
+
 use std::collections::HashMap;
 
 use crate::core::analysis::dataflow::{DataflowGraph, solve_forward};
+use crate::core::context::SemCheckNormalizedContext;
 use crate::core::resolve::{DefId, DefTable};
+use crate::core::semck::{SEK, SemCheckError, push_error};
 use crate::core::tree::cfg::{AstBlockId, Cfg, CfgBuilder, CfgItem, CfgNode};
 use crate::core::tree::visit::{self, Visitor};
 use crate::core::tree::{
     Expr, ExprKind, MethodBlock, MethodDef, MethodItem, Module, NodeId, StmtExpr,
 };
-use crate::core::typecheck::engine::TypecheckEngine;
-use crate::core::typecheck::errors::{TEK, TypeCheckError};
 use crate::core::typecheck::type_map::resolve_type_expr;
 use crate::core::types::{Type, TypeAssignability, type_assignable};
 
-pub(super) fn check_reply_cap_usage(engine: &TypecheckEngine) -> Vec<TypeCheckError> {
+pub(super) fn check_reply_cap_usage(ctx: &SemCheckNormalizedContext) -> Vec<SemCheckError> {
     let mut errors = Vec::new();
-    let node_types = &engine.state().solve.resolved_node_types;
 
     let mut outside_collector = ReplyOutsideHandlerCollector::default();
-    outside_collector.visit_module(&engine.context().module);
+    outside_collector.visit_module(&ctx.module);
     errors.extend(outside_collector.errors);
 
-    for method_block in engine.context().module.method_blocks() {
+    for method_block in ctx.module.method_blocks() {
         if !method_block.type_name.starts_with("__ts_") {
             continue;
         }
@@ -31,19 +36,15 @@ pub(super) fn check_reply_cap_usage(engine: &TypecheckEngine) -> Vec<TypeCheckEr
             if !method_def.sig.name.starts_with("__ts_on_") {
                 continue;
             }
-            let cap_params = collect_handler_reply_caps(
-                &engine.context().def_table,
-                &engine.context().module,
-                method_def,
-            );
+            let cap_params = collect_handler_reply_caps(&ctx.def_table, &ctx.module, method_def);
             errors.extend(check_handler_reply_calls(
-                &engine.context().def_table,
+                &ctx.def_table,
                 method_def,
                 &cap_params,
-                node_types,
+                &ctx.type_map,
             ));
             errors.extend(check_handler_reply_cap_linearity(
-                &engine.context().def_table,
+                &ctx.def_table,
                 method_def,
                 &cap_params,
             ));
@@ -55,7 +56,7 @@ pub(super) fn check_reply_cap_usage(engine: &TypecheckEngine) -> Vec<TypeCheckEr
 
 #[derive(Default)]
 struct ReplyOutsideHandlerCollector {
-    errors: Vec<TypeCheckError>,
+    errors: Vec<SemCheckError>,
     in_typestate_method_block: bool,
     in_typestate_handler: bool,
 }
@@ -78,7 +79,7 @@ impl Visitor for ReplyOutsideHandlerCollector {
 
     fn visit_expr(&mut self, expr: &Expr) {
         if matches!(expr.kind, ExprKind::Reply { .. }) && !self.in_typestate_handler {
-            self.errors.push(TEK::ReplyOutsideHandler.at(expr.span));
+            self.errors.push(SEK::ReplyOutsideHandler.at(expr.span));
         }
         visit::walk_expr(self, expr);
     }
@@ -126,8 +127,8 @@ fn check_handler_reply_calls(
     def_table: &crate::core::resolve::DefTable,
     method_def: &MethodDef,
     cap_params: &[ReplyCapParam],
-    node_types: &HashMap<NodeId, Type>,
-) -> Vec<TypeCheckError> {
+    type_map: &crate::core::typecheck::type_map::TypeMap,
+) -> Vec<SemCheckError> {
     let mut errors = Vec::new();
     let cap_params_by_id: HashMap<DefId, &ReplyCapParam> =
         cap_params.iter().map(|cap| (cap.def_id, cap)).collect();
@@ -135,47 +136,38 @@ fn check_handler_reply_calls(
     collect_reply_sites_from_expr(&method_def.body, &mut sites);
 
     for site in sites {
-        let Some(cap_ty) = node_types.get(&site.cap_node) else {
+        let Some(cap_ty) = type_map.lookup_node_type(site.cap_node) else {
             continue;
         };
         let Type::ReplyCap { .. } = cap_ty else {
-            crate::core::typecheck::tc_push_error!(
-                errors,
+            push_error(
+                &mut errors,
                 site.cap_span,
-                TEK::ReplyCapExpected(cap_ty.clone())
+                SEK::ReplyCapExpected(cap_ty.clone()),
             );
             continue;
         };
 
         let Some(cap_def_id) = def_table.lookup_node_def_id(site.cap_node) else {
-            crate::core::typecheck::tc_push_error!(
-                errors,
-                site.cap_span,
-                TEK::ReplyCapParamRequired
-            );
+            push_error(&mut errors, site.cap_span, SEK::ReplyCapParamRequired);
             continue;
         };
         let Some(cap_param) = cap_params_by_id.get(&cap_def_id).copied() else {
-            crate::core::typecheck::tc_push_error!(
-                errors,
-                site.cap_span,
-                TEK::ReplyCapParamRequired
-            );
+            push_error(&mut errors, site.cap_span, SEK::ReplyCapParamRequired);
             continue;
         };
 
-        let Some(value_ty) = node_types.get(&site.value_node) else {
+        let Some(value_ty) = type_map.lookup_node_type(site.value_node) else {
             continue;
         };
-        let allowed = cap_param
-            .response_tys
-            .iter()
-            .any(|expected| type_assignable(value_ty, expected) != TypeAssignability::Incompatible);
+        let allowed = cap_param.response_tys.iter().any(|expected| {
+            type_assignable(&value_ty, expected) != TypeAssignability::Incompatible
+        });
         if !allowed {
-            crate::core::typecheck::tc_push_error!(
-                errors,
+            push_error(
+                &mut errors,
                 site.span,
-                TEK::ReplyPayloadNotAllowed(value_ty.clone(), cap_param.response_tys.clone(),)
+                SEK::ReplyPayloadNotAllowed(value_ty.clone(), cap_param.response_tys.clone()),
             );
         }
     }
@@ -195,7 +187,7 @@ fn check_handler_reply_cap_linearity(
     def_table: &crate::core::resolve::DefTable,
     method_def: &MethodDef,
     cap_params: &[ReplyCapParam],
-) -> Vec<TypeCheckError> {
+) -> Vec<SemCheckError> {
     if cap_params.is_empty() {
         return Vec::new();
     }
@@ -241,10 +233,10 @@ fn check_handler_reply_cap_linearity(
                         | ReplyCapFlowState::MaybeConsumed
                         | ReplyCapFlowState::InvalidDoubleConsume
                 ) {
-                    crate::core::typecheck::tc_push_error!(
-                        errors,
+                    push_error(
+                        &mut errors,
                         *span,
-                        TEK::ReplyCapConsumedMultipleTimes(cap.name.clone())
+                        SEK::ReplyCapConsumedMultipleTimes(cap.name.clone()),
                     );
                     state = ReplyCapFlowState::InvalidDoubleConsume;
                 } else {
@@ -271,10 +263,10 @@ fn check_handler_reply_cap_linearity(
             }
         }
         if missing_on_some_path {
-            crate::core::typecheck::tc_push_error!(
-                errors,
+            push_error(
+                &mut errors,
                 cap.span,
-                TEK::ReplyCapMustBeConsumed(cap.name.clone())
+                SEK::ReplyCapMustBeConsumed(cap.name.clone()),
             );
         }
     }

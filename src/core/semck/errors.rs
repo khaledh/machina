@@ -219,6 +219,24 @@ pub enum SemCheckErrorKind {
     #[error("Typestate {0} handler for request {1}{2} uses unsupported response variant {3}")]
     TypestateHandlerUnsupportedResponseVariant(String, Type, String, Type),
 
+    #[error("`reply` can only be used inside typestate `on` handlers")]
+    ReplyOutsideHandler,
+
+    #[error("`reply` expects a ReplyCap as its first argument, found {0}")]
+    ReplyCapExpected(Type),
+
+    #[error("`reply` payload type {0} is not in reply capability response set {1:?}")]
+    ReplyPayloadNotAllowed(Type, Vec<Type>),
+
+    #[error("reply capability must be consumed exactly once on all paths: {0}")]
+    ReplyCapMustBeConsumed(String),
+
+    #[error("reply capability consumed multiple times: {0}")]
+    ReplyCapConsumedMultipleTimes(String),
+
+    #[error("`reply` capability argument must be a handler ReplyCap parameter")]
+    ReplyCapParamRequired,
+
     #[error(
         "Typestate {0} ({1}::{2} state {3}) has handler trigger {4} with no matching protocol transition"
     )]

@@ -107,6 +107,14 @@ fn semcheck_code(error: &SemCheckError) -> &'static str {
         SemCheckErrorKind::TypestateHandlerUnsupportedResponseVariant(..) => {
             "MC-SEMCK-TypestateHandlerUnsupportedResponseVariant"
         }
+        SemCheckErrorKind::ReplyOutsideHandler => "MC-SEMCK-ReplyOutsideHandler",
+        SemCheckErrorKind::ReplyCapExpected(..) => "MC-SEMCK-ReplyCapExpected",
+        SemCheckErrorKind::ReplyPayloadNotAllowed(..) => "MC-SEMCK-ReplyPayloadNotAllowed",
+        SemCheckErrorKind::ReplyCapMustBeConsumed(..) => "MC-SEMCK-ReplyCapMustBeConsumed",
+        SemCheckErrorKind::ReplyCapConsumedMultipleTimes(..) => {
+            "MC-SEMCK-ReplyCapConsumedMultipleTimes"
+        }
+        SemCheckErrorKind::ReplyCapParamRequired => "MC-SEMCK-ReplyCapParamRequired",
         SemCheckErrorKind::ProtocolProgressionMissingTriggerTransition(..) => {
             "MC-SEMCK-ProtocolProgressionMissingTriggerTransition"
         }
@@ -319,6 +327,23 @@ fn populate_semcheck_metadata(error: &SemCheckError, metadata: &mut DiagnosticMe
                 "response".to_string(),
                 DiagnosticValue::String(response.to_string()),
             );
+        }
+        SemCheckErrorKind::ReplyCapExpected(ty) => {
+            metadata.insert("type".to_string(), DiagnosticValue::String(ty.to_string()));
+        }
+        SemCheckErrorKind::ReplyPayloadNotAllowed(payload, allowed) => {
+            metadata.insert(
+                "payload".to_string(),
+                DiagnosticValue::String(payload.to_string()),
+            );
+            metadata.insert(
+                "allowed".to_string(),
+                DiagnosticValue::StringList(allowed.iter().map(ToString::to_string).collect()),
+            );
+        }
+        SemCheckErrorKind::ReplyCapMustBeConsumed(name)
+        | SemCheckErrorKind::ReplyCapConsumedMultipleTimes(name) => {
+            metadata.insert("name".to_string(), DiagnosticValue::String(name.clone()));
         }
         SemCheckErrorKind::ProtocolProgressionMissingTriggerTransition(
             typestate,

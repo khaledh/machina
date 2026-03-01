@@ -6,7 +6,6 @@ use crate::core::typecheck::errors::TypeCheckError;
 use crate::core::typecheck::errors::TypeCheckErrorKind;
 
 mod control;
-mod reply_cap;
 mod stmt;
 
 /// Pass 4: semantic checks that are not pure type equalities/assignability.
@@ -17,7 +16,6 @@ pub(crate) fn run(engine: &mut TypecheckEngine) -> Result<(), Vec<TypeCheckError
     // Stmt-level rules sit here because they depend on solved types, but
     // do not need the heavier semantic passes downstream.
     errors.extend(stmt::check_stmt_semantics(engine));
-    errors.extend(reply_cap::check_reply_cap_usage(engine));
 
     if errors.is_empty() {
         Ok(())
