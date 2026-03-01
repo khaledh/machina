@@ -41,6 +41,7 @@ impl super::AnalysisDb {
         Ok(
             def_at_span(&state, query_span, source.as_deref()).map(|def_id| DefTarget {
                 file_id,
+                module_id: Some(crate::core::capsule::ModuleId(file_id.0)),
                 def_id,
                 symbol_id: state
                     .resolved
@@ -72,14 +73,21 @@ impl super::AnalysisDb {
     ) -> QueryResult<Option<DefTarget>> {
         let snapshot = self.snapshot();
         let source = snapshot.text(file_id);
-        let state = if let Some(state) = self.entry_lookup_state_for_program_file(file_id)? {
-            state
+        let (state, module_id) = if let Some(program) =
+            self.program_pipeline_for_file(file_id)?.entry_module_id
+            && let Some(state) = self.entry_lookup_state_for_program_file(file_id)?
+        {
+            (state, Some(program))
         } else {
-            self.lookup_state_for_file(file_id)?
+            (
+                self.lookup_state_for_file(file_id)?,
+                Some(crate::core::capsule::ModuleId(file_id.0)),
+            )
         };
         Ok(
             def_at_span(&state, query_span, source.as_deref()).map(|def_id| DefTarget {
                 file_id,
+                module_id,
                 def_id,
                 symbol_id: state
                     .resolved

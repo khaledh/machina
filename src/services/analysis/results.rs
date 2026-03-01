@@ -218,6 +218,7 @@ pub struct Location {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct DefTarget {
     pub file_id: FileId,
+    pub module_id: Option<ModuleId>,
     pub def_id: DefId,
     pub symbol_id: Option<SymbolId>,
     pub program_scoped: bool,

@@ -1,6 +1,10 @@
 //! Pipeline and lookup helper methods for `AnalysisDb`.
 
+use std::collections::HashMap;
+
 use crate::core::capsule::ModuleId;
+use crate::core::resolve::DefId;
+use crate::core::symbol_id::SymbolId;
 use crate::services::analysis::frontend_support::{
     stable_source_revision, strict_frontend_lookup_state_with_path,
 };
@@ -11,6 +15,8 @@ use crate::services::analysis::program_pipeline::{
     ProgramPipelineResult, run_program_pipeline_for_file_with_options,
 };
 use crate::services::analysis::query::{QueryKey, QueryKind, QueryResult};
+use crate::services::analysis::results::DefTarget;
+use crate::services::analysis::snapshot::AnalysisSnapshot;
 use crate::services::analysis::snapshot::FileId;
 
 impl super::AnalysisDb {
@@ -25,7 +31,7 @@ impl super::AnalysisDb {
         self.lookup_state_for_file(file_id)
     }
 
-    fn lookup_state_in_origin_program(
+    pub(super) fn lookup_state_in_origin_program(
         &mut self,
         origin_file_id: FileId,
         file_id: FileId,
@@ -159,4 +165,64 @@ impl super::AnalysisDb {
             self.experimental_typestate,
         )
     }
+}
+
+pub(super) fn def_target_for_symbol_id_in_states(
+    snapshot: &AnalysisSnapshot,
+    module_states: &HashMap<ModuleId, LookupState>,
+    origin_file_id: FileId,
+    symbol_id: &SymbolId,
+) -> Option<DefTarget> {
+    for (module_id, state) in module_states {
+        let resolved = state.resolved.as_ref()?;
+        if resolved.module_path.as_ref() != Some(&symbol_id.module) {
+            continue;
+        }
+        let local_def_id = unique_local_def_id_for_symbol(resolved, symbol_id)?;
+        let target_file_id = resolved
+            .def_table
+            .source_path()
+            .and_then(|path| snapshot.file_id(path))
+            .unwrap_or(origin_file_id);
+        return Some(DefTarget {
+            file_id: target_file_id,
+            module_id: Some(*module_id),
+            def_id: local_def_id,
+            symbol_id: Some(symbol_id.clone()),
+            program_scoped: true,
+        });
+    }
+    None
+}
+
+pub(super) fn lookup_program_state_for_target(
+    module_states: &HashMap<ModuleId, LookupState>,
+    target: &DefTarget,
+    snapshot: &AnalysisSnapshot,
+) -> Option<LookupState> {
+    if let Some(module_id) = target.module_id
+        && let Some(state) = module_states.get(&module_id)
+    {
+        return Some(state.clone());
+    }
+
+    module_states
+        .values()
+        .find(|candidate| {
+            candidate
+                .resolved
+                .as_ref()
+                .and_then(|resolved| resolved.def_table.source_path())
+                .and_then(|path| snapshot.file_id(path))
+                == Some(target.file_id)
+        })
+        .cloned()
+}
+
+fn unique_local_def_id_for_symbol(
+    resolved: &crate::core::context::ResolvedContext,
+    symbol_id: &SymbolId,
+) -> Option<DefId> {
+    let defs = resolved.symbol_ids.lookup_local_def_ids(symbol_id)?;
+    (defs.len() == 1).then_some(defs[0])
 }

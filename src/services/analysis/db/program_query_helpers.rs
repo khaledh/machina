@@ -4,13 +4,18 @@ use crate::core::diag::Span;
 use crate::core::resolve::GlobalDefId;
 use crate::core::symbol_id::SelectedCallable;
 use crate::core::types::Type;
+use crate::services::analysis::db::pipeline_helpers::{
+    def_target_for_symbol_id_in_states, lookup_program_state_for_target,
+};
 use crate::services::analysis::lookups::{
     def_at_span, hover_at_span_in_file, hover_for_def_in_state,
     signature_help_for_def_at_call_site, type_at_span,
 };
 use crate::services::analysis::program_pipeline::resolve_imported_symbol_target_from_import_env;
 use crate::services::analysis::query::QueryResult;
-use crate::services::analysis::results::{CompletionItem, HoverInfo, Location, SignatureHelp};
+use crate::services::analysis::results::{
+    CompletionItem, DefTarget, HoverInfo, Location, SignatureHelp,
+};
 use crate::services::analysis::snapshot::FileId;
 use crate::services::analysis::syntax_index::{
     call_site_at_span, node_span_map, span_contains_span,
@@ -32,42 +37,45 @@ impl super::AnalysisDb {
             return Ok(None);
         };
         let source = snapshot.text(file_id);
-        if let Some(target) =
-            selected_imported_callable_target(&entry_state, query_span, true, module_states)
-            && let Some(target_state) = module_states.get(&target.module_id)
-            && let Some(target_resolved) = target_state.resolved.as_ref()
-            && let Some(loc) = target_resolved.def_table.lookup_def_location(target.def_id)
-        {
-            let target_file_id = loc
-                .path
-                .as_deref()
-                .and_then(|path| snapshot.file_id(path))
-                .unwrap_or(file_id);
-            return Ok(Some(Location {
-                file_id: target_file_id,
-                path: loc.path,
-                span: loc.span,
-            }));
+        if let Some(target) = selected_imported_callable_target(
+            &snapshot,
+            file_id,
+            &entry_state,
+            query_span,
+            true,
+            module_states,
+        ) {
+            let Some(target_state) =
+                lookup_program_state_for_target(module_states, &target, &snapshot)
+            else {
+                return Ok(None);
+            };
+            if let Some(target_resolved) = target_state.resolved.as_ref()
+                && let Some(loc) = target_resolved.def_table.lookup_def_location(target.def_id)
+            {
+                return Ok(Some(Location {
+                    file_id: target.file_id,
+                    path: loc.path,
+                    span: loc.span,
+                }));
+            }
         }
         let Some(def_id) = def_at_span(entry_state, query_span, source.as_deref()) else {
             return Ok(None);
         };
-        let Some(entry_resolved) = entry_state.resolved.as_ref() else {
+        let Some(target) = imported_or_local_def_target(
+            &snapshot,
+            file_id,
+            entry_module_id,
+            entry_state,
+            def_id,
+            &program_lookup.import_env_by_module,
+            module_states,
+        ) else {
             return Ok(None);
         };
-
-        let target = entry_resolved
-            .def_table
-            .lookup_def(def_id)
-            .and_then(|def| {
-                resolve_imported_symbol_target_from_import_env(
-                    entry_module_id,
-                    def,
-                    &program_lookup.import_env_by_module,
-                )
-            })
-            .unwrap_or_else(|| GlobalDefId::new(entry_module_id, def_id));
-        let Some(target_state) = module_states.get(&target.module_id) else {
+        let Some(target_state) = lookup_program_state_for_target(module_states, &target, &snapshot)
+        else {
             return Ok(None);
         };
         let Some(target_resolved) = target_state.resolved.as_ref() else {
@@ -76,13 +84,8 @@ impl super::AnalysisDb {
         let Some(loc) = target_resolved.def_table.lookup_def_location(target.def_id) else {
             return Ok(None);
         };
-        let target_file_id = loc
-            .path
-            .as_deref()
-            .and_then(|path| snapshot.file_id(path))
-            .unwrap_or(file_id);
         Ok(Some(Location {
-            file_id: target_file_id,
+            file_id: target.file_id,
             path: loc.path,
             span: loc.span,
         }))
@@ -123,18 +126,18 @@ impl super::AnalysisDb {
             snapshot.path(file_id),
             source.as_deref(),
         );
-        if let (Some(entry_module_id), Some(_), Some(hover)) = (
-            program.entry_module_id,
-            state.resolved.as_ref(),
-            hover.as_ref(),
-        ) && let Some(target) = imported_hover_target(
-            &state,
-            entry_module_id,
-            hover,
-            query_span,
-            &program.import_env_by_module,
-            &program.module_states,
-        ) {
+        if let (Some(entry_module_id), Some(hover)) = (program.entry_module_id, hover.as_ref())
+            && let Some(target) = imported_hover_target(
+                &snapshot,
+                file_id,
+                &state,
+                entry_module_id,
+                hover,
+                query_span,
+                &program.import_env_by_module,
+                &program.module_states,
+            )
+        {
             return Ok(Some(target));
         }
         if hover.as_ref().is_some_and(hover_needs_strict_fallback)
@@ -184,14 +187,20 @@ impl super::AnalysisDb {
         } else {
             self.lookup_state_for_file(file_id)?
         };
-        if let Some(target) =
-            selected_imported_callable_target(&state, query_span, false, &program.module_states)
-            && let Some(target_state) = program.module_states.get(&target.module_id)
+        if let Some(target) = selected_imported_callable_target(
+            &snapshot,
+            file_id,
+            &state,
+            query_span,
+            false,
+            &program.module_states,
+        ) && let Some(target_state) =
+            lookup_program_state_for_target(&program.module_states, &target, &snapshot)
             && let Some(sig) = signature_help_for_def_at_call_site(
                 &state,
                 query_span,
                 source.as_deref(),
-                target_state,
+                &target_state,
                 target.def_id,
             )
         {
@@ -215,6 +224,8 @@ fn hover_needs_strict_fallback(info: &HoverInfo) -> bool {
 }
 
 fn imported_hover_target(
+    snapshot: &crate::services::analysis::snapshot::AnalysisSnapshot,
+    origin_file_id: FileId,
     state: &crate::services::analysis::pipeline::LookupState,
     module_id: crate::core::capsule::ModuleId,
     hover: &HoverInfo,
@@ -228,10 +239,24 @@ fn imported_hover_target(
         crate::services::analysis::pipeline::LookupState,
     >,
 ) -> Option<HoverInfo> {
-    if let Some(target) = selected_imported_callable_target(state, query_span, true, module_states)
+    if let Some(target) = selected_imported_callable_target(
+        snapshot,
+        origin_file_id,
+        state,
+        query_span,
+        true,
+        module_states,
+    ) {
+        let target_state = lookup_program_state_for_target(module_states, &target, snapshot)?;
+        return hover_for_def_in_state(&target_state, target.def_id);
+    }
+
+    if let Some(symbol_id) = hover.symbol_id.as_ref()
+        && let Some(target) =
+            def_target_for_symbol_id_in_states(snapshot, module_states, origin_file_id, symbol_id)
     {
-        let target_state = module_states.get(&target.module_id)?;
-        return hover_for_def_in_state(target_state, target.def_id);
+        let target_state = lookup_program_state_for_target(module_states, &target, snapshot)?;
+        return hover_for_def_in_state(&target_state, target.def_id);
     }
 
     let entry_resolved = state.resolved.as_ref()?;
@@ -244,6 +269,8 @@ fn imported_hover_target(
 }
 
 fn selected_imported_callable_target(
+    snapshot: &crate::services::analysis::snapshot::AnalysisSnapshot,
+    origin_file_id: FileId,
     state: &crate::services::analysis::pipeline::LookupState,
     query_span: Span,
     require_callee_span: bool,
@@ -251,7 +278,7 @@ fn selected_imported_callable_target(
         crate::core::capsule::ModuleId,
         crate::services::analysis::pipeline::LookupState,
     >,
-) -> Option<GlobalDefId> {
+) -> Option<DefTarget> {
     let typed = state.typed.as_ref()?;
     let call = call_site_at_span(&typed.module, query_span)?;
     if require_callee_span {
@@ -264,29 +291,70 @@ fn selected_imported_callable_target(
     }
     let selected_sig = typed.call_sigs.get(&call.node_id)?;
     match selected_sig.selected.as_ref()? {
-        SelectedCallable::Global(target) => Some(*target),
-        SelectedCallable::Canonical(symbol_id) => canonical_symbol_target(module_states, symbol_id),
+        SelectedCallable::Global(target) => Some(global_def_target(
+            snapshot,
+            origin_file_id,
+            module_states,
+            *target,
+        )?),
+        SelectedCallable::Canonical(symbol_id) => {
+            def_target_for_symbol_id_in_states(snapshot, module_states, origin_file_id, symbol_id)
+        }
         _ => None,
     }
 }
 
-fn canonical_symbol_target(
+fn global_def_target(
+    snapshot: &crate::services::analysis::snapshot::AnalysisSnapshot,
+    origin_file_id: FileId,
     module_states: &std::collections::HashMap<
         crate::core::capsule::ModuleId,
         crate::services::analysis::pipeline::LookupState,
     >,
-    symbol_id: &crate::core::symbol_id::SymbolId,
-) -> Option<GlobalDefId> {
-    for (module_id, state) in module_states {
-        let resolved = state.resolved.as_ref()?;
-        if resolved.module_path.as_ref() != Some(&symbol_id.module) {
-            continue;
-        }
-        let local_def_id = resolved
-            .symbol_ids
-            .lookup_local_def_ids(symbol_id)
-            .and_then(|defs| (defs.len() == 1).then_some(defs[0]))?;
-        return Some(GlobalDefId::new(*module_id, local_def_id));
+    target: GlobalDefId,
+) -> Option<DefTarget> {
+    let state = module_states.get(&target.module_id)?;
+    let resolved = state.resolved.as_ref()?;
+    let file_id = resolved
+        .def_table
+        .source_path()
+        .and_then(|path| snapshot.file_id(path))
+        .unwrap_or(origin_file_id);
+    Some(DefTarget {
+        file_id,
+        module_id: Some(target.module_id),
+        def_id: target.def_id,
+        symbol_id: resolved.symbol_ids.lookup_symbol_id(target.def_id).cloned(),
+        program_scoped: true,
+    })
+}
+
+fn imported_or_local_def_target(
+    snapshot: &crate::services::analysis::snapshot::AnalysisSnapshot,
+    origin_file_id: FileId,
+    module_id: crate::core::capsule::ModuleId,
+    state: &crate::services::analysis::pipeline::LookupState,
+    def_id: crate::core::resolve::DefId,
+    import_env_by_module: &std::collections::HashMap<
+        crate::core::capsule::ModuleId,
+        crate::core::context::ImportEnv,
+    >,
+    module_states: &std::collections::HashMap<
+        crate::core::capsule::ModuleId,
+        crate::services::analysis::pipeline::LookupState,
+    >,
+) -> Option<DefTarget> {
+    let resolved = state.resolved.as_ref()?;
+    if let Some(symbol_id) = resolved.symbol_ids.lookup_symbol_id(def_id)
+        && let Some(target) =
+            def_target_for_symbol_id_in_states(snapshot, module_states, origin_file_id, symbol_id)
+    {
+        return Some(target);
     }
-    None
+
+    let local_def = resolved.def_table.lookup_def(def_id)?;
+    let target =
+        resolve_imported_symbol_target_from_import_env(module_id, local_def, import_env_by_module)
+            .unwrap_or_else(|| GlobalDefId::new(module_id, def_id));
+    global_def_target(snapshot, origin_file_id, module_states, target)
 }
