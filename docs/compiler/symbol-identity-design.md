@@ -24,15 +24,15 @@ Current status as of March 1, 2026:
 - Phase 1 is complete: `SymbolTable` was renamed to `CodegenNameTable`.
 - Phase 2 is largely complete: `SymbolId`/`SymbolIdTable` exist and loaded module contexts can map local defs to canonical symbol ids.
 - Phase 3 is substantially implemented: selected callable facts now prefer canonical symbol ids, including overloaded imported call sites.
-- Phase 4 is underway: import/export facts carry canonical symbol ids for callable/type/trait payloads, while `GlobalDefId` remains mostly as provenance.
+- Phase 4 is substantially implemented: import/export facts now carry symbol-aware exported entries and canonical symbol ids for callable/type/trait payloads.
 - Phase 5 is substantially implemented for tooling lookup: hover, signature help, definition, references, and rename now flow through `DefTarget` and canonical symbol lookup helpers.
-- Phase 6 has not started in earnest yet: `GlobalDefId` still has a visible surface in resolver/typecheck/import plumbing.
+- Phase 6 is underway: `GlobalDefId` has been removed from selected-call handling and most active tooling/import lookup paths, but it still remains in provenance-oriented export/import metadata and a few bridge APIs.
 
 The remaining high-value work is mostly consolidation:
 
 - make `SymbolId -> source definition/render` the single obvious tooling API
 - attach doc comments through canonical symbol lookup
-- continue shrinking `GlobalDefId` to provenance/internal bridging only
+- continue shrinking `GlobalDefId` to provenance/internal bridging only, or decide deliberately to keep it as the explicit provenance type
 
 ## Goals
 
@@ -564,9 +564,9 @@ references, and rename. Documentation comments are still pending.
 
 ### Phase 6: Reduce `GlobalDefId` surface
 
-Status: not started as a dedicated cleanup phase. `GlobalDefId` is still used
-widely as provenance and as a transitional bridge in core resolve/typecheck
-plumbing.
+Status: underway. `GlobalDefId` no longer drives selected-call identity or most
+analysis/tooling lookup paths. Its remaining role is mainly provenance in
+export/import metadata plus a handful of bridge APIs.
 
 1. Keep `GlobalDefId` only where it still helps as a compact bridge.
 2. Move public/compiler-service APIs to `SymbolId`.
