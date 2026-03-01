@@ -6,8 +6,8 @@ use crate::core::symbol_id::SelectedCallable;
 use crate::core::types::Type;
 use crate::services::analysis::db::pipeline_helpers::def_target_for_symbol_id_in_states;
 use crate::services::analysis::lookups::{
-    def_at_span, hover_at_span_in_file, hover_for_def_in_state, hover_for_resolved_target,
-    location_for_resolved_target, signature_help_for_resolved_target_at_call_site, type_at_span,
+    def_at_span, hover_at_span_in_file, hover_for_resolved_target, location_for_resolved_target,
+    signature_help_for_resolved_target_at_call_site, type_at_span,
 };
 use crate::services::analysis::program_pipeline::resolve_imported_symbol_target_from_import_env;
 use crate::services::analysis::query::QueryResult;
@@ -35,34 +35,19 @@ impl super::AnalysisDb {
             return Ok(None);
         };
         let source = snapshot.text(file_id);
-        if let Some(target) = selected_callable_target(
-            &snapshot,
+        let resolved_target = resolved_target_at_program_span(
+            self,
             file_id,
-            &entry_state,
+            &snapshot,
             query_span,
-            true,
-            module_states,
-        ) {
-            let Some(resolved_target) = self.resolve_target_in_program(file_id, target)? else {
-                return Ok(None);
-            };
-            return Ok(location_for_resolved_target(&resolved_target));
-        }
-        let Some(def_id) = def_at_span(entry_state, query_span, source.as_deref()) else {
-            return Ok(None);
-        };
-        let Some(target) = imported_or_local_def_target(
-            &snapshot,
-            file_id,
+            source.as_deref(),
             entry_module_id,
             entry_state,
-            def_id,
             &program_lookup.import_env_by_module,
             module_states,
-        ) else {
-            return Ok(None);
-        };
-        let Some(resolved_target) = self.resolve_target_in_program(file_id, target)? else {
+            true,
+        )?;
+        let Some(resolved_target) = resolved_target else {
             return Ok(None);
         };
         Ok(location_for_resolved_target(&resolved_target))
@@ -237,13 +222,71 @@ fn imported_hover_target(
         return hover_for_resolved_target(&resolved_target);
     }
 
-    let entry_resolved = state.resolved.as_ref()?;
     let local_def_id = hover.def_id?;
-    let local_def = entry_resolved.def_table.lookup_def(local_def_id)?;
-    let target =
-        resolve_imported_symbol_target_from_import_env(module_id, local_def, import_env_by_module)?;
-    let target_state = module_states.get(&target.module_id)?;
-    hover_for_def_in_state(target_state, target.def_id)
+    let target = imported_or_local_def_target(
+        &snapshot,
+        origin_file_id,
+        module_id,
+        state,
+        local_def_id,
+        import_env_by_module,
+        module_states,
+    )?;
+    if target.module_id == Some(module_id) && target.def_id == local_def_id {
+        return None;
+    }
+    let resolved_target = db
+        .resolve_target_in_program(origin_file_id, target)
+        .ok()??;
+    hover_for_resolved_target(&resolved_target)
+}
+
+fn resolved_target_at_program_span(
+    db: &mut super::AnalysisDb,
+    origin_file_id: FileId,
+    snapshot: &crate::services::analysis::snapshot::AnalysisSnapshot,
+    query_span: Span,
+    source: Option<&str>,
+    module_id: crate::core::capsule::ModuleId,
+    state: &crate::services::analysis::pipeline::LookupState,
+    import_env_by_module: &std::collections::HashMap<
+        crate::core::capsule::ModuleId,
+        crate::core::context::ImportEnv,
+    >,
+    module_states: &std::collections::HashMap<
+        crate::core::capsule::ModuleId,
+        crate::services::analysis::pipeline::LookupState,
+    >,
+    require_callee_span: bool,
+) -> QueryResult<Option<crate::services::analysis::lookups::ResolvedSymbolTarget>> {
+    let target = if let Some(target) = selected_callable_target(
+        snapshot,
+        origin_file_id,
+        state,
+        query_span,
+        require_callee_span,
+        module_states,
+    ) {
+        target
+    } else {
+        let Some(def_id) = def_at_span(state, query_span, source) else {
+            return Ok(None);
+        };
+        let Some(target) = imported_or_local_def_target(
+            snapshot,
+            origin_file_id,
+            module_id,
+            state,
+            def_id,
+            import_env_by_module,
+            module_states,
+        ) else {
+            return Ok(None);
+        };
+        target
+    };
+
+    db.resolve_target_in_program(origin_file_id, target)
 }
 
 fn selected_callable_target(
