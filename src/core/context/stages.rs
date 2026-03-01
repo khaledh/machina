@@ -3,11 +3,11 @@ use std::ops::{Deref, DerefMut};
 use std::path::PathBuf;
 
 use crate::core::capsule::ModuleId;
+use crate::core::codegen_names::CodegenNameTable;
 use crate::core::diag::Span;
 use crate::core::protocol::ProtocolIndex;
 use crate::core::resolve::{DefId, DefTable};
 use crate::core::semck::closure::capture::ClosureCapture;
-use crate::core::symtab::SymbolTable;
 use crate::core::tree::semantic::Module as SemanticModule;
 use crate::core::tree::semantic::{DropPlanMap, LoweringPlanMap, MachinePlanMap};
 use crate::core::tree::{Module, NodeId, NodeIdGen, TypeExpr};
@@ -18,7 +18,7 @@ use crate::core::types::Type;
 pub struct ResolvedTables {
     pub def_table: DefTable,
     pub def_owners: HashMap<DefId, ModuleId>,
-    pub symbols: SymbolTable,
+    pub symbols: CodegenNameTable,
     pub node_id_gen: NodeIdGen,
     pub typestate_role_impls: Vec<TypestateRoleImplBinding>,
     /// Canonical protocol facts extracted from resolved protocol definitions
@@ -253,7 +253,7 @@ impl ParsedContext {
             def_table.set_source_path(self.source_path.clone());
         }
 
-        let symbols = SymbolTable::new(&module, &def_table);
+        let symbols = CodegenNameTable::new(&module, &def_table);
 
         ResolvedContext {
             module,

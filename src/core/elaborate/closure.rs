@@ -43,10 +43,10 @@
 //! ```
 
 use crate::core::analysis::facts::SyntheticReason;
+use crate::core::codegen_names::CodegenNameTable;
 use crate::core::diag::Span;
 use crate::core::resolve::{DefId, DefKind, TypeAttrs};
 use crate::core::semck::closure::capture::CaptureMode;
-use crate::core::symtab::SymbolTable;
 use crate::core::tree as ast;
 use crate::core::tree::semantic as sem;
 use crate::core::tree::{NodeId, ParamMode};
@@ -59,7 +59,7 @@ use super::elaborator::{CaptureField, ClosureContext, ClosureInfo, Elaborator};
 /// Closure conversion synthesizes method defs that do not exist in the initial
 /// resolved symbol table. Add stable backend names so downstream IR/codegen
 /// formatting can print and reference them.
-pub(super) fn register_lifted_method_symbols(module: &sem::Module, symbols: &mut SymbolTable) {
+pub(super) fn register_lifted_method_symbols(module: &sem::Module, symbols: &mut CodegenNameTable) {
     let mut used_names: std::collections::HashSet<String> =
         symbols.def_names.values().cloned().collect();
     for method_block in module.method_blocks() {

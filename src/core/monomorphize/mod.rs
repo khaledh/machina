@@ -147,7 +147,7 @@ pub(crate) fn monomorphize_with_plan(
     };
 
     if generic_insts.is_empty() {
-        let symbols = crate::core::symtab::SymbolTable::new(&module, &def_table);
+        let symbols = crate::core::codegen_names::CodegenNameTable::new(&module, &def_table);
         return Ok((
             ResolvedContext {
                 module,
@@ -418,7 +418,7 @@ pub(crate) fn monomorphize_with_plan(
     }
 
     module.top_level_items = new_items;
-    let symbols = crate::core::symtab::SymbolTable::new(&module, &def_table);
+    let symbols = crate::core::codegen_names::CodegenNameTable::new(&module, &def_table);
     Ok((
         ResolvedContext {
             module,

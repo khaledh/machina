@@ -1,14 +1,21 @@
+//! Backend-facing emitted name assignment for definitions.
+//!
+//! This table is intentionally separate from the compiler's future semantic
+//! symbol identity model. Its job is narrower: map local `DefId`s to emitted
+//! labels/link names used by IR formatting and backend codegen.
+
 use std::collections::HashMap;
 
 use crate::core::resolve::{DefId, DefTable};
 use crate::core::tree::Module;
 
 #[derive(Debug, Clone)]
-pub struct SymbolTable {
+pub struct CodegenNameTable {
+    /// Emitted/link names keyed by local definition id inside one module.
     pub def_names: HashMap<DefId, String>,
 }
 
-impl SymbolTable {
+impl CodegenNameTable {
     pub fn new(module: &Module, def_table: &DefTable) -> Self {
         // Collect overloads
         let mut overloads: HashMap<String, Vec<DefId>> = HashMap::new();
