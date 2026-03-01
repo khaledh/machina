@@ -11,7 +11,7 @@ use crate::core::resolve::def_table::{DefTable, DefTableBuilder};
 use crate::core::resolve::errors::{ResolveError, ResolveErrorKind as REK};
 use crate::core::resolve::symbols::{Scope, Symbol, SymbolKind};
 use crate::core::resolve::{
-    Def, DefId, DefIdGen, DefKind, FuncAttrs, GlobalDefId, TraitAttrs, TypeAttrs, Visibility,
+    Def, DefId, DefIdGen, DefKind, FuncAttrs, TraitAttrs, TypeAttrs, Visibility,
 };
 use crate::core::symbol_id::SymbolId;
 use crate::core::tree::visit::*;
@@ -28,13 +28,10 @@ pub struct ImportedModule {
 #[derive(Clone, Debug, Default)]
 pub struct ImportedSymbol {
     pub callable_sigs: Vec<ImportedCallableSig>,
-    pub callable_sources: Vec<GlobalDefId>,
-    pub callable_symbols: HashMap<GlobalDefId, SymbolId>,
+    pub callable_symbols: Vec<SymbolId>,
     pub type_ty: Option<Type>,
-    pub type_source: Option<GlobalDefId>,
     pub type_symbol: Option<SymbolId>,
     pub trait_sig: Option<ImportedTraitSig>,
-    pub trait_source: Option<GlobalDefId>,
     pub trait_symbol: Option<SymbolId>,
 }
 
@@ -77,31 +74,19 @@ impl ImportedSymbol {
             } else {
                 Vec::new()
             },
-            callable_sources: exports
-                .callables
-                .get(member)
-                .into_iter()
-                .flat_map(|items| items.iter().map(|item| item.global_def_id))
-                .collect(),
             callable_symbols: exports
                 .callables
                 .get(member)
                 .into_iter()
                 .flat_map(|items| items.iter())
-                .filter_map(|item| {
-                    item.symbol_id
-                        .clone()
-                        .map(|symbol| (item.global_def_id, symbol))
-                })
+                .filter_map(|item| item.symbol_id.clone())
                 .collect(),
             type_ty: if has_type { type_ty } else { None },
-            type_source: exports.types.get(member).map(|item| item.global_def_id),
             type_symbol: exports
                 .types
                 .get(member)
                 .and_then(|item| item.symbol_id.clone()),
             trait_sig: if has_trait { trait_sig } else { None },
-            trait_source: exports.traits.get(member).map(|item| item.global_def_id),
             trait_symbol: exports
                 .traits
                 .get(member)
@@ -110,15 +95,15 @@ impl ImportedSymbol {
     }
 
     pub fn has_callable(&self) -> bool {
-        !self.callable_sources.is_empty() || !self.callable_sigs.is_empty()
+        !self.callable_symbols.is_empty() || !self.callable_sigs.is_empty()
     }
 
     pub fn has_type(&self) -> bool {
-        self.type_source.is_some() || self.type_ty.is_some()
+        self.type_symbol.is_some() || self.type_ty.is_some()
     }
 
     pub fn has_trait(&self) -> bool {
-        self.trait_source.is_some() || self.trait_sig.is_some()
+        self.trait_symbol.is_some() || self.trait_sig.is_some()
     }
 
     pub fn from_binding(
@@ -133,28 +118,17 @@ impl ImportedSymbol {
 
         Some(Self {
             callable_sigs,
-            callable_sources: binding
-                .callables
-                .iter()
-                .map(|item| item.global_def_id)
-                .collect(),
             callable_symbols: binding
                 .callables
                 .iter()
-                .filter_map(|item| {
-                    item.symbol_id
-                        .clone()
-                        .map(|symbol| (item.global_def_id, symbol))
-                })
+                .filter_map(|item| item.symbol_id.clone())
                 .collect(),
             type_ty,
-            type_source: binding.type_def.as_ref().map(|item| item.global_def_id),
             type_symbol: binding
                 .type_def
                 .as_ref()
                 .and_then(|item| item.symbol_id.clone()),
             trait_sig,
-            trait_source: binding.trait_def.as_ref().map(|item| item.global_def_id),
             trait_symbol: binding
                 .trait_def
                 .as_ref()
@@ -793,19 +767,13 @@ impl SymbolResolver {
                     overloads: vec![def_id],
                 });
                 let callable_symbols = imported
-                    .callable_sources
+                    .callable_symbols
                     .iter()
-                    .copied()
+                    .cloned()
                     .zip(imported.callable_sigs.iter().cloned())
-                    .filter_map(|(source, sig)| {
-                        imported
-                            .callable_symbols
-                            .get(&source)
-                            .cloned()
-                            .map(|symbol_id| {
-                                self.imported_callable_sigs.insert(symbol_id.clone(), sig);
-                                symbol_id
-                            })
+                    .map(|(symbol_id, sig)| {
+                        self.imported_callable_sigs.insert(symbol_id.clone(), sig);
+                        symbol_id
                     })
                     .collect();
                 self.imported_defs.insert(

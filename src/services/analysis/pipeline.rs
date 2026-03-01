@@ -383,11 +383,11 @@ fn hash_imported_symbols(
             symbol.has_callable().hash(hasher);
             symbol.has_type().hash(hasher);
             symbol.has_trait().hash(hasher);
-            for source in &symbol.callable_sources {
-                (*source).hash(hasher);
+            for symbol_id in &symbol.callable_symbols {
+                symbol_id.hash(hasher);
             }
-            symbol.type_source.hash(hasher);
-            symbol.trait_source.hash(hasher);
+            symbol.type_symbol.hash(hasher);
+            symbol.trait_symbol.hash(hasher);
             if let Some(ty) = symbol.type_ty.as_ref() {
                 ty.hash(hasher);
             }

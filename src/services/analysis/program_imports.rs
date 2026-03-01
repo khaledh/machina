@@ -81,28 +81,17 @@ impl ProgramImportFactsCache {
                 alias,
                 ImportedSymbol {
                     callable_sigs,
-                    callable_sources: binding
-                        .callables
-                        .iter()
-                        .map(|item| item.global_def_id)
-                        .collect(),
                     callable_symbols: binding
                         .callables
                         .iter()
-                        .filter_map(|item| {
-                            item.symbol_id
-                                .clone()
-                                .map(|symbol| (item.global_def_id, symbol))
-                        })
+                        .filter_map(|item| item.symbol_id.clone())
                         .collect(),
                     type_ty,
-                    type_source: binding.type_def.as_ref().map(|item| item.global_def_id),
                     type_symbol: binding
                         .type_def
                         .as_ref()
                         .and_then(|item| item.symbol_id.clone()),
                     trait_sig,
-                    trait_source: binding.trait_def.as_ref().map(|item| item.global_def_id),
                     trait_symbol: binding
                         .trait_def
                         .as_ref()
