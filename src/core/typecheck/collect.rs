@@ -13,7 +13,9 @@
 use std::collections::{BTreeMap, HashMap, HashSet};
 
 use crate::core::diag::Span;
-use crate::core::resolve::{DefId, DefTable, ImportedCallableSig, ImportedFacts, ImportedTraitSig};
+use crate::core::resolve::{
+    DefId, DefTable, ImportedCallableSig, ImportedFacts, ImportedParamSig, ImportedTraitSig,
+};
 use crate::core::tree::ParamMode;
 use crate::core::tree::{
     Attribute, EnumDefVariant, FunctionSig, MethodItem, MethodSig, Param, StructDefField, TypeDef,
@@ -294,16 +296,7 @@ fn collect_trait_sigs(
             },
         );
     }
-
-    for (def_id, imported) in imported_facts.trait_entries() {
-        let Some(def) = ctx.def_table.lookup_def(def_id) else {
-            continue;
-        };
-        trait_sigs.insert(
-            def.name.clone(),
-            imported_trait_sig_to_collected(def_id, imported),
-        );
-    }
+    collect_imported_trait_sigs(ctx, imported_facts, trait_sigs);
 }
 
 fn collect_function_sigs(
@@ -338,7 +331,18 @@ fn collect_function_sigs(
             errors,
         );
     }
+    collect_imported_function_sigs(ctx, imported_facts, func_sigs);
+}
 
+/// Imported aliases are synthetic local defs; this pass reconstructs the same
+/// collected callable environment shape used for local functions.
+fn collect_imported_function_sigs(
+    ctx: &crate::core::context::ResolvedContext,
+    imported_facts: &ImportedFacts,
+    func_sigs: &mut HashMap<String, Vec<CollectedCallableSig>>,
+) {
+    // Imported callable aliases already have local synthetic defs in the
+    // def-table, so we only need to rehydrate their source-backed payloads.
     for (def_id, imported_sigs) in imported_facts.callable_entries() {
         let Some(def) = ctx.def_table.lookup_def(def_id) else {
             continue;
@@ -350,22 +354,30 @@ fn collect_function_sigs(
     }
 }
 
+fn collect_imported_trait_sigs(
+    ctx: &crate::core::context::ResolvedContext,
+    imported_facts: &ImportedFacts,
+    trait_sigs: &mut HashMap<String, CollectedTraitSig>,
+) {
+    // Traits follow the same pattern: alias-local def id, source-keyed payload.
+    for (def_id, imported) in imported_facts.trait_entries() {
+        let Some(def) = ctx.def_table.lookup_def(def_id) else {
+            continue;
+        };
+        trait_sigs.insert(
+            def.name.clone(),
+            imported_trait_sig_to_collected(def_id, imported),
+        );
+    }
+}
+
 fn imported_callable_sig_to_collected(
     def_id: DefId,
     imported: &ImportedCallableSig,
 ) -> CollectedCallableSig {
     CollectedCallableSig {
         def_id,
-        params: imported
-            .params
-            .iter()
-            .enumerate()
-            .map(|(index, param)| CollectedParamSig {
-                name: format!("arg{index}"),
-                ty: param.ty.clone(),
-                mode: param.mode.clone(),
-            })
-            .collect(),
+        params: imported_params_to_collected(&imported.params),
         ret_ty: imported.ret_ty.clone(),
         type_param_count: 0,
         type_param_var_names: BTreeMap::new(),
@@ -387,16 +399,7 @@ fn imported_trait_sig_to_collected(
                 name.clone(),
                 CollectedTraitMethodSig {
                     name: method.name.clone(),
-                    params: method
-                        .params
-                        .iter()
-                        .enumerate()
-                        .map(|(index, param)| CollectedParamSig {
-                            name: format!("arg{index}"),
-                            ty: param.ty.clone(),
-                            mode: param.mode.clone(),
-                        })
-                        .collect(),
+                    params: imported_params_to_collected(&method.params),
                     ret_ty: method.ret_ty.clone(),
                     type_param_count: method.type_param_count,
                     type_param_bounds: method.type_param_bounds.clone(),
@@ -428,6 +431,18 @@ fn imported_trait_sig_to_collected(
         properties,
         span: Span::default(),
     }
+}
+
+fn imported_params_to_collected(params: &[ImportedParamSig]) -> Vec<CollectedParamSig> {
+    params
+        .iter()
+        .enumerate()
+        .map(|(index, param)| CollectedParamSig {
+            name: format!("arg{index}"),
+            ty: param.ty.clone(),
+            mode: param.mode.clone(),
+        })
+        .collect()
 }
 
 fn collect_method_sigs(

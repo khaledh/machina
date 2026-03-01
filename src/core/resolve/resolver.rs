@@ -171,15 +171,6 @@ pub struct ImportedFacts {
 }
 
 impl ImportedFacts {
-    pub fn callable_sigs(&self, def_id: DefId) -> Vec<&ImportedCallableSig> {
-        self.defs_by_local_def
-            .get(&def_id)
-            .into_iter()
-            .flat_map(|facts| facts.callable_sources.iter())
-            .filter_map(|source| self.callable_sigs_by_source.get(source))
-            .collect()
-    }
-
     pub fn imported_type(&self, def_id: DefId) -> Option<&Type> {
         self.defs_by_local_def
             .get(&def_id)
@@ -192,10 +183,6 @@ impl ImportedFacts {
             .get(&def_id)
             .and_then(|facts| facts.trait_source)
             .and_then(|source| self.trait_defs_by_source.get(&source))
-    }
-
-    pub fn def_facts(&self, def_id: DefId) -> Option<&ImportedDefFacts> {
-        self.defs_by_local_def.get(&def_id)
     }
 
     pub fn callable_entries(
