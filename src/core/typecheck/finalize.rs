@@ -387,10 +387,7 @@ impl NominalKeyResolver {
         imported_facts: &ImportedFacts,
     ) -> Self {
         Self {
-            explicit_nominal_keys: collect_explicit_nominal_keys(
-                resolved,
-                &imported_facts.type_defs_by_def,
-            ),
+            explicit_nominal_keys: collect_explicit_nominal_keys(resolved, imported_facts),
             nominal_templates: collect_nominal_templates(resolved),
         }
     }
@@ -726,7 +723,7 @@ impl Visitor for ExplicitNominalCollector<'_> {
 
 struct ResolvedTypeLookup<'a> {
     context: &'a crate::core::context::ResolvedContext,
-    imported_type_defs: &'a HashMap<DefId, Type>,
+    imported_facts: &'a ImportedFacts,
 }
 
 impl TypeDefLookup for ResolvedTypeLookup<'_> {
@@ -737,19 +734,19 @@ impl TypeDefLookup for ResolvedTypeLookup<'_> {
     }
 
     fn imported_type_by_id(&self, def_id: DefId) -> Option<&Type> {
-        self.imported_type_defs.get(&def_id)
+        self.imported_facts.imported_type(def_id)
     }
 }
 
 fn collect_explicit_nominal_keys(
     resolved: &crate::core::context::ResolvedContext,
-    imported_type_defs: &HashMap<DefId, Type>,
+    imported_facts: &ImportedFacts,
 ) -> HashMap<String, NominalKey> {
     let mut out = HashMap::new();
     let uses = ExplicitNominalCollector::collect(&resolved.def_table, &resolved.module);
     let type_lookup = ResolvedTypeLookup {
         context: resolved,
-        imported_type_defs,
+        imported_facts,
     };
 
     for usage in uses {

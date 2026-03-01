@@ -11,7 +11,7 @@ use crate::core::resolve::def_table::{DefTable, DefTableBuilder};
 use crate::core::resolve::errors::{ResolveError, ResolveErrorKind as REK};
 use crate::core::resolve::symbols::{Scope, Symbol, SymbolKind};
 use crate::core::resolve::{
-    Def, DefId, DefIdGen, DefKind, FuncAttrs, TraitAttrs, TypeAttrs, Visibility,
+    Def, DefId, DefIdGen, DefKind, FuncAttrs, GlobalDefId, TraitAttrs, TypeAttrs, Visibility,
 };
 use crate::core::tree::visit::*;
 use crate::core::tree::*;
@@ -28,10 +28,13 @@ pub struct ImportedModule {
 pub struct ImportedSymbol {
     pub has_callable: bool,
     pub callable_sigs: Vec<ImportedCallableSig>,
+    pub callable_sources: Vec<GlobalDefId>,
     pub has_type: bool,
     pub type_ty: Option<Type>,
+    pub type_source: Option<GlobalDefId>,
     pub has_trait: bool,
     pub trait_sig: Option<ImportedTraitSig>,
+    pub trait_source: Option<GlobalDefId>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -70,11 +73,67 @@ pub struct ImportedTraitSig {
     pub properties: HashMap<String, ImportedTraitPropertySig>,
 }
 
+/// Imported facts keyed by the synthetic local def created for an imported alias.
+///
+/// The type checker still consumes reconstructed signatures/types today, but we
+/// also retain the originating global def identity so later passes can converge
+/// on one import representation instead of rebuilding it repeatedly.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct ImportedDefFacts {
+    pub callable_sources: Vec<GlobalDefId>,
+    pub callable_sigs: Vec<ImportedCallableSig>,
+    pub type_source: Option<GlobalDefId>,
+    pub type_def: Option<Type>,
+    pub trait_source: Option<GlobalDefId>,
+    pub trait_def: Option<ImportedTraitSig>,
+}
+
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct ImportedFacts {
-    pub callable_sigs_by_def: HashMap<DefId, Vec<ImportedCallableSig>>,
-    pub type_defs_by_def: HashMap<DefId, Type>,
-    pub trait_defs_by_def: HashMap<DefId, ImportedTraitSig>,
+    defs_by_local_def: HashMap<DefId, ImportedDefFacts>,
+}
+
+impl ImportedFacts {
+    pub fn callable_sigs(&self, def_id: DefId) -> Option<&[ImportedCallableSig]> {
+        self.defs_by_local_def
+            .get(&def_id)
+            .map(|facts| facts.callable_sigs.as_slice())
+            .filter(|sigs| !sigs.is_empty())
+    }
+
+    pub fn imported_type(&self, def_id: DefId) -> Option<&Type> {
+        self.defs_by_local_def
+            .get(&def_id)
+            .and_then(|facts| facts.type_def.as_ref())
+    }
+
+    pub fn imported_trait(&self, def_id: DefId) -> Option<&ImportedTraitSig> {
+        self.defs_by_local_def
+            .get(&def_id)
+            .and_then(|facts| facts.trait_def.as_ref())
+    }
+
+    pub fn def_facts(&self, def_id: DefId) -> Option<&ImportedDefFacts> {
+        self.defs_by_local_def.get(&def_id)
+    }
+
+    pub fn callable_entries(&self) -> impl Iterator<Item = (DefId, &[ImportedCallableSig])> + '_ {
+        self.defs_by_local_def.iter().filter_map(|(def_id, facts)| {
+            (!facts.callable_sigs.is_empty()).then_some((*def_id, facts.callable_sigs.as_slice()))
+        })
+    }
+
+    pub fn type_entries(&self) -> impl Iterator<Item = (DefId, &Type)> + '_ {
+        self.defs_by_local_def
+            .iter()
+            .filter_map(|(def_id, facts)| facts.type_def.as_ref().map(|ty| (*def_id, ty)))
+    }
+
+    pub fn trait_entries(&self) -> impl Iterator<Item = (DefId, &ImportedTraitSig)> + '_ {
+        self.defs_by_local_def
+            .iter()
+            .filter_map(|(def_id, facts)| facts.trait_def.as_ref().map(|sig| (*def_id, sig)))
+    }
 }
 
 pub struct SymbolResolver {
@@ -89,9 +148,7 @@ pub struct SymbolResolver {
     require_aliases: HashSet<String>,
     imported_modules: HashMap<String, ImportedModule>,
     imported_symbols: HashMap<String, ImportedSymbol>,
-    imported_callable_sigs: HashMap<DefId, Vec<ImportedCallableSig>>,
-    imported_type_defs: HashMap<DefId, Type>,
-    imported_trait_defs: HashMap<DefId, ImportedTraitSig>,
+    imported_defs: HashMap<DefId, ImportedDefFacts>,
     typestate_role_impls: Vec<TypestateRoleImplRef>,
 }
 
@@ -124,9 +181,7 @@ impl SymbolResolver {
             require_aliases: HashSet::new(),
             imported_modules: HashMap::new(),
             imported_symbols: HashMap::new(),
-            imported_callable_sigs: HashMap::new(),
-            imported_type_defs: HashMap::new(),
-            imported_trait_defs: HashMap::new(),
+            imported_defs: HashMap::new(),
             typestate_role_impls: Vec::new(),
         }
     }
@@ -580,10 +635,17 @@ impl SymbolResolver {
                 let def_id = self.add_built_in_symbol(&alias, false, |def_id| SymbolKind::Func {
                     overloads: vec![def_id],
                 });
-                if !imported.callable_sigs.is_empty() {
-                    self.imported_callable_sigs
-                        .insert(def_id, imported.callable_sigs.clone());
-                }
+                self.imported_defs.insert(
+                    def_id,
+                    ImportedDefFacts {
+                        callable_sources: imported.callable_sources.clone(),
+                        callable_sigs: imported.callable_sigs.clone(),
+                        type_source: None,
+                        type_def: None,
+                        trait_source: None,
+                        trait_def: None,
+                    },
+                );
                 continue;
             }
 
@@ -597,18 +659,34 @@ impl SymbolResolver {
                             span: Span::default(),
                         },
                     });
-                if let Some(type_ty) = imported.type_ty.clone() {
-                    self.imported_type_defs.insert(def_id, type_ty);
-                }
+                self.imported_defs.insert(
+                    def_id,
+                    ImportedDefFacts {
+                        callable_sources: Vec::new(),
+                        callable_sigs: Vec::new(),
+                        type_source: imported.type_source,
+                        type_def: imported.type_ty.clone(),
+                        trait_source: None,
+                        trait_def: None,
+                    },
+                );
                 continue;
             }
 
             if imported.has_trait {
                 let def_id = self
                     .add_built_in_symbol(&alias, false, |def_id| SymbolKind::TraitDef { def_id });
-                if let Some(trait_sig) = imported.trait_sig.clone() {
-                    self.imported_trait_defs.insert(def_id, trait_sig);
-                }
+                self.imported_defs.insert(
+                    def_id,
+                    ImportedDefFacts {
+                        callable_sources: Vec::new(),
+                        callable_sigs: Vec::new(),
+                        type_source: None,
+                        type_def: None,
+                        trait_source: imported.trait_source,
+                        trait_def: imported.trait_sig.clone(),
+                    },
+                );
             }
         }
     }
@@ -2039,9 +2117,7 @@ pub fn resolve_with_imports_and_symbols_and_typestate_roles_partial(
     let (def_table, errors) = resolver.resolve_partial(&ast_context.module);
 
     let imported_facts = ImportedFacts {
-        callable_sigs_by_def: std::mem::take(&mut resolver.imported_callable_sigs),
-        type_defs_by_def: std::mem::take(&mut resolver.imported_type_defs),
-        trait_defs_by_def: std::mem::take(&mut resolver.imported_trait_defs),
+        defs_by_local_def: std::mem::take(&mut resolver.imported_defs),
     };
 
     ResolveOutput {
@@ -2105,10 +2181,17 @@ pub fn resolve_program(
                     .get(member)
                     .is_some_and(|overloads| !overloads.is_empty()),
                 callable_sigs: Vec::new(),
+                callable_sources: dep_exports
+                    .callables
+                    .get(member)
+                    .cloned()
+                    .unwrap_or_default(),
                 has_type: dep_exports.types.contains_key(member),
                 type_ty: None,
+                type_source: dep_exports.types.get(member).copied(),
                 has_trait: dep_exports.traits.contains_key(member),
                 trait_sig: None,
+                trait_source: dep_exports.traits.get(member).copied(),
             };
             if imported.has_callable || imported.has_type || imported.has_trait {
                 imported_symbols.insert(req.alias.clone(), imported);

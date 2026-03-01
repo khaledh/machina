@@ -38,17 +38,17 @@ enum PropertyAccessorKind {
 
 struct ResolvedTypeLookup<'a> {
     context: &'a crate::core::context::ResolvedContext,
-    imported_type_defs: &'a HashMap<DefId, Type>,
+    imported_facts: &'a ImportedFacts,
 }
 
 impl<'a> ResolvedTypeLookup<'a> {
     fn new(
         context: &'a crate::core::context::ResolvedContext,
-        imported_type_defs: &'a HashMap<DefId, Type>,
+        imported_facts: &'a ImportedFacts,
     ) -> Self {
         Self {
             context,
-            imported_type_defs,
+            imported_facts,
         }
     }
 }
@@ -61,7 +61,7 @@ impl TypeDefLookup for ResolvedTypeLookup<'_> {
     }
 
     fn imported_type_by_id(&self, def_id: DefId) -> Option<&Type> {
-        self.imported_type_defs.get(&def_id)
+        self.imported_facts.imported_type(def_id)
     }
 }
 
@@ -144,7 +144,7 @@ fn collect_type_defs(
     generic_envs: &mut HashMap<DefId, HashMap<DefId, TyVarId>>,
     errors: &mut Vec<TypeCheckError>,
 ) {
-    let type_lookup = ResolvedTypeLookup::new(ctx, &imported_facts.type_defs_by_def);
+    let type_lookup = ResolvedTypeLookup::new(ctx, imported_facts);
     for type_def in ctx.module.type_defs() {
         let Some(type_def_id) = ctx.def_table.lookup_node_def_id(type_def.id) else {
             continue;
@@ -230,7 +230,7 @@ fn collect_trait_sigs(
     trait_sigs: &mut HashMap<String, CollectedTraitSig>,
     errors: &mut Vec<TypeCheckError>,
 ) {
-    let type_lookup = ResolvedTypeLookup::new(ctx, &imported_facts.type_defs_by_def);
+    let type_lookup = ResolvedTypeLookup::new(ctx, imported_facts);
     for trait_def in ctx.module.trait_defs() {
         let mut methods = HashMap::new();
         let mut properties = HashMap::new();
@@ -295,13 +295,13 @@ fn collect_trait_sigs(
         );
     }
 
-    for (def_id, imported) in &imported_facts.trait_defs_by_def {
-        let Some(def) = ctx.def_table.lookup_def(*def_id) else {
+    for (def_id, imported) in imported_facts.trait_entries() {
+        let Some(def) = ctx.def_table.lookup_def(def_id) else {
             continue;
         };
         trait_sigs.insert(
             def.name.clone(),
-            imported_trait_sig_to_collected(*def_id, imported),
+            imported_trait_sig_to_collected(def_id, imported),
         );
     }
 }
@@ -339,13 +339,13 @@ fn collect_function_sigs(
         );
     }
 
-    for (def_id, imported_sigs) in &imported_facts.callable_sigs_by_def {
-        let Some(def) = ctx.def_table.lookup_def(*def_id) else {
+    for (def_id, imported_sigs) in imported_facts.callable_entries() {
+        let Some(def) = ctx.def_table.lookup_def(def_id) else {
             continue;
         };
         let out = func_sigs.entry(def.name.clone()).or_default();
         for imported in imported_sigs {
-            out.push(imported_callable_sig_to_collected(*def_id, imported));
+            out.push(imported_callable_sig_to_collected(def_id, imported));
         }
     }
 }
@@ -666,7 +666,7 @@ fn collect_callable_sig(
         }
     };
 
-    let type_lookup = ResolvedTypeLookup::new(ctx, &imported_facts.type_defs_by_def);
+    let type_lookup = ResolvedTypeLookup::new(ctx, imported_facts);
     let ret_ty = match resolve_return_type_expr_with_params(
         &ctx.def_table,
         &type_lookup,
@@ -726,7 +726,7 @@ fn collect_trait_method_sig(
         }
     };
 
-    let type_lookup = ResolvedTypeLookup::new(ctx, &imported_facts.type_defs_by_def);
+    let type_lookup = ResolvedTypeLookup::new(ctx, imported_facts);
     let ret_ty = match resolve_return_type_expr_with_params(
         &ctx.def_table,
         &type_lookup,
@@ -817,7 +817,7 @@ fn build_param_sigs(
     params: &[Param],
     type_params: Option<&HashMap<DefId, TyVarId>>,
 ) -> Result<Vec<CollectedParamSig>, TypeCheckError> {
-    let type_lookup = ResolvedTypeLookup::new(ctx, &imported_facts.type_defs_by_def);
+    let type_lookup = ResolvedTypeLookup::new(ctx, imported_facts);
     let mut out = Vec::with_capacity(params.len());
     for param in params {
         let ty =

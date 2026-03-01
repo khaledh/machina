@@ -114,6 +114,11 @@ impl ProgramImportFactsCache {
                 } else {
                     Vec::new()
                 },
+                callable_sources: dep_exports
+                    .callables
+                    .get(member)
+                    .cloned()
+                    .unwrap_or_default(),
                 has_type,
                 type_ty: if has_type {
                     dep_type_tys
@@ -122,6 +127,7 @@ impl ProgramImportFactsCache {
                 } else {
                     None
                 },
+                type_source: dep_exports.types.get(member).copied(),
                 has_trait,
                 trait_sig: if has_trait {
                     dep_trait_sigs
@@ -130,6 +136,7 @@ impl ProgramImportFactsCache {
                 } else {
                     None
                 },
+                trait_source: dep_exports.traits.get(member).copied(),
             };
             if imported.has_callable || imported.has_type || imported.has_trait {
                 out.insert(req.alias.clone(), imported);
