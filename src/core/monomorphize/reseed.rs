@@ -425,7 +425,12 @@ impl VisitorMut for NodeIdReseeder<'_> {
             StmtExprKind::Defer { value } => {
                 self.visit_expr(value);
             }
-            StmtExprKind::Using { value, body, .. } => {
+            StmtExprKind::Using {
+                binding,
+                value,
+                body,
+            } => {
+                self.visit_using_binding(binding);
                 self.visit_expr(value);
                 self.visit_expr(body);
             }

@@ -280,6 +280,7 @@ impl<'a> Parser<'a> {
         let marker = self.mark();
 
         self.consume_keyword(TK::KwUsing)?;
+        let binding_span = self.curr_token.span;
         let ident = self.parse_ident()?;
         self.consume(&TK::Equals)?;
         let allow_struct_lit = self.allow_struct_lit;
@@ -294,7 +295,11 @@ impl<'a> Parser<'a> {
         Ok(StmtExpr {
             id: self.id_gen.new_id(),
             kind: StmtExprKind::Using {
-                ident,
+                binding: UsingBinding {
+                    id: self.id_gen.new_id(),
+                    ident,
+                    span: binding_span,
+                },
                 value: Box::new(value),
                 body: Box::new(body),
             },

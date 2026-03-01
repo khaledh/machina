@@ -3238,6 +3238,58 @@ fn hover_at_program_file_std_io_point_hover_shows_text_writer() {
 }
 
 #[test]
+fn hover_at_program_file_std_io_using_reader_shows_text_reader() {
+    let mut db = AnalysisDb::new();
+
+    let path = PathBuf::from("examples/basics/file_using_stdout.mc");
+    let source = std::fs::read_to_string(&path).expect("failed to read using std::io example");
+    let file_id = db.upsert_disk_text(path, source.clone());
+    let binding_start = source
+        .find("using reader")
+        .expect("expected reader binding")
+        + "using ".len();
+    let binding_end = binding_start + "reader".len();
+    let span = Span {
+        start: position_at(&source, binding_start),
+        end: position_at(&source, binding_end),
+    };
+
+    let hover = db
+        .hover_at_program_file(file_id, span)
+        .expect("program hover query should succeed")
+        .expect("expected hover for reader binding");
+    assert!(
+        hover.display.contains("TextReader"),
+        "expected reader hover to mention TextReader, got: {}",
+        hover.display
+    );
+}
+
+#[test]
+fn hover_at_program_file_std_io_using_text_method_shows_signature() {
+    let mut db = AnalysisDb::new();
+
+    let path = PathBuf::from("examples/basics/file_using_stdout.mc");
+    let source = std::fs::read_to_string(&path).expect("failed to read using std::io example");
+    let file_id = db.upsert_disk_text(path, source.clone());
+    let text_offset = source.rfind(".text()").expect("expected text call") + ".".len();
+    let text_point = Span {
+        start: position_at(&source, text_offset),
+        end: position_at(&source, text_offset),
+    };
+
+    let hover = db
+        .hover_at_program_file(file_id, text_point)
+        .expect("program hover query should succeed")
+        .expect("expected hover for text method");
+    assert!(
+        hover.display.contains("fn text(sink self) -> TextReader"),
+        "expected text hover to show source signature, got: {}",
+        hover.display
+    );
+}
+
+#[test]
 fn diagnostics_for_program_file_reports_typestate_handler_overlap() {
     let mut db = AnalysisDb::new();
     db.set_experimental_typestate(true);

@@ -260,6 +260,11 @@ impl Visitor for NodeSpanCollector {
         visit::walk_bind_pattern(self, pattern);
     }
 
+    fn visit_using_binding(&mut self, binding: &UsingBinding) {
+        self.record(binding.id, binding.span);
+        visit::walk_using_binding(self, binding);
+    }
+
     fn visit_match_pattern(&mut self, pattern: &MatchPattern) {
         match pattern {
             MatchPattern::Binding { id, span, .. }

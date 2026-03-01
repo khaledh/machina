@@ -61,34 +61,40 @@ pub(super) fn format_source_callable_signature(
             .collect::<Vec<_>>()
     };
 
-    let (name, type_params, params_src): (
+    let (name, type_params, self_mode, params_src): (
         String,
         Vec<String>,
+        Option<ParamMode>,
         Vec<(String, ParamMode, DefId, TypeExpr)>,
     ) = match callable {
         CallableRef::FuncDecl(func_decl) => (
             func_decl.sig.name.clone(),
             map_type_params(&func_decl.sig.type_params),
+            None,
             map_params(&func_decl.sig.params),
         ),
         CallableRef::FuncDef(func_def) => (
             func_def.sig.name.clone(),
             map_type_params(&func_def.sig.type_params),
+            None,
             map_params(&func_def.sig.params),
         ),
         CallableRef::MethodDecl { method_decl, .. } => (
             method_decl.sig.name.clone(),
             map_type_params(&method_decl.sig.type_params),
+            Some(method_decl.sig.self_param.mode.clone()),
             map_params(&method_decl.sig.params),
         ),
         CallableRef::MethodDef { method_def, .. } => (
             method_def.sig.name.clone(),
             map_type_params(&method_def.sig.type_params),
+            Some(method_def.sig.self_param.mode.clone()),
             map_params(&method_def.sig.params),
         ),
         CallableRef::ClosureDef(closure_def) => (
             "<closure>".to_string(),
             Vec::new(),
+            None,
             map_params(&closure_def.sig.params),
         ),
     };
@@ -112,7 +118,17 @@ pub(super) fn format_source_callable_signature(
         )
     };
 
-    let mut rendered_params = Vec::with_capacity(params_src.len());
+    let mut rendered_params =
+        Vec::with_capacity(params_src.len() + usize::from(self_mode.is_some()));
+    if let Some(self_mode) = self_mode {
+        let mode_prefix = match self_mode {
+            ParamMode::In => "",
+            ParamMode::InOut => "inout ",
+            ParamMode::Out => "out ",
+            ParamMode::Sink => "sink ",
+        };
+        rendered_params.push(format!("{mode_prefix}self"));
+    }
     for (idx, (param_name, mode, param_def_id, param_ty_expr)) in params_src.into_iter().enumerate()
     {
         let mode_prefix = match mode {

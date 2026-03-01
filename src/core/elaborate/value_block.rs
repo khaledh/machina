@@ -93,14 +93,18 @@ impl<'a> Elaborator<'a> {
             ast::StmtExprKind::Defer { value } => sem::StmtExprKind::Defer {
                 value: Box::new(self.elab_value(value)),
             },
-            ast::StmtExprKind::Using { ident, value, body } => sem::StmtExprKind::Using {
+            ast::StmtExprKind::Using {
+                binding,
+                value,
+                body,
+            } => sem::StmtExprKind::Using {
                 pattern: sem::BindPattern {
-                    id: stmt.id,
+                    id: binding.id,
                     kind: sem::BindPatternKind::Name {
-                        ident: ident.clone(),
-                        def_id: self.def_id_for(stmt.id),
+                        ident: binding.ident.clone(),
+                        def_id: self.def_id_for(binding.id),
                     },
-                    span: stmt.span,
+                    span: binding.span,
                 },
                 value: Box::new(self.elab_value(value)),
                 body: Box::new(self.elab_value(body)),

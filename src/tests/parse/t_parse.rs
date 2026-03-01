@@ -265,8 +265,12 @@ fn test_parse_using_statement_with_block_body() {
 
     let stmt = block_stmt_at(items, 0);
     match &stmt.kind {
-        StmtExprKind::Using { ident, value, body } => {
-            assert_eq!(ident, "file");
+        StmtExprKind::Using {
+            binding,
+            value,
+            body,
+        } => {
+            assert_eq!(binding.ident, "file");
             assert!(
                 matches!(value.kind, ExprKind::Try { .. }),
                 "expected using initializer to preserve `?` expression"

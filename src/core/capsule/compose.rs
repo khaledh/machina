@@ -826,10 +826,14 @@ impl VisitorMut for PrivateSymbolRenamer {
             StmtExprKind::Defer { value } => {
                 self.visit_expr(value);
             }
-            StmtExprKind::Using { ident, value, body } => {
+            StmtExprKind::Using {
+                binding,
+                value,
+                body,
+            } => {
                 self.visit_expr(value);
                 self.push_value_scope();
-                self.bind_value_name(ident);
+                self.bind_value_name(&binding.ident);
                 self.visit_expr(body);
                 self.pop_value_scope();
             }

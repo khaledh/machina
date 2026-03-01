@@ -689,6 +689,13 @@ pub struct StructFieldBindPattern {
     pub span: Span,
 }
 
+#[derive(Clone, Debug)]
+pub struct UsingBinding {
+    pub id: NodeId,
+    pub ident: String,
+    pub span: Span,
+}
+
 // -- Match patterns ---
 
 #[derive(Clone, Debug)]
@@ -806,7 +813,7 @@ pub enum StmtExprKind {
         value: Box<Expr>,
     },
     Using {
-        ident: String,
+        binding: UsingBinding,
         value: Box<Expr>,
         body: Box<Expr>,
     },

@@ -1923,13 +1923,17 @@ impl Visitor for SymbolResolver {
             StmtExprKind::Defer { value } => {
                 self.visit_expr(value);
             }
-            StmtExprKind::Using { ident, value, body } => {
+            StmtExprKind::Using {
+                binding,
+                value,
+                body,
+            } => {
                 self.visit_expr(value);
                 self.with_scope(|resolver| {
                     let def_id = resolver.def_id_gen.new_id();
                     let def = Def {
                         id: def_id,
-                        name: ident.clone(),
+                        name: binding.ident.clone(),
                         kind: DefKind::LocalVar {
                             nrvo_eligible: false,
                             is_mutable: false,
@@ -1937,17 +1941,18 @@ impl Visitor for SymbolResolver {
                     };
                     resolver
                         .def_table_builder
-                        .record_def(def, stmt.id, stmt.span);
+                        .record_def(def, binding.id, binding.span);
+                    resolver.def_table_builder.record_use(stmt.id, def_id);
                     resolver.insert_symbol(
-                        ident,
+                        &binding.ident,
                         Symbol {
-                            name: ident.clone(),
+                            name: binding.ident.clone(),
                             kind: SymbolKind::Var {
                                 def_id,
                                 is_mutable: false,
                             },
                         },
-                        stmt.span,
+                        binding.span,
                     );
                     resolver.visit_expr(body);
                 });

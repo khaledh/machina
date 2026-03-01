@@ -389,8 +389,13 @@ impl<'a> DefCollector<'a> {
             StmtExprKind::Defer { value } => {
                 self.collect_expr(value);
             }
-            StmtExprKind::Using { value, body, .. } => {
-                self.defs.insert(self.def_table.def_id(stmt.id));
+            StmtExprKind::Using {
+                binding,
+                value,
+                body,
+            } => {
+                let def_id = self.def_table.def_id(binding.id);
+                self.defs.insert(def_id);
                 self.collect_expr(value);
                 self.collect_expr(body);
             }
@@ -530,9 +535,13 @@ impl<'a> DefSpanCollector<'a> {
             StmtExprKind::Defer { value } => {
                 self.collect_expr(value);
             }
-            StmtExprKind::Using { value, body, .. } => {
-                let def_id = self.def_table.def_id(stmt.id);
-                self.spans.entry(def_id).or_insert(stmt.span);
+            StmtExprKind::Using {
+                binding,
+                value,
+                body,
+            } => {
+                let def_id = self.def_table.def_id(binding.id);
+                self.spans.entry(def_id).or_insert(binding.span);
                 self.collect_expr(value);
                 self.collect_expr(body);
             }
@@ -685,10 +694,14 @@ impl<'a> DefInitChecker<'a> {
             StmtExprKind::Defer { value } => {
                 self.check_expr(value);
             }
-            StmtExprKind::Using { value, body, .. } => {
+            StmtExprKind::Using {
+                binding,
+                value,
+                body,
+            } => {
                 self.check_expr(value);
-                self.initialized
-                    .mark_full(self.ctx.def_table.def_id(stmt.id));
+                let def_id = self.ctx.def_table.def_id(binding.id);
+                self.initialized.mark_full(def_id);
                 self.check_expr(body);
             }
             StmtExprKind::Break | StmtExprKind::Continue => {}

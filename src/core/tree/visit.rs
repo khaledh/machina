@@ -201,6 +201,10 @@ pub trait Visitor {
         walk_bind_pattern(self, pattern)
     }
 
+    fn visit_using_binding(&mut self, binding: &UsingBinding) {
+        walk_using_binding(self, binding)
+    }
+
     // --- Match Patterns ---
 
     fn visit_match_pattern(&mut self, pattern: &MatchPattern) {
@@ -543,6 +547,8 @@ pub fn walk_bind_pattern<V: Visitor + ?Sized>(v: &mut V, pattern: &BindPattern) 
     }
 }
 
+pub fn walk_using_binding<V: Visitor + ?Sized>(_v: &mut V, _binding: &UsingBinding) {}
+
 // --- Match Patterns ---
 
 pub fn walk_match_pattern<V: Visitor + ?Sized>(v: &mut V, pattern: &MatchPattern) {
@@ -636,7 +642,12 @@ pub fn walk_stmt_expr<V: Visitor + ?Sized>(v: &mut V, stmt: &StmtExpr) {
         StmtExprKind::Defer { value } => {
             v.visit_expr(value);
         }
-        StmtExprKind::Using { value, body, .. } => {
+        StmtExprKind::Using {
+            binding,
+            value,
+            body,
+        } => {
+            v.visit_using_binding(binding);
             v.visit_expr(value);
             v.visit_expr(body);
         }

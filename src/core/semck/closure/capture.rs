@@ -16,7 +16,7 @@ use crate::core::tree::visit::{
 };
 use crate::core::tree::{
     BindPattern, BindPatternKind, CallArg, CaptureSpec, Expr, ExprKind, MatchPattern,
-    MatchPatternBinding, Param, ParamMode, StmtExpr, StmtExprKind,
+    MatchPatternBinding, Param, ParamMode, StmtExpr, StmtExprKind, UsingBinding,
 };
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -309,6 +309,10 @@ impl<'a> Visitor for LocalCollector<'a> {
             self.locals.insert(self.def_table.def_id(pattern.id));
         }
         walk_bind_pattern(self, pattern);
+    }
+
+    fn visit_using_binding(&mut self, binding: &UsingBinding) {
+        self.locals.insert(self.def_table.def_id(binding.id));
     }
 
     fn visit_match_pattern(&mut self, pattern: &MatchPattern) {

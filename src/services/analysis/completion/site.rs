@@ -4,7 +4,7 @@ use crate::core::diag::{Position, Span};
 use crate::core::resolve::DefId;
 use crate::core::tree::visit;
 use crate::core::tree::visit::Visitor;
-use crate::core::tree::{BindPattern, MatchPattern, Module, TypeExpr};
+use crate::core::tree::{BindPattern, MatchPattern, Module, TypeExpr, UsingBinding};
 use crate::core::types::Type;
 use crate::services::analysis::syntax_index::node_at_span;
 
@@ -242,6 +242,13 @@ impl Visitor for PatternAndTypeClassifier {
             self.in_pattern = true;
         }
         visit::walk_bind_pattern(self, pattern);
+    }
+
+    fn visit_using_binding(&mut self, binding: &UsingBinding) {
+        if span_contains_pos(binding.span, self.cursor) {
+            self.in_pattern = true;
+        }
+        visit::walk_using_binding(self, binding);
     }
 
     fn visit_match_pattern(&mut self, pattern: &MatchPattern) {

@@ -179,15 +179,18 @@ impl<'a> LocalScopeCollector<'a> {
                     self.collect_expr(value);
                 }
             }
-            StmtExprKind::Using { ident, value, body } => {
+            StmtExprKind::Using {
+                binding,
+                value,
+                body,
+            } => {
                 if self.span_contains_pos(value.span) {
                     self.collect_expr(value);
                     return;
                 }
                 if self.span_contains_pos(body.span) {
                     self.push_scope();
-                    let _ = ident;
-                    self.insert_def(self.def_table.def_id(stmt.id));
+                    self.insert_def(self.def_table.def_id(binding.id));
                     self.collect_expr(body);
                 }
             }
@@ -210,8 +213,8 @@ impl<'a> LocalScopeCollector<'a> {
             StmtExprKind::VarDecl { .. } => {
                 self.insert_def(self.def_table.def_id(stmt.id));
             }
-            StmtExprKind::Using { .. } => {
-                self.insert_def(self.def_table.def_id(stmt.id));
+            StmtExprKind::Using { binding, .. } => {
+                self.insert_def(self.def_table.def_id(binding.id));
             }
             _ => {}
         }

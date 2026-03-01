@@ -173,6 +173,11 @@ impl Visitor for DefOwnerCollector<'_> {
         visit::walk_bind_pattern(self, pattern);
     }
 
+    fn visit_using_binding(&mut self, binding: &crate::core::tree::UsingBinding) {
+        self.record_node(binding.id);
+        visit::walk_using_binding(self, binding);
+    }
+
     fn visit_match_pattern(&mut self, pattern: &crate::core::tree::MatchPattern) {
         match pattern {
             crate::core::tree::MatchPattern::Binding { id, .. }

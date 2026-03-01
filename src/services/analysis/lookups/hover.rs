@@ -9,7 +9,8 @@ use std::path::Path;
 
 use crate::core::diag::Span;
 use crate::core::resolve::{DefId, DefTable, UNKNOWN_DEF_ID};
-use crate::core::tree::Module;
+use crate::core::tree::visit::{Visitor, walk_module};
+use crate::core::tree::{Module, StmtExpr, StmtExprKind};
 use crate::core::typecheck::type_map::TypeMap;
 use crate::core::types::{Type, TypeRenderConfig, render_type};
 use crate::services::analysis::pipeline::LookupState;
@@ -78,6 +79,94 @@ pub(crate) fn hover_at_span_in_file(
     }
 }
 
+fn local_binding_value_type(
+    module: &Module,
+    type_map: &TypeMap,
+    def_table: &DefTable,
+    target_def_id: DefId,
+) -> Option<Type> {
+    struct Finder<'a> {
+        type_map: &'a TypeMap,
+        def_table: &'a DefTable,
+        target_def_id: DefId,
+        found: Option<Type>,
+    }
+
+    impl Visitor for Finder<'_> {
+        fn visit_stmt_expr(&mut self, stmt: &StmtExpr) {
+            if self.found.is_some() {
+                return;
+            }
+            match &stmt.kind {
+                StmtExprKind::LetBind { pattern, value, .. }
+                | StmtExprKind::VarBind { pattern, value, .. } => {
+                    if pattern_contains_def_id(&pattern, self.def_table, self.target_def_id) {
+                        self.found = self
+                            .type_map
+                            .lookup_node_type(value.id)
+                            .filter(|ty| !matches!(ty, Type::Unknown));
+                        return;
+                    }
+                }
+                StmtExprKind::Using { binding, value, .. } => {
+                    if self.def_table.lookup_node_def_id(binding.id) == Some(self.target_def_id) {
+                        self.found = self
+                            .type_map
+                            .lookup_node_type(value.id)
+                            .filter(|ty| !matches!(ty, Type::Unknown));
+                        return;
+                    }
+                }
+                _ => {}
+            }
+            crate::core::tree::visit::walk_stmt_expr(self, stmt);
+        }
+    }
+
+    let mut finder = Finder {
+        type_map,
+        def_table,
+        target_def_id,
+        found: None,
+    };
+    walk_module(&mut finder, module);
+    finder.found
+}
+
+fn pattern_contains_def_id(
+    pattern: &crate::core::tree::BindPattern,
+    def_table: &DefTable,
+    target_def_id: DefId,
+) -> bool {
+    match &pattern.kind {
+        crate::core::tree::BindPatternKind::Name { .. } => {
+            def_table.lookup_node_def_id(pattern.id) == Some(target_def_id)
+        }
+        crate::core::tree::BindPatternKind::Tuple { patterns } => patterns
+            .iter()
+            .any(|item| pattern_contains_def_id(item, def_table, target_def_id)),
+        crate::core::tree::BindPatternKind::Struct { fields, .. } => fields
+            .iter()
+            .any(|field| pattern_contains_def_id(&field.pattern, def_table, target_def_id)),
+        crate::core::tree::BindPatternKind::Array { patterns } => patterns
+            .iter()
+            .any(|item| pattern_contains_def_id(item, def_table, target_def_id)),
+    }
+}
+
+fn prefer_resolved_binding_type(
+    ty: Option<Type>,
+    module: &Module,
+    type_map: &TypeMap,
+    def_table: &DefTable,
+    def_id: DefId,
+) -> Option<Type> {
+    match ty {
+        Some(ty) if !ty.contains_unresolved() => Some(ty),
+        _ => local_binding_value_type(module, type_map, def_table, def_id).or(ty),
+    }
+}
+
 /// Build hover information for a concrete definition id in a specific lookup
 /// state. Program-aware queries use this after resolving imported aliases to
 /// their actual source definitions in dependency modules.
@@ -89,7 +178,13 @@ pub(crate) fn hover_for_def_in_state(state: &LookupState, def_id: DefId) -> Opti
         .lookup_def_location(def_id)
         .map(|loc| loc.span)
         .unwrap_or_default();
-    let ty = typed.type_map.lookup_def_type(def);
+    let ty = prefer_resolved_binding_type(
+        typed.type_map.lookup_def_type(def),
+        &typed.module,
+        &typed.type_map,
+        &typed.def_table,
+        def_id,
+    );
     let display = format_hover_label(
         Some(&def.name),
         ty.as_ref(),
@@ -137,7 +232,13 @@ fn try_call_site_hover(
     {
         return None;
     }
-    let ty = typed.type_map.lookup_def_type(def);
+    let ty = prefer_resolved_binding_type(
+        typed.type_map.lookup_def_type(def),
+        &typed.module,
+        &typed.type_map,
+        &typed.def_table,
+        def_id,
+    );
     let display = format_hover_label(
         Some(&def.name),
         ty.as_ref(),
@@ -200,10 +301,21 @@ fn try_node_hover(
         {
             continue;
         }
-        let ty = typed
+        let node_ty = typed
             .type_map
             .lookup_node_type(node_id)
             .filter(|ty| !matches!(ty, Type::Unknown));
+        let ty = def_id
+            .map(|def_id| {
+                prefer_resolved_binding_type(
+                    node_ty.clone(),
+                    &typed.module,
+                    &typed.type_map,
+                    &typed.def_table,
+                    def_id,
+                )
+            })
+            .unwrap_or(node_ty);
         if def_id.is_none() && ty.is_none() {
             continue;
         }
