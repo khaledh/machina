@@ -1,4 +1,10 @@
 // I/O utilities backed by runtime intrinsics declared in prelude_decl.mc.
+//
+// Public surface:
+// - capability handles from `open_read/open_write/open_rw`
+// - representation adapters via `.text()` / `.binary()`
+// - scoped cleanup via `using`, which relies on the internal
+//   `close_ignore_error` methods below
 
 @public
 fn print(s: string) {
@@ -92,9 +98,9 @@ type BinaryFile = {
     _fd: u64,
 }
 
-// Runtime open helpers encode success as (fd + 1) so zero can remain the
-// generic failure sentinel and errno can carry the OS detail.
-fn decode_open_result(encoded: u64) -> u64 | IoError {
+// Runtime file helpers encode success as (count_or_fd + 1) so zero can remain
+// the generic failure sentinel and errno can carry the OS detail.
+fn decode_file_result(encoded: u64) -> u64 | IoError {
     if encoded == 0 {
         return IoError {
             code: __rt_file_last_errno(),
@@ -105,25 +111,11 @@ fn decode_open_result(encoded: u64) -> u64 | IoError {
 }
 
 fn file_read(fd: u64, inout buf: u8[]) -> u64 | IoError {
-    let encoded = __rt_file_read(fd, inout buf);
-    if encoded == 0 {
-        return IoError {
-            code: __rt_file_last_errno(),
-        };
-    } else {
-        encoded - 1
-    }
+    decode_file_result(__rt_file_read(fd, inout buf))
 }
 
 fn file_write(fd: u64, data: u8[]) -> u64 | IoError {
-    let encoded = __rt_file_write(fd, data);
-    if encoded == 0 {
-        return IoError {
-            code: __rt_file_last_errno(),
-        };
-    } else {
-        encoded - 1
-    }
+    decode_file_result(__rt_file_write(fd, data))
 }
 
 fn file_close(fd: u64) -> () | IoError {
@@ -178,19 +170,19 @@ fn write_all_text_to_fd(fd: u64, text: string) -> () | IoError {
 
 @public
 fn open_read(path: string) -> ReadFile | IoError {
-    let fd = decode_open_result(__rt_file_open_read(path))?;
+    let fd = decode_file_result(__rt_file_open_read(path))?;
     ReadFile { _fd: fd }
 }
 
 @public
 fn open_write(path: string) -> WriteFile | IoError {
-    let fd = decode_open_result(__rt_file_open_write(path))?;
+    let fd = decode_file_result(__rt_file_open_write(path))?;
     WriteFile { _fd: fd }
 }
 
 @public
 fn open_rw(path: string) -> ReadWriteFile | IoError {
-    let fd = decode_open_result(__rt_file_open_rw(path))?;
+    let fd = decode_file_result(__rt_file_open_rw(path))?;
     ReadWriteFile { _fd: fd }
 }
 
