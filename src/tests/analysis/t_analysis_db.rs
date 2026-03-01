@@ -2077,13 +2077,28 @@ fn run() -> u64 { 1 }
         .expect("program hover query should succeed")
         .expect("expected hover info for imported symbol");
     assert_eq!(hover.def_name.as_deref(), Some("run"));
-    assert!(
-        hover.display.contains("run:"),
-        "expected hover display to include resolved type info, got: {}",
-        hover.display
-    );
+    assert_eq!(hover.display, "fn run() -> u64");
 
     let _ = fs::remove_dir_all(&temp_dir);
+}
+
+#[test]
+fn hover_at_program_file_uses_selected_imported_overload_signature() {
+    let entry_path = PathBuf::from("examples/quickstart/hello.mc")
+        .canonicalize()
+        .unwrap();
+    let entry_source = fs::read_to_string(&entry_path).expect("failed to read entry source");
+
+    let mut db = AnalysisDb::new();
+    let entry_id = db.upsert_disk_text(entry_path, entry_source.clone());
+
+    let query_span = span_for_last_substring(&entry_source, "println");
+    let hover = db
+        .hover_at_program_file(entry_id, query_span)
+        .expect("program hover query should succeed")
+        .expect("expected hover info for imported println call");
+    assert_eq!(hover.def_name.as_deref(), Some("println"));
+    assert_eq!(hover.display, "fn println(s: string) -> ()");
 }
 
 #[test]

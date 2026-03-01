@@ -78,6 +78,39 @@ pub(crate) fn hover_at_span_in_file(
     }
 }
 
+/// Build hover information for a concrete definition id in a specific lookup
+/// state. Program-aware queries use this after resolving imported aliases to
+/// their actual source definitions in dependency modules.
+pub(crate) fn hover_for_def_in_state(state: &LookupState, def_id: DefId) -> Option<HoverInfo> {
+    let typed = state.typed.as_ref()?;
+    let def = typed.def_table.lookup_def(def_id)?;
+    let span = typed
+        .def_table
+        .lookup_def_location(def_id)
+        .map(|loc| loc.span)
+        .unwrap_or_default();
+    let ty = typed.type_map.lookup_def_type(def);
+    let display = format_hover_label(
+        Some(&def.name),
+        ty.as_ref(),
+        Some(def_id),
+        Some(&typed.module),
+        Some(&typed.type_map),
+        &typed.def_table,
+    );
+    Some(HoverInfo {
+        node_id: typed
+            .def_table
+            .lookup_def_node_id(def_id)
+            .unwrap_or(crate::core::tree::NodeId(0)),
+        span,
+        def_id: Some(def_id),
+        def_name: Some(def.name.clone()),
+        ty,
+        display,
+    })
+}
+
 /// Try hover via typed call-site resolution (callee function name at a call
 /// expression).
 fn try_call_site_hover(
