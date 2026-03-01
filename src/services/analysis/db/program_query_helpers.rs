@@ -4,9 +4,7 @@ use crate::core::diag::Span;
 use crate::core::resolve::GlobalDefId;
 use crate::core::symbol_id::SelectedCallable;
 use crate::core::types::Type;
-use crate::services::analysis::db::pipeline_helpers::{
-    def_target_for_symbol_id_in_states, lookup_program_state_for_target,
-};
+use crate::services::analysis::db::pipeline_helpers::def_target_for_symbol_id_in_states;
 use crate::services::analysis::lookups::{
     def_at_span, hover_at_span_in_file, hover_for_def_in_state,
     signature_help_for_def_at_call_site, type_at_span,
@@ -37,7 +35,7 @@ impl super::AnalysisDb {
             return Ok(None);
         };
         let source = snapshot.text(file_id);
-        if let Some(target) = selected_imported_callable_target(
+        if let Some(target) = selected_callable_target(
             &snapshot,
             file_id,
             &entry_state,
@@ -45,9 +43,7 @@ impl super::AnalysisDb {
             true,
             module_states,
         ) {
-            let Some(target_state) =
-                lookup_program_state_for_target(module_states, &target, &snapshot)
-            else {
+            let Some(target_state) = self.lookup_state_for_target(file_id, &target)? else {
                 return Ok(None);
             };
             if let Some(target_resolved) = target_state.resolved.as_ref()
@@ -74,8 +70,7 @@ impl super::AnalysisDb {
         ) else {
             return Ok(None);
         };
-        let Some(target_state) = lookup_program_state_for_target(module_states, &target, &snapshot)
-        else {
+        let Some(target_state) = self.lookup_state_for_target(file_id, &target)? else {
             return Ok(None);
         };
         let Some(target_resolved) = target_state.resolved.as_ref() else {
@@ -128,7 +123,7 @@ impl super::AnalysisDb {
         );
         if let (Some(entry_module_id), Some(hover)) = (program.entry_module_id, hover.as_ref())
             && let Some(target) = imported_hover_target(
-                &snapshot,
+                self,
                 file_id,
                 &state,
                 entry_module_id,
@@ -187,15 +182,14 @@ impl super::AnalysisDb {
         } else {
             self.lookup_state_for_file(file_id)?
         };
-        if let Some(target) = selected_imported_callable_target(
+        if let Some(target) = selected_callable_target(
             &snapshot,
             file_id,
             &state,
             query_span,
             false,
             &program.module_states,
-        ) && let Some(target_state) =
-            lookup_program_state_for_target(&program.module_states, &target, &snapshot)
+        ) && let Some(target_state) = self.lookup_state_for_target(file_id, &target)?
             && let Some(sig) = signature_help_for_def_at_call_site(
                 &state,
                 query_span,
@@ -224,7 +218,7 @@ fn hover_needs_strict_fallback(info: &HoverInfo) -> bool {
 }
 
 fn imported_hover_target(
-    snapshot: &crate::services::analysis::snapshot::AnalysisSnapshot,
+    db: &mut super::AnalysisDb,
     origin_file_id: FileId,
     state: &crate::services::analysis::pipeline::LookupState,
     module_id: crate::core::capsule::ModuleId,
@@ -239,23 +233,25 @@ fn imported_hover_target(
         crate::services::analysis::pipeline::LookupState,
     >,
 ) -> Option<HoverInfo> {
-    if let Some(target) = selected_imported_callable_target(
-        snapshot,
+    let snapshot = db.snapshot();
+    if let Some(target) = selected_callable_target(
+        &snapshot,
         origin_file_id,
         state,
         query_span,
         true,
         module_states,
     ) {
-        let target_state = lookup_program_state_for_target(module_states, &target, snapshot)?;
+        let target_state = db.lookup_state_for_target(origin_file_id, &target).ok()??;
         return hover_for_def_in_state(&target_state, target.def_id);
     }
 
     if let Some(symbol_id) = hover.symbol_id.as_ref()
-        && let Some(target) =
-            def_target_for_symbol_id_in_states(snapshot, module_states, origin_file_id, symbol_id)
+        && let Some(target) = db
+            .def_target_for_symbol_id_in_program(origin_file_id, symbol_id)
+            .ok()?
     {
-        let target_state = lookup_program_state_for_target(module_states, &target, snapshot)?;
+        let target_state = db.lookup_state_for_target(origin_file_id, &target).ok()??;
         return hover_for_def_in_state(&target_state, target.def_id);
     }
 
@@ -268,7 +264,7 @@ fn imported_hover_target(
     hover_for_def_in_state(target_state, target.def_id)
 }
 
-fn selected_imported_callable_target(
+fn selected_callable_target(
     snapshot: &crate::services::analysis::snapshot::AnalysisSnapshot,
     origin_file_id: FileId,
     state: &crate::services::analysis::pipeline::LookupState,

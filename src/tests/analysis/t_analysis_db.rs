@@ -2236,6 +2236,39 @@ fn hover_at_program_file_uses_selected_imported_overload_signature() {
 }
 
 #[test]
+fn def_target_for_symbol_id_in_program_resolves_imported_overload_target() {
+    let entry_path = PathBuf::from("examples/quickstart/hello.mc")
+        .canonicalize()
+        .unwrap();
+    let entry_source = fs::read_to_string(&entry_path).expect("failed to read entry source");
+
+    let mut db = AnalysisDb::new();
+    let entry_id = db.upsert_disk_text(entry_path, entry_source.clone());
+
+    let query_span = span_for_last_substring(&entry_source, "println");
+    let hover = db
+        .hover_at_program_file(entry_id, query_span)
+        .expect("program hover query should succeed")
+        .expect("expected hover info for imported println call");
+    let symbol_id = hover
+        .symbol_id
+        .clone()
+        .expect("hover should expose canonical symbol id");
+
+    let target = db
+        .def_target_for_symbol_id_in_program(entry_id, &symbol_id)
+        .expect("canonical symbol lookup should succeed")
+        .expect("expected definition target for imported println");
+
+    assert_eq!(target.symbol_id, Some(symbol_id));
+    assert!(target.program_scoped);
+    assert_ne!(
+        target.module_id,
+        Some(crate::core::capsule::ModuleId(entry_id.0))
+    );
+}
+
+#[test]
 fn def_location_at_program_file_uses_selected_imported_overload_target() {
     let run_id = ANALYSIS_TMP_COUNTER.fetch_add(1, Ordering::Relaxed);
     let temp_dir = std::env::temp_dir().join(format!(

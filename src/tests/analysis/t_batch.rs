@@ -1,10 +1,11 @@
 use std::collections::HashMap;
 
-use crate::core::capsule::ModuleId;
+use crate::core::capsule::{ModuleId, ModulePath};
 use crate::core::context::ParsedContext;
 use crate::core::lexer::{LexError, Lexer};
 use crate::core::parse::Parser;
 use crate::core::resolve::{attach_def_owners, resolve};
+use crate::core::symbol_id::SelectedCallable;
 use crate::core::tree::NodeIdGen;
 use crate::core::typecheck::type_check;
 use crate::services::analysis::batch::{query_parse_resolve_typecheck, query_typecheck};
@@ -85,4 +86,42 @@ fn main() -> u64 { id(1) }
         .next()
         .expect("main call should be present");
     assert!(typed.lookup_node_type(main_call_node).is_some());
+}
+
+#[test]
+fn query_typecheck_records_canonical_selected_callable_for_local_overload() {
+    let source = r#"
+fn println(s: string) -> u64 { 1 }
+fn println(n: u64) -> u64 { n }
+fn main() -> u64 { println("hi") }
+"#;
+
+    let parsed = parsed_context(source).with_module_path(
+        ModulePath::new(vec!["app".to_string(), "main".to_string()])
+            .expect("module path should be valid"),
+    );
+    let resolved = attach_def_owners(
+        resolve(parsed).expect("resolve should succeed"),
+        &HashMap::new(),
+    );
+    let resolved_result = ResolvedModuleResult::from_context(ModuleId(17), resolved);
+
+    let mut db = AnalysisDb::new();
+    let typed = query_typecheck(&mut db, ModuleId(17), 5, resolved_result)
+        .expect("query typecheck should succeed")
+        .into_context();
+
+    let selected = typed
+        .call_sigs
+        .values()
+        .next()
+        .and_then(|sig| sig.selected.clone())
+        .expect("expected selected callable");
+
+    match selected {
+        SelectedCallable::Canonical(symbol_id) => {
+            assert_eq!(symbol_id.to_string(), "app::main::println");
+        }
+        other => panic!("expected canonical selected callable, got {other:?}"),
+    }
 }

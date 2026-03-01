@@ -20,6 +20,24 @@ use crate::services::analysis::snapshot::AnalysisSnapshot;
 use crate::services::analysis::snapshot::FileId;
 
 impl super::AnalysisDb {
+    pub(super) fn lookup_state_for_target(
+        &mut self,
+        origin_file_id: FileId,
+        target: &DefTarget,
+    ) -> QueryResult<Option<LookupState>> {
+        if target.program_scoped {
+            let snapshot = self.snapshot();
+            let program = self.program_pipeline_for_file(origin_file_id)?;
+            return Ok(lookup_program_state_for_target(
+                &program.module_states,
+                target,
+                &snapshot,
+            ));
+        }
+
+        Ok(Some(self.lookup_state_for_file(target.file_id)?))
+    }
+
     pub(super) fn best_lookup_state_for_navigation(
         &mut self,
         origin_file_id: FileId,
@@ -164,6 +182,21 @@ impl super::AnalysisDb {
             file_id,
             self.experimental_typestate,
         )
+    }
+
+    pub(crate) fn def_target_for_symbol_id_in_program(
+        &mut self,
+        origin_file_id: FileId,
+        symbol_id: &SymbolId,
+    ) -> QueryResult<Option<DefTarget>> {
+        let snapshot = self.snapshot();
+        let program = self.program_pipeline_for_file(origin_file_id)?;
+        Ok(def_target_for_symbol_id_in_states(
+            &snapshot,
+            &program.module_states,
+            origin_file_id,
+            symbol_id,
+        ))
     }
 }
 

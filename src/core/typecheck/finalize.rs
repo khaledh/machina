@@ -362,10 +362,18 @@ fn selected_callable_for_finalize(
     params: &[CallParam],
     ret_ty: &Type,
 ) -> Option<SelectedCallable> {
-    // Imported aliases now prefer their canonical source symbol id when we
-    // can recover it from export facts; same-module calls still use the local
-    // def id until all frontend stages speak `SymbolId` natively.
+    // Prefer canonical source identity whenever the current module already has
+    // a symbol id for the selected def. Imported aliases keep their source
+    // symbol ids through export facts; same-module calls now do the same.
     selected_imported_callable(engine, local_def_id, params, ret_ty)
+        .or_else(|| {
+            engine
+                .context()
+                .symbol_ids
+                .lookup_symbol_id(local_def_id)
+                .cloned()
+                .map(SelectedCallable::Canonical)
+        })
         .or(Some(SelectedCallable::Local(local_def_id)))
 }
 
