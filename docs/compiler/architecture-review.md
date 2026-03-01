@@ -524,6 +524,37 @@ Result:
 - better alignment between capsule facts, analysis, resolve, and typecheck
 - no longer one of the highest-leverage cleanup targets
 
+### Backend Lowering (`src/core/backend/lower/`)
+
+*Files: `src/core/backend/lower/branching.rs`, `src/core/backend/lower/calls.rs`, `src/core/backend/lower/linear.rs`, `src/core/backend/lower/util.rs`*
+
+This area was worth tackling and has now been materially improved.
+
+Completed work:
+- shared try-lowering setup in `branching.rs`, so propagate/handle paths no
+  longer rebuild the same join and variant scaffolding
+- shared collection runtime helpers in `util.rs` for:
+  - addressable runtime call inputs
+  - runtime size/align constants
+  - empty hash-collection slot initialization
+- unified collection receiver resolution in `calls.rs` for dyn arrays, sets,
+  and maps
+- shared join-branch and loop-jump helpers in `branching.rs`
+- shared aggregate field-store helpers in `linear.rs` for tuple literals,
+  struct literals, and struct updates
+
+What remains:
+- `FuncLowerer` is still a large lowering state object and could eventually be
+  split further if a clear state/context boundary emerges
+- there are still opportunities for broader IR-builder abstractions, but the
+  low-risk duplication seams identified in this review have largely been
+  addressed
+
+Result:
+- repeated collection/runtime lowering plumbing is much smaller
+- branching control-flow lowering is more uniform and easier to follow
+- no longer one of the highest-leverage cleanup targets
+
 ---
 
 ## Summary of Recommendations
@@ -531,17 +562,16 @@ Result:
 | #  | Area                            | Change                                          | Lines Saved   | Priority |
 |----|---------------------------------|-------------------------------------------------|---------------|----------|
 | 1  | AST / Semantic tree             | Eliminate semantic tree; lower from annotated AST | 4,000-6,000 | High     |
-| 2  | Backend lowering                | IR builder abstraction; consolidate god object    | 2,000-3,000 | High     |
-| 3  | Visitor infrastructure          | Generate visitors; merge dataflow passes          | 2,000-3,000 | Medium   |
-| 4  | Type checker                    | Deduplicate unification, type walking, dispatch   | 2,000-3,000 | Medium   |
-| 5  | IR types                        | Eliminate IrTypeKind translation layer             | 800-1,200   | Medium   |
-| 6  | IDE/LSP                         | Collapse API variants, unify query entry points   | ~200        | Low      |
-| 7  | C Runtime                       | Extract duplicated utilities to shared header     | ~50         | Low      |
+| 2  | Visitor infrastructure          | Generate visitors; merge dataflow passes          | 2,000-3,000 | Medium   |
+| 3  | Type checker                    | Deduplicate unification, type walking, dispatch   | 2,000-3,000 | Medium   |
+| 4  | IR types                        | Eliminate IrTypeKind translation layer             | 800-1,200   | Medium   |
+| 5  | IDE/LSP                         | Collapse API variants, unify query entry points   | ~200        | Low      |
+| 6  | C Runtime                       | Extract duplicated utilities to shared header     | ~50         | Low      |
 
-**Total estimated reduction: 12,000-17,000 lines from ~77K production Rust
-(15-22%).**
+**Total estimated reduction: 10,000-14,000 lines from ~77K production Rust
+(13-18%).**
 
-Items 1 and 2 are the highest-impact changes and can be done independently.
+Item 1 remains the highest-impact architectural simplification.
 
 ---
 
