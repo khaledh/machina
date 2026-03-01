@@ -13,7 +13,7 @@ use std::collections::HashMap;
 use std::fmt;
 
 use crate::core::capsule::ModulePath;
-use crate::core::resolve::{DefId, DefTable, GlobalDefId};
+use crate::core::resolve::{DefId, DefTable};
 use crate::core::tree::ParamMode;
 use crate::core::tree::{
     FunctionSig, MethodItem, MethodSig, Module, RefinementKind, TopLevelItem, TypeExpr,
@@ -105,8 +105,6 @@ pub enum SymbolDisambiguator {
 pub enum SelectedCallable {
     /// A same-module callable selected by the type checker.
     Local(DefId),
-    /// A cross-module callable selected via imported/exported facts.
-    Global(GlobalDefId),
     /// Final canonical callable identity once the frontend can provide it.
     Canonical(SymbolId),
 }

@@ -1,7 +1,6 @@
 //! Program-aware query helper methods for `AnalysisDb`.
 
 use crate::core::diag::Span;
-use crate::core::resolve::GlobalDefId;
 use crate::core::symbol_id::SelectedCallable;
 use crate::core::types::Type;
 use crate::services::analysis::db::pipeline_helpers::def_target_for_symbol_id_in_states;
@@ -312,12 +311,6 @@ fn selected_callable_target(
     }
     let selected_sig = typed.call_sigs.get(&call.node_id)?;
     match selected_sig.selected.as_ref()? {
-        SelectedCallable::Global(target) => Some(global_def_target(
-            snapshot,
-            origin_file_id,
-            module_states,
-            *target,
-        )?),
         SelectedCallable::Canonical(symbol_id) => {
             def_target_for_symbol_id_in_states(snapshot, module_states, origin_file_id, symbol_id)
         }
@@ -325,16 +318,13 @@ fn selected_callable_target(
     }
 }
 
-fn global_def_target(
+fn local_def_target(
     snapshot: &crate::services::analysis::snapshot::AnalysisSnapshot,
     origin_file_id: FileId,
-    module_states: &std::collections::HashMap<
-        crate::core::capsule::ModuleId,
-        crate::services::analysis::pipeline::LookupState,
-    >,
-    target: GlobalDefId,
+    module_id: crate::core::capsule::ModuleId,
+    state: &crate::services::analysis::pipeline::LookupState,
+    def_id: crate::core::resolve::DefId,
 ) -> Option<DefTarget> {
-    let state = module_states.get(&target.module_id)?;
     let resolved = state.resolved.as_ref()?;
     let file_id = resolved
         .def_table
@@ -343,9 +333,9 @@ fn global_def_target(
         .unwrap_or(origin_file_id);
     Some(DefTarget {
         file_id,
-        module_id: Some(target.module_id),
-        def_id: target.def_id,
-        symbol_id: resolved.symbol_ids.lookup_symbol_id(target.def_id).cloned(),
+        module_id: Some(module_id),
+        def_id,
+        symbol_id: resolved.symbol_ids.lookup_symbol_id(def_id).cloned(),
         program_scoped: true,
     })
 }
@@ -382,6 +372,5 @@ fn imported_or_local_def_target(
         return Some(target);
     }
 
-    let target = GlobalDefId::new(module_id, def_id);
-    global_def_target(snapshot, origin_file_id, module_states, target)
+    local_def_target(snapshot, origin_file_id, module_id, state, def_id)
 }
