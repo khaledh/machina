@@ -17,7 +17,7 @@ production code (~77K lines Rust), test code (~31K lines), a C runtime
 - [Area 5: IR Type Representation](#area-5-ir-type-representation)
 - [Area 6: IDE/LSP Integration (services/, tooling/, core/api/)](#area-6-ideslsp-integration)
 - [Area 7: C Runtime (runtime/)](#area-7-c-runtime)
-- [Area 8: Multi-Module Support (capsule/)](#area-8-multi-module-support-capsule)
+- [Done](#done)
 - [Summary of Recommendations](#summary-of-recommendations)
 - [Strategic Observations](#strategic-observations)
 
@@ -495,55 +495,34 @@ needed.**
 
 ---
 
-## Area 8: Multi-Module Support (capsule/)
+## Done
+
+### Multi-Module Support (capsule/)
 
 *Files: `src/core/capsule/`, `src/core/resolve/`, `src/core/context/capsule.rs`*
 
-### Current Design
+This area was worth tackling and has now been materially improved.
 
-Multi-module compilation uses a flattening approach:
+Completed work:
+- import/export flow is now much more consistently centered on `GlobalDefId`
+- analysis-side import caches now use `ModuleExportFacts` and source-keyed
+  payloads instead of parallel member-name maps
+- core `ImportedFacts` now distinguishes:
+  - alias-local imported defs
+  - source-keyed callable/type/trait payloads
+- typecheck import adaptation is now isolated behind a dedicated helper module
+  instead of being spread through the main collect pass
 
-1. **Discover** all modules reachable from entry via `requires` statements
-   (BFS, cycle detection).
-2. **Flatten** all modules into a single `Module` by rewriting qualified names,
-   validating visibility, and mangling conflicting symbols.
-3. **Compile** the flattened module through the standard single-file pipeline.
+What remains:
+- `ImportedCallableSig` / `ImportedTraitSig` still exist as adapter payloads,
+  but they are now behind narrower seams
+- `resolve_program()` still needs a separate decision: delete it, or keep it if
+  it becomes part of a future non-flattening module path
 
-### Analysis
-
-**The system works correctly** but carries accidental complexity from three
-parallel import representations:
-
-1. **Capsule layer**: `RequireSpec` with module paths and member names.
-2. **Resolver layer**: `ImportedModule`, `ImportedSymbol`,
-   `ImportedCallableSig` — reconstructed signature types that duplicate what
-   the `Type` system already knows.
-3. **Context layer**: `ModuleExportFacts`, `ImportEnv`,
-   `ImportedSymbolBinding` with `GlobalDefId` references.
-
-These represent the same information in different encodings with conversion
-logic between them.
-
-Additional issues:
-- `resolve_program()` in `resolver.rs` (lines 2054-2156) implements a
-  module-aware resolution approach that is **never called**. Appears to be an
-  abandoned alternative to flattening.
-- Flattening loses module ownership information, requiring a
-  `top_level_owners: HashMap<NodeId, ModuleId>` hack threaded through later
-  phases.
-
-### Recommendation
-
-1. **Unify import representations around `GlobalDefId`.** When module A imports
-   `foo` from module B, store B's `DefId` for `foo`. Let the type checker look
-   up the actual signature from the DefTable. This eliminates
-   `ImportedCallableSig`, `ImportedSymbol`, `ImportedFacts`, and the conversion
-   logic between all three representations.
-
-2. **Delete the unused `resolve_program()` function.**
-
-**Estimated impact: 500-800 lines removed, meaningful reduction in conceptual
-complexity.**
+Result:
+- meaningful reduction in duplication and conceptual drift
+- better alignment between capsule facts, analysis, resolve, and typecheck
+- no longer one of the highest-leverage cleanup targets
 
 ---
 
@@ -556,9 +535,8 @@ complexity.**
 | 3  | Visitor infrastructure          | Generate visitors; merge dataflow passes          | 2,000-3,000 | Medium   |
 | 4  | Type checker                    | Deduplicate unification, type walking, dispatch   | 2,000-3,000 | Medium   |
 | 5  | IR types                        | Eliminate IrTypeKind translation layer             | 800-1,200   | Medium   |
-| 6  | Multi-module                    | Unify import representations around DefId         | 500-800     | Low      |
-| 7  | IDE/LSP                         | Collapse API variants, unify query entry points   | ~200        | Low      |
-| 8  | C Runtime                       | Extract duplicated utilities to shared header     | ~50         | Low      |
+| 6  | IDE/LSP                         | Collapse API variants, unify query entry points   | ~200        | Low      |
+| 7  | C Runtime                       | Extract duplicated utilities to shared header     | ~50         | Low      |
 
 **Total estimated reduction: 12,000-17,000 lines from ~77K production Rust
 (15-22%).**
