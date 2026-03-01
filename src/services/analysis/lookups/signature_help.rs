@@ -140,21 +140,6 @@ pub(crate) fn signature_help_for_def_at_call_site(
     )
 }
 
-pub(crate) fn signature_help_for_symbol_id_at_call_site(
-    caller_state: &LookupState,
-    query_span: Span,
-    source: Option<&str>,
-    callee_state: &LookupState,
-    symbol_id: &crate::core::symbol_id::SymbolId,
-) -> Option<SignatureHelp> {
-    let callee_typed = callee_state.typed.as_ref()?;
-    let def_id = callee_typed
-        .symbol_ids
-        .lookup_local_def_ids(symbol_id)
-        .and_then(|defs| (defs.len() == 1).then_some(defs[0]))?;
-    signature_help_for_def_at_call_site(caller_state, query_span, source, callee_state, def_id)
-}
-
 fn source_signature_help<F>(
     typed: &crate::core::context::TypeCheckedContext,
     render_def_id: Option<crate::core::resolve::DefId>,
