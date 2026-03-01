@@ -8,6 +8,7 @@ use std::collections::HashMap;
 
 use crate::core::analysis::dataflow::{DataflowGraph, solve_forward};
 use crate::core::context::SemCheckNormalizedContext;
+use crate::core::machine::naming::{is_generated_handler_name, is_generated_state_name};
 use crate::core::resolve::{DefId, DefTable};
 use crate::core::semck::{SEK, SemCheckError, push_error};
 use crate::core::tree::cfg::{AstBlockId, Cfg, CfgBuilder, CfgItem, CfgNode};
@@ -26,14 +27,14 @@ pub(super) fn check_reply_cap_usage(ctx: &SemCheckNormalizedContext) -> Vec<SemC
     errors.extend(outside_collector.errors);
 
     for method_block in ctx.module.method_blocks() {
-        if !method_block.type_name.starts_with("__ts_") {
+        if !is_generated_state_name(&method_block.type_name) {
             continue;
         }
         for method_item in &method_block.method_items {
             let MethodItem::Def(method_def) = method_item else {
                 continue;
             };
-            if !method_def.sig.name.starts_with("__ts_on_") {
+            if !is_generated_handler_name(&method_def.sig.name) {
                 continue;
             }
             let cap_params = collect_handler_reply_caps(&ctx.def_table, &ctx.module, method_def);
@@ -64,7 +65,7 @@ struct ReplyOutsideHandlerCollector {
 impl Visitor for ReplyOutsideHandlerCollector {
     fn visit_method_block(&mut self, method_block: &MethodBlock) {
         let prev = self.in_typestate_method_block;
-        self.in_typestate_method_block = method_block.type_name.starts_with("__ts_");
+        self.in_typestate_method_block = is_generated_state_name(&method_block.type_name);
         visit::walk_method_block(self, method_block);
         self.in_typestate_method_block = prev;
     }
@@ -72,7 +73,7 @@ impl Visitor for ReplyOutsideHandlerCollector {
     fn visit_method_def(&mut self, method_def: &MethodDef) {
         let prev = self.in_typestate_handler;
         self.in_typestate_handler =
-            self.in_typestate_method_block && method_def.sig.name.starts_with("__ts_on_");
+            self.in_typestate_method_block && is_generated_handler_name(&method_def.sig.name);
         visit::walk_method_def(self, method_def);
         self.in_typestate_handler = prev;
     }

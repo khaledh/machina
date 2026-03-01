@@ -7,7 +7,9 @@
 use std::collections::{HashMap, HashSet};
 
 use crate::core::context::SemCheckNormalizedContext;
-use crate::core::machine::naming::parse_generated_handler_site_label;
+use crate::core::machine::naming::{
+    is_generated_handler_name, parse_generated_handler_site_label, parse_generated_state_name,
+};
 use crate::core::protocol::event_extract::extract_emit_from_expr;
 use crate::core::resolve::DefTable;
 use crate::core::semck::{SEK, SemCheckError, push_error};
@@ -252,7 +254,7 @@ pub(super) fn check_typestate_handler_overlap(
 
     for method_block in resolved.module.method_blocks() {
         let Some((typestate_name, state_name)) =
-            parse_typestate_and_state_from_generated_state(&method_block.type_name)
+            parse_generated_state_name(&method_block.type_name)
         else {
             continue;
         };
@@ -325,7 +327,7 @@ fn collect_handler_response_patterns(
         let MethodItem::Def(method_def) = method_item else {
             continue;
         };
-        if !method_def.sig.name.starts_with("__ts_on_") {
+        if !is_generated_handler_name(&method_def.sig.name) {
             continue;
         }
 
@@ -493,9 +495,8 @@ struct TypestateRequestCollector<'a> {
 impl Visitor for TypestateRequestCollector<'_> {
     fn visit_method_block(&mut self, method_block: &MethodBlock) {
         let prev = self.current_typestate.clone();
-        self.current_typestate =
-            parse_typestate_and_state_from_generated_state(&method_block.type_name)
-                .map(|(typestate_name, _)| typestate_name);
+        self.current_typestate = parse_generated_state_name(&method_block.type_name)
+            .map(|(typestate_name, _)| typestate_name);
         visit::walk_method_block(self, method_block);
         self.current_typestate = prev;
     }
@@ -531,7 +532,7 @@ fn collect_provenance_handler_shapes(
     let mut out = Vec::new();
     for method_block in ctx.module.method_blocks() {
         let Some((typestate_name, _state_name)) =
-            parse_typestate_and_state_from_generated_state(&method_block.type_name)
+            parse_generated_state_name(&method_block.type_name)
         else {
             continue;
         };
@@ -539,7 +540,7 @@ fn collect_provenance_handler_shapes(
             let MethodItem::Def(method_def) = method_item else {
                 continue;
             };
-            if !method_def.sig.name.starts_with("__ts_on_") {
+            if !is_generated_handler_name(&method_def.sig.name) {
                 continue;
             }
             // `for RequestType(binding)` handlers lower to:
@@ -592,7 +593,7 @@ fn collect_typestate_handler_payloads_by_state(
     let mut out = HashMap::<TypestateStateKey, HashSet<Type>>::new();
     for method_block in ctx.module.method_blocks() {
         let Some((typestate_name, state_name)) =
-            parse_typestate_and_state_from_generated_state(&method_block.type_name)
+            parse_generated_state_name(&method_block.type_name)
         else {
             continue;
         };
@@ -607,7 +608,7 @@ fn collect_typestate_handler_payloads_by_state(
             let MethodItem::Def(method_def) = method_item else {
                 continue;
             };
-            if !method_def.sig.name.starts_with("__ts_on_") {
+            if !is_generated_handler_name(&method_def.sig.name) {
                 continue;
             }
             let Some(event_param) = method_def.sig.params.first() else {
@@ -659,19 +660,18 @@ struct TypestateEmitCollector<'a> {
 impl Visitor for TypestateEmitCollector<'_> {
     fn visit_method_block(&mut self, method_block: &MethodBlock) {
         let prev = self.current_state.clone();
-        self.current_state = parse_typestate_and_state_from_generated_state(
-            &method_block.type_name,
-        )
-        .and_then(|(typestate_name, state_name)| {
-            if self.typestate_names.contains(&typestate_name) {
-                Some(TypestateStateKey {
-                    typestate_name,
-                    state_name,
-                })
-            } else {
-                None
-            }
-        });
+        self.current_state = parse_generated_state_name(&method_block.type_name).and_then(
+            |(typestate_name, state_name)| {
+                if self.typestate_names.contains(&typestate_name) {
+                    Some(TypestateStateKey {
+                        typestate_name,
+                        state_name,
+                    })
+                } else {
+                    None
+                }
+            },
+        );
         visit::walk_method_block(self, method_block);
         self.current_state = prev;
     }
@@ -699,12 +699,6 @@ impl Visitor for TypestateEmitCollector<'_> {
         }
         visit::walk_expr(self, expr);
     }
-}
-
-fn parse_typestate_and_state_from_generated_state(type_name: &str) -> Option<(String, String)> {
-    let rest = type_name.strip_prefix("__ts_")?;
-    let (typestate_name, state_name) = rest.rsplit_once('_')?;
-    Some((typestate_name.to_string(), state_name.to_string()))
 }
 
 fn state_expected_roles_for_payload(

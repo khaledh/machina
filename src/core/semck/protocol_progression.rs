@@ -12,6 +12,7 @@ use crate::core::context::{
     ProtocolProgressionEvent, ProtocolProgressionFacts, ProtocolProgressionReturnState,
     ProtocolProgressionState, ProtocolProgressionStateKey, SemCheckNormalizedContext,
 };
+use crate::core::machine::naming::{is_generated_handler_name, parse_generated_state_name};
 use crate::core::protocol::event_extract::extract_emit_from_expr;
 use crate::core::tree::cfg::{AstBlockId, CfgBuilder, CfgItem};
 use crate::core::tree::{Expr, ExprKind, MethodItem, StmtExprKind};
@@ -22,7 +23,7 @@ pub(super) fn extract(ctx: &SemCheckNormalizedContext) -> ProtocolProgressionFac
 
     for method_block in ctx.module.method_blocks() {
         let Some((typestate_name, state_name)) =
-            parse_typestate_and_state_from_generated_state(&method_block.type_name)
+            parse_generated_state_name(&method_block.type_name)
         else {
             continue;
         };
@@ -34,7 +35,7 @@ pub(super) fn extract(ctx: &SemCheckNormalizedContext) -> ProtocolProgressionFac
             let MethodItem::Def(method_def) = method_item else {
                 continue;
             };
-            if !method_def.sig.name.starts_with("__ts_on_") {
+            if !is_generated_handler_name(&method_def.sig.name) {
                 continue;
             }
             let Some(selector_param) = method_def.sig.params.first() else {
@@ -214,16 +215,10 @@ fn return_state_name(typestate_name: &str, expr: &Expr) -> Option<String> {
     let ExprKind::StructLit { name, .. } = &expr.kind else {
         return None;
     };
-    let (lit_typestate_name, state_name) = parse_typestate_and_state_from_generated_state(name)?;
+    let (lit_typestate_name, state_name) = parse_generated_state_name(name)?;
     if lit_typestate_name == typestate_name {
         Some(state_name)
     } else {
         None
     }
-}
-
-fn parse_typestate_and_state_from_generated_state(type_name: &str) -> Option<(String, String)> {
-    let rest = type_name.strip_prefix("__ts_")?;
-    let (typestate_name, state_name) = rest.rsplit_once('_')?;
-    Some((typestate_name.to_string(), state_name.to_string()))
 }
