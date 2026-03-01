@@ -28,6 +28,34 @@ struct TryLoweringSetup {
 }
 
 impl<'a, 'g> FuncLowerer<'a, 'g> {
+    fn lower_expr_to_join(
+        &mut self,
+        join: &JoinSession,
+        expr: &sem::ValueExpr,
+        span: crate::core::diag::Span,
+        join_sem_ty: Option<&Type>,
+    ) -> Result<bool, LowerToIrError> {
+        match self.lower_branching_value_expr(expr)? {
+            BranchResult::Value(value) => {
+                let branch_value = if let Some(join_sem_ty) = join_sem_ty {
+                    let branch_sem_ty = self.type_map.type_table().get(expr.ty).clone();
+                    self.coerce_value(value, &branch_sem_ty, join_sem_ty)
+                } else {
+                    value
+                };
+                join.emit_branch(self, branch_value, span)?;
+                Ok(false)
+            }
+            BranchResult::Return => Ok(true),
+        }
+    }
+
+    fn finalize_join_value(&mut self, join: JoinSession) -> BranchResult {
+        let join_value = join.join_value();
+        join.finalize(self);
+        BranchResult::Value(join_value)
+    }
+
     /// Lowers a branching expression, potentially creating multiple basic blocks.
     ///
     /// Emits instructions starting at the current block cursor. May create new blocks
@@ -99,34 +127,14 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
 
                 // Lower the then branch.
                 self.builder.select_block(then_bb);
-                let mut then_returned = false;
-                match self.lower_branching_value_expr(then_body)? {
-                    BranchResult::Value(value) => {
-                        let then_sem_ty = self.type_map.type_table().get(then_body.ty).clone();
-                        let coerced = self.coerce_value(value, &then_sem_ty, &join_sem_ty);
-                        // Cursor is at end of then branch; emit branch to join.
-                        join.emit_branch(self, coerced, expr.span)?;
-                    }
-                    BranchResult::Return => {
-                        then_returned = true;
-                    }
-                }
+                let then_returned =
+                    self.lower_expr_to_join(&join, then_body, expr.span, Some(&join_sem_ty))?;
 
                 // Lower the else branch (start from saved locals snapshot).
                 join.restore_locals(self);
                 self.builder.select_block(else_bb);
-                let mut else_returned = false;
-                match self.lower_branching_value_expr(else_body)? {
-                    BranchResult::Value(value) => {
-                        let else_sem_ty = self.type_map.type_table().get(else_body.ty).clone();
-                        let coerced = self.coerce_value(value, &else_sem_ty, &join_sem_ty);
-                        // Cursor is at end of else branch; emit branch to join.
-                        join.emit_branch(self, coerced, expr.span)?;
-                    }
-                    BranchResult::Return => {
-                        else_returned = true;
-                    }
-                }
+                let else_returned =
+                    self.lower_expr_to_join(&join, else_body, expr.span, Some(&join_sem_ty))?;
 
                 // If both branches return, the if expression never produces a value.
                 if then_returned && else_returned {
@@ -134,9 +142,7 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
                 }
 
                 // Select join block and install its parameters as the new local values.
-                let join_value = join.join_value();
-                join.finalize(self);
-                Ok(BranchResult::Value(join_value))
+                Ok(self.finalize_join_value(join))
             }
 
             sem::ValueExprKind::BinOp { left, op, right }
@@ -172,13 +178,8 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
 
                 // Evaluate the RHS on the branch that continues execution.
                 self.builder.select_block(rhs_bb);
-                match self.lower_value_expr(right)? {
-                    BranchResult::Value(value) => {
-                        join.emit_branch(self, value, expr.span)?;
-                    }
-                    BranchResult::Return => {
-                        return Ok(BranchResult::Return);
-                    }
+                if self.lower_expr_to_join(&join, right, expr.span, None)? {
+                    return Ok(BranchResult::Return);
                 }
 
                 // Emit the short-circuit value on the opposite branch.
@@ -188,9 +189,7 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
                 let short_value = self.builder.const_bool(short_val, bool_ty);
                 join.emit_branch(self, short_value, expr.span)?;
 
-                let join_value = join.join_value();
-                join.finalize(self);
-                Ok(BranchResult::Value(join_value))
+                Ok(self.finalize_join_value(join))
             }
 
             sem::ValueExprKind::Try {
@@ -273,9 +272,7 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
             )?;
         }
 
-        let join_value = setup.join.join_value();
-        setup.join.finalize(self);
-        Ok(BranchResult::Value(join_value))
+        Ok(self.finalize_join_value(setup.join))
     }
 
     pub(super) fn lower_try_handle(
@@ -316,9 +313,7 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
             .call(Callee::Value(handler_value), call_args, result_ir_ty);
         setup.join.emit_branch(self, handled, expr.span)?;
 
-        let join_value = setup.join.join_value();
-        setup.join.finalize(self);
-        Ok(BranchResult::Value(join_value))
+        Ok(self.finalize_join_value(setup.join))
     }
 
     fn lower_try_setup(
