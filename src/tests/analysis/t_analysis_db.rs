@@ -2100,7 +2100,7 @@ fn hover_at_program_file_uses_selected_imported_overload_signature() {
     assert_eq!(hover.def_name.as_deref(), Some("println"));
     assert_eq!(
         hover.symbol_id.as_ref().map(ToString::to_string).as_deref(),
-        Some("std.io::println")
+        Some("std::io::println")
     );
     assert_eq!(hover.display, "fn println(s: string) -> ()");
 }
@@ -2592,7 +2592,7 @@ fn println(n: u64) -> u64 { n }
         .expect("expected signature help for imported overload");
     assert_eq!(
         sig.symbol_id.as_ref().map(ToString::to_string).as_deref(),
-        Some("app.dep::println")
+        Some("app::dep::println")
     );
     assert_eq!(sig.label, "fn println(s: string) -> u64");
 

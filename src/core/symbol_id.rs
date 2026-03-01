@@ -625,10 +625,11 @@ impl fmt::Display for SymbolPath {
 
 impl fmt::Display for SymbolId {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let module = self.module.segments().join("::");
         if self.path.segments.is_empty() {
-            write!(f, "{}", self.module)
+            write!(f, "{module}")
         } else {
-            write!(f, "{}::{}", self.module, self.path)
+            write!(f, "{module}::{}", self.path)
         }
     }
 }
