@@ -1,10 +1,14 @@
 //! Validation checks for stmt-specific semantics.
 
+use std::collections::HashMap;
+
 use crate::core::tree::visit::{self, Visitor};
-use crate::core::tree::{Expr, ExprKind, StmtExpr, StmtExprKind};
+use crate::core::tree::{Expr, ExprKind, NodeId, StmtExpr, StmtExprKind};
 use crate::core::typecheck::engine::TypecheckEngine;
 use crate::core::typecheck::errors::{TEK, TypeCheckError};
 use crate::core::types::Type;
+
+type NodeTypeMap = HashMap<NodeId, Type>;
 
 pub(super) fn check_stmt_semantics(engine: &TypecheckEngine) -> Vec<TypeCheckError> {
     let mut checker = StmtSemanticsChecker {
@@ -18,7 +22,7 @@ pub(super) fn check_stmt_semantics(engine: &TypecheckEngine) -> Vec<TypeCheckErr
 }
 
 struct StmtSemanticsChecker<'a> {
-    node_types: &'a std::collections::HashMap<crate::core::tree::NodeId, Type>,
+    node_types: &'a NodeTypeMap,
     errors: Vec<TypeCheckError>,
 }
 

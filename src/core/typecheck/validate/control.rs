@@ -1,5 +1,6 @@
 //! Control-flow-only validation checks.
 
+use crate::core::diag::Span;
 use crate::core::typecheck::constraints::ControlFact;
 use crate::core::typecheck::engine::TypecheckEngine;
 use crate::core::typecheck::errors::{TEK, TypeCheckError};
@@ -25,34 +26,36 @@ pub(super) fn check_control_facts(engine: &TypecheckEngine) -> Vec<TypeCheckErro
                 expected_return_ty,
                 span,
                 ..
-            } => match expected_return_ty {
-                None => {
-                    crate::core::typecheck::tc_push_error!(
-                        errors,
-                        *span,
-                        TEK::ReturnOutsideFunction
-                    );
+            } => {
+                if let Some(error) =
+                    return_fact_error(engine, *has_value, expected_return_ty.as_ref(), *span)
+                {
+                    errors.push(error);
                 }
-                Some(expected_ty) => {
-                    let expected_ty = engine.type_vars().apply(expected_ty);
-                    if *has_value && expected_ty == Type::Unit {
-                        crate::core::typecheck::tc_push_error!(
-                            errors,
-                            *span,
-                            TEK::ReturnValueUnexpected
-                        );
-                    } else if !*has_value && expected_ty != Type::Unit {
-                        crate::core::typecheck::tc_push_error!(
-                            errors,
-                            *span,
-                            TEK::ReturnValueMissing(expected_ty)
-                        );
-                    }
-                }
-            },
+            }
             _ => {}
         }
     }
 
     errors
+}
+
+fn return_fact_error(
+    engine: &TypecheckEngine,
+    has_value: bool,
+    expected_return_ty: Option<&Type>,
+    span: Span,
+) -> Option<TypeCheckError> {
+    let expected_ty = match expected_return_ty {
+        None => return Some(TEK::ReturnOutsideFunction.at(span)),
+        Some(expected_ty) => engine.type_vars().apply(expected_ty),
+    };
+
+    if has_value && expected_ty == Type::Unit {
+        Some(TEK::ReturnValueUnexpected.at(span))
+    } else if !has_value && expected_ty != Type::Unit {
+        Some(TEK::ReturnValueMissing(expected_ty).at(span))
+    } else {
+        None
+    }
 }
