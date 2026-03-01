@@ -97,12 +97,9 @@ impl CapsuleResolvedContext {
 pub struct ImportedSymbolBinding {
     pub module_id: ModuleId,
     pub module_path: ModulePath,
-    pub callables: Vec<GlobalDefId>,
-    pub callable_symbols: Vec<SymbolId>,
-    pub type_def: Option<GlobalDefId>,
-    pub type_symbol: Option<SymbolId>,
-    pub trait_def: Option<GlobalDefId>,
-    pub trait_symbol: Option<SymbolId>,
+    pub callables: Vec<ExportedCallable>,
+    pub type_def: Option<ExportedType>,
+    pub trait_def: Option<ExportedTrait>,
 }
 
 impl ImportedSymbolBinding {
@@ -112,13 +109,30 @@ impl ImportedSymbolBinding {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ExportedCallable {
+    pub global_def_id: GlobalDefId,
+    pub symbol_id: Option<SymbolId>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ExportedType {
+    pub global_def_id: GlobalDefId,
+    pub symbol_id: Option<SymbolId>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ExportedTrait {
+    pub global_def_id: GlobalDefId,
+    pub symbol_id: Option<SymbolId>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ModuleExportFacts {
     pub module_id: ModuleId,
     pub module_path: Option<ModulePath>,
-    pub callables: HashMap<String, Vec<GlobalDefId>>,
-    pub types: HashMap<String, GlobalDefId>,
-    pub traits: HashMap<String, GlobalDefId>,
-    pub symbols_by_def: HashMap<GlobalDefId, SymbolId>,
+    pub callables: HashMap<String, Vec<ExportedCallable>>,
+    pub types: HashMap<String, ExportedType>,
+    pub traits: HashMap<String, ExportedTrait>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -146,40 +160,44 @@ pub fn module_export_facts_from_def_table(
         callables: HashMap::new(),
         types: HashMap::new(),
         traits: HashMap::new(),
-        symbols_by_def: HashMap::new(),
     };
     for def in def_table.defs() {
         if !def.is_public() {
             continue;
         }
         let global_def_id = GlobalDefId::new(module_id, def.id);
-        if let Some(symbol_id) = symbol_ids.lookup_symbol_id(def.id) {
-            facts
-                .symbols_by_def
-                .insert(global_def_id, symbol_id.clone());
-        }
+        let symbol_id = symbol_ids.lookup_symbol_id(def.id).cloned();
         match def.kind {
             DefKind::FuncDef { .. } | DefKind::FuncDecl { .. } => {
                 facts
                     .callables
                     .entry(def.name.clone())
                     .or_default()
-                    .push(global_def_id);
+                    .push(ExportedCallable {
+                        global_def_id,
+                        symbol_id,
+                    });
             }
             DefKind::TypeDef { .. } => {
-                facts.types.entry(def.name.clone()).or_insert(global_def_id);
+                facts.types.entry(def.name.clone()).or_insert(ExportedType {
+                    global_def_id,
+                    symbol_id,
+                });
             }
             DefKind::TraitDef { .. } => {
                 facts
                     .traits
                     .entry(def.name.clone())
-                    .or_insert(global_def_id);
+                    .or_insert(ExportedTrait {
+                        global_def_id,
+                        symbol_id,
+                    });
             }
             _ => {}
         }
     }
     for overloads in facts.callables.values_mut() {
-        overloads.sort_by_key(|id| id.def_id);
+        overloads.sort_by_key(|item| item.global_def_id.def_id);
         overloads.dedup();
     }
     facts
@@ -199,21 +217,10 @@ pub fn imported_symbol_binding_from_exports(
     ImportedSymbolBinding {
         module_id: dep_module_id,
         module_path: dep_module_path.clone(),
-        callable_symbols: callables
-            .iter()
-            .filter_map(|source| dep_exports.symbols_by_def.get(source).cloned())
-            .collect(),
+
         callables,
-        type_def: dep_exports.types.get(member).copied(),
-        type_symbol: dep_exports
-            .types
-            .get(member)
-            .and_then(|source| dep_exports.symbols_by_def.get(source).cloned()),
-        trait_def: dep_exports.traits.get(member).copied(),
-        trait_symbol: dep_exports
-            .traits
-            .get(member)
-            .and_then(|source| dep_exports.symbols_by_def.get(source).cloned()),
+        type_def: dep_exports.types.get(member).cloned(),
+        trait_def: dep_exports.traits.get(member).cloned(),
     }
 }
 

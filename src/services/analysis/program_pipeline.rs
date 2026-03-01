@@ -201,11 +201,18 @@ pub(crate) fn resolve_imported_symbol_id_from_import_env(
     let import_env = import_env_by_module.get(&module_id)?;
     let binding = import_env.symbol_aliases.get(&local_def.name)?;
     let target = match local_def.kind {
-        DefKind::FuncDef { .. } | DefKind::FuncDecl { .. } => {
-            binding.callable_symbols.first().cloned()
-        }
-        DefKind::TypeDef { .. } => binding.type_symbol.clone(),
-        DefKind::TraitDef { .. } => binding.trait_symbol.clone(),
+        DefKind::FuncDef { .. } | DefKind::FuncDecl { .. } => binding
+            .callables
+            .first()
+            .and_then(|item| item.symbol_id.clone()),
+        DefKind::TypeDef { .. } => binding
+            .type_def
+            .as_ref()
+            .and_then(|item| item.symbol_id.clone()),
+        DefKind::TraitDef { .. } => binding
+            .trait_def
+            .as_ref()
+            .and_then(|item| item.symbol_id.clone()),
         _ => None,
     };
     if target.is_some() {
@@ -215,13 +222,25 @@ pub(crate) fn resolve_imported_symbol_id_from_import_env(
     // Partial/errored resolve may classify imported symbol aliases conservatively.
     // If the import binding has only one possible canonical target, use it.
     let mut candidates = Vec::new();
-    if let Some(callable) = binding.callable_symbols.first().cloned() {
+    if let Some(callable) = binding
+        .callables
+        .first()
+        .and_then(|item| item.symbol_id.clone())
+    {
         candidates.push(callable);
     }
-    if let Some(type_symbol) = binding.type_symbol.clone() {
+    if let Some(type_symbol) = binding
+        .type_def
+        .as_ref()
+        .and_then(|item| item.symbol_id.clone())
+    {
         candidates.push(type_symbol);
     }
-    if let Some(trait_symbol) = binding.trait_symbol.clone() {
+    if let Some(trait_symbol) = binding
+        .trait_def
+        .as_ref()
+        .and_then(|item| item.symbol_id.clone())
+    {
         candidates.push(trait_symbol);
     }
     candidates.dedup();

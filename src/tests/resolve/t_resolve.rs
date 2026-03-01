@@ -272,7 +272,11 @@ fn test_resolve_program_tracks_imported_symbol_origins() {
         .imported_symbol_binding(entry_id, "run")
         .expect("run import binding should exist");
     assert_eq!(
-        run_binding.callables,
+        run_binding
+            .callables
+            .iter()
+            .map(|item| item.global_def_id)
+            .collect::<Vec<_>>(),
         vec![resolved.global_def_id(dep_id, run_def_id)]
     );
     assert!(run_binding.type_def.is_none());
@@ -282,7 +286,10 @@ fn test_resolve_program_tracks_imported_symbol_origins() {
         .imported_symbol_binding(entry_id, "Config")
         .expect("Config import binding should exist");
     assert_eq!(
-        config_binding.type_def,
+        config_binding
+            .type_def
+            .as_ref()
+            .map(|item| item.global_def_id),
         Some(resolved.global_def_id(dep_id, config_def_id))
     );
     assert!(config_binding.callables.is_empty());
@@ -292,7 +299,10 @@ fn test_resolve_program_tracks_imported_symbol_origins() {
         .imported_symbol_binding(entry_id, "Runnable")
         .expect("Runnable import binding should exist");
     assert_eq!(
-        trait_binding.trait_def,
+        trait_binding
+            .trait_def
+            .as_ref()
+            .map(|item| item.global_def_id),
         Some(resolved.global_def_id(dep_id, runnable_def_id))
     );
     assert!(trait_binding.callables.is_empty());

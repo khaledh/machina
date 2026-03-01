@@ -54,32 +54,24 @@ impl ProgramImportFactsCache {
         let import_env =
             import_env_from_requires(program_context, module_id, &self.export_facts_by_module);
         for (alias, binding) in import_env.symbol_aliases {
-            let exports = self.export_facts_by_module.get(&binding.module_id);
             let callable_sigs = binding
                 .callables
                 .iter()
-                .filter_map(|def_id| {
-                    exports
-                        .and_then(|facts| facts.symbols_by_def.get(def_id))
-                        .and_then(|symbol_id| self.callable_sigs_by_symbol.get(symbol_id))
-                })
+                .filter_map(|item| item.symbol_id.as_ref())
+                .filter_map(|symbol_id| self.callable_sigs_by_symbol.get(symbol_id))
                 .cloned()
                 .collect();
             let type_ty = binding
                 .type_def
-                .and_then(|def_id| {
-                    exports
-                        .and_then(|facts| facts.symbols_by_def.get(&def_id))
-                        .and_then(|symbol_id| self.type_tys_by_symbol.get(symbol_id))
-                })
+                .as_ref()
+                .and_then(|item| item.symbol_id.as_ref())
+                .and_then(|symbol_id| self.type_tys_by_symbol.get(symbol_id))
                 .cloned();
             let trait_sig = binding
                 .trait_def
-                .and_then(|def_id| {
-                    exports
-                        .and_then(|facts| facts.symbols_by_def.get(&def_id))
-                        .and_then(|symbol_id| self.trait_sigs_by_symbol.get(symbol_id))
-                })
+                .as_ref()
+                .and_then(|item| item.symbol_id.as_ref())
+                .and_then(|symbol_id| self.trait_sigs_by_symbol.get(symbol_id))
                 .cloned();
             if binding.is_empty() {
                 continue;
@@ -89,34 +81,32 @@ impl ProgramImportFactsCache {
                 alias,
                 ImportedSymbol {
                     callable_sigs,
-                    callable_sources: binding.callables.clone(),
+                    callable_sources: binding
+                        .callables
+                        .iter()
+                        .map(|item| item.global_def_id)
+                        .collect(),
                     callable_symbols: binding
                         .callables
                         .iter()
-                        .copied()
-                        .filter_map(|source| {
-                            exports
-                                .and_then(|facts| facts.symbols_by_def.get(&source))
-                                .cloned()
-                                .map(|symbol| (source, symbol))
+                        .filter_map(|item| {
+                            item.symbol_id
+                                .clone()
+                                .map(|symbol| (item.global_def_id, symbol))
                         })
                         .collect(),
                     type_ty,
-                    type_source: binding.type_def,
+                    type_source: binding.type_def.as_ref().map(|item| item.global_def_id),
                     type_symbol: binding
                         .type_def
-                        .and_then(|source| {
-                            exports.and_then(|facts| facts.symbols_by_def.get(&source))
-                        })
-                        .cloned(),
+                        .as_ref()
+                        .and_then(|item| item.symbol_id.clone()),
                     trait_sig,
-                    trait_source: binding.trait_def,
+                    trait_source: binding.trait_def.as_ref().map(|item| item.global_def_id),
                     trait_symbol: binding
                         .trait_def
-                        .and_then(|source| {
-                            exports.and_then(|facts| facts.symbols_by_def.get(&source))
-                        })
-                        .cloned(),
+                        .as_ref()
+                        .and_then(|item| item.symbol_id.clone()),
                 },
             );
         }

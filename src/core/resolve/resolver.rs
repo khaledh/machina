@@ -77,32 +77,35 @@ impl ImportedSymbol {
             } else {
                 Vec::new()
             },
-            callable_sources: exports.callables.get(member).cloned().unwrap_or_default(),
+            callable_sources: exports
+                .callables
+                .get(member)
+                .into_iter()
+                .flat_map(|items| items.iter().map(|item| item.global_def_id))
+                .collect(),
             callable_symbols: exports
                 .callables
                 .get(member)
                 .into_iter()
-                .flat_map(|sources| sources.iter().copied())
-                .filter_map(|source| {
-                    exports
-                        .symbols_by_def
-                        .get(&source)
-                        .cloned()
-                        .map(|symbol| (source, symbol))
+                .flat_map(|items| items.iter())
+                .filter_map(|item| {
+                    item.symbol_id
+                        .clone()
+                        .map(|symbol| (item.global_def_id, symbol))
                 })
                 .collect(),
             type_ty: if has_type { type_ty } else { None },
-            type_source: exports.types.get(member).copied(),
+            type_source: exports.types.get(member).map(|item| item.global_def_id),
             type_symbol: exports
                 .types
                 .get(member)
-                .and_then(|source| exports.symbols_by_def.get(source).cloned()),
+                .and_then(|item| item.symbol_id.clone()),
             trait_sig: if has_trait { trait_sig } else { None },
-            trait_source: exports.traits.get(member).copied(),
+            trait_source: exports.traits.get(member).map(|item| item.global_def_id),
             trait_symbol: exports
                 .traits
                 .get(member)
-                .and_then(|source| exports.symbols_by_def.get(source).cloned()),
+                .and_then(|item| item.symbol_id.clone()),
         })
     }
 
@@ -130,19 +133,32 @@ impl ImportedSymbol {
 
         Some(Self {
             callable_sigs,
-            callable_sources: binding.callables.clone(),
+            callable_sources: binding
+                .callables
+                .iter()
+                .map(|item| item.global_def_id)
+                .collect(),
             callable_symbols: binding
                 .callables
                 .iter()
-                .cloned()
-                .zip(binding.callable_symbols.iter().cloned())
+                .filter_map(|item| {
+                    item.symbol_id
+                        .clone()
+                        .map(|symbol| (item.global_def_id, symbol))
+                })
                 .collect(),
             type_ty,
-            type_source: binding.type_def,
-            type_symbol: binding.type_symbol.clone(),
+            type_source: binding.type_def.as_ref().map(|item| item.global_def_id),
+            type_symbol: binding
+                .type_def
+                .as_ref()
+                .and_then(|item| item.symbol_id.clone()),
             trait_sig,
-            trait_source: binding.trait_def,
-            trait_symbol: binding.trait_symbol.clone(),
+            trait_source: binding.trait_def.as_ref().map(|item| item.global_def_id),
+            trait_symbol: binding
+                .trait_def
+                .as_ref()
+                .and_then(|item| item.symbol_id.clone()),
         })
     }
 }
