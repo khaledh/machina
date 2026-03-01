@@ -178,16 +178,17 @@ fn run_signature_query(db: &mut AnalysisDb, req: &QueryRequest) -> Result<usize,
 
 fn run_references_query(db: &mut AnalysisDb, req: &QueryRequest) -> Result<usize, String> {
     let printer = QueryPrinter::new(req);
-    let target = def_at_query_point(db, req)?;
-    let Some(target) = target else {
-        return Ok(printer.none_at("definition"));
-    };
-
-    let refs = map_query_cancelled(db.references(&target))?;
+    let refs = map_query_cancelled(db.references_at_program_file(req.file_id, req.span))?;
     if refs.is_empty() {
+        let target = def_at_query_point(db, req)?;
+        let Some(target) = target else {
+            return Ok(printer.none_at("definition"));
+        };
         println!("[NONE] no references for def {}", target.def_id.0);
         return Ok(1);
     }
+    let target = def_at_query_point(db, req)?
+        .expect("references_at_program_file should imply an existing definition target");
     println!("def {} references {}", target.def_id.0, refs.len());
     for loc in refs {
         println!(
@@ -207,12 +208,11 @@ fn run_rename_query(
     let Some(new_name) = new_name else {
         return Err("`--new-name` is required for `--kind rename`".to_string());
     };
-    let target = def_at_query_point(db, req)?;
-    let Some(target) = target else {
+    let plan =
+        map_query_cancelled(db.rename_plan_at_program_file(req.file_id, req.span, new_name))?;
+    let Some(plan) = plan else {
         return Ok(printer.none_at("definition"));
     };
-
-    let plan = map_query_cancelled(db.rename_plan(&target, new_name))?;
     let old_name = plan.old_name.as_deref().unwrap_or("<unknown>");
     let can_apply = plan.can_apply();
     println!(
