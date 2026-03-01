@@ -193,11 +193,11 @@ pub struct ImportedDefFacts {
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct ImportedFacts {
     defs_by_local_def: HashMap<DefId, ImportedDefFacts>,
-    callable_sigs_by_source: HashMap<GlobalDefId, ImportedCallableSig>,
+    callable_sigs_by_symbol: HashMap<SymbolId, ImportedCallableSig>,
     callable_symbols_by_source: HashMap<GlobalDefId, SymbolId>,
-    type_defs_by_source: HashMap<GlobalDefId, Type>,
+    type_defs_by_symbol: HashMap<SymbolId, Type>,
     type_symbols_by_source: HashMap<GlobalDefId, SymbolId>,
-    trait_defs_by_source: HashMap<GlobalDefId, ImportedTraitSig>,
+    trait_defs_by_symbol: HashMap<SymbolId, ImportedTraitSig>,
     trait_symbols_by_source: HashMap<GlobalDefId, SymbolId>,
 }
 
@@ -209,7 +209,9 @@ impl ImportedFacts {
     }
 
     pub fn callable_sig_by_source(&self, source: GlobalDefId) -> Option<&ImportedCallableSig> {
-        self.callable_sigs_by_source.get(&source)
+        self.callable_symbols_by_source
+            .get(&source)
+            .and_then(|symbol| self.callable_sigs_by_symbol.get(symbol))
     }
 
     pub fn callable_symbol_by_source(&self, source: GlobalDefId) -> Option<&SymbolId> {
@@ -234,14 +236,16 @@ impl ImportedFacts {
         self.defs_by_local_def
             .get(&def_id)
             .and_then(|facts| facts.type_source)
-            .and_then(|source| self.type_defs_by_source.get(&source))
+            .and_then(|source| self.type_symbols_by_source.get(&source))
+            .and_then(|symbol| self.type_defs_by_symbol.get(symbol))
     }
 
     pub fn imported_trait(&self, def_id: DefId) -> Option<&ImportedTraitSig> {
         self.defs_by_local_def
             .get(&def_id)
             .and_then(|facts| facts.trait_source)
-            .and_then(|source| self.trait_defs_by_source.get(&source))
+            .and_then(|source| self.trait_symbols_by_source.get(&source))
+            .and_then(|symbol| self.trait_defs_by_symbol.get(symbol))
     }
 
     pub fn callable_entries(
@@ -251,7 +255,7 @@ impl ImportedFacts {
             let sigs = facts
                 .callable_sources
                 .iter()
-                .filter_map(|source| self.callable_sigs_by_source.get(source))
+                .filter_map(|source| self.callable_sig_by_source(*source))
                 .collect::<Vec<_>>();
             (!sigs.is_empty()).then_some((*def_id, sigs))
         })
@@ -261,7 +265,8 @@ impl ImportedFacts {
         self.defs_by_local_def.iter().filter_map(|(def_id, facts)| {
             facts
                 .type_source
-                .and_then(|source| self.type_defs_by_source.get(&source))
+                .and_then(|source| self.type_symbols_by_source.get(&source))
+                .and_then(|symbol| self.type_defs_by_symbol.get(symbol))
                 .map(|ty| (*def_id, ty))
         })
     }
@@ -270,7 +275,8 @@ impl ImportedFacts {
         self.defs_by_local_def.iter().filter_map(|(def_id, facts)| {
             facts
                 .trait_source
-                .and_then(|source| self.trait_defs_by_source.get(&source))
+                .and_then(|source| self.trait_symbols_by_source.get(&source))
+                .and_then(|symbol| self.trait_defs_by_symbol.get(symbol))
                 .map(|sig| (*def_id, sig))
         })
     }
@@ -289,11 +295,11 @@ pub struct SymbolResolver {
     imported_modules: HashMap<String, ImportedModule>,
     imported_symbols: HashMap<String, ImportedSymbol>,
     imported_defs: HashMap<DefId, ImportedDefFacts>,
-    imported_callable_sigs: HashMap<GlobalDefId, ImportedCallableSig>,
+    imported_callable_sigs: HashMap<SymbolId, ImportedCallableSig>,
     imported_callable_symbols: HashMap<GlobalDefId, SymbolId>,
-    imported_type_defs: HashMap<GlobalDefId, Type>,
+    imported_type_defs: HashMap<SymbolId, Type>,
     imported_type_symbols: HashMap<GlobalDefId, SymbolId>,
-    imported_trait_defs: HashMap<GlobalDefId, ImportedTraitSig>,
+    imported_trait_defs: HashMap<SymbolId, ImportedTraitSig>,
     imported_trait_symbols: HashMap<GlobalDefId, SymbolId>,
     typestate_role_impls: Vec<TypestateRoleImplRef>,
 }
@@ -793,7 +799,9 @@ impl SymbolResolver {
                     .copied()
                     .zip(imported.callable_sigs.iter().cloned())
                 {
-                    self.imported_callable_sigs.insert(source, sig);
+                    if let Some(symbol_id) = imported.callable_symbols.get(&source).cloned() {
+                        self.imported_callable_sigs.insert(symbol_id, sig);
+                    }
                 }
                 for (source, symbol_id) in &imported.callable_symbols {
                     self.imported_callable_symbols
@@ -823,12 +831,10 @@ impl SymbolResolver {
                 if let (Some(source), Some(type_ty)) =
                     (imported.type_source, imported.type_ty.clone())
                 {
-                    self.imported_type_defs.insert(source, type_ty);
-                }
-                if let (Some(source), Some(symbol_id)) =
-                    (imported.type_source, imported.type_symbol.clone())
-                {
-                    self.imported_type_symbols.insert(source, symbol_id);
+                    if let Some(symbol_id) = imported.type_symbol.clone() {
+                        self.imported_type_defs.insert(symbol_id.clone(), type_ty);
+                        self.imported_type_symbols.insert(source, symbol_id);
+                    }
                 }
                 self.imported_defs.insert(
                     def_id,
@@ -847,12 +853,11 @@ impl SymbolResolver {
                 if let (Some(source), Some(trait_sig)) =
                     (imported.trait_source, imported.trait_sig.clone())
                 {
-                    self.imported_trait_defs.insert(source, trait_sig);
-                }
-                if let (Some(source), Some(symbol_id)) =
-                    (imported.trait_source, imported.trait_symbol.clone())
-                {
-                    self.imported_trait_symbols.insert(source, symbol_id);
+                    if let Some(symbol_id) = imported.trait_symbol.clone() {
+                        self.imported_trait_defs
+                            .insert(symbol_id.clone(), trait_sig);
+                        self.imported_trait_symbols.insert(source, symbol_id);
+                    }
                 }
                 self.imported_defs.insert(
                     def_id,
@@ -2293,11 +2298,11 @@ pub fn resolve_with_imports_and_symbols_and_typestate_roles_partial(
 
     let imported_facts = ImportedFacts {
         defs_by_local_def: std::mem::take(&mut resolver.imported_defs),
-        callable_sigs_by_source: std::mem::take(&mut resolver.imported_callable_sigs),
+        callable_sigs_by_symbol: std::mem::take(&mut resolver.imported_callable_sigs),
         callable_symbols_by_source: std::mem::take(&mut resolver.imported_callable_symbols),
-        type_defs_by_source: std::mem::take(&mut resolver.imported_type_defs),
+        type_defs_by_symbol: std::mem::take(&mut resolver.imported_type_defs),
         type_symbols_by_source: std::mem::take(&mut resolver.imported_type_symbols),
-        trait_defs_by_source: std::mem::take(&mut resolver.imported_trait_defs),
+        trait_defs_by_symbol: std::mem::take(&mut resolver.imported_trait_defs),
         trait_symbols_by_source: std::mem::take(&mut resolver.imported_trait_symbols),
     };
     let mut context = ast_context.with_def_table(def_table);
