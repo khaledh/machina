@@ -9,7 +9,7 @@ use crate::core::ir::{
     BlockId, Callee, CastKind, CmpOp, ConstValue, SwitchCase, Terminator, ValueId,
 };
 use crate::core::resolve::DefId;
-use crate::core::tree::{BinaryOp, semantic as sem};
+use crate::core::tree::{BinaryOp, NodeId, semantic as sem};
 use crate::core::types::{Type, TypeId};
 
 struct TryLoweringSetup {
@@ -54,6 +54,19 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
         let join_value = join.join_value();
         join.finalize(self);
         BranchResult::Value(join_value)
+    }
+
+    fn lower_loop_jump(
+        &mut self,
+        stmt_id: NodeId,
+        target: BlockId,
+        defs: &[DefId],
+        locals: &[crate::core::backend::lower::locals::LocalValue],
+    ) -> Result<BranchResult, LowerToIrError> {
+        self.emit_drops_for_stmt(stmt_id)?;
+        let args = self.local_args_for_like(defs, locals);
+        self.builder.terminate(Terminator::Br { target, args });
+        Ok(BranchResult::Return)
     }
 
     /// Lowers a branching expression, potentially creating multiple basic blocks.
@@ -652,17 +665,11 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
 
     /// Lowers a `break` statement by branching to the loop exit block.
     fn lower_break_stmt(&mut self, stmt: &sem::StmtExpr) -> Result<BranchResult, LowerToIrError> {
-        self.emit_drops_for_stmt(stmt.id)?;
-        let ctx = self.current_loop();
-        let exit_bb = ctx.exit_bb;
-        let defs = ctx.defs.clone();
-        let locals = ctx.locals.clone();
-        let exit_args = self.local_args_for_like(&defs, &locals);
-        self.builder.terminate(Terminator::Br {
-            target: exit_bb,
-            args: exit_args,
-        });
-        Ok(BranchResult::Return)
+        let (target, defs, locals) = {
+            let ctx = self.current_loop();
+            (ctx.exit_bb, ctx.defs.clone(), ctx.locals.clone())
+        };
+        self.lower_loop_jump(stmt.id, target, &defs, &locals)
     }
 
     /// Lowers a `continue` statement by branching to the loop header block.
@@ -670,16 +677,10 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
         &mut self,
         stmt: &sem::StmtExpr,
     ) -> Result<BranchResult, LowerToIrError> {
-        self.emit_drops_for_stmt(stmt.id)?;
-        let ctx = self.current_loop();
-        let header_bb = ctx.header_bb;
-        let defs = ctx.defs.clone();
-        let locals = ctx.locals.clone();
-        let loop_args = self.local_args_for_like(&defs, &locals);
-        self.builder.terminate(Terminator::Br {
-            target: header_bb,
-            args: loop_args,
-        });
-        Ok(BranchResult::Return)
+        let (target, defs, locals) = {
+            let ctx = self.current_loop();
+            (ctx.header_bb, ctx.defs.clone(), ctx.locals.clone())
+        };
+        self.lower_loop_jump(stmt.id, target, &defs, &locals)
     }
 }
