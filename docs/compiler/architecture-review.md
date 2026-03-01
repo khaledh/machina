@@ -391,8 +391,15 @@ that the backend doesn't use, but this stripping provides no benefit and costs
 
 ### Recommendation
 
-**Use `Type` directly in the IR** (or a thin wrapper adding layout info).
-Eliminate `IrTypeKind` and the translation layer.
+The low-risk cleanup seams in this area have already been captured:
+- common IR struct representations are now shared in `backend/lower/types.rs`
+- scalar-size / sret ABI classification is now centralized in `IrTypeCache`
+
+The larger redesign remains possible:
+
+**Use `Type` directly in the IR** (or a thin wrapper adding layout info) if a
+future audit shows that the remaining `IrTypeKind` translation layer is still
+paying more cost than value.
 
 **Estimated impact: 800-1,200 lines removed.**
 
@@ -555,6 +562,33 @@ Result:
 - branching control-flow lowering is more uniform and easier to follow
 - no longer one of the highest-leverage cleanup targets
 
+### IR Type Representation (`src/core/ir/`, `src/core/backend/lower/types.rs`)
+
+*Files: `src/core/ir/types.rs`, `src/core/backend/lower/types.rs`, `src/core/backend/codegen/arm64.rs`, `src/core/backend/codegen/traverse.rs`*
+
+This area was worth touching, and the clean low-risk seams have now been
+addressed.
+
+Completed work:
+- shared common IR struct representations for:
+  - `{ ptr, len }`
+  - `{ ptr, len, cap }`
+  - `{ tag, payload }`
+- centralized scalar-size and sret ABI classification in `IrTypeCache`
+  instead of duplicating it across codegen entry points
+
+What remains:
+- the larger question of whether `IrTypeKind` should collapse further into
+  frontend `Type` is still open
+- after these slices, that redesign no longer has an obvious small follow-up
+  seam and should be revisited only if the remaining translation layer becomes
+  a clearer source of friction
+
+Result:
+- IR type lowering is less repetitive
+- codegen ABI decisions are more centralized
+- no longer one of the highest-leverage cleanup targets
+
 ---
 
 ## Summary of Recommendations
@@ -564,12 +598,11 @@ Result:
 | 1  | AST / Semantic tree             | Eliminate semantic tree; lower from annotated AST | 4,000-6,000 | High     |
 | 2  | Visitor infrastructure          | Generate visitors; merge dataflow passes          | 2,000-3,000 | Medium   |
 | 3  | Type checker                    | Deduplicate unification, type walking, dispatch   | 2,000-3,000 | Medium   |
-| 4  | IR types                        | Eliminate IrTypeKind translation layer             | 800-1,200   | Medium   |
-| 5  | IDE/LSP                         | Collapse API variants, unify query entry points   | ~200        | Low      |
-| 6  | C Runtime                       | Extract duplicated utilities to shared header     | ~50         | Low      |
+| 4  | IDE/LSP                         | Collapse API variants, unify query entry points   | ~200        | Low      |
+| 5  | C Runtime                       | Extract duplicated utilities to shared header     | ~50         | Low      |
 
-**Total estimated reduction: 10,000-14,000 lines from ~77K production Rust
-(13-18%).**
+**Total estimated reduction: 9,000-13,000 lines from ~77K production Rust
+(12-17%).**
 
 Item 1 remains the highest-impact architectural simplification.
 
