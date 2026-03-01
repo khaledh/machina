@@ -4,6 +4,7 @@ use std::collections::{HashMap, HashSet};
 
 use crate::core::context::{ResolvedContext, TypeCheckedContext};
 use crate::core::resolve::{DefId, DefTable, ImportedFacts};
+use crate::core::symbol_id::SelectedCallable;
 use crate::core::tree::*;
 use crate::core::typecheck::TypeCheckError;
 use crate::core::typecheck::type_check_with_imported_facts;
@@ -159,6 +160,9 @@ fn apply_call_rewrites(call_sigs: &mut CallSigMap, call_rewrites: &HashMap<NodeI
     for (call_id, rewritten_def_id) in call_rewrites {
         if let Some(sig) = call_sigs.get_mut(call_id) {
             sig.def_id = Some(*rewritten_def_id);
+            if let Some(SelectedCallable::Local(local_def_id)) = &mut sig.selected {
+                *local_def_id = *rewritten_def_id;
+            }
         }
     }
 }

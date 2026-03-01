@@ -13,7 +13,7 @@ use std::collections::HashMap;
 use std::fmt;
 
 use crate::core::capsule::ModulePath;
-use crate::core::resolve::{DefId, DefTable};
+use crate::core::resolve::{DefId, DefTable, GlobalDefId};
 use crate::core::tree::ParamMode;
 use crate::core::tree::{MethodItem, Module, TopLevelItem};
 
@@ -90,6 +90,22 @@ pub enum SymbolNs {
 pub enum SymbolDisambiguator {
     /// Callable overload identity derived from the declared signature shape.
     Callable(CallableSigKey),
+}
+
+/// Transitional selected-call identity.
+///
+/// The long-term goal is for call sites to carry a canonical `SymbolId`, but
+/// while callable disambiguators are still being threaded through the frontend
+/// we keep the migration state explicit instead of relying on loosely-related
+/// optional ids.
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub enum SelectedCallable {
+    /// A same-module callable selected by the type checker.
+    Local(DefId),
+    /// A cross-module callable selected via imported/exported facts.
+    Global(GlobalDefId),
+    /// Final canonical callable identity once the frontend can provide it.
+    Canonical(SymbolId),
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Default)]

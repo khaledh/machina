@@ -171,6 +171,16 @@ pub struct ImportedFacts {
 }
 
 impl ImportedFacts {
+    pub fn callable_sources(&self, def_id: DefId) -> Option<&[GlobalDefId]> {
+        self.defs_by_local_def
+            .get(&def_id)
+            .map(|facts| facts.callable_sources.as_slice())
+    }
+
+    pub fn callable_sig_by_source(&self, source: GlobalDefId) -> Option<&ImportedCallableSig> {
+        self.callable_sigs_by_source.get(&source)
+    }
+
     pub fn imported_type(&self, def_id: DefId) -> Option<&Type> {
         self.defs_by_local_def
             .get(&def_id)

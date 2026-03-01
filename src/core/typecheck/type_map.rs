@@ -7,6 +7,7 @@
 use crate::core::context::{ResolvedContext, TypeCheckedContext};
 use crate::core::diag::Span;
 use crate::core::resolve::{Def, DefId, DefKind, DefTable};
+use crate::core::symbol_id::SelectedCallable;
 use crate::core::tree as ast;
 use crate::core::tree::semantic as sem;
 use crate::core::tree::{NodeId, ParamMode, RefinementKind};
@@ -1065,6 +1066,10 @@ impl TypeMapBuilder {
 #[derive(Debug, Clone)]
 pub struct CallSig {
     pub def_id: Option<DefId>,
+    /// Transitional selected-call identity. This lets tooling distinguish the
+    /// concrete imported overload chosen at a call site before all frontend
+    /// stages converge on canonical `SymbolId`s.
+    pub selected: Option<SelectedCallable>,
     pub receiver: Option<CallParam>,
     pub params: Vec<CallParam>,
 }

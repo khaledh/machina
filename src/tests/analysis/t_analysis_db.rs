@@ -2102,6 +2102,59 @@ fn hover_at_program_file_uses_selected_imported_overload_signature() {
 }
 
 #[test]
+fn def_location_at_program_file_uses_selected_imported_overload_target() {
+    let run_id = ANALYSIS_TMP_COUNTER.fetch_add(1, Ordering::Relaxed);
+    let temp_dir = std::env::temp_dir().join(format!(
+        "machina_analysis_defloc_imported_overload_{}_{}",
+        std::process::id(),
+        run_id
+    ));
+    let app_dir = temp_dir.join("app");
+    fs::create_dir_all(&app_dir).expect("failed to create temp module tree");
+
+    let entry_path = temp_dir.join("main.mc");
+    let dep_path = app_dir.join("dep.mc");
+    let entry_source = r#"
+requires {
+    app::dep::println
+}
+
+fn main() -> u64 {
+    println("hi")
+}
+"#;
+    let dep_source = r#"
+@public
+fn println(s: string) -> u64 { 1 }
+
+@public
+fn println(n: u64) -> u64 { n }
+"#;
+
+    fs::write(&entry_path, entry_source).expect("failed to write entry source");
+    fs::write(&dep_path, dep_source).expect("failed to write dependency source");
+
+    let mut db = AnalysisDb::new();
+    let entry_id = db.upsert_disk_text(entry_path, entry_source.to_string());
+    db.upsert_disk_text(dep_path.clone(), dep_source);
+
+    let query_span = span_for_last_substring(entry_source, "println");
+    let location = db
+        .def_location_at_program_file(entry_id, query_span)
+        .expect("program definition location query should succeed")
+        .expect("expected definition location for imported println");
+    let println_line = dep_source
+        .lines()
+        .position(|line| line.contains("fn println(s: string)"))
+        .expect("expected string println overload")
+        + 1;
+    assert_eq!(location.path.as_deref(), Some(dep_path.as_path()));
+    assert_eq!(location.span.start.line, println_line);
+
+    let _ = fs::remove_dir_all(&temp_dir);
+}
+
+#[test]
 fn def_location_at_file_points_typestate_role_binding_to_protocol_role() {
     let mut db = AnalysisDb::new();
     db.set_experimental_typestate(true);
@@ -2485,12 +2538,55 @@ fn run(x: u64, y: bool) -> u64 { x }
         .signature_help_at_program_file(entry_id, query_span)
         .expect("program signature-help query should succeed")
         .expect("expected signature help for imported callable");
-    assert!(
-        sig.label.contains("run("),
-        "expected signature label to reference callable name, got: {}",
-        sig.label
-    );
+    assert_eq!(sig.label, "fn run(x: u64, y: bool) -> u64");
     assert_eq!(sig.parameters.len(), 2);
+
+    let _ = fs::remove_dir_all(&temp_dir);
+}
+
+#[test]
+fn signature_help_at_program_file_uses_selected_imported_overload_signature() {
+    let run_id = ANALYSIS_TMP_COUNTER.fetch_add(1, Ordering::Relaxed);
+    let temp_dir = std::env::temp_dir().join(format!(
+        "machina_analysis_program_signature_overload_{}_{}",
+        std::process::id(),
+        run_id
+    ));
+    let app_dir = temp_dir.join("app");
+    fs::create_dir_all(&app_dir).expect("failed to create temp module tree");
+
+    let entry_path = temp_dir.join("main.mc");
+    let dep_path = app_dir.join("dep.mc");
+    let entry_source = r#"
+requires {
+    app::dep::println
+}
+
+fn main() -> u64 {
+    println("hi")
+}
+"#;
+    let dep_source = r#"
+@public
+fn println(s: string) -> u64 { 1 }
+
+@public
+fn println(n: u64) -> u64 { n }
+"#;
+
+    fs::write(&entry_path, entry_source).expect("failed to write entry source");
+    fs::write(&dep_path, dep_source).expect("failed to write dependency source");
+
+    let mut db = AnalysisDb::new();
+    let entry_id = db.upsert_disk_text(entry_path.clone(), entry_source);
+    db.upsert_disk_text(dep_path.clone(), dep_source);
+
+    let query_span = cursor_after_substring(entry_source, "println(");
+    let sig = db
+        .signature_help_at_program_file(entry_id, query_span)
+        .expect("program signature-help query should succeed")
+        .expect("expected signature help for imported overload");
+    assert_eq!(sig.label, "fn println(s: string) -> u64");
 
     let _ = fs::remove_dir_all(&temp_dir);
 }

@@ -220,6 +220,7 @@ impl<'a> Elaborator<'a> {
             // The semantic call plan uses the canonical receiver+args order.
             let plan_sig = CallSig {
                 def_id: Some(closure_def_id),
+                selected: None,
                 receiver: Some(CallParam {
                     mode: ast::ParamMode::In,
                     ty: info.ty.clone(),

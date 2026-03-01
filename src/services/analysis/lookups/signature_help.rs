@@ -106,6 +106,35 @@ pub(crate) fn signature_help_at_span(
     }))
 }
 
+/// Render source-level signature help for a known callable definition while
+/// using the caller-side call site to determine the active parameter index.
+pub(crate) fn signature_help_for_def_at_call_site(
+    caller_state: &LookupState,
+    query_span: Span,
+    source: Option<&str>,
+    callee_state: &LookupState,
+    callee_def_id: crate::core::resolve::DefId,
+) -> Option<SignatureHelp> {
+    let caller_typed = caller_state.typed.as_ref()?;
+    let call = call_site_at_span(&caller_typed.module, query_span).or_else(|| {
+        let nudged = nudge_span_left(query_span)?;
+        call_site_at_span(&caller_typed.module, nudged)
+    })?;
+    let active_parameter_for = |param_count: usize| {
+        active_param_index_with_comma_context(
+            &call.arg_spans,
+            query_span.start,
+            source,
+            param_count,
+        )
+    };
+    source_signature_help(
+        callee_state.typed.as_ref()?,
+        Some(callee_def_id),
+        active_parameter_for,
+    )
+}
+
 fn source_signature_help<F>(
     typed: &crate::core::context::TypeCheckedContext,
     render_def_id: Option<crate::core::resolve::DefId>,

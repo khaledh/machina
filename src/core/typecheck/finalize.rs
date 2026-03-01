@@ -8,6 +8,7 @@ use std::collections::{HashMap, HashSet};
 
 use crate::core::context::TypeCheckedContext;
 use crate::core::resolve::DefId;
+use crate::core::symbol_id::SelectedCallable;
 use crate::core::tree::NodeId;
 use crate::core::tree::visit::Visitor;
 use crate::core::tree::*;
@@ -216,10 +217,17 @@ fn build_outputs(engine: &TypecheckEngine) -> FinalizeOutput {
                 .collect::<Vec<_>>();
             (None, None, params, None)
         };
+        // Keep the local `def_id` for existing lowering/codegen users, but
+        // also attach the best-selected semantic target so analysis/tooling
+        // can stop re-matching imported overloads later.
+        let selected = def_id.and_then(|local_def_id| {
+            selected_callable_for_finalize(engine, local_def_id, &params, &expected_ret)
+        });
         builder.record_call_sig(
             obligation.call_node,
             CallSig {
                 def_id,
+                selected,
                 receiver,
                 params,
             },
@@ -297,6 +305,7 @@ fn record_property_access_call_sigs(engine: &TypecheckEngine, builder: &mut Type
                     *expr_id,
                     CallSig {
                         def_id: prop.getter_def,
+                        selected: None,
                         receiver: Some(CallParam {
                             mode: crate::core::tree::ParamMode::In,
                             ty: target_ty,
@@ -330,6 +339,7 @@ fn record_property_access_call_sigs(engine: &TypecheckEngine, builder: &mut Type
                     *assignee_expr_id,
                     CallSig {
                         def_id: prop.setter_def,
+                        selected: None,
                         receiver: Some(CallParam {
                             mode: crate::core::tree::ParamMode::InOut,
                             ty: target_ty,
@@ -344,6 +354,57 @@ fn record_property_access_call_sigs(engine: &TypecheckEngine, builder: &mut Type
             _ => {}
         }
     }
+}
+
+fn selected_callable_for_finalize(
+    engine: &TypecheckEngine,
+    local_def_id: DefId,
+    params: &[CallParam],
+    ret_ty: &Type,
+) -> Option<SelectedCallable> {
+    // Imported aliases need their chosen source overload, while same-module
+    // calls can keep using the local def until callable disambiguators land.
+    selected_imported_callable(engine, local_def_id, params, ret_ty)
+        .map(SelectedCallable::Global)
+        .or(Some(SelectedCallable::Local(local_def_id)))
+}
+
+fn selected_imported_callable(
+    engine: &TypecheckEngine,
+    local_def_id: DefId,
+    params: &[CallParam],
+    ret_ty: &Type,
+) -> Option<crate::core::resolve::GlobalDefId> {
+    let imported_facts = &engine.env().imported_facts;
+    let candidates = imported_facts.callable_sources(local_def_id)?;
+    if candidates.len() <= 1 {
+        return candidates.first().copied();
+    }
+
+    // Imported overload aliases still resolve to a local synthetic def id in
+    // the solver, so finalize matches the chosen param/return shape back to a
+    // concrete exported source callable.
+    candidates.iter().copied().find(|source| {
+        imported_facts
+            .callable_sig_by_source(*source)
+            .is_some_and(|sig| callable_sig_matches_call(sig, params, ret_ty))
+    })
+}
+
+fn callable_sig_matches_call(
+    imported: &crate::core::resolve::ImportedCallableSig,
+    params: &[CallParam],
+    ret_ty: &Type,
+) -> bool {
+    imported.ret_ty == *ret_ty
+        && imported.params.len() == params.len()
+        && imported
+            .params
+            .iter()
+            .zip(params)
+            .all(|(expected, selected)| {
+                expected.mode == selected.mode && expected.ty == selected.ty
+            })
 }
 
 #[derive(Debug, Clone)]

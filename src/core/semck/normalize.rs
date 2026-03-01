@@ -291,6 +291,7 @@ impl<'a> Normalizer<'a> {
                     lhs_call_id,
                     CallSig {
                         def_id: setter_sig.def_id,
+                        selected: None,
                         receiver: setter_sig.receiver,
                         params: Vec::new(),
                     },
