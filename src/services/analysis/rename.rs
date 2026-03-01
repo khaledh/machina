@@ -7,13 +7,15 @@ use crate::core::capsule::ModuleId;
 use crate::core::resolve::DefId;
 use crate::services::analysis::pipeline::LookupState;
 use crate::services::analysis::query::QueryResult;
-use crate::services::analysis::results::{Location, RenameConflict, RenameEdit, RenamePlan};
+use crate::services::analysis::results::{
+    DefTarget, Location, RenameConflict, RenameEdit, RenamePlan,
+};
 use crate::services::analysis::snapshot::{AnalysisSnapshot, FileId};
 use crate::services::analysis::syntax_index::node_span_map;
 
 pub(crate) fn references<F>(
     snapshot: &AnalysisSnapshot,
-    def_id: DefId,
+    target: &DefTarget,
     mut lookup_state_for_file: F,
 ) -> QueryResult<Vec<Location>>
 where
@@ -29,7 +31,7 @@ where
 
         let node_spans = node_span_map(&resolved.module);
         for (node_id, mapped_def_id) in resolved.def_table.node_def_entries() {
-            if mapped_def_id != def_id {
+            if !matches_reference_target(file_id, &resolved, target, mapped_def_id) {
                 continue;
             }
             let Some(span) = node_spans.get(&node_id).copied() else {
@@ -59,16 +61,17 @@ where
 
 pub(crate) fn rename_plan<F>(
     snapshot: &AnalysisSnapshot,
-    def_id: DefId,
+    target: &DefTarget,
     new_name: &str,
     mut lookup_state_for_file: F,
 ) -> QueryResult<RenamePlan>
 where
     F: FnMut(FileId) -> QueryResult<LookupState>,
 {
-    let references = references(snapshot, def_id, &mut lookup_state_for_file)?;
+    let references = references(snapshot, target, &mut lookup_state_for_file)?;
     let mut plan = RenamePlan {
-        def_id,
+        def_id: target.def_id,
+        symbol_id: target.symbol_id.clone(),
         old_name: None,
         new_name: new_name.to_string(),
         edits: Vec::new(),
@@ -92,21 +95,21 @@ where
         };
 
         if plan.old_name.is_none()
-            && let Some(def) = resolved.def_table.lookup_def(def_id)
+            && let Some(def) = resolved.def_table.lookup_def(target.def_id)
         {
             plan.old_name = Some(def.name.clone());
             owner_module = resolved
                 .def_owners
-                .get(&def_id)
+                .get(&target.def_id)
                 .copied()
-                .or(Some(ModuleId(file_id.0)));
+                .or(Some(ModuleId(target.file_id.0)));
         }
 
         let Some(target_owner) = owner_module else {
             continue;
         };
         for def in resolved.def_table.defs() {
-            if def.id == def_id || def.name != new_name {
+            if def.id == target.def_id || def.name != new_name {
                 continue;
             }
             let owner = resolved
@@ -128,7 +131,7 @@ where
     {
         plan.conflicts.push(RenameConflict {
             message: "new name matches existing symbol name".to_string(),
-            existing_def: Some(def_id),
+            existing_def: Some(target.def_id),
         });
     }
 
@@ -140,6 +143,18 @@ where
     }
 
     Ok(plan)
+}
+
+fn matches_reference_target(
+    file_id: FileId,
+    resolved: &crate::core::context::ResolvedContext,
+    target: &DefTarget,
+    mapped_def_id: DefId,
+) -> bool {
+    (file_id == target.file_id && mapped_def_id == target.def_id)
+        || target.symbol_id.as_ref().is_some_and(|symbol_id| {
+            resolved.symbol_ids.lookup_symbol_id(mapped_def_id) == Some(symbol_id)
+        })
 }
 
 fn is_identifier_name(name: &str) -> bool {

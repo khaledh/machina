@@ -1,9 +1,9 @@
 use std::path::{Path, PathBuf};
 
 use crate::core::diag::{Position, Span};
-use crate::core::resolve::def::DefId;
 use crate::services::analysis::db::AnalysisDb;
 use crate::services::analysis::query::QueryResult;
+use crate::services::analysis::results::DefTarget;
 
 #[derive(Debug, Clone, Copy)]
 pub enum QueryLookupKind {
@@ -116,8 +116,8 @@ fn run_def_query(db: &mut AnalysisDb, req: &QueryRequest) -> Result<usize, Strin
         req,
         "definition",
         || def_at_query_point(db, req),
-        |def_id| {
-            println!("def {}", def_id.0);
+        |target| {
+            println!("def {}", target.def_id.0);
             Ok(0)
         },
     )
@@ -178,17 +178,17 @@ fn run_signature_query(db: &mut AnalysisDb, req: &QueryRequest) -> Result<usize,
 
 fn run_references_query(db: &mut AnalysisDb, req: &QueryRequest) -> Result<usize, String> {
     let printer = QueryPrinter::new(req);
-    let def_id = def_at_query_point(db, req)?;
-    let Some(def_id) = def_id else {
+    let target = def_at_query_point(db, req)?;
+    let Some(target) = target else {
         return Ok(printer.none_at("definition"));
     };
 
-    let refs = map_query_cancelled(db.references(def_id))?;
+    let refs = map_query_cancelled(db.references(&target))?;
     if refs.is_empty() {
-        println!("[NONE] no references for def {}", def_id.0);
+        println!("[NONE] no references for def {}", target.def_id.0);
         return Ok(1);
     }
-    println!("def {} references {}", def_id.0, refs.len());
+    println!("def {} references {}", target.def_id.0, refs.len());
     for loc in refs {
         println!(
             "{}",
@@ -207,12 +207,12 @@ fn run_rename_query(
     let Some(new_name) = new_name else {
         return Err("`--new-name` is required for `--kind rename`".to_string());
     };
-    let def_id = def_at_query_point(db, req)?;
-    let Some(def_id) = def_id else {
+    let target = def_at_query_point(db, req)?;
+    let Some(target) = target else {
         return Ok(printer.none_at("definition"));
     };
 
-    let plan = map_query_cancelled(db.rename_plan(def_id, new_name))?;
+    let plan = map_query_cancelled(db.rename_plan(&target, new_name))?;
     let old_name = plan.old_name.as_deref().unwrap_or("<unknown>");
     let can_apply = plan.can_apply();
     println!(
@@ -309,8 +309,11 @@ fn format_location(path: Option<&Path>, file_id: u64, span: Span) -> String {
     )
 }
 
-fn def_at_query_point(db: &mut AnalysisDb, req: &QueryRequest) -> Result<Option<DefId>, String> {
-    map_query_cancelled(db.def_at_file(req.file_id, req.span))
+fn def_at_query_point(
+    db: &mut AnalysisDb,
+    req: &QueryRequest,
+) -> Result<Option<DefTarget>, String> {
+    map_query_cancelled(db.def_target_at_program_file(req.file_id, req.span))
 }
 
 fn run_optional_query<T>(

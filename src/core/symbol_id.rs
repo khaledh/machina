@@ -338,6 +338,12 @@ impl SymbolIdTable {
         self.defs_by_symbol.get(symbol_id).map(Vec::as_slice)
     }
 
+    /// Associate a synthetic local alias def with an existing canonical symbol
+    /// id, without changing the source-owned symbol id itself.
+    pub fn record_alias_symbol(&mut self, def_id: DefId, symbol_id: SymbolId) {
+        self.record(Some(def_id), symbol_id);
+    }
+
     fn record(&mut self, def_id: Option<DefId>, symbol_id: SymbolId) {
         let Some(def_id) = def_id else {
             return;

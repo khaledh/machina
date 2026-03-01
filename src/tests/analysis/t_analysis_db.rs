@@ -298,6 +298,7 @@ fn def_location_at_program_file_points_to_imported_symbol_definition() {
     ));
     let app_dir = temp_dir.join("app");
     fs::create_dir_all(&app_dir).expect("failed to create temp module tree");
+    fs::write(temp_dir.join("machina.toml"), "").expect("failed to write capsule root config");
 
     let entry_path = temp_dir.join("main.mc");
     let dep_path = app_dir.join("dep.mc");
@@ -345,6 +346,7 @@ fn def_location_at_program_file_points_to_imported_type_definition() {
     ));
     let app_dir = temp_dir.join("app");
     fs::create_dir_all(&app_dir).expect("failed to create temp module tree");
+    fs::write(temp_dir.join("machina.toml"), "").expect("failed to write capsule root config");
 
     let entry_path = temp_dir.join("main.mc");
     let dep_path = app_dir.join("dep.mc");
@@ -1254,13 +1256,13 @@ fn main() -> u64 { id(1) + id(2) }
 
     let mut def_span = span_for_substring(source, "id(x");
     def_span.end = position_at(source, def_span.start.offset + 2);
-    let def_id = db
-        .def_at_file(file_id, def_span)
+    let target = db
+        .def_target_at_file(file_id, def_span)
         .expect("def lookup should succeed")
-        .expect("expected def id for `id`");
+        .expect("expected def target for `id`");
 
     let refs = db
-        .references(def_id)
+        .references(&target)
         .expect("references query should succeed");
     assert!(
         refs.len() >= 3,
@@ -1278,6 +1280,66 @@ fn main() -> u64 { id(1) + id(2) }
 }
 
 #[test]
+fn references_for_imported_definition_include_import_use_sites() {
+    let run_id = ANALYSIS_TMP_COUNTER.fetch_add(1, Ordering::Relaxed);
+    let temp_dir = std::env::temp_dir().join(format!(
+        "machina_analysis_references_imported_{}_{}",
+        std::process::id(),
+        run_id
+    ));
+    let app_dir = temp_dir.join("app");
+    fs::create_dir_all(&app_dir).expect("failed to create temp module tree");
+
+    let entry_path = temp_dir.join("main.mc");
+    let dep_path = app_dir.join("dep.mc");
+    let entry_source = r#"
+requires {
+    app::dep::run
+}
+
+fn main() -> u64 {
+    run() + run()
+}
+"#;
+    let dep_source = r#"
+@public
+fn run() -> u64 { 1 }
+"#;
+
+    fs::write(&entry_path, entry_source).expect("failed to write entry source");
+    fs::write(&dep_path, dep_source).expect("failed to write dependency source");
+
+    let mut db = AnalysisDb::new();
+    let entry_id = db.upsert_disk_text(entry_path.clone(), entry_source);
+    db.upsert_disk_text(dep_path.clone(), dep_source);
+
+    let query_span = span_for_last_substring(entry_source, "run");
+    let target = db
+        .def_target_at_program_file(entry_id, query_span)
+        .expect("def lookup should succeed")
+        .expect("expected imported target for run");
+
+    let refs = db
+        .references(&target)
+        .expect("references query should succeed");
+    assert!(
+        refs.iter()
+            .any(|loc| loc.path.as_deref() == Some(dep_path.as_path())),
+        "expected definition site in dependency module"
+    );
+    let entry_refs = refs
+        .iter()
+        .filter(|loc| loc.path.as_deref() == Some(entry_path.as_path()))
+        .count();
+    assert!(
+        entry_refs >= 2,
+        "expected imported call sites in entry module, got {entry_refs}"
+    );
+
+    let _ = fs::remove_dir_all(&temp_dir);
+}
+
+#[test]
 fn rename_plan_reports_conflicts_for_existing_name() {
     let mut db = AnalysisDb::new();
     let source = r#"
@@ -1289,13 +1351,13 @@ fn baz() -> u64 { 2 }
 
     let mut foo_span = span_for_substring(source, "foo()");
     foo_span.end = position_at(source, foo_span.start.offset + 3);
-    let def_id = db
-        .def_at_file(file_id, foo_span)
+    let target = db
+        .def_target_at_file(file_id, foo_span)
         .expect("def lookup should succeed")
-        .expect("expected def id for foo");
+        .expect("expected def target for foo");
 
     let plan = db
-        .rename_plan(def_id, "baz")
+        .rename_plan(&target, "baz")
         .expect("rename plan query should succeed");
     assert!(
         !plan.can_apply(),
@@ -1319,13 +1381,13 @@ fn main() -> u64 {
 
     let mut foo_span = span_for_substring(source, "foo()");
     foo_span.end = position_at(source, foo_span.start.offset + 3);
-    let def_id = db
-        .def_at_file(file_id, foo_span)
+    let target = db
+        .def_target_at_file(file_id, foo_span)
         .expect("def lookup should succeed")
-        .expect("expected def id for foo");
+        .expect("expected def target for foo");
 
     let plan = db
-        .rename_plan(def_id, "renamed")
+        .rename_plan(&target, "renamed")
         .expect("rename plan query should succeed");
     assert!(
         plan.conflicts.is_empty(),
@@ -1350,6 +1412,74 @@ fn main() -> u64 {
             "rename edits should be deterministically sorted"
         );
     }
+}
+
+#[test]
+fn rename_plan_for_imported_definition_includes_import_use_edits() {
+    let run_id = ANALYSIS_TMP_COUNTER.fetch_add(1, Ordering::Relaxed);
+    let temp_dir = std::env::temp_dir().join(format!(
+        "machina_analysis_rename_imported_{}_{}",
+        std::process::id(),
+        run_id
+    ));
+    let app_dir = temp_dir.join("app");
+    fs::create_dir_all(&app_dir).expect("failed to create temp module tree");
+
+    let entry_path = temp_dir.join("main.mc");
+    let dep_path = app_dir.join("dep.mc");
+    let entry_source = r#"
+requires {
+    app::dep::run
+}
+
+fn main() -> u64 {
+    run()
+}
+"#;
+    let dep_source = r#"
+@public
+fn run() -> u64 { 1 }
+"#;
+
+    fs::write(&entry_path, entry_source).expect("failed to write entry source");
+    fs::write(&dep_path, dep_source).expect("failed to write dependency source");
+
+    let mut db = AnalysisDb::new();
+    let entry_id = db.upsert_disk_text(entry_path.clone(), entry_source);
+    db.upsert_disk_text(dep_path.clone(), dep_source);
+
+    let query_span = span_for_last_substring(entry_source, "run");
+    let target = db
+        .def_target_at_program_file(entry_id, query_span)
+        .expect("def lookup should succeed")
+        .expect("expected imported target for run");
+
+    let plan = db
+        .rename_plan(&target, "execute")
+        .expect("rename plan query should succeed");
+    assert!(
+        plan.conflicts.is_empty(),
+        "unexpected conflicts: {:?}",
+        plan.conflicts
+    );
+    assert_eq!(
+        plan.symbol_id.as_ref().map(ToString::to_string).as_deref(),
+        Some("app::dep::run")
+    );
+    assert!(
+        plan.edits
+            .iter()
+            .any(|edit| edit.location.path.as_deref() == Some(dep_path.as_path())),
+        "expected definition edit in dependency module"
+    );
+    assert!(
+        plan.edits
+            .iter()
+            .any(|edit| edit.location.path.as_deref() == Some(entry_path.as_path())),
+        "expected imported use edit in entry module"
+    );
+
+    let _ = fs::remove_dir_all(&temp_dir);
 }
 
 #[test]

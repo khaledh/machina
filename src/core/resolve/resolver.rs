@@ -196,7 +196,9 @@ pub struct ImportedFacts {
     callable_sigs_by_source: HashMap<GlobalDefId, ImportedCallableSig>,
     callable_symbols_by_source: HashMap<GlobalDefId, SymbolId>,
     type_defs_by_source: HashMap<GlobalDefId, Type>,
+    type_symbols_by_source: HashMap<GlobalDefId, SymbolId>,
     trait_defs_by_source: HashMap<GlobalDefId, ImportedTraitSig>,
+    trait_symbols_by_source: HashMap<GlobalDefId, SymbolId>,
 }
 
 impl ImportedFacts {
@@ -212,6 +214,20 @@ impl ImportedFacts {
 
     pub fn callable_symbol_by_source(&self, source: GlobalDefId) -> Option<&SymbolId> {
         self.callable_symbols_by_source.get(&source)
+    }
+
+    pub fn imported_symbol_id(&self, def_id: DefId) -> Option<&SymbolId> {
+        let facts = self.defs_by_local_def.get(&def_id)?;
+        if let Some(source) = facts.callable_sources.first() {
+            return self.callable_symbols_by_source.get(source);
+        }
+        if let Some(source) = facts.type_source {
+            return self.type_symbols_by_source.get(&source);
+        }
+        if let Some(source) = facts.trait_source {
+            return self.trait_symbols_by_source.get(&source);
+        }
+        None
     }
 
     pub fn imported_type(&self, def_id: DefId) -> Option<&Type> {
@@ -276,7 +292,9 @@ pub struct SymbolResolver {
     imported_callable_sigs: HashMap<GlobalDefId, ImportedCallableSig>,
     imported_callable_symbols: HashMap<GlobalDefId, SymbolId>,
     imported_type_defs: HashMap<GlobalDefId, Type>,
+    imported_type_symbols: HashMap<GlobalDefId, SymbolId>,
     imported_trait_defs: HashMap<GlobalDefId, ImportedTraitSig>,
+    imported_trait_symbols: HashMap<GlobalDefId, SymbolId>,
     typestate_role_impls: Vec<TypestateRoleImplRef>,
 }
 
@@ -313,7 +331,9 @@ impl SymbolResolver {
             imported_callable_sigs: HashMap::new(),
             imported_callable_symbols: HashMap::new(),
             imported_type_defs: HashMap::new(),
+            imported_type_symbols: HashMap::new(),
             imported_trait_defs: HashMap::new(),
+            imported_trait_symbols: HashMap::new(),
             typestate_role_impls: Vec::new(),
         }
     }
@@ -805,6 +825,11 @@ impl SymbolResolver {
                 {
                     self.imported_type_defs.insert(source, type_ty);
                 }
+                if let (Some(source), Some(symbol_id)) =
+                    (imported.type_source, imported.type_symbol.clone())
+                {
+                    self.imported_type_symbols.insert(source, symbol_id);
+                }
                 self.imported_defs.insert(
                     def_id,
                     ImportedDefFacts {
@@ -823,6 +848,11 @@ impl SymbolResolver {
                     (imported.trait_source, imported.trait_sig.clone())
                 {
                     self.imported_trait_defs.insert(source, trait_sig);
+                }
+                if let (Some(source), Some(symbol_id)) =
+                    (imported.trait_source, imported.trait_symbol.clone())
+                {
+                    self.imported_trait_symbols.insert(source, symbol_id);
                 }
                 self.imported_defs.insert(
                     def_id,
@@ -2266,13 +2296,27 @@ pub fn resolve_with_imports_and_symbols_and_typestate_roles_partial(
         callable_sigs_by_source: std::mem::take(&mut resolver.imported_callable_sigs),
         callable_symbols_by_source: std::mem::take(&mut resolver.imported_callable_symbols),
         type_defs_by_source: std::mem::take(&mut resolver.imported_type_defs),
+        type_symbols_by_source: std::mem::take(&mut resolver.imported_type_symbols),
         trait_defs_by_source: std::mem::take(&mut resolver.imported_trait_defs),
+        trait_symbols_by_source: std::mem::take(&mut resolver.imported_trait_symbols),
     };
+    let mut context = ast_context.with_def_table(def_table);
+    attach_imported_symbol_ids(&mut context, &imported_facts);
 
     ResolveOutput {
-        context: ast_context.with_def_table(def_table),
+        context,
         imported_facts,
         errors,
+    }
+}
+
+fn attach_imported_symbol_ids(context: &mut ResolveStageOutput, imported_facts: &ImportedFacts) {
+    for local_def_id in imported_facts.defs_by_local_def.keys().copied() {
+        if let Some(symbol_id) = imported_facts.imported_symbol_id(local_def_id).cloned() {
+            context
+                .symbol_ids
+                .record_alias_symbol(local_def_id, symbol_id);
+        }
     }
 }
 

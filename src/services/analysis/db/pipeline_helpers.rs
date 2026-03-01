@@ -14,6 +14,39 @@ use crate::services::analysis::query::{QueryKey, QueryKind, QueryResult};
 use crate::services::analysis::snapshot::FileId;
 
 impl super::AnalysisDb {
+    pub(super) fn best_lookup_state_for_navigation(
+        &mut self,
+        origin_file_id: FileId,
+        file_id: FileId,
+    ) -> QueryResult<LookupState> {
+        if let Some(state) = self.lookup_state_in_origin_program(origin_file_id, file_id)? {
+            return Ok(state);
+        }
+        self.lookup_state_for_file(file_id)
+    }
+
+    fn lookup_state_in_origin_program(
+        &mut self,
+        origin_file_id: FileId,
+        file_id: FileId,
+    ) -> QueryResult<Option<LookupState>> {
+        let target_path = self.snapshot().path(file_id).map(|p| p.to_path_buf());
+        let Some(target_path) = target_path else {
+            return Ok(None);
+        };
+
+        let program = self.program_pipeline_for_file(origin_file_id)?;
+        for state in program.module_states.values() {
+            let Some(resolved) = state.resolved.as_ref() else {
+                continue;
+            };
+            if resolved.def_table.source_path() == Some(target_path.as_path()) {
+                return Ok(Some(state.clone()));
+            }
+        }
+        Ok(None)
+    }
+
     pub(super) fn lookup_state_for_file(&mut self, file_id: FileId) -> QueryResult<LookupState> {
         let snapshot = self.snapshot();
         let Some(source) = snapshot.text(file_id) else {

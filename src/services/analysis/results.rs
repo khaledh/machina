@@ -216,6 +216,14 @@ pub struct Location {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
+pub struct DefTarget {
+    pub file_id: FileId,
+    pub def_id: DefId,
+    pub symbol_id: Option<SymbolId>,
+    pub program_scoped: bool,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct RenameEdit {
     pub location: Location,
     pub replacement: String,
@@ -230,6 +238,7 @@ pub struct RenameConflict {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct RenamePlan {
     pub def_id: DefId,
+    pub symbol_id: Option<SymbolId>,
     pub old_name: Option<String>,
     pub new_name: String,
     pub edits: Vec<RenameEdit>,

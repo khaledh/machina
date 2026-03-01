@@ -3,7 +3,6 @@
 use std::path::Path;
 
 use crate::core::diag::Span;
-use crate::core::resolve::DefId;
 use crate::services::analysis::diagnostics::Diagnostic;
 use crate::services::analysis::lookups::{
     code_actions_for_range, document_symbols, semantic_tokens,
@@ -13,7 +12,7 @@ use crate::services::analysis::rename::{
     references as collect_references, rename_plan as build_rename_plan,
 };
 use crate::services::analysis::results::{
-    CodeAction, DocumentSymbol, Location, RenamePlan, SemanticToken,
+    CodeAction, DefTarget, DocumentSymbol, Location, RenamePlan, SemanticToken,
 };
 use crate::services::analysis::snapshot::FileId;
 
@@ -76,17 +75,25 @@ impl super::AnalysisDb {
         ))
     }
 
-    pub fn references(&mut self, def_id: DefId) -> QueryResult<Vec<Location>> {
+    pub fn references(&mut self, target: &DefTarget) -> QueryResult<Vec<Location>> {
         let snapshot = self.snapshot();
-        collect_references(&snapshot, def_id, |file_id| {
-            self.lookup_state_for_file(file_id)
+        collect_references(&snapshot, target, |file_id| {
+            if target.program_scoped {
+                self.best_lookup_state_for_navigation(target.file_id, file_id)
+            } else {
+                self.lookup_state_for_file(file_id)
+            }
         })
     }
 
-    pub fn rename_plan(&mut self, def_id: DefId, new_name: &str) -> QueryResult<RenamePlan> {
+    pub fn rename_plan(&mut self, target: &DefTarget, new_name: &str) -> QueryResult<RenamePlan> {
         let snapshot = self.snapshot();
-        build_rename_plan(&snapshot, def_id, new_name, |file_id| {
-            self.lookup_state_for_file(file_id)
+        build_rename_plan(&snapshot, target, new_name, |file_id| {
+            if target.program_scoped {
+                self.best_lookup_state_for_navigation(target.file_id, file_id)
+            } else {
+                self.lookup_state_for_file(file_id)
+            }
         })
     }
 }

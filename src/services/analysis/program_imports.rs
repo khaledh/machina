@@ -53,6 +53,7 @@ impl ProgramImportFactsCache {
         let import_env =
             import_env_from_requires(program_context, module_id, &self.export_facts_by_module);
         for (alias, binding) in import_env.symbol_aliases {
+            let exports = self.export_facts_by_module.get(&binding.module_id);
             let callable_sigs = binding
                 .callables
                 .iter()
@@ -67,11 +68,44 @@ impl ProgramImportFactsCache {
                 .trait_def
                 .and_then(|def_id| self.trait_sigs_by_def.get(&def_id))
                 .cloned();
-            if let Some(imported) =
-                ImportedSymbol::from_binding(&binding, callable_sigs, type_ty, trait_sig)
-            {
-                out.insert(alias, imported);
+            if binding.is_empty() {
+                continue;
             }
+
+            out.insert(
+                alias,
+                ImportedSymbol {
+                    callable_sigs,
+                    callable_sources: binding.callables.clone(),
+                    callable_symbols: binding
+                        .callables
+                        .iter()
+                        .copied()
+                        .filter_map(|source| {
+                            exports
+                                .and_then(|facts| facts.symbols_by_def.get(&source))
+                                .cloned()
+                                .map(|symbol| (source, symbol))
+                        })
+                        .collect(),
+                    type_ty,
+                    type_source: binding.type_def,
+                    type_symbol: binding
+                        .type_def
+                        .and_then(|source| {
+                            exports.and_then(|facts| facts.symbols_by_def.get(&source))
+                        })
+                        .cloned(),
+                    trait_sig,
+                    trait_source: binding.trait_def,
+                    trait_symbol: binding
+                        .trait_def
+                        .and_then(|source| {
+                            exports.and_then(|facts| facts.symbols_by_def.get(&source))
+                        })
+                        .cloned(),
+                },
+            );
         }
 
         out

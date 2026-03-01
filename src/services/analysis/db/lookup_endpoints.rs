@@ -9,7 +9,9 @@ use crate::services::analysis::lookups::{
     def_at_span, def_location_at_span, hover_at_span_in_file, type_at_span,
 };
 use crate::services::analysis::query::QueryResult;
-use crate::services::analysis::results::{CompletionItem, HoverInfo, Location, SignatureHelp};
+use crate::services::analysis::results::{
+    CompletionItem, DefTarget, HoverInfo, Location, SignatureHelp,
+};
 use crate::services::analysis::snapshot::FileId;
 
 impl super::AnalysisDb {
@@ -26,6 +28,65 @@ impl super::AnalysisDb {
         let snapshot = self.snapshot();
         let source = snapshot.text(file_id);
         Ok(def_at_span(&state, query_span, source.as_deref()))
+    }
+
+    pub fn def_target_at_file(
+        &mut self,
+        file_id: FileId,
+        query_span: Span,
+    ) -> QueryResult<Option<DefTarget>> {
+        let state = self.lookup_state_for_file(file_id)?;
+        let snapshot = self.snapshot();
+        let source = snapshot.text(file_id);
+        Ok(
+            def_at_span(&state, query_span, source.as_deref()).map(|def_id| DefTarget {
+                file_id,
+                def_id,
+                symbol_id: state
+                    .resolved
+                    .and_then(|resolved| resolved.symbol_ids.lookup_symbol_id(def_id).cloned()),
+                program_scoped: false,
+            }),
+        )
+    }
+
+    pub fn def_at_program_file(
+        &mut self,
+        file_id: FileId,
+        query_span: Span,
+    ) -> QueryResult<Option<DefId>> {
+        let snapshot = self.snapshot();
+        let source = snapshot.text(file_id);
+        let state = if let Some(state) = self.entry_lookup_state_for_program_file(file_id)? {
+            state
+        } else {
+            self.lookup_state_for_file(file_id)?
+        };
+        Ok(def_at_span(&state, query_span, source.as_deref()))
+    }
+
+    pub fn def_target_at_program_file(
+        &mut self,
+        file_id: FileId,
+        query_span: Span,
+    ) -> QueryResult<Option<DefTarget>> {
+        let snapshot = self.snapshot();
+        let source = snapshot.text(file_id);
+        let state = if let Some(state) = self.entry_lookup_state_for_program_file(file_id)? {
+            state
+        } else {
+            self.lookup_state_for_file(file_id)?
+        };
+        Ok(
+            def_at_span(&state, query_span, source.as_deref()).map(|def_id| DefTarget {
+                file_id,
+                def_id,
+                symbol_id: state
+                    .resolved
+                    .and_then(|resolved| resolved.symbol_ids.lookup_symbol_id(def_id).cloned()),
+                program_scoped: true,
+            }),
+        )
     }
 
     pub fn def_location_at_path(
