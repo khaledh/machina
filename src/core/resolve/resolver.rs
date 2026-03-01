@@ -13,6 +13,7 @@ use crate::core::resolve::symbols::{Scope, Symbol, SymbolKind};
 use crate::core::resolve::{
     Def, DefId, DefIdGen, DefKind, FuncAttrs, GlobalDefId, TraitAttrs, TypeAttrs, Visibility,
 };
+use crate::core::symbol_id::SymbolId;
 use crate::core::tree::visit::*;
 use crate::core::tree::*;
 use crate::core::types::{BUILTIN_TYPES, Type};
@@ -28,10 +29,13 @@ pub struct ImportedModule {
 pub struct ImportedSymbol {
     pub callable_sigs: Vec<ImportedCallableSig>,
     pub callable_sources: Vec<GlobalDefId>,
+    pub callable_symbols: HashMap<GlobalDefId, SymbolId>,
     pub type_ty: Option<Type>,
     pub type_source: Option<GlobalDefId>,
+    pub type_symbol: Option<SymbolId>,
     pub trait_sig: Option<ImportedTraitSig>,
     pub trait_source: Option<GlobalDefId>,
+    pub trait_symbol: Option<SymbolId>,
 }
 
 impl ImportedModule {
@@ -74,10 +78,31 @@ impl ImportedSymbol {
                 Vec::new()
             },
             callable_sources: exports.callables.get(member).cloned().unwrap_or_default(),
+            callable_symbols: exports
+                .callables
+                .get(member)
+                .into_iter()
+                .flat_map(|sources| sources.iter().copied())
+                .filter_map(|source| {
+                    exports
+                        .symbols_by_def
+                        .get(&source)
+                        .cloned()
+                        .map(|symbol| (source, symbol))
+                })
+                .collect(),
             type_ty: if has_type { type_ty } else { None },
             type_source: exports.types.get(member).copied(),
+            type_symbol: exports
+                .types
+                .get(member)
+                .and_then(|source| exports.symbols_by_def.get(source).cloned()),
             trait_sig: if has_trait { trait_sig } else { None },
             trait_source: exports.traits.get(member).copied(),
+            trait_symbol: exports
+                .traits
+                .get(member)
+                .and_then(|source| exports.symbols_by_def.get(source).cloned()),
         })
     }
 
@@ -106,10 +131,13 @@ impl ImportedSymbol {
         Some(Self {
             callable_sigs,
             callable_sources: binding.callables.clone(),
+            callable_symbols: HashMap::new(),
             type_ty,
             type_source: binding.type_def,
+            type_symbol: None,
             trait_sig,
             trait_source: binding.trait_def,
+            trait_symbol: None,
         })
     }
 }
@@ -166,6 +194,7 @@ pub struct ImportedDefFacts {
 pub struct ImportedFacts {
     defs_by_local_def: HashMap<DefId, ImportedDefFacts>,
     callable_sigs_by_source: HashMap<GlobalDefId, ImportedCallableSig>,
+    callable_symbols_by_source: HashMap<GlobalDefId, SymbolId>,
     type_defs_by_source: HashMap<GlobalDefId, Type>,
     trait_defs_by_source: HashMap<GlobalDefId, ImportedTraitSig>,
 }
@@ -179,6 +208,10 @@ impl ImportedFacts {
 
     pub fn callable_sig_by_source(&self, source: GlobalDefId) -> Option<&ImportedCallableSig> {
         self.callable_sigs_by_source.get(&source)
+    }
+
+    pub fn callable_symbol_by_source(&self, source: GlobalDefId) -> Option<&SymbolId> {
+        self.callable_symbols_by_source.get(&source)
     }
 
     pub fn imported_type(&self, def_id: DefId) -> Option<&Type> {
@@ -241,6 +274,7 @@ pub struct SymbolResolver {
     imported_symbols: HashMap<String, ImportedSymbol>,
     imported_defs: HashMap<DefId, ImportedDefFacts>,
     imported_callable_sigs: HashMap<GlobalDefId, ImportedCallableSig>,
+    imported_callable_symbols: HashMap<GlobalDefId, SymbolId>,
     imported_type_defs: HashMap<GlobalDefId, Type>,
     imported_trait_defs: HashMap<GlobalDefId, ImportedTraitSig>,
     typestate_role_impls: Vec<TypestateRoleImplRef>,
@@ -277,6 +311,7 @@ impl SymbolResolver {
             imported_symbols: HashMap::new(),
             imported_defs: HashMap::new(),
             imported_callable_sigs: HashMap::new(),
+            imported_callable_symbols: HashMap::new(),
             imported_type_defs: HashMap::new(),
             imported_trait_defs: HashMap::new(),
             typestate_role_impls: Vec::new(),
@@ -739,6 +774,10 @@ impl SymbolResolver {
                     .zip(imported.callable_sigs.iter().cloned())
                 {
                     self.imported_callable_sigs.insert(source, sig);
+                }
+                for (source, symbol_id) in &imported.callable_symbols {
+                    self.imported_callable_symbols
+                        .insert(*source, symbol_id.clone());
                 }
                 self.imported_defs.insert(
                     def_id,
@@ -2225,6 +2264,7 @@ pub fn resolve_with_imports_and_symbols_and_typestate_roles_partial(
     let imported_facts = ImportedFacts {
         defs_by_local_def: std::mem::take(&mut resolver.imported_defs),
         callable_sigs_by_source: std::mem::take(&mut resolver.imported_callable_sigs),
+        callable_symbols_by_source: std::mem::take(&mut resolver.imported_callable_symbols),
         type_defs_by_source: std::mem::take(&mut resolver.imported_type_defs),
         trait_defs_by_source: std::mem::take(&mut resolver.imported_trait_defs),
     };
@@ -2300,6 +2340,7 @@ pub fn resolve_program(
                     module_id,
                     Some(parsed_module.source.path.clone()),
                     &resolved_context.def_table,
+                    &resolved_context.symbol_ids,
                 );
                 export_facts_by_module.insert(module_id, module_exports.clone());
                 modules.insert(module_id, resolved_context);

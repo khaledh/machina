@@ -362,10 +362,10 @@ fn selected_callable_for_finalize(
     params: &[CallParam],
     ret_ty: &Type,
 ) -> Option<SelectedCallable> {
-    // Imported aliases need their chosen source overload, while same-module
-    // calls can keep using the local def until callable disambiguators land.
+    // Imported aliases now prefer their canonical source symbol id when we
+    // can recover it from export facts; same-module calls still use the local
+    // def id until all frontend stages speak `SymbolId` natively.
     selected_imported_callable(engine, local_def_id, params, ret_ty)
-        .map(SelectedCallable::Global)
         .or(Some(SelectedCallable::Local(local_def_id)))
 }
 
@@ -374,21 +374,35 @@ fn selected_imported_callable(
     local_def_id: DefId,
     params: &[CallParam],
     ret_ty: &Type,
-) -> Option<crate::core::resolve::GlobalDefId> {
+) -> Option<SelectedCallable> {
     let imported_facts = &engine.env().imported_facts;
     let candidates = imported_facts.callable_sources(local_def_id)?;
     if candidates.len() <= 1 {
-        return candidates.first().copied();
+        let source = candidates.first().copied()?;
+        return Some(
+            imported_facts
+                .callable_symbol_by_source(source)
+                .cloned()
+                .map(SelectedCallable::Canonical)
+                .unwrap_or(SelectedCallable::Global(source)),
+        );
     }
 
     // Imported overload aliases still resolve to a local synthetic def id in
     // the solver, so finalize matches the chosen param/return shape back to a
     // concrete exported source callable.
-    candidates.iter().copied().find(|source| {
+    let source = candidates.iter().copied().find(|source| {
         imported_facts
             .callable_sig_by_source(*source)
             .is_some_and(|sig| callable_sig_matches_call(sig, params, ret_ty))
-    })
+    })?;
+    Some(
+        imported_facts
+            .callable_symbol_by_source(source)
+            .cloned()
+            .map(SelectedCallable::Canonical)
+            .unwrap_or(SelectedCallable::Global(source)),
+    )
 }
 
 fn callable_sig_matches_call(

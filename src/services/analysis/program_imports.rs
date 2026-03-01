@@ -99,7 +99,12 @@ impl ProgramImportFactsCache {
         self.export_facts_by_module
             .entry(module_id)
             .or_insert_with(|| {
-                module_export_facts_from_def_table(module_id, module_path, &resolved.def_table)
+                module_export_facts_from_def_table(
+                    module_id,
+                    module_path,
+                    &resolved.def_table,
+                    &resolved.symbol_ids,
+                )
             });
         self.callable_sigs_by_def
             .extend(collect_public_callable_sigs_resolved(module_id, resolved));

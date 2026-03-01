@@ -32,7 +32,8 @@ impl super::AnalysisDb {
             return Ok(None);
         };
         let source = snapshot.text(file_id);
-        if let Some(target) = selected_imported_callable_target(&entry_state, query_span, true)
+        if let Some(target) =
+            selected_imported_callable_target(&entry_state, query_span, true, module_states)
             && let Some(target_state) = module_states.get(&target.module_id)
             && let Some(target_resolved) = target_state.resolved.as_ref()
             && let Some(loc) = target_resolved.def_table.lookup_def_location(target.def_id)
@@ -183,7 +184,8 @@ impl super::AnalysisDb {
         } else {
             self.lookup_state_for_file(file_id)?
         };
-        if let Some(target) = selected_imported_callable_target(&state, query_span, false)
+        if let Some(target) =
+            selected_imported_callable_target(&state, query_span, false, &program.module_states)
             && let Some(target_state) = program.module_states.get(&target.module_id)
             && let Some(sig) = signature_help_for_def_at_call_site(
                 &state,
@@ -226,7 +228,8 @@ fn imported_hover_target(
         crate::services::analysis::pipeline::LookupState,
     >,
 ) -> Option<HoverInfo> {
-    if let Some(target) = selected_imported_callable_target(state, query_span, true) {
+    if let Some(target) = selected_imported_callable_target(state, query_span, true, module_states)
+    {
         let target_state = module_states.get(&target.module_id)?;
         return hover_for_def_in_state(target_state, target.def_id);
     }
@@ -244,6 +247,10 @@ fn selected_imported_callable_target(
     state: &crate::services::analysis::pipeline::LookupState,
     query_span: Span,
     require_callee_span: bool,
+    module_states: &std::collections::HashMap<
+        crate::core::capsule::ModuleId,
+        crate::services::analysis::pipeline::LookupState,
+    >,
 ) -> Option<GlobalDefId> {
     let typed = state.typed.as_ref()?;
     let call = call_site_at_span(&typed.module, query_span)?;
@@ -258,6 +265,28 @@ fn selected_imported_callable_target(
     let selected_sig = typed.call_sigs.get(&call.node_id)?;
     match selected_sig.selected.as_ref()? {
         SelectedCallable::Global(target) => Some(*target),
+        SelectedCallable::Canonical(symbol_id) => canonical_symbol_target(module_states, symbol_id),
         _ => None,
     }
+}
+
+fn canonical_symbol_target(
+    module_states: &std::collections::HashMap<
+        crate::core::capsule::ModuleId,
+        crate::services::analysis::pipeline::LookupState,
+    >,
+    symbol_id: &crate::core::symbol_id::SymbolId,
+) -> Option<GlobalDefId> {
+    for (module_id, state) in module_states {
+        let resolved = state.resolved.as_ref()?;
+        if resolved.module_path.as_ref() != Some(&symbol_id.module) {
+            continue;
+        }
+        let local_def_id = resolved
+            .symbol_ids
+            .lookup_local_def_ids(symbol_id)
+            .and_then(|defs| (defs.len() == 1).then_some(defs[0]))?;
+        return Some(GlobalDefId::new(*module_id, local_def_id));
+    }
+    None
 }

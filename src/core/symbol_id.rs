@@ -15,7 +15,10 @@ use std::fmt;
 use crate::core::capsule::ModulePath;
 use crate::core::resolve::{DefId, DefTable, GlobalDefId};
 use crate::core::tree::ParamMode;
-use crate::core::tree::{MethodItem, Module, TopLevelItem};
+use crate::core::tree::{
+    FunctionSig, MethodItem, MethodSig, Module, RefinementKind, TopLevelItem, TypeExpr,
+    TypeExprKind, TypeParam,
+};
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct SymbolId {
@@ -159,6 +162,10 @@ pub enum TypeKey {
     Slice(Box<TypeKey>),
     DynArray(Box<TypeKey>),
     Heap(Box<TypeKey>),
+    Ref {
+        mutable: bool,
+        elem: Box<TypeKey>,
+    },
     Set(Box<TypeKey>),
     Map {
         key: Box<TypeKey>,
@@ -173,6 +180,10 @@ pub enum TypeKey {
     ErrorUnion {
         ok: Box<TypeKey>,
         errs: Vec<TypeKey>,
+    },
+    Refined {
+        base: Box<TypeKey>,
+        refinements: Vec<RefinementKind>,
     },
 }
 
@@ -274,6 +285,7 @@ impl SymbolIdTable {
                         module_path,
                         &[func_decl.sig.name.as_str()],
                         SymbolNs::Value,
+                        callable_sig_key_for_function(&func_decl.sig, def_table, module_path),
                     );
                 }
                 TopLevelItem::FuncDef(func_def) => {
@@ -282,6 +294,7 @@ impl SymbolIdTable {
                         module_path,
                         &[func_def.sig.name.as_str()],
                         SymbolNs::Value,
+                        callable_sig_key_for_function(&func_def.sig, def_table, module_path),
                     );
                 }
                 TopLevelItem::MethodBlock(method_block) => {
@@ -299,6 +312,14 @@ impl SymbolIdTable {
                             module_path,
                             &[method_block.type_name.as_str(), method_name],
                             SymbolNs::Method,
+                            callable_sig_key_for_method(
+                                match method_item {
+                                    MethodItem::Decl(method_decl) => &method_decl.sig,
+                                    MethodItem::Def(method_def) => &method_def.sig,
+                                },
+                                def_table,
+                                module_path,
+                            ),
                         );
                     }
                 }
@@ -334,17 +355,264 @@ impl SymbolIdTable {
         module_path: &ModulePath,
         path_segments: &[&str],
         ns: SymbolNs,
+        sig_key: CallableSigKey,
     ) {
-        // Callable overloads still share the same base `SymbolId` until we
-        // thread canonical callable disambiguators through the frontend.
         self.record(
             def_id,
             SymbolId::new(
                 module_path.clone(),
                 SymbolPath::from_names(path_segments.iter().copied()),
                 ns,
-            ),
+            )
+            .with_disambiguator(SymbolDisambiguator::Callable(sig_key)),
         );
+    }
+}
+
+fn callable_sig_key_for_function(
+    sig: &FunctionSig,
+    def_table: &DefTable,
+    module_path: &ModulePath,
+) -> CallableSigKey {
+    CallableSigKey {
+        type_param_count: sig.type_params.len() as u16,
+        self_mode: None,
+        params: callable_param_keys(&sig.type_params, &sig.params, def_table, module_path),
+    }
+}
+
+fn callable_sig_key_for_method(
+    sig: &MethodSig,
+    def_table: &DefTable,
+    module_path: &ModulePath,
+) -> CallableSigKey {
+    CallableSigKey {
+        type_param_count: sig.type_params.len() as u16,
+        self_mode: Some(match sig.self_param.mode {
+            ParamMode::In => CallableSelfKey::In,
+            ParamMode::InOut => CallableSelfKey::InOut,
+            ParamMode::Sink => CallableSelfKey::Sink,
+            ParamMode::Out => CallableSelfKey::InOut,
+        }),
+        params: callable_param_keys(&sig.type_params, &sig.params, def_table, module_path),
+    }
+}
+
+fn callable_param_keys(
+    type_params: &[TypeParam],
+    params: &[crate::core::tree::Param],
+    def_table: &DefTable,
+    module_path: &ModulePath,
+) -> Vec<ParamKey> {
+    let generic_param_indexes = generic_param_index_map(type_params, def_table);
+    params
+        .iter()
+        .map(|param| ParamKey {
+            mode: param.mode.clone(),
+            ty: type_key_from_expr(&param.typ, def_table, module_path, &generic_param_indexes),
+        })
+        .collect()
+}
+
+fn generic_param_index_map(type_params: &[TypeParam], def_table: &DefTable) -> HashMap<DefId, u32> {
+    type_params
+        .iter()
+        .enumerate()
+        .filter_map(|(idx, param)| {
+            def_table
+                .lookup_node_def_id(param.id)
+                .map(|def_id| (def_id, idx as u32))
+        })
+        .collect()
+}
+
+fn type_key_from_expr(
+    type_expr: &TypeExpr,
+    def_table: &DefTable,
+    module_path: &ModulePath,
+    generic_param_indexes: &HashMap<DefId, u32>,
+) -> TypeKey {
+    match &type_expr.kind {
+        TypeExprKind::Infer => TypeKey::GenericParam(u32::MAX),
+        TypeExprKind::Union { variants } => {
+            if let Some((ok, errs)) = variants.split_first() {
+                TypeKey::ErrorUnion {
+                    ok: Box::new(type_key_from_expr(
+                        ok,
+                        def_table,
+                        module_path,
+                        generic_param_indexes,
+                    )),
+                    errs: errs
+                        .iter()
+                        .map(|variant| {
+                            type_key_from_expr(
+                                variant,
+                                def_table,
+                                module_path,
+                                generic_param_indexes,
+                            )
+                        })
+                        .collect(),
+                }
+            } else {
+                TypeKey::ErrorUnion {
+                    ok: Box::new(TypeKey::Unit),
+                    errs: Vec::new(),
+                }
+            }
+        }
+        TypeExprKind::Named { ident, type_args } => {
+            if let Some(builtin) = builtin_type_key(ident) {
+                return builtin;
+            }
+            if let Some(def_id) = def_table.lookup_node_def_id(type_expr.id)
+                && let Some(index) = generic_param_indexes.get(&def_id)
+            {
+                return TypeKey::GenericParam(*index);
+            }
+            let args = type_args
+                .iter()
+                .map(|arg| type_key_from_expr(arg, def_table, module_path, generic_param_indexes))
+                .collect();
+            TypeKey::Named {
+                module: module_path.clone(),
+                path: SymbolPath::from_names([ident.as_str()]),
+                args,
+            }
+        }
+        TypeExprKind::Refined {
+            base_ty_expr,
+            refinements,
+        } => TypeKey::Refined {
+            base: Box::new(type_key_from_expr(
+                base_ty_expr,
+                def_table,
+                module_path,
+                generic_param_indexes,
+            )),
+            refinements: refinements.clone(),
+        },
+        TypeExprKind::Array { elem_ty_expr, dims } => TypeKey::Array {
+            elem: Box::new(type_key_from_expr(
+                elem_ty_expr,
+                def_table,
+                module_path,
+                generic_param_indexes,
+            )),
+            dims: dims.clone(),
+        },
+        TypeExprKind::DynArray { elem_ty_expr } => TypeKey::DynArray(Box::new(type_key_from_expr(
+            elem_ty_expr,
+            def_table,
+            module_path,
+            generic_param_indexes,
+        ))),
+        TypeExprKind::Tuple { field_ty_exprs } => TypeKey::Tuple(
+            field_ty_exprs
+                .iter()
+                .map(|field| {
+                    type_key_from_expr(field, def_table, module_path, generic_param_indexes)
+                })
+                .collect(),
+        ),
+        TypeExprKind::Slice { elem_ty_expr } => TypeKey::Slice(Box::new(type_key_from_expr(
+            elem_ty_expr,
+            def_table,
+            module_path,
+            generic_param_indexes,
+        ))),
+        TypeExprKind::Heap { elem_ty_expr } => TypeKey::Heap(Box::new(type_key_from_expr(
+            elem_ty_expr,
+            def_table,
+            module_path,
+            generic_param_indexes,
+        ))),
+        TypeExprKind::Ref {
+            mutable,
+            elem_ty_expr,
+        } => TypeKey::Ref {
+            mutable: *mutable,
+            elem: Box::new(type_key_from_expr(
+                elem_ty_expr,
+                def_table,
+                module_path,
+                generic_param_indexes,
+            )),
+        },
+        TypeExprKind::Fn {
+            params,
+            ret_ty_expr,
+        } => TypeKey::Fn {
+            params: params
+                .iter()
+                .map(|param| ParamKey {
+                    mode: param.mode.clone(),
+                    ty: type_key_from_expr(
+                        &param.ty_expr,
+                        def_table,
+                        module_path,
+                        generic_param_indexes,
+                    ),
+                })
+                .collect(),
+            ret: Box::new(type_key_from_expr(
+                ret_ty_expr,
+                def_table,
+                module_path,
+                generic_param_indexes,
+            )),
+        },
+    }
+}
+
+fn builtin_type_key(name: &str) -> Option<TypeKey> {
+    match name {
+        "()" => Some(TypeKey::Unit),
+        "bool" => Some(TypeKey::Bool),
+        "char" => Some(TypeKey::Char),
+        "string" => Some(TypeKey::String),
+        "u8" => Some(TypeKey::Int {
+            signed: false,
+            bits: 8,
+            nonzero: false,
+        }),
+        "u16" => Some(TypeKey::Int {
+            signed: false,
+            bits: 16,
+            nonzero: false,
+        }),
+        "u32" => Some(TypeKey::Int {
+            signed: false,
+            bits: 32,
+            nonzero: false,
+        }),
+        "u64" => Some(TypeKey::Int {
+            signed: false,
+            bits: 64,
+            nonzero: false,
+        }),
+        "i8" => Some(TypeKey::Int {
+            signed: true,
+            bits: 8,
+            nonzero: false,
+        }),
+        "i16" => Some(TypeKey::Int {
+            signed: true,
+            bits: 16,
+            nonzero: false,
+        }),
+        "i32" => Some(TypeKey::Int {
+            signed: true,
+            bits: 32,
+            nonzero: false,
+        }),
+        "i64" => Some(TypeKey::Int {
+            signed: true,
+            bits: 64,
+            nonzero: false,
+        }),
+        _ => None,
     }
 }
 

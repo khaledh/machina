@@ -453,7 +453,7 @@ pub struct TypeExpr {
     pub span: Span,
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub enum RefinementKind {
     Bounds { min: i128, max: i128 },
     NonZero,

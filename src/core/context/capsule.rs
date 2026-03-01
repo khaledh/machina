@@ -4,6 +4,7 @@ use crate::core::capsule::{
     CapsuleParsed, ModuleId, ModulePath, ParsedModule as CapsuleModule, RequireKind,
 };
 use crate::core::resolve::{DefId, DefKind, DefTable, GlobalDefId};
+use crate::core::symbol_id::{SymbolId, SymbolIdTable};
 use crate::core::tree::{NodeId, NodeIdGen};
 
 /// Capsule-level parsed context produced by module discovery/parsing.
@@ -114,6 +115,7 @@ pub struct ModuleExportFacts {
     pub callables: HashMap<String, Vec<GlobalDefId>>,
     pub types: HashMap<String, GlobalDefId>,
     pub traits: HashMap<String, GlobalDefId>,
+    pub symbols_by_def: HashMap<GlobalDefId, SymbolId>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -133,6 +135,7 @@ pub fn module_export_facts_from_def_table(
     module_id: ModuleId,
     module_path: Option<ModulePath>,
     def_table: &DefTable,
+    symbol_ids: &SymbolIdTable,
 ) -> ModuleExportFacts {
     let mut facts = ModuleExportFacts {
         module_id,
@@ -140,10 +143,17 @@ pub fn module_export_facts_from_def_table(
         callables: HashMap::new(),
         types: HashMap::new(),
         traits: HashMap::new(),
+        symbols_by_def: HashMap::new(),
     };
     for def in def_table.defs() {
         if !def.is_public() {
             continue;
+        }
+        let global_def_id = GlobalDefId::new(module_id, def.id);
+        if let Some(symbol_id) = symbol_ids.lookup_symbol_id(def.id) {
+            facts
+                .symbols_by_def
+                .insert(global_def_id, symbol_id.clone());
         }
         match def.kind {
             DefKind::FuncDef { .. } | DefKind::FuncDecl { .. } => {
@@ -151,19 +161,16 @@ pub fn module_export_facts_from_def_table(
                     .callables
                     .entry(def.name.clone())
                     .or_default()
-                    .push(GlobalDefId::new(module_id, def.id));
+                    .push(global_def_id);
             }
             DefKind::TypeDef { .. } => {
-                facts
-                    .types
-                    .entry(def.name.clone())
-                    .or_insert_with(|| GlobalDefId::new(module_id, def.id));
+                facts.types.entry(def.name.clone()).or_insert(global_def_id);
             }
             DefKind::TraitDef { .. } => {
                 facts
                     .traits
                     .entry(def.name.clone())
-                    .or_insert_with(|| GlobalDefId::new(module_id, def.id));
+                    .or_insert(global_def_id);
             }
             _ => {}
         }

@@ -4,7 +4,7 @@ use crate::core::context::ParsedContext;
 use crate::core::resolve::resolve;
 use crate::core::tree::TopLevelItem;
 
-use crate::core::symbol_id::{SymbolId, SymbolNs, SymbolPath};
+use crate::core::symbol_id::{SymbolNs, SymbolPath};
 
 fn resolved_with_module_path(
     source: &str,
@@ -76,7 +76,7 @@ fn run() {}
 }
 
 #[test]
-fn symbol_id_table_keeps_overloaded_callables_under_shared_base_symbol() {
+fn symbol_id_table_disambiguates_overloaded_callables_by_signature_shape() {
     let resolved = resolved_with_module_path(
         r#"
 fn println(s: string) {}
@@ -85,14 +85,34 @@ fn println(n: u64) {}
         "std::io",
     );
 
-    let base = SymbolId::new(
-        ModulePath::new(vec!["std".into(), "io".into()]).unwrap(),
-        SymbolPath::from_names(["println"]),
-        SymbolNs::Value,
-    );
     let defs = resolved
-        .symbol_ids
-        .lookup_local_def_ids(&base)
-        .expect("expected overloaded defs");
+        .module
+        .func_defs()
+        .into_iter()
+        .map(|def| resolved.def_table.lookup_node_def_id(def.id).unwrap())
+        .collect::<Vec<_>>();
     assert_eq!(defs.len(), 2);
+
+    let left = resolved
+        .symbol_ids
+        .lookup_symbol_id(defs[0])
+        .expect("expected left overload symbol");
+    let right = resolved
+        .symbol_ids
+        .lookup_symbol_id(defs[1])
+        .expect("expected right overload symbol");
+
+    assert_eq!(left.path, SymbolPath::from_names(["println"]));
+    assert_eq!(right.path, SymbolPath::from_names(["println"]));
+    assert_ne!(left, right, "overloads should carry distinct symbol ids");
+    assert!(left.disambiguator.is_some());
+    assert!(right.disambiguator.is_some());
+    assert_eq!(
+        resolved
+            .symbol_ids
+            .lookup_local_def_ids(left)
+            .expect("expected exact reverse lookup")
+            .len(),
+        1
+    );
 }
