@@ -2213,6 +2213,24 @@ fn run() -> u64 { 1 }
 }
 
 #[test]
+fn hover_at_program_file_uses_selected_imported_overload_signature_for_u64_call() {
+    let entry_path = PathBuf::from("examples/basics/arith_ops.mc")
+        .canonicalize()
+        .unwrap();
+    let entry_source = fs::read_to_string(&entry_path).expect("failed to read entry source");
+
+    let mut db = AnalysisDb::new();
+    let entry_id = db.upsert_disk_text(entry_path, entry_source.clone());
+
+    let query_span = span_for_substring_with_len(&entry_source, "println(add)", "println".len());
+    let hover = db
+        .hover_at_program_file(entry_id, query_span)
+        .expect("program hover query should succeed")
+        .expect("expected hover info for imported println call");
+    assert_eq!(hover.display, "fn println(value: u64) -> ()");
+}
+
+#[test]
 fn hover_at_program_file_uses_selected_imported_overload_signature() {
     let entry_path = PathBuf::from("examples/quickstart/hello.mc")
         .canonicalize()

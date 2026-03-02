@@ -16,7 +16,6 @@ use machina::services::analysis::query::QueryResult;
 use machina::services::analysis::snapshot::FileId;
 
 use crate::session::{AnalysisSession, SessionError};
-use std::fs;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum HandlerAction {

@@ -540,9 +540,7 @@ fn resolve_named_call_by_def_id(
     expected_ret: &Type,
 ) -> Option<ResolvedCall> {
     let overloads = engine.env().func_sigs.get(name)?;
-    let sig = overloads
-        .iter()
-        .find(|sig| sig.def_id == def_id && sig.params.len() == arg_types.len())?;
+    let sig = pick_def_id_overload(overloads, def_id, arg_types, expected_ret)?;
     Some(instantiate_call_sig(
         sig,
         arg_types,
@@ -628,9 +626,7 @@ fn resolve_method_call_by_def_id(
     };
     let by_name = engine.env().method_sigs.get(&owner)?;
     let overloads = by_name.get(method_name)?;
-    let sig = overloads
-        .iter()
-        .find(|sig| sig.def_id == def_id && sig.params.len() == arg_types.len())?;
+    let sig = pick_def_id_overload(overloads, def_id, arg_types, expected_ret)?;
     let receiver = Some(CallParam {
         mode: sig
             .self_mode
@@ -645,6 +641,30 @@ fn resolve_method_call_by_def_id(
         span,
         expected_ret,
     ))
+}
+
+fn pick_def_id_overload<'a>(
+    overloads: &'a [CollectedCallableSig],
+    def_id: DefId,
+    arg_types: &[Type],
+    expected_ret: &Type,
+) -> Option<&'a CollectedCallableSig> {
+    let mut matches = overloads.iter().filter(|sig| {
+        sig.def_id == def_id
+            && sig.params.len() == arg_types.len()
+            && sig.ret_ty == *expected_ret
+            && sig
+                .params
+                .iter()
+                .zip(arg_types)
+                .all(|(param, arg_ty)| param.ty == *arg_ty)
+    });
+    if let Some(sig) = matches.next() {
+        return Some(sig);
+    }
+    overloads
+        .iter()
+        .find(|sig| sig.def_id == def_id && sig.params.len() == arg_types.len())
 }
 
 fn pick_overload(
