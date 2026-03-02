@@ -13,6 +13,7 @@ use crate::core::machine::naming::{
     parse_generated_handler_site_label,
 };
 use crate::core::machine::request_site::labeled_request_site_key;
+use crate::core::resolve::DefId;
 use crate::core::tree::semantic as sem;
 use crate::core::typecheck::type_map::resolve_type_expr;
 use crate::core::types::{StructField, Type, TypeId};
@@ -32,7 +33,7 @@ pub fn build_machine_plans(
 
 #[derive(Clone, Debug)]
 struct HandlerPlanSeed {
-    def_id: crate::core::resolve::DefId,
+    def_id: DefId,
     ordinal: usize,
     state_name: String,
     state_layout_ty: TypeId,
@@ -61,7 +62,7 @@ impl HandlerPlanSeed {
 #[derive(Clone, Debug)]
 struct StatePlanSeed {
     state_name: String,
-    state_type_def_id: crate::core::resolve::DefId,
+    state_type_def_id: DefId,
     state_layout_ty: TypeId,
     // Source `@final` marker propagated from typestate desugaring.
     is_final: bool,
@@ -491,10 +492,7 @@ fn shared_fallback_prefix_len(states: &[&StatePlanSeed]) -> usize {
     min_len
 }
 
-fn build_fallback_map(
-    states: &[&StatePlanSeed],
-    prefix_len: usize,
-) -> HashMap<DispatchKey, crate::core::resolve::DefId> {
+fn build_fallback_map(states: &[&StatePlanSeed], prefix_len: usize) -> HashMap<DispatchKey, DefId> {
     let mut out = HashMap::new();
     let Some(first) = states.first() else {
         return out;
@@ -543,7 +541,7 @@ fn build_dispatch_table(
     states: &[&StatePlanSeed],
     state_tag_by_name: &HashMap<String, u64>,
     event_kinds: &[sem::MachineEventKindPlan],
-    fallback_map: &HashMap<DispatchKey, crate::core::resolve::DefId>,
+    fallback_map: &HashMap<DispatchKey, DefId>,
     fallback_prefix_len: usize,
 ) -> Vec<sem::MachineDispatchEntryPlan> {
     let mut rows = Vec::new();
@@ -556,7 +554,7 @@ fn build_dispatch_table(
             )
         });
         let local_handlers = state.handlers.iter().skip(fallback_prefix_len).fold(
-            HashMap::<DispatchKey, crate::core::resolve::DefId>::new(),
+            HashMap::<DispatchKey, DefId>::new(),
             |mut acc, handler| {
                 acc.entry(handler.dispatch_key()).or_insert(handler.def_id);
                 acc

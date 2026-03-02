@@ -14,7 +14,7 @@ pub fn build_lowering_plans(
     index_plans: &sem::IndexPlanMap,
     match_plans: &sem::MatchPlanMap,
     slice_plans: &sem::SlicePlanMap,
-    try_cleanup_plans: &std::collections::HashMap<NodeId, Vec<sem::ValueExpr>>,
+    try_cleanup_plans: &HashMap<NodeId, Vec<sem::ValueExpr>>,
 ) -> sem::LoweringPlanMap {
     let mut builder = LoweringPlanBuilder {
         call_plans,

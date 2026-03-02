@@ -3,6 +3,7 @@
 use std::collections::HashMap;
 
 use crate::core::capsule::ModuleId;
+use crate::core::context::ResolvedContext;
 use crate::core::resolve::DefId;
 use crate::core::symbol_id::SymbolId;
 use crate::services::analysis::frontend_support::{
@@ -19,6 +20,7 @@ use crate::services::analysis::query::{QueryKey, QueryKind, QueryResult};
 use crate::services::analysis::results::DefTarget;
 use crate::services::analysis::snapshot::AnalysisSnapshot;
 use crate::services::analysis::snapshot::FileId;
+use std::sync::Arc;
 
 impl super::AnalysisDb {
     pub(super) fn lookup_state_for_target(
@@ -115,7 +117,7 @@ impl super::AnalysisDb {
             &mut self.runtime,
             module_id,
             revision,
-            std::sync::Arc::<str>::from(source),
+            Arc::<str>::from(source),
             query_input,
             self.experimental_typestate,
         )?;
@@ -277,7 +279,7 @@ pub(super) fn lookup_program_state_for_target(
 }
 
 fn unique_local_def_id_for_symbol(
-    resolved: &crate::core::context::ResolvedContext,
+    resolved: &ResolvedContext,
     symbol_id: &SymbolId,
 ) -> Option<DefId> {
     let defs = resolved.symbol_ids.lookup_local_def_ids(symbol_id)?;

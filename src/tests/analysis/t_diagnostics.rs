@@ -3,7 +3,7 @@ use crate::core::lexer::LEK;
 use crate::core::lexer::{Token, TokenKind};
 use crate::core::parse::PEK;
 use crate::core::resolve::symbols::SymbolKind;
-use crate::core::resolve::{ResolveError, ResolveErrorKind};
+use crate::core::resolve::{DefId, ResolveError, ResolveErrorKind};
 use crate::core::semck::SEK;
 use crate::core::semck::SemCheckError;
 use crate::core::typecheck::{TypeCheckError, TypeCheckErrorKind};
@@ -54,9 +54,7 @@ fn lex_diagnostic_is_phase_tagged_and_stable_coded() {
 fn resolve_diagnostic_keeps_structured_metadata() {
     let err = ResolveErrorKind::ExpectedType(
         "HasTickCount".to_string(),
-        SymbolKind::TraitDef {
-            def_id: crate::core::resolve::DefId(7),
-        },
+        SymbolKind::TraitDef { def_id: DefId(7) },
     )
     .at(Span::default());
     let diag = Diagnostic::from_resolve_error(&err);

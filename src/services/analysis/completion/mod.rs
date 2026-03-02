@@ -10,6 +10,8 @@ mod source_probe;
 
 use std::collections::HashSet;
 
+use crate::core::context::ResolvedContext;
+use crate::core::context::TypeCheckedContext;
 use crate::core::diag::{Position, Span};
 use crate::services::analysis::results::CompletionItem;
 use member::{member_completions, qualified_path_completions};
@@ -19,8 +21,8 @@ use site::{CompletionSite, classify_completion_site};
 pub(crate) fn collect(
     source: &str,
     query_span: Span,
-    resolved: &crate::core::context::ResolvedContext,
-    typed: Option<&crate::core::context::TypeCheckedContext>,
+    resolved: &ResolvedContext,
+    typed: Option<&TypeCheckedContext>,
 ) -> Vec<CompletionItem> {
     let site = classify_completion_site(
         source,
@@ -43,7 +45,7 @@ pub(crate) fn synthesize_member_completion_source(
 fn dispatch_site_completions(
     site: &CompletionSite,
     fallback_cursor: Position,
-    resolved: &crate::core::context::ResolvedContext,
+    resolved: &ResolvedContext,
 ) -> Vec<CompletionItem> {
     let items = match site {
         CompletionSite::Scope { cursor, .. } => scope_completions(resolved, *cursor),

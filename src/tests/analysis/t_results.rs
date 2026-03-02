@@ -1,6 +1,7 @@
 use crate::core::api::{FrontendPolicy, ResolveInputs, resolve_stage_with_policy};
 use crate::core::capsule::ModuleId;
 use crate::core::context::ParsedContext;
+use crate::core::context::ResolvedContext;
 use crate::core::lexer::{LexError, Lexer};
 use crate::core::parse::{Parser, ParserOptions};
 use crate::core::resolve::{ResolveError, resolve};
@@ -10,9 +11,7 @@ use crate::services::analysis::results::{
     ResolvedModuleResult, SymbolLookup, TypeLookup, TypedModuleResult,
 };
 
-fn resolve_source(
-    source: &str,
-) -> Result<crate::core::context::ResolvedContext, Vec<ResolveError>> {
+fn resolve_source(source: &str) -> Result<ResolvedContext, Vec<ResolveError>> {
     let id_gen = NodeIdGen::new();
     let lexer = Lexer::new(source);
     let tokens = lexer
@@ -25,9 +24,7 @@ fn resolve_source(
     resolve(parsed)
 }
 
-fn resolve_source_with_typestate(
-    source: &str,
-) -> Result<crate::core::context::ResolvedContext, Vec<ResolveError>> {
+fn resolve_source_with_typestate(source: &str) -> Result<ResolvedContext, Vec<ResolveError>> {
     let id_gen = NodeIdGen::new();
     let lexer = Lexer::new(source);
     let tokens = lexer

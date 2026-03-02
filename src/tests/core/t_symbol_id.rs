@@ -4,12 +4,10 @@ use crate::core::context::ParsedContext;
 use crate::core::resolve::resolve;
 use crate::core::tree::TopLevelItem;
 
+use crate::core::context::ResolvedContext;
 use crate::core::symbol_id::{SymbolNs, SymbolPath};
 
-fn resolved_with_module_path(
-    source: &str,
-    module_path: &str,
-) -> crate::core::context::ResolvedContext {
+fn resolved_with_module_path(source: &str, module_path: &str) -> ResolvedContext {
     let id_gen = crate::core::tree::NodeIdGen::new();
     let (module, id_gen) = parse_module_with_id_gen_and_options(
         source,

@@ -7,6 +7,7 @@
 
 use std::collections::{BTreeMap, HashMap};
 
+use crate::core::context::ResolvedContext;
 use crate::core::diag::Span;
 use crate::core::resolve::{
     DefId, ImportedCallableSig, ImportedFacts, ImportedParamSig, ImportedTraitSig,
@@ -17,7 +18,7 @@ use crate::core::typecheck::engine::{
 };
 
 pub(super) fn extend_imported_function_sigs(
-    ctx: &crate::core::context::ResolvedContext,
+    ctx: &ResolvedContext,
     imported_facts: &ImportedFacts,
     func_sigs: &mut HashMap<String, Vec<CollectedCallableSig>>,
 ) {
@@ -35,7 +36,7 @@ pub(super) fn extend_imported_function_sigs(
 }
 
 pub(super) fn extend_imported_trait_sigs(
-    ctx: &crate::core::context::ResolvedContext,
+    ctx: &ResolvedContext,
     imported_facts: &ImportedFacts,
     trait_sigs: &mut HashMap<String, CollectedTraitSig>,
 ) {

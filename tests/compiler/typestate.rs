@@ -5,6 +5,7 @@ use machina::core::parse::ParseErrorKind;
 use machina::core::resolve::{ResolveError, ResolveErrorKind};
 use machina::core::semck::SemCheckErrorKind;
 use machina::driver::compile::{CompileOptions, check_with_path, compile_with_path};
+use std::fs;
 use std::path::{Path, PathBuf};
 
 fn repo_root() -> PathBuf {
@@ -24,12 +25,12 @@ fn typestate_opts(experimental_typestate: bool) -> CompileOptions {
 }
 
 fn compile_example(path: &Path, experimental_typestate: bool) -> Result<(), Vec<CompileError>> {
-    let source = std::fs::read_to_string(path).expect("failed to read example source");
+    let source = fs::read_to_string(path).expect("failed to read example source");
     compile_with_path(&source, Some(path), &typestate_opts(experimental_typestate)).map(|_| ())
 }
 
 fn check_example(path: &Path, experimental_typestate: bool) -> Result<(), Vec<CompileError>> {
-    let source = std::fs::read_to_string(path).expect("failed to read example source");
+    let source = fs::read_to_string(path).expect("failed to read example source");
     check_with_path(&source, path, true, experimental_typestate)
 }
 
@@ -163,7 +164,7 @@ fn typestate_invalid_examples_emit_expected_diagnostics() {
 #[test]
 fn typestate_example_runs_in_experimental_mode() {
     let path = repo_root().join("tests/fixtures/typestate/connection.mc");
-    let source = std::fs::read_to_string(&path).expect("failed to read typestate runtime fixture");
+    let source = fs::read_to_string(&path).expect("failed to read typestate runtime fixture");
     let run = run_program_with_opts("typestate_connection", &source, typestate_opts(true));
     assert_eq!(run.status.code(), Some(0));
 }
@@ -179,8 +180,8 @@ fn typestate_managed_examples_typecheck_with_experimental_flag() {
 #[test]
 fn typestate_machine_handle_request_example_runs_in_experimental_mode() {
     let path = repo_root().join("tests/fixtures/typestate/typed_handle_request_reply.mc");
-    let source = std::fs::read_to_string(&path)
-        .expect("failed to read typestate machine-handle request fixture");
+    let source =
+        fs::read_to_string(&path).expect("failed to read typestate machine-handle request fixture");
     let run = run_program_with_opts(
         "typestate_machine_handle_request",
         &source,
@@ -197,8 +198,8 @@ fn typestate_machine_handle_request_example_runs_in_experimental_mode() {
 #[test]
 fn typestate_machine_lowering_is_deterministic_across_runs() {
     let path = repo_root().join("tests/fixtures/typestate/typed_handle_request_reply.mc");
-    let source = std::fs::read_to_string(&path)
-        .expect("failed to read typestate machine-handle request fixture");
+    let source =
+        fs::read_to_string(&path).expect("failed to read typestate machine-handle request fixture");
     let opts = typestate_opts(true);
     let out1 = compile_with_path(&source, Some(&path), &opts)
         .expect("first compile failed for determinism check");
@@ -213,7 +214,7 @@ fn typestate_machine_lowering_is_deterministic_across_runs() {
 #[test]
 fn typestate_managed_state_transitions_example_runs_in_experimental_mode() {
     let path = repo_root().join("tests/fixtures/typestate/managed_state_transitions.mc");
-    let source = std::fs::read_to_string(&path)
+    let source = fs::read_to_string(&path)
         .expect("failed to read typestate managed state-transition fixture");
     let run = run_program_with_opts(
         "typestate_managed_state_transitions",
@@ -318,7 +319,7 @@ fn typestate_example_lists_cover_all_typestate_fixtures() {
     use std::collections::HashSet;
     let root = repo_root();
     let fixture_dir = root.join("tests/fixtures/typestate");
-    let disk: HashSet<PathBuf> = std::fs::read_dir(&fixture_dir)
+    let disk: HashSet<PathBuf> = fs::read_dir(&fixture_dir)
         .expect("failed to read typestate fixture directory")
         .filter_map(|entry| entry.ok().map(|e| e.path()))
         .filter(|path| path.extension().and_then(|e| e.to_str()) == Some("mc"))

@@ -3,6 +3,7 @@ use std::process::{Command, Output};
 use std::sync::atomic::{AtomicUsize, Ordering};
 
 use machina::driver::compile::{CompileOptions, compile_with_path};
+use std::fs;
 
 static TEST_COUNTER: AtomicUsize = AtomicUsize::new(0);
 
@@ -31,16 +32,16 @@ pub(crate) fn run_program_with_opts(name: &str, source: &str, opts: CompileOptio
         std::process::id(),
         run_id
     ));
-    std::fs::create_dir_all(&temp_dir).expect("failed to create temp dir");
+    fs::create_dir_all(&temp_dir).expect("failed to create temp dir");
 
     let source_path = temp_dir.join(format!("{name}.mc"));
-    std::fs::write(&source_path, source).expect("failed to write temp source");
+    fs::write(&source_path, source).expect("failed to write temp source");
 
     let output = compile_source_with_opts(&source_path, &opts);
 
     let asm_path = temp_dir.join(format!("{name}.s"));
     let exe_path = temp_dir.join(name);
-    std::fs::write(&asm_path, output.asm).expect("failed to write asm");
+    fs::write(&asm_path, output.asm).expect("failed to write asm");
 
     let prelude_obj = compile_prelude_impl(&repo_root, &temp_dir);
     let runtime_sources = runtime_sources(&repo_root);
@@ -49,7 +50,7 @@ pub(crate) fn run_program_with_opts(name: &str, source: &str, opts: CompileOptio
     let run = Command::new(&exe_path)
         .output()
         .expect("failed to run executable");
-    let _ = std::fs::remove_dir_all(&temp_dir);
+    let _ = fs::remove_dir_all(&temp_dir);
     run
 }
 
@@ -62,7 +63,7 @@ pub(crate) fn run_c_program(name: &str, source_path: &Path) -> Output {
         std::process::id(),
         run_id
     ));
-    std::fs::create_dir_all(&temp_dir).expect("failed to create temp dir");
+    fs::create_dir_all(&temp_dir).expect("failed to create temp dir");
 
     let exe_path = temp_dir.join(name);
     let runtime_dir = repo_root.join("runtime");
@@ -83,7 +84,7 @@ pub(crate) fn run_c_program(name: &str, source_path: &Path) -> Output {
     let run = Command::new(&exe_path)
         .output()
         .expect("failed to run executable");
-    let _ = std::fs::remove_dir_all(&temp_dir);
+    let _ = fs::remove_dir_all(&temp_dir);
     run
 }
 
@@ -91,13 +92,13 @@ fn compile_source_with_opts(
     source_path: &Path,
     opts: &CompileOptions,
 ) -> machina::driver::compile::CompileOutput {
-    let source = std::fs::read_to_string(source_path).expect("failed to read temp source");
+    let source = fs::read_to_string(source_path).expect("failed to read temp source");
     compile_with_path(&source, Some(source_path), opts).expect("compile failed")
 }
 
 fn compile_prelude_impl(repo_root: &Path, temp_dir: &Path) -> PathBuf {
     let prelude_path = repo_root.join("std").join("prelude_impl.mc");
-    let source = std::fs::read_to_string(&prelude_path).expect("failed to read prelude_impl");
+    let source = fs::read_to_string(&prelude_path).expect("failed to read prelude_impl");
     let opts = CompileOptions {
         dump: None,
         emit_ir: false,
@@ -111,7 +112,7 @@ fn compile_prelude_impl(repo_root: &Path, temp_dir: &Path) -> PathBuf {
 
     let asm_path = temp_dir.join("prelude_impl.s");
     let obj_path = temp_dir.join("prelude_impl.o");
-    std::fs::write(&asm_path, prelude.asm).expect("failed to write prelude asm");
+    fs::write(&asm_path, prelude.asm).expect("failed to write prelude asm");
 
     let status = Command::new("cc")
         .arg("-c")

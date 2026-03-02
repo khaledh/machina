@@ -28,6 +28,7 @@ use crate::core::types::{TyVarId, Type};
 
 use super::typesys::TypeVarStore;
 use super::utils::fn_param_mode;
+use crate::core::context::ResolvedContext;
 
 mod calls;
 mod decls;
@@ -284,7 +285,7 @@ struct ClosureSigInfo {
 }
 
 struct ConstraintCollector<'a> {
-    ctx: &'a crate::core::context::ResolvedContext,
+    ctx: &'a ResolvedContext,
     type_defs: &'a HashMap<String, Type>,
     allow_missing_def_ids: bool,
     vars: &'a mut TypeVarStore,
@@ -295,7 +296,7 @@ struct ConstraintCollector<'a> {
 
 impl<'a> ConstraintCollector<'a> {
     fn new(
-        ctx: &'a crate::core::context::ResolvedContext,
+        ctx: &'a ResolvedContext,
         type_defs: &'a HashMap<String, Type>,
         allow_missing_def_ids: bool,
         vars: &'a mut TypeVarStore,

@@ -9,6 +9,8 @@ use crate::core::types::Type;
 use crate::services::analysis::syntax_index::node_at_span;
 
 use super::source_probe::{is_ident_byte, offset_for_position, single_char_span};
+use crate::core::context::ResolvedContext;
+use crate::core::context::TypeCheckedContext;
 
 #[derive(Debug, Clone)]
 pub(super) enum CompletionSite {
@@ -59,8 +61,8 @@ struct PrefixProbe {
 pub(super) fn classify_completion_site(
     source: &str,
     query_span: Span,
-    resolved: &crate::core::context::ResolvedContext,
-    typed: Option<&crate::core::context::TypeCheckedContext>,
+    resolved: &ResolvedContext,
+    typed: Option<&TypeCheckedContext>,
     enclosing_callable_def_id: impl Fn(&Module, Position) -> Option<DefId>,
 ) -> CompletionSite {
     let cursor = query_span.start;
@@ -125,7 +127,7 @@ fn prefix_probe(source: &str, offset: usize) -> PrefixProbe {
 fn classify_member_site(
     source: &str,
     query_span: Span,
-    typed: Option<&crate::core::context::TypeCheckedContext>,
+    typed: Option<&TypeCheckedContext>,
     probe: &PrefixProbe,
     enclosing_callable_def_id: &impl Fn(&Module, Position) -> Option<DefId>,
 ) -> Option<CompletionSite> {

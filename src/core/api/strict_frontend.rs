@@ -17,6 +17,8 @@ use crate::core::diag::CompileError;
 use crate::core::monomorphize;
 use crate::core::tree::{Module, NodeId, NodeIdGen};
 
+use std::fs;
+
 use super::{
     FrontendPolicy, ParseModuleError, ParseModuleOptions, ResolveInputs,
     parse_module_with_id_gen_and_options, resolve_typecheck_pipeline_with_policy,
@@ -143,7 +145,7 @@ fn inject_prelude_module(
     let prelude_path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
         .join("std")
         .join("prelude_decl.mc");
-    let prelude_src = std::fs::read_to_string(&prelude_path)
+    let prelude_src = fs::read_to_string(&prelude_path)
         .map_err(|e| vec![CompileError::Io(prelude_path.clone(), e)])?;
     let (prelude_module, id_gen) = parse_with_id_gen(&prelude_src, id_gen, experimental_typestate)?;
     Ok((merge_modules(&prelude_module, &user_module), id_gen))

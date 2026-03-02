@@ -2,6 +2,7 @@
 
 use std::path::Path;
 
+use crate::core::capsule::ModuleId;
 use crate::core::diag::Span;
 use crate::core::resolve::DefId;
 use crate::core::types::Type;
@@ -41,7 +42,7 @@ impl super::AnalysisDb {
         Ok(
             def_at_span(&state, query_span, source.as_deref()).map(|def_id| DefTarget {
                 file_id,
-                module_id: Some(crate::core::capsule::ModuleId(file_id.0)),
+                module_id: Some(ModuleId(file_id.0)),
                 def_id,
                 symbol_id: state
                     .resolved
@@ -81,7 +82,7 @@ impl super::AnalysisDb {
         } else {
             (
                 self.lookup_state_for_file(file_id)?,
-                Some(crate::core::capsule::ModuleId(file_id.0)),
+                Some(ModuleId(file_id.0)),
             )
         };
         Ok(

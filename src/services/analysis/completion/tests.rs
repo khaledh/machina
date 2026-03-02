@@ -7,6 +7,8 @@ use crate::core::tree::NodeIdGen;
 
 use super::source_probe::position_for_offset;
 use super::{CompletionSite, classify_completion_site, enclosing_callable_def_id};
+use crate::core::context::ResolvedContext;
+use crate::core::context::TypeCheckedContext;
 
 #[test]
 fn classify_site_detects_member_context() {
@@ -93,19 +95,14 @@ fn main() -> u64 {
     assert!(matches!(site, CompletionSite::QualifiedPath { .. }));
 }
 
-fn resolved_only(source: &str) -> crate::core::context::ResolvedContext {
+fn resolved_only(source: &str) -> ResolvedContext {
     let (module, id_gen) =
         parse_module_with_id_gen(source, NodeIdGen::new()).expect("parse should succeed");
     let parsed = ParsedContext::new(module, id_gen);
     resolve_stage_partial(parsed, HashMap::new(), HashMap::new()).context
 }
 
-fn resolved_and_typed(
-    source: &str,
-) -> (
-    crate::core::context::ResolvedContext,
-    crate::core::context::TypeCheckedContext,
-) {
+fn resolved_and_typed(source: &str) -> (ResolvedContext, TypeCheckedContext) {
     let (module, id_gen) =
         parse_module_with_id_gen(source, NodeIdGen::new()).expect("parse should succeed");
     let parsed = ParsedContext::new(module, id_gen);

@@ -4,6 +4,7 @@ use crate::core::diag::{Position, Span};
 use crate::services::analysis::db::AnalysisDb;
 use crate::services::analysis::query::QueryResult;
 use crate::services::analysis::results::DefTarget;
+use std::fs;
 
 #[derive(Debug, Clone, Copy)]
 pub enum QueryLookupKind {
@@ -72,7 +73,7 @@ fn build_query_request(
     input_path: &Path,
     pos: &str,
 ) -> Result<QueryRequest, String> {
-    let source = std::fs::read_to_string(input_path)
+    let source = fs::read_to_string(input_path)
         .map_err(|e| format!("failed to read {}: {e}", input_path.display()))?;
     let (line, col) = parse_pos_arg(pos)?;
     let position = position_from_line_col(&source, line, col)?;

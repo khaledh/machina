@@ -4,6 +4,7 @@ use std::collections::HashSet;
 use std::path::Path;
 
 use crate::core::capsule::ModuleId;
+use crate::core::context::ResolvedContext;
 use crate::core::resolve::DefId;
 use crate::services::analysis::pipeline::LookupState;
 use crate::services::analysis::query::QueryResult;
@@ -147,7 +148,7 @@ where
 
 fn matches_reference_target(
     file_id: FileId,
-    resolved: &crate::core::context::ResolvedContext,
+    resolved: &ResolvedContext,
     target: &DefTarget,
     mapped_def_id: DefId,
 ) -> bool {

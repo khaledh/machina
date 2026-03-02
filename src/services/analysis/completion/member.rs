@@ -5,13 +5,14 @@
 //! - `Name::...` qualified path completions
 
 use crate::core::capsule::ModuleId;
+use crate::core::context::ResolvedContext;
 use crate::core::resolve::{DefId, UNKNOWN_DEF_ID};
 use crate::core::tree::{MethodItem, TopLevelItem, TypeDefKind};
 use crate::core::types::Type;
 use crate::services::analysis::results::{CompletionItem, CompletionKind};
 
 pub(super) fn member_completions(
-    resolved: &crate::core::context::ResolvedContext,
+    resolved: &ResolvedContext,
     receiver_ty: &Type,
     caller_def_id: Option<DefId>,
 ) -> Vec<CompletionItem> {
@@ -37,7 +38,7 @@ pub(super) fn member_completions(
 }
 
 pub(super) fn qualified_path_completions(
-    resolved: &crate::core::context::ResolvedContext,
+    resolved: &ResolvedContext,
     path_segments: &[String],
 ) -> Vec<CompletionItem> {
     // V1 scope: resolve first-segment nominal paths (`Protocol::Role`,
@@ -144,7 +145,7 @@ fn push_builtin_method(out: &mut Vec<CompletionItem>, label: &str, detail: &str)
 }
 
 fn nominal_method_completions(
-    resolved: &crate::core::context::ResolvedContext,
+    resolved: &ResolvedContext,
     owner_ty: &Type,
     caller_def_id: Option<DefId>,
 ) -> Vec<CompletionItem> {
@@ -198,7 +199,7 @@ fn nominal_method_completions(
 }
 
 fn method_accessible(
-    resolved: &crate::core::context::ResolvedContext,
+    resolved: &ResolvedContext,
     target_def_id: DefId,
     caller_def_id: Option<DefId>,
 ) -> bool {
@@ -227,7 +228,7 @@ fn method_accessible(
 }
 
 fn struct_fields_accessible(
-    resolved: &crate::core::context::ResolvedContext,
+    resolved: &ResolvedContext,
     type_name: &str,
     caller_def_id: Option<DefId>,
 ) -> bool {

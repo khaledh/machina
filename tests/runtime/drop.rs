@@ -4,6 +4,7 @@ use std::path::PathBuf;
 use machina::driver::compile::CompileOptions;
 
 use crate::common::run_program_with_opts;
+use std::fs;
 
 fn trace_opts() -> CompileOptions {
     CompileOptions {
@@ -25,7 +26,7 @@ fn load_fixture(name: &str) -> String {
         .join("runtime")
         .join("drop")
         .join(format!("{name}.mc"));
-    std::fs::read_to_string(&path).expect("failed to read runtime drop fixture")
+    fs::read_to_string(&path).expect("failed to read runtime drop fixture")
 }
 
 fn parse_trace(output: &std::process::Output) -> (HashMap<String, usize>, HashMap<String, usize>) {

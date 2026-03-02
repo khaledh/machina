@@ -12,11 +12,12 @@ use crate::core::diag::Position;
 use crate::core::resolve::DefId;
 use crate::services::analysis::results::CompletionItem;
 
+use crate::core::context::ResolvedContext;
 use global::global_scope;
 use locals::collect_local_scopes;
 
 pub(super) fn scope_completions(
-    resolved: &crate::core::context::ResolvedContext,
+    resolved: &ResolvedContext,
     cursor: Position,
 ) -> Vec<CompletionItem> {
     let mut scopes = vec![global_scope(resolved)];

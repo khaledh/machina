@@ -5,13 +5,12 @@
 
 use std::collections::{HashMap, HashSet};
 
+use crate::core::context::ResolvedContext;
 use crate::core::resolve::DefKind;
 use crate::core::tree::{NodeId, TopLevelItem, TypeDefKind};
 use crate::services::analysis::results::{CompletionItem, CompletionKind};
 
-pub(super) fn global_scope(
-    resolved: &crate::core::context::ResolvedContext,
-) -> HashMap<String, CompletionItem> {
+pub(super) fn global_scope(resolved: &ResolvedContext) -> HashMap<String, CompletionItem> {
     let mut allowed_nodes = HashSet::new();
     for item in &resolved.module.top_level_items {
         match item {

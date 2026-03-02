@@ -9,6 +9,7 @@ pub mod compose;
 
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::fmt;
+use std::fs;
 use std::path::{Path, PathBuf};
 
 use thiserror::Error;
@@ -249,8 +250,8 @@ impl FsModuleLoader {
 impl ModuleLoader for FsModuleLoader {
     fn load(&self, path: &ModulePath) -> Result<(PathBuf, String), CapsuleError> {
         let file_path = self.module_to_path(path);
-        let source = std::fs::read_to_string(&file_path)
-            .map_err(|e| CapsuleError::Io(file_path.clone(), e))?;
+        let source =
+            fs::read_to_string(&file_path).map_err(|e| CapsuleError::Io(file_path.clone(), e))?;
         Ok((file_path, source))
     }
 }

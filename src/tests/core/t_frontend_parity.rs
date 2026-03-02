@@ -11,6 +11,7 @@ use crate::core::context::{
 use crate::core::diag::Span;
 use crate::core::tree::NodeIdGen;
 use crate::core::typecheck::type_map::CallSigMap;
+use std::mem;
 
 fn parsed_context(source: &str) -> ResolveStageInput {
     let id_gen = NodeIdGen::new();
@@ -119,7 +120,7 @@ fn resolve_parity_keys(source: &str, policy: FrontendPolicy) -> (BTreeSet<String
         .map(|err| {
             format!(
                 "{:?}@{}",
-                std::mem::discriminant(err.kind()),
+                mem::discriminant(err.kind()),
                 span_key(err.span())
             )
         })
@@ -148,7 +149,7 @@ fn typecheck_parity_keys(source: &str, policy: FrontendPolicy) -> (BTreeSet<Stri
         .map(|err| {
             format!(
                 "{:?}@{}",
-                std::mem::discriminant(err.kind()),
+                mem::discriminant(err.kind()),
                 span_key(err.span())
             )
         })
@@ -185,7 +186,7 @@ fn semcheck_parity_keys(source: &str, policy: FrontendPolicy) -> (BTreeSet<Strin
         .map(|err| {
             format!(
                 "{:?}@{}",
-                std::mem::discriminant(err.kind()),
+                mem::discriminant(err.kind()),
                 span_key(err.span())
             )
         })
@@ -299,7 +300,7 @@ fn main() -> u64 {
         .map(|err| {
             format!(
                 "{:?}@{}",
-                std::mem::discriminant(err.kind()),
+                mem::discriminant(err.kind()),
                 span_key(err.span())
             )
         })
@@ -310,7 +311,7 @@ fn main() -> u64 {
         .map(|err| {
             format!(
                 "{:?}@{}",
-                std::mem::discriminant(err.kind()),
+                mem::discriminant(err.kind()),
                 span_key(err.span())
             )
         })

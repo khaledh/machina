@@ -16,6 +16,7 @@ use machina::services::analysis::query::QueryResult;
 use machina::services::analysis::snapshot::FileId;
 
 use crate::session::{AnalysisSession, SessionError};
+use std::fs;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum HandlerAction {
@@ -1397,7 +1398,7 @@ mod tests {
             run_id
         ));
         let app_dir = temp_dir.join("app");
-        std::fs::create_dir_all(&app_dir).expect("failed to create temp module tree");
+        fs::create_dir_all(&app_dir).expect("failed to create temp module tree");
 
         let entry_path = temp_dir.join("main.mc");
         let dep_path = app_dir.join("dep.mc");
@@ -1411,8 +1412,8 @@ fn main() -> u64 {
         let dep_source = r#"@public
 fn run() -> u64 { 1 }
 "#;
-        std::fs::write(&entry_path, entry_source).expect("failed to write entry source");
-        std::fs::write(&dep_path, dep_source).expect("failed to write dependency source");
+        fs::write(&entry_path, entry_source).expect("failed to write entry source");
+        fs::write(&dep_path, dep_source).expect("failed to write dependency source");
 
         let entry_uri = format!("file://{}", entry_path.to_string_lossy());
         let dep_uri = format!("file://{}", dep_path.to_string_lossy());
@@ -1457,7 +1458,7 @@ fn run() -> u64 { 1 }
         assert_eq!(locations[0]["uri"], dep_uri);
         assert_eq!(locations[0]["range"]["start"]["line"], 1);
 
-        let _ = std::fs::remove_dir_all(&temp_dir);
+        let _ = fs::remove_dir_all(&temp_dir);
     }
 
     #[test]
@@ -1540,7 +1541,7 @@ fn run() -> u64 { 1 }
             run_id
         ));
         let app_dir = temp_dir.join("app");
-        std::fs::create_dir_all(&app_dir).expect("failed to create temp module tree");
+        fs::create_dir_all(&app_dir).expect("failed to create temp module tree");
 
         let entry_path = temp_dir.join("main.mc");
         let dep_path = app_dir.join("dep.mc");
@@ -1554,8 +1555,8 @@ fn main() -> u64 {
         let dep_source = r#"@public
 fn run(x: u64, y: bool) -> u64 { x }
 "#;
-        std::fs::write(&entry_path, entry_source).expect("failed to write entry source");
-        std::fs::write(&dep_path, dep_source).expect("failed to write dependency source");
+        fs::write(&entry_path, entry_source).expect("failed to write entry source");
+        fs::write(&dep_path, dep_source).expect("failed to write dependency source");
         let entry_uri = format!("file://{}", entry_path.to_string_lossy());
 
         let mut session = AnalysisSession::new();
@@ -1601,7 +1602,7 @@ fn run(x: u64, y: bool) -> u64 { x }
         );
         assert_eq!(response["result"]["activeParameter"], 1);
 
-        let _ = std::fs::remove_dir_all(&temp_dir);
+        let _ = fs::remove_dir_all(&temp_dir);
     }
 
     #[test]

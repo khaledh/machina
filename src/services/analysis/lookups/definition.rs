@@ -11,6 +11,7 @@ use crate::services::analysis::syntax_index::{
 };
 
 use super::identifier_token_at_span;
+use std::collections::HashSet;
 
 /// Resolve the definition under `query_span`. Prefers role-binding matches
 /// over AST node matches — generated typestate items may carry synthetic
@@ -121,7 +122,7 @@ fn selected_callable_def_at_span(
 fn best_def_use_at_span(
     module: &Module,
     def_table: &DefTable,
-    poisoned_nodes: &std::collections::HashSet<NodeId>,
+    poisoned_nodes: &HashSet<NodeId>,
     query_span: Span,
 ) -> Option<(NodeId, DefId)> {
     let spans = node_span_map(module);

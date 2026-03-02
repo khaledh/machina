@@ -1,4 +1,5 @@
 use crate::core::context::ParsedContext;
+use crate::core::context::ResolvedContext;
 use crate::core::lexer::Lexer;
 use crate::core::monomorphize::{monomorphize_resolved, monomorphize_resolved_with_stats};
 use crate::core::parse::Parser;
@@ -7,7 +8,7 @@ use crate::core::resolve::resolve;
 use crate::core::tree::{FuncDef, MethodItem, Module, TopLevelItem};
 use crate::core::typecheck::type_check;
 
-fn resolve_context(source: &str) -> (crate::core::context::ResolvedContext, DefTable) {
+fn resolve_context(source: &str) -> (ResolvedContext, DefTable) {
     let lexer = Lexer::new(source);
     let tokens = lexer
         .tokenize()

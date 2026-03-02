@@ -31,6 +31,8 @@ use crate::services::analysis::pipeline::{
 use crate::services::analysis::program_imports::ProgramImportFactsCache;
 use crate::services::analysis::query::{QueryKey, QueryResult, QueryRuntime};
 use crate::services::analysis::snapshot::{AnalysisSnapshot, FileId};
+use std::fs;
+use std::sync::Arc;
 
 #[derive(Clone, Default)]
 pub(crate) struct ProgramPipelineResult {
@@ -115,7 +117,7 @@ pub(crate) fn run_program_pipeline_for_file_with_options(
             let Some(parsed) = program_context.module(module_id) else {
                 continue;
             };
-            let source = std::sync::Arc::<str>::from(parsed.source.source.as_str());
+            let source = Arc::<str>::from(parsed.source.source.as_str());
             let module_revision = stable_source_revision(&parsed.source.source);
             let parsed_module =
                 module_with_implicit_prelude(parsed, parsed_prelude.as_ref().map(|p| &p.module));
@@ -123,10 +125,9 @@ pub(crate) fn run_program_pipeline_for_file_with_options(
                 .as_ref()
                 .map(|p| p.next_node_id_gen.clone())
                 .unwrap_or_else(|| program_context.next_node_id_gen().clone());
-            let parsed_context =
-                crate::core::context::ParsedContext::new(parsed_module, node_id_gen)
-                    .with_source_path(parsed.source.file_path.clone())
-                    .with_module_path(parsed.source.path.clone());
+            let parsed_context = ParsedContext::new(parsed_module, node_id_gen)
+                .with_source_path(parsed.source.file_path.clone())
+                .with_module_path(parsed.source.path.clone());
             let imported_modules = import_facts.imported_modules_for(&program_context, module_id);
             let imported_symbols = import_facts.imported_symbols_for(&program_context, module_id);
             let skip_typecheck = ProgramImportFactsCache::should_skip_typecheck(&imported_symbols);
@@ -275,7 +276,7 @@ fn parsed_prelude_decl_module(
     experimental_typestate: bool,
 ) -> Option<ParsedPrelude> {
     let prelude_path = prelude_decl_path();
-    let prelude_src = std::fs::read_to_string(prelude_path).ok()?;
+    let prelude_src = fs::read_to_string(prelude_path).ok()?;
     let (module, next_node_id_gen) = api::parse_module_with_id_gen_and_options(
         &prelude_src,
         id_gen.clone(),
@@ -328,7 +329,7 @@ fn prelude_decl_runtime_locations() -> &'static HashMap<String, DefLocation> {
 
 fn build_prelude_runtime_locations() -> HashMap<String, DefLocation> {
     let prelude_path = prelude_decl_path();
-    let Ok(prelude_src) = std::fs::read_to_string(prelude_path) else {
+    let Ok(prelude_src) = fs::read_to_string(prelude_path) else {
         return HashMap::new();
     };
     let Ok((module, id_gen)) = api::parse_module_with_id_gen(&prelude_src, NodeIdGen::new()) else {

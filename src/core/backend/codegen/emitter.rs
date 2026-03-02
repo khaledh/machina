@@ -10,6 +10,7 @@ use crate::core::ir::layout::IrLayout;
 use crate::core::ir::{BinOp, ConstValue, GlobalData, Instruction, LocalId, Terminator, ValueId};
 use crate::core::ir::{IrTypeCache, IrTypeId};
 use crate::core::resolve::DefId;
+use std::collections::HashSet;
 
 /// Minimal instruction selection interface for SSA codegen.
 pub trait CodegenEmitter {
@@ -69,8 +70,8 @@ pub struct LocationResolver<'a> {
     pub def_names: &'a HashMap<DefId, String>,
     pub field_addr_folds: &'a HashMap<ValueId, (ValueId, u32)>,
     pub index_addr_folds: &'a HashMap<ValueId, (ValueId, u32)>,
-    pub const_zero_values: &'a std::collections::HashSet<ValueId>,
-    pub const_zero_skips: &'a std::collections::HashSet<ValueId>,
+    pub const_zero_values: &'a HashSet<ValueId>,
+    pub const_zero_skips: &'a HashSet<ValueId>,
 }
 
 impl<'a> LocationResolver<'a> {

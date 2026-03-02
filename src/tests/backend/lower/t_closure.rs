@@ -1,6 +1,7 @@
 use crate::core::tree::semantic as sem;
 
 use super::{analyze, assert_ir_eq, format_func, indoc, lower_module};
+use std::collections::HashMap;
 
 #[test]
 fn test_lower_closure_ref_captureless() {
@@ -38,7 +39,7 @@ fn test_lower_closure_ref_captureless() {
     )
     .unwrap();
 
-    let mut func_texts = std::collections::HashMap::new();
+    let mut func_texts = HashMap::new();
     for lowered_func in &lowered.funcs {
         let text = format_func(&lowered_func.func, &lowered_func.types);
         func_texts.insert(lowered_func.func.name.clone(), text);
@@ -114,7 +115,7 @@ fn test_lower_closure_invoke() {
     )
     .unwrap();
 
-    let mut func_texts = std::collections::HashMap::new();
+    let mut func_texts = HashMap::new();
     for lowered_func in &lowered.funcs {
         let text = format_func(&lowered_func.func, &lowered_func.types);
         func_texts.insert(lowered_func.func.name.clone(), text);
@@ -217,7 +218,7 @@ fn test_lower_closure_borrow_capture() {
     )
     .unwrap();
 
-    let mut func_texts = std::collections::HashMap::new();
+    let mut func_texts = HashMap::new();
     for lowered_func in &lowered.funcs {
         let text = format_func(&lowered_func.func, &lowered_func.types);
         func_texts.insert(lowered_func.func.name.clone(), text);

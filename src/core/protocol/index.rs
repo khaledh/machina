@@ -257,11 +257,11 @@ fn build_protocol_fact(
 #[cfg(test)]
 mod tests {
     use crate::core::api::{FrontendPolicy, ResolveInputs, resolve_stage_with_policy};
-    use crate::core::context::ParsedContext;
+    use crate::core::context::{ParsedContext, ResolvedContext};
     use crate::core::lexer::{LexError, Lexer, Token};
     use crate::core::parse::{Parser, ParserOptions};
 
-    fn resolve_source(source: &str) -> crate::core::context::ResolvedContext {
+    fn resolve_source(source: &str) -> ResolvedContext {
         let lexer = Lexer::new(source);
         let tokens = lexer
             .tokenize()

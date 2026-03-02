@@ -14,6 +14,9 @@ use crate::core::api::{
     typecheck_stage_with_policy,
 };
 use crate::core::capsule::ModuleId;
+use crate::core::context::ParsedContext;
+use crate::core::context::ResolvedContext;
+use crate::core::context::TypeCheckedContext;
 use crate::core::resolve::{
     ImportedCallableSig, ImportedFacts, ImportedModule, ImportedParamSig, ImportedSymbol,
     ImportedTraitMethodSig, ImportedTraitPropertySig, ImportedTraitSig,
@@ -43,9 +46,9 @@ impl<T> Default for StageOutput<T> {
     }
 }
 
-pub(crate) type ParseStageOutput = StageOutput<crate::core::context::ParsedContext>;
-pub(crate) type ResolveStageOutput = StageOutput<crate::core::context::ResolvedContext>;
-pub(crate) type TypecheckStageOutput = StageOutput<crate::core::context::TypeCheckedContext>;
+pub(crate) type ParseStageOutput = StageOutput<ParsedContext>;
+pub(crate) type ResolveStageOutput = StageOutput<ResolvedContext>;
+pub(crate) type TypecheckStageOutput = StageOutput<TypeCheckedContext>;
 pub(crate) type SemcheckStageOutput = StageOutput<crate::core::context::SemanticCheckedContext>;
 
 #[derive(Clone, Default)]
@@ -58,8 +61,8 @@ pub(crate) struct ModulePipelineState {
 
 #[derive(Clone, Default)]
 pub(crate) struct LookupState {
-    pub resolved: Option<crate::core::context::ResolvedContext>,
-    pub typed: Option<crate::core::context::TypeCheckedContext>,
+    pub resolved: Option<ResolvedContext>,
+    pub typed: Option<TypeCheckedContext>,
     pub poisoned_nodes: HashSet<NodeId>,
 }
 
@@ -68,7 +71,7 @@ pub(crate) struct LookupState {
 /// These are intentionally kept out of core `ResolvedContext`/`TypeCheckedContext`.
 #[derive(Clone, Default)]
 pub(crate) struct ModulePipelineInputs {
-    pub parsed_override: Option<crate::core::context::ParsedContext>,
+    pub parsed_override: Option<ParsedContext>,
     pub imported_modules: HashMap<String, ImportedModule>,
     pub imported_symbols: HashMap<String, ImportedSymbol>,
     pub skip_typecheck: bool,
@@ -106,7 +109,7 @@ pub(crate) fn run_module_pipeline_with_parsed_and_imports(
     module_id: ModuleId,
     revision: u64,
     source: Arc<str>,
-    parsed_override: Option<crate::core::context::ParsedContext>,
+    parsed_override: Option<ParsedContext>,
     imported_modules: HashMap<String, ImportedModule>,
     imported_symbols: HashMap<String, ImportedSymbol>,
     skip_typecheck: bool,
@@ -133,7 +136,7 @@ pub(crate) fn run_module_pipeline_with_parsed_and_imports_with_query_input(
     revision: u64,
     source: Arc<str>,
     query_input: u64,
-    parsed_override: Option<crate::core::context::ParsedContext>,
+    parsed_override: Option<ParsedContext>,
     imported_modules: HashMap<String, ImportedModule>,
     imported_symbols: HashMap<String, ImportedSymbol>,
     skip_typecheck: bool,
@@ -203,7 +206,7 @@ fn run_module_pipeline_with_inputs(
             },
         ) {
             Ok((module, id_gen)) => {
-                state.product = Some(crate::core::context::ParsedContext::new(module, id_gen));
+                state.product = Some(ParsedContext::new(module, id_gen));
             }
             Err(ParseModuleError::Lex(error)) => {
                 state.diagnostics.push(Diagnostic::from_lex_error(&error));
@@ -336,7 +339,7 @@ fn run_module_pipeline_with_inputs(
 }
 
 fn semantic_input_fingerprint(
-    parsed_override: Option<&crate::core::context::ParsedContext>,
+    parsed_override: Option<&ParsedContext>,
     imported_modules: &HashMap<String, ImportedModule>,
     imported_symbols: &HashMap<String, ImportedSymbol>,
     skip_typecheck: bool,

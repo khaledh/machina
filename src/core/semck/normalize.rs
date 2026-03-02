@@ -1,4 +1,5 @@
 use crate::core::analysis::facts::{SyntheticReason, TypeMapOverlay};
+use crate::core::context::TypeCheckedContext;
 use crate::core::context::{SemCheckNormalizedContext, SemCheckStageInput};
 use crate::core::resolve::DefKind;
 use crate::core::resolve::def_table::DefTable;
@@ -14,7 +15,7 @@ use crate::core::types::{
 /// This is a semcheck-internal prepass that performs a 1:1 typed->normalized
 /// mapping and inserts explicit call-argument coercions.
 pub fn normalize(ctx: SemCheckStageInput) -> SemCheckNormalizedContext {
-    let crate::core::context::TypeCheckedContext { module, payload } = ctx;
+    let TypeCheckedContext { module, payload } = ctx;
     let crate::core::context::TypedTables {
         resolved,
         type_map,

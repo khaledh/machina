@@ -3,6 +3,7 @@ use machina::core::capsule::CapsuleError;
 use machina::core::diag::CompileError;
 use machina::core::typecheck::TypeCheckErrorKind;
 use machina::driver::compile::{CompileOptions, check_with_path, compile_with_path};
+use std::fs;
 use std::path::Path;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
@@ -268,21 +269,21 @@ fn with_temp_program(
         std::process::id(),
         run_id
     ));
-    std::fs::create_dir_all(&temp_dir).expect("failed to create temp dir");
+    fs::create_dir_all(&temp_dir).expect("failed to create temp dir");
 
     let entry_path = temp_dir.join("main.mc");
-    std::fs::write(&entry_path, entry_source).expect("failed to write entry source");
+    fs::write(&entry_path, entry_source).expect("failed to write entry source");
 
     for (module_path, source) in extra_modules {
         let file_path = temp_dir.join(module_path);
         if let Some(parent) = file_path.parent() {
-            std::fs::create_dir_all(parent).expect("failed to create module parent");
+            fs::create_dir_all(parent).expect("failed to create module parent");
         }
-        std::fs::write(&file_path, source).expect("failed to write module source");
+        fs::write(&file_path, source).expect("failed to write module source");
     }
 
     test(&entry_path, entry_source);
-    let _ = std::fs::remove_dir_all(&temp_dir);
+    let _ = fs::remove_dir_all(&temp_dir);
 }
 
 fn typecheck_with_modules(

@@ -1,7 +1,7 @@
 //! Signature help lookup.
 
 use crate::core::diag::Span;
-use crate::core::resolve::{DefTable, UNKNOWN_DEF_ID};
+use crate::core::resolve::{DefId, DefTable, UNKNOWN_DEF_ID};
 use crate::core::types::Type;
 use crate::services::analysis::pipeline::LookupState;
 use crate::services::analysis::results::SignatureHelp;
@@ -12,6 +12,7 @@ use crate::services::analysis::syntax_index::{
 
 use super::TypestateNameDemangler;
 use super::callable_signature::format_source_callable_signature;
+use crate::core::context::TypeCheckedContext;
 
 /// Build signature help at a call site. First tries call-site resolution
 /// (populated by the type checker for fully resolved calls), then falls back
@@ -118,7 +119,7 @@ pub(crate) fn signature_help_for_def_at_call_site(
     query_span: Span,
     source: Option<&str>,
     callee_state: &LookupState,
-    callee_def_id: crate::core::resolve::DefId,
+    callee_def_id: DefId,
 ) -> Option<SignatureHelp> {
     let caller_typed = caller_state.typed.as_ref()?;
     let call = call_site_at_span(&caller_typed.module, query_span).or_else(|| {
@@ -141,8 +142,8 @@ pub(crate) fn signature_help_for_def_at_call_site(
 }
 
 fn source_signature_help<F>(
-    typed: &crate::core::context::TypeCheckedContext,
-    render_def_id: Option<crate::core::resolve::DefId>,
+    typed: &TypeCheckedContext,
+    render_def_id: Option<DefId>,
     active_parameter_for: F,
 ) -> Option<SignatureHelp>
 where

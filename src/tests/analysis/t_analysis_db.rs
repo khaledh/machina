@@ -2262,10 +2262,7 @@ fn def_target_for_symbol_id_in_program_resolves_imported_overload_target() {
 
     assert_eq!(target.symbol_id, Some(symbol_id));
     assert!(target.program_scoped);
-    assert_ne!(
-        target.module_id,
-        Some(crate::core::capsule::ModuleId(entry_id.0))
-    );
+    assert_ne!(target.module_id, Some(ModuleId(entry_id.0)));
 }
 
 #[test]
@@ -3141,7 +3138,7 @@ fn diagnostics_for_program_file_typestate_connection_example_is_clean_when_enabl
     db.set_experimental_typestate(true);
 
     let path = PathBuf::from("examples/typestate/connection.mc");
-    let source = std::fs::read_to_string(&path).expect("failed to read typestate example");
+    let source = fs::read_to_string(&path).expect("failed to read typestate example");
     let file_id = db.upsert_disk_text(path, source.clone());
 
     let diagnostics = db
@@ -3158,7 +3155,7 @@ fn diagnostics_for_program_file_std_io_file_read_stdout_example_is_clean() {
     let mut db = AnalysisDb::new();
 
     let path = PathBuf::from("examples/basics/file_read_stdout.mc");
-    let source = std::fs::read_to_string(&path).expect("failed to read std::io example");
+    let source = fs::read_to_string(&path).expect("failed to read std::io example");
     let file_id = db.upsert_disk_text(path, source.clone());
 
     let diagnostics = db
@@ -3175,13 +3172,13 @@ fn diagnostics_for_program_file_std_io_examples_ignore_unrelated_open_overlays()
     let mut db = AnalysisDb::new();
 
     let read_path = PathBuf::from("examples/basics/file_read_stdout.mc");
-    let read_source = std::fs::read_to_string(&read_path).expect("failed to read std::io example");
+    let read_source = fs::read_to_string(&read_path).expect("failed to read std::io example");
     let read_id = db.upsert_disk_text(read_path, read_source.clone());
     db.set_overlay(read_id, read_source);
 
     let using_path = PathBuf::from("examples/basics/file_using_stdout.mc");
     let using_source =
-        std::fs::read_to_string(&using_path).expect("failed to read using std::io example");
+        fs::read_to_string(&using_path).expect("failed to read using std::io example");
     let using_id = db.upsert_disk_text(using_path, using_source.clone());
     db.set_overlay(using_id, using_source);
 
@@ -3207,7 +3204,7 @@ fn hover_at_program_file_std_io_writer_shows_text_writer() {
     let mut db = AnalysisDb::new();
 
     let path = PathBuf::from("examples/basics/file_read_stdout.mc");
-    let source = std::fs::read_to_string(&path).expect("failed to read std::io example");
+    let source = fs::read_to_string(&path).expect("failed to read std::io example");
     let file_id = db.upsert_disk_text(path, source.clone());
     let binding_start = source.find("let writer").expect("expected writer binding") + 4;
     let binding_end = binding_start + "writer".len();
@@ -3232,7 +3229,7 @@ fn hover_at_program_file_std_io_point_hover_shows_text_writer() {
     let mut db = AnalysisDb::new();
 
     let path = PathBuf::from("examples/basics/file_read_stdout.mc");
-    let source = std::fs::read_to_string(&path).expect("failed to read std::io example");
+    let source = fs::read_to_string(&path).expect("failed to read std::io example");
     let file_id = db.upsert_disk_text(path, source.clone());
 
     let writer_offset = source
@@ -3274,7 +3271,7 @@ fn hover_at_program_file_std_io_using_reader_shows_text_reader() {
     let mut db = AnalysisDb::new();
 
     let path = PathBuf::from("examples/basics/file_using_stdout.mc");
-    let source = std::fs::read_to_string(&path).expect("failed to read using std::io example");
+    let source = fs::read_to_string(&path).expect("failed to read using std::io example");
     let file_id = db.upsert_disk_text(path, source.clone());
     let binding_start = source
         .find("using reader")
@@ -3302,7 +3299,7 @@ fn hover_at_program_file_std_io_using_text_method_shows_signature() {
     let mut db = AnalysisDb::new();
 
     let path = PathBuf::from("examples/basics/file_using_stdout.mc");
-    let source = std::fs::read_to_string(&path).expect("failed to read using std::io example");
+    let source = fs::read_to_string(&path).expect("failed to read using std::io example");
     let file_id = db.upsert_disk_text(path, source.clone());
     let text_offset = source.rfind(".text()").expect("expected text call") + ".".len();
     let text_point = Span {
@@ -3326,7 +3323,7 @@ fn def_location_at_program_file_std_io_using_write_all_method_points_to_std_meth
     let mut db = AnalysisDb::new();
 
     let path = PathBuf::from("examples/basics/file_using_stdout.mc");
-    let source = std::fs::read_to_string(&path).expect("failed to read using std::io example");
+    let source = fs::read_to_string(&path).expect("failed to read using std::io example");
     let file_id = db.upsert_disk_text(path, source.clone());
     let write_all_offset = source.find(".write_all(").expect("expected write_all call") + ".".len();
     let write_all_point = Span {
@@ -3351,7 +3348,7 @@ fn def_location_at_program_file_std_io_using_text_method_points_to_std_method() 
     let mut db = AnalysisDb::new();
 
     let path = PathBuf::from("examples/basics/file_using_stdout.mc");
-    let source = std::fs::read_to_string(&path).expect("failed to read using std::io example");
+    let source = fs::read_to_string(&path).expect("failed to read using std::io example");
     let file_id = db.upsert_disk_text(path, source.clone());
     let text_offset = source.rfind(".text()").expect("expected text call") + ".".len();
     let text_point = Span {
@@ -3530,7 +3527,7 @@ fn hover_for_program_typestate_example_uses_source_facing_names() {
     db.set_experimental_typestate(true);
 
     let path = PathBuf::from("examples/typestate/connection.mc");
-    let source = std::fs::read_to_string(&path).expect("failed to read typestate example");
+    let source = fs::read_to_string(&path).expect("failed to read typestate example");
     let file_id = db.upsert_disk_text(path, source.clone());
 
     let ctor_span = span_for_last_substring(&source, "new");
@@ -3593,7 +3590,7 @@ fn hover_for_typestate_field_with_zero_offset_span_returns_info() {
     db.set_experimental_typestate(true);
 
     let path = PathBuf::from("examples/typestate/connection.mc");
-    let source = std::fs::read_to_string(&path).expect("failed to read typestate example");
+    let source = fs::read_to_string(&path).expect("failed to read typestate example");
     let file_id = db.upsert_disk_text(path, source.clone());
 
     // Simulate LSP's frequent "line/column only" cursor shape by zeroing the
@@ -3628,7 +3625,7 @@ fn hover_for_typestate_method_calls_prefers_method_over_enclosing_fn() {
     db.set_experimental_typestate(true);
 
     let path = PathBuf::from("examples/typestate/connection.mc");
-    let source = std::fs::read_to_string(&path).expect("failed to read typestate example");
+    let source = fs::read_to_string(&path).expect("failed to read typestate example");
     let file_id = db.upsert_disk_text(path, source.clone());
 
     let connect_span = span_for_last_substring(&source, "connect");

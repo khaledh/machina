@@ -117,7 +117,7 @@ pub struct Elaborator<'a> {
     index_plans: sem::IndexPlanMap,
     match_plans: sem::MatchPlanMap,
     slice_plans: sem::SlicePlanMap,
-    try_cleanup_plans: std::collections::HashMap<NodeId, Vec<sem::ValueExpr>>,
+    try_cleanup_plans: HashMap<NodeId, Vec<sem::ValueExpr>>,
 }
 
 impl<'a> Elaborator<'a> {
@@ -365,7 +365,7 @@ impl<'a> Elaborator<'a> {
         &sem::IndexPlanMap,
         &sem::MatchPlanMap,
         &sem::SlicePlanMap,
-        &std::collections::HashMap<NodeId, Vec<sem::ValueExpr>>,
+        &HashMap<NodeId, Vec<sem::ValueExpr>>,
     ) {
         (
             &self.call_plans,

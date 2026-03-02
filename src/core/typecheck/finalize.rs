@@ -451,7 +451,7 @@ fn is_unresolved_type(ty: &Type) -> bool {
     matches!(ty, Type::Unknown | Type::Var(_))
 }
 
-fn collect_callable_def_types(engine: &TypecheckEngine) -> std::collections::HashMap<DefId, Type> {
+fn collect_callable_def_types(engine: &TypecheckEngine) -> HashMap<DefId, Type> {
     let mut out = HashMap::new();
     for overloads in engine.env().func_sigs.values() {
         for sig in overloads {
@@ -470,7 +470,7 @@ fn collect_callable_def_types(engine: &TypecheckEngine) -> std::collections::Has
 
 fn collect_callable_type_param_names(
     engine: &TypecheckEngine,
-) -> std::collections::HashMap<DefId, std::collections::BTreeMap<u32, String>> {
+) -> HashMap<DefId, std::collections::BTreeMap<u32, String>> {
     let mut out = HashMap::new();
     for overloads in engine.env().func_sigs.values() {
         for sig in overloads {

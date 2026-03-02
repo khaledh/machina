@@ -53,6 +53,7 @@ use crate::core::tree::{NodeId, ParamMode};
 use crate::core::types::{StructField, Type, TypeId};
 
 use super::elaborator::{CaptureField, ClosureContext, ClosureInfo, Elaborator};
+use std::collections::HashSet;
 
 /// Register generated symbol names for lifted closure methods.
 ///
@@ -60,8 +61,7 @@ use super::elaborator::{CaptureField, ClosureContext, ClosureInfo, Elaborator};
 /// resolved symbol table. Add stable backend names so downstream IR/codegen
 /// formatting can print and reference them.
 pub(super) fn register_lifted_method_symbols(module: &sem::Module, symbols: &mut CodegenNameTable) {
-    let mut used_names: std::collections::HashSet<String> =
-        symbols.def_names.values().cloned().collect();
+    let mut used_names: HashSet<String> = symbols.def_names.values().cloned().collect();
     for method_block in module.method_blocks() {
         let type_name = method_block.type_name.as_str();
         for method_item in &method_block.method_items {

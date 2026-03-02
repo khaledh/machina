@@ -29,6 +29,7 @@ use crate::services::analysis::query::{
     CacheStats, CancellationToken, QueryKey, QueryResult, QueryRuntime,
 };
 use crate::services::analysis::snapshot::{AnalysisSnapshot, FileId, SourceStore};
+use std::sync::Arc;
 
 #[derive(Default)]
 pub struct AnalysisDb {
@@ -76,14 +77,14 @@ impl AnalysisDb {
 
     pub fn upsert_disk_text<S>(&mut self, path: PathBuf, text: S) -> FileId
     where
-        S: Into<std::sync::Arc<str>>,
+        S: Into<Arc<str>>,
     {
         self.sources.upsert_disk_text(path, text)
     }
 
     pub fn set_overlay<S>(&mut self, file_id: FileId, text: S)
     where
-        S: Into<std::sync::Arc<str>>,
+        S: Into<Arc<str>>,
     {
         self.sources.set_overlay(file_id, text);
     }

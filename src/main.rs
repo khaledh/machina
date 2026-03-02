@@ -6,6 +6,7 @@ use machina::driver::query::{QueryLookupKind as DriverQueryLookupKind, run_query
 use machina::services::analysis::diagnostics::Diagnostic;
 use machina::services::analysis::diagnostics::DiagnosticPhase;
 use std::ffi::OsStr;
+use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Command as ProcessCommand;
 
@@ -222,7 +223,7 @@ fn main() {
         }
     };
     let input_path = invocation.input_path.as_path();
-    let source = match std::fs::read_to_string(input_path) {
+    let source = match fs::read_to_string(input_path) {
         Ok(source) => source,
         Err(e) => {
             println!("[ERROR] failed to read {}: {e}", input_path.display());
@@ -246,7 +247,7 @@ fn main() {
         Ok(output) => {
             if let Some(ir) = output.ir {
                 let ir_path = input_path.with_extension("ir");
-                if let Err(e) = std::fs::write(&ir_path, ir) {
+                if let Err(e) = fs::write(&ir_path, ir) {
                     eprintln!("[WARN] failed to write {}: {e}", ir_path.display());
                 }
             }
@@ -256,7 +257,7 @@ fn main() {
             } else {
                 temp_asm_path(input_path)
             };
-            if let Err(e) = std::fs::write(&asm_path, output.asm) {
+            if let Err(e) = fs::write(&asm_path, output.asm) {
                 println!("[ERROR] failed to write {}: {e}", asm_path.display());
                 return;
             }
@@ -388,7 +389,7 @@ fn main() {
 }
 
 fn run_check(input_path: &Path, experimental_typestate: bool) -> Result<usize, String> {
-    let source = std::fs::read_to_string(input_path)
+    let source = fs::read_to_string(input_path)
         .map_err(|e| format!("failed to read {}: {e}", input_path.display()))?;
     match check_with_path(&source, input_path, true, experimental_typestate) {
         Ok(()) => {
@@ -442,12 +443,12 @@ fn print_check_error(entry_source: &str, error: CompileError) -> usize {
 fn print_capsule_check_error(error: CapsuleError) -> usize {
     match error {
         CapsuleError::Lex { path, error } => {
-            let source = std::fs::read_to_string(&path).unwrap_or_default();
+            let source = fs::read_to_string(&path).unwrap_or_default();
             print_structured_diag(&source, Diagnostic::from_lex_error(&error));
             1
         }
         CapsuleError::Parse { path, error } => {
-            let source = std::fs::read_to_string(&path).unwrap_or_default();
+            let source = fs::read_to_string(&path).unwrap_or_default();
             print_structured_diag(&source, Diagnostic::from_parse_error(&error));
             1
         }
@@ -548,7 +549,7 @@ fn compile_prelude_impl_object(
     let prelude_path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
         .join("std")
         .join("prelude_impl.mc");
-    let prelude_src = std::fs::read_to_string(&prelude_path)
+    let prelude_src = fs::read_to_string(&prelude_path)
         .map_err(|e| format!("failed to read {}: {e}", prelude_path.display()))?;
 
     let impl_opts = CompileOptions {
@@ -572,7 +573,7 @@ fn compile_prelude_impl_object(
 
     if let Some(ir) = output.ir.as_ref() {
         let ir_path = ir_dir.join("prelude_impl.ir");
-        if let Err(e) = std::fs::write(&ir_path, ir) {
+        if let Err(e) = fs::write(&ir_path, ir) {
             eprintln!("[WARN] failed to write {}: {e}", ir_path.display());
         }
     }
@@ -580,7 +581,7 @@ fn compile_prelude_impl_object(
     let asm_path = temp_named_asm_path("prelude_impl");
     let obj_path = temp_obj_path("prelude_impl");
 
-    std::fs::write(&asm_path, output.asm)
+    fs::write(&asm_path, output.asm)
         .map_err(|e| format!("failed to write {}: {e}", asm_path.display()))?;
     assemble_object(&asm_path, &obj_path)?;
 

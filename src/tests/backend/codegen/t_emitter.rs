@@ -14,6 +14,7 @@ use crate::core::ir::{
     IrTypeCache, IrTypeId, IrTypeKind, RuntimeFn, SwitchCase, Terminator,
 };
 use crate::core::resolve::DefId;
+use std::collections::HashMap;
 
 // ============================================================================
 // Test Helpers
@@ -136,7 +137,7 @@ fn emit_graph_with_emitter(
     types: &mut IrTypeCache,
     emitter: &mut Arm64Emitter,
 ) {
-    let def_names = std::collections::HashMap::new();
+    let def_names = HashMap::new();
     let func_label = format!("_fn{}", func.def_id.0);
     emit_graph_with_emitter_impl(
         graph,
@@ -493,7 +494,7 @@ fn test_arm64_emit_module() {
     };
 
     let target = TinyTarget::new(2);
-    let def_names = std::collections::HashMap::new();
+    let def_names = HashMap::new();
     let asm = emit_module_arm64(&module, &def_names, &target);
     assert!(asm.contains("g0:"));
     assert!(asm.contains("fn0:"));
