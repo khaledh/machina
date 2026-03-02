@@ -468,19 +468,34 @@ fn hover_response(
         Err(r) => return r,
     };
     match result {
-        Some(hover) => success_response(
-            id,
-            json!({
-                "contents": {
-                    "kind": "markdown",
-                    "value": hover_markdown_value(&hover.display)
-                },
-                "range": {
-                    "start": {"line": hover.span.start.line.saturating_sub(1), "character": hover.span.start.column.saturating_sub(1)},
-                    "end": {"line": hover.span.end.line.saturating_sub(1), "character": hover.span.end.column.saturating_sub(1)}
+        Some(hover) => {
+            let hover_range = match version_guarded_query(session, &id, uri, version, |db| {
+                db.def_location_at_program_file(file_id, span)
+            }) {
+                Ok(Some(location))
+                    if location.path.as_deref().map(path_to_file_uri).as_deref() == Some(uri) =>
+                {
+                    hover.span
                 }
-            }),
-        ),
+                _ => span,
+            };
+            success_response(
+                id,
+                json!({
+                    "contents": {
+                        "kind": "markdown",
+                        "value": hover_markdown_value(&hover.display)
+                    },
+                    // LSP hover ranges are interpreted in the current
+                    // document, so only reuse the source definition span when
+                    // the definition is in the same file.
+                    "range": {
+                        "start": {"line": hover_range.start.line.saturating_sub(1), "character": hover_range.start.column.saturating_sub(1)},
+                        "end": {"line": hover_range.end.line.saturating_sub(1), "character": hover_range.end.column.saturating_sub(1)}
+                    }
+                }),
+            )
+        }
         None => success_response(id, Value::Null),
     }
 }
@@ -1383,6 +1398,120 @@ mod tests {
         let response = response.expect("expected definition response");
         assert_eq!(response["id"], 905);
         assert_eq!(response["result"], json!([]));
+    }
+
+    #[test]
+    fn hover_request_uses_definition_range_for_local_symbol() {
+        let mut session = AnalysisSession::new();
+        let source = "fn foo() {}
+fn main() {
+    foo();
+}
+";
+        let _ = handle_message(
+            &mut session,
+            json!({
+                "jsonrpc": "2.0",
+                "method": "textDocument/didOpen",
+                "params": {
+                    "textDocument": {
+                        "uri": "file:///tmp/lsp-hover-local-range.mc",
+                        "version": 1,
+                        "languageId": "machina",
+                        "text": source
+                    }
+                }
+            }),
+        );
+
+        let (_action, response) = handle_message(
+            &mut session,
+            json!({
+                "jsonrpc": "2.0",
+                "id": 89,
+                "method": "textDocument/hover",
+                "params": {
+                    "textDocument": { "uri": "file:///tmp/lsp-hover-local-range.mc" },
+                    "position": { "line": 2, "character": 5 },
+                    "mcDocVersion": 1
+                }
+            }),
+        );
+
+        let response = response.expect("expected hover response");
+        assert_eq!(response["id"], 89);
+        assert_eq!(response["result"]["range"]["start"]["line"], 0);
+        assert_eq!(response["result"]["range"]["end"]["line"], 0);
+    }
+
+    #[test]
+    fn hover_request_uses_current_document_range_for_imported_symbol() {
+        let run_id = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .expect("system time should be valid")
+            .as_nanos();
+        let temp_dir = std::env::temp_dir().join(format!(
+            "machina_lsp_hover_import_{}_{}",
+            std::process::id(),
+            run_id
+        ));
+        let app_dir = temp_dir.join("app");
+        fs::create_dir_all(&app_dir).expect("failed to create temp module tree");
+
+        let entry_path = temp_dir.join("main.mc");
+        let dep_path = app_dir.join("dep.mc");
+        let entry_source = r#"requires {
+    app::dep::run
+}
+
+fn main() -> u64 {
+    run()
+}"#;
+        let dep_source = r#"@public
+fn run() -> u64 { 1 }
+"#;
+        fs::write(&entry_path, entry_source).expect("failed to write entry source");
+        fs::write(&dep_path, dep_source).expect("failed to write dependency source");
+
+        let entry_uri = format!("file://{}", entry_path.to_string_lossy());
+
+        let mut session = AnalysisSession::new();
+        let _ = handle_message(
+            &mut session,
+            json!({
+                "jsonrpc": "2.0",
+                "method": "textDocument/didOpen",
+                "params": {
+                    "textDocument": {
+                        "uri": entry_uri,
+                        "version": 1,
+                        "languageId": "machina",
+                        "text": entry_source
+                    }
+                }
+            }),
+        );
+
+        let (_action, response) = handle_message(
+            &mut session,
+            json!({
+                "jsonrpc": "2.0",
+                "id": 90,
+                "method": "textDocument/hover",
+                "params": {
+                    "textDocument": { "uri": entry_uri },
+                    "position": { "line": 5, "character": 5 },
+                    "mcDocVersion": 1
+                }
+            }),
+        );
+
+        let response = response.expect("expected hover response");
+        assert_eq!(response["id"], 90);
+        assert_eq!(response["result"]["range"]["start"]["line"], 5);
+        assert_eq!(response["result"]["range"]["end"]["line"], 5);
+
+        let _ = fs::remove_dir_all(&temp_dir);
     }
 
     #[test]
