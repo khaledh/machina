@@ -48,6 +48,7 @@ pub(crate) fn flatten_capsule(
 ) -> Result<FlattenedCapsule, Vec<CapsuleError>> {
     let bindings = CapsuleBindings::build(program);
     let conflicts = collect_conflicting_public_exports(program);
+    let prelude_keep = prelude_only_keep_sets(program);
 
     let mut merged = Module {
         requires: Vec::new(),
@@ -73,7 +74,12 @@ pub(crate) fn flatten_capsule(
         errors.extend(rewriter.errors);
 
         if module_id != program.entry() {
-            mangle_dependency_symbols(&mut module, &parsed.source.path, &conflicts);
+            mangle_dependency_symbols(
+                &mut module,
+                &parsed.source.path,
+                &conflicts,
+                prelude_keep.get(&module_id),
+            );
         }
 
         for item in &module.top_level_items {
@@ -90,6 +96,38 @@ pub(crate) fn flatten_capsule(
     } else {
         Err(errors)
     }
+}
+
+/// For modules reached exclusively through prelude-injected requires,
+/// compute the set of symbol names that should remain public (i.e. the
+/// specifically imported symbols). All other public names get mangled during
+/// flattening to avoid collisions with user-defined names.
+fn prelude_only_keep_sets(
+    program: &CapsuleParsedContext,
+) -> HashMap<ModuleId, HashSet<String>> {
+    let mut has_user_require: HashSet<ModuleId> = HashSet::new();
+    let mut prelude_members: HashMap<ModuleId, HashSet<String>> = HashMap::new();
+
+    for module_id in program.dependency_order_from_entry() {
+        let Some(parsed) = program.module(module_id) else {
+            continue;
+        };
+        for req in &parsed.requires {
+            let Some(dep_id) = program.capsule.by_path.get(&req.module_path) else {
+                continue;
+            };
+            if req.prelude {
+                if let Some(member) = &req.member {
+                    prelude_members.entry(*dep_id).or_default().insert(member.clone());
+                }
+            } else {
+                has_user_require.insert(*dep_id);
+            }
+        }
+    }
+
+    prelude_members.retain(|id, _| !has_user_require.contains(id));
+    prelude_members
 }
 
 fn validate_symbol_imports(
@@ -547,10 +585,17 @@ fn split_qualified_name(name: &str) -> Option<(&str, &str)> {
     name.split_once("::")
 }
 
+/// Mangle dependency symbols that should not be directly visible from the
+/// entry module.
+///
+/// When `prelude_keep` is `Some`, the module was loaded exclusively via
+/// prelude-injected requires. In that case, public symbols not in the keep
+/// set are mangled to avoid polluting the user's namespace.
 fn mangle_dependency_symbols(
     module: &mut Module,
     module_path: &ModulePath,
     conflicts: &ConflictingPublicExports,
+    prelude_keep: Option<&HashSet<String>>,
 ) {
     let mut value_renames = HashMap::new();
     let mut type_renames = HashMap::new();
@@ -560,8 +605,7 @@ fn mangle_dependency_symbols(
         match item {
             TopLevelItem::FuncDecl(func_decl) => {
                 let old = func_decl.sig.name.clone();
-                if !is_public_item(&func_decl.attrs)
-                    || conflicts.contains_callable(module_path, &old)
+                if should_mangle_callable(&func_decl.attrs, module_path, &old, conflicts, prelude_keep)
                 {
                     let new_name = mangled_module_symbol(module_path, &old);
                     func_decl.sig.name = new_name.clone();
@@ -570,8 +614,7 @@ fn mangle_dependency_symbols(
             }
             TopLevelItem::FuncDef(func_def) => {
                 let old = func_def.sig.name.clone();
-                if !is_public_item(&func_def.attrs)
-                    || conflicts.contains_callable(module_path, &old)
+                if should_mangle_callable(&func_def.attrs, module_path, &old, conflicts, prelude_keep)
                 {
                     let new_name = mangled_module_symbol(module_path, &old);
                     func_def.sig.name = new_name.clone();
@@ -580,7 +623,7 @@ fn mangle_dependency_symbols(
             }
             TopLevelItem::TypeDef(type_def) => {
                 let old = type_def.name.clone();
-                if !is_public_item(&type_def.attrs) || conflicts.contains_type(module_path, &old) {
+                if should_mangle_type(&type_def.attrs, module_path, &old, conflicts, prelude_keep) {
                     let new_name = mangled_module_symbol(module_path, &old);
                     type_def.name = new_name.clone();
                     type_renames.insert(old, new_name);
@@ -588,7 +631,7 @@ fn mangle_dependency_symbols(
             }
             TopLevelItem::TraitDef(trait_def) => {
                 let old = trait_def.name.clone();
-                if !is_public_item(&trait_def.attrs) || conflicts.contains_trait(module_path, &old)
+                if should_mangle_trait(&trait_def.attrs, module_path, &old, conflicts, prelude_keep)
                 {
                     let new_name = mangled_module_symbol(module_path, &old);
                     trait_def.name = new_name.clone();
@@ -617,6 +660,54 @@ fn is_public_item(attrs: &[Attribute]) -> bool {
     attrs
         .iter()
         .any(|attr| attr.name == "public" || attr.name == "opaque")
+}
+
+fn should_mangle_callable(
+    attrs: &[Attribute],
+    module_path: &ModulePath,
+    name: &str,
+    conflicts: &ConflictingPublicExports,
+    prelude_keep: Option<&HashSet<String>>,
+) -> bool {
+    if !is_public_item(attrs) {
+        return true;
+    }
+    if conflicts.contains_callable(module_path, name) {
+        return true;
+    }
+    prelude_keep.is_some_and(|keep| !keep.contains(name))
+}
+
+fn should_mangle_type(
+    attrs: &[Attribute],
+    module_path: &ModulePath,
+    name: &str,
+    conflicts: &ConflictingPublicExports,
+    prelude_keep: Option<&HashSet<String>>,
+) -> bool {
+    if !is_public_item(attrs) {
+        return true;
+    }
+    if conflicts.contains_type(module_path, name) {
+        return true;
+    }
+    prelude_keep.is_some_and(|keep| !keep.contains(name))
+}
+
+fn should_mangle_trait(
+    attrs: &[Attribute],
+    module_path: &ModulePath,
+    name: &str,
+    conflicts: &ConflictingPublicExports,
+    prelude_keep: Option<&HashSet<String>>,
+) -> bool {
+    if !is_public_item(attrs) {
+        return true;
+    }
+    if conflicts.contains_trait(module_path, name) {
+        return true;
+    }
+    prelude_keep.is_some_and(|keep| !keep.contains(name))
 }
 
 struct PrivateSymbolRenamer {

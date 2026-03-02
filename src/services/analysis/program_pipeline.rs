@@ -96,6 +96,7 @@ pub(crate) fn run_program_pipeline_for_file_with_options(
             &loader,
             capsule::CapsuleParseOptions {
                 experimental_typestate,
+                inject_prelude_requires: true,
             },
         ) {
             Ok(program) => program,

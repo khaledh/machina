@@ -14,6 +14,8 @@ use std::path::{Path, PathBuf};
 
 use thiserror::Error;
 
+use std::sync::OnceLock;
+
 use crate::core::diag::Span;
 use crate::core::lexer::{LexError, Lexer, Token};
 use crate::core::parse::{ParseError, Parser, ParserOptions};
@@ -71,6 +73,10 @@ pub struct RequireSpec {
     pub kind: RequireKind,
     pub alias: String,
     pub span: Span,
+    /// True when this `require` was auto-injected from the prelude, not written
+    /// by the user. Prelude-only dependencies get their non-imported public
+    /// symbols mangled during flattening to avoid name collisions.
+    pub prelude: bool,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -94,9 +100,21 @@ pub struct ParsedModule {
     pub requires: Vec<RequireSpec>,
 }
 
-#[derive(Debug, Clone, Copy, Default)]
+#[derive(Debug, Clone, Copy)]
 pub struct CapsuleParseOptions {
     pub experimental_typestate: bool,
+    /// When true, auto-import symbols listed in `std/prelude_requires.mc`
+    /// into every non-std module.
+    pub inject_prelude_requires: bool,
+}
+
+impl Default for CapsuleParseOptions {
+    fn default() -> Self {
+        Self {
+            experimental_typestate: false,
+            inject_prelude_requires: true,
+        }
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -256,6 +274,67 @@ impl ModuleLoader for FsModuleLoader {
     }
 }
 
+// ---------------------------------------------------------------------------
+// Prelude requires: auto-imported symbols for user modules
+// ---------------------------------------------------------------------------
+
+fn prelude_requires_path() -> PathBuf {
+    PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("std")
+        .join("prelude_requires.mc")
+}
+
+/// Cached prelude requires parsed once per process.
+fn prelude_require_entries() -> &'static [Require] {
+    static CACHE: OnceLock<Vec<Require>> = OnceLock::new();
+    CACHE.get_or_init(|| {
+        let path = prelude_requires_path();
+        let Ok(src) = fs::read_to_string(&path) else {
+            return Vec::new();
+        };
+        let Ok(tokens) = Lexer::new(&src).tokenize().collect::<Result<Vec<_>, _>>() else {
+            return Vec::new();
+        };
+        let mut parser = Parser::new(&tokens);
+        let Ok(module) = parser.parse() else {
+            return Vec::new();
+        };
+        module.requires
+    })
+}
+
+/// Merge prelude requires into `requires`, skipping entries whose alias
+/// already exists (user-explicit imports take precedence).
+fn inject_prelude_requires(requires: &mut Vec<RequireSpec>, module_path: &ModulePath) {
+    if module_path.segments().first().map(String::as_str) == Some("std") {
+        return;
+    }
+
+    let existing: HashSet<String> = requires.iter().map(|r| r.alias.clone()).collect();
+
+    for req in prelude_require_entries() {
+        let alias = req
+            .alias
+            .clone()
+            .or_else(|| req.path.last().cloned())
+            .unwrap_or_default();
+        if existing.contains(&alias) {
+            continue;
+        }
+        let Ok(path) = ModulePath::from_require(req) else {
+            continue;
+        };
+        requires.push(RequireSpec {
+            module_path: path,
+            member: None,
+            kind: RequireKind::Module,
+            alias,
+            span: Span::default(),
+            prelude: true,
+        });
+    }
+}
+
 pub fn discover_and_parse_capsule(
     entry_source: &str,
     entry_file: &Path,
@@ -295,7 +374,10 @@ pub fn discover_and_parse_capsule_with_loader(
         entry_file,
         entry_path,
         loader,
-        CapsuleParseOptions::default(),
+        CapsuleParseOptions {
+            inject_prelude_requires: false,
+            ..Default::default()
+        },
     )
 }
 
@@ -311,7 +393,10 @@ pub fn discover_and_parse_capsule_with_loader_and_options(
 
     let entry_module = parse_module(entry_source, entry_file, id_gen, options)?;
     id_gen = entry_module.1;
-    let entry_requires = collect_requires(&entry_path, &entry_module.0)?;
+    let mut entry_requires = collect_requires(&entry_path, &entry_module.0)?;
+    if options.inject_prelude_requires {
+        inject_prelude_requires(&mut entry_requires, &entry_path);
+    }
 
     let entry_id = ModuleId(next_module_id);
     next_module_id += 1;
@@ -356,7 +441,10 @@ pub fn discover_and_parse_capsule_with_loader_and_options(
                 let (dep_module, next_id_gen) =
                     parse_module(&dep_source, &dep_file, id_gen, options)?;
                 id_gen = next_id_gen;
-                let dep_requires = collect_requires(&req.module_path, &dep_module)?;
+                let mut dep_requires = collect_requires(&req.module_path, &dep_module)?;
+                if options.inject_prelude_requires {
+                    inject_prelude_requires(&mut dep_requires, &req.module_path);
+                }
                 let dep_id = ModuleId(next_module_id);
                 next_module_id += 1;
                 by_path.insert(req.module_path.clone(), dep_id);
@@ -422,6 +510,7 @@ fn collect_requires(
             kind: RequireKind::Module,
             alias,
             span: req.span,
+            prelude: false,
         });
     }
     Ok(out)

@@ -82,6 +82,7 @@ pub(crate) fn build_strict_frontend_input(
             path,
             capsule::CapsuleParseOptions {
                 experimental_typestate: opts.experimental_typestate,
+                inject_prelude_requires: opts.inject_prelude,
             },
         )
         .map_err(|e| vec![e.into()])?;
