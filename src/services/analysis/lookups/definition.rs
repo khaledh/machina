@@ -6,7 +6,9 @@ use crate::core::tree::{Module, NodeId};
 use crate::services::analysis::pipeline::LookupState;
 use crate::services::analysis::results::Location;
 use crate::services::analysis::snapshot::{AnalysisSnapshot, FileId};
-use crate::services::analysis::syntax_index::{node_span_map, span_contains_span};
+use crate::services::analysis::syntax_index::{
+    call_site_at_span, node_span_map, span_contains_span,
+};
 
 use super::identifier_token_at_span;
 
@@ -18,10 +20,14 @@ pub(crate) fn def_at_span(
     query_span: Span,
     source: Option<&str>,
 ) -> Option<DefId> {
-    let query_span = identifier_token_at_span(source, query_span)
-        .map(|token| token.span)
-        .unwrap_or(query_span);
+    let token = identifier_token_at_span(source, query_span);
+    let query_span = token.as_ref().map(|token| token.span).unwrap_or(query_span);
     let resolved = state.resolved.as_ref()?;
+    if let Some(def_id) =
+        selected_callable_def_at_span(state, query_span, token.as_ref().map(|t| t.ident.as_str()))
+    {
+        return Some(def_id);
+    }
     if let Some(def_id) = typestate_role_def_at_span(
         &resolved.typestate_role_impls,
         &resolved.def_table,
@@ -47,15 +53,18 @@ pub(crate) fn def_location_at_span(
     query_span: Span,
     source: Option<&str>,
 ) -> Option<Location> {
-    let query_span = identifier_token_at_span(source, query_span)
-        .map(|token| token.span)
-        .unwrap_or(query_span);
+    let token = identifier_token_at_span(source, query_span);
+    let query_span = token.as_ref().map(|token| token.span).unwrap_or(query_span);
     let resolved = state.resolved.as_ref()?;
     // Try role-binding lookup first — generated typestate items may carry
     // synthetic spans that overlap with the role reference, causing
     // `best_def_use_at_span` to match a generated node instead of the
     // original protocol role.
-    let def_id = if let Some(def_id) = typestate_role_def_at_span(
+    let def_id = if let Some(def_id) =
+        selected_callable_def_at_span(state, query_span, token.as_ref().map(|t| t.ident.as_str()))
+    {
+        def_id
+    } else if let Some(def_id) = typestate_role_def_at_span(
         &resolved.typestate_role_impls,
         &resolved.def_table,
         query_span,
@@ -80,6 +89,29 @@ pub(crate) fn def_location_at_span(
             .or_else(|| snapshot.path(file_id).map(std::path::Path::to_path_buf)),
         span: def_loc.span,
     })
+}
+
+fn selected_callable_def_at_span(
+    state: &LookupState,
+    query_span: Span,
+    query_ident: Option<&str>,
+) -> Option<DefId> {
+    let typed = state.typed.as_ref()?;
+    let query_ident = query_ident?;
+    let call = call_site_at_span(&typed.module, query_span)?;
+    if let Some(method_name) = call.method_name.as_deref() {
+        if method_name != query_ident {
+            return None;
+        }
+    } else {
+        let callee_span = node_span_map(&typed.module)
+            .get(&call.callee_node_id)
+            .copied()?;
+        if !span_contains_span(callee_span, query_span) {
+            return None;
+        }
+    }
+    typed.call_sigs.get(&call.node_id)?.def_id
 }
 
 /// Find the narrowest AST node that contains `query_span` and has a known

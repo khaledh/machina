@@ -3171,6 +3171,38 @@ fn diagnostics_for_program_file_std_io_file_read_stdout_example_is_clean() {
 }
 
 #[test]
+fn diagnostics_for_program_file_std_io_examples_ignore_unrelated_open_overlays() {
+    let mut db = AnalysisDb::new();
+
+    let read_path = PathBuf::from("examples/basics/file_read_stdout.mc");
+    let read_source = std::fs::read_to_string(&read_path).expect("failed to read std::io example");
+    let read_id = db.upsert_disk_text(read_path, read_source.clone());
+    db.set_overlay(read_id, read_source);
+
+    let using_path = PathBuf::from("examples/basics/file_using_stdout.mc");
+    let using_source =
+        std::fs::read_to_string(&using_path).expect("failed to read using std::io example");
+    let using_id = db.upsert_disk_text(using_path, using_source.clone());
+    db.set_overlay(using_id, using_source);
+
+    let read_diagnostics = db
+        .diagnostics_for_program_file(read_id)
+        .expect("program diagnostics query should succeed");
+    assert!(
+        read_diagnostics.is_empty(),
+        "expected clean diagnostics for file_read_stdout.mc with unrelated open overlay, got: {read_diagnostics:#?}"
+    );
+
+    let using_diagnostics = db
+        .diagnostics_for_program_file(using_id)
+        .expect("program diagnostics query should succeed");
+    assert!(
+        using_diagnostics.is_empty(),
+        "expected clean diagnostics for file_using_stdout.mc with unrelated open overlay, got: {using_diagnostics:#?}"
+    );
+}
+
+#[test]
 fn hover_at_program_file_std_io_writer_shows_text_writer() {
     let mut db = AnalysisDb::new();
 
@@ -3286,6 +3318,64 @@ fn hover_at_program_file_std_io_using_text_method_shows_signature() {
         hover.display.contains("fn text(sink self) -> TextReader"),
         "expected text hover to show source signature, got: {}",
         hover.display
+    );
+}
+
+#[test]
+fn def_location_at_program_file_std_io_using_write_all_method_points_to_std_method() {
+    let mut db = AnalysisDb::new();
+
+    let path = PathBuf::from("examples/basics/file_using_stdout.mc");
+    let source = std::fs::read_to_string(&path).expect("failed to read using std::io example");
+    let file_id = db.upsert_disk_text(path, source.clone());
+    let write_all_offset = source.find(".write_all(").expect("expected write_all call") + ".".len();
+    let write_all_point = Span {
+        start: position_at(&source, write_all_offset),
+        end: position_at(&source, write_all_offset),
+    };
+
+    let location = db
+        .def_location_at_program_file(file_id, write_all_point)
+        .expect("program definition location query should succeed")
+        .expect("expected definition location for write_all method");
+    let location_path = location.path.expect("expected std::io definition path");
+    assert!(
+        location_path.ends_with("std/io.mc"),
+        "expected write_all definition in std/io.mc, got: {}",
+        location_path.display()
+    );
+}
+
+#[test]
+fn def_location_at_program_file_std_io_using_text_method_points_to_std_method() {
+    let mut db = AnalysisDb::new();
+
+    let path = PathBuf::from("examples/basics/file_using_stdout.mc");
+    let source = std::fs::read_to_string(&path).expect("failed to read using std::io example");
+    let file_id = db.upsert_disk_text(path, source.clone());
+    let text_offset = source.rfind(".text()").expect("expected text call") + ".".len();
+    let text_point = Span {
+        start: position_at(&source, text_offset),
+        end: position_at(&source, text_offset),
+    };
+    let hover = db
+        .hover_at_program_file(file_id, text_point)
+        .expect("program hover query should succeed")
+        .expect("expected hover");
+    assert_eq!(hover.display, "fn text(sink self) -> TextReader");
+    assert!(
+        hover.symbol_id.is_some(),
+        "expected canonical symbol for text()"
+    );
+    let location = db
+        .def_location_at_program_file(file_id, text_point)
+        .expect("program definition location query should succeed")
+        .expect("expected definition location for text method");
+    let location_path = location.path.expect("expected std::io definition path");
+    assert!(
+        location_path.ends_with("std/io.mc"),
+        "expected text definition in std/io.mc, got: {}",
+        location_path.display()
     );
 }
 

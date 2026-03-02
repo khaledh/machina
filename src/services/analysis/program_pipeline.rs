@@ -111,7 +111,6 @@ pub(crate) fn run_program_pipeline_for_file_with_options(
         let mut module_states = HashMap::<ModuleId, LookupState>::new();
         let mut exports_by_module = HashMap::<ModuleId, ModuleExportFacts>::new();
         let mut import_env_by_module = HashMap::<ModuleId, ImportEnv>::new();
-
         for module_id in program_context.dependency_order_from_entry() {
             let Some(parsed) = program_context.module(module_id) else {
                 continue;

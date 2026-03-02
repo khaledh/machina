@@ -22,7 +22,10 @@ pub(crate) use symbol_target::{
 };
 
 use crate::core::diag::{Position, Span};
-use crate::core::resolve::DefTable;
+use crate::core::resolve::{DefId, DefTable};
+use crate::core::tree::visit::{Visitor, walk_module};
+use crate::core::tree::{BindPattern, BindPatternKind, Module, StmtExpr, StmtExprKind};
+use crate::core::typecheck::type_map::TypeMap;
 use crate::core::types::Type;
 use crate::services::analysis::code_actions::code_actions_for_diagnostic_with_source;
 use crate::services::analysis::diagnostics::Diagnostic;
@@ -40,6 +43,22 @@ pub(crate) fn type_at_span(state: &LookupState, query_span: Span) -> Option<Type
         .type_map
         .lookup_node_type(node_id)
         .filter(|ty| !matches!(ty, Type::Unknown))
+}
+
+pub(crate) fn resolved_binding_type_for_def(
+    module: &Module,
+    type_map: &TypeMap,
+    def_table: &DefTable,
+    def_id: DefId,
+    fallback: Option<Type>,
+) -> Option<Type> {
+    match fallback {
+        Some(ty) if !ty.contains_unresolved() => Some(ty),
+        _ => binding_value_node_id_for_def(module, def_table, def_id)
+            .and_then(|node_id| type_map.lookup_node_type(node_id))
+            .filter(|ty| !matches!(ty, Type::Unknown))
+            .or(fallback),
+    }
 }
 
 pub(crate) fn code_actions_for_range(
@@ -69,6 +88,72 @@ pub(crate) fn code_actions_for_range(
         a.title == b.title && a.diagnostic_code == b.diagnostic_code && a.edits == b.edits
     });
     actions
+}
+
+pub(crate) fn binding_value_node_id_for_def(
+    module: &Module,
+    def_table: &DefTable,
+    target_def_id: DefId,
+) -> Option<crate::core::tree::NodeId> {
+    struct Finder<'a> {
+        def_table: &'a DefTable,
+        target_def_id: DefId,
+        found: Option<crate::core::tree::NodeId>,
+    }
+
+    impl Visitor for Finder<'_> {
+        fn visit_stmt_expr(&mut self, stmt: &StmtExpr) {
+            if self.found.is_some() {
+                return;
+            }
+            match &stmt.kind {
+                StmtExprKind::LetBind { pattern, value, .. }
+                | StmtExprKind::VarBind { pattern, value, .. } => {
+                    if pattern_contains_def_id(pattern, self.def_table, self.target_def_id) {
+                        self.found = Some(value.id);
+                        return;
+                    }
+                }
+                StmtExprKind::Using { binding, value, .. } => {
+                    if self.def_table.lookup_node_def_id(binding.id) == Some(self.target_def_id) {
+                        self.found = Some(value.id);
+                        return;
+                    }
+                }
+                _ => {}
+            }
+            crate::core::tree::visit::walk_stmt_expr(self, stmt);
+        }
+    }
+
+    let mut finder = Finder {
+        def_table,
+        target_def_id,
+        found: None,
+    };
+    walk_module(&mut finder, module);
+    finder.found
+}
+
+fn pattern_contains_def_id(
+    pattern: &BindPattern,
+    def_table: &DefTable,
+    target_def_id: DefId,
+) -> bool {
+    match &pattern.kind {
+        BindPatternKind::Name { .. } => {
+            def_table.lookup_node_def_id(pattern.id) == Some(target_def_id)
+        }
+        BindPatternKind::Tuple { patterns } => patterns
+            .iter()
+            .any(|item| pattern_contains_def_id(item, def_table, target_def_id)),
+        BindPatternKind::Struct { fields, .. } => fields
+            .iter()
+            .any(|field| pattern_contains_def_id(&field.pattern, def_table, target_def_id)),
+        BindPatternKind::Array { patterns } => patterns
+            .iter()
+            .any(|item| pattern_contains_def_id(item, def_table, target_def_id)),
+    }
 }
 
 // --- Shared utilities used by hover and signature_help submodules ---

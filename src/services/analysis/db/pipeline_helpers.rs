@@ -136,10 +136,6 @@ impl super::AnalysisDb {
         &mut self,
         file_id: FileId,
     ) -> QueryResult<Option<LookupState>> {
-        if !self.sources.supports_isolated_file_frontend(file_id) {
-            return Ok(None);
-        }
-
         let snapshot = self.snapshot();
         let Some(source) = snapshot.text(file_id) else {
             return Ok(None);

@@ -15,7 +15,9 @@ pub(crate) struct CallSite {
     pub node_id: NodeId,
     pub callee_node_id: NodeId,
     pub span: Span,
+    pub arg_node_ids: Vec<NodeId>,
     pub arg_spans: Vec<Span>,
+    pub method_name: Option<String>,
 }
 
 pub(crate) fn node_at_span(module: &Module, query_span: Span) -> Option<NodeId> {
@@ -62,6 +64,15 @@ pub(crate) fn call_site_at_span(module: &Module, query_span: Span) -> Option<Cal
         }
     }
     best
+}
+
+pub(crate) fn call_site_by_node_id(module: &Module, node_id: NodeId) -> Option<CallSite> {
+    let mut collector = CallSiteCollector::default();
+    collector.visit_module(module);
+    collector
+        .calls
+        .into_iter()
+        .find(|call| call.node_id == node_id)
 }
 
 pub(crate) fn active_param_index(arg_spans: &[Span], pos: Position) -> usize {
@@ -117,7 +128,12 @@ impl Visitor for CallSiteCollector {
                     node_id: expr.id,
                     callee_node_id,
                     span: expr.span,
+                    arg_node_ids: args.iter().map(|arg| arg.expr.id).collect(),
                     arg_spans: args.iter().map(|arg| arg.span).collect(),
+                    method_name: match &expr.kind {
+                        ExprKind::MethodCall { method_name, .. } => Some(method_name.clone()),
+                        _ => None,
+                    },
                 });
             }
             _ => {}

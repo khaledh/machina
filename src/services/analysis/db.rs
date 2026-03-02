@@ -18,6 +18,9 @@ use std::path::{Path, PathBuf};
 use crate::core::capsule::ModuleId;
 use crate::core::tree::NodeId;
 use crate::services::analysis::diagnostics::Diagnostic;
+use crate::services::analysis::diagnostics::{
+    ANALYSIS_FILE_ID_KEY, ANALYSIS_FILE_PATH_KEY, DiagnosticValue,
+};
 use crate::services::analysis::module_graph::ModuleGraph;
 use crate::services::analysis::pipeline::{
     collect_sorted_diagnostics, run_module_pipeline_with_query_input,
@@ -156,6 +159,7 @@ impl AnalysisDb {
         &mut self,
         file_id: FileId,
     ) -> QueryResult<Vec<Diagnostic>> {
+        let snapshot = self.snapshot();
         let program_diagnostics = self.program_pipeline_for_file(file_id)?.diagnostics;
         if program_diagnostics.is_empty() {
             return Ok(program_diagnostics);
@@ -176,6 +180,7 @@ impl AnalysisDb {
                     crate::services::analysis::diagnostics::DiagnosticPhase::Semcheck
                 )
             })
+            && diagnostics_are_local_to_file(&snapshot, file_id, &program_diagnostics)
         {
             return Ok(Vec::new());
         }
@@ -219,6 +224,29 @@ impl AnalysisDb {
         let impacted = self.module_graph.invalidation_closure(changed);
         self.runtime.invalidate_modules(&impacted);
     }
+}
+
+fn diagnostics_are_local_to_file(
+    snapshot: &AnalysisSnapshot,
+    file_id: FileId,
+    diagnostics: &[Diagnostic],
+) -> bool {
+    let current_path = snapshot
+        .path(file_id)
+        .map(|path| path.to_string_lossy().to_string());
+    diagnostics.iter().all(|diag| {
+        if let (Some(current_path), Some(DiagnosticValue::String(diag_path))) = (
+            current_path.as_ref(),
+            diag.metadata.get(ANALYSIS_FILE_PATH_KEY),
+        ) {
+            return diag_path == current_path;
+        }
+        if let Some(DiagnosticValue::Number(diag_file_id)) = diag.metadata.get(ANALYSIS_FILE_ID_KEY)
+        {
+            return *diag_file_id == file_id.0 as i64;
+        }
+        false
+    })
 }
 
 #[cfg(test)]
