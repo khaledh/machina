@@ -1,8 +1,3 @@
-requires {
-    std::io::println
-    std::io as io
-}
-
 // Custom types (type aliases, enums, and structs)
 
 // Type Alias

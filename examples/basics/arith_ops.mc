@@ -1,9 +1,3 @@
-requires {
-    std::io::println
-    std::io::print
-    std::io as io
-}
-
 // Arithmetic operators
 
 fn main() {

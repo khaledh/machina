@@ -1,6 +1,4 @@
-requires {
-    std::io::println
-}
+// `type_of` intrinsic
 
 type Point = {
     x: u64,

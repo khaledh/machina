@@ -1,7 +1,4 @@
-requires {
-    std::io::println
-    std::io as io
-}
+// Error unions and `?` propagation
 
 type IoError = {
     code: u64,

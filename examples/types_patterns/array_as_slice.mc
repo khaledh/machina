@@ -1,7 +1,4 @@
-requires {
-    std::io::println
-    std::io as io
-}
+// Pass an array as a slice
 
 fn sum(xs: u64[]) -> u64 {
     var acc = 0;

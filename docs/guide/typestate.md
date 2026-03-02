@@ -127,10 +127,6 @@ Tier 1 managed entrypoint model:
 - let the compiler-managed runtime auto-drive dispatch after `main` returns.
 
 ```mc
-requires {
-    std::io::println
-}
-
 type OpenPressed = { id: u64 }
 type OpenCmd = {}
 type Opened = {}

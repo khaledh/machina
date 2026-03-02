@@ -1,7 +1,4 @@
-requires {
-    std::io::println
-    std::io as io
-}
+// Move semantics
 
 fn main() {
     let a = [1, 2, 3];

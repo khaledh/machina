@@ -1,9 +1,6 @@
-requires {
-    std::io::println
-}
-
-// Canonical typestate example: builder ordering enforced by state.
+// Typestate example: builder ordering enforced by state.
 // You cannot send before transitioning to `Ready`.
+
 typestate RequestBuilder {
     fields {
         url: string,

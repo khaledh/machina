@@ -1,6 +1,4 @@
-requires {
-    std::io::println
-}
+// Handler explicitly matches error variants and recovers differently per kind.
 
 type IoError = {
     code: u64,

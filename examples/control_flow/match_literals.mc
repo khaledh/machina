@@ -1,7 +1,4 @@
-requires {
-    std::io::println
-    std::io as io
-}
+// Match literals
 
 type Flag = On | Off
 

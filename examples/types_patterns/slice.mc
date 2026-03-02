@@ -1,9 +1,5 @@
-requires {
-    std::io::println
-    std::io as io
-}
-
 // Slice expressions with optional bounds
+
 fn consume_slice(_s: u64[]) -> u64 {
     0
 }

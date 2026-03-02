@@ -1,8 +1,3 @@
-requires {
-    std::io::println
-    std::io as io
-}
-
 // If/else blocks with optional else and else-if chains
 
 fn classify(n: u64) -> string {

@@ -1,9 +1,5 @@
-requires {
-    std::io::println
-    std::io as io
-}
+// function overload resolution
 
-// Demonstrate function overload resolution.
 type Small = u64: bounds(0, 10);
 
 fn id(x: u64) -> u64 {

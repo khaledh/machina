@@ -1,3 +1,5 @@
+// Imported by config module
+
 @public
 trait Runnable {
     fn run(self) -> u64;

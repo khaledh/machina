@@ -1,9 +1,6 @@
-requires {
-    std::io::println
-}
-
 // Canonical typestate example: method-driven state transitions with
 // shared fields (`retries`) and state-local fields (`fd`).
+
 typestate Connection {
     fields {
         retries: u64,

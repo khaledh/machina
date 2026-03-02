@@ -1,8 +1,4 @@
-requires {
-    std::io::println
-}
-
-// Protocol-driven send example with explicit role binding and state transition.
+// Protocol-driven send example with explicit role binding and state transition
 
 type Start = {}
 type AuthReq = {}

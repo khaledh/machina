@@ -1,7 +1,4 @@
-requires {
-    std::io::println
-    std::io as io
-}
+// Type inference in generic calls
 
 type Option<T>
   = Some(T)

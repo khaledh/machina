@@ -1,6 +1,4 @@
-requires {
-    std::io::println
-}
+// Sugar forms over recovery handlers.
 
 type IoError = {
     code: u64,

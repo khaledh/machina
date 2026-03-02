@@ -1,7 +1,4 @@
-requires {
-    std::io::println
-    std::io as io
-}
+// Capture modes for closures
 
 type Point = { x: u64, y: u64 }
 type AddFn = fn(u64) -> u64;

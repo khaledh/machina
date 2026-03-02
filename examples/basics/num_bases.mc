@@ -1,8 +1,3 @@
-requires {
-    std::io::println
-    std::io as io
-}
-
 // Numeric literal bases and digit grouping
 
 fn main() {

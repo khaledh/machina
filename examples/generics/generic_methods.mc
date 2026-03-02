@@ -1,9 +1,5 @@
-requires {
-    std::io::println
-    std::io as io
-}
+// Generic methods on non-generic types.
 
-// Demonstrate generic methods on non-generic types.
 type Boxed = {
     value: u64
 }

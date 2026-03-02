@@ -1,7 +1,4 @@
-requires {
-    std::io::println
-    std::io as io
-}
+// Heap allocation and moves
 
 type Point = { x: u64, y: u64 }
 type Msg = Ping(u64) | Pong(u64)

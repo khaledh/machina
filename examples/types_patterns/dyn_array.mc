@@ -1,6 +1,4 @@
-requires {
-    std::io::println
-}
+// Dynamic array
 
 fn sum(xs: u64[]) -> u64 {
     var i = 0;

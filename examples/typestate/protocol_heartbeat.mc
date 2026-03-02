@@ -1,7 +1,3 @@
-requires {
-    std::io::println
-}
-
 // Protocol-driven one-way messaging.
 // Monitor forwards Start to Worker.
 

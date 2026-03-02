@@ -1,12 +1,9 @@
-requires {
-    std::io::println
-}
-
-// Canonical machine + transition example:
+// Machine + transition example:
 // - Controller receives a user event.
 // - Controller requests actuator work.
 // - Controller transitions Closed -> Waiting -> Open.
 // - Open is final.
+
 type OpenPressed = { id: u64 }
 type OpenCmd = {}
 type Opened = {}

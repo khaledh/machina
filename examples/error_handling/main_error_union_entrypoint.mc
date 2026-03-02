@@ -1,3 +1,5 @@
+// `main` entrypoint returning an error union.
+
 type AppError
   = NotFound
   | InvalidCode(u64)

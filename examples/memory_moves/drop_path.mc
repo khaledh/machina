@@ -1,3 +1,5 @@
+// Path-sensitive drop checks
+
 type Point = { x: u64, y: u64 }
 
 fn consume(sink p: Point^) {

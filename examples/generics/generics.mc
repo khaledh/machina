@@ -1,8 +1,4 @@
-requires {
-    std::io::println
-}
-
-// Generic functions.
+// Generic functions
 
 fn id<T>(x: T) -> T {
     x

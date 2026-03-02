@@ -1,7 +1,4 @@
-requires {
-    std::io::println
-    std::io as io
-}
+// Partial initialization and drop checks
 
 type Point = { x: u64, y: u64 }
 type Boxed = { p: Point^ }

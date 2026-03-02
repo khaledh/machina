@@ -1,7 +1,4 @@
-requires {
-    std::io::println
-    std::io as io
-}
+// out parameters
 
 type Pair = { x: u64, y: u64 }
 type Point = { x: u64, y: u64 }

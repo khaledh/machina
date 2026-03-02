@@ -1,9 +1,4 @@
-requires {
-    std::io::println
-    std::io as io
-}
-
-// Generic type definitions + literals.
+// Generic types + literals
 
 type Pair<T> = {
   left: T,

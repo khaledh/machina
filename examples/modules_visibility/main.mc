@@ -1,6 +1,6 @@
+// Modules visibility example
+
 requires {
-    std::io::println
-    std::io as io
     examples::modules_visibility::config as cfg
     examples::modules_visibility::runtime as rt
 }

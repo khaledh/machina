@@ -1,7 +1,4 @@
-requires {
-    std::io::println
-    std::io as io
-}
+// Partial initialization via out parameters
 
 type Pair = { a: u64[2], b: u64[2] }
 

@@ -1,8 +1,3 @@
-requires {
-    std::io::println
-    std::io as io
-}
-
 // Break, continue, and return
 
 fn last_even_below(limit: u64) -> u64 {

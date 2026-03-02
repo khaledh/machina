@@ -1,8 +1,5 @@
-requires {
-    std::io::println
-}
+// Machine example: spawn + send + handler execution
 
-// Canonical machine example: spawn + send + handler execution.
 type Tick = { n: u64 }
 
 typestate Timer {

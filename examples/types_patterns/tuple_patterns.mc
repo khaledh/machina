@@ -1,7 +1,4 @@
-requires {
-    std::io::println
-    std::io as io
-}
+// Tuple match patterns
 
 type Flag = On | Off
 type Wrap = Wrap(u64) | Empty

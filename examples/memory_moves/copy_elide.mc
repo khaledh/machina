@@ -1,4 +1,4 @@
-// Demonstrate copy-elision and the cases that prevent it.
+// Copy-elision and cases that prevent it
 
 fn use_arr(arr: u64[3]) -> u64 {
     arr[0]

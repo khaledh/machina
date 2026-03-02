@@ -2,14 +2,6 @@
 
 Functions are the primary way to organize code in Machina.
 
-> Note: snippets that call `println` assume:
->
-> ```mc
-> requires {
->     std::io::println
-> }
-> ```
-
 ## Defining Functions
 
 A function has a name, parameters, an optional return type, and a body:

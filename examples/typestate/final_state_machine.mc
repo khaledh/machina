@@ -1,9 +1,5 @@
-requires {
-    std::io::println
-}
+// Final state example
 
-// Canonical final-state example.
-// This version uses the friendly managed-machine surface.
 type Start = {}
 
 typestate OneShot {

@@ -2,7 +2,6 @@ requires {
     std::io::IoError
     std::io::open_read
     std::io::open_write
-    std::io::print
 }
 
 fn main() -> () | IoError {

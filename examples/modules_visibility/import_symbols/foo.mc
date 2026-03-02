@@ -1,3 +1,5 @@
+// Imported by main module
+
 @public
 type Foo = {
     value: u64,

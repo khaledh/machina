@@ -1,7 +1,4 @@
-requires {
-    std::io::println
-    std::io as io
-}
+// Traits with methods and properties
 
 trait Runnable {
     fn run(self) -> u64;

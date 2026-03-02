@@ -1,7 +1,4 @@
-requires {
-    std::io::println
-    std::io as io
-}
+// inout heap argument
 
 type Point = { x: u64, y: u64 }
 type Box = { p1: Point^, p2: Point^ }

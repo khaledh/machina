@@ -1,9 +1,6 @@
-requires {
-    std::io::println
-}
-
-// Canonical request/reply example:
+// Request/reply example:
 // app -> Client(StartAuth) -> request(AuthServer) -> reply(AuthReply) -> Client handler.
+
 type StartAuth = { token: u64 }
 type AuthCheck = { token: u64 }
 type AuthReply = { accepted: u64 }

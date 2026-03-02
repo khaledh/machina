@@ -1,7 +1,4 @@
-requires {
-    std::io::println
-    std::io as io
-}
+// Type methods
 
 type Counter = { total: u64, last: u64 }
 type Event = Add(u64) | Reset

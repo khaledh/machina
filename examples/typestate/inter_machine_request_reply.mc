@@ -1,9 +1,7 @@
-requires {
-    std::io::println
-}
+// Concurrent request example:
+//   - same request/response types
+//   - disambiguated by request-site labels
 
-// Canonical concurrent request example:
-// same request/response types, disambiguated by request-site labels.
 type KickApprove = {}
 type KickDeny = {}
 type AuthCheck = {}

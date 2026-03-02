@@ -5,16 +5,12 @@ This tour gives a quick pass over Machina's core syntax and features.
 ## Hello World
 
 ```mc
-requires {
-    std::io::println
-}
-
 fn main() {
     println("Hello, Machina!");
 }
 ```
 
-Programs import symbols with a top-level `requires` block.
+`print` and `println` are available by default.
 
 ## Variables and Types
 
@@ -150,7 +146,6 @@ let v = m.get(1);
 
 ```mc
 requires {
-    std::io::println
     app::config::Config
     app::config::load as load_config
 }

@@ -1,9 +1,4 @@
-requires {
-    std::io::println
-    std::io as io
-}
-
-// Range type
+// Range type and refinement checks
 
 type MidRange = u64: bounds(50, 100);
 type Delta = i8: bounds(-10, 10);

@@ -1,3 +1,5 @@
+// Import symbols example
+
 requires {
     examples::modules_visibility::import_symbols::foo::Foo
     examples::modules_visibility::import_symbols::foo::make_foo

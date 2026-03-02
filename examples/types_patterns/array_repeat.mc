@@ -1,7 +1,4 @@
-requires {
-    std::io::println
-    std::io as io
-}
+// Array repeat initializer
 
 fn main() {
     // Repeat initializer at threshold (inlined stores).

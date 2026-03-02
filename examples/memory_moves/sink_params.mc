@@ -1,7 +1,4 @@
-requires {
-    std::io::println
-    std::io as io
-}
+// sink parameters
 
 type Point = { x: u64, y: u64 }
 

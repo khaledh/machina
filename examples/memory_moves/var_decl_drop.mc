@@ -1,3 +1,5 @@
+// Path-sensitive drop (initialized vs. uninitialized)
+
 fn maybe_alloc(flag: bool) {
     var p: u64^;
     if flag {

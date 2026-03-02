@@ -1,6 +1,4 @@
-requires {
-    std::io::println
-}
+// Built-in sets
 
 fn main() {
     var s = {1, 2, 2, 3};

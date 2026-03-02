@@ -1,8 +1,3 @@
-requires {
-    std::io::println
-    std::io as io
-}
-
 // For-loop over a range
 
 fn main() {

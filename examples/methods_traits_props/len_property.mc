@@ -1,7 +1,4 @@
-requires {
-    std::io::println
-    std::io as io
-}
+// Length property on arrays, slices, and strings
 
 fn main() {
     let arr = [1, 2, 3, 4];

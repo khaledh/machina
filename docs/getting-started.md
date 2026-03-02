@@ -23,16 +23,13 @@ The compiler binary is `mcc`, located in `target/release/`.
 Create a file called `hello.mc`:
 
 ```mc
-requires {
-    std::io::println
-}
-
 fn main() {
     println("Hello, Machina!");
 }
 ```
 
-`requires` imports modules or symbols into the current file.
+`print` and `println` are available by default. Other symbols are imported
+with a `requires` block.
 
 ## Compile and Run
 

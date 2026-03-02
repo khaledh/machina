@@ -1,8 +1,3 @@
-requires {
-    std::io::println
-    std::io as io
-}
-
 // Logical operators (&&, ||, !)
 
 fn side() -> bool {

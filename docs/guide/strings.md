@@ -2,15 +2,6 @@
 
 Machina provides string literals and formatted strings (f-strings).
 
-> Note: snippets that call `print`/`println` assume:
->
-> ```mc
-> requires {
->     std::io::print
->     std::io::println
-> }
-> ```
-
 ## String Literals
 
 String literals are enclosed in double quotes:

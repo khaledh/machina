@@ -1,6 +1,4 @@
-requires {
-    std::io::println
-}
+// Built-in map (hash table)
 
 fn main() {
     var m = map<u64, u64>{1: 10, 2: 20};

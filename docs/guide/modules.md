@@ -7,7 +7,6 @@ Machina source files are modules. Imports are declared with a top-level
 
 ```mc
 requires {
-    std::io::println
     app::config::Config
     app::config::load
 }

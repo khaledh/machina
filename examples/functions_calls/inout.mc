@@ -1,7 +1,4 @@
-requires {
-    std::io::println
-    std::io as io
-}
+// inout parameter
 
 fn update(inout arr: u64[3]) {
     arr[0] = 10;
