@@ -145,8 +145,6 @@ fn read_all_text_from_fd(out dst: string, fd: u64) -> () | IoError {
         return IoError {
             code: err,
         };
-    } else {
-        ()
     }
 }
 
@@ -156,7 +154,6 @@ fn write_all_binary_to_fd(fd: u64, data: u8[]) -> () | IoError {
         let n: u64 = file_write(fd, data[off..])?;
         off += n;
     }
-    ()
 }
 
 fn write_all_text_to_fd(fd: u64, text: string) -> () | IoError {
@@ -165,7 +162,6 @@ fn write_all_text_to_fd(fd: u64, text: string) -> () | IoError {
         let n: u64 = file_write(fd, text[off..])?;
         off += n;
     }
-    ()
 }
 
 @public
