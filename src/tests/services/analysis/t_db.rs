@@ -1,6 +1,6 @@
 use std::collections::{HashMap, HashSet};
 use std::fs;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicUsize, Ordering};
 
 use crate::core::capsule::ModuleId;
@@ -105,7 +105,7 @@ fn analysis_db_module_invalidation_keeps_unaffected_cache() {
 #[test]
 fn diagnostics_follow_overlay_edits() {
     let mut db = AnalysisDb::new();
-    let path = PathBuf::from("examples/tmp.mc");
+    let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("examples/tmp.mc");
     let file_id = db.upsert_disk_text(path.clone(), "fn main() -> u64 { 0 }");
 
     let clean = db
@@ -139,7 +139,10 @@ fn diagnostics_respect_cancellation() {
     token.cancel();
 
     let mut db = AnalysisDb::with_cancellation_token(token);
-    let file_id = db.upsert_disk_text(PathBuf::from("examples/cancel.mc"), "fn main() {}");
+    let file_id = db.upsert_disk_text(
+        Path::new(env!("CARGO_MANIFEST_DIR")).join("examples/cancel.mc"),
+        "fn main() {}",
+    );
 
     let result = db.diagnostics_for_file(file_id);
     assert_eq!(
@@ -152,7 +155,10 @@ fn diagnostics_respect_cancellation() {
 #[test]
 fn poisoned_nodes_are_exposed_for_broken_files() {
     let mut db = AnalysisDb::new();
-    let file_id = db.upsert_disk_text(PathBuf::from("examples/poisoned.mc"), "fn main( {");
+    let file_id = db.upsert_disk_text(
+        Path::new(env!("CARGO_MANIFEST_DIR")).join("examples/poisoned.mc"),
+        "fn main( {",
+    );
 
     let poisoned = db
         .poisoned_nodes_for_file(file_id)
@@ -167,7 +173,10 @@ fn def_at_returns_definition_for_use_site() {
 fn id(x: u64) -> u64 { x }
 fn main() -> u64 { id(1) }
 "#;
-    let file_id = db.upsert_disk_text(PathBuf::from("examples/lookup.mc"), source);
+    let file_id = db.upsert_disk_text(
+        Path::new(env!("CARGO_MANIFEST_DIR")).join("examples/lookup.mc"),
+        source,
+    );
 
     let mut use_span = span_for_substring(source, "id(1)");
     use_span.end = position_at(source, use_span.start.offset + 2);
@@ -185,7 +194,10 @@ fn def_at_returns_definition_for_point_query_inside_identifier() {
 fn id(x: u64) -> u64 { x }
 fn main() -> u64 { id(1) }
 "#;
-    let file_id = db.upsert_disk_text(PathBuf::from("examples/lookup_point.mc"), source);
+    let file_id = db.upsert_disk_text(
+        Path::new(env!("CARGO_MANIFEST_DIR")).join("examples/lookup_point.mc"),
+        source,
+    );
 
     let offset = source.rfind("id(1)").expect("expected call site") + 1;
     let point = Span {
@@ -209,7 +221,10 @@ fn main() -> u64 {
     id(1)
 }
 "#;
-    let file_id = db.upsert_disk_text(PathBuf::from("examples/lookup_partial.mc"), source);
+    let file_id = db.upsert_disk_text(
+        Path::new(env!("CARGO_MANIFEST_DIR")).join("examples/lookup_partial.mc"),
+        source,
+    );
 
     let mut use_span = span_for_substring(source, "id(1)");
     use_span.end = position_at(source, use_span.start.offset + 2);
@@ -230,7 +245,10 @@ fn main() -> u64 {
     id(1)
 }
 "#;
-    let file_id = db.upsert_disk_text(PathBuf::from("examples/lookup_unknown_target.mc"), source);
+    let file_id = db.upsert_disk_text(
+        Path::new(env!("CARGO_MANIFEST_DIR")).join("examples/lookup_unknown_target.mc"),
+        source,
+    );
 
     let query_span = span_for_substring(source, "missing");
     let def_id = db
@@ -247,7 +265,10 @@ fn def_location_points_to_declaration_site() {
 fn id(x: u64) -> u64 { x }
 fn main() -> u64 { id(1) }
 "#;
-    let file_id = db.upsert_disk_text(PathBuf::from("examples/lookup_def_location.mc"), source);
+    let file_id = db.upsert_disk_text(
+        Path::new(env!("CARGO_MANIFEST_DIR")).join("examples/lookup_def_location.mc"),
+        source,
+    );
 
     let mut use_span = span_for_substring(source, "id(1)");
     use_span.end = position_at(source, use_span.start.offset + 2);
@@ -269,7 +290,7 @@ fn id(x: u64) -> u64 { x }
 fn main() -> u64 { id(1) }
 "#;
     let file_id = db.upsert_disk_text(
-        PathBuf::from("examples/lookup_def_location_point.mc"),
+        Path::new(env!("CARGO_MANIFEST_DIR")).join("examples/lookup_def_location_point.mc"),
         source,
     );
 
@@ -471,7 +492,10 @@ fn type_at_returns_expression_type() {
 fn id(x: u64) -> u64 { x }
 fn main() -> u64 { id(1) }
 "#;
-    let file_id = db.upsert_disk_text(PathBuf::from("examples/lookup_type.mc"), source);
+    let file_id = db.upsert_disk_text(
+        Path::new(env!("CARGO_MANIFEST_DIR")).join("examples/lookup_type.mc"),
+        source,
+    );
 
     let call_span = span_for_substring(source, "id(1)");
     let ty = db
@@ -491,7 +515,10 @@ fn main() -> u64 {
     id(1)
 }
 "#;
-    let file_id = db.upsert_disk_text(PathBuf::from("examples/type_at_partial.mc"), source);
+    let file_id = db.upsert_disk_text(
+        Path::new(env!("CARGO_MANIFEST_DIR")).join("examples/type_at_partial.mc"),
+        source,
+    );
 
     let call_span = span_for_substring(source, "id(1)");
     let ty = db
@@ -511,7 +538,10 @@ fn main() -> u64 {
     id(1)
 }
 "#;
-    let file_id = db.upsert_disk_text(PathBuf::from("examples/type_at_unknown_target.mc"), source);
+    let file_id = db.upsert_disk_text(
+        Path::new(env!("CARGO_MANIFEST_DIR")).join("examples/type_at_unknown_target.mc"),
+        source,
+    );
 
     let query_span = span_for_substring(source, "missing");
     let ty = db
@@ -528,7 +558,10 @@ fn hover_includes_symbol_and_type() {
 fn id(x: u64) -> u64 { x }
 fn main() -> u64 { id(1) }
 "#;
-    let file_id = db.upsert_disk_text(PathBuf::from("examples/lookup_hover.mc"), source);
+    let file_id = db.upsert_disk_text(
+        Path::new(env!("CARGO_MANIFEST_DIR")).join("examples/lookup_hover.mc"),
+        source,
+    );
 
     let mut call_span = span_for_substring(source, "id(1)");
     call_span.end = position_at(source, call_span.start.offset + 2);
@@ -555,7 +588,10 @@ fn main() -> u64 {
     n
 }
 "#;
-    let file_id = db.upsert_disk_text(PathBuf::from("examples/lookup_hover_generic.mc"), source);
+    let file_id = db.upsert_disk_text(
+        Path::new(env!("CARGO_MANIFEST_DIR")).join("examples/lookup_hover_generic.mc"),
+        source,
+    );
     let mut call_span = span_for_substring(source, "id(1)");
     call_span.end = position_at(source, call_span.start.offset + 2);
     let hover = db
@@ -577,7 +613,10 @@ fn main() -> u64 {
     id(1)
 }
 "#;
-    let file_id = db.upsert_disk_text(PathBuf::from("examples/hover_unknown_target.mc"), source);
+    let file_id = db.upsert_disk_text(
+        Path::new(env!("CARGO_MANIFEST_DIR")).join("examples/hover_unknown_target.mc"),
+        source,
+    );
 
     let query_span = span_for_substring(source, "missing");
     let hover = db
@@ -601,7 +640,10 @@ type Packet = {
 fn id(x: u64) -> u64 { x }
 fn main() -> u64 { id(1) }
 "#;
-    let file_id = db.upsert_disk_text(PathBuf::from("examples/completions.mc"), source);
+    let file_id = db.upsert_disk_text(
+        Path::new(env!("CARGO_MANIFEST_DIR")).join("examples/completions.mc"),
+        source,
+    );
     let query_span = cursor_after_substring(source, "{ id(1)");
     let completions = db
         .completions_at_file(file_id, query_span)
@@ -632,7 +674,7 @@ fn main() -> u64 {
 }
 "#;
     let file_id = db.upsert_disk_text(
-        PathBuf::from("examples/completions_partial_resolve.mc"),
+        Path::new(env!("CARGO_MANIFEST_DIR")).join("examples/completions_partial_resolve.mc"),
         source,
     );
     let query_span = cursor_after_substring(source, "{\n    ");
@@ -663,7 +705,7 @@ fn main() -> u64 {
 }
 "#;
     let file_id = db.upsert_disk_text(
-        PathBuf::from("examples/completions_scope_shadow.mc"),
+        Path::new(env!("CARGO_MANIFEST_DIR")).join("examples/completions_scope_shadow.mc"),
         source,
     );
     let query_span = span_for_last_substring(source, "inner");
@@ -692,7 +734,10 @@ fn main() -> u64 {
     hi
 }
 "#;
-    let file_id = db.upsert_disk_text(PathBuf::from("examples/completions_scope_leak.mc"), source);
+    let file_id = db.upsert_disk_text(
+        Path::new(env!("CARGO_MANIFEST_DIR")).join("examples/completions_scope_leak.mc"),
+        source,
+    );
     let query_span = span_for_last_substring(source, "hi");
     let completions = db
         .completions_at_file(file_id, query_span)
@@ -729,7 +774,10 @@ fn main() -> u64 {
     0
 }
 "#;
-    let file_id = db.upsert_disk_text(PathBuf::from("examples/completions_members.mc"), source);
+    let file_id = db.upsert_disk_text(
+        Path::new(env!("CARGO_MANIFEST_DIR")).join("examples/completions_members.mc"),
+        source,
+    );
     let query_span = span_for_substring(source, "p.");
     let completions = db
         .completions_at_file(file_id, query_span)
@@ -780,7 +828,8 @@ fn main() -> u64 {
 }
 "#;
     let file_id = db.upsert_disk_text(
-        PathBuf::from("examples/completions_members_partial_resolve.mc"),
+        Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("examples/completions_members_partial_resolve.mc"),
         source,
     );
     let query_span = span_for_substring(source, "p.");
@@ -829,7 +878,7 @@ fn main() -> u64 {
 }
 "#;
     let file_id = db.upsert_disk_text(
-        PathBuf::from("examples/completions_members_after_dot.mc"),
+        Path::new(env!("CARGO_MANIFEST_DIR")).join("examples/completions_members_after_dot.mc"),
         source,
     );
     let query_span = span_for_substring(source, "p.");
@@ -877,7 +926,8 @@ fn main() {
 }
 "#;
     let file_id = db.upsert_disk_text(
-        PathBuf::from("examples/completions_members_standalone_dot.mc"),
+        Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("examples/completions_members_standalone_dot.mc"),
         source,
     );
     let query_span = span_for_substring(source, "p.");
@@ -909,7 +959,10 @@ fn main() -> u64 {
     al
 }
 "#;
-    let file_id = db.upsert_disk_text(PathBuf::from("examples/completions_prefix.mc"), source);
+    let file_id = db.upsert_disk_text(
+        Path::new(env!("CARGO_MANIFEST_DIR")).join("examples/completions_prefix.mc"),
+        source,
+    );
     let query_span = span_for_last_substring(source, "al");
     let completions = db
         .completions_at_file(file_id, query_span)
@@ -943,7 +996,10 @@ fn main() -> u64 {
     id(1)
 }
 "#;
-    let file_id = db.upsert_disk_text(PathBuf::from("examples/mixed_resolve_regions.mc"), source);
+    let file_id = db.upsert_disk_text(
+        Path::new(env!("CARGO_MANIFEST_DIR")).join("examples/mixed_resolve_regions.mc"),
+        source,
+    );
 
     let mut id_use_span = span_for_substring(source, "id(1)");
     id_use_span.end = position_at(source, id_use_span.start.offset + 2);
@@ -990,7 +1046,10 @@ fn main() -> u64 {
     id(1)
 }
 "#;
-    let file_id = db.upsert_disk_text(PathBuf::from("examples/mixed_type_regions.mc"), source);
+    let file_id = db.upsert_disk_text(
+        Path::new(env!("CARGO_MANIFEST_DIR")).join("examples/mixed_type_regions.mc"),
+        source,
+    );
 
     let mut id_use_span = span_for_substring(source, "id(1)");
     id_use_span.end = position_at(source, id_use_span.start.offset + 2);
@@ -1037,7 +1096,10 @@ fn signature_help_returns_call_signature_and_active_parameter() {
 fn pair(a: u64, b: u64) -> u64 { a + b }
 fn main() -> u64 { pair(1, 2) }
 "#;
-    let file_id = db.upsert_disk_text(PathBuf::from("examples/signature_help.mc"), source);
+    let file_id = db.upsert_disk_text(
+        Path::new(env!("CARGO_MANIFEST_DIR")).join("examples/signature_help.mc"),
+        source,
+    );
 
     let query_span = span_for_substring(source, "2");
     let sig = db
@@ -1066,7 +1128,7 @@ fn main() -> u64 {
 }
 "#;
     let file_id = db.upsert_disk_text(
-        PathBuf::from("examples/signature_help_incomplete.mc"),
+        Path::new(env!("CARGO_MANIFEST_DIR")).join("examples/signature_help_incomplete.mc"),
         source,
     );
     let query_span = cursor_after_substring(source, "    add(");
@@ -1097,7 +1159,8 @@ fn main() -> u64 {
 }
 "#;
     let file_id = db.upsert_disk_text(
-        PathBuf::from("examples/signature_help_empty_call_incomplete_stmt.mc"),
+        Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("examples/signature_help_empty_call_incomplete_stmt.mc"),
         source,
     );
     let query_span = cursor_after_substring(source, "    add(");
@@ -1126,7 +1189,7 @@ fn main() -> u64 {
 }
 "#;
     let file_id = db.upsert_disk_text(
-        PathBuf::from("examples/signature_help_after_first_arg.mc"),
+        Path::new(env!("CARGO_MANIFEST_DIR")).join("examples/signature_help_after_first_arg.mc"),
         source,
     );
     let query_span = cursor_after_substring(source, "    pair(1");
@@ -1155,7 +1218,8 @@ fn main() -> u64 {
 }
 "#;
     let file_id = db.upsert_disk_text(
-        PathBuf::from("examples/signature_help_after_comma_before_second_arg.mc"),
+        Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("examples/signature_help_after_comma_before_second_arg.mc"),
         source,
     );
     let query_span = cursor_after_substring(source, "    foo(42,");
@@ -1189,7 +1253,8 @@ fn main() {
 }
 "#;
     let file_id = db.upsert_disk_text(
-        PathBuf::from("examples/signature_help_empty_let_call_incomplete_stmt.mc"),
+        Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("examples/signature_help_empty_let_call_incomplete_stmt.mc"),
         source,
     );
     let query_span = cursor_after_substring(source, "    let q = pair(");
@@ -1226,7 +1291,8 @@ fn main() {
 }
 "#;
     let file_id = db.upsert_disk_text(
-        PathBuf::from("examples/signature_help_program_after_first_generic_arg.mc"),
+        Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("examples/signature_help_program_after_first_generic_arg.mc"),
         source,
     );
     let query_span = cursor_after_substring(source, "    let q = pair(1");
@@ -1252,7 +1318,10 @@ fn references_returns_definition_and_use_sites() {
 fn id(x: u64) -> u64 { x }
 fn main() -> u64 { id(1) + id(2) }
 "#;
-    let file_id = db.upsert_disk_text(PathBuf::from("examples/references.mc"), source);
+    let file_id = db.upsert_disk_text(
+        Path::new(env!("CARGO_MANIFEST_DIR")).join("examples/references.mc"),
+        source,
+    );
 
     let mut def_span = span_for_substring(source, "id(x");
     def_span.end = position_at(source, def_span.start.offset + 2);
@@ -1347,7 +1416,10 @@ fn foo() -> u64 { 1 }
 fn bar() -> u64 { foo() }
 fn baz() -> u64 { 2 }
 "#;
-    let file_id = db.upsert_disk_text(PathBuf::from("examples/rename_conflict.mc"), source);
+    let file_id = db.upsert_disk_text(
+        Path::new(env!("CARGO_MANIFEST_DIR")).join("examples/rename_conflict.mc"),
+        source,
+    );
 
     let mut foo_span = span_for_substring(source, "foo()");
     foo_span.end = position_at(source, foo_span.start.offset + 3);
@@ -1377,7 +1449,10 @@ fn main() -> u64 {
     a + b
 }
 "#;
-    let file_id = db.upsert_disk_text(PathBuf::from("examples/rename_ok.mc"), source);
+    let file_id = db.upsert_disk_text(
+        Path::new(env!("CARGO_MANIFEST_DIR")).join("examples/rename_ok.mc"),
+        source,
+    );
 
     let mut foo_span = span_for_substring(source, "foo()");
     foo_span.end = position_at(source, foo_span.start.offset + 3);
@@ -1490,7 +1565,10 @@ type Packet = { id: u64 }
 trait Runnable { fn run(self) -> u64; }
 fn ping() -> u64 { 1 }
 "#;
-    let file_id = db.upsert_disk_text(PathBuf::from("examples/document_symbols.mc"), source);
+    let file_id = db.upsert_disk_text(
+        Path::new(env!("CARGO_MANIFEST_DIR")).join("examples/document_symbols.mc"),
+        source,
+    );
     let symbols = db
         .document_symbols_at_file(file_id)
         .expect("document symbol query should succeed");
@@ -1516,7 +1594,10 @@ fn semantic_tokens_are_stable_for_same_snapshot() {
 fn id(x: u64) -> u64 { x }
 fn main() -> u64 { id(1) + id(2) }
 "#;
-    let file_id = db.upsert_disk_text(PathBuf::from("examples/semantic_tokens.mc"), source);
+    let file_id = db.upsert_disk_text(
+        Path::new(env!("CARGO_MANIFEST_DIR")).join("examples/semantic_tokens.mc"),
+        source,
+    );
 
     let tokens_a = db
         .semantic_tokens_at_file(file_id)
@@ -1545,7 +1626,10 @@ fn use_try() -> u64 | OtherErr {
     x
 }
 "#;
-    let file_id = db.upsert_disk_text(PathBuf::from("examples/code_actions_try.mc"), source);
+    let file_id = db.upsert_disk_text(
+        Path::new(env!("CARGO_MANIFEST_DIR")).join("examples/code_actions_try.mc"),
+        source,
+    );
     let query_span = span_for_substring(source, "may_fail()?");
 
     let actions = db
@@ -1580,7 +1664,7 @@ fn main() -> u64 {
 }
 "#;
     let file_id = db.upsert_disk_text(
-        PathBuf::from("examples/code_actions_match_union.mc"),
+        Path::new(env!("CARGO_MANIFEST_DIR")).join("examples/code_actions_match_union.mc"),
         source,
     );
     let query_span = span_for_substring(source, "match load()");
@@ -1629,7 +1713,7 @@ fn describe_flag(f: Flag) -> u64 {
 }
 "#;
     let file_id = db.upsert_disk_text(
-        PathBuf::from("examples/code_actions_non_exhaustive_match.mc"),
+        Path::new(env!("CARGO_MANIFEST_DIR")).join("examples/code_actions_non_exhaustive_match.mc"),
         source,
     );
     let query_span = span_for_substring(source, "match f");
@@ -1664,7 +1748,7 @@ fn use_try() -> u64 {
 }
 "#;
     let file_id = db.upsert_disk_text(
-        PathBuf::from("examples/code_actions_deterministic.mc"),
+        Path::new(env!("CARGO_MANIFEST_DIR")).join("examples/code_actions_deterministic.mc"),
         source,
     );
     let query_span = span_for_substring(source, "may_fail()?");
@@ -2150,7 +2234,8 @@ fn main() {
 
 #[test]
 fn diagnostics_for_program_file_examples_import_symbols_main_is_clean() {
-    let entry_path = PathBuf::from("examples/modules_visibility/import_symbols/main.mc")
+    let entry_path = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("examples/modules_visibility/import_symbols/main.mc")
         .canonicalize()
         .unwrap();
     let entry_source = fs::read_to_string(&entry_path).expect("failed to read entry source");
@@ -2214,7 +2299,8 @@ fn run() -> u64 { 1 }
 
 #[test]
 fn hover_at_program_file_uses_selected_imported_overload_signature_for_u64_call() {
-    let entry_path = PathBuf::from("examples/basics/arith_ops.mc")
+    let entry_path = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("examples/basics/arith_ops.mc")
         .canonicalize()
         .unwrap();
     let entry_source = fs::read_to_string(&entry_path).expect("failed to read entry source");
@@ -2232,7 +2318,8 @@ fn hover_at_program_file_uses_selected_imported_overload_signature_for_u64_call(
 
 #[test]
 fn hover_at_program_file_uses_selected_imported_overload_signature() {
-    let entry_path = PathBuf::from("examples/quickstart/hello.mc")
+    let entry_path = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("examples/quickstart/hello.mc")
         .canonicalize()
         .unwrap();
     let entry_source = fs::read_to_string(&entry_path).expect("failed to read entry source");
@@ -2255,7 +2342,8 @@ fn hover_at_program_file_uses_selected_imported_overload_signature() {
 
 #[test]
 fn def_target_for_symbol_id_in_program_resolves_imported_overload_target() {
-    let entry_path = PathBuf::from("examples/quickstart/hello.mc")
+    let entry_path = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("examples/quickstart/hello.mc")
         .canonicalize()
         .unwrap();
     let entry_source = fs::read_to_string(&entry_path).expect("failed to read entry source");
@@ -2285,7 +2373,8 @@ fn def_target_for_symbol_id_in_program_resolves_imported_overload_target() {
 
 #[test]
 fn hover_for_symbol_id_in_program_matches_source_definition_render() {
-    let entry_path = PathBuf::from("examples/quickstart/hello.mc")
+    let entry_path = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("examples/quickstart/hello.mc")
         .canonicalize()
         .unwrap();
     let entry_source = fs::read_to_string(&entry_path).expect("failed to read entry source");
@@ -2405,7 +2494,7 @@ typestate Gateway : Auth::Client {
 }
 "#;
     let file_id = db.upsert_disk_text(
-        PathBuf::from("examples/analysis_protocol_role_defloc.mc"),
+        Path::new(env!("CARGO_MANIFEST_DIR")).join("examples/analysis_protocol_role_defloc.mc"),
         source,
     );
 
@@ -2459,7 +2548,7 @@ typestate Gateway : Auth::Client {
 }
 "#;
     let file_id = db.upsert_disk_text(
-        PathBuf::from("examples/analysis_protocol_role_hover.mc"),
+        Path::new(env!("CARGO_MANIFEST_DIR")).join("examples/analysis_protocol_role_hover.mc"),
         source,
     );
     let role_use = span_for_substring(source, "Auth::Client");
@@ -2511,7 +2600,8 @@ typestate Gateway : Auth::Client {
 }
 "#;
     let file_id = db.upsert_disk_text(
-        PathBuf::from("examples/analysis_protocol_field_role_defloc.mc"),
+        Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("examples/analysis_protocol_field_role_defloc.mc"),
         source,
     );
 
@@ -2566,7 +2656,8 @@ typestate Gateway : Auth::Client {
 }
 "#;
     let file_id = db.upsert_disk_text(
-        PathBuf::from("examples/analysis_protocol_field_role_hover.mc"),
+        Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("examples/analysis_protocol_field_role_hover.mc"),
         source,
     );
     let binding_span = span_for_substring(source, "as Server");
@@ -2603,7 +2694,7 @@ typestate Gateway : Auth::Cl {
 }
 "#;
     let file_id = db.upsert_disk_text(
-        PathBuf::from("examples/analysis_protocol_role_completion.mc"),
+        Path::new(env!("CARGO_MANIFEST_DIR")).join("examples/analysis_protocol_role_completion.mc"),
         source,
     );
 
@@ -2993,7 +3084,7 @@ fn main() {
 }
 "#;
     let file_id = db.upsert_disk_text(
-        PathBuf::from("examples/functions_calls/basic_fn.mc"),
+        Path::new(env!("CARGO_MANIFEST_DIR")).join("examples/functions_calls/basic_fn.mc"),
         source,
     );
 
@@ -3028,7 +3119,7 @@ fn main() {
 }
 "#;
     let file_id = db.upsert_disk_text(
-        PathBuf::from("examples/functions_calls/basic_fn_span.mc"),
+        Path::new(env!("CARGO_MANIFEST_DIR")).join("examples/functions_calls/basic_fn_span.mc"),
         source,
     );
 
@@ -3055,7 +3146,10 @@ typestate Connection {
     state Disconnected {}
 }
 "#;
-    let file_id = db.upsert_disk_text(PathBuf::from("examples/analysis_typestate.mc"), source);
+    let file_id = db.upsert_disk_text(
+        Path::new(env!("CARGO_MANIFEST_DIR")).join("examples/analysis_typestate.mc"),
+        source,
+    );
 
     let diagnostics = db
         .diagnostics_for_file(file_id)
@@ -3081,7 +3175,7 @@ typestate Connection {
 }
 "#;
     let file_id = db.upsert_disk_text(
-        PathBuf::from("examples/analysis_typestate_toggle.mc"),
+        Path::new(env!("CARGO_MANIFEST_DIR")).join("examples/analysis_typestate_toggle.mc"),
         source,
     );
 
@@ -3124,7 +3218,7 @@ fn main() -> u64 {
 }
 "#;
     let file_id = db.upsert_disk_text(
-        PathBuf::from("examples/analysis_program_typestate_toggle.mc"),
+        Path::new(env!("CARGO_MANIFEST_DIR")).join("examples/analysis_program_typestate_toggle.mc"),
         source,
     );
 
@@ -3155,7 +3249,7 @@ fn diagnostics_for_program_file_typestate_connection_example_is_clean_when_enabl
     let mut db = AnalysisDb::new();
     db.set_experimental_typestate(true);
 
-    let path = PathBuf::from("examples/typestate/connection.mc");
+    let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("examples/typestate/connection.mc");
     let source = fs::read_to_string(&path).expect("failed to read typestate example");
     let file_id = db.upsert_disk_text(path, source.clone());
 
@@ -3172,7 +3266,7 @@ fn diagnostics_for_program_file_typestate_connection_example_is_clean_when_enabl
 fn diagnostics_for_program_file_std_io_file_read_stdout_example_is_clean() {
     let mut db = AnalysisDb::new();
 
-    let path = PathBuf::from("examples/basics/file_read_stdout.mc");
+    let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("examples/basics/file_read_stdout.mc");
     let source = fs::read_to_string(&path).expect("failed to read std::io example");
     let file_id = db.upsert_disk_text(path, source.clone());
 
@@ -3189,12 +3283,14 @@ fn diagnostics_for_program_file_std_io_file_read_stdout_example_is_clean() {
 fn diagnostics_for_program_file_std_io_examples_ignore_unrelated_open_overlays() {
     let mut db = AnalysisDb::new();
 
-    let read_path = PathBuf::from("examples/basics/file_read_stdout.mc");
+    let read_path =
+        Path::new(env!("CARGO_MANIFEST_DIR")).join("examples/basics/file_read_stdout.mc");
     let read_source = fs::read_to_string(&read_path).expect("failed to read std::io example");
     let read_id = db.upsert_disk_text(read_path, read_source.clone());
     db.set_overlay(read_id, read_source);
 
-    let using_path = PathBuf::from("examples/basics/file_using_stdout.mc");
+    let using_path =
+        Path::new(env!("CARGO_MANIFEST_DIR")).join("examples/basics/file_using_stdout.mc");
     let using_source =
         fs::read_to_string(&using_path).expect("failed to read using std::io example");
     let using_id = db.upsert_disk_text(using_path, using_source.clone());
@@ -3221,7 +3317,7 @@ fn diagnostics_for_program_file_std_io_examples_ignore_unrelated_open_overlays()
 fn hover_at_program_file_std_io_writer_shows_text_writer() {
     let mut db = AnalysisDb::new();
 
-    let path = PathBuf::from("examples/basics/file_read_stdout.mc");
+    let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("examples/basics/file_read_stdout.mc");
     let source = fs::read_to_string(&path).expect("failed to read std::io example");
     let file_id = db.upsert_disk_text(path, source.clone());
     let binding_start = source.find("let writer").expect("expected writer binding") + 4;
@@ -3246,7 +3342,7 @@ fn hover_at_program_file_std_io_writer_shows_text_writer() {
 fn hover_at_program_file_std_io_point_hover_shows_text_writer() {
     let mut db = AnalysisDb::new();
 
-    let path = PathBuf::from("examples/basics/file_read_stdout.mc");
+    let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("examples/basics/file_read_stdout.mc");
     let source = fs::read_to_string(&path).expect("failed to read std::io example");
     let file_id = db.upsert_disk_text(path, source.clone());
 
@@ -3288,7 +3384,7 @@ fn hover_at_program_file_std_io_point_hover_shows_text_writer() {
 fn hover_at_program_file_std_io_using_reader_shows_text_reader() {
     let mut db = AnalysisDb::new();
 
-    let path = PathBuf::from("examples/basics/file_using_stdout.mc");
+    let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("examples/basics/file_using_stdout.mc");
     let source = fs::read_to_string(&path).expect("failed to read using std::io example");
     let file_id = db.upsert_disk_text(path, source.clone());
     let binding_start = source
@@ -3316,7 +3412,7 @@ fn hover_at_program_file_std_io_using_reader_shows_text_reader() {
 fn hover_at_program_file_std_io_using_text_method_shows_signature() {
     let mut db = AnalysisDb::new();
 
-    let path = PathBuf::from("examples/basics/file_using_stdout.mc");
+    let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("examples/basics/file_using_stdout.mc");
     let source = fs::read_to_string(&path).expect("failed to read using std::io example");
     let file_id = db.upsert_disk_text(path, source.clone());
     let text_offset = source.rfind(".text()").expect("expected text call") + ".".len();
@@ -3340,7 +3436,7 @@ fn hover_at_program_file_std_io_using_text_method_shows_signature() {
 fn def_location_at_program_file_std_io_using_write_all_method_points_to_std_method() {
     let mut db = AnalysisDb::new();
 
-    let path = PathBuf::from("examples/basics/file_using_stdout.mc");
+    let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("examples/basics/file_using_stdout.mc");
     let source = fs::read_to_string(&path).expect("failed to read using std::io example");
     let file_id = db.upsert_disk_text(path, source.clone());
     let write_all_offset = source.find(".write_all(").expect("expected write_all call") + ".".len();
@@ -3365,7 +3461,7 @@ fn def_location_at_program_file_std_io_using_write_all_method_points_to_std_meth
 fn def_location_at_program_file_std_io_using_text_method_points_to_std_method() {
     let mut db = AnalysisDb::new();
 
-    let path = PathBuf::from("examples/basics/file_using_stdout.mc");
+    let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("examples/basics/file_using_stdout.mc");
     let source = fs::read_to_string(&path).expect("failed to read using std::io example");
     let file_id = db.upsert_disk_text(path, source.clone());
     let text_offset = source.rfind(".text()").expect("expected text call") + ".".len();
@@ -3424,7 +3520,8 @@ fn main() -> u64 {
 }
 "#;
     let file_id = db.upsert_disk_text(
-        PathBuf::from("examples/analysis_typestate_handler_overlap.mc"),
+        Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("examples/analysis_typestate_handler_overlap.mc"),
         source,
     );
 
@@ -3474,7 +3571,8 @@ typestate Client {
 }
 "#;
     let file_id = db.upsert_disk_text(
-        PathBuf::from("examples/analysis_typestate_provenance_ambiguity.mc"),
+        Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("examples/analysis_typestate_provenance_ambiguity.mc"),
         source,
     );
 
@@ -3526,7 +3624,8 @@ typestate Client {
 }
 "#;
     let file_id = db.upsert_disk_text(
-        PathBuf::from("examples/analysis_typestate_provenance_labels_ok.mc"),
+        Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("examples/analysis_typestate_provenance_labels_ok.mc"),
         source,
     );
 
@@ -3544,7 +3643,7 @@ fn hover_for_program_typestate_example_uses_source_facing_names() {
     let mut db = AnalysisDb::new();
     db.set_experimental_typestate(true);
 
-    let path = PathBuf::from("examples/typestate/connection.mc");
+    let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("examples/typestate/connection.mc");
     let source = fs::read_to_string(&path).expect("failed to read typestate example");
     let file_id = db.upsert_disk_text(path, source.clone());
 
@@ -3607,7 +3706,7 @@ fn hover_for_typestate_field_with_zero_offset_span_returns_info() {
     let mut db = AnalysisDb::new();
     db.set_experimental_typestate(true);
 
-    let path = PathBuf::from("examples/typestate/connection.mc");
+    let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("examples/typestate/connection.mc");
     let source = fs::read_to_string(&path).expect("failed to read typestate example");
     let file_id = db.upsert_disk_text(path, source.clone());
 
@@ -3642,7 +3741,7 @@ fn hover_for_typestate_method_calls_prefers_method_over_enclosing_fn() {
     let mut db = AnalysisDb::new();
     db.set_experimental_typestate(true);
 
-    let path = PathBuf::from("examples/typestate/connection.mc");
+    let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("examples/typestate/connection.mc");
     let source = fs::read_to_string(&path).expect("failed to read typestate example");
     let file_id = db.upsert_disk_text(path, source.clone());
 
@@ -3731,7 +3830,10 @@ fn main() -> u64 {
     x
 }
 "#;
-    let file_id = db.upsert_disk_text(PathBuf::from("examples/hover_tokens.mc"), source);
+    let file_id = db.upsert_disk_text(
+        Path::new(env!("CARGO_MANIFEST_DIR")).join("examples/hover_tokens.mc"),
+        source,
+    );
 
     let let_span = span_for_substring(source, "let");
     let let_hover = db

@@ -843,5 +843,5 @@ impl<'a> Iterator for Lexer<'a> {
 }
 
 #[cfg(test)]
-#[path = "../tests/t_lexer.rs"]
+#[path = "../tests/core/t_lexer.rs"]
 mod tests;

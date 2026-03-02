@@ -244,5 +244,5 @@ impl QueryRuntime {
 }
 
 #[cfg(test)]
-#[path = "../../../tests/analysis/t_query_runtime.rs"]
+#[path = "../../../tests/services/analysis/t_query.rs"]
 mod tests;

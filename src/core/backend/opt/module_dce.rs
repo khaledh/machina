@@ -195,5 +195,5 @@ fn enqueue_references(
 }
 
 #[cfg(test)]
-#[path = "../../../tests/backend/opt/t_module_dce.rs"]
-mod tests_module_dce;
+#[path = "../../../tests/core/backend/opt/t_module_dce.rs"]
+mod tests;

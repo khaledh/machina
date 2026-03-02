@@ -381,5 +381,5 @@ fn format_ir_stage(
 // --- std parsed-tree injection ---
 
 #[cfg(test)]
-#[path = "../tests/t_compile.rs"]
+#[path = "../tests/driver/t_compile.rs"]
 mod tests;

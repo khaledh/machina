@@ -143,5 +143,5 @@ impl IrLayoutCache {
 }
 
 #[cfg(test)]
-#[path = "../../tests/ir/t_layout.rs"]
+#[path = "../../tests/core/ir/t_layout.rs"]
 mod tests;

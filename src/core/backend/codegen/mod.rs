@@ -79,17 +79,17 @@ fn emit_function_with_emitter(
 }
 
 #[cfg(test)]
-#[path = "../../../tests/backend/codegen/t_moves.rs"]
+#[path = "../../../tests/core/backend/codegen/t_moves.rs"]
 mod tests_moves;
 
 #[cfg(test)]
-#[path = "../../../tests/backend/codegen/t_graph.rs"]
+#[path = "../../../tests/core/backend/codegen/t_graph.rs"]
 mod tests_graph;
 
 #[cfg(test)]
-#[path = "../../../tests/backend/codegen/t_traverse.rs"]
+#[path = "../../../tests/core/backend/codegen/t_traverse.rs"]
 mod tests_traverse;
 
 #[cfg(test)]
-#[path = "../../../tests/backend/codegen/t_emitter.rs"]
+#[path = "../../../tests/core/backend/codegen/t_emitter.rs"]
 mod tests_emitter;

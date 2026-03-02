@@ -899,5 +899,5 @@ fn function_sig_from_method(sig: &MethodSig) -> FunctionSig {
 }
 
 #[cfg(test)]
-#[path = "../../tests/typecheck/t_collect.rs"]
+#[path = "../../tests/core/typecheck/t_collect.rs"]
 mod tests;

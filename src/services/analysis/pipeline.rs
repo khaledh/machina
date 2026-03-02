@@ -512,5 +512,5 @@ pub(crate) fn to_lookup_state(state: &ModulePipelineState) -> LookupState {
 }
 
 #[cfg(test)]
-#[path = "../../tests/analysis/t_pipeline.rs"]
+#[path = "../../tests/services/analysis/t_pipeline.rs"]
 mod tests;

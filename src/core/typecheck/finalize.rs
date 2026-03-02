@@ -796,5 +796,5 @@ fn collect_payload_nodes(module: &Module) -> HashSet<NodeId> {
 }
 
 #[cfg(test)]
-#[path = "../../tests/typecheck/t_finalize.rs"]
+#[path = "../../tests/core/typecheck/t_finalize.rs"]
 mod tests;

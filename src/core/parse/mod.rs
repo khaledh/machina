@@ -392,5 +392,5 @@ impl<'a> Parser<'a> {
 }
 
 #[cfg(test)]
-#[path = "../../tests/parse/t_parse.rs"]
+#[path = "../../tests/core/parse/t_parse.rs"]
 mod tests;

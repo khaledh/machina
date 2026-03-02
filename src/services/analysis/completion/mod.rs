@@ -82,6 +82,3 @@ fn completion_post_pass(mut items: Vec<CompletionItem>, prefix: &str) -> Vec<Com
     items.sort_unstable_by(|a, b| a.label.cmp(&b.label));
     items
 }
-
-#[cfg(test)]
-mod tests;

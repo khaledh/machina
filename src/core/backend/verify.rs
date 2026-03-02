@@ -41,9 +41,6 @@ pub fn verify_module(module: &LoweredModule) -> Result<(), VerifyIrError> {
     Ok(())
 }
 
-#[cfg(test)]
-#[path = "../../tests/backend/verify/t_verify.rs"]
-mod tests;
 fn verify_function(
     lowered: &LoweredFunction,
     direct_sigs: &HashMap<DefId, FunctionSig>,
@@ -708,3 +705,7 @@ fn err(func_name: &str, block_id: Option<BlockId>, message: impl Into<String>) -
     };
     VerifyIrError::new(message)
 }
+
+#[cfg(test)]
+#[path = "../../tests/core/backend/verify/t_verify.rs"]
+mod tests;

@@ -810,5 +810,5 @@ fn iterable_elem_type(ty: &Type) -> Option<Type> {
 }
 
 #[cfg(test)]
-#[path = "../../../tests/typecheck/solver/t_mod.rs"]
+#[path = "../../../tests/core/typecheck/solver/t_mod.rs"]
 mod tests;

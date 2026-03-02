@@ -119,13 +119,13 @@ pub fn regalloc(
 }
 
 #[cfg(test)]
-#[path = "../../../tests/backend/regalloc/t_alloc.rs"]
+#[path = "../../../tests/core/backend/regalloc/t_alloc.rs"]
 mod tests;
 
 #[cfg(test)]
-#[path = "../../../tests/backend/regalloc/t_moves.rs"]
+#[path = "../../../tests/core/backend/regalloc/t_moves.rs"]
 mod tests_moves;
 
 #[cfg(test)]
-#[path = "../../../tests/backend/regalloc/t_constraints.rs"]
+#[path = "../../../tests/core/backend/regalloc/t_constraints.rs"]
 mod tests_constraints;

@@ -404,5 +404,5 @@ impl TypeLookup for TypedModuleResult {
 }
 
 #[cfg(test)]
-#[path = "../../tests/analysis/t_results.rs"]
+#[path = "../../tests/services/analysis/t_results.rs"]
 mod tests;

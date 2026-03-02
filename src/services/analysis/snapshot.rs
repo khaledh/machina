@@ -161,5 +161,5 @@ impl SourceStore {
 }
 
 #[cfg(test)]
-#[path = "../../tests/analysis/t_snapshot.rs"]
+#[path = "../../tests/services/analysis/t_snapshot.rs"]
 mod tests;

@@ -552,5 +552,5 @@ fn renumber_blocks(func: &mut Function) {
 }
 
 #[cfg(test)]
-#[path = "../../../../tests/backend/opt/cfg/mod.rs"]
+#[path = "../../../../tests/core/backend/opt/cfg/mod.rs"]
 mod tests;

@@ -490,5 +490,5 @@ fn unop_name(op: &UnOp) -> &'static str {
 }
 
 #[cfg(test)]
-#[path = "../../tests/ir/t_format.rs"]
+#[path = "../../tests/core/ir/t_format.rs"]
 mod tests;

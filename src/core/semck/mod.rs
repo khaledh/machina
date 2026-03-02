@@ -124,17 +124,17 @@ pub struct SemCheckOutput {
 }
 
 #[cfg(test)]
-#[path = "../../tests/semck/t_semck.rs"]
+#[path = "../../tests/core/semck/t_semck.rs"]
 mod tests;
 
 #[cfg(test)]
-#[path = "../../tests/semck/t_move_check.rs"]
+#[path = "../../tests/core/semck/t_move_check.rs"]
 mod move_tests;
 
 #[cfg(test)]
-#[path = "../../tests/semck/t_partial.rs"]
+#[path = "../../tests/core/semck/t_partial.rs"]
 mod partial_tests;
 
 #[cfg(test)]
-#[path = "../../tests/semck/t_protocol_progression.rs"]
+#[path = "../../tests/core/semck/t_protocol_progression.rs"]
 mod protocol_progression_tests;

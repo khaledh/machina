@@ -33,5 +33,5 @@ fn collect_errors(engine: &TypecheckEngine) -> Vec<TypeCheckError> {
 }
 
 #[cfg(test)]
-#[path = "../../../tests/typecheck/t_validate.rs"]
+#[path = "../../../tests/core/typecheck/t_validate.rs"]
 mod tests;

@@ -126,5 +126,5 @@ pub fn query_parse_resolve_typecheck(
 }
 
 #[cfg(test)]
-#[path = "../../tests/analysis/t_batch.rs"]
+#[path = "../../tests/services/analysis/t_batch.rs"]
 mod tests;

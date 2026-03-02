@@ -319,5 +319,5 @@ fn canonical_nominal_name(name: &str) -> &str {
 }
 
 #[cfg(test)]
-#[path = "../../tests/typecheck/t_unify_internal.rs"]
+#[path = "../../tests/core/typecheck/t_unify_internal.rs"]
 mod tests;

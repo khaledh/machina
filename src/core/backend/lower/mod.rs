@@ -380,5 +380,5 @@ fn lower_method_def_with_globals(
 }
 
 #[cfg(test)]
-#[path = "../../../tests/backend/lower/mod.rs"]
+#[path = "../../../tests/core/backend/lower/mod.rs"]
 mod tests;

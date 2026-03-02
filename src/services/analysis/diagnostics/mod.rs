@@ -141,5 +141,5 @@ pub fn collect_partial_diagnostics(
 }
 
 #[cfg(test)]
-#[path = "../../../tests/analysis/t_diagnostics.rs"]
+#[path = "../../../tests/services/analysis/t_diagnostics.rs"]
 mod tests;

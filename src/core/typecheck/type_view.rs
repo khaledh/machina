@@ -124,5 +124,5 @@ impl<'a, M: TypeDefLookup> TypeViewResolver<'a, M> {
 }
 
 #[cfg(test)]
-#[path = "../../tests/typecheck/t_type_view.rs"]
+#[path = "../../tests/core/typecheck/t_type_view.rs"]
 mod tests;

@@ -462,5 +462,5 @@ pub(crate) fn build_retype_context(
 }
 
 #[cfg(test)]
-#[path = "../../tests/monomorphize/t_monomorphize.rs"]
+#[path = "../../tests/core/monomorphize/t_monomorphize.rs"]
 mod tests;

@@ -64,13 +64,13 @@ pub fn type_check_partial_with_imported_facts(
 }
 
 #[cfg(test)]
-#[path = "../../tests/typecheck/t_parity.rs"]
+#[path = "../../tests/core/typecheck/t_parity.rs"]
 mod tests_parity;
 
 #[cfg(test)]
-#[path = "../../tests/typecheck/t_typeck.rs"]
+#[path = "../../tests/core/typecheck/t_typeck.rs"]
 mod tests_typecheck;
 
 #[cfg(test)]
-#[path = "../../tests/typecheck/t_infer_unify.rs"]
+#[path = "../../tests/core/typecheck/t_infer_unify.rs"]
 mod tests_infer_unify;

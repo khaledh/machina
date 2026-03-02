@@ -55,5 +55,5 @@ impl ModuleGraph {
 }
 
 #[cfg(test)]
-#[path = "../../tests/analysis/t_module_graph.rs"]
+#[path = "../../tests/services/analysis/t_module_graph.rs"]
 mod tests;

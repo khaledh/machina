@@ -251,5 +251,5 @@ fn diagnostics_are_local_to_file(
 }
 
 #[cfg(test)]
-#[path = "../../tests/analysis/t_analysis_db.rs"]
+#[path = "../../tests/services/analysis/t_db.rs"]
 mod tests;

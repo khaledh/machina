@@ -144,5 +144,5 @@ where
 }
 
 #[cfg(test)]
-#[path = "../../../tests/analysis/t_dataflow.rs"]
+#[path = "../../../tests/core/analysis/t_dataflow.rs"]
 mod tests;

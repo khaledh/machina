@@ -22,5 +22,5 @@ pub use resolver::{
 pub use symbols::SymbolKind;
 
 #[cfg(test)]
-#[path = "../../tests/resolve/t_resolve.rs"]
+#[path = "../../tests/core/resolve/t_resolve.rs"]
 mod tests;

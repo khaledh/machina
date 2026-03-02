@@ -299,5 +299,5 @@ impl Deref for DefTableOverlay {
 }
 
 #[cfg(test)]
-#[path = "../../tests/analysis/t_facts.rs"]
+#[path = "../../tests/core/analysis/t_facts.rs"]
 mod tests;
