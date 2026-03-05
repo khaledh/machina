@@ -1,4 +1,4 @@
-use crate::core::tree::*;
+use crate::core::ast::*;
 
 /// Tree mutable visitor with default traversal helpers.
 ///
@@ -798,12 +798,7 @@ pub fn walk_expr<V: VisitorMut + ?Sized>(v: &mut V, expr: &mut Expr) {
             }
         }
         ExprKind::Emit { kind } => match kind {
-            EmitKind::Send { to, payload }
-            | EmitKind::Request {
-                to,
-                payload,
-                request_site_label: _,
-            } => {
+            EmitKind::Send { to, payload } | EmitKind::Request { to, payload, .. } => {
                 v.visit_expr(to);
                 v.visit_expr(payload);
             }
@@ -873,5 +868,16 @@ pub fn walk_expr<V: VisitorMut + ?Sized>(v: &mut V, expr: &mut Expr) {
         ExprKind::Deref { expr } => {
             v.visit_expr(expr);
         }
+        ExprKind::Load { expr } => {
+            v.visit_expr(expr);
+        }
+        ExprKind::MapGet { target, key } => {
+            v.visit_expr(target);
+            v.visit_expr(key);
+        }
+        ExprKind::Len { expr } => {
+            v.visit_expr(expr);
+        }
+        ExprKind::ClosureRef { .. } => {}
     }
 }

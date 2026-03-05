@@ -5,8 +5,8 @@
 
 use std::collections::{HashMap, HashSet};
 
+use crate::core::ast::TypeDefKind;
 use crate::core::resolve::DefTable;
-use crate::core::tree::TypeDefKind;
 use crate::core::typecheck::nominal::{
     EnumVariantView, EnumView, ExpansionState, NominalKey, StructFieldView, StructView, TypeView,
 };

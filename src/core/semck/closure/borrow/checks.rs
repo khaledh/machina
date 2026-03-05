@@ -5,16 +5,16 @@
 //! ways while a closure is live. It also rejects escaping captured closures.
 use std::collections::{HashMap, HashSet};
 
+use crate::core::ast::cfg::{CfgBuilder, CfgItem, CfgTerminator};
+use crate::core::ast::visit::{Visitor, walk_expr};
+use crate::core::ast::{
+    ArrayLitInit, CallArg, Expr, ExprKind, FuncDef, NodeId, ParamMode, StmtExprKind,
+};
 use crate::core::context::NormalizedContext;
 use crate::core::diag::Span;
 use crate::core::resolve::DefId;
 use crate::core::semck::closure::capture::CaptureMode;
 use crate::core::semck::{SEK, SemCheckError, push_error};
-use crate::core::tree::ArrayLitInit;
-use crate::core::tree::NodeId;
-use crate::core::tree::cfg::{CfgBuilder, CfgItem, CfgTerminator};
-use crate::core::tree::visit::{Visitor, walk_expr};
-use crate::core::tree::{CallArg, Expr, ExprKind, FuncDef, ParamMode, StmtExprKind};
 
 use super::bindings::{analyze_closure_bindings, apply_item_bindings};
 use super::collect::{collect_expr_var_uses, collect_item_var_uses, lvalue_base_def_id};

@@ -1,12 +1,10 @@
+use crate::core::ast::visit::{Visitor, walk_expr, walk_func_sig, walk_method_sig, walk_stmt_expr};
+use crate::core::ast::*;
 use crate::core::context::NormalizedContext;
 use crate::core::diag::Span;
 use crate::core::resolve::DefKind;
 use crate::core::semck::match_check;
 use crate::core::semck::{SEK, SemCheckError};
-use crate::core::tree::visit::{
-    Visitor, walk_expr, walk_func_sig, walk_method_sig, walk_stmt_expr,
-};
-use crate::core::tree::*;
 use crate::core::typecheck::type_map::{CallSig, resolve_type_expr};
 use crate::core::types::Type;
 use std::collections::{HashMap, HashSet};

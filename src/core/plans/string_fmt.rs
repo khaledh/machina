@@ -1,6 +1,6 @@
 //! Semantic f-string plans consumed by lowering.
 
-use super::ValueExpr;
+use crate::core::ast::Expr;
 
 #[derive(Clone, Debug)]
 pub struct StringFmtPlan {
@@ -19,15 +19,15 @@ pub enum FmtKind {
 pub enum SegmentKind {
     LiteralBytes(String),
     Bool {
-        expr: Box<ValueExpr>,
+        expr: Box<Expr>,
     },
     Int {
-        expr: Box<ValueExpr>,
+        expr: Box<Expr>,
         signed: bool,
         bits: u8,
     },
     StringValue {
-        expr: Box<ValueExpr>,
+        expr: Box<Expr>,
     },
 }
 

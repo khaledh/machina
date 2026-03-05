@@ -2,14 +2,13 @@
 //!
 //! Place expressions (lvalues) represent memory locations that can be read
 //! from or written to. This module transforms normalized expressions that
-//! appear in lvalue position into explicit `PlaceExpr` nodes.
+//! appear in lvalue position into place-enriched AST nodes.
 //!
 //! Key transformation: Inside closure bodies, references to captured
 //! variables are rewritten to access the closure's environment struct
 //! (`env.<field>` for move captures, `*env.<field>` for borrow captures).
 
-use crate::core::tree as ast;
-use crate::core::tree::semantic as sem;
+use crate::core::ast::{Expr, ExprKind};
 
 use super::elaborator::Elaborator;
 
@@ -28,40 +27,43 @@ impl<'a> Elaborator<'a> {
     ///
     /// When inside a closure body, captured variable references are
     /// rewritten to access the `env` parameter's struct fields.
-    pub(super) fn elab_place(&mut self, expr: &ast::Expr) -> sem::PlaceExpr {
-        if let ast::ExprKind::Var { .. } = &expr.kind
+    pub(super) fn elab_place(&mut self, expr: &Expr) -> Expr {
+        if let ExprKind::Var { .. } = &expr.kind
             && let Some(place) =
                 self.capture_place_for(self.def_table.def_id(expr.id), expr.id, expr.span)
         {
             return place;
         }
         let kind = match &expr.kind {
-            ast::ExprKind::Var { ident } => sem::PlaceExprKind::Var {
+            ExprKind::Var { ident } => ExprKind::Var {
                 ident: ident.clone(),
-                def_id: self.def_table.def_id(expr.id),
             },
-            ast::ExprKind::Deref { expr } => sem::PlaceExprKind::Deref {
-                value: Box::new(self.elab_value(expr)),
+            ExprKind::Deref { expr } => ExprKind::Deref {
+                expr: Box::new(self.elab_value(expr)),
             },
-            ast::ExprKind::ArrayIndex { target, indices } => {
+            ExprKind::ArrayIndex { target, indices } => {
                 let target_place = self.elab_place(target);
-                let target_ty = self.type_map.type_table().get(target_place.ty).clone();
+                let target_ty = self
+                    .type_map
+                    .type_table()
+                    .get(self.type_id_for(target_place.id))
+                    .clone();
                 let plan = self.build_index_plan(&target_ty);
                 self.record_index_plan(expr.id, plan);
-                sem::PlaceExprKind::ArrayIndex {
+                ExprKind::ArrayIndex {
                     target: Box::new(target_place),
                     indices: indices.iter().map(|index| self.elab_value(index)).collect(),
                 }
             }
-            ast::ExprKind::TupleField { target, index } => sem::PlaceExprKind::TupleField {
+            ExprKind::TupleField { target, index } => ExprKind::TupleField {
                 target: Box::new(self.elab_place(target)),
                 index: *index,
             },
-            ast::ExprKind::StructField { target, field } => sem::PlaceExprKind::StructField {
+            ExprKind::StructField { target, field } => ExprKind::StructField {
                 target: Box::new(self.elab_place(target)),
                 field: field.clone(),
             },
-            ast::ExprKind::Move { expr } | ast::ExprKind::ImplicitMove { expr } => {
+            ExprKind::Move { expr } | ExprKind::ImplicitMove { expr } => {
                 return self.elab_place(expr);
             }
             _ => {
@@ -72,13 +74,14 @@ impl<'a> Elaborator<'a> {
             }
         };
 
-        let ty = match &expr.kind {
-            ast::ExprKind::Var { .. } => {
+        // Register the type for this place expression node.
+        let _ty = match &expr.kind {
+            ExprKind::Var { .. } => {
                 // If this var is a closure binding, its type is the generated closure struct.
                 self.closure_type_id_for_def(self.def_table.def_id(expr.id))
                     .unwrap_or_else(|| self.type_map.type_of(expr.id))
             }
-            ast::ExprKind::Deref { expr: inner } => {
+            ExprKind::Deref { expr: inner } => {
                 let inner_ty = self
                     .type_map
                     .type_table()
@@ -92,7 +95,7 @@ impl<'a> Elaborator<'a> {
                     _ => self.type_map.type_of(expr.id),
                 }
             }
-            ast::ExprKind::TupleField { target, index } => {
+            ExprKind::TupleField { target, index } => {
                 let target_ty = self.peel_place_base_type(
                     self.type_map
                         .type_table()
@@ -107,7 +110,7 @@ impl<'a> Elaborator<'a> {
                     _ => self.type_map.type_of(expr.id),
                 }
             }
-            ast::ExprKind::StructField { target, field } => {
+            ExprKind::StructField { target, field } => {
                 let target_ty = self.peel_place_base_type(
                     self.type_map
                         .type_table()
@@ -125,10 +128,9 @@ impl<'a> Elaborator<'a> {
             _ => self.type_map.type_of(expr.id),
         };
 
-        sem::PlaceExpr {
+        Expr {
             id: expr.id,
             kind,
-            ty,
             span: expr.span,
         }
     }

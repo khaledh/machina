@@ -673,7 +673,7 @@ fn hover_request_uses_current_document_range_for_imported_symbol() {
         run_id
     ));
     let app_dir = temp_dir.join("app");
-    fs::create_dir_all(&app_dir).expect("failed to create temp module tree");
+    fs::create_dir_all(&app_dir).expect("failed to create temp module ast");
 
     let entry_path = temp_dir.join("main.mc");
     let dep_path = app_dir.join("dep.mc");
@@ -743,7 +743,7 @@ fn definition_request_resolves_imported_symbol_location_across_modules() {
         run_id
     ));
     let app_dir = temp_dir.join("app");
-    fs::create_dir_all(&app_dir).expect("failed to create temp module tree");
+    fs::create_dir_all(&app_dir).expect("failed to create temp module ast");
 
     let entry_path = temp_dir.join("main.mc");
     let dep_path = app_dir.join("dep.mc");
@@ -886,7 +886,7 @@ fn signature_help_request_uses_program_aware_imported_callable_signature() {
         run_id
     ));
     let app_dir = temp_dir.join("app");
-    fs::create_dir_all(&app_dir).expect("failed to create temp module tree");
+    fs::create_dir_all(&app_dir).expect("failed to create temp module ast");
 
     let entry_path = temp_dir.join("main.mc");
     let dep_path = app_dir.join("dep.mc");

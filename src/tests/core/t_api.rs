@@ -3,15 +3,13 @@ use crate::core::api::{
     parse_module_with_id_gen_and_options, resolve_stage_with_policy,
     resolve_typecheck_pipeline_with_policy, semcheck_stage, typecheck_stage_with_policy,
 };
+use crate::core::ast::visit::{self, Visitor};
+use crate::core::ast::*;
 use crate::core::context::ParsedContext;
 use crate::core::machine::request_site::labeled_request_site_key;
+use crate::core::plans::MachineEventKeyPlan;
 use crate::core::resolve::ResolveErrorKind;
 use crate::core::semck::SemCheckErrorKind;
-use crate::core::tree::semantic as sem;
-use crate::core::tree::visit::{self, Visitor};
-use crate::core::tree::{
-    EmitKind, Expr, ExprKind, FuncDef, MethodItem, NodeId, NodeIdGen, TopLevelItem, TypeExprKind,
-};
 use crate::core::types::Type;
 
 fn parsed_context(source: &str) -> ParsedContext {
@@ -1717,7 +1715,9 @@ typestate Connection {
         .filter(|block| block.type_name.starts_with("__ts_"))
         .flat_map(|block| &block.method_items)
         .find_map(|item| match item {
-            sem::MethodItem::Def(def) if def.sig.name.starts_with("__ts_on_") => Some(def.def_id),
+            MethodItem::Def(def) if def.sig.name.starts_with("__ts_on_") => {
+                Some(elaborated.def_table.def_id(def.id))
+            }
             _ => None,
         })
         .expect("expected lowered typestate handler");
@@ -2259,7 +2259,7 @@ typestate Connection {
         .find(|event| {
             matches!(
                 &event.key,
-                sem::MachineEventKeyPlan::Payload {
+                MachineEventKeyPlan::Payload {
                     payload_ty: Type::Struct { name, .. }
                 } if name == "Ping"
             )
@@ -2272,7 +2272,7 @@ typestate Connection {
         .find(|event| {
             matches!(
                 &event.key,
-                sem::MachineEventKeyPlan::Payload {
+                MachineEventKeyPlan::Payload {
                     payload_ty: Type::Struct { name, .. }
                 } if name == "Pong"
             )
@@ -2396,11 +2396,11 @@ fn elaborate_typestate_semantic(source: &str) -> crate::core::context::SemanticC
     elaborate_stage(sem_checked)
 }
 
-fn semantic_module_has_for(module: &sem::Module) -> bool {
+fn semantic_module_has_for(module: &Module) -> bool {
     module.top_level_items.iter().any(top_level_item_has_for)
 }
 
-fn semantic_module_has_defer_or_using(module: &sem::Module) -> bool {
+fn semantic_module_has_defer_or_using(module: &Module) -> bool {
     module
         .top_level_items
         .iter()
@@ -2414,7 +2414,7 @@ enum ControlTransferKind {
 }
 
 fn semantic_module_has_cleanup_before_control_transfer(
-    module: &sem::Module,
+    module: &Module,
     kind: ControlTransferKind,
 ) -> bool {
     module
@@ -2423,136 +2423,143 @@ fn semantic_module_has_cleanup_before_control_transfer(
         .any(|item| top_level_item_has_cleanup_before_control_transfer(item, kind))
 }
 
-fn find_first_bare_try_id(module: &sem::Module) -> Option<NodeId> {
+fn find_first_bare_try_id(module: &Module) -> Option<NodeId> {
     module
         .top_level_items
         .iter()
         .find_map(top_level_item_first_bare_try_id)
 }
 
-fn top_level_item_has_for(item: &sem::TopLevelItem) -> bool {
+fn top_level_item_has_for(item: &TopLevelItem) -> bool {
     match item {
-        sem::TopLevelItem::FuncDef(def) => value_has_for(&def.body),
-        sem::TopLevelItem::MethodBlock(block) => block
+        TopLevelItem::FuncDef(def) => value_has_for(&def.body),
+        TopLevelItem::MethodBlock(block) => block
             .method_items
             .iter()
             .filter_map(|item| match item {
-                sem::MethodItem::Def(def) => Some(def),
-                sem::MethodItem::Decl(_) => None,
+                MethodItem::Def(def) => Some(def),
+                MethodItem::Decl(_) => None,
             })
             .any(|def| value_has_for(&def.body)),
-        sem::TopLevelItem::TraitDef(_)
-        | sem::TopLevelItem::TypeDef(_)
-        | sem::TopLevelItem::FuncDecl(_) => false,
+        TopLevelItem::TraitDef(_)
+        | TopLevelItem::TypeDef(_)
+        | TopLevelItem::FuncDecl(_)
+        | TopLevelItem::ProtocolDef(_)
+        | TopLevelItem::TypestateDef(_)
+        | TopLevelItem::ClosureDef(_) => false,
     }
 }
 
-fn top_level_item_has_defer_or_using(item: &sem::TopLevelItem) -> bool {
+fn top_level_item_has_defer_or_using(item: &TopLevelItem) -> bool {
     match item {
-        sem::TopLevelItem::FuncDef(def) => value_has_defer_or_using(&def.body),
-        sem::TopLevelItem::MethodBlock(block) => block
+        TopLevelItem::FuncDef(def) => value_has_defer_or_using(&def.body),
+        TopLevelItem::MethodBlock(block) => block
             .method_items
             .iter()
             .filter_map(|item| match item {
-                sem::MethodItem::Def(def) => Some(def),
-                sem::MethodItem::Decl(_) => None,
+                MethodItem::Def(def) => Some(def),
+                MethodItem::Decl(_) => None,
             })
             .any(|def| value_has_defer_or_using(&def.body)),
-        sem::TopLevelItem::TraitDef(_)
-        | sem::TopLevelItem::TypeDef(_)
-        | sem::TopLevelItem::FuncDecl(_) => false,
+        TopLevelItem::TraitDef(_)
+        | TopLevelItem::TypeDef(_)
+        | TopLevelItem::FuncDecl(_)
+        | TopLevelItem::ProtocolDef(_)
+        | TopLevelItem::TypestateDef(_)
+        | TopLevelItem::ClosureDef(_) => false,
     }
 }
 
 fn top_level_item_has_cleanup_before_control_transfer(
-    item: &sem::TopLevelItem,
+    item: &TopLevelItem,
     kind: ControlTransferKind,
 ) -> bool {
     match item {
-        sem::TopLevelItem::FuncDef(def) => {
-            value_has_cleanup_before_control_transfer(&def.body, kind)
-        }
-        sem::TopLevelItem::MethodBlock(block) => block
+        TopLevelItem::FuncDef(def) => value_has_cleanup_before_control_transfer(&def.body, kind),
+        TopLevelItem::MethodBlock(block) => block
             .method_items
             .iter()
             .filter_map(|item| match item {
-                sem::MethodItem::Def(def) => Some(def),
-                sem::MethodItem::Decl(_) => None,
+                MethodItem::Def(def) => Some(def),
+                MethodItem::Decl(_) => None,
             })
             .any(|def| value_has_cleanup_before_control_transfer(&def.body, kind)),
-        sem::TopLevelItem::TraitDef(_)
-        | sem::TopLevelItem::TypeDef(_)
-        | sem::TopLevelItem::FuncDecl(_) => false,
+        TopLevelItem::TraitDef(_)
+        | TopLevelItem::TypeDef(_)
+        | TopLevelItem::FuncDecl(_)
+        | TopLevelItem::ProtocolDef(_)
+        | TopLevelItem::TypestateDef(_)
+        | TopLevelItem::ClosureDef(_) => false,
     }
 }
 
-fn top_level_item_first_bare_try_id(item: &sem::TopLevelItem) -> Option<NodeId> {
+fn top_level_item_first_bare_try_id(item: &TopLevelItem) -> Option<NodeId> {
     match item {
-        sem::TopLevelItem::FuncDef(def) => value_first_bare_try_id(&def.body),
-        sem::TopLevelItem::MethodBlock(block) => block
+        TopLevelItem::FuncDef(def) => value_first_bare_try_id(&def.body),
+        TopLevelItem::MethodBlock(block) => block
             .method_items
             .iter()
             .filter_map(|item| match item {
-                sem::MethodItem::Def(def) => Some(def),
-                sem::MethodItem::Decl(_) => None,
+                MethodItem::Def(def) => Some(def),
+                MethodItem::Decl(_) => None,
             })
             .find_map(|def| value_first_bare_try_id(&def.body)),
-        sem::TopLevelItem::TraitDef(_)
-        | sem::TopLevelItem::TypeDef(_)
-        | sem::TopLevelItem::FuncDecl(_) => None,
+        TopLevelItem::TraitDef(_)
+        | TopLevelItem::TypeDef(_)
+        | TopLevelItem::FuncDecl(_)
+        | TopLevelItem::ProtocolDef(_)
+        | TopLevelItem::TypestateDef(_)
+        | TopLevelItem::ClosureDef(_) => None,
     }
 }
 
-fn value_has_for(value: &sem::ValueExpr) -> bool {
+fn value_has_for(value: &Expr) -> bool {
     match &value.kind {
-        sem::ValueExprKind::Block { items, tail } => {
+        ExprKind::Block { items, tail } => {
             items.iter().any(block_item_has_for)
                 || tail.as_ref().is_some_and(|tail| value_has_for(tail))
         }
-        sem::ValueExprKind::If {
+        ExprKind::If {
             cond,
             then_body,
             else_body,
         } => value_has_for(cond) || value_has_for(then_body) || value_has_for(else_body),
-        sem::ValueExprKind::Match { scrutinee, arms } => {
+        ExprKind::Match { scrutinee, arms } => {
             value_has_for(scrutinee) || arms.iter().any(|arm| value_has_for(&arm.body))
         }
-        sem::ValueExprKind::Call { callee, args } => {
+        ExprKind::Call { callee, args } => {
             value_has_for(callee) || args.iter().any(call_arg_has_for)
         }
-        sem::ValueExprKind::MethodCall { receiver, args, .. } => {
-            let receiver_has_for = match receiver {
-                sem::MethodReceiver::ValueExpr(value) => value_has_for(value),
-                sem::MethodReceiver::PlaceExpr(_) => false,
-            };
-            receiver_has_for || args.iter().any(call_arg_has_for)
+        ExprKind::MethodCall { callee, args, .. } => {
+            value_has_for(callee) || args.iter().any(call_arg_has_for)
         }
-        sem::ValueExprKind::EmitSend { to, payload }
-        | sem::ValueExprKind::EmitRequest { to, payload, .. } => {
-            value_has_for(to) || value_has_for(payload)
-        }
-        sem::ValueExprKind::Reply { cap, value } => value_has_for(cap) || value_has_for(value),
-        sem::ValueExprKind::StructLit { fields, .. } => {
+        ExprKind::Emit { kind } => match kind {
+            EmitKind::Send { to, payload } | EmitKind::Request { to, payload, .. } => {
+                value_has_for(to) || value_has_for(payload)
+            }
+        },
+        ExprKind::Reply { cap, value } => value_has_for(cap) || value_has_for(value),
+        ExprKind::StructLit { fields, .. } => {
             fields.iter().any(|field| value_has_for(&field.value))
         }
-        sem::ValueExprKind::StructUpdate { target, fields } => {
+        ExprKind::StructUpdate { target, fields } => {
             value_has_for(target) || fields.iter().any(|field| value_has_for(&field.value))
         }
-        sem::ValueExprKind::EnumVariant { payload, .. } | sem::ValueExprKind::TupleLit(payload) => {
+        ExprKind::EnumVariant { payload, .. } | ExprKind::TupleLit(payload) => {
             payload.iter().any(value_has_for)
         }
-        sem::ValueExprKind::ArrayLit { init, .. } => match init {
-            sem::ArrayLitInit::Elems(elems) => elems.iter().any(value_has_for),
-            sem::ArrayLitInit::Repeat(value, _) => value_has_for(value),
+        ExprKind::ArrayLit { init, .. } => match init {
+            ArrayLitInit::Elems(elems) => elems.iter().any(value_has_for),
+            ArrayLitInit::Repeat(value, _) => value_has_for(value),
         },
-        sem::ValueExprKind::SetLit { elems, .. } => elems.iter().any(value_has_for),
-        sem::ValueExprKind::MapLit { entries, .. } => entries
+        ExprKind::SetLit { elems, .. } => elems.iter().any(value_has_for),
+        ExprKind::MapLit { entries, .. } => entries
             .iter()
             .any(|entry| value_has_for(&entry.key) || value_has_for(&entry.value)),
-        sem::ValueExprKind::UnaryOp { expr, .. }
-        | sem::ValueExprKind::HeapAlloc { expr }
-        | sem::ValueExprKind::Coerce { expr, .. } => value_has_for(expr),
-        sem::ValueExprKind::Try {
+        ExprKind::UnaryOp { expr, .. }
+        | ExprKind::HeapAlloc { expr }
+        | ExprKind::Coerce { expr, .. } => value_has_for(expr),
+        ExprKind::Try {
             fallible_expr,
             on_error,
         } => {
@@ -2561,39 +2568,43 @@ fn value_has_for(value: &sem::ValueExpr) -> bool {
                     .as_ref()
                     .is_some_and(|handler| value_has_for(handler))
         }
-        sem::ValueExprKind::BinOp { left, right, .. } => {
-            value_has_for(left) || value_has_for(right)
-        }
-        sem::ValueExprKind::Range { start, end } => value_has_for(start) || value_has_for(end),
-        sem::ValueExprKind::Slice { start, end, .. } => {
+        ExprKind::BinOp { left, right, .. } => value_has_for(left) || value_has_for(right),
+        ExprKind::Range { start, end } => value_has_for(start) || value_has_for(end),
+        ExprKind::Slice { start, end, .. } => {
             start.as_ref().is_some_and(|start| value_has_for(start))
                 || end.as_ref().is_some_and(|end| value_has_for(end))
         }
-        sem::ValueExprKind::MapGet { target, key } => value_has_for(target) || value_has_for(key),
-        sem::ValueExprKind::UnitLit
-        | sem::ValueExprKind::IntLit(_)
-        | sem::ValueExprKind::BoolLit(_)
-        | sem::ValueExprKind::CharLit(_)
-        | sem::ValueExprKind::StringLit { .. }
-        | sem::ValueExprKind::StringFmt { .. }
-        | sem::ValueExprKind::Move { .. }
-        | sem::ValueExprKind::ImplicitMove { .. }
-        | sem::ValueExprKind::AddrOf { .. }
-        | sem::ValueExprKind::Load { .. }
-        | sem::ValueExprKind::Len { .. }
-        | sem::ValueExprKind::ClosureRef { .. } => false,
+        ExprKind::MapGet { target, key } => value_has_for(target) || value_has_for(key),
+        ExprKind::UnitLit
+        | ExprKind::IntLit(_)
+        | ExprKind::BoolLit(_)
+        | ExprKind::CharLit(_)
+        | ExprKind::StringLit { .. }
+        | ExprKind::StringFmt { .. }
+        | ExprKind::Move { .. }
+        | ExprKind::ImplicitMove { .. }
+        | ExprKind::AddrOf { .. }
+        | ExprKind::Load { .. }
+        | ExprKind::Len { .. }
+        | ExprKind::ClosureRef { .. }
+        | ExprKind::Var { .. }
+        | ExprKind::ArrayIndex { .. }
+        | ExprKind::TupleField { .. }
+        | ExprKind::StructField { .. }
+        | ExprKind::Deref { .. }
+        | ExprKind::Closure { .. } => false,
     }
 }
 
-fn value_has_defer_or_using(value: &sem::ValueExpr) -> bool {
+fn value_has_defer_or_using(value: &Expr) -> bool {
     match &value.kind {
-        sem::ValueExprKind::Block { items, tail } => {
+        ExprKind::Block { items, tail } => {
             items.iter().any(block_item_has_defer_or_using)
                 || tail
                     .as_ref()
                     .is_some_and(|tail| value_has_defer_or_using(tail))
         }
-        sem::ValueExprKind::If {
+        ExprKind::If {
             cond,
             then_body,
             else_body,
@@ -2602,51 +2613,48 @@ fn value_has_defer_or_using(value: &sem::ValueExpr) -> bool {
                 || value_has_defer_or_using(then_body)
                 || value_has_defer_or_using(else_body)
         }
-        sem::ValueExprKind::Match { scrutinee, arms } => {
+        ExprKind::Match { scrutinee, arms } => {
             value_has_defer_or_using(scrutinee)
                 || arms.iter().any(|arm| value_has_defer_or_using(&arm.body))
         }
-        sem::ValueExprKind::Call { callee, args } => {
+        ExprKind::Call { callee, args } => {
             value_has_defer_or_using(callee) || args.iter().any(call_arg_has_defer_or_using)
         }
-        sem::ValueExprKind::MethodCall { receiver, args, .. } => {
-            let receiver_has = match receiver {
-                sem::MethodReceiver::ValueExpr(value) => value_has_defer_or_using(value),
-                sem::MethodReceiver::PlaceExpr(_) => false,
-            };
-            receiver_has || args.iter().any(call_arg_has_defer_or_using)
+        ExprKind::MethodCall { callee, args, .. } => {
+            value_has_defer_or_using(callee) || args.iter().any(call_arg_has_defer_or_using)
         }
-        sem::ValueExprKind::EmitSend { to, payload }
-        | sem::ValueExprKind::EmitRequest { to, payload, .. } => {
-            value_has_defer_or_using(to) || value_has_defer_or_using(payload)
-        }
-        sem::ValueExprKind::Reply { cap, value } => {
+        ExprKind::Emit { kind } => match kind {
+            EmitKind::Send { to, payload } | EmitKind::Request { to, payload, .. } => {
+                value_has_defer_or_using(to) || value_has_defer_or_using(payload)
+            }
+        },
+        ExprKind::Reply { cap, value } => {
             value_has_defer_or_using(cap) || value_has_defer_or_using(value)
         }
-        sem::ValueExprKind::StructLit { fields, .. } => fields
+        ExprKind::StructLit { fields, .. } => fields
             .iter()
             .any(|field| value_has_defer_or_using(&field.value)),
-        sem::ValueExprKind::StructUpdate { target, fields } => {
+        ExprKind::StructUpdate { target, fields } => {
             value_has_defer_or_using(target)
                 || fields
                     .iter()
                     .any(|field| value_has_defer_or_using(&field.value))
         }
-        sem::ValueExprKind::EnumVariant { payload, .. } | sem::ValueExprKind::TupleLit(payload) => {
+        ExprKind::EnumVariant { payload, .. } | ExprKind::TupleLit(payload) => {
             payload.iter().any(value_has_defer_or_using)
         }
-        sem::ValueExprKind::ArrayLit { init, .. } => match init {
-            sem::ArrayLitInit::Elems(elems) => elems.iter().any(value_has_defer_or_using),
-            sem::ArrayLitInit::Repeat(value, _) => value_has_defer_or_using(value),
+        ExprKind::ArrayLit { init, .. } => match init {
+            ArrayLitInit::Elems(elems) => elems.iter().any(value_has_defer_or_using),
+            ArrayLitInit::Repeat(value, _) => value_has_defer_or_using(value),
         },
-        sem::ValueExprKind::SetLit { elems, .. } => elems.iter().any(value_has_defer_or_using),
-        sem::ValueExprKind::MapLit { entries, .. } => entries.iter().any(|entry| {
+        ExprKind::SetLit { elems, .. } => elems.iter().any(value_has_defer_or_using),
+        ExprKind::MapLit { entries, .. } => entries.iter().any(|entry| {
             value_has_defer_or_using(&entry.key) || value_has_defer_or_using(&entry.value)
         }),
-        sem::ValueExprKind::UnaryOp { expr, .. }
-        | sem::ValueExprKind::HeapAlloc { expr }
-        | sem::ValueExprKind::Coerce { expr, .. } => value_has_defer_or_using(expr),
-        sem::ValueExprKind::Try {
+        ExprKind::UnaryOp { expr, .. }
+        | ExprKind::HeapAlloc { expr }
+        | ExprKind::Coerce { expr, .. } => value_has_defer_or_using(expr),
+        ExprKind::Try {
             fallible_expr,
             on_error,
         } => {
@@ -2655,13 +2663,13 @@ fn value_has_defer_or_using(value: &sem::ValueExpr) -> bool {
                     .as_ref()
                     .is_some_and(|handler| value_has_defer_or_using(handler))
         }
-        sem::ValueExprKind::BinOp { left, right, .. } => {
+        ExprKind::BinOp { left, right, .. } => {
             value_has_defer_or_using(left) || value_has_defer_or_using(right)
         }
-        sem::ValueExprKind::Range { start, end } => {
+        ExprKind::Range { start, end } => {
             value_has_defer_or_using(start) || value_has_defer_or_using(end)
         }
-        sem::ValueExprKind::Slice { start, end, .. } => {
+        ExprKind::Slice { start, end, .. } => {
             start
                 .as_ref()
                 .is_some_and(|start| value_has_defer_or_using(start))
@@ -2669,36 +2677,39 @@ fn value_has_defer_or_using(value: &sem::ValueExpr) -> bool {
                     .as_ref()
                     .is_some_and(|end| value_has_defer_or_using(end))
         }
-        sem::ValueExprKind::MapGet { target, key } => {
+        ExprKind::MapGet { target, key } => {
             value_has_defer_or_using(target) || value_has_defer_or_using(key)
         }
-        sem::ValueExprKind::UnitLit
-        | sem::ValueExprKind::IntLit(_)
-        | sem::ValueExprKind::BoolLit(_)
-        | sem::ValueExprKind::CharLit(_)
-        | sem::ValueExprKind::StringLit { .. }
-        | sem::ValueExprKind::StringFmt { .. }
-        | sem::ValueExprKind::Move { .. }
-        | sem::ValueExprKind::ImplicitMove { .. }
-        | sem::ValueExprKind::AddrOf { .. }
-        | sem::ValueExprKind::Load { .. }
-        | sem::ValueExprKind::Len { .. }
-        | sem::ValueExprKind::ClosureRef { .. } => false,
+        ExprKind::UnitLit
+        | ExprKind::IntLit(_)
+        | ExprKind::BoolLit(_)
+        | ExprKind::CharLit(_)
+        | ExprKind::StringLit { .. }
+        | ExprKind::StringFmt { .. }
+        | ExprKind::Move { .. }
+        | ExprKind::ImplicitMove { .. }
+        | ExprKind::AddrOf { .. }
+        | ExprKind::Load { .. }
+        | ExprKind::Len { .. }
+        | ExprKind::ClosureRef { .. }
+        | ExprKind::Var { .. }
+        | ExprKind::ArrayIndex { .. }
+        | ExprKind::TupleField { .. }
+        | ExprKind::StructField { .. }
+        | ExprKind::Deref { .. }
+        | ExprKind::Closure { .. } => false,
     }
 }
 
-fn value_has_cleanup_before_control_transfer(
-    value: &sem::ValueExpr,
-    kind: ControlTransferKind,
-) -> bool {
+fn value_has_cleanup_before_control_transfer(value: &Expr, kind: ControlTransferKind) -> bool {
     match &value.kind {
-        sem::ValueExprKind::Block { items, tail } => {
+        ExprKind::Block { items, tail } => {
             block_has_cleanup_before_control_transfer(items, kind)
                 || tail
                     .as_ref()
                     .is_some_and(|tail| value_has_cleanup_before_control_transfer(tail, kind))
         }
-        sem::ValueExprKind::If {
+        ExprKind::If {
             cond,
             then_body,
             else_body,
@@ -2707,74 +2718,65 @@ fn value_has_cleanup_before_control_transfer(
                 || value_has_cleanup_before_control_transfer(then_body, kind)
                 || value_has_cleanup_before_control_transfer(else_body, kind)
         }
-        sem::ValueExprKind::Match { scrutinee, arms } => {
+        ExprKind::Match { scrutinee, arms } => {
             value_has_cleanup_before_control_transfer(scrutinee, kind)
                 || arms
                     .iter()
                     .any(|arm| value_has_cleanup_before_control_transfer(&arm.body, kind))
         }
-        sem::ValueExprKind::Call { callee, args } => {
+        ExprKind::Call { callee, args } => {
             value_has_cleanup_before_control_transfer(callee, kind)
                 || args
                     .iter()
                     .any(|arg| call_arg_has_cleanup_before_control_transfer(arg, kind))
         }
-        sem::ValueExprKind::MethodCall { receiver, args, .. } => {
-            let receiver_has = match receiver {
-                sem::MethodReceiver::ValueExpr(value) => {
-                    value_has_cleanup_before_control_transfer(value, kind)
-                }
-                sem::MethodReceiver::PlaceExpr(_) => false,
-            };
-            receiver_has
+        ExprKind::MethodCall { callee, args, .. } => {
+            value_has_cleanup_before_control_transfer(callee, kind)
                 || args
                     .iter()
                     .any(|arg| call_arg_has_cleanup_before_control_transfer(arg, kind))
         }
-        sem::ValueExprKind::EmitSend { to, payload }
-        | sem::ValueExprKind::EmitRequest { to, payload, .. } => {
-            value_has_cleanup_before_control_transfer(to, kind)
-                || value_has_cleanup_before_control_transfer(payload, kind)
-        }
-        sem::ValueExprKind::Reply { cap, value } => {
+        ExprKind::Emit { kind: emit_kind } => match emit_kind {
+            EmitKind::Send { to, payload } | EmitKind::Request { to, payload, .. } => {
+                value_has_cleanup_before_control_transfer(to, kind)
+                    || value_has_cleanup_before_control_transfer(payload, kind)
+            }
+        },
+        ExprKind::Reply { cap, value } => {
             value_has_cleanup_before_control_transfer(cap, kind)
                 || value_has_cleanup_before_control_transfer(value, kind)
         }
-        sem::ValueExprKind::StructLit { fields, .. } => fields
+        ExprKind::StructLit { fields, .. } => fields
             .iter()
             .any(|field| value_has_cleanup_before_control_transfer(&field.value, kind)),
-        sem::ValueExprKind::StructUpdate { target, fields } => {
+        ExprKind::StructUpdate { target, fields } => {
             value_has_cleanup_before_control_transfer(target, kind)
                 || fields
                     .iter()
                     .any(|field| value_has_cleanup_before_control_transfer(&field.value, kind))
         }
-        sem::ValueExprKind::EnumVariant { payload, .. } | sem::ValueExprKind::TupleLit(payload) => {
-            payload
-                .iter()
-                .any(|value| value_has_cleanup_before_control_transfer(value, kind))
-        }
-        sem::ValueExprKind::ArrayLit { init, .. } => match init {
-            sem::ArrayLitInit::Elems(elems) => elems
+        ExprKind::EnumVariant { payload, .. } | ExprKind::TupleLit(payload) => payload
+            .iter()
+            .any(|value| value_has_cleanup_before_control_transfer(value, kind)),
+        ExprKind::ArrayLit { init, .. } => match init {
+            ArrayLitInit::Elems(elems) => elems
                 .iter()
                 .any(|value| value_has_cleanup_before_control_transfer(value, kind)),
-            sem::ArrayLitInit::Repeat(value, _) => {
+            ArrayLitInit::Repeat(value, _) => {
                 value_has_cleanup_before_control_transfer(value, kind)
             }
         },
-        sem::ValueExprKind::SetLit { elems, .. } => elems
+        ExprKind::SetLit { elems, .. } => elems
             .iter()
             .any(|value| value_has_cleanup_before_control_transfer(value, kind)),
-        sem::ValueExprKind::MapLit { entries, .. } => entries.iter().any(|entry| {
+        ExprKind::MapLit { entries, .. } => entries.iter().any(|entry| {
             value_has_cleanup_before_control_transfer(&entry.key, kind)
                 || value_has_cleanup_before_control_transfer(&entry.value, kind)
         }),
-        sem::ValueExprKind::UnaryOp { expr, .. }
-        | sem::ValueExprKind::HeapAlloc { expr }
-        | sem::ValueExprKind::Coerce { expr, .. } => {
-            value_has_cleanup_before_control_transfer(expr, kind)
-        }
-        sem::ValueExprKind::Try {
+        ExprKind::UnaryOp { expr, .. }
+        | ExprKind::HeapAlloc { expr }
+        | ExprKind::Coerce { expr, .. } => value_has_cleanup_before_control_transfer(expr, kind),
+        ExprKind::Try {
             fallible_expr,
             on_error,
         } => {
@@ -2783,15 +2785,15 @@ fn value_has_cleanup_before_control_transfer(
                     .as_ref()
                     .is_some_and(|handler| value_has_cleanup_before_control_transfer(handler, kind))
         }
-        sem::ValueExprKind::BinOp { left, right, .. } => {
+        ExprKind::BinOp { left, right, .. } => {
             value_has_cleanup_before_control_transfer(left, kind)
                 || value_has_cleanup_before_control_transfer(right, kind)
         }
-        sem::ValueExprKind::Range { start, end } => {
+        ExprKind::Range { start, end } => {
             value_has_cleanup_before_control_transfer(start, kind)
                 || value_has_cleanup_before_control_transfer(end, kind)
         }
-        sem::ValueExprKind::Slice { start, end, .. } => {
+        ExprKind::Slice { start, end, .. } => {
             start
                 .as_ref()
                 .is_some_and(|start| value_has_cleanup_before_control_transfer(start, kind))
@@ -2799,316 +2801,291 @@ fn value_has_cleanup_before_control_transfer(
                     .as_ref()
                     .is_some_and(|end| value_has_cleanup_before_control_transfer(end, kind))
         }
-        sem::ValueExprKind::MapGet { target, key } => {
+        ExprKind::MapGet { target, key } => {
             value_has_cleanup_before_control_transfer(target, kind)
                 || value_has_cleanup_before_control_transfer(key, kind)
         }
-        sem::ValueExprKind::UnitLit
-        | sem::ValueExprKind::IntLit(_)
-        | sem::ValueExprKind::BoolLit(_)
-        | sem::ValueExprKind::CharLit(_)
-        | sem::ValueExprKind::StringLit { .. }
-        | sem::ValueExprKind::StringFmt { .. }
-        | sem::ValueExprKind::Move { .. }
-        | sem::ValueExprKind::ImplicitMove { .. }
-        | sem::ValueExprKind::AddrOf { .. }
-        | sem::ValueExprKind::Load { .. }
-        | sem::ValueExprKind::Len { .. }
-        | sem::ValueExprKind::ClosureRef { .. } => false,
+        ExprKind::UnitLit
+        | ExprKind::IntLit(_)
+        | ExprKind::BoolLit(_)
+        | ExprKind::CharLit(_)
+        | ExprKind::StringLit { .. }
+        | ExprKind::StringFmt { .. }
+        | ExprKind::Move { .. }
+        | ExprKind::ImplicitMove { .. }
+        | ExprKind::AddrOf { .. }
+        | ExprKind::Load { .. }
+        | ExprKind::Len { .. }
+        | ExprKind::ClosureRef { .. }
+        | ExprKind::Var { .. }
+        | ExprKind::ArrayIndex { .. }
+        | ExprKind::TupleField { .. }
+        | ExprKind::StructField { .. }
+        | ExprKind::Deref { .. }
+        | ExprKind::Closure { .. } => false,
     }
 }
 
-fn value_first_bare_try_id(value: &sem::ValueExpr) -> Option<NodeId> {
+fn value_first_bare_try_id(value: &Expr) -> Option<NodeId> {
     match &value.kind {
-        sem::ValueExprKind::Try {
-            fallible_expr,
-            on_error: None,
-        } => value_first_bare_try_id(fallible_expr).or(Some(value.id)),
-        sem::ValueExprKind::Try {
+        ExprKind::Try {
             fallible_expr,
             on_error: Some(handler),
         } => value_first_bare_try_id(fallible_expr).or_else(|| value_first_bare_try_id(handler)),
-        sem::ValueExprKind::Block { items, tail } => items
+        ExprKind::Try { fallible_expr, .. } => {
+            value_first_bare_try_id(fallible_expr).or(Some(value.id))
+        }
+        ExprKind::Block { items, tail } => items
             .iter()
             .find_map(block_item_first_bare_try_id)
             .or_else(|| tail.as_ref().and_then(|tail| value_first_bare_try_id(tail))),
-        sem::ValueExprKind::If {
+        ExprKind::If {
             cond,
             then_body,
             else_body,
         } => value_first_bare_try_id(cond)
             .or_else(|| value_first_bare_try_id(then_body))
             .or_else(|| value_first_bare_try_id(else_body)),
-        sem::ValueExprKind::Match { scrutinee, arms } => value_first_bare_try_id(scrutinee)
-            .or_else(|| {
-                arms.iter()
-                    .find_map(|arm| value_first_bare_try_id(&arm.body))
-            }),
-        sem::ValueExprKind::Call { callee, args } => value_first_bare_try_id(callee)
+        ExprKind::Match { scrutinee, arms } => value_first_bare_try_id(scrutinee).or_else(|| {
+            arms.iter()
+                .find_map(|arm| value_first_bare_try_id(&arm.body))
+        }),
+        ExprKind::Call { callee, args } => value_first_bare_try_id(callee)
             .or_else(|| args.iter().find_map(call_arg_first_bare_try_id)),
-        sem::ValueExprKind::MethodCall { receiver, args, .. } => {
-            let receiver_try = match receiver {
-                sem::MethodReceiver::ValueExpr(value) => value_first_bare_try_id(value),
-                sem::MethodReceiver::PlaceExpr(_) => None,
-            };
-            receiver_try.or_else(|| args.iter().find_map(call_arg_first_bare_try_id))
-        }
-        sem::ValueExprKind::EmitSend { to, payload }
-        | sem::ValueExprKind::EmitRequest { to, payload, .. } => {
-            value_first_bare_try_id(to).or_else(|| value_first_bare_try_id(payload))
-        }
-        sem::ValueExprKind::Reply { cap, value } => {
+        ExprKind::MethodCall { callee, args, .. } => value_first_bare_try_id(callee)
+            .or_else(|| args.iter().find_map(call_arg_first_bare_try_id)),
+        ExprKind::Emit { kind } => match kind {
+            EmitKind::Send { to, payload } | EmitKind::Request { to, payload, .. } => {
+                value_first_bare_try_id(to).or_else(|| value_first_bare_try_id(payload))
+            }
+        },
+        ExprKind::Reply { cap, value } => {
             value_first_bare_try_id(cap).or_else(|| value_first_bare_try_id(value))
         }
-        sem::ValueExprKind::StructLit { fields, .. } => fields
+        ExprKind::StructLit { fields, .. } => fields
             .iter()
             .find_map(|field| value_first_bare_try_id(&field.value)),
-        sem::ValueExprKind::StructUpdate { target, fields } => value_first_bare_try_id(target)
-            .or_else(|| {
+        ExprKind::StructUpdate { target, fields } => {
+            value_first_bare_try_id(target).or_else(|| {
                 fields
                     .iter()
                     .find_map(|field| value_first_bare_try_id(&field.value))
-            }),
-        sem::ValueExprKind::EnumVariant { payload, .. } | sem::ValueExprKind::TupleLit(payload) => {
+            })
+        }
+        ExprKind::EnumVariant { payload, .. } | ExprKind::TupleLit(payload) => {
             payload.iter().find_map(value_first_bare_try_id)
         }
-        sem::ValueExprKind::ArrayLit { init, .. } => match init {
-            sem::ArrayLitInit::Elems(elems) => elems.iter().find_map(value_first_bare_try_id),
-            sem::ArrayLitInit::Repeat(value, _) => value_first_bare_try_id(value),
+        ExprKind::ArrayLit { init, .. } => match init {
+            ArrayLitInit::Elems(elems) => elems.iter().find_map(value_first_bare_try_id),
+            ArrayLitInit::Repeat(value, _) => value_first_bare_try_id(value),
         },
-        sem::ValueExprKind::SetLit { elems, .. } => elems.iter().find_map(value_first_bare_try_id),
-        sem::ValueExprKind::MapLit { entries, .. } => entries.iter().find_map(|entry| {
+        ExprKind::SetLit { elems, .. } => elems.iter().find_map(value_first_bare_try_id),
+        ExprKind::MapLit { entries, .. } => entries.iter().find_map(|entry| {
             value_first_bare_try_id(&entry.key).or_else(|| value_first_bare_try_id(&entry.value))
         }),
-        sem::ValueExprKind::UnaryOp { expr, .. }
-        | sem::ValueExprKind::HeapAlloc { expr }
-        | sem::ValueExprKind::Coerce { expr, .. } => value_first_bare_try_id(expr),
-        sem::ValueExprKind::BinOp { left, right, .. } => {
+        ExprKind::UnaryOp { expr, .. }
+        | ExprKind::HeapAlloc { expr }
+        | ExprKind::Coerce { expr, .. } => value_first_bare_try_id(expr),
+        ExprKind::BinOp { left, right, .. } => {
             value_first_bare_try_id(left).or_else(|| value_first_bare_try_id(right))
         }
-        sem::ValueExprKind::Range { start, end } => {
+        ExprKind::Range { start, end } => {
             value_first_bare_try_id(start).or_else(|| value_first_bare_try_id(end))
         }
-        sem::ValueExprKind::Slice { start, end, .. } => start
+        ExprKind::Slice { start, end, .. } => start
             .as_ref()
             .and_then(|start| value_first_bare_try_id(start))
             .or_else(|| end.as_ref().and_then(|end| value_first_bare_try_id(end))),
-        sem::ValueExprKind::MapGet { target, key } => {
+        ExprKind::MapGet { target, key } => {
             value_first_bare_try_id(target).or_else(|| value_first_bare_try_id(key))
         }
-        sem::ValueExprKind::UnitLit
-        | sem::ValueExprKind::IntLit(_)
-        | sem::ValueExprKind::BoolLit(_)
-        | sem::ValueExprKind::CharLit(_)
-        | sem::ValueExprKind::StringLit { .. }
-        | sem::ValueExprKind::StringFmt { .. }
-        | sem::ValueExprKind::Move { .. }
-        | sem::ValueExprKind::ImplicitMove { .. }
-        | sem::ValueExprKind::AddrOf { .. }
-        | sem::ValueExprKind::Load { .. }
-        | sem::ValueExprKind::Len { .. }
-        | sem::ValueExprKind::ClosureRef { .. } => None,
+        ExprKind::UnitLit
+        | ExprKind::IntLit(_)
+        | ExprKind::BoolLit(_)
+        | ExprKind::CharLit(_)
+        | ExprKind::StringLit { .. }
+        | ExprKind::StringFmt { .. }
+        | ExprKind::Move { .. }
+        | ExprKind::ImplicitMove { .. }
+        | ExprKind::AddrOf { .. }
+        | ExprKind::Load { .. }
+        | ExprKind::Len { .. }
+        | ExprKind::ClosureRef { .. }
+        | ExprKind::Var { .. }
+        | ExprKind::ArrayIndex { .. }
+        | ExprKind::TupleField { .. }
+        | ExprKind::StructField { .. }
+        | ExprKind::Deref { .. }
+        | ExprKind::Closure { .. } => None,
     }
 }
 
-fn block_item_has_for(item: &sem::BlockItem) -> bool {
+fn block_item_has_for(item: &BlockItem) -> bool {
     match item {
-        sem::BlockItem::Stmt(stmt) => stmt_has_for(stmt),
-        sem::BlockItem::Expr(expr) => value_has_for(expr),
+        BlockItem::Stmt(stmt) => stmt_has_for(stmt),
+        BlockItem::Expr(expr) => value_has_for(expr),
     }
 }
 
-fn block_item_has_defer_or_using(item: &sem::BlockItem) -> bool {
+fn block_item_has_defer_or_using(item: &BlockItem) -> bool {
     match item {
-        sem::BlockItem::Stmt(stmt) => stmt_has_defer_or_using(stmt),
-        sem::BlockItem::Expr(expr) => value_has_defer_or_using(expr),
+        BlockItem::Stmt(stmt) => stmt_has_defer_or_using(stmt),
+        BlockItem::Expr(expr) => value_has_defer_or_using(expr),
     }
 }
 
 fn block_has_cleanup_before_control_transfer(
-    items: &[sem::BlockItem],
+    items: &[BlockItem],
     kind: ControlTransferKind,
 ) -> bool {
     items.windows(2).any(|window| match window {
-        [sem::BlockItem::Expr(expr), sem::BlockItem::Stmt(stmt)] => {
+        [BlockItem::Expr(expr), BlockItem::Stmt(stmt)] => {
             expr_is_close_ignore_error(expr) && stmt_matches_control_transfer(stmt, kind)
         }
         _ => false,
     }) || items.iter().any(|item| match item {
-        sem::BlockItem::Stmt(stmt) => stmt_has_cleanup_before_control_transfer(stmt, kind),
-        sem::BlockItem::Expr(expr) => value_has_cleanup_before_control_transfer(expr, kind),
+        BlockItem::Stmt(stmt) => stmt_has_cleanup_before_control_transfer(stmt, kind),
+        BlockItem::Expr(expr) => value_has_cleanup_before_control_transfer(expr, kind),
     })
 }
 
-fn block_item_first_bare_try_id(item: &sem::BlockItem) -> Option<NodeId> {
+fn block_item_first_bare_try_id(item: &BlockItem) -> Option<NodeId> {
     match item {
-        sem::BlockItem::Stmt(stmt) => stmt_first_bare_try_id(stmt),
-        sem::BlockItem::Expr(expr) => value_first_bare_try_id(expr),
+        BlockItem::Stmt(stmt) => stmt_first_bare_try_id(stmt),
+        BlockItem::Expr(expr) => value_first_bare_try_id(expr),
     }
 }
 
-fn stmt_has_for(stmt: &sem::StmtExpr) -> bool {
+fn stmt_has_for(stmt: &StmtExpr) -> bool {
     match &stmt.kind {
-        sem::StmtExprKind::For { .. } => true,
-        sem::StmtExprKind::LetBind { value, .. } | sem::StmtExprKind::VarBind { value, .. } => {
+        StmtExprKind::For { .. } => true,
+        StmtExprKind::LetBind { value, .. } | StmtExprKind::VarBind { value, .. } => {
             value_has_for(value)
         }
-        sem::StmtExprKind::Assign { value, .. } => value_has_for(value),
-        sem::StmtExprKind::While { cond, body } => value_has_for(cond) || value_has_for(body),
-        sem::StmtExprKind::Return { value } => {
-            value.as_ref().is_some_and(|value| value_has_for(value))
+        StmtExprKind::Assign { value, .. } | StmtExprKind::CompoundAssign { value, .. } => {
+            value_has_for(value)
         }
-        sem::StmtExprKind::Defer { value } => value_has_for(value),
-        sem::StmtExprKind::Using { value, body, .. } => value_has_for(value) || value_has_for(body),
-        sem::StmtExprKind::VarDecl { .. }
-        | sem::StmtExprKind::Break
-        | sem::StmtExprKind::Continue => false,
+        StmtExprKind::While { cond, body } => value_has_for(cond) || value_has_for(body),
+        StmtExprKind::Return { value } => value.as_ref().is_some_and(|value| value_has_for(value)),
+        StmtExprKind::Defer { value } => value_has_for(value),
+        StmtExprKind::Using { value, body, .. } => value_has_for(value) || value_has_for(body),
+        StmtExprKind::VarDecl { .. } | StmtExprKind::Break | StmtExprKind::Continue => false,
     }
 }
 
-fn stmt_has_defer_or_using(stmt: &sem::StmtExpr) -> bool {
+fn stmt_has_defer_or_using(stmt: &StmtExpr) -> bool {
     match &stmt.kind {
-        sem::StmtExprKind::Defer { .. } | sem::StmtExprKind::Using { .. } => true,
-        sem::StmtExprKind::LetBind { value, .. } | sem::StmtExprKind::VarBind { value, .. } => {
+        StmtExprKind::Defer { .. } | StmtExprKind::Using { .. } => true,
+        StmtExprKind::LetBind { value, .. } | StmtExprKind::VarBind { value, .. } => {
             value_has_defer_or_using(value)
         }
-        sem::StmtExprKind::Assign { value, .. } => value_has_defer_or_using(value),
-        sem::StmtExprKind::While { cond, body } => {
+        StmtExprKind::Assign { value, .. } | StmtExprKind::CompoundAssign { value, .. } => {
+            value_has_defer_or_using(value)
+        }
+        StmtExprKind::While { cond, body } => {
             value_has_defer_or_using(cond) || value_has_defer_or_using(body)
         }
-        sem::StmtExprKind::For { iter, body, .. } => {
+        StmtExprKind::For { iter, body, .. } => {
             value_has_defer_or_using(iter) || value_has_defer_or_using(body)
         }
-        sem::StmtExprKind::Return { value } => value
+        StmtExprKind::Return { value } => value
             .as_ref()
             .is_some_and(|value| value_has_defer_or_using(value)),
-        sem::StmtExprKind::VarDecl { .. }
-        | sem::StmtExprKind::Break
-        | sem::StmtExprKind::Continue => false,
+        StmtExprKind::VarDecl { .. } | StmtExprKind::Break | StmtExprKind::Continue => false,
     }
 }
 
-fn stmt_has_cleanup_before_control_transfer(
-    stmt: &sem::StmtExpr,
-    kind: ControlTransferKind,
-) -> bool {
+fn stmt_has_cleanup_before_control_transfer(stmt: &StmtExpr, kind: ControlTransferKind) -> bool {
     match &stmt.kind {
-        sem::StmtExprKind::LetBind { value, .. } | sem::StmtExprKind::VarBind { value, .. } => {
+        StmtExprKind::LetBind { value, .. } | StmtExprKind::VarBind { value, .. } => {
             value_has_cleanup_before_control_transfer(value, kind)
         }
-        sem::StmtExprKind::Assign { value, .. } => {
+        StmtExprKind::Assign { value, .. } | StmtExprKind::CompoundAssign { value, .. } => {
             value_has_cleanup_before_control_transfer(value, kind)
         }
-        sem::StmtExprKind::While { cond, body } => {
+        StmtExprKind::While { cond, body } => {
             value_has_cleanup_before_control_transfer(cond, kind)
                 || value_has_cleanup_before_control_transfer(body, kind)
         }
-        sem::StmtExprKind::For { iter, body, .. } => {
+        StmtExprKind::For { iter, body, .. } => {
             value_has_cleanup_before_control_transfer(iter, kind)
                 || value_has_cleanup_before_control_transfer(body, kind)
         }
-        sem::StmtExprKind::Return { value } => value
+        StmtExprKind::Return { value } => value
             .as_ref()
             .is_some_and(|value| value_has_cleanup_before_control_transfer(value, kind)),
-        sem::StmtExprKind::Defer { value } => {
-            value_has_cleanup_before_control_transfer(value, kind)
-        }
-        sem::StmtExprKind::Using { value, body, .. } => {
+        StmtExprKind::Defer { value } => value_has_cleanup_before_control_transfer(value, kind),
+        StmtExprKind::Using { value, body, .. } => {
             value_has_cleanup_before_control_transfer(value, kind)
                 || value_has_cleanup_before_control_transfer(body, kind)
         }
-        sem::StmtExprKind::VarDecl { .. }
-        | sem::StmtExprKind::Break
-        | sem::StmtExprKind::Continue => false,
+        StmtExprKind::VarDecl { .. } | StmtExprKind::Break | StmtExprKind::Continue => false,
     }
 }
 
-fn stmt_first_bare_try_id(stmt: &sem::StmtExpr) -> Option<NodeId> {
+fn stmt_first_bare_try_id(stmt: &StmtExpr) -> Option<NodeId> {
     match &stmt.kind {
-        sem::StmtExprKind::LetBind { value, .. } | sem::StmtExprKind::VarBind { value, .. } => {
+        StmtExprKind::LetBind { value, .. } | StmtExprKind::VarBind { value, .. } => {
             value_first_bare_try_id(value)
         }
-        sem::StmtExprKind::Assign { value, .. } => value_first_bare_try_id(value),
-        sem::StmtExprKind::While { cond, body } => {
+        StmtExprKind::Assign { value, .. } | StmtExprKind::CompoundAssign { value, .. } => {
+            value_first_bare_try_id(value)
+        }
+        StmtExprKind::While { cond, body } => {
             value_first_bare_try_id(cond).or_else(|| value_first_bare_try_id(body))
         }
-        sem::StmtExprKind::For { iter, body, .. } => {
+        StmtExprKind::For { iter, body, .. } => {
             value_first_bare_try_id(iter).or_else(|| value_first_bare_try_id(body))
         }
-        sem::StmtExprKind::Return { value } => value
+        StmtExprKind::Return { value } => value
             .as_ref()
             .and_then(|value| value_first_bare_try_id(value)),
-        sem::StmtExprKind::Defer { value } => value_first_bare_try_id(value),
-        sem::StmtExprKind::Using { value, body, .. } => {
+        StmtExprKind::Defer { value } => value_first_bare_try_id(value),
+        StmtExprKind::Using { value, body, .. } => {
             value_first_bare_try_id(value).or_else(|| value_first_bare_try_id(body))
         }
-        sem::StmtExprKind::VarDecl { .. }
-        | sem::StmtExprKind::Break
-        | sem::StmtExprKind::Continue => None,
+        StmtExprKind::VarDecl { .. } | StmtExprKind::Break | StmtExprKind::Continue => None,
     }
 }
 
-fn call_arg_has_for(arg: &sem::CallArg) -> bool {
-    match arg {
-        sem::CallArg::In { expr, .. } | sem::CallArg::Sink { expr, .. } => value_has_for(expr),
-        sem::CallArg::InOut { .. } | sem::CallArg::Out { .. } => false,
-    }
+fn call_arg_has_for(arg: &CallArg) -> bool {
+    value_has_for(&arg.expr)
 }
 
-fn call_arg_has_defer_or_using(arg: &sem::CallArg) -> bool {
-    match arg {
-        sem::CallArg::In { expr, .. } | sem::CallArg::Sink { expr, .. } => {
-            value_has_defer_or_using(expr)
-        }
-        sem::CallArg::InOut { .. } | sem::CallArg::Out { .. } => false,
-    }
+fn call_arg_has_defer_or_using(arg: &CallArg) -> bool {
+    value_has_defer_or_using(&arg.expr)
 }
 
-fn call_arg_has_cleanup_before_control_transfer(
-    arg: &sem::CallArg,
-    kind: ControlTransferKind,
-) -> bool {
-    match arg {
-        sem::CallArg::In { expr, .. } | sem::CallArg::Sink { expr, .. } => {
-            value_has_cleanup_before_control_transfer(expr, kind)
-        }
-        sem::CallArg::InOut { .. } | sem::CallArg::Out { .. } => false,
-    }
+fn call_arg_has_cleanup_before_control_transfer(arg: &CallArg, kind: ControlTransferKind) -> bool {
+    value_has_cleanup_before_control_transfer(&arg.expr, kind)
 }
 
-fn call_arg_first_bare_try_id(arg: &sem::CallArg) -> Option<NodeId> {
-    match arg {
-        sem::CallArg::In { expr, .. } | sem::CallArg::Sink { expr, .. } => {
-            value_first_bare_try_id(expr)
-        }
-        sem::CallArg::InOut { .. } | sem::CallArg::Out { .. } => None,
-    }
+fn call_arg_first_bare_try_id(arg: &CallArg) -> Option<NodeId> {
+    value_first_bare_try_id(&arg.expr)
 }
 
-fn expr_is_close_ignore_error(expr: &sem::ValueExpr) -> bool {
+fn expr_is_close_ignore_error(expr: &Expr) -> bool {
     matches!(
         &expr.kind,
-        sem::ValueExprKind::MethodCall { method_name, .. } if method_name == "close_ignore_error"
+        ExprKind::MethodCall { method_name, .. } if method_name == "close_ignore_error"
     ) || matches!(
         &expr.kind,
-        sem::ValueExprKind::Call { callee, .. }
+        ExprKind::Call { callee, .. }
             if matches!(
                 &callee.kind,
-                sem::ValueExprKind::Load { place }
+                ExprKind::Load { expr }
                     if matches!(
-                        &place.kind,
-                        sem::PlaceExprKind::Var { ident, .. } if ident == "cleanup"
+                        &expr.kind,
+                        ExprKind::Var { ident, .. } if ident == "cleanup"
                     )
             )
     )
 }
 
-fn stmt_matches_control_transfer(stmt: &sem::StmtExpr, kind: ControlTransferKind) -> bool {
+fn stmt_matches_control_transfer(stmt: &StmtExpr, kind: ControlTransferKind) -> bool {
     matches!(
         (&stmt.kind, kind),
-        (
-            sem::StmtExprKind::Return { .. },
-            ControlTransferKind::Return
-        ) | (sem::StmtExprKind::Continue, ControlTransferKind::Continue)
+        (StmtExprKind::Return { .. }, ControlTransferKind::Return)
+            | (StmtExprKind::Continue, ControlTransferKind::Continue)
     )
 }

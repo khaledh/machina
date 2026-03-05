@@ -1,4 +1,4 @@
-use crate::core::tree::semantic as sem;
+use crate::core::ast::MethodItem;
 
 use super::{analyze, assert_ir_eq, format_func, indoc, lower_module};
 use std::collections::HashMap;
@@ -21,7 +21,7 @@ fn test_lower_closure_ref_captureless() {
         .find(|def| def.sig.name.contains("$closure$"))
         .expect("missing closure function definition");
     let closure_name = closure_def.sig.name.clone();
-    let closure_def_id = closure_def.def_id;
+    let closure_def_id = ctx.def_table.def_id(closure_def.id);
 
     assert!(
         ctx.module
@@ -99,12 +99,12 @@ fn test_lower_closure_invoke() {
         .find(|block| block.type_name == "main$closure$1")
         .and_then(|block| {
             block.method_items.iter().find_map(|item| match item {
-                sem::MethodItem::Def(def) if def.sig.name == "invoke" => Some(def),
+                MethodItem::Def(def) if def.sig.name == "invoke" => Some(def),
                 _ => None,
             })
         })
         .expect("missing closure invoke method");
-    let invoke_def_id = method_def.def_id;
+    let invoke_def_id = ctx.def_table.def_id(method_def.id);
 
     let lowered = lower_module(
         &ctx.module,
@@ -200,7 +200,9 @@ fn test_lower_closure_borrow_capture() {
             .find(|block| block.type_name == type_name)
             .and_then(|block| {
                 block.method_items.iter().find_map(|item| match item {
-                    sem::MethodItem::Def(def) if def.sig.name == "invoke" => Some(def.def_id),
+                    MethodItem::Def(def) if def.sig.name == "invoke" => {
+                        Some(ctx.def_table.def_id(def.id))
+                    }
                     _ => None,
                 })
             })

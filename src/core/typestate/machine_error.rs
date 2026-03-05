@@ -117,7 +117,7 @@ pub(super) fn return_machine_error_if_eq(
         id: node_id_gen.new_id(),
         kind: ExprKind::BinOp {
             left: Box::new(var_expr(value_var, node_id_gen, span)),
-            op: crate::core::tree::BinaryOp::Eq,
+            op: BinaryOp::Eq,
             right: Box::new(int_expr(expected, node_id_gen, span)),
         },
         span,

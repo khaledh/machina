@@ -16,10 +16,10 @@ use thiserror::Error;
 
 use std::sync::OnceLock;
 
+use crate::core::ast::{Module, NodeIdGen, Require};
 use crate::core::diag::Span;
 use crate::core::lexer::{LexError, Lexer, Token};
 use crate::core::parse::{ParseError, Parser, ParserOptions};
-use crate::core::tree::{Module, NodeIdGen, Require};
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct ModulePath {

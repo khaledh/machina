@@ -1,8 +1,8 @@
 //! Type lowering from semantic types to SSA IR types.
 
+use crate::core::ast::Module;
 use crate::core::ir::{IrStructField, IrTypeCache, IrTypeId, IrTypeKind};
 use crate::core::resolve::DefTable;
-use crate::core::tree::semantic as sem;
 use crate::core::typecheck::nominal::{NominalKey, TypeView};
 use crate::core::typecheck::type_map::TypeMap;
 use crate::core::typecheck::type_view::TypeViewResolver;
@@ -17,7 +17,7 @@ use std::collections::HashMap;
 /// - `type_cache_by_kind`: Maps type structures to SSA type IDs (for structural dedup)
 pub(super) struct TypeLowerer<'a> {
     type_map: &'a TypeMap,
-    type_view_resolver: Option<TypeViewResolver<'a, sem::Module>>,
+    type_view_resolver: Option<TypeViewResolver<'a, Module>>,
     pub(super) ir_type_cache: IrTypeCache,
     by_type_id: HashMap<TypeId, IrTypeId>,
     by_type: HashMap<Type, IrTypeId>,
@@ -34,7 +34,7 @@ impl<'a> TypeLowerer<'a> {
     pub(super) fn new_with_type_defs(
         type_map: &'a TypeMap,
         def_table: Option<&'a DefTable>,
-        module: Option<&'a sem::Module>,
+        module: Option<&'a Module>,
     ) -> Self {
         Self {
             type_map,
@@ -376,7 +376,7 @@ impl<'a> TypeLowerer<'a> {
                 let mut variants = Vec::with_capacity(err_tys.len() + 1);
                 variants.push(EnumVariant {
                     name: "Ok".to_string(),
-                    payload: vec![(*ok_ty.clone())],
+                    payload: vec![*ok_ty.clone()],
                 });
                 for (index, err_ty) in err_tys.iter().enumerate() {
                     variants.push(EnumVariant {

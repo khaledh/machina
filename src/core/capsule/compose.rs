@@ -5,12 +5,16 @@
 
 use std::collections::{HashMap, HashSet};
 
+use crate::core::ast::visit_mut::{self, VisitorMut};
+use crate::core::ast::{
+    Attribute, BindPattern, BindPatternKind, CaptureSpec, Expr, ExprKind, FuncDef, FunctionSig,
+    MatchPattern, MethodBlock, MethodDef, MethodSig, Module, NodeId, StmtExpr, StmtExprKind,
+    TopLevelItem, TypeExpr, TypeExprKind, TypeParam,
+};
 use crate::core::capsule::bind::{AliasSymbols, CapsuleBindings};
 use crate::core::capsule::{CapsuleError, ModuleId, ModulePath, RequireKind};
 use crate::core::context::CapsuleParsedContext;
 use crate::core::diag::Span;
-use crate::core::tree::visit_mut::{self, VisitorMut};
-use crate::core::tree::*;
 
 /// Merge prelude declarations ahead of user declarations.
 pub(crate) fn merge_modules(prelude_module: &Module, user_module: &Module) -> Module {
@@ -102,9 +106,7 @@ pub(crate) fn flatten_capsule(
 /// compute the set of symbol names that should remain public (i.e. the
 /// specifically imported symbols). All other public names get mangled during
 /// flattening to avoid collisions with user-defined names.
-fn prelude_only_keep_sets(
-    program: &CapsuleParsedContext,
-) -> HashMap<ModuleId, HashSet<String>> {
+fn prelude_only_keep_sets(program: &CapsuleParsedContext) -> HashMap<ModuleId, HashSet<String>> {
     let mut has_user_require: HashSet<ModuleId> = HashSet::new();
     let mut prelude_members: HashMap<ModuleId, HashSet<String>> = HashMap::new();
 
@@ -118,7 +120,10 @@ fn prelude_only_keep_sets(
             };
             if req.prelude {
                 if let Some(member) = &req.member {
-                    prelude_members.entry(*dep_id).or_default().insert(member.clone());
+                    prelude_members
+                        .entry(*dep_id)
+                        .or_default()
+                        .insert(member.clone());
                 }
             } else {
                 has_user_require.insert(*dep_id);
@@ -605,8 +610,13 @@ fn mangle_dependency_symbols(
         match item {
             TopLevelItem::FuncDecl(func_decl) => {
                 let old = func_decl.sig.name.clone();
-                if should_mangle_callable(&func_decl.attrs, module_path, &old, conflicts, prelude_keep)
-                {
+                if should_mangle_callable(
+                    &func_decl.attrs,
+                    module_path,
+                    &old,
+                    conflicts,
+                    prelude_keep,
+                ) {
                     let new_name = mangled_module_symbol(module_path, &old);
                     func_decl.sig.name = new_name.clone();
                     value_renames.insert(old, new_name);
@@ -614,8 +624,13 @@ fn mangle_dependency_symbols(
             }
             TopLevelItem::FuncDef(func_def) => {
                 let old = func_def.sig.name.clone();
-                if should_mangle_callable(&func_def.attrs, module_path, &old, conflicts, prelude_keep)
-                {
+                if should_mangle_callable(
+                    &func_def.attrs,
+                    module_path,
+                    &old,
+                    conflicts,
+                    prelude_keep,
+                ) {
                     let new_name = mangled_module_symbol(module_path, &old);
                     func_def.sig.name = new_name.clone();
                     value_renames.insert(old, new_name);

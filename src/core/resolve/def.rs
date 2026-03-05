@@ -4,7 +4,7 @@ use std::hash::{Hash, Hasher};
 use crate::core::capsule::ModuleId;
 
 // Defs store only identifiers and kinds; def kind structure lives in
-// the resolved tree.
+// the resolved AST.
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct DefId(pub u32);

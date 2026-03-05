@@ -26,7 +26,7 @@ pub(crate) fn signature_help_at_span(
     let typed = state.typed.as_ref()?;
     let call = call_site_at_span(&typed.module, query_span).or_else(|| {
         // Cursor-at-boundary editing case: when the caret sits just after the
-        // last typed argument token (before `,`/`)`), some spans may exclude
+        // last typed argument token (before `,` / `)`), some spans may exclude
         // that boundary point. Nudge left by one column and retry.
         let nudged = nudge_span_left(query_span)?;
         call_site_at_span(&typed.module, nudged)
@@ -228,12 +228,12 @@ fn format_signature_label(def_table: &DefTable, name: &str, params: &[String]) -
     demangler.demangle_text(&label)
 }
 
-fn param_mode_name(mode: &crate::core::tree::ParamMode) -> &'static str {
+fn param_mode_name(mode: &crate::core::ast::ParamMode) -> &'static str {
     match mode {
-        crate::core::tree::ParamMode::In => "in",
-        crate::core::tree::ParamMode::InOut => "inout",
-        crate::core::tree::ParamMode::Out => "out",
-        crate::core::tree::ParamMode::Sink => "sink",
+        crate::core::ast::ParamMode::In => "in",
+        crate::core::ast::ParamMode::InOut => "inout",
+        crate::core::ast::ParamMode::Out => "out",
+        crate::core::ast::ParamMode::Sink => "sink",
     }
 }
 

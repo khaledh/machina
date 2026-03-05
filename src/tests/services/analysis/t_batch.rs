@@ -1,12 +1,12 @@
 use std::collections::HashMap;
 
+use crate::core::ast::NodeIdGen;
 use crate::core::capsule::{ModuleId, ModulePath};
 use crate::core::context::ParsedContext;
 use crate::core::lexer::{LexError, Lexer};
 use crate::core::parse::Parser;
 use crate::core::resolve::{attach_def_owners, resolve};
 use crate::core::symbol_id::SelectedCallable;
-use crate::core::tree::NodeIdGen;
 use crate::core::typecheck::type_check;
 use crate::services::analysis::batch::{query_parse_resolve_typecheck, query_typecheck};
 use crate::services::analysis::db::AnalysisDb;

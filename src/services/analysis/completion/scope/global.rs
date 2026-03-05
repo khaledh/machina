@@ -5,9 +5,9 @@
 
 use std::collections::{HashMap, HashSet};
 
+use crate::core::ast::{NodeId, TopLevelItem, TypeDefKind};
 use crate::core::context::ResolvedContext;
 use crate::core::resolve::DefKind;
-use crate::core::tree::{NodeId, TopLevelItem, TypeDefKind};
 use crate::services::analysis::results::{CompletionItem, CompletionKind};
 
 pub(super) fn global_scope(resolved: &ResolvedContext) -> HashMap<String, CompletionItem> {

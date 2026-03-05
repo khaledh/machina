@@ -6,10 +6,10 @@
 
 use std::collections::HashMap;
 
+use crate::core::ast::visit::{self, Visitor};
+use crate::core::ast::*;
 use crate::core::context::ResolvedContext;
 use crate::core::resolve::{DefId, DefTable, ImportedFacts};
-use crate::core::tree::visit::{self, Visitor};
-use crate::core::tree::*;
 use crate::core::typecheck::nominal::NominalKey;
 use crate::core::typecheck::type_map::{
     TypeDefLookup, TypeMap, resolve_type_def_with_args, resolve_type_expr,
@@ -296,15 +296,12 @@ struct ExplicitNominalUse {
 }
 
 struct ExplicitNominalCollector<'a> {
-    def_table: &'a crate::core::resolve::DefTable,
+    def_table: &'a DefTable,
     uses: Vec<ExplicitNominalUse>,
 }
 
 impl<'a> ExplicitNominalCollector<'a> {
-    fn collect(
-        def_table: &'a crate::core::resolve::DefTable,
-        module: &Module,
-    ) -> Vec<ExplicitNominalUse> {
+    fn collect(def_table: &'a DefTable, module: &Module) -> Vec<ExplicitNominalUse> {
         let mut collector = Self {
             def_table,
             uses: Vec::new(),

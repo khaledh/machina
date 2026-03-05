@@ -21,9 +21,9 @@ use std::collections::HashSet;
 
 pub use errors::{SemCheckError, SemCheckErrorKind, SemCheckErrorKind as SEK};
 
+use crate::core::ast::NodeId;
 use crate::core::context::{SemCheckNormalizedContext, SemCheckStageInput, SemCheckStageOutput};
 use crate::core::diag::Span;
-use crate::core::tree::NodeId;
 use std::collections::HashMap;
 
 pub(crate) fn push_error(errors: &mut Vec<SemCheckError>, span: Span, kind: SEK) {

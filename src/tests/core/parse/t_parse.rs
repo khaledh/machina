@@ -1,7 +1,7 @@
 use super::*;
+use crate::core::ast::RefinementKind;
 use crate::core::lexer::{LexError, Lexer, Token, TokenKind as TK};
 use crate::core::parse::{ParseErrorKind, ParserOptions};
-use crate::core::tree::RefinementKind;
 
 fn parse_module(source: &str) -> Result<Module, ParseError> {
     parse_module_with_options(source, ParserOptions::default())

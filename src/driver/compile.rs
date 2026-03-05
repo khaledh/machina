@@ -5,6 +5,7 @@ use crate::core::api::{
     StrictFrontendOptions, build_strict_frontend_input, elaborate_stage, run_strict_frontend,
     semcheck_stage,
 };
+use crate::core::ast::Module;
 use crate::core::backend;
 use crate::core::backend::regalloc::arm64::Arm64Target;
 use crate::core::context::{AnalyzedContext, ResolvedContext, TypeCheckedContext};
@@ -13,7 +14,6 @@ use crate::core::ir::format::{format_func_with_comments_and_names, format_global
 use crate::core::lexer::{LexError, Lexer, Token};
 use crate::core::nrvo::NrvoAnalyzer;
 use crate::core::resolve::DefId;
-use crate::core::tree::Module;
 
 #[derive(Debug)]
 pub struct CompileOptions {
@@ -378,7 +378,7 @@ fn format_ir_stage(
     Some(out)
 }
 
-// --- std parsed-tree injection ---
+// --- std parsed-AST injection ---
 
 #[cfg(test)]
 #[path = "../tests/driver/t_compile.rs"]

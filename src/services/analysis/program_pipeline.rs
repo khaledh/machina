@@ -9,6 +9,7 @@ use std::path::{Path, PathBuf};
 use std::sync::OnceLock;
 
 use crate::core::api;
+use crate::core::ast::{Module, NodeIdGen};
 use crate::core::capsule::compose::merge_modules;
 use crate::core::capsule::{self, ModuleId, ModulePath};
 use crate::core::context::{
@@ -16,7 +17,6 @@ use crate::core::context::{
 };
 use crate::core::resolve::{DefId, DefKind, DefLocation};
 use crate::core::symbol_id::SymbolId;
-use crate::core::tree::{Module, NodeIdGen};
 use crate::services::analysis::diagnostics::{
     ANALYSIS_FILE_ID_KEY, ANALYSIS_FILE_PATH_KEY, Diagnostic, DiagnosticValue,
 };

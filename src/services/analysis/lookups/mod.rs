@@ -21,10 +21,10 @@ pub(crate) use symbol_target::{
     resolved_target_def_id, signature_help_for_resolved_target_at_call_site,
 };
 
+use crate::core::ast::visit::{Visitor, walk_module};
+use crate::core::ast::{BindPattern, BindPatternKind, Module, StmtExpr, StmtExprKind};
 use crate::core::diag::{Position, Span};
 use crate::core::resolve::{DefId, DefTable};
-use crate::core::tree::visit::{Visitor, walk_module};
-use crate::core::tree::{BindPattern, BindPatternKind, Module, StmtExpr, StmtExprKind};
 use crate::core::typecheck::type_map::TypeMap;
 use crate::core::types::Type;
 use crate::services::analysis::code_actions::code_actions_for_diagnostic_with_source;
@@ -94,11 +94,11 @@ pub(crate) fn binding_value_node_id_for_def(
     module: &Module,
     def_table: &DefTable,
     target_def_id: DefId,
-) -> Option<crate::core::tree::NodeId> {
+) -> Option<crate::core::ast::NodeId> {
     struct Finder<'a> {
         def_table: &'a DefTable,
         target_def_id: DefId,
-        found: Option<crate::core::tree::NodeId>,
+        found: Option<crate::core::ast::NodeId>,
     }
 
     impl Visitor for Finder<'_> {
@@ -122,7 +122,7 @@ pub(crate) fn binding_value_node_id_for_def(
                 }
                 _ => {}
             }
-            crate::core::tree::visit::walk_stmt_expr(self, stmt);
+            crate::core::ast::visit::walk_stmt_expr(self, stmt);
         }
     }
 
@@ -167,7 +167,7 @@ pub(super) struct IdentifierToken {
 
 /// Normalize a point/span hover or lookup position to the enclosing
 /// identifier token when possible. Editor-originated queries often arrive as
-/// zero-width point spans, while most tree lookups behave more predictably on
+/// zero-width point spans, while most AST lookups behave more predictably on
 /// token spans.
 pub(super) fn identifier_token_at_span(
     source: Option<&str>,

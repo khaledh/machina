@@ -12,14 +12,14 @@
 
 use std::collections::{HashMap, HashSet};
 
-use crate::core::context::ResolvedContext;
-use crate::core::diag::Span;
-use crate::core::resolve::{DefId, DefTable, ImportedFacts};
-use crate::core::tree::ParamMode;
-use crate::core::tree::{
+use crate::core::ast::ParamMode;
+use crate::core::ast::{
     Attribute, EnumDefVariant, FunctionSig, MethodItem, MethodSig, Param, StructDefField, TypeDef,
     TypeDefKind, TypeParam,
 };
+use crate::core::context::ResolvedContext;
+use crate::core::diag::Span;
+use crate::core::resolve::{DefId, DefTable, ImportedFacts};
 use crate::core::typecheck::engine::{
     CollectedCallableSig, CollectedParamSig, CollectedPropertySig, CollectedTraitMethodSig,
     CollectedTraitPropertySig, CollectedTraitSig, TypecheckEngine,
@@ -740,7 +740,7 @@ fn build_param_sigs(
 
 fn record_generic_env(
     owner: DefId,
-    def_table: &crate::core::resolve::DefTable,
+    def_table: &DefTable,
     type_params: &[TypeParam],
     generic_envs: &mut HashMap<DefId, HashMap<DefId, TyVarId>>,
 ) {
@@ -750,10 +750,7 @@ fn record_generic_env(
     generic_envs.insert(owner, type_param_map(def_table, type_params));
 }
 
-fn type_param_map(
-    def_table: &crate::core::resolve::DefTable,
-    type_params: &[TypeParam],
-) -> HashMap<DefId, TyVarId> {
+fn type_param_map(def_table: &DefTable, type_params: &[TypeParam]) -> HashMap<DefId, TyVarId> {
     type_params
         .iter()
         .enumerate()

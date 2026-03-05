@@ -1,4 +1,4 @@
-use crate::core::tree::*;
+use crate::core::ast::*;
 
 use std::fmt;
 
@@ -1075,6 +1075,7 @@ impl Expr {
                     to,
                     payload,
                     request_site_label,
+                    ..
                 } => {
                     let pad1 = indent(level + 1);
                     writeln!(f, "{}EmitRequest [{}]", pad, self.id)?;
@@ -1302,6 +1303,29 @@ impl Expr {
                 writeln!(f, "{}Deref [{}]", pad, self.id)?;
                 writeln!(f, "{}Expr:", pad1)?;
                 expr.fmt_with_indent(f, level + 2)?;
+            }
+            ExprKind::Load { expr } => {
+                let pad1 = indent(level + 1);
+                writeln!(f, "{}Load [{}]", pad, self.id)?;
+                writeln!(f, "{}Expr:", pad1)?;
+                expr.fmt_with_indent(f, level + 2)?;
+            }
+            ExprKind::MapGet { target, key } => {
+                let pad1 = indent(level + 1);
+                writeln!(f, "{}MapGet [{}]", pad, self.id)?;
+                writeln!(f, "{}Target:", pad1)?;
+                target.fmt_with_indent(f, level + 2)?;
+                writeln!(f, "{}Key:", pad1)?;
+                key.fmt_with_indent(f, level + 2)?;
+            }
+            ExprKind::Len { expr } => {
+                let pad1 = indent(level + 1);
+                writeln!(f, "{}Len [{}]", pad, self.id)?;
+                writeln!(f, "{}Expr:", pad1)?;
+                expr.fmt_with_indent(f, level + 2)?;
+            }
+            ExprKind::ClosureRef { ident } => {
+                writeln!(f, "{}ClosureRef({}) [{}]", pad, ident, self.id)?;
             }
         }
         Ok(())

@@ -2,30 +2,34 @@
 //!
 //! This module derives managed-runtime plans from typestate-desugared semantic
 //! items (`__ts_*` generated state types/methods). The output is purely a
-//! semantic side table and does not mutate the semantic tree.
+//! semantic side table.
 
 use std::collections::{BTreeMap, HashMap};
 
 use crate::core::analysis::facts::{DefTableOverlay, TypeMapOverlay};
+use crate::core::ast::{MethodDef, MethodItem, Module, TypeDef, TypeDefKind, TypeExpr};
 use crate::core::context::TypestateRoleImplBinding;
 use crate::core::machine::naming::{
     GENERATED_FINAL_STATE_MARKER, GENERATED_HANDLER_PREFIX, GENERATED_STATE_PREFIX,
     parse_generated_handler_site_label,
 };
 use crate::core::machine::request_site::labeled_request_site_key;
+use crate::core::plans::{
+    MachineDescriptorPlan, MachineDispatchEntryPlan, MachineDispatchThunkPlan, MachineEventKeyPlan,
+    MachineEventKindPlan, MachinePlanMap, MachineRoleImplPlan, MachineStateTagPlan,
+};
 use crate::core::resolve::DefId;
-use crate::core::tree::semantic as sem;
 use crate::core::typecheck::type_map::resolve_type_expr;
 use crate::core::types::{StructField, Type, TypeId};
 
 /// Build managed-machine plans for all typestates present in the semantic
 /// module. Plans are deterministic by typestate/state/event lexical ordering.
 pub fn build_machine_plans(
-    module: &sem::Module,
+    module: &Module,
     def_table: &DefTableOverlay,
     type_map: &TypeMapOverlay,
     typestate_role_impls: &[TypestateRoleImplBinding],
-) -> sem::MachinePlanMap {
+) -> MachinePlanMap {
     let mut builders = collect_typestate_builders(module, def_table, type_map);
     attach_role_impls(&mut builders, typestate_role_impls);
     materialize_machine_plans(builders)
@@ -37,7 +41,7 @@ struct HandlerPlanSeed {
     ordinal: usize,
     state_name: String,
     state_layout_ty: TypeId,
-    event_key: sem::MachineEventKeyPlan,
+    event_key: MachineEventKeyPlan,
     request_site_key_match: Option<u64>,
     provenance_param_index: Option<usize>,
     payload_layout_ty: TypeId,
@@ -72,11 +76,11 @@ struct StatePlanSeed {
 #[derive(Clone, Debug, Default)]
 struct TypestatePlanSeed {
     states: BTreeMap<String, StatePlanSeed>,
-    role_impls: Vec<sem::MachineRoleImplPlan>,
+    role_impls: Vec<MachineRoleImplPlan>,
 }
 
 fn collect_typestate_builders(
-    module: &sem::Module,
+    module: &Module,
     def_table: &DefTableOverlay,
     type_map: &TypeMapOverlay,
 ) -> BTreeMap<String, TypestatePlanSeed> {
@@ -118,7 +122,7 @@ fn collect_typestate_builders(
         };
 
         for item in &method_block.method_items {
-            let sem::MethodItem::Def(method_def) = item else {
+            let MethodItem::Def(method_def) = item else {
                 continue;
             };
             // Typestate lowering injects a synthetic marker method in `@final`
@@ -173,7 +177,7 @@ fn collect_typestate_builders(
             );
 
             state_seed.handlers.push(HandlerPlanSeed {
-                def_id: method_def.def_id,
+                def_id: def_table.def_id(method_def.id),
                 ordinal,
                 state_name: state_seed.state_name.clone(),
                 state_layout_ty: state_seed.state_layout_ty,
@@ -198,10 +202,10 @@ fn collect_typestate_builders(
 }
 
 fn resolve_state_layout_type_id(
-    module: &sem::Module,
+    module: &Module,
     def_table: &DefTableOverlay,
     type_map: &TypeMapOverlay,
-    type_def: &sem::TypeDef,
+    type_def: &TypeDef,
 ) -> TypeId {
     if let Some(def) = def_table.lookup_def(def_table.def_id(type_def.id))
         && let Some(id) = type_map.lookup_def_type_id(def)
@@ -210,7 +214,7 @@ fn resolve_state_layout_type_id(
         return id;
     }
 
-    let sem::TypeDefKind::Struct { fields } = &type_def.kind else {
+    let TypeDefKind::Struct { fields } = &type_def.kind else {
         panic!(
             "compiler bug: expected generated typestate state to be struct, found {}",
             type_def.name
@@ -244,12 +248,12 @@ fn resolve_state_layout_type_id(
 }
 
 fn resolve_handler_event_key(
-    module: &sem::Module,
+    module: &Module,
     def_table: &DefTableOverlay,
     type_map: &TypeMapOverlay,
-    method_def: &sem::MethodDef,
+    method_def: &MethodDef,
     selector_ty: Type,
-) -> (sem::MachineEventKeyPlan, Option<TypeId>) {
+) -> (MachineEventKeyPlan, Option<TypeId>) {
     // Response forms include a hidden/explicit `Pending<...>` parameter.
     // We always keep selector metadata, and choose payload event key from the
     // concrete response type:
@@ -291,7 +295,7 @@ fn resolve_handler_event_key(
                 (response_ty, response_ty_id)
             };
             return (
-                sem::MachineEventKeyPlan::Response {
+                MachineEventKeyPlan::Response {
                     selector_ty,
                     response_ty,
                 },
@@ -301,7 +305,7 @@ fn resolve_handler_event_key(
     }
 
     (
-        sem::MachineEventKeyPlan::Payload {
+        MachineEventKeyPlan::Payload {
             payload_ty: selector_ty,
         },
         None,
@@ -316,7 +320,7 @@ fn is_response_selector_type(selector_ty: &Type) -> bool {
 }
 
 fn resolve_handler_provenance_param_index(
-    method_def: &sem::MethodDef,
+    method_def: &MethodDef,
     selector_ty: &Type,
 ) -> Option<usize> {
     // `for RequestType(binding)` lowering injects hidden `__pending` as param[1]
@@ -332,10 +336,10 @@ fn resolve_handler_provenance_param_index(
 }
 
 fn resolve_type_id(
-    module: &sem::Module,
+    module: &Module,
     def_table: &DefTableOverlay,
     type_map: &TypeMapOverlay,
-    ty_expr: &sem::TypeExpr,
+    ty_expr: &TypeExpr,
     handler_name: &str,
     label: &str,
 ) -> TypeId {
@@ -363,7 +367,7 @@ fn attach_role_impls(
 ) {
     for binding in typestate_role_impls {
         let typestate = builders.entry(binding.typestate_name.clone()).or_default();
-        typestate.role_impls.push(sem::MachineRoleImplPlan {
+        typestate.role_impls.push(MachineRoleImplPlan {
             path: binding.path.clone(),
             role_def_id: binding.role_def_id,
             span: binding.span,
@@ -371,7 +375,7 @@ fn attach_role_impls(
     }
 }
 
-fn materialize_machine_plans(builders: BTreeMap<String, TypestatePlanSeed>) -> sem::MachinePlanMap {
+fn materialize_machine_plans(builders: BTreeMap<String, TypestatePlanSeed>) -> MachinePlanMap {
     let mut descriptors = HashMap::new();
     let mut thunks = HashMap::new();
 
@@ -390,7 +394,7 @@ fn materialize_machine_plans(builders: BTreeMap<String, TypestatePlanSeed>) -> s
             state_tag_by_name.insert(state.state_name.clone(), tag);
             state_tag_by_layout.insert(state.state_layout_ty, tag);
             state_is_final_by_layout.insert(state.state_layout_ty, state.is_final);
-            state_tags.push(sem::MachineStateTagPlan {
+            state_tags.push(MachineStateTagPlan {
                 state_name: state.state_name.clone(),
                 state_type_def_id: state.state_type_def_id,
                 state_layout_ty: state.state_layout_ty,
@@ -416,7 +420,7 @@ fn materialize_machine_plans(builders: BTreeMap<String, TypestatePlanSeed>) -> s
             for handler in &state.handlers {
                 thunks
                     .entry(handler.def_id)
-                    .or_insert_with(|| sem::MachineDispatchThunkPlan {
+                    .or_insert_with(|| MachineDispatchThunkPlan {
                         handler_def_id: handler.def_id,
                         symbol: format!("__mc_machine_dispatch_thunk_{}", handler.def_id.0),
                         typestate_name: typestate_name.clone(),
@@ -446,7 +450,7 @@ fn materialize_machine_plans(builders: BTreeMap<String, TypestatePlanSeed>) -> s
 
         descriptors.insert(
             typestate_name.clone(),
-            sem::MachineDescriptorPlan {
+            MachineDescriptorPlan {
                 typestate_name,
                 state_tags,
                 event_kinds,
@@ -456,7 +460,7 @@ fn materialize_machine_plans(builders: BTreeMap<String, TypestatePlanSeed>) -> s
         );
     }
 
-    sem::MachinePlanMap {
+    MachinePlanMap {
         descriptors,
         thunks,
     }
@@ -505,7 +509,7 @@ fn build_fallback_map(states: &[&StatePlanSeed], prefix_len: usize) -> HashMap<D
 
 #[derive(Clone, Debug)]
 struct EventDef {
-    key: sem::MachineEventKeyPlan,
+    key: MachineEventKeyPlan,
     payload_layout_ty: TypeId,
 }
 
@@ -525,11 +529,11 @@ fn collect_event_defs(states: &[&StatePlanSeed]) -> BTreeMap<String, EventDef> {
     out
 }
 
-fn assign_event_kinds(events: &BTreeMap<String, EventDef>) -> Vec<sem::MachineEventKindPlan> {
+fn assign_event_kinds(events: &BTreeMap<String, EventDef>) -> Vec<MachineEventKindPlan> {
     events
         .values()
         .enumerate()
-        .map(|(idx, event)| sem::MachineEventKindPlan {
+        .map(|(idx, event)| MachineEventKindPlan {
             key: event.key.clone(),
             payload_layout_ty: event.payload_layout_ty,
             kind: (idx + 1) as u64,
@@ -540,10 +544,10 @@ fn assign_event_kinds(events: &BTreeMap<String, EventDef>) -> Vec<sem::MachineEv
 fn build_dispatch_table(
     states: &[&StatePlanSeed],
     state_tag_by_name: &HashMap<String, u64>,
-    event_kinds: &[sem::MachineEventKindPlan],
+    event_kinds: &[MachineEventKindPlan],
     fallback_map: &HashMap<DispatchKey, DefId>,
     fallback_prefix_len: usize,
-) -> Vec<sem::MachineDispatchEntryPlan> {
+) -> Vec<MachineDispatchEntryPlan> {
     let mut rows = Vec::new();
 
     for state in states {
@@ -581,7 +585,7 @@ fn build_dispatch_table(
             site_keys.sort_unstable();
             site_keys.dedup();
 
-            rows.push(sem::MachineDispatchEntryPlan {
+            rows.push(MachineDispatchEntryPlan {
                 state_tag,
                 event_kind: event.kind,
                 request_site_key: None,
@@ -594,7 +598,7 @@ fn build_dispatch_table(
                     event_stable_key: event_stable_key.clone(),
                     site: Some(site_key),
                 };
-                rows.push(sem::MachineDispatchEntryPlan {
+                rows.push(MachineDispatchEntryPlan {
                     state_tag,
                     event_kind: event.kind,
                     request_site_key: Some(site_key),

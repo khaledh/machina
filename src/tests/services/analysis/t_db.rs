@@ -318,7 +318,7 @@ fn def_location_at_program_file_points_to_imported_symbol_definition() {
         run_id
     ));
     let app_dir = temp_dir.join("app");
-    fs::create_dir_all(&app_dir).expect("failed to create temp module tree");
+    fs::create_dir_all(&app_dir).expect("failed to create temp module ast");
     fs::write(temp_dir.join("machina.toml"), "").expect("failed to write capsule root config");
 
     let entry_path = temp_dir.join("main.mc");
@@ -366,7 +366,7 @@ fn def_location_at_program_file_points_to_imported_type_definition() {
         run_id
     ));
     let app_dir = temp_dir.join("app");
-    fs::create_dir_all(&app_dir).expect("failed to create temp module tree");
+    fs::create_dir_all(&app_dir).expect("failed to create temp module ast");
     fs::write(temp_dir.join("machina.toml"), "").expect("failed to write capsule root config");
 
     let entry_path = temp_dir.join("main.mc");
@@ -423,7 +423,7 @@ fn def_location_at_program_file_points_to_imported_trait_definition() {
         run_id
     ));
     let app_dir = temp_dir.join("app");
-    fs::create_dir_all(&app_dir).expect("failed to create temp module tree");
+    fs::create_dir_all(&app_dir).expect("failed to create temp module ast");
 
     let entry_path = temp_dir.join("main.mc");
     let dep_path = app_dir.join("dep.mc");
@@ -1357,7 +1357,7 @@ fn references_for_imported_definition_include_import_use_sites() {
         run_id
     ));
     let app_dir = temp_dir.join("app");
-    fs::create_dir_all(&app_dir).expect("failed to create temp module tree");
+    fs::create_dir_all(&app_dir).expect("failed to create temp module ast");
 
     let entry_path = temp_dir.join("main.mc");
     let dep_path = app_dir.join("dep.mc");
@@ -1498,7 +1498,7 @@ fn rename_plan_for_imported_definition_includes_import_use_edits() {
         run_id
     ));
     let app_dir = temp_dir.join("app");
-    fs::create_dir_all(&app_dir).expect("failed to create temp module tree");
+    fs::create_dir_all(&app_dir).expect("failed to create temp module ast");
 
     let entry_path = temp_dir.join("main.mc");
     let dep_path = app_dir.join("dep.mc");
@@ -1772,7 +1772,7 @@ fn diagnostics_for_program_file_uses_dependency_overlay() {
         std::process::id(),
         run_id
     ));
-    fs::create_dir_all(temp_dir.join("app")).expect("failed to create temp module tree");
+    fs::create_dir_all(temp_dir.join("app")).expect("failed to create temp module ast");
 
     let entry_path = temp_dir.join("main.mc");
     let dep_path = temp_dir.join("app").join("dep.mc");
@@ -1827,7 +1827,7 @@ fn diagnostics_for_program_file_attach_file_id_metadata() {
         std::process::id(),
         run_id
     ));
-    fs::create_dir_all(temp_dir.join("app")).expect("failed to create temp module tree");
+    fs::create_dir_all(temp_dir.join("app")).expect("failed to create temp module ast");
 
     let entry_path = temp_dir.join("main.mc");
     let dep_path = temp_dir.join("app").join("dep.mc");
@@ -1883,7 +1883,7 @@ fn diagnostics_for_program_file_reuses_unchanged_module_queries() {
         std::process::id(),
         run_id
     ));
-    fs::create_dir_all(temp_dir.join("app")).expect("failed to create temp module tree");
+    fs::create_dir_all(temp_dir.join("app")).expect("failed to create temp module ast");
 
     let entry_path = temp_dir.join("main.mc");
     let dep_path = temp_dir.join("app").join("dep.mc");
@@ -2017,7 +2017,7 @@ fn program_pipeline_query_is_reused_across_program_lookups() {
         run_id
     ));
     let app_dir = temp_dir.join("app");
-    fs::create_dir_all(&app_dir).expect("failed to create temp module tree");
+    fs::create_dir_all(&app_dir).expect("failed to create temp module ast");
 
     let entry_path = temp_dir.join("main.mc");
     let dep_path = app_dir.join("dep.mc");
@@ -2074,7 +2074,7 @@ fn diagnostics_for_program_file_respects_cancellation_during_overlay_churn() {
         std::process::id(),
         run_id
     ));
-    fs::create_dir_all(temp_dir.join("app")).expect("failed to create temp module tree");
+    fs::create_dir_all(temp_dir.join("app")).expect("failed to create temp module ast");
 
     let entry_path = temp_dir.join("main.mc");
     let dep_path = temp_dir.join("app").join("dep.mc");
@@ -2125,7 +2125,7 @@ fn diagnostics_for_program_file_resolves_public_symbol_imports() {
         run_id
     ));
     let app_dir = temp_dir.join("app");
-    fs::create_dir_all(&app_dir).expect("failed to create temp module tree");
+    fs::create_dir_all(&app_dir).expect("failed to create temp module ast");
 
     let entry_path = temp_dir.join("main.mc");
     let dep_path = app_dir.join("dep.mc");
@@ -2169,7 +2169,7 @@ fn diagnostics_for_program_file_injects_prelude_decl_for_runtime_intrinsics() {
         std::process::id(),
         run_id
     ));
-    fs::create_dir_all(&temp_dir).expect("failed to create temp module tree");
+    fs::create_dir_all(&temp_dir).expect("failed to create temp module ast");
 
     let entry_path = temp_dir.join("main.mc");
     let entry_source = r#"
@@ -2201,7 +2201,7 @@ fn def_location_at_program_file_maps_runtime_intrinsic_to_prelude_decl() {
         std::process::id(),
         run_id
     ));
-    fs::create_dir_all(&temp_dir).expect("failed to create temp module tree");
+    fs::create_dir_all(&temp_dir).expect("failed to create temp module ast");
 
     let entry_path = temp_dir.join("main.mc");
     let entry_source = r#"
@@ -2261,7 +2261,7 @@ fn hover_at_program_file_resolves_imported_symbol_type() {
         run_id
     ));
     let app_dir = temp_dir.join("app");
-    fs::create_dir_all(&app_dir).expect("failed to create temp module tree");
+    fs::create_dir_all(&app_dir).expect("failed to create temp module ast");
 
     let entry_path = temp_dir.join("main.mc");
     let dep_path = app_dir.join("dep.mc");
@@ -2415,7 +2415,7 @@ fn def_location_at_program_file_uses_selected_imported_overload_target() {
         run_id
     ));
     let app_dir = temp_dir.join("app");
-    fs::create_dir_all(&app_dir).expect("failed to create temp module tree");
+    fs::create_dir_all(&app_dir).expect("failed to create temp module ast");
 
     let entry_path = temp_dir.join("main.mc");
     let dep_path = app_dir.join("dep.mc");
@@ -2722,7 +2722,7 @@ fn completions_at_program_file_include_imported_symbols() {
         run_id
     ));
     let app_dir = temp_dir.join("app");
-    fs::create_dir_all(&app_dir).expect("failed to create temp module tree");
+    fs::create_dir_all(&app_dir).expect("failed to create temp module ast");
 
     let entry_path = temp_dir.join("main.mc");
     let dep_path = app_dir.join("dep.mc");
@@ -2770,7 +2770,7 @@ fn type_at_program_file_resolves_imported_type_alias() {
         run_id
     ));
     let app_dir = temp_dir.join("app");
-    fs::create_dir_all(&app_dir).expect("failed to create temp module tree");
+    fs::create_dir_all(&app_dir).expect("failed to create temp module ast");
 
     let entry_path = temp_dir.join("main.mc");
     let dep_path = app_dir.join("dep.mc");
@@ -2815,7 +2815,7 @@ fn signature_help_at_program_file_uses_imported_callable_signature() {
         run_id
     ));
     let app_dir = temp_dir.join("app");
-    fs::create_dir_all(&app_dir).expect("failed to create temp module tree");
+    fs::create_dir_all(&app_dir).expect("failed to create temp module ast");
 
     let entry_path = temp_dir.join("main.mc");
     let dep_path = app_dir.join("dep.mc");
@@ -2860,7 +2860,7 @@ fn signature_help_at_program_file_uses_selected_imported_overload_signature() {
         run_id
     ));
     let app_dir = temp_dir.join("app");
-    fs::create_dir_all(&app_dir).expect("failed to create temp module tree");
+    fs::create_dir_all(&app_dir).expect("failed to create temp module ast");
 
     let entry_path = temp_dir.join("main.mc");
     let dep_path = app_dir.join("dep.mc");
@@ -2911,7 +2911,7 @@ fn diagnostics_for_program_file_typechecks_symbol_import_calls() {
         run_id
     ));
     let app_dir = temp_dir.join("app");
-    fs::create_dir_all(&app_dir).expect("failed to create temp module tree");
+    fs::create_dir_all(&app_dir).expect("failed to create temp module ast");
 
     let entry_path = temp_dir.join("main.mc");
     let dep_path = app_dir.join("dep.mc");
@@ -2964,7 +2964,7 @@ fn diagnostics_for_program_file_typechecks_symbol_import_types() {
         run_id
     ));
     let app_dir = temp_dir.join("app");
-    fs::create_dir_all(&app_dir).expect("failed to create temp module tree");
+    fs::create_dir_all(&app_dir).expect("failed to create temp module ast");
 
     let entry_path = temp_dir.join("main.mc");
     let dep_path = app_dir.join("dep.mc");
@@ -3018,7 +3018,7 @@ fn diagnostics_for_program_file_typechecks_symbol_import_traits() {
         run_id
     ));
     let app_dir = temp_dir.join("app");
-    fs::create_dir_all(&app_dir).expect("failed to create temp module tree");
+    fs::create_dir_all(&app_dir).expect("failed to create temp module ast");
 
     let entry_path = temp_dir.join("main.mc");
     let dep_path = app_dir.join("dep.mc");

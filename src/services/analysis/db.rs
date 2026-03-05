@@ -15,8 +15,8 @@ mod signature_helpers;
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 
+use crate::core::ast::NodeId;
 use crate::core::capsule::ModuleId;
-use crate::core::tree::NodeId;
 use crate::services::analysis::diagnostics::Diagnostic;
 use crate::services::analysis::diagnostics::{
     ANALYSIS_FILE_ID_KEY, ANALYSIS_FILE_PATH_KEY, DiagnosticValue,

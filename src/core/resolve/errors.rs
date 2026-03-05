@@ -1,8 +1,8 @@
 use thiserror::Error;
 
+use crate::core::ast::ExprKind;
 use crate::core::diag::{Span, SpannedError};
 use crate::core::resolve::symbols::SymbolKind;
-use crate::core::tree::ExprKind;
 
 #[derive(Clone, Debug, Error)]
 pub enum ResolveErrorKind {

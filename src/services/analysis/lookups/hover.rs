@@ -7,9 +7,9 @@
 
 use std::path::Path;
 
+use crate::core::ast::Module;
 use crate::core::diag::Span;
 use crate::core::resolve::{DefId, DefTable, UNKNOWN_DEF_ID};
-use crate::core::tree::Module;
 use crate::core::typecheck::type_map::TypeMap;
 use crate::core::types::{Type, TypeRenderConfig, render_type};
 use crate::services::analysis::pipeline::LookupState;
@@ -105,7 +105,7 @@ pub(crate) fn hover_for_def_in_state(state: &LookupState, def_id: DefId) -> Opti
         node_id: typed
             .def_table
             .lookup_def_node_id(def_id)
-            .unwrap_or(crate::core::tree::NodeId(0)),
+            .unwrap_or(crate::core::ast::NodeId(0)),
         span,
         def_id: Some(def_id),
         symbol_id: typed.symbol_ids.lookup_symbol_id(def_id).cloned(),
@@ -301,7 +301,7 @@ fn try_typestate_role_hover(
         node_id: typed
             .def_table
             .lookup_def_node_id(def_id)
-            .unwrap_or(crate::core::tree::NodeId(0)),
+            .unwrap_or(crate::core::ast::NodeId(0)),
         span: query_span,
         def_id: Some(def_id),
         symbol_id: typed.symbol_ids.lookup_symbol_id(def_id).cloned(),
@@ -341,7 +341,7 @@ fn try_syntactic_field_hover(
     let query_ident = query_ident?;
     let display = syntactic_field_hover_display(source_text, query_offset, query_ident)?;
     Some(HoverInfo {
-        node_id: crate::core::tree::NodeId(0),
+        node_id: crate::core::ast::NodeId(0),
         span: query_span,
         def_id: None,
         symbol_id: None,
@@ -509,7 +509,7 @@ fn paths_equivalent(lhs: &Path, rhs: &Path) -> bool {
 /// matches `query_ident` and whose source location contains the cursor.
 fn fallback_hover_from_def_table(
     def_table: &DefTable,
-    type_map: Option<&crate::core::typecheck::type_map::TypeMap>,
+    type_map: Option<&TypeMap>,
     module: Option<&Module>,
     query_span: Span,
     current_file_path: Option<&Path>,
@@ -544,7 +544,7 @@ fn fallback_hover_from_def_table(
         return Some(HoverInfo {
             node_id: def_table
                 .lookup_def_node_id(def.id)
-                .unwrap_or(crate::core::tree::NodeId(0)),
+                .unwrap_or(crate::core::ast::NodeId(0)),
             span: query_span,
             def_id: Some(def.id),
             symbol_id: None,

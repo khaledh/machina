@@ -3,8 +3,8 @@
 //! This module centralizes the "what counts as protocol traffic" logic used by
 //! both typecheck protocol conformance and semck progression extraction.
 
+use crate::core::ast::{CallArg, CallArgMode, EmitKind, Expr, ExprKind, NodeId};
 use crate::core::diag::Span;
-use crate::core::tree::{CallArgMode, Expr, ExprKind, NodeId};
 use crate::core::types::Type;
 
 #[derive(Clone, Debug)]
@@ -31,8 +31,8 @@ where
     match &expr.kind {
         ExprKind::Emit { kind } => {
             let (to, payload, is_request) = match kind {
-                crate::core::tree::EmitKind::Send { to, payload } => (to, payload, false),
-                crate::core::tree::EmitKind::Request { to, payload, .. } => (to, payload, true),
+                EmitKind::Send { to, payload } => (to, payload, false),
+                EmitKind::Request { to, payload, .. } => (to, payload, true),
             };
             let payload_ty = lookup_type(payload.id)?;
             let request_response_tys = if is_request {
@@ -78,7 +78,7 @@ where
 fn extract_emit_from_machine_method_call<F>(
     callee: &Expr,
     method_name: &str,
-    args: &[crate::core::tree::CallArg],
+    args: &[CallArg],
     _call_span: Span,
     lookup_type: &mut F,
 ) -> Option<ProtocolEmitExtract>

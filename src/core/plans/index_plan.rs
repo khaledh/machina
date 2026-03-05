@@ -2,7 +2,7 @@
 
 use std::collections::HashMap;
 
-use crate::core::tree::NodeId;
+use crate::core::ast::NodeId;
 
 #[derive(Clone, Debug)]
 pub struct IndexPlan {

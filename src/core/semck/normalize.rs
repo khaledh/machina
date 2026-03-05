@@ -1,16 +1,16 @@
 use crate::core::analysis::facts::{SyntheticReason, TypeMapOverlay};
+use crate::core::ast::visit_mut::{self, VisitorMut};
+use crate::core::ast::*;
 use crate::core::context::TypeCheckedContext;
 use crate::core::context::{SemCheckNormalizedContext, SemCheckStageInput};
 use crate::core::resolve::DefKind;
 use crate::core::resolve::def_table::DefTable;
-use crate::core::tree::visit_mut::{self, VisitorMut};
-use crate::core::tree::*;
 use crate::core::typecheck::type_map::{CallParam, CallSig, CallSigMap};
 use crate::core::types::{
     Type, array_to_dyn_array_assignable, array_to_slice_assignable, dyn_array_to_slice_assignable,
 };
 
-/// Normalize a typed tree into a normalized tree.
+/// Normalize a typed AST into a normalized AST.
 ///
 /// This is a semcheck-internal prepass that performs a 1:1 typed->normalized
 /// mapping and inserts explicit call-argument coercions.
@@ -33,7 +33,7 @@ pub fn normalize(ctx: SemCheckStageInput) -> SemCheckNormalizedContext {
         protocol_index,
     } = resolved;
     // `typed::Module` and `normalized::Module` currently share the same
-    // underlying representation (`tree::model::Module`), so
+    // underlying representation (`ast::model::Module`), so
     // normalization can mutate the owned module in place.
     let mut module = module;
     let mut def_table = def_table;

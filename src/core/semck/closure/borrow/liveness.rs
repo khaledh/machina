@@ -5,9 +5,9 @@
 //! still potentially used.
 use std::collections::HashSet;
 
+use crate::core::ast::cfg::{Cfg, CfgItem, CfgTerminator};
+use crate::core::ast::{StmtExpr, StmtExprKind};
 use crate::core::resolve::{DefId, DefTable};
-use crate::core::tree::cfg::{Cfg, CfgItem, CfgTerminator};
-use crate::core::tree::{StmtExpr, StmtExprKind};
 
 use super::collect::{
     collect_assignee_defs, collect_bind_pattern_defs, collect_expr_var_uses, collect_stmt_var_uses,

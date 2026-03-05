@@ -5,13 +5,13 @@
 //! without pulling in the full type checker.
 use std::collections::HashSet;
 
-use crate::core::resolve::{DefId, DefTable};
-use crate::core::tree::cfg::CfgItem;
-use crate::core::tree::visit::{Visitor, walk_bind_pattern, walk_expr, walk_match_pattern};
-use crate::core::tree::{
+use crate::core::ast::cfg::CfgItem;
+use crate::core::ast::visit::{Visitor, walk_bind_pattern, walk_expr, walk_match_pattern};
+use crate::core::ast::{
     BindPattern, BindPatternKind, Expr, ExprKind, MatchArm, MatchPattern, MatchPatternBinding,
     StmtExpr, StmtExprKind,
 };
+use crate::core::resolve::{DefId, DefTable};
 
 pub(super) fn collect_bind_pattern_defs(
     pattern: &BindPattern,

@@ -1,13 +1,13 @@
+use crate::core::ast::RefinementKind;
+use crate::core::ast::visit::{Visitor, walk_expr, walk_stmt_expr};
+use crate::core::ast::{
+    BinaryOp, BindPatternKind, Expr, ExprKind, FuncDef, FunctionSig, StmtExpr, StmtExprKind,
+    TypeDef, TypeDefKind, TypeExpr, TypeExprKind, UnaryOp,
+};
 use crate::core::context::NormalizedContext;
 use crate::core::diag::Span;
 use crate::core::resolve::DefId;
 use crate::core::semck::{SEK, SemCheckError};
-use crate::core::tree::RefinementKind;
-use crate::core::tree::visit::{Visitor, walk_expr, walk_stmt_expr};
-use crate::core::tree::{
-    BinaryOp, BindPatternKind, Expr, ExprKind, FuncDef, FunctionSig, StmtExpr, StmtExprKind,
-    TypeDef, TypeDefKind, TypeExpr, TypeExprKind, UnaryOp,
-};
 use crate::core::typecheck::type_map::resolve_type_expr;
 use crate::core::types::Type;
 use std::collections::HashMap;

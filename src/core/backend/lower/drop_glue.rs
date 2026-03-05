@@ -1,12 +1,12 @@
 use std::collections::HashMap;
 
+use crate::core::ast::{Module, TypeExpr, TypeExprKind};
 use crate::core::backend::lower::globals::GlobalArena;
 use crate::core::backend::lower::lowerer::FuncLowerer;
 use crate::core::backend::lower::{LowerToIrError, LoweredFunction};
 use crate::core::ir::Terminator;
+use crate::core::plans::LoweringPlanMap;
 use crate::core::resolve::{DefId, DefTable};
-use crate::core::tree as ast;
-use crate::core::tree::semantic as sem;
 use crate::core::typecheck::nominal::NominalKey;
 use crate::core::typecheck::nominal::TypeView;
 use crate::core::typecheck::type_map::{TypeMap, resolve_type_expr};
@@ -37,7 +37,7 @@ impl DropGlueRegistry {
         }
     }
 
-    pub(super) fn from_module(def_table: &DefTable, module: &sem::Module) -> Self {
+    pub(super) fn from_module(def_table: &DefTable, module: &Module) -> Self {
         let mut full_tys = HashMap::new();
         let mut view_resolver = TypeViewResolver::new(def_table, module);
         for type_def in module.type_defs() {
@@ -52,9 +52,9 @@ impl DropGlueRegistry {
                 .map(type_from_view)
                 .or_else(|| {
                     // Keep fallback behavior for non-nominal aliases.
-                    let type_expr = ast::TypeExpr {
+                    let type_expr = TypeExpr {
                         id: type_def.id,
-                        kind: ast::TypeExprKind::Named {
+                        kind: TypeExprKind::Named {
                             ident: type_def.name.clone(),
                             type_args: Vec::new(),
                         },
@@ -102,7 +102,7 @@ impl DropGlueRegistry {
         trace_drops: bool,
     ) -> Result<Vec<LoweredFunction>, LowerToIrError> {
         let mut funcs = Vec::new();
-        let empty_plans = sem::LoweringPlanMap::default();
+        let empty_plans = LoweringPlanMap::default();
         let mut pending: Vec<(NominalKey, Type)> = self.tys.drain().collect();
         while let Some((nominal_key, ty)) = pending.pop() {
             let def_id =

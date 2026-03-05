@@ -2,8 +2,8 @@
 
 use std::collections::HashMap;
 
-use crate::core::tree::visit::{self, Visitor};
-use crate::core::tree::{Expr, ExprKind, NodeId, StmtExpr, StmtExprKind};
+use crate::core::ast::visit::{self, Visitor};
+use crate::core::ast::{Expr, ExprKind, NodeId, StmtExpr, StmtExprKind};
 use crate::core::typecheck::engine::TypecheckEngine;
 use crate::core::typecheck::errors::{TEK, TypeCheckError};
 use crate::core::types::Type;

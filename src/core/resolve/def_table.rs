@@ -2,9 +2,9 @@ use std::collections::HashMap;
 use std::fmt;
 use std::path::{Path, PathBuf};
 
+use crate::core::ast::NodeId;
 use crate::core::diag::Span;
 use crate::core::resolve::{Def, DefId, DefKind};
-use crate::core::tree::NodeId;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct DefLocation {

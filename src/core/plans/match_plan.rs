@@ -2,8 +2,8 @@
 
 use std::collections::HashMap;
 
+use crate::core::ast::NodeId;
 use crate::core::resolve::DefId;
-use crate::core::tree::NodeId;
 use crate::core::types::Type;
 
 #[derive(Clone, Debug)]

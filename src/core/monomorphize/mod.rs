@@ -4,11 +4,11 @@ mod subst;
 
 use std::collections::{HashMap, HashSet};
 
+use crate::core::ast::*;
 use crate::core::capsule::ModuleId;
 use crate::core::context::{ResolvedContext, TypeCheckedContext};
 use crate::core::diag::{Span, SpannedError};
 use crate::core::resolve::{DefId, attach_def_owners};
-use crate::core::tree::*;
 use crate::core::typecheck::TypeCheckError;
 use crate::core::typecheck::type_map::{GenericInst, GenericInstMap};
 use crate::core::types::Type;

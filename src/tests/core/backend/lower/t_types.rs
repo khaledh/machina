@@ -1,3 +1,4 @@
+use crate::core::ast::TypeDefKind;
 use crate::core::backend::lower::types::TypeLowerer;
 use crate::core::context::{ParsedContext, SemanticContext};
 use crate::core::elaborate::elaborate;
@@ -6,7 +7,6 @@ use crate::core::lexer::{LexError, Lexer, Token};
 use crate::core::parse::Parser;
 use crate::core::resolve::resolve;
 use crate::core::semck::sem_check;
-use crate::core::tree::semantic as sem;
 use crate::core::typecheck::type_check;
 use crate::core::typecheck::type_map::resolve_type_expr;
 use crate::core::types::{EnumVariant, FnParam, FnParamMode, Type, TypeId};
@@ -38,7 +38,7 @@ fn enum_type_id(ctx: &SemanticContext, name: &str) -> TypeId {
         .find(|def| def.name == name)
         .unwrap_or_else(|| panic!("missing enum type def {name}"));
     let variants = match &type_def.kind {
-        sem::TypeDefKind::Enum { variants } => variants,
+        TypeDefKind::Enum { variants } => variants,
         other => panic!("expected enum type def, found {:?}", other),
     };
 

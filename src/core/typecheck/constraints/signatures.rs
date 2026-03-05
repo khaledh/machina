@@ -1,7 +1,7 @@
 //! Function/method/closure signature collection helpers.
 
 use super::*;
-use crate::core::tree::{FunctionSig, Param, TypeExprKind};
+use crate::core::ast::{FunctionSig, Param, TypeExprKind};
 
 impl<'a> ConstraintCollector<'a> {
     pub(super) fn collect_closure_signature(

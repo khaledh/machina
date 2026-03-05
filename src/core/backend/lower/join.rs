@@ -1,5 +1,6 @@
 //! Join-plan and join-session helpers for branching lowering.
 
+use crate::core::ast::Expr;
 use crate::core::backend::lower::LowerToIrError;
 use crate::core::backend::lower::drops::DropSnapshot;
 use crate::core::backend::lower::locals::{LocalSnapshot, LocalValue};
@@ -7,7 +8,7 @@ use crate::core::diag::Span;
 use crate::core::ir::IrTypeId;
 use crate::core::ir::{BlockId, Terminator, ValueId};
 use crate::core::resolve::DefId;
-use crate::core::tree::semantic as sem;
+use crate::core::types::TypeId;
 
 use super::FuncLowerer;
 
@@ -37,11 +38,11 @@ impl FuncLowerer<'_, '_> {
     /// 2. Parameters for each local variable (to thread SSA values through)
     ///
     /// The caller is responsible for emitting branches to this join block.
-    pub(super) fn build_join_plan(&mut self, expr: &sem::ValueExpr) -> JoinPlan {
+    pub(super) fn build_join_plan(&mut self, join_type_id: TypeId) -> JoinPlan {
         let join_bb = self.builder.add_block();
 
         // Add parameter for the expression's result value.
-        let join_ty = self.type_lowerer.lower_type_id(expr.ty);
+        let join_ty = self.type_lowerer.lower_type_id(join_type_id);
         let join_value = self.builder.add_block_param(join_bb, join_ty);
 
         // Snapshot current locals in deterministic order.
@@ -68,9 +69,14 @@ impl FuncLowerer<'_, '_> {
         }
     }
 
-    pub(super) fn begin_join(&mut self, expr: &sem::ValueExpr) -> JoinSession {
+    pub(super) fn begin_join(&mut self, expr: &Expr) -> JoinSession {
+        let ty_id = self.type_map.type_of(expr.id);
+        self.begin_join_with_ty(ty_id)
+    }
+
+    pub(super) fn begin_join_with_ty(&mut self, ty_id: TypeId) -> JoinSession {
         JoinSession::new(
-            self.build_join_plan(expr),
+            self.build_join_plan(ty_id),
             self.locals.snapshot(),
             self.drop_scopes_snapshot(),
         )

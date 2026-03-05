@@ -76,17 +76,17 @@ fn test_finalize_records_nominal_keys_for_generic_instantiations() {
         .expect("missing main")
         .body;
     let local_b_def_id = match &main_body.kind {
-        crate::core::tree::ExprKind::Block { items, .. } => items
+        ExprKind::Block { items, .. } => items
             .iter()
             .find_map(|item| {
-                let crate::core::tree::BlockItem::Stmt(stmt) = item else {
+                let BlockItem::Stmt(stmt) = item else {
                     return None;
                 };
-                let crate::core::tree::StmtExprKind::LetBind { pattern, .. } = &stmt.kind else {
+                let StmtExprKind::LetBind { pattern, .. } = &stmt.kind else {
                     return None;
                 };
                 match &pattern.kind {
-                    crate::core::tree::BindPatternKind::Name { ident } if ident == "b" => {
+                    BindPatternKind::Name { ident } if ident == "b" => {
                         Some(checked.def_table.def_id(pattern.id))
                     }
                     _ => None,

@@ -4,6 +4,7 @@
 //! maps successful returns to process exit codes, and reports unhandled
 //! error-union variants through the runtime trap path.
 
+use crate::core::ast::Module;
 use crate::core::backend::lower::LoweredFunction;
 use crate::core::backend::lower::globals::GlobalArena;
 use crate::core::backend::lower::types::TypeLowerer;
@@ -12,7 +13,6 @@ use crate::core::ir::{
     SwitchCase, Terminator, ValueId,
 };
 use crate::core::resolve::{DefId, DefTable};
-use crate::core::tree::semantic as sem;
 use crate::core::typecheck::type_map::TypeMap;
 use crate::core::types::Type;
 
@@ -34,7 +34,7 @@ struct MainErrorCase {
 /// - call user main and translate the result to process exit semantics,
 /// - report unhandled error-union variants via `RuntimeFn::Trap`.
 pub(super) fn append_executable_entry_wrapper(
-    module: &sem::Module,
+    module: &Module,
     def_table: &DefTable,
     type_map: &TypeMap,
     funcs: &mut Vec<LoweredFunction>,
@@ -48,7 +48,7 @@ pub(super) fn append_executable_entry_wrapper(
         return;
     };
 
-    let main_def_id = main_def.def_id;
+    let main_def_id = def_table.def_id(main_def.id);
     let Some(main_lowered) = funcs.iter_mut().find(|f| f.func.def_id == main_def_id) else {
         return;
     };

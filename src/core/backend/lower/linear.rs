@@ -1,13 +1,16 @@
 //! Straight-line (single-block) lowering routines.
 
+use crate::core::ast::{
+    ArrayLitInit, BinaryOp, BlockItem, CoerceKind, EmitKind, Expr, ExprKind, MapLitEntry,
+    ParamMode, StmtExpr, StmtExprKind, StructLitField, StructUpdateField, UnaryOp,
+};
 use crate::core::backend::lower::LowerToIrError;
 use crate::core::backend::lower::locals::LocalValue;
 use crate::core::backend::lower::lowerer::{BranchResult, FuncLowerer, LinearValue, StmtOutcome};
 use crate::core::backend::lower::mapping::{map_binop, map_cmp};
 use crate::core::ir::{BinOp, Callee, CastKind, IrTypeId, RuntimeFn, Terminator, UnOp, ValueId};
+use crate::core::plans::{FmtKind, LoweringPlan, SliceBaseKind};
 use crate::core::resolve::DefKind;
-use crate::core::tree::semantic as sem;
-use crate::core::tree::{BinaryOp, CoerceKind, ParamMode, UnaryOp};
 use crate::core::types::{Type, TypeId};
 
 impl<'a, 'g> FuncLowerer<'a, 'g> {
@@ -15,7 +18,7 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
         &mut self,
         tuple_ty: TypeId,
         slot_addr: ValueId,
-        items: &[sem::ValueExpr],
+        items: &[Expr],
     ) -> Result<bool, LowerToIrError> {
         for (i, elem_expr) in items.iter().enumerate() {
             let Some(value) = self.lower_value_expr_opt(elem_expr)? else {
@@ -31,7 +34,7 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
         &mut self,
         struct_ty: TypeId,
         slot_addr: ValueId,
-        fields: &[sem::StructLitField],
+        fields: &[StructLitField],
     ) -> Result<bool, LowerToIrError> {
         for field in fields.iter() {
             let Some(value) = self.lower_value_expr_opt(&field.value)? else {
@@ -47,7 +50,7 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
         &mut self,
         struct_ty: TypeId,
         slot_addr: ValueId,
-        fields: &[sem::StructUpdateField],
+        fields: &[StructUpdateField],
     ) -> Result<bool, LowerToIrError> {
         for field in fields.iter() {
             let Some(value) = self.lower_value_expr_opt(&field.value)? else {
@@ -59,12 +62,10 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
         Ok(true)
     }
 
-    /// Lowers a linear value expression directly from the semantic tree.
-    ///
-    /// This avoids constructing a parallel linear AST for the common cases.
+    /// Lowers a linear value expression (single basic block, no branching).
     pub(super) fn lower_linear_value_expr(
         &mut self,
-        expr: &sem::ValueExpr,
+        expr: &Expr,
     ) -> Result<LinearValue, LowerToIrError> {
         match self.lower_value_expr_value(expr)? {
             BranchResult::Value(value) => Ok(value),
@@ -80,51 +81,67 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
     /// Lowers a value expression, allowing branching subexpressions to return early.
     pub(super) fn lower_value_expr_value(
         &mut self,
-        expr: &sem::ValueExpr,
+        expr: &Expr,
     ) -> Result<BranchResult, LowerToIrError> {
         match &expr.kind {
-            sem::ValueExprKind::Block { items, tail } => self.lower_block_expr(expr, items, tail),
+            ExprKind::Block { items, tail } => self.lower_block_expr(expr, items, tail),
 
-            sem::ValueExprKind::UnitLit => {
-                let ty = self.type_lowerer.lower_type_id(expr.ty);
+            ExprKind::UnitLit => {
+                let ty = self
+                    .type_lowerer
+                    .lower_type_id(self.type_map.type_of(expr.id));
                 Ok(self.builder.const_unit(ty).into())
             }
-            sem::ValueExprKind::IntLit(value) => {
-                let ty = self.type_lowerer.lower_type_id(expr.ty);
-                let (signed, bits) = self.type_lowerer.int_info(expr.ty);
+            ExprKind::IntLit(value) => {
+                let expr_ty = self.type_map.type_of(expr.id);
+                let ty = self.type_lowerer.lower_type_id(expr_ty);
+                let (signed, bits) = self.type_lowerer.int_info(expr_ty);
                 Ok(self
                     .builder
                     .const_int(*value as i128, signed, bits, ty)
                     .into())
             }
-            sem::ValueExprKind::BoolLit(value) => {
-                let ty = self.type_lowerer.lower_type_id(expr.ty);
+            ExprKind::BoolLit(value) => {
+                let ty = self
+                    .type_lowerer
+                    .lower_type_id(self.type_map.type_of(expr.id));
                 Ok(self.builder.const_bool(*value, ty).into())
             }
-            sem::ValueExprKind::CharLit(value) => {
-                let ty = self.type_lowerer.lower_type_id(expr.ty);
+            ExprKind::CharLit(value) => {
+                let ty = self
+                    .type_lowerer
+                    .lower_type_id(self.type_map.type_of(expr.id));
                 Ok(self
                     .builder
                     .const_int(*value as u32 as i128, false, 32, ty)
                     .into())
             }
-            sem::ValueExprKind::StringLit { value } => self.lower_string_lit_expr(expr, value),
+            ExprKind::StringLit { value } => self.lower_string_lit_expr(expr, value),
 
-            sem::ValueExprKind::Range { start, end } => {
-                let (sem::ValueExprKind::IntLit(start), sem::ValueExprKind::IntLit(_end)) =
-                    (&start.kind, &end.kind)
+            ExprKind::Range { start, end } => {
+                let (ExprKind::IntLit(start), ExprKind::IntLit(_end)) = (&start.kind, &end.kind)
                 else {
                     panic!("backend range values require literal bounds");
                 };
-                let ty = self.type_lowerer.lower_type_id(expr.ty);
+                let ty = self
+                    .type_lowerer
+                    .lower_type_id(self.type_map.type_of(expr.id));
                 Ok(self.builder.const_int(*start as i128, false, 64, ty).into())
             }
 
-            sem::ValueExprKind::StringFmt { plan } => {
-                let string_ty = self.type_lowerer.lower_type_id(expr.ty);
+            ExprKind::StringFmt { segments: _ } => {
+                let plan = self
+                    .lowering_plans
+                    .string_fmt_plans
+                    .get(&expr.id)
+                    .unwrap_or_else(|| panic!("backend missing string_fmt_plan for {:?}", expr.id));
+                let plan = plan.clone();
+                let string_ty = self
+                    .type_lowerer
+                    .lower_type_id(self.type_map.type_of(expr.id));
                 let value = match plan.kind {
-                    sem::FmtKind::View => self.lower_string_fmt_view(plan, string_ty)?,
-                    sem::FmtKind::Owned => self.lower_string_fmt_owned(plan, string_ty)?,
+                    FmtKind::View => self.lower_string_fmt_view(&plan, string_ty)?,
+                    FmtKind::Owned => self.lower_string_fmt_owned(&plan, string_ty)?,
                 };
                 let Some(value) = value else {
                     return Ok(BranchResult::Return);
@@ -132,25 +149,21 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
                 Ok(value.into())
             }
 
-            sem::ValueExprKind::ArrayLit { init, .. } => self.lower_array_lit_expr(expr, init),
-            sem::ValueExprKind::SetLit { elems, .. } => self.lower_set_lit_expr(expr, elems),
-            sem::ValueExprKind::MapLit { entries, .. } => self.lower_map_lit_expr(expr, entries),
+            ExprKind::ArrayLit { init, .. } => self.lower_array_lit_expr(expr, init),
+            ExprKind::SetLit { elems, .. } => self.lower_set_lit_expr(expr, elems),
+            ExprKind::MapLit { entries, .. } => self.lower_map_lit_expr(expr, entries),
 
-            sem::ValueExprKind::TupleLit(items) => self.lower_tuple_lit_expr(expr, items),
-            sem::ValueExprKind::StructLit { fields, .. } => {
-                self.lower_struct_lit_expr(expr, fields)
-            }
-            sem::ValueExprKind::StructUpdate { target, fields } => {
+            ExprKind::TupleLit(items) => self.lower_tuple_lit_expr(expr, items),
+            ExprKind::StructLit { fields, .. } => self.lower_struct_lit_expr(expr, fields),
+            ExprKind::StructUpdate { target, fields } => {
                 self.lower_struct_update_expr(expr, target, fields)
             }
 
-            sem::ValueExprKind::EnumVariant {
-                enum_name: _,
-                variant,
-                payload,
+            ExprKind::EnumVariant {
+                variant, payload, ..
             } => self.lower_enum_variant_expr(expr, variant, payload),
 
-            sem::ValueExprKind::Try {
+            ExprKind::Try {
                 fallible_expr,
                 on_error,
             } => {
@@ -160,11 +173,13 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
                 self.lower_try_propagate(expr, fallible_expr)
             }
 
-            sem::ValueExprKind::UnaryOp { op, expr: inner } => {
+            ExprKind::UnaryOp { op, expr: inner } => {
                 let Some(value) = self.lower_value_expr_opt(inner)? else {
                     return Ok(BranchResult::Return);
                 };
-                let ty = self.type_lowerer.lower_type_id(expr.ty);
+                let ty = self
+                    .type_lowerer
+                    .lower_type_id(self.type_map.type_of(expr.id));
                 let result = match op {
                     UnaryOp::Neg => self.builder.unop(UnOp::Neg, value, ty),
                     UnaryOp::LogicalNot => self.builder.unop(UnOp::Not, value, ty),
@@ -173,25 +188,20 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
                 Ok(result.into())
             }
 
-            sem::ValueExprKind::HeapAlloc { expr: inner } => {
-                self.lower_heap_alloc_expr(expr, inner)
-            }
-            sem::ValueExprKind::BinOp { left, op, right } => {
-                self.lower_binop_expr(expr, left, *op, right)
-            }
-            sem::ValueExprKind::Slice { target, start, end } => {
+            ExprKind::HeapAlloc { expr: inner } => self.lower_heap_alloc_expr(expr, inner),
+            ExprKind::BinOp { left, op, right } => self.lower_binop_expr(expr, left, *op, right),
+            ExprKind::Slice { target, start, end } => {
                 self.lower_slice_expr(expr, target, start.as_deref(), end.as_deref())
             }
-            sem::ValueExprKind::MapGet { target, key } => {
-                self.lower_map_get_expr(expr, target, key)
-            }
-            sem::ValueExprKind::Len { place } => self.lower_len_expr(expr, place),
+            ExprKind::MapGet { target, key } => self.lower_map_get_expr(expr, target, key),
+            ExprKind::Len { expr: place } => self.lower_len_expr(expr, place),
 
-            sem::ValueExprKind::Move { place } | sem::ValueExprKind::ImplicitMove { place } => {
+            ExprKind::Move { expr: place } | ExprKind::ImplicitMove { expr: place } => {
                 match &place.kind {
-                    sem::PlaceExprKind::Var { def_id, .. } => {
-                        self.set_drop_flag_for_def(*def_id, false);
-                        Ok(self.load_local_value(*def_id).into())
+                    ExprKind::Var { .. } => {
+                        let def_id = self.def_table.def_id(place.id);
+                        self.set_drop_flag_for_def(def_id, false);
+                        Ok(self.load_local_value(def_id).into())
                     }
                     _ => {
                         let place_addr = self.lower_place_addr(place)?;
@@ -203,20 +213,21 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
                 }
             }
 
-            sem::ValueExprKind::Coerce { kind, expr: inner } => {
-                self.lower_coerce_expr(expr, *kind, inner)
-            }
+            ExprKind::Coerce { kind, expr: inner } => self.lower_coerce_expr(expr, *kind, inner),
 
-            sem::ValueExprKind::Load { place } => match &place.kind {
-                sem::PlaceExprKind::Var { def_id, .. } => {
-                    if self.locals.get(*def_id).is_some() {
-                        Ok(self.load_local_value(*def_id).into())
+            ExprKind::Load { expr: place } => match &place.kind {
+                ExprKind::Var { .. } => {
+                    let def_id = self.def_table.def_id(place.id);
+                    if self.locals.get(def_id).is_some() {
+                        Ok(self.load_local_value(def_id).into())
                     } else {
-                        let def = self.def(*def_id);
+                        let def = self.def(def_id);
                         match def.kind {
                             DefKind::FuncDef { .. } | DefKind::FuncDecl { .. } => {
-                                let value_ty = self.type_lowerer.lower_type_id(place.ty);
-                                Ok(self.builder.const_func_addr(*def_id, value_ty).into())
+                                let value_ty = self
+                                    .type_lowerer
+                                    .lower_type_id(self.type_map.type_of(place.id));
+                                Ok(self.builder.const_func_addr(def_id, value_ty).into())
                             }
                             _ => panic!(
                                 "backend load missing local for non-function def {:?}",
@@ -234,43 +245,50 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
                 }
             },
 
-            sem::ValueExprKind::AddrOf { place } => {
+            ExprKind::AddrOf { expr: place } => {
                 let place_addr = self.lower_place_addr(place)?;
                 Ok(place_addr.addr.into())
             }
 
-            sem::ValueExprKind::Call { callee, args } => {
+            ExprKind::Call { callee, args } => {
                 let Some(value) = self.lower_call_expr(expr, callee, args)? else {
                     return Ok(BranchResult::Return);
                 };
                 Ok(value.into())
             }
 
-            sem::ValueExprKind::MethodCall { receiver, args, .. } => {
-                let Some(value) = self.lower_method_call_expr(expr, receiver, args)? else {
+            ExprKind::MethodCall { callee, args, .. } => {
+                let Some(value) = self.lower_method_call_expr(expr, callee, args)? else {
                     return Ok(BranchResult::Return);
                 };
                 Ok(value.into())
             }
 
-            sem::ValueExprKind::EmitSend { to, payload } => {
-                self.lower_emit_send_expr(expr, to, payload)
-            }
-            sem::ValueExprKind::EmitRequest {
-                to,
-                payload,
-                request_site_key,
-            } => self.lower_emit_request_expr(expr, to, payload, *request_site_key),
-            sem::ValueExprKind::Reply { cap, value } => self.lower_reply_expr(expr, cap, value),
+            ExprKind::Emit {
+                kind: EmitKind::Send { to, payload },
+            } => self.lower_emit_send_expr(expr, to, payload),
+            ExprKind::Emit {
+                kind:
+                    EmitKind::Request {
+                        to,
+                        payload,
+                        request_site_key,
+                        ..
+                    },
+            } => self.lower_emit_request_expr(expr, to, payload, request_site_key.unwrap()),
+            ExprKind::Reply { cap, value } => self.lower_reply_expr(expr, cap, value),
 
-            sem::ValueExprKind::ClosureRef { def_id } => {
-                let ty = self.type_lowerer.lower_type_id(expr.ty);
-                Ok(self.builder.const_func_addr(*def_id, ty).into())
+            ExprKind::ClosureRef { .. } => {
+                let def_id = self.def_table.def_id(expr.id);
+                let ty = self
+                    .type_lowerer
+                    .lower_type_id(self.type_map.type_of(expr.id));
+                Ok(self.builder.const_func_addr(def_id, ty).into())
             }
 
             _ => match self.lowering_plan(expr.id) {
-                sem::LoweringPlan::Branching => self.lower_branching_value_expr(expr),
-                sem::LoweringPlan::Linear => {
+                LoweringPlan::Branching => self.lower_branching_value_expr(expr),
+                LoweringPlan::Linear => {
                     panic!(
                         "backend lower_value_expr_value unsupported expr {:?} at {:?}",
                         expr.kind, expr.span
@@ -280,37 +298,39 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
         }
     }
 
-    /// Lowers a linear statement directly from the semantic tree.
+    /// Lowers a linear statement (single basic block, no branching).
     pub(super) fn lower_stmt_expr_linear(
         &mut self,
-        stmt: &sem::StmtExpr,
+        stmt: &StmtExpr,
     ) -> Result<StmtOutcome, LowerToIrError> {
         self.annotate_stmt(stmt);
         match &stmt.kind {
-            sem::StmtExprKind::LetBind { pattern, value, .. }
-            | sem::StmtExprKind::VarBind { pattern, value, .. } => {
+            StmtExprKind::LetBind { pattern, value, .. }
+            | StmtExprKind::VarBind { pattern, value, .. } => {
                 let value_expr = value;
                 let value = match self.lower_value_expr_value(value_expr)? {
                     BranchResult::Value(value) => value,
                     BranchResult::Return => return Ok(StmtOutcome::Return),
                 };
-                let ty = self.type_lowerer.lower_type_id(value_expr.ty);
-                let value_ty = self.type_map.type_table().get(value_expr.ty).clone();
+                let value_expr_ty = self.type_map.type_of(value_expr.id);
+                let ty = self.type_lowerer.lower_type_id(value_expr_ty);
+                let value_ty = self.type_map.type_table().get(value_expr_ty).clone();
                 self.bind_pattern(pattern, LocalValue::value(value, ty), &value_ty)?;
                 Ok(StmtOutcome::Continue)
             }
 
-            sem::StmtExprKind::VarDecl { def_id, .. } => {
-                let ty = self.def_type(*def_id);
+            StmtExprKind::VarDecl { .. } => {
+                let def_id = self.def_table.def_id(stmt.id);
+                let ty = self.def_type(def_id);
                 let ir_ty = self.type_lowerer.lower_type(&ty);
                 let addr = self.alloc_local_addr(ir_ty);
-                self.locals.insert(*def_id, LocalValue::addr(addr, ir_ty));
+                self.locals.insert(def_id, LocalValue::addr(addr, ir_ty));
                 // Start drop tracking as uninitialized until the first init assignment.
-                self.set_drop_flag_for_def(*def_id, false);
+                self.set_drop_flag_for_def(def_id, false);
                 Ok(StmtOutcome::Continue)
             }
 
-            sem::StmtExprKind::Assign {
+            StmtExprKind::Assign {
                 assignee,
                 value,
                 init,
@@ -321,55 +341,59 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
                     BranchResult::Value(value) => value,
                     BranchResult::Return => return Ok(StmtOutcome::Return),
                 };
-                let value_ty = self.type_map.type_table().get(value_expr.ty).clone();
+                let value_expr_ty = self.type_map.type_of(value_expr.id);
+                let value_ty = self.type_map.type_table().get(value_expr_ty).clone();
                 match &assignee.kind {
-                    sem::PlaceExprKind::Var { def_id, .. } => {
-                        let dest_ty = self.def_type(*def_id);
+                    ExprKind::Var { .. } => {
+                        let def_id = self.def_table.def_id(assignee.id);
+                        let dest_ty = self.def_type(def_id);
                         self.emit_conversion_check(&value_ty, &dest_ty, value);
-                        if let Some(mode) = self.param_mode_for(*def_id)
+                        if let Some(mode) = self.param_mode_for(def_id)
                             && matches!(mode, ParamMode::Out | ParamMode::InOut)
                         {
                             if !init.is_init && !init.promotes_full {
-                                self.emit_drop_for_def_if_live(*def_id, value_expr.ty)?;
+                                self.emit_drop_for_def_if_live(def_id, value_expr_ty)?;
                             }
-                            let ty = self.type_lowerer.lower_type_id(value_expr.ty);
-                            self.assign_local_value(*def_id, value, ty);
-                            self.set_drop_flag_for_def(*def_id, true);
+                            let ty = self.type_lowerer.lower_type_id(value_expr_ty);
+                            self.assign_local_value(def_id, value, ty);
+                            self.set_drop_flag_for_def(def_id, true);
                             return Ok(StmtOutcome::Continue);
                         }
                         if !init.is_init && !init.promotes_full {
-                            self.emit_drop_for_def_if_live(*def_id, value_expr.ty)?;
+                            self.emit_drop_for_def_if_live(def_id, value_expr_ty)?;
                         }
-                        let ty = self.type_lowerer.lower_type_id(value_expr.ty);
-                        self.assign_local_value(*def_id, value, ty);
-                        self.set_drop_flag_for_def(*def_id, true);
+                        let ty = self.type_lowerer.lower_type_id(value_expr_ty);
+                        self.assign_local_value(def_id, value, ty);
+                        self.set_drop_flag_for_def(def_id, true);
                         Ok(StmtOutcome::Continue)
                     }
                     _ => {
-                        let dest_ty = self.type_map.type_table().get(assignee.ty).clone();
+                        let assignee_ty = self.type_map.type_of(assignee.id);
+                        let dest_ty = self.type_map.type_table().get(assignee_ty).clone();
                         self.emit_conversion_check(&value_ty, &dest_ty, value);
                         let place_addr = self.lower_place_addr(assignee)?;
                         if !init.is_init && !init.promotes_full {
                             self.drop_value_at_addr(place_addr.addr, &dest_ty)?;
                         }
-                        let ir_ty = self.type_lowerer.lower_type_id(value_expr.ty);
-                        let sem_ty = self.type_map.type_table().get(value_expr.ty);
+                        let ir_ty = self.type_lowerer.lower_type_id(value_expr_ty);
+                        let sem_ty = self.type_map.type_table().get(value_expr_ty);
                         self.store_value_into_addr(place_addr.addr, value, sem_ty, ir_ty);
                         if init.promotes_full {
                             let mut cursor = assignee.as_ref();
                             let mut base_def = None;
                             loop {
                                 match &cursor.kind {
-                                    sem::PlaceExprKind::Var { def_id, .. } => {
-                                        base_def = Some(*def_id);
+                                    ExprKind::Var { .. } => {
+                                        base_def = Some(self.def_table.def_id(cursor.id));
                                         break;
                                     }
-                                    sem::PlaceExprKind::StructField { target, .. }
-                                    | sem::PlaceExprKind::TupleField { target, .. }
-                                    | sem::PlaceExprKind::ArrayIndex { target, .. } => {
+                                    ExprKind::StructField { target, .. }
+                                    | ExprKind::TupleField { target, .. }
+                                    | ExprKind::ArrayIndex { target, .. } => {
                                         cursor = target.as_ref();
                                     }
-                                    sem::PlaceExprKind::Deref { .. } => break,
+                                    ExprKind::Deref { .. } => break,
+                                    _ => break,
                                 }
                             }
                             if let Some(def_id) = base_def {
@@ -381,11 +405,14 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
                 }
             }
 
-            sem::StmtExprKind::Return { value } => {
+            StmtExprKind::Return { value } => {
                 let value = match value {
                     Some(expr) => match self.lower_value_expr_value(expr)? {
                         BranchResult::Value(value) => {
-                            let ty = self.type_map.type_table().get(expr.ty);
+                            let ty = self
+                                .type_map
+                                .type_table()
+                                .get(self.type_map.type_of(expr.id));
                             if matches!(ty, Type::Unit) {
                                 None
                             } else {
@@ -401,25 +428,29 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
                 Ok(StmtOutcome::Return)
             }
 
-            sem::StmtExprKind::While { .. }
-            | sem::StmtExprKind::For { .. }
-            | sem::StmtExprKind::Break
-            | sem::StmtExprKind::Continue => {
+            StmtExprKind::While { .. }
+            | StmtExprKind::For { .. }
+            | StmtExprKind::Break
+            | StmtExprKind::Continue => {
                 panic!(
                     "backend lower_stmt_expr_linear unsupported stmt {:?} at {:?}",
                     stmt.kind, stmt.span
                 );
             }
-            sem::StmtExprKind::Defer { .. } | sem::StmtExprKind::Using { .. } => {
-                unreachable!("syntax desugar must remove defer/using before backend lowering");
+            StmtExprKind::CompoundAssign { .. }
+            | StmtExprKind::Defer { .. }
+            | StmtExprKind::Using { .. } => {
+                unreachable!(
+                    "syntax desugar must remove compound-assign/defer/using before backend lowering"
+                );
             }
         }
     }
 
-    /// Convenience: lower a ValueExpr and return its value in one step.
+    /// Convenience: lower an expression and return its value in one step.
     pub(super) fn lower_linear_expr_value(
         &mut self,
-        expr: &sem::ValueExpr,
+        expr: &Expr,
     ) -> Result<LinearValue, LowerToIrError> {
         match self.lower_value_expr(expr)? {
             BranchResult::Value(value) => Ok(value),
@@ -436,14 +467,14 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
 
     fn lower_block_expr(
         &mut self,
-        expr: &sem::ValueExpr,
-        items: &[sem::BlockItem],
-        tail: &Option<Box<sem::ValueExpr>>,
+        expr: &Expr,
+        items: &[BlockItem],
+        tail: &Option<Box<Expr>>,
     ) -> Result<BranchResult, LowerToIrError> {
         self.with_drop_scope(expr.id, |lowerer| {
             for item in items {
                 match item {
-                    sem::BlockItem::Stmt(stmt) => {
+                    BlockItem::Stmt(stmt) => {
                         match lowerer.lower_stmt_expr_linear(stmt)? {
                             StmtOutcome::Continue => {}
                             StmtOutcome::Return => {
@@ -454,7 +485,7 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
                             }
                         }
                     }
-                    sem::BlockItem::Expr(expr) => {
+                    BlockItem::Expr(expr) => {
                         lowerer.annotate_expr(expr);
                         let _ = lowerer.lower_linear_value_expr(expr)?;
                     }
@@ -468,17 +499,19 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
                     .map(Into::into);
             }
 
-            let ty = lowerer.type_lowerer.lower_type_id(expr.ty);
+            let ty = lowerer.type_lowerer.lower_type_id(lowerer.type_map.type_of(expr.id));
             Ok(lowerer.builder.const_unit(ty).into())
         })
     }
 
     fn lower_string_lit_expr(
         &mut self,
-        expr: &sem::ValueExpr,
+        expr: &Expr,
         value: &str,
     ) -> Result<BranchResult, LowerToIrError> {
-        let string_ty = self.type_lowerer.lower_type_id(expr.ty);
+        let string_ty = self
+            .type_lowerer
+            .lower_type_id(self.type_map.type_of(expr.id));
         let slot = self.alloc_value_slot(string_ty);
 
         // pointer to global bytes
@@ -510,32 +543,37 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
 
     fn lower_array_lit_expr(
         &mut self,
-        expr: &sem::ValueExpr,
-        init: &sem::ArrayLitInit,
+        expr: &Expr,
+        init: &ArrayLitInit,
     ) -> Result<BranchResult, LowerToIrError> {
-        let array_ty = self.type_lowerer.lower_type_id(expr.ty);
+        let array_ty = self
+            .type_lowerer
+            .lower_type_id(self.type_map.type_of(expr.id));
         let addr = self.alloc_local_addr(array_ty);
         let u64_ty = self.type_lowerer.lower_type(&Type::uint(64));
 
         match init {
-            sem::ArrayLitInit::Elems(elems) => {
+            ArrayLitInit::Elems(elems) => {
                 for (i, elem_expr) in elems.iter().enumerate() {
                     let Some(value) = self.lower_value_expr_opt(elem_expr)? else {
                         return Ok(BranchResult::Return);
                     };
                     let index_val = self.builder.const_int(i as i128, false, 64, u64_ty);
-                    let elem_ty = self.type_lowerer.lower_type_id(elem_expr.ty);
+                    let elem_ty = self
+                        .type_lowerer
+                        .lower_type_id(self.type_map.type_of(elem_expr.id));
                     let elem_ptr_ty = self.type_lowerer.ptr_to(elem_ty);
                     let elem_addr = self.builder.index_addr(addr, index_val, elem_ptr_ty);
                     self.builder.store(elem_addr, value);
                 }
             }
-            sem::ArrayLitInit::Repeat(repeat_expr, count) => {
+            ArrayLitInit::Repeat(repeat_expr, count) => {
                 let Some(value) = self.lower_value_expr_opt(repeat_expr)? else {
                     return Ok(BranchResult::Return);
                 };
-                let elem_ty = self.type_lowerer.lower_type_id(repeat_expr.ty);
-                let sem_ty = self.type_map.type_table().get(repeat_expr.ty);
+                let repeat_expr_ty = self.type_map.type_of(repeat_expr.id);
+                let elem_ty = self.type_lowerer.lower_type_id(repeat_expr_ty);
+                let sem_ty = self.type_map.type_table().get(repeat_expr_ty);
                 if matches!(
                     sem_ty,
                     Type::Int {
@@ -565,15 +603,16 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
 
     fn lower_set_lit_expr(
         &mut self,
-        expr: &sem::ValueExpr,
-        elems: &[sem::ValueExpr],
+        expr: &Expr,
+        elems: &[Expr],
     ) -> Result<BranchResult, LowerToIrError> {
-        let set_sem_ty = self.type_map.type_table().get(expr.ty).clone();
+        let expr_ty = self.type_map.type_of(expr.id);
+        let set_sem_ty = self.type_map.type_table().get(expr_ty).clone();
         let Type::Set { elem_ty } = set_sem_ty else {
             panic!("backend set literal has non-set type");
         };
 
-        let set_ir_ty = self.type_lowerer.lower_type_id(expr.ty);
+        let set_ir_ty = self.type_lowerer.lower_type_id(expr_ty);
         let slot = self.alloc_value_slot(set_ir_ty);
 
         let elem_ir_ty = self.type_lowerer.lower_type(&elem_ty);
@@ -588,7 +627,11 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
             let Some(value) = self.lower_value_expr_opt(elem_expr)? else {
                 return Ok(BranchResult::Return);
             };
-            let elem_value_ty = self.type_map.type_table().get(elem_expr.ty).clone();
+            let elem_value_ty = self
+                .type_map
+                .type_table()
+                .get(self.type_map.type_of(elem_expr.id))
+                .clone();
             let elem_addr = self.materialize_value_addr(value, &elem_value_ty);
             let _ = self.builder.call(
                 Callee::Runtime(RuntimeFn::SetInsertElem),
@@ -602,15 +645,16 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
 
     fn lower_map_lit_expr(
         &mut self,
-        expr: &sem::ValueExpr,
-        entries: &[sem::MapLitEntry],
+        expr: &Expr,
+        entries: &[MapLitEntry],
     ) -> Result<BranchResult, LowerToIrError> {
-        let map_sem_ty = self.type_map.type_table().get(expr.ty).clone();
+        let expr_ty = self.type_map.type_of(expr.id);
+        let map_sem_ty = self.type_map.type_table().get(expr_ty).clone();
         let Type::Map { key_ty, value_ty } = map_sem_ty else {
             panic!("backend map literal has non-map type");
         };
 
-        let map_ir_ty = self.type_lowerer.lower_type_id(expr.ty);
+        let map_ir_ty = self.type_lowerer.lower_type_id(expr_ty);
         let slot = self.alloc_value_slot(map_ir_ty);
 
         let key_ir_ty = self.type_lowerer.lower_type(&key_ty);
@@ -625,13 +669,21 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
             let Some(key_value) = self.lower_value_expr_opt(&entry.key)? else {
                 return Ok(BranchResult::Return);
             };
-            let key_value_ty = self.type_map.type_table().get(entry.key.ty).clone();
+            let key_value_ty = self
+                .type_map
+                .type_table()
+                .get(self.type_map.type_of(entry.key.id))
+                .clone();
             let key_addr = self.materialize_value_addr(key_value, &key_value_ty);
 
             let Some(value_value) = self.lower_value_expr_opt(&entry.value)? else {
                 return Ok(BranchResult::Return);
             };
-            let value_value_ty = self.type_map.type_table().get(entry.value.ty).clone();
+            let value_value_ty = self
+                .type_map
+                .type_table()
+                .get(self.type_map.type_of(entry.value.id))
+                .clone();
             let value_addr = self.materialize_value_addr(value_value, &value_value_ty);
 
             let _ = self.builder.call(
@@ -646,12 +698,13 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
 
     fn lower_tuple_lit_expr(
         &mut self,
-        expr: &sem::ValueExpr,
-        items: &[sem::ValueExpr],
+        expr: &Expr,
+        items: &[Expr],
     ) -> Result<BranchResult, LowerToIrError> {
-        let tuple_ty = self.type_lowerer.lower_type_id(expr.ty);
+        let expr_ty = self.type_map.type_of(expr.id);
+        let tuple_ty = self.type_lowerer.lower_type_id(expr_ty);
         let slot = self.alloc_value_slot(tuple_ty);
-        if !self.store_tuple_items(expr.ty, slot.addr, items)? {
+        if !self.store_tuple_items(expr_ty, slot.addr, items)? {
             return Ok(BranchResult::Return);
         }
 
@@ -660,12 +713,13 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
 
     fn lower_struct_lit_expr(
         &mut self,
-        expr: &sem::ValueExpr,
-        fields: &[sem::StructLitField],
+        expr: &Expr,
+        fields: &[StructLitField],
     ) -> Result<BranchResult, LowerToIrError> {
-        let struct_ty = self.type_lowerer.lower_type_id(expr.ty);
+        let expr_ty = self.type_map.type_of(expr.id);
+        let struct_ty = self.type_lowerer.lower_type_id(expr_ty);
         let slot = self.alloc_value_slot(struct_ty);
-        if !self.store_struct_lit_fields(expr.ty, slot.addr, fields)? {
+        if !self.store_struct_lit_fields(expr_ty, slot.addr, fields)? {
             return Ok(BranchResult::Return);
         }
 
@@ -674,22 +728,23 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
 
     fn lower_struct_update_expr(
         &mut self,
-        expr: &sem::ValueExpr,
-        target: &sem::ValueExpr,
-        fields: &[sem::StructUpdateField],
+        expr: &Expr,
+        target: &Expr,
+        fields: &[StructUpdateField],
     ) -> Result<BranchResult, LowerToIrError> {
-        let struct_ty = self.type_lowerer.lower_type_id(expr.ty);
+        let expr_ty = self.type_map.type_of(expr.id);
+        let struct_ty = self.type_lowerer.lower_type_id(expr_ty);
         let slot = self.alloc_value_slot(struct_ty);
 
         // Copy the base struct
         let Some(base_value) = self.lower_value_expr_opt(target)? else {
             return Ok(BranchResult::Return);
         };
-        let base_ty = self.type_map.type_table().get(expr.ty);
+        let base_ty = self.type_map.type_table().get(expr_ty);
         self.store_value_into_addr(slot.addr, base_value, base_ty, struct_ty);
 
         // Overwrite the updated fields
-        if !self.store_struct_update_fields(expr.ty, slot.addr, fields)? {
+        if !self.store_struct_update_fields(expr_ty, slot.addr, fields)? {
             return Ok(BranchResult::Return);
         }
 
@@ -698,12 +753,13 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
 
     fn lower_enum_variant_expr(
         &mut self,
-        expr: &sem::ValueExpr,
+        expr: &Expr,
         variant: &str,
-        payload: &[sem::ValueExpr],
+        payload: &[Expr],
     ) -> Result<BranchResult, LowerToIrError> {
+        let expr_ty = self.type_map.type_of(expr.id);
         let (tag_ty, blob_ty, variant_tag, field_offsets, field_tys) = {
-            let layout = self.type_lowerer.enum_layout(expr.ty);
+            let layout = self.type_lowerer.enum_layout(expr_ty);
             let variant_layout = layout.variant_by_name(variant);
             (
                 layout.tag_ty,
@@ -714,7 +770,7 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
             )
         };
 
-        let enum_ty = self.type_lowerer.lower_type_id(expr.ty);
+        let enum_ty = self.type_lowerer.lower_type_id(expr_ty);
         let slot = self.alloc_value_slot(enum_ty);
 
         // Store the tag in field 0.
@@ -752,10 +808,14 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
 
     fn lower_heap_alloc_expr(
         &mut self,
-        expr: &sem::ValueExpr,
-        inner: &sem::ValueExpr,
+        expr: &Expr,
+        inner: &Expr,
     ) -> Result<BranchResult, LowerToIrError> {
-        let heap_ty = self.type_map.type_table().get(expr.ty).clone();
+        let heap_ty = self
+            .type_map
+            .type_table()
+            .get(self.type_map.type_of(expr.id))
+            .clone();
         let Type::Heap { elem_ty } = heap_ty else {
             panic!("backend heap alloc expects heap type, got {:?}", heap_ty);
         };
@@ -790,10 +850,10 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
 
     fn lower_binop_expr(
         &mut self,
-        expr: &sem::ValueExpr,
-        left: &sem::ValueExpr,
+        expr: &Expr,
+        left: &Expr,
         op: BinaryOp,
-        right: &sem::ValueExpr,
+        right: &Expr,
     ) -> Result<BranchResult, LowerToIrError> {
         if matches!(op, BinaryOp::LogicalAnd | BinaryOp::LogicalOr) {
             return self.lower_branching_value_expr(expr);
@@ -804,8 +864,9 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
         let Some(rhs) = self.lower_value_expr_opt(right)? else {
             return Ok(BranchResult::Return);
         };
-        let ty = self.type_lowerer.lower_type_id(expr.ty);
-        let sem_ty = self.type_map.type_table().get(expr.ty);
+        let expr_ty = self.type_map.type_of(expr.id);
+        let ty = self.type_lowerer.lower_type_id(expr_ty);
+        let sem_ty = self.type_map.type_table().get(expr_ty);
 
         if let Some(binop) = map_binop(op) {
             if matches!(op, BinaryOp::Div | BinaryOp::Mod) {
@@ -814,7 +875,11 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
             return Ok(self.builder.binop(binop, lhs, rhs, ty).into());
         }
         if matches!(op, BinaryOp::Eq | BinaryOp::Ne) {
-            let operand_ty = self.type_map.type_table().get(left.ty).clone();
+            let operand_ty = self
+                .type_map
+                .type_table()
+                .get(self.type_map.type_of(left.id))
+                .clone();
             let eq_value = self.lower_eq_value(lhs, rhs, &operand_ty);
             let bool_ty = self.type_lowerer.lower_type(&Type::Bool);
             let value = if matches!(op, BinaryOp::Eq) {
@@ -835,14 +900,19 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
 
     fn lower_slice_expr(
         &mut self,
-        expr: &sem::ValueExpr,
-        target: &sem::PlaceExpr,
-        start: Option<&sem::ValueExpr>,
-        end: Option<&sem::ValueExpr>,
+        expr: &Expr,
+        target: &Expr,
+        start: Option<&Expr>,
+        end: Option<&Expr>,
     ) -> Result<BranchResult, LowerToIrError> {
         let plan = self.slice_plan(expr.id);
 
-        let Type::Slice { elem_ty } = self.type_map.type_table().get(expr.ty).clone() else {
+        let Type::Slice { elem_ty } = self
+            .type_map
+            .type_table()
+            .get(self.type_map.type_of(expr.id))
+            .clone()
+        else {
             panic!("backend slice expr has non-slice type");
         };
 
@@ -852,7 +922,7 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
 
         // Resolve the base pointer and length from the slice plan.
         let (base_ptr, base_len) = match plan.base {
-            sem::SliceBaseKind::Array { len, deref_count } => {
+            SliceBaseKind::Array { len, deref_count } => {
                 let (base_addr, base_ty) = self.resolve_deref_base(target, deref_count)?;
                 let Type::Array { .. } = base_ty else {
                     panic!("backend slice on non-array base {:?}", base_ty);
@@ -860,7 +930,7 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
                 let view = self.load_array_view(base_addr, elem_ptr_ty, len);
                 (view.ptr, view.len)
             }
-            sem::SliceBaseKind::Slice { deref_count } => {
+            SliceBaseKind::Slice { deref_count } => {
                 let (base_addr, base_ty) = self.resolve_deref_base(target, deref_count)?;
                 let Type::Slice { .. } = base_ty else {
                     panic!("backend slice on non-slice base {:?}", base_ty);
@@ -868,7 +938,7 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
                 let view = self.load_slice_view(base_addr, elem_ptr_ty);
                 (view.ptr, view.len)
             }
-            sem::SliceBaseKind::String { deref_count } => {
+            SliceBaseKind::String { deref_count } => {
                 let (base_addr, base_ty) = self.resolve_deref_base(target, deref_count)?;
                 let Type::String = base_ty else {
                     panic!("backend slice on non-string base {:?}", base_ty);
@@ -876,7 +946,7 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
                 let view = self.load_string_view(base_addr);
                 (view.ptr, view.len)
             }
-            sem::SliceBaseKind::DynArray { deref_count } => {
+            SliceBaseKind::DynArray { deref_count } => {
                 let (base_addr, base_ty) = self.resolve_deref_base(target, deref_count)?;
                 let Type::DynArray { .. } = base_ty else {
                     panic!("backend slice on non-dyn-array base {:?}", base_ty);
@@ -906,8 +976,7 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
             None => base_len,
         };
 
-        let start_check =
-            start.is_some_and(|expr| !matches!(expr.kind, sem::ValueExprKind::IntLit(0)));
+        let start_check = start.is_some_and(|expr| !matches!(expr.kind, ExprKind::IntLit(0)));
         let end_check = end.is_some();
 
         if start_check || end_check {
@@ -923,7 +992,9 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
             }
         }
 
-        let slice_ty = self.type_lowerer.lower_type_id(expr.ty);
+        let slice_ty = self
+            .type_lowerer
+            .lower_type_id(self.type_map.type_of(expr.id));
         Ok(self
             .emit_slice_value(
                 slice_ty,
@@ -939,14 +1010,18 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
 
     fn lower_map_get_expr(
         &mut self,
-        expr: &sem::ValueExpr,
-        target: &sem::ValueExpr,
-        key: &sem::ValueExpr,
+        expr: &Expr,
+        target: &Expr,
+        key: &Expr,
     ) -> Result<BranchResult, LowerToIrError> {
         let Some(map_value) = self.lower_value_expr_opt(target)? else {
             return Ok(BranchResult::Return);
         };
-        let map_target_ty = self.type_map.type_table().get(target.ty).clone();
+        let map_target_ty = self
+            .type_map
+            .type_table()
+            .get(self.type_map.type_of(target.id))
+            .clone();
         let (map_addr, map_ty) = {
             let (peeled_ty, deref_count) = map_target_ty.peel_heap_with_count();
             if deref_count == 0 {
@@ -979,10 +1054,11 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
         );
 
         // Build `V | KeyNotFound`: tag 0 when key is present, tag 1 otherwise.
-        let union_ir_ty = self.type_lowerer.lower_type_id(expr.ty);
+        let expr_ty = self.type_map.type_of(expr.id);
+        let union_ir_ty = self.type_lowerer.lower_type_id(expr_ty);
         let union_slot = self.alloc_value_slot(union_ir_ty);
         let (tag_ty, blob_ty, payload_offset, payload_ty) = {
-            let layout = self.type_lowerer.enum_layout(expr.ty);
+            let layout = self.type_lowerer.enum_layout(expr_ty);
             let ok_variant = layout
                 .variants
                 .first()
@@ -1012,17 +1088,23 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
 
     fn lower_len_expr(
         &mut self,
-        expr: &sem::ValueExpr,
-        place: &sem::PlaceExpr,
+        expr: &Expr,
+        place: &Expr,
     ) -> Result<BranchResult, LowerToIrError> {
-        let place_ty = self.type_map.type_table().get(place.ty).clone();
+        let place_ty = self
+            .type_map
+            .type_table()
+            .get(self.type_map.type_of(place.id))
+            .clone();
         match place_ty {
             Type::Array { dims, .. } => {
                 let len = dims
                     .first()
                     .copied()
                     .unwrap_or_else(|| panic!("backend len on array with empty dims"));
-                let ty = self.type_lowerer.lower_type_id(expr.ty);
+                let ty = self
+                    .type_lowerer
+                    .lower_type_id(self.type_map.type_of(expr.id));
                 Ok(self.builder.const_int(len as i128, false, 64, ty).into())
             }
             Type::Slice { .. } => {
@@ -1049,9 +1131,9 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
 
     fn lower_coerce_expr(
         &mut self,
-        expr: &sem::ValueExpr,
+        expr: &Expr,
         kind: CoerceKind,
-        inner: &sem::ValueExpr,
+        inner: &Expr,
     ) -> Result<BranchResult, LowerToIrError> {
         match kind {
             CoerceKind::ArrayToSlice => self.lower_coerce_array_to_slice(expr, inner),
@@ -1062,12 +1144,13 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
 
     fn lower_coerce_array_to_slice(
         &mut self,
-        expr: &sem::ValueExpr,
-        inner: &sem::ValueExpr,
+        expr: &Expr,
+        inner: &Expr,
     ) -> Result<BranchResult, LowerToIrError> {
         let plan = self.slice_plan(expr.id);
 
-        let Type::Slice { elem_ty } = self.type_map.type_table().get(expr.ty).clone() else {
+        let expr_ty_id = self.type_map.type_of(expr.id);
+        let Type::Slice { elem_ty } = self.type_map.type_table().get(expr_ty_id).clone() else {
             panic!("backend coerce array-to-slice has non-slice type");
         };
 
@@ -1076,15 +1159,16 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
         let elem_ptr_ty = self.type_lowerer.ptr_to(elem_ir_ty);
 
         let (base_addr, base_len) = match plan.base {
-            sem::SliceBaseKind::Array { len, deref_count } => {
-                let base_ty = self.type_map.type_table().get(inner.ty).clone();
+            SliceBaseKind::Array { len, deref_count } => {
+                let inner_ty = self.type_map.type_of(inner.id);
+                let base_ty = self.type_map.type_table().get(inner_ty).clone();
 
                 // Prefer a place-based lowering to reuse the base address; otherwise
                 // materialize the value into a temporary slot.
                 let (base_addr, base_ty) = match &inner.kind {
-                    sem::ValueExprKind::Load { place }
-                    | sem::ValueExprKind::Move { place }
-                    | sem::ValueExprKind::ImplicitMove { place } => {
+                    ExprKind::Load { expr: place }
+                    | ExprKind::Move { expr: place }
+                    | ExprKind::ImplicitMove { expr: place } => {
                         self.resolve_deref_base(place, deref_count)?
                     }
                     _ => {
@@ -1092,9 +1176,9 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
                             return Ok(BranchResult::Return);
                         };
                         if deref_count == 0 {
-                            let array_ty = self.type_lowerer.lower_type_id(inner.ty);
+                            let array_ty = self.type_lowerer.lower_type_id(inner_ty);
                             let addr = self.alloc_local_addr(array_ty);
-                            let array_sem_ty = self.type_map.type_table().get(inner.ty);
+                            let array_sem_ty = self.type_map.type_table().get(inner_ty);
                             self.store_value_into_addr(addr, value, array_sem_ty, array_ty);
                             (addr, base_ty)
                         } else {
@@ -1119,7 +1203,7 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
 
         let start_val = self.builder.const_int(0, false, 64, u64_ty);
         let end_val = base_len;
-        let slice_ty = self.type_lowerer.lower_type_id(expr.ty);
+        let slice_ty = self.type_lowerer.lower_type_id(expr_ty_id);
         Ok(self
             .emit_slice_value(
                 slice_ty,
@@ -1135,15 +1219,17 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
 
     fn lower_coerce_array_to_dyn_array(
         &mut self,
-        expr: &sem::ValueExpr,
-        inner: &sem::ValueExpr,
+        expr: &Expr,
+        inner: &Expr,
     ) -> Result<BranchResult, LowerToIrError> {
-        let target_dyn_ty = self.type_map.type_table().get(expr.ty).clone();
+        let expr_ty = self.type_map.type_of(expr.id);
+        let target_dyn_ty = self.type_map.type_table().get(expr_ty).clone();
         let Type::DynArray { elem_ty } = target_dyn_ty else {
             panic!("backend coerce array-to-dyn-array has non-dyn-array type");
         };
 
-        let source_array_ty = self.type_map.type_table().get(inner.ty).clone();
+        let inner_ty = self.type_map.type_of(inner.id);
+        let source_array_ty = self.type_map.type_table().get(inner_ty).clone();
         let Type::Array { dims, .. } = source_array_ty else {
             panic!(
                 "backend coerce array-to-dyn-array expects array source, got {:?}",
@@ -1163,21 +1249,21 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
 
         let elem_ir_ty = self.type_lowerer.lower_type(&elem_ty);
         let elem_ptr_ty = self.type_lowerer.ptr_to(elem_ir_ty);
-        let dyn_ir_ty = self.type_lowerer.lower_type_id(expr.ty);
+        let dyn_ir_ty = self.type_lowerer.lower_type_id(expr_ty);
         let dyn_slot = self.alloc_value_slot(dyn_ir_ty);
 
         // Lower the source as an addressable array value.
         let source_addr = match &inner.kind {
-            sem::ValueExprKind::Load { place }
-            | sem::ValueExprKind::Move { place }
-            | sem::ValueExprKind::ImplicitMove { place } => self.lower_place_addr(place)?.addr,
+            ExprKind::Load { expr: place }
+            | ExprKind::Move { expr: place }
+            | ExprKind::ImplicitMove { expr: place } => self.lower_place_addr(place)?.addr,
             _ => {
                 let Some(value) = self.lower_value_expr_opt(inner)? else {
                     return Ok(BranchResult::Return);
                 };
-                let array_ir_ty = self.type_lowerer.lower_type_id(inner.ty);
+                let array_ir_ty = self.type_lowerer.lower_type_id(inner_ty);
                 let addr = self.alloc_local_addr(array_ir_ty);
-                let array_sem_ty = self.type_map.type_table().get(inner.ty);
+                let array_sem_ty = self.type_map.type_table().get(inner_ty);
                 self.store_value_into_addr(addr, value, array_sem_ty, array_ir_ty);
                 addr
             }
@@ -1224,12 +1310,13 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
 
     fn lower_coerce_dyn_array_to_slice(
         &mut self,
-        expr: &sem::ValueExpr,
-        inner: &sem::ValueExpr,
+        expr: &Expr,
+        inner: &Expr,
     ) -> Result<BranchResult, LowerToIrError> {
         let plan = self.slice_plan(expr.id);
 
-        let Type::Slice { elem_ty } = self.type_map.type_table().get(expr.ty).clone() else {
+        let expr_ty_id = self.type_map.type_of(expr.id);
+        let Type::Slice { elem_ty } = self.type_map.type_table().get(expr_ty_id).clone() else {
             panic!("backend coerce dyn-array-to-slice has non-slice type");
         };
 
@@ -1238,12 +1325,13 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
         let elem_ptr_ty = self.type_lowerer.ptr_to(elem_ir_ty);
 
         let (base_ptr, base_len) = match plan.base {
-            sem::SliceBaseKind::DynArray { deref_count } => {
-                let base_ty = self.type_map.type_table().get(inner.ty).clone();
+            SliceBaseKind::DynArray { deref_count } => {
+                let inner_ty = self.type_map.type_of(inner.id);
+                let base_ty = self.type_map.type_table().get(inner_ty).clone();
                 let (base_addr, base_ty) = match &inner.kind {
-                    sem::ValueExprKind::Load { place }
-                    | sem::ValueExprKind::Move { place }
-                    | sem::ValueExprKind::ImplicitMove { place } => {
+                    ExprKind::Load { expr: place }
+                    | ExprKind::Move { expr: place }
+                    | ExprKind::ImplicitMove { expr: place } => {
                         self.resolve_deref_base(place, deref_count)?
                     }
                     _ => {
@@ -1251,9 +1339,9 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
                             return Ok(BranchResult::Return);
                         };
                         if deref_count == 0 {
-                            let dyn_ir_ty = self.type_lowerer.lower_type_id(inner.ty);
+                            let dyn_ir_ty = self.type_lowerer.lower_type_id(inner_ty);
                             let addr = self.alloc_local_addr(dyn_ir_ty);
-                            let dyn_sem_ty = self.type_map.type_table().get(inner.ty);
+                            let dyn_sem_ty = self.type_map.type_table().get(inner_ty);
                             self.store_value_into_addr(addr, value, dyn_sem_ty, dyn_ir_ty);
                             (addr, base_ty)
                         } else {
@@ -1274,7 +1362,7 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
         };
 
         let start_val = self.builder.const_int(0, false, 64, u64_ty);
-        let slice_ty = self.type_lowerer.lower_type_id(expr.ty);
+        let slice_ty = self.type_lowerer.lower_type_id(expr_ty_id);
         Ok(self
             .emit_slice_value(
                 slice_ty,
@@ -1290,9 +1378,9 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
 
     fn lower_emit_send_expr(
         &mut self,
-        expr: &sem::ValueExpr,
-        to: &sem::ValueExpr,
-        payload: &sem::ValueExpr,
+        expr: &Expr,
+        to: &Expr,
+        payload: &Expr,
     ) -> Result<BranchResult, LowerToIrError> {
         let Some(dst) = self.lower_value_expr_opt(to)? else {
             return Ok(BranchResult::Return);
@@ -1301,7 +1389,11 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
             return Ok(BranchResult::Return);
         };
         let u64_ty = self.type_lowerer.lower_type(&Type::uint(64));
-        let payload_ty = self.type_map.type_table().get(payload.ty).clone();
+        let payload_ty = self
+            .type_map
+            .type_table()
+            .get(self.type_map.type_of(payload.id))
+            .clone();
         let event_kind = self.machine_payload_event_kind(&payload_ty).unwrap_or(0);
         let kind = self
             .builder
@@ -1313,15 +1405,17 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
             vec![dst, kind, payload0, payload1],
             bool_ty,
         );
-        let unit_ty = self.type_lowerer.lower_type_id(expr.ty);
+        let unit_ty = self
+            .type_lowerer
+            .lower_type_id(self.type_map.type_of(expr.id));
         Ok(self.builder.const_int(0, false, 8, unit_ty).into())
     }
 
     fn lower_emit_request_expr(
         &mut self,
-        expr: &sem::ValueExpr,
-        to: &sem::ValueExpr,
-        payload: &sem::ValueExpr,
+        expr: &Expr,
+        to: &Expr,
+        payload: &Expr,
         request_site_key: u64,
     ) -> Result<BranchResult, LowerToIrError> {
         let Some(dst) = self.lower_value_expr_opt(to)? else {
@@ -1331,7 +1425,11 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
             return Ok(BranchResult::Return);
         };
         let u64_ty = self.type_lowerer.lower_type(&Type::uint(64));
-        let payload_ty = self.type_map.type_table().get(payload.ty).clone();
+        let payload_ty = self
+            .type_map
+            .type_table()
+            .get(self.type_map.type_of(payload.id))
+            .clone();
         let event_kind = self.machine_payload_event_kind(&payload_ty).unwrap_or(0);
         let kind = self
             .builder
@@ -1340,7 +1438,9 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
         let request_site = self
             .builder
             .const_int(request_site_key as i128, false, 64, u64_ty);
-        let pending_ty = self.type_lowerer.lower_type_id(expr.ty);
+        let pending_ty = self
+            .type_lowerer
+            .lower_type_id(self.type_map.type_of(expr.id));
         let pending = self.builder.call(
             Callee::Runtime(RuntimeFn::MachineEmitRequest),
             vec![dst, kind, payload0, payload1, request_site],
@@ -1351,9 +1451,9 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
 
     fn lower_reply_expr(
         &mut self,
-        expr: &sem::ValueExpr,
-        cap: &sem::ValueExpr,
-        value: &sem::ValueExpr,
+        expr: &Expr,
+        cap: &Expr,
+        value: &Expr,
     ) -> Result<BranchResult, LowerToIrError> {
         let Some(cap_value) = self.lower_value_expr_opt(cap)? else {
             return Ok(BranchResult::Return);
@@ -1362,7 +1462,11 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
             return Ok(BranchResult::Return);
         };
         let u64_ty = self.type_lowerer.lower_type(&Type::uint(64));
-        let response_ty = self.type_map.type_table().get(value.ty).clone();
+        let response_ty = self
+            .type_map
+            .type_table()
+            .get(self.type_map.type_of(value.id))
+            .clone();
         let event_kind = self.machine_response_event_kind(&response_ty).unwrap_or(0);
         let kind = self
             .builder
@@ -1374,7 +1478,9 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
             vec![cap_value, kind, payload0, payload1],
             bool_ty,
         );
-        let unit_ty = self.type_lowerer.lower_type_id(expr.ty);
+        let unit_ty = self
+            .type_lowerer
+            .lower_type_id(self.type_map.type_of(expr.id));
         Ok(self.builder.const_int(0, false, 8, unit_ty).into())
     }
 

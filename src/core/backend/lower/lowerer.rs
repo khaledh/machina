@@ -1,5 +1,9 @@
 //! SSA lowering state and shared helpers.
 
+use crate::core::ast::format_compact::{
+    format_semantic_stmt_compact, format_semantic_value_expr_compact,
+};
+use crate::core::ast::{Expr, FuncDef, MethodDef, Module, NodeId, ParamMode, StmtExpr};
 use crate::core::backend::lower::LowerToIrError;
 use crate::core::backend::lower::drop_glue::DropGlueRegistry;
 use crate::core::backend::lower::drops::DropManager;
@@ -9,15 +13,13 @@ use crate::core::backend::lower::machine_layout::{build_payload_layout_ids, payl
 use crate::core::backend::lower::types::TypeLowerer;
 use crate::core::ir::builder::FunctionBuilder;
 use crate::core::ir::{BlockId, Function, FunctionSig, GlobalId, IrTypeCache, IrTypeId, ValueId};
-use crate::core::resolve::{Def, DefId, DefTable};
-use crate::core::tree as ast;
-use crate::core::tree::NodeId;
-use crate::core::tree::format_compact::{
-    format_semantic_stmt_compact, format_semantic_value_expr_compact,
+use crate::core::plans::{
+    CallPlan, IndexPlan, LoweringPlan, LoweringPlanMap, MachineEventKeyPlan, MachinePlanMap,
+    MatchPlan, SlicePlan,
 };
-use crate::core::tree::semantic as sem;
+use crate::core::resolve::{Def, DefId, DefTable};
 use crate::core::typecheck::type_map::TypeMap;
-use crate::core::types::Type;
+use crate::core::types::{Type, TypeId};
 
 /// An SSA value produced by linear (single-block) expression lowering.
 pub(super) type LinearValue = ValueId;
@@ -66,15 +68,15 @@ pub(super) struct FuncLowerer<'a, 'g> {
     pub(crate) def_table: &'a DefTable,
     pub(super) type_lowerer: TypeLowerer<'a>,
     pub(crate) type_map: &'a TypeMap,
-    pub(super) machine_plans: Option<&'a sem::MachinePlanMap>,
+    pub(super) machine_plans: Option<&'a MachinePlanMap>,
     pub(super) ret_ty: Type,
     pub(super) builder: FunctionBuilder,
     /// Maps definition IDs to their current SSA values (mutable during lowering).
     pub(super) locals: LocalMap,
-    pub(super) lowering_plans: &'a sem::LoweringPlanMap,
+    pub(super) lowering_plans: &'a LoweringPlanMap,
     pub(super) param_defs: Vec<DefId>,
     pub(super) param_tys: Vec<IrTypeId>,
-    pub(super) param_modes: Vec<ast::ParamMode>,
+    pub(super) param_modes: Vec<ParamMode>,
     pub(super) loop_stack: Vec<LoopContext>,
     pub(super) drop_manager: DropManager<'a>,
     pub(super) drop_glue: &'g mut DropGlueRegistry,
@@ -103,6 +105,11 @@ pub(super) struct CallInputValue {
 }
 
 impl<'a, 'g> FuncLowerer<'a, 'g> {
+    /// Retrieves the TypeId for a given node, panicking if not recorded.
+    pub(super) fn type_id_for(&self, node_id: NodeId) -> TypeId {
+        self.type_map.type_of(node_id)
+    }
+
     /// Looks up a definition by id, panicking with SSA-specific context on failure.
     pub(super) fn def(&self, def_id: DefId) -> &Def {
         self.def_table
@@ -118,42 +125,42 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
     }
 
     /// Fetches the lowering plan for a node.
-    pub(super) fn lowering_plan(&self, node_id: NodeId) -> sem::LoweringPlan {
+    pub(super) fn lowering_plan(&self, node_id: NodeId) -> LoweringPlan {
         self.lowering_plans
             .lookup_value_plan(node_id)
             .unwrap_or_else(|| panic!("backend missing lowering plan {:?}", node_id))
     }
 
     /// Fetches a call plan for a node.
-    pub(super) fn call_plan(&self, node_id: NodeId) -> sem::CallPlan {
+    pub(super) fn call_plan(&self, node_id: NodeId) -> CallPlan {
         self.lowering_plans
             .lookup_call_plan(node_id)
             .unwrap_or_else(|| panic!("backend missing call plan {:?}", node_id))
     }
 
     /// Fetches an index plan for a node.
-    pub(super) fn index_plan(&self, node_id: NodeId) -> sem::IndexPlan {
+    pub(super) fn index_plan(&self, node_id: NodeId) -> IndexPlan {
         self.lowering_plans
             .lookup_index_plan(node_id)
             .unwrap_or_else(|| panic!("backend missing index plan {:?}", node_id))
     }
 
     /// Fetches a match plan for a node.
-    pub(super) fn match_plan(&self, node_id: NodeId) -> sem::MatchPlan {
+    pub(super) fn match_plan(&self, node_id: NodeId) -> MatchPlan {
         self.lowering_plans
             .lookup_match_plan(node_id)
             .unwrap_or_else(|| panic!("backend missing match plan {:?}", node_id))
     }
 
     /// Fetches a slice plan for a node.
-    pub(super) fn slice_plan(&self, node_id: NodeId) -> sem::SlicePlan {
+    pub(super) fn slice_plan(&self, node_id: NodeId) -> SlicePlan {
         self.lowering_plans
             .lookup_slice_plan(node_id)
             .unwrap_or_else(|| panic!("backend missing slice plan {:?}", node_id))
     }
 
     /// Fetches any cleanup expressions that must run before `?` propagates.
-    pub(super) fn try_cleanup_plan(&self, node_id: NodeId) -> Option<Vec<sem::ValueExpr>> {
+    pub(super) fn try_cleanup_plan(&self, node_id: NodeId) -> Option<Vec<Expr>> {
         self.lowering_plans.lookup_try_cleanup_plan(node_id)
     }
 
@@ -162,12 +169,12 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
     /// Initializes the type context, extracts the function signature, and prepares
     /// parameter information for later mapping to SSA block parameters.
     pub(super) fn new(
-        func: &sem::FuncDef,
+        func: &FuncDef,
         def_table: &'a DefTable,
-        module: Option<&'a sem::Module>,
+        module: Option<&'a Module>,
         type_map: &'a TypeMap,
-        lowering_plans: &'a sem::LoweringPlanMap,
-        machine_plans: Option<&'a sem::MachinePlanMap>,
+        lowering_plans: &'a LoweringPlanMap,
+        machine_plans: Option<&'a MachinePlanMap>,
         drop_glue: &'g mut DropGlueRegistry,
         globals: &'g mut GlobalArena,
         trace_drops: bool,
@@ -175,12 +182,13 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
         let mut type_lowerer = TypeLowerer::new_with_type_defs(type_map, Some(def_table), module);
 
         // Look up the function's type to extract parameter and return types.
+        let func_def_id = def_table.def_id(func.id);
         let def = def_table
-            .lookup_def(func.def_id)
-            .unwrap_or_else(|| panic!("backend lower_func missing def {:?}", func.def_id));
+            .lookup_def(func_def_id)
+            .unwrap_or_else(|| panic!("backend lower_func missing def {:?}", func_def_id));
         let func_ty = type_map
             .lookup_def_type(def)
-            .unwrap_or_else(|| panic!("backend lower_func missing def type {:?}", func.def_id));
+            .unwrap_or_else(|| panic!("backend lower_func missing def type {:?}", func_def_id));
         let ret_ty = match func_ty {
             Type::Fn { ret_ty, .. } => ret_ty,
             other => panic!("backend lower_func expected fn type, found {:?}", other),
@@ -206,7 +214,7 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
                 )
             });
             let param_ty_id = match param.mode {
-                ast::ParamMode::In | ast::ParamMode::Sink => {
+                ParamMode::In | ParamMode::Sink => {
                     let value_ty = type_lowerer.lower_type(&param_ty);
                     if param_ty.is_scalar() {
                         value_ty
@@ -214,7 +222,7 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
                         type_lowerer.ptr_to(value_ty)
                     }
                 }
-                ast::ParamMode::Out | ast::ParamMode::InOut => {
+                ParamMode::Out | ParamMode::InOut => {
                     let value_ty = type_lowerer.lower_type(&param_ty);
                     type_lowerer.ptr_to(value_ty)
                 }
@@ -230,7 +238,7 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
             params: param_tys.clone(),
             ret: ret_id,
         };
-        let builder = FunctionBuilder::new(func.def_id, func.sig.name.clone(), sig);
+        let builder = FunctionBuilder::new(func_def_id, func.sig.name.clone(), sig);
         Self {
             def_table,
             type_map,
@@ -258,12 +266,12 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
     #[allow(clippy::too_many_arguments)]
     pub(super) fn new_method(
         type_name: &str,
-        method_def: &sem::MethodDef,
+        method_def: &MethodDef,
         def_table: &'a DefTable,
-        module: &'a sem::Module,
+        module: &'a Module,
         type_map: &'a TypeMap,
-        lowering_plans: &'a sem::LoweringPlanMap,
-        machine_plans: Option<&'a sem::MachinePlanMap>,
+        lowering_plans: &'a LoweringPlanMap,
+        machine_plans: Option<&'a MachinePlanMap>,
         drop_glue: &'g mut DropGlueRegistry,
         globals: &'g mut GlobalArena,
         trace_drops: bool,
@@ -294,7 +302,7 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
             )
         });
         let self_ty_id = match method_def.sig.self_param.mode {
-            ast::ParamMode::In | ast::ParamMode::Sink => {
+            ParamMode::In | ParamMode::Sink => {
                 let value_ty = type_lowerer.lower_type(&self_ty);
                 if self_ty.is_scalar() {
                     value_ty
@@ -302,7 +310,7 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
                     type_lowerer.ptr_to(value_ty)
                 }
             }
-            ast::ParamMode::Out | ast::ParamMode::InOut => {
+            ParamMode::Out | ParamMode::InOut => {
                 let value_ty = type_lowerer.lower_type(&self_ty);
                 type_lowerer.ptr_to(value_ty)
             }
@@ -332,7 +340,7 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
                 )
             });
             let param_ty_id = match param.mode {
-                ast::ParamMode::In | ast::ParamMode::Sink => {
+                ParamMode::In | ParamMode::Sink => {
                     let value_ty = type_lowerer.lower_type(&param_ty);
                     if param_ty.is_scalar() {
                         value_ty
@@ -340,7 +348,7 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
                         type_lowerer.ptr_to(value_ty)
                     }
                 }
-                ast::ParamMode::Out | ast::ParamMode::InOut => {
+                ParamMode::Out | ParamMode::InOut => {
                     let value_ty = type_lowerer.lower_type(&param_ty);
                     type_lowerer.ptr_to(value_ty)
                 }
@@ -357,7 +365,7 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
             ret: ret_id,
         };
         let name = format!("{type_name}${}", method_def.sig.name);
-        let builder = FunctionBuilder::new(method_def.def_id, name, sig);
+        let builder = FunctionBuilder::new(def_table.def_id(method_def.id), name, sig);
         Self {
             def_table,
             type_map,
@@ -385,7 +393,7 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
         param_ty: Type,
         def_table: &'a DefTable,
         type_map: &'a TypeMap,
-        lowering_plans: &'a sem::LoweringPlanMap,
+        lowering_plans: &'a LoweringPlanMap,
         drop_glue: &'g mut DropGlueRegistry,
         globals: &'g mut GlobalArena,
         trace_drops: bool,
@@ -411,7 +419,7 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
             lowering_plans,
             param_defs: Vec::new(),
             param_tys: vec![param_ptr],
-            param_modes: vec![ast::ParamMode::In],
+            param_modes: vec![ParamMode::In],
             loop_stack: Vec::new(),
             drop_manager: DropManager::new(),
             drop_glue,
@@ -430,7 +438,7 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
         let mut selected = None;
         for descriptor in plans.descriptors.values() {
             for event in &descriptor.event_kinds {
-                if let sem::MachineEventKeyPlan::Payload { payload_ty: ty } = &event.key
+                if let MachineEventKeyPlan::Payload { payload_ty: ty } = &event.key
                     && ty == payload_ty
                 {
                     match selected {
@@ -468,7 +476,7 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
         let mut selected = None;
         for descriptor in plans.descriptors.values() {
             for event in &descriptor.event_kinds {
-                if let sem::MachineEventKeyPlan::Response {
+                if let MachineEventKeyPlan::Response {
                     selector_ty: _,
                     response_ty: ty,
                 } = &event.key
@@ -502,7 +510,7 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
             let param_ty = self.def_type(def_id);
             let value_ty = self.type_lowerer.lower_type(&param_ty);
             let local = match mode {
-                ast::ParamMode::In | ast::ParamMode::Sink => {
+                ParamMode::In | ParamMode::Sink => {
                     if param_ty.is_scalar() {
                         LocalValue::value(*value, value_ty)
                     } else {
@@ -516,10 +524,10 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
                         LocalValue::addr(slot.addr, value_ty)
                     }
                 }
-                ast::ParamMode::Out | ast::ParamMode::InOut => LocalValue::addr(*value, value_ty),
+                ParamMode::Out | ParamMode::InOut => LocalValue::addr(*value, value_ty),
             };
             self.locals.insert(def_id, local);
-            if matches!(mode, ast::ParamMode::Sink) {
+            if matches!(mode, ParamMode::Sink) {
                 self.set_drop_flag_for_def(def_id, true);
             }
         }
@@ -529,12 +537,12 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
         (self.builder.finish(), self.type_lowerer.ir_type_cache)
     }
 
-    pub(super) fn annotate_stmt(&mut self, stmt: &sem::StmtExpr) {
+    pub(super) fn annotate_stmt(&mut self, stmt: &StmtExpr) {
         self.builder
             .annotate_next_inst(format_semantic_stmt_compact(stmt));
     }
 
-    pub(super) fn annotate_expr(&mut self, expr: &sem::ValueExpr) {
+    pub(super) fn annotate_expr(&mut self, expr: &Expr) {
         self.builder
             .annotate_next_inst(format_semantic_value_expr_compact(expr));
     }
@@ -545,7 +553,7 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
         }
     }
 
-    pub(super) fn param_mode_for(&self, def_id: DefId) -> Option<ast::ParamMode> {
+    pub(super) fn param_mode_for(&self, def_id: DefId) -> Option<ParamMode> {
         self.param_defs
             .iter()
             .position(|id| *id == def_id)
@@ -561,12 +569,9 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
     ///
     /// Linear expressions are lowered in the current block. Branching expressions
     /// delegate to the multi-block lowering path.
-    pub(super) fn lower_value_expr(
-        &mut self,
-        expr: &sem::ValueExpr,
-    ) -> Result<BranchResult, LowerToIrError> {
+    pub(super) fn lower_value_expr(&mut self, expr: &Expr) -> Result<BranchResult, LowerToIrError> {
         match self.lowering_plan(expr.id) {
-            sem::LoweringPlan::Linear => {
+            LoweringPlan::Linear => {
                 // The plan guarantees linearity; any failure here is a compiler bug.
                 let value = self.lower_linear_value_expr(expr).unwrap_or_else(|err| {
                     panic!(
@@ -576,7 +581,7 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
                 });
                 Ok(BranchResult::Value(value))
             }
-            sem::LoweringPlan::Branching => self.lower_branching_value_expr(expr),
+            LoweringPlan::Branching => self.lower_branching_value_expr(expr),
         }
     }
 
@@ -586,7 +591,7 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
     /// branching control-flow (e.g. `if`), without duplicating the linear logic.
     pub(super) fn lower_value_expr_opt(
         &mut self,
-        expr: &sem::ValueExpr,
+        expr: &Expr,
     ) -> Result<Option<ValueId>, LowerToIrError> {
         match self.lower_value_expr(expr)? {
             BranchResult::Value(value) => Ok(Some(value)),

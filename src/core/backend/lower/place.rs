@@ -1,8 +1,9 @@
 //! Place lowering helpers for SSA explicit-memory ops.
 
+use crate::core::ast::{Expr, ExprKind};
 use crate::core::backend::lower::LowerToIrError;
 use crate::core::ir::{IrTypeId, IrTypeKind, ValueId};
-use crate::core::tree::semantic as sem;
+use crate::core::plans::IndexBaseKind;
 use crate::core::types::Type;
 
 use super::FuncLowerer;
@@ -15,22 +16,24 @@ pub(super) struct PlaceAddr {
 
 impl<'a, 'g> FuncLowerer<'a, 'g> {
     /// Lowers a place expression into an address and its value type.
-    pub(super) fn lower_place_addr(
-        &mut self,
-        place: &sem::PlaceExpr,
-    ) -> Result<PlaceAddr, LowerToIrError> {
+    pub(super) fn lower_place_addr(&mut self, place: &Expr) -> Result<PlaceAddr, LowerToIrError> {
         match &place.kind {
-            sem::PlaceExprKind::Var { def_id, .. } => {
-                let value_ty = self.type_lowerer.lower_type_id(place.ty);
-                let addr = self.ensure_local_addr(*def_id, value_ty);
+            ExprKind::Var { .. } => {
+                let def_id = self.def_table.def_id(place.id);
+                let value_ty = self
+                    .type_lowerer
+                    .lower_type_id(self.type_map.type_of(place.id));
+                let addr = self.ensure_local_addr(def_id, value_ty);
                 Ok(PlaceAddr { addr, value_ty })
             }
-            sem::PlaceExprKind::Deref { value } => {
-                let addr = self.lower_linear_value_expr(value)?;
-                let value_ty = self.type_lowerer.lower_type_id(place.ty);
+            ExprKind::Deref { expr } => {
+                let addr = self.lower_linear_value_expr(expr)?;
+                let value_ty = self
+                    .type_lowerer
+                    .lower_type_id(self.type_map.type_of(place.id));
                 Ok(PlaceAddr { addr, value_ty })
             }
-            sem::PlaceExprKind::TupleField { target, index } => {
+            ExprKind::TupleField { target, index } => {
                 let (base_addr, base_ty) = self.lower_place_deref_base(target)?;
                 let (_field_ty, field_ir_ty) = self.tuple_field_from_type(&base_ty, *index);
                 let addr = self.field_addr_typed(base_addr, *index, field_ir_ty);
@@ -39,11 +42,14 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
                     value_ty: field_ir_ty,
                 })
             }
-            sem::PlaceExprKind::StructField { target, field } => {
+            ExprKind::StructField { target, field } => {
                 let (base_addr, base_ty) = self.lower_place_deref_base(target)?;
-                if let Some(place_addr) =
-                    self.lower_builtin_property_place(base_addr, &base_ty, field, place.ty)
-                {
+                if let Some(place_addr) = self.lower_builtin_property_place(
+                    base_addr,
+                    &base_ty,
+                    field,
+                    self.type_map.type_of(place.id),
+                ) {
                     return Ok(place_addr);
                 }
                 let (field_index, _field_ty, field_ir_ty) =
@@ -54,11 +60,11 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
                     value_ty: field_ir_ty,
                 })
             }
-            sem::PlaceExprKind::ArrayIndex { target, indices } => {
+            ExprKind::ArrayIndex { target, indices } => {
                 let plan = self.index_plan(place.id);
 
                 match plan.base {
-                    sem::IndexBaseKind::Array { deref_count, .. } => {
+                    IndexBaseKind::Array { deref_count, .. } => {
                         let (mut base_addr, mut curr_ty) =
                             self.resolve_deref_base(target, deref_count)?;
 
@@ -85,10 +91,12 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
 
                         Ok(PlaceAddr {
                             addr: base_addr,
-                            value_ty: self.type_lowerer.lower_type_id(place.ty),
+                            value_ty: self
+                                .type_lowerer
+                                .lower_type_id(self.type_map.type_of(place.id)),
                         })
                     }
-                    sem::IndexBaseKind::Slice { deref_count } => {
+                    IndexBaseKind::Slice { deref_count } => {
                         if indices.len() != 1 {
                             panic!("backend slice index expects exactly one index");
                         }
@@ -109,7 +117,7 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
                             value_ty: elem_ir_ty,
                         })
                     }
-                    sem::IndexBaseKind::String { deref_count } => {
+                    IndexBaseKind::String { deref_count } => {
                         if indices.len() != 1 {
                             panic!("backend string index expects exactly one index");
                         }
@@ -130,7 +138,7 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
                             value_ty: u8_ty,
                         })
                     }
-                    sem::IndexBaseKind::DynArray { deref_count } => {
+                    IndexBaseKind::DynArray { deref_count } => {
                         if indices.len() != 1 {
                             panic!("backend dyn-array index expects exactly one index");
                         }
@@ -155,15 +163,17 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
                     }
                 }
             }
+            other => panic!("backend lower_place_addr: unexpected ExprKind {:?}", other),
         }
     }
 
-    fn lower_place_deref_base(
-        &mut self,
-        target: &sem::PlaceExpr,
-    ) -> Result<(ValueId, Type), LowerToIrError> {
+    fn lower_place_deref_base(&mut self, target: &Expr) -> Result<(ValueId, Type), LowerToIrError> {
         let mut base = self.lower_place_addr(target)?;
-        let mut curr_ty = self.type_map.type_table().get(target.ty).clone();
+        let mut curr_ty = self
+            .type_map
+            .type_table()
+            .get(self.type_map.type_of(target.id))
+            .clone();
 
         while let Type::Heap { elem_ty } | Type::Ref { elem_ty, .. } = curr_ty {
             let elem_ir_ty = self.type_lowerer.lower_type(&elem_ty);

@@ -1,7 +1,7 @@
 //! Expression constraint collection for typecheck constraints pass.
 
 use super::*;
-use crate::core::tree::{ArrayLitInit, Param, StructLitField};
+use crate::core::ast::{ArrayLitInit, Param, StructLitField};
 
 impl<'a> ConstraintCollector<'a> {
     pub(super) fn collect_expr(&mut self, expr: &Expr, expected: Option<Type>) -> Type {
@@ -452,6 +452,15 @@ impl<'a> ConstraintCollector<'a> {
                     return_ty,
                     body,
                 );
+            }
+            ExprKind::Load { .. }
+            | ExprKind::MapGet { .. }
+            | ExprKind::Len { .. }
+            | ExprKind::ClosureRef { .. } => {
+                unreachable!(
+                    "ExprKind::{:?} should not appear before elaboration",
+                    expr.kind
+                )
             }
         }
 

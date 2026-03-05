@@ -9,6 +9,7 @@ use std::collections::{HashMap, HashSet};
 
 use thiserror::Error;
 
+use crate::core::ast::{Module, NodeId, NodeIdGen};
 use crate::core::capsule::ModuleId;
 use crate::core::context::{
     ElaborateStageInput, ElaborateStageOutput, ResolveStageInput, SemCheckStageOutput,
@@ -22,7 +23,6 @@ use crate::core::resolve::{
     resolve_with_imports_and_symbols_and_typestate_roles_partial,
 };
 use crate::core::semck::{self, SemCheckError};
-use crate::core::tree::{Module, NodeId, NodeIdGen};
 use crate::core::typecheck::{
     TypeCheckError, TypecheckOutput, type_check_partial_with_imported_facts,
     type_check_with_imported_facts,

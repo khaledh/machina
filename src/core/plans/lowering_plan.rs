@@ -3,10 +3,8 @@
 //! Classifies each value expression as either linear (single-block) or
 //! branching (may introduce control flow), so lowering can dispatch directly.
 
-use crate::core::tree::NodeId;
-use crate::core::tree::semantic::{
-    CallPlanMap, IndexPlanMap, MatchPlanMap, SlicePlanMap, ValueExpr,
-};
+use super::{CallPlanMap, IndexPlanMap, MatchPlanMap, SlicePlanMap, StringFmtPlan};
+use crate::core::ast::{Expr, NodeId};
 use std::collections::HashMap;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -22,7 +20,8 @@ pub struct LoweringPlanMap {
     pub index_plans: IndexPlanMap,
     pub match_plans: MatchPlanMap,
     pub slice_plans: SlicePlanMap,
-    pub try_cleanup_plans: HashMap<NodeId, Vec<ValueExpr>>,
+    pub try_cleanup_plans: HashMap<NodeId, Vec<Expr>>,
+    pub string_fmt_plans: HashMap<NodeId, StringFmtPlan>,
 }
 
 impl LoweringPlanMap {
@@ -30,32 +29,23 @@ impl LoweringPlanMap {
         self.value_plans.get(&node).cloned()
     }
 
-    pub fn lookup_call_plan(&self, node: NodeId) -> Option<crate::core::tree::semantic::CallPlan> {
+    pub fn lookup_call_plan(&self, node: NodeId) -> Option<super::CallPlan> {
         self.call_plans.get(&node).cloned()
     }
 
-    pub fn lookup_index_plan(
-        &self,
-        node: NodeId,
-    ) -> Option<crate::core::tree::semantic::IndexPlan> {
+    pub fn lookup_index_plan(&self, node: NodeId) -> Option<super::IndexPlan> {
         self.index_plans.get(&node).cloned()
     }
 
-    pub fn lookup_match_plan(
-        &self,
-        node: NodeId,
-    ) -> Option<crate::core::tree::semantic::MatchPlan> {
+    pub fn lookup_match_plan(&self, node: NodeId) -> Option<super::MatchPlan> {
         self.match_plans.get(&node).cloned()
     }
 
-    pub fn lookup_slice_plan(
-        &self,
-        node: NodeId,
-    ) -> Option<crate::core::tree::semantic::SlicePlan> {
+    pub fn lookup_slice_plan(&self, node: NodeId) -> Option<super::SlicePlan> {
         self.slice_plans.get(&node).cloned()
     }
 
-    pub fn lookup_try_cleanup_plan(&self, node: NodeId) -> Option<Vec<ValueExpr>> {
+    pub fn lookup_try_cleanup_plan(&self, node: NodeId) -> Option<Vec<Expr>> {
         self.try_cleanup_plans.get(&node).cloned()
     }
 

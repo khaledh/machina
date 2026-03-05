@@ -7,11 +7,11 @@
 
 use std::collections::HashMap;
 
+use crate::core::ast::visit::{self, Visitor};
+use crate::core::ast::*;
 use crate::core::capsule::ModuleId;
 use crate::core::context::ResolvedContext;
 use crate::core::resolve::DefTable;
-use crate::core::tree::visit::{self, Visitor};
-use crate::core::tree::{NodeId, TopLevelItem};
 
 use super::DefId;
 
@@ -48,16 +48,16 @@ pub fn attach_def_owners(
     resolved_context.with_def_owners(def_owners)
 }
 
-fn top_level_item_id(item: &crate::core::tree::TopLevelItem) -> NodeId {
+fn top_level_item_id(item: &TopLevelItem) -> NodeId {
     match item {
-        crate::core::tree::TopLevelItem::ProtocolDef(protocol_def) => protocol_def.id,
-        crate::core::tree::TopLevelItem::TraitDef(trait_def) => trait_def.id,
-        crate::core::tree::TopLevelItem::TypeDef(type_def) => type_def.id,
-        crate::core::tree::TopLevelItem::TypestateDef(typestate_def) => typestate_def.id,
-        crate::core::tree::TopLevelItem::FuncDecl(func_decl) => func_decl.id,
-        crate::core::tree::TopLevelItem::FuncDef(func_def) => func_def.id,
-        crate::core::tree::TopLevelItem::MethodBlock(method_block) => method_block.id,
-        crate::core::tree::TopLevelItem::ClosureDef(closure_def) => closure_def.id,
+        TopLevelItem::ProtocolDef(protocol_def) => protocol_def.id,
+        TopLevelItem::TraitDef(trait_def) => trait_def.id,
+        TopLevelItem::TypeDef(type_def) => type_def.id,
+        TopLevelItem::TypestateDef(typestate_def) => typestate_def.id,
+        TopLevelItem::FuncDecl(func_decl) => func_decl.id,
+        TopLevelItem::FuncDef(func_def) => func_def.id,
+        TopLevelItem::MethodBlock(method_block) => method_block.id,
+        TopLevelItem::ClosureDef(closure_def) => closure_def.id,
     }
 }
 
@@ -92,56 +92,56 @@ impl<'a> DefOwnerCollector<'a> {
 }
 
 impl Visitor for DefOwnerCollector<'_> {
-    fn visit_protocol_def(&mut self, protocol_def: &crate::core::tree::ProtocolDef) {
+    fn visit_protocol_def(&mut self, protocol_def: &ProtocolDef) {
         self.record_node(protocol_def.id);
         visit::walk_protocol_def(self, protocol_def);
     }
 
-    fn visit_protocol_role(&mut self, role: &crate::core::tree::ProtocolRole) {
+    fn visit_protocol_role(&mut self, role: &ProtocolRole) {
         self.record_node(role.id);
     }
 
-    fn visit_trait_def(&mut self, trait_def: &crate::core::tree::TraitDef) {
+    fn visit_trait_def(&mut self, trait_def: &TraitDef) {
         self.record_node(trait_def.id);
         visit::walk_trait_def(self, trait_def);
     }
 
-    fn visit_type_def(&mut self, type_def: &crate::core::tree::TypeDef) {
+    fn visit_type_def(&mut self, type_def: &TypeDef) {
         self.record_node(type_def.id);
         visit::walk_type_def(self, type_def);
     }
 
-    fn visit_typestate_def(&mut self, typestate_def: &crate::core::tree::TypestateDef) {
+    fn visit_typestate_def(&mut self, typestate_def: &TypestateDef) {
         self.record_node(typestate_def.id);
         visit::walk_typestate_def(self, typestate_def);
     }
 
-    fn visit_func_decl(&mut self, func_decl: &crate::core::tree::FuncDecl) {
+    fn visit_func_decl(&mut self, func_decl: &FuncDecl) {
         self.record_node(func_decl.id);
         visit::walk_func_decl(self, func_decl);
     }
 
-    fn visit_func_def(&mut self, func_def: &crate::core::tree::FuncDef) {
+    fn visit_func_def(&mut self, func_def: &FuncDef) {
         self.record_node(func_def.id);
         visit::walk_func_def(self, func_def);
     }
 
-    fn visit_method_decl(&mut self, method_decl: &crate::core::tree::MethodDecl) {
+    fn visit_method_decl(&mut self, method_decl: &MethodDecl) {
         self.record_node(method_decl.id);
         visit::walk_method_decl(self, method_decl);
     }
 
-    fn visit_method_def(&mut self, method_def: &crate::core::tree::MethodDef) {
+    fn visit_method_def(&mut self, method_def: &MethodDef) {
         self.record_node(method_def.id);
         visit::walk_method_def(self, method_def);
     }
 
-    fn visit_closure_def(&mut self, closure_def: &crate::core::tree::ClosureDef) {
+    fn visit_closure_def(&mut self, closure_def: &ClosureDef) {
         self.record_node(closure_def.id);
         visit::walk_closure_def(self, closure_def);
     }
 
-    fn visit_type_param(&mut self, param: &crate::core::tree::TypeParam) {
+    fn visit_type_param(&mut self, param: &TypeParam) {
         self.record_node(param.id);
         if let Some(bound) = &param.bound {
             self.record_node(bound.id);
@@ -149,39 +149,38 @@ impl Visitor for DefOwnerCollector<'_> {
         visit::walk_type_param(self, param);
     }
 
-    fn visit_method_sig(&mut self, method_sig: &crate::core::tree::MethodSig) {
+    fn visit_method_sig(&mut self, method_sig: &MethodSig) {
         self.record_node(method_sig.self_param.id);
         visit::walk_method_sig(self, method_sig);
     }
 
-    fn visit_param(&mut self, param: &crate::core::tree::Param) {
+    fn visit_param(&mut self, param: &Param) {
         self.record_node(param.id);
         visit::walk_param(self, param);
     }
 
-    fn visit_stmt_expr(&mut self, stmt: &crate::core::tree::StmtExpr) {
-        if let crate::core::tree::StmtExprKind::VarDecl { .. } = &stmt.kind {
+    fn visit_stmt_expr(&mut self, stmt: &StmtExpr) {
+        if let StmtExprKind::VarDecl { .. } = &stmt.kind {
             self.record_node(stmt.id);
         }
         visit::walk_stmt_expr(self, stmt);
     }
 
-    fn visit_bind_pattern(&mut self, pattern: &crate::core::tree::BindPattern) {
-        if let crate::core::tree::BindPatternKind::Name { .. } = &pattern.kind {
+    fn visit_bind_pattern(&mut self, pattern: &BindPattern) {
+        if let BindPatternKind::Name { .. } = &pattern.kind {
             self.record_node(pattern.id);
         }
         visit::walk_bind_pattern(self, pattern);
     }
 
-    fn visit_using_binding(&mut self, binding: &crate::core::tree::UsingBinding) {
+    fn visit_using_binding(&mut self, binding: &UsingBinding) {
         self.record_node(binding.id);
         visit::walk_using_binding(self, binding);
     }
 
-    fn visit_match_pattern(&mut self, pattern: &crate::core::tree::MatchPattern) {
+    fn visit_match_pattern(&mut self, pattern: &MatchPattern) {
         match pattern {
-            crate::core::tree::MatchPattern::Binding { id, .. }
-            | crate::core::tree::MatchPattern::TypedBinding { id, .. } => {
+            MatchPattern::Binding { id, .. } | MatchPattern::TypedBinding { id, .. } => {
                 self.record_node(*id);
             }
             _ => {}
@@ -189,8 +188,8 @@ impl Visitor for DefOwnerCollector<'_> {
         visit::walk_match_pattern(self, pattern);
     }
 
-    fn visit_match_pattern_binding(&mut self, binding: &crate::core::tree::MatchPatternBinding) {
-        if let crate::core::tree::MatchPatternBinding::Named { id, .. } = binding {
+    fn visit_match_pattern_binding(&mut self, binding: &MatchPatternBinding) {
+        if let MatchPatternBinding::Named { id, .. } = binding {
             self.record_node(*id);
         }
         visit::walk_match_pattern_binding(self, binding);

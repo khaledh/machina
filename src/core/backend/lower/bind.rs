@@ -1,55 +1,52 @@
 //! Bind pattern lowering for let/var bindings.
 
+use crate::core::ast::{BindPattern, BindPatternKind};
 use crate::core::backend::lower::LowerToIrError;
 use crate::core::backend::lower::locals::{LocalStorage, LocalValue};
 use crate::core::backend::lower::lowerer::FuncLowerer;
-use crate::core::tree::semantic as sem;
 use crate::core::types::Type;
 
 impl<'a, 'g> FuncLowerer<'a, 'g> {
     /// Binds a pattern to a value, updating the locals map.
     pub(super) fn bind_pattern(
         &mut self,
-        pattern: &sem::BindPattern,
+        pattern: &BindPattern,
         value: LocalValue,
         value_ty: &Type,
     ) -> Result<(), LowerToIrError> {
         match &pattern.kind {
-            sem::BindPatternKind::Name { def_id, .. } => {
-                let dest_ty = self.def_type(*def_id);
+            BindPatternKind::Name { .. } => {
+                let def_id = self.def_table.def_id(pattern.id);
+                let dest_ty = self.def_type(def_id);
                 if let LocalStorage::Value(value) = value.storage {
                     self.emit_conversion_check(value_ty, &dest_ty, value);
                 }
                 if value_ty.is_scalar() {
-                    self.locals.insert(*def_id, value);
+                    self.locals.insert(def_id, value);
                 } else {
                     let slot = self.slot_for_value_typed(value, value_ty);
                     self.locals
-                        .insert(*def_id, LocalValue::addr(slot.addr, slot.ty));
+                        .insert(def_id, LocalValue::addr(slot.addr, slot.ty));
                 }
                 // Track drop liveness for bindings that own drop-tracked values.
-                self.set_drop_flag_for_def(*def_id, true);
+                self.set_drop_flag_for_def(def_id, true);
                 Ok(())
             }
-            sem::BindPatternKind::Tuple { fields } => {
+            BindPatternKind::Tuple { patterns } => {
                 let Type::Tuple { .. } = value_ty else {
                     panic!("backend bind tuple on {:?}", value_ty);
                 };
                 let slot = self.slot_for_value_typed(value, value_ty);
 
                 // Destructure each tuple field into a local binding.
-                for field in fields {
-                    let (field_ty, field_ir_ty) = self.tuple_field_from_type(value_ty, field.index);
-                    let field_val = self.load_field(slot.addr, field.index, field_ir_ty);
-                    self.bind_pattern(
-                        &field.pattern,
-                        LocalValue::value(field_val, field_ir_ty),
-                        &field_ty,
-                    )?;
+                for (index, pat) in patterns.iter().enumerate() {
+                    let (field_ty, field_ir_ty) = self.tuple_field_from_type(value_ty, index);
+                    let field_val = self.load_field(slot.addr, index, field_ir_ty);
+                    self.bind_pattern(pat, LocalValue::value(field_val, field_ir_ty), &field_ty)?;
                 }
                 Ok(())
             }
-            sem::BindPatternKind::Struct { fields, .. } => {
+            BindPatternKind::Struct { fields, .. } => {
                 let Type::Struct { .. } = value_ty else {
                     panic!("backend bind struct on {:?}", value_ty);
                 };
@@ -57,9 +54,10 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
 
                 // Destructure each struct field into a local binding.
                 for field in fields {
+                    let field_index = value_ty.struct_field_index(&field.name);
                     let (field_ty, field_ir_ty) =
-                        self.struct_field_from_index(value_ty, field.field_index);
-                    let field_val = self.load_field(slot.addr, field.field_index, field_ir_ty);
+                        self.struct_field_from_index(value_ty, field_index);
+                    let field_val = self.load_field(slot.addr, field_index, field_ir_ty);
                     self.bind_pattern(
                         &field.pattern,
                         LocalValue::value(field_val, field_ir_ty),
@@ -68,7 +66,7 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
                 }
                 Ok(())
             }
-            sem::BindPatternKind::Array { patterns } => {
+            BindPatternKind::Array { patterns } => {
                 let Type::Array { .. } = value_ty else {
                     panic!("backend bind array on {:?}", value_ty);
                 };

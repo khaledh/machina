@@ -9,13 +9,18 @@
 use std::collections::{HashMap, HashSet};
 
 use crate::core::analysis::facts::{DefTableOverlay, SyntheticReason, TypeMapOverlay};
+use crate::core::ast::{
+    Expr, ExprKind, FuncDecl, FuncDef, InitInfo, MethodBlock, MethodDecl, MethodDef, MethodItem,
+    Module, NodeId, NodeIdGen, ParamMode, TopLevelItem, TypeDef, TypeExpr,
+};
 use crate::core::diag::Span;
+use crate::core::plans::{
+    CallPlan, CallPlanMap, IndexPlan, IndexPlanMap, MatchPlan, MatchPlanMap, SlicePlan,
+    SlicePlanMap, StringFmtPlan,
+};
 use crate::core::resolve::DefId;
 use crate::core::semck::closure::capture::CaptureMode;
 use crate::core::semck::closure::capture::ClosureCapture;
-use crate::core::tree as ast;
-use crate::core::tree::semantic as sem;
-use crate::core::tree::{InitInfo, NodeId, NodeIdGen, ParamMode};
 use crate::core::typecheck::type_map::CallSigMap;
 use crate::core::types::{Type, TypeId};
 
@@ -28,10 +33,8 @@ pub(super) struct CaptureField {
     pub(super) name: String,
     pub(super) mode: CaptureMode,
     pub(super) base_ty: Type,
-    pub(super) base_ty_id: TypeId,
     pub(super) field_ty: Type,
-    pub(super) field_ty_id: TypeId,
-    pub(super) field_ty_expr: sem::TypeExpr,
+    pub(super) field_ty_expr: TypeExpr,
 }
 
 /// Complete metadata for a lifted closure, including its generated struct
@@ -53,7 +56,6 @@ pub(super) struct ClosureInfo {
 #[derive(Clone, Debug)]
 pub(super) struct ClosureContext {
     pub(super) self_def_id: DefId,
-    pub(super) type_id: TypeId,
     pub(super) ty: Type,
     pub(super) captures: HashMap<DefId, CaptureField>,
 }
@@ -68,7 +70,6 @@ impl ClosureContext {
             .collect();
         Self {
             self_def_id: info.self_def_id,
-            type_id: info.type_id,
             ty: info.ty.clone(),
             captures,
         }
@@ -85,9 +86,9 @@ impl ClosureContext {
 /// analysis results) plus mutable state accumulated during elaboration
 /// (lifted closure types, method blocks, binding mappings).
 ///
-/// The elaborator traverses the normalized tree recursively, transforming
-/// each node into its semantic equivalent while applying the elaboration
-/// rules defined in the submodules.
+/// The elaborator traverses the normalized AST recursively, transforming
+/// each node into its elaborated form while applying the elaboration rules
+/// defined in the submodules.
 pub struct Elaborator<'a> {
     // Shared compiler state (borrowed)
     pub(super) def_table: &'a mut DefTableOverlay,
@@ -102,10 +103,10 @@ pub struct Elaborator<'a> {
     pub(super) closure_captures: &'a HashMap<DefId, Vec<ClosureCapture>>,
 
     // Accumulated closure lifting results
-    pub(super) closure_types: Vec<sem::TypeDef>,
-    pub(super) closure_methods: Vec<sem::MethodBlock>,
+    pub(super) closure_types: Vec<TypeDef>,
+    pub(super) closure_methods: Vec<MethodBlock>,
     /// Captureless closures lowered as top-level functions.
-    pub(super) closure_funcs: Vec<sem::FuncDef>,
+    pub(super) closure_funcs: Vec<FuncDef>,
     pub(super) closure_info: HashMap<DefId, ClosureInfo>,
     pub(super) closure_bindings: HashMap<DefId, DefId>,
     pub(super) closure_stack: Vec<ClosureContext>,
@@ -113,11 +114,12 @@ pub struct Elaborator<'a> {
     pub(super) closure_func_ids: HashSet<DefId>,
 
     // Elaboration-produced lowering side tables (consumed by backend lowering).
-    call_plans: sem::CallPlanMap,
-    index_plans: sem::IndexPlanMap,
-    match_plans: sem::MatchPlanMap,
-    slice_plans: sem::SlicePlanMap,
-    try_cleanup_plans: HashMap<NodeId, Vec<sem::ValueExpr>>,
+    call_plans: CallPlanMap,
+    index_plans: IndexPlanMap,
+    match_plans: MatchPlanMap,
+    slice_plans: SlicePlanMap,
+    try_cleanup_plans: HashMap<NodeId, Vec<Expr>>,
+    string_fmt_plans: HashMap<NodeId, StringFmtPlan>,
 }
 
 impl<'a> Elaborator<'a> {
@@ -153,6 +155,7 @@ impl<'a> Elaborator<'a> {
             match_plans: HashMap::new(),
             slice_plans: HashMap::new(),
             try_cleanup_plans: HashMap::new(),
+            string_fmt_plans: HashMap::new(),
         }
     }
 
@@ -170,6 +173,7 @@ impl<'a> Elaborator<'a> {
         self.match_plans.clear();
         self.slice_plans.clear();
         self.try_cleanup_plans.clear();
+        self.string_fmt_plans.clear();
     }
 
     /// Pass 1 core elaboration: normalize-level desugaring + place/value
@@ -177,10 +181,7 @@ impl<'a> Elaborator<'a> {
     ///
     /// Closure artifacts discovered here are queued and materialized by the
     /// dedicated closure materialization pass.
-    pub(super) fn run_place_value_planning_pass(
-        &mut self,
-        module: &ast::Module,
-    ) -> Vec<sem::TopLevelItem> {
+    pub(super) fn run_place_value_planning_pass(&mut self, module: &Module) -> Vec<TopLevelItem> {
         module
             .top_level_items
             .iter()
@@ -188,64 +189,59 @@ impl<'a> Elaborator<'a> {
             .collect()
     }
 
-    fn elab_top_level_item(&mut self, item: &ast::TopLevelItem) -> Option<sem::TopLevelItem> {
+    fn elab_top_level_item(&mut self, item: &TopLevelItem) -> Option<TopLevelItem> {
         match item {
-            ast::TopLevelItem::ProtocolDef(_) => {
+            TopLevelItem::ProtocolDef(_) => {
                 // Protocol definitions are frontend-only conformance metadata.
                 // They do not participate in semantic IR/codegen, so elaborate
                 // drops them instead of treating them as an internal error.
                 None
             }
-            ast::TopLevelItem::TraitDef(def) => Some(sem::TopLevelItem::TraitDef(def.clone())),
-            ast::TopLevelItem::TypeDef(def) => Some(sem::TopLevelItem::TypeDef(def.clone())),
-            ast::TopLevelItem::TypestateDef(_) => {
+            TopLevelItem::TraitDef(def) => Some(TopLevelItem::TraitDef(def.clone())),
+            TopLevelItem::TypeDef(def) => Some(TopLevelItem::TypeDef(def.clone())),
+            TopLevelItem::TypestateDef(_) => {
                 panic!("compiler bug: typestate defs should be desugared before elaborate")
             }
-            ast::TopLevelItem::FuncDecl(decl) => Some(sem::TopLevelItem::FuncDecl(sem::FuncDecl {
+            TopLevelItem::FuncDecl(decl) => Some(TopLevelItem::FuncDecl(FuncDecl {
                 id: decl.id,
-                def_id: self.def_id_for(decl.id),
                 attrs: decl.attrs.clone(),
                 sig: decl.sig.clone(),
                 span: decl.span,
             })),
-            ast::TopLevelItem::FuncDef(def) => Some(sem::TopLevelItem::FuncDef(sem::FuncDef {
+            TopLevelItem::FuncDef(def) => Some(TopLevelItem::FuncDef(FuncDef {
                 id: def.id,
-                def_id: self.def_id_for(def.id),
                 attrs: def.attrs.clone(),
                 sig: def.sig.clone(),
                 body: self.elab_value(&def.body),
                 span: def.span,
             })),
-            ast::TopLevelItem::MethodBlock(block) => {
-                Some(sem::TopLevelItem::MethodBlock(sem::MethodBlock {
-                    id: block.id,
-                    type_name: block.type_name.clone(),
-                    trait_name: block.trait_name.clone(),
-                    method_items: block
-                        .method_items
-                        .iter()
-                        .map(|method_item| match method_item {
-                            ast::MethodItem::Decl(method_decl) => {
-                                sem::MethodItem::Decl(self.elab_method_decl(method_decl))
-                            }
-                            ast::MethodItem::Def(method_def) => {
-                                sem::MethodItem::Def(self.elab_method_def(method_def))
-                            }
-                        })
-                        .collect(),
-                    span: block.span,
-                }))
-            }
-            ast::TopLevelItem::ClosureDef(_) => {
+            TopLevelItem::MethodBlock(block) => Some(TopLevelItem::MethodBlock(MethodBlock {
+                id: block.id,
+                type_name: block.type_name.clone(),
+                trait_name: block.trait_name.clone(),
+                method_items: block
+                    .method_items
+                    .iter()
+                    .map(|method_item| match method_item {
+                        MethodItem::Decl(method_decl) => {
+                            MethodItem::Decl(self.elab_method_decl(method_decl))
+                        }
+                        MethodItem::Def(method_def) => {
+                            MethodItem::Def(self.elab_method_def(method_def))
+                        }
+                    })
+                    .collect(),
+                span: block.span,
+            })),
+            TopLevelItem::ClosureDef(_) => {
                 panic!("compiler bug: closure defs should not exist before elaborate")
             }
         }
     }
 
-    fn elab_method_def(&mut self, def: &ast::MethodDef) -> sem::MethodDef {
-        sem::MethodDef {
+    fn elab_method_def(&mut self, def: &MethodDef) -> MethodDef {
+        MethodDef {
             id: def.id,
-            def_id: self.def_id_for(def.id),
             attrs: def.attrs.clone(),
             sig: def.sig.clone(),
             body: self.elab_value(&def.body),
@@ -253,10 +249,9 @@ impl<'a> Elaborator<'a> {
         }
     }
 
-    fn elab_method_decl(&mut self, decl: &ast::MethodDecl) -> sem::MethodDecl {
-        sem::MethodDecl {
+    fn elab_method_decl(&mut self, decl: &MethodDecl) -> MethodDecl {
+        MethodDecl {
             id: decl.id,
-            def_id: self.def_id_for(decl.id),
             attrs: decl.attrs.clone(),
             sig: decl.sig.clone(),
             span: decl.span,
@@ -294,19 +289,6 @@ impl<'a> Elaborator<'a> {
             .unwrap_or_else(|| panic!("compiler bug: missing def type for {context}: {}", def.id))
     }
 
-    pub(super) fn def_type_id_or_panic(
-        &self,
-        def: &crate::core::resolve::Def,
-        context: &str,
-    ) -> TypeId {
-        self.type_map.lookup_def_type_id(def).unwrap_or_else(|| {
-            panic!(
-                "compiler bug: missing def type id for {context}: {}",
-                def.id
-            )
-        })
-    }
-
     pub(super) fn has_def_type(&self, def: &crate::core::resolve::Def) -> bool {
         self.type_map.lookup_def_type_id(def).is_some()
     }
@@ -333,27 +315,27 @@ impl<'a> Elaborator<'a> {
             .insert_node_type(node_id, ty, "elaborate", reason)
     }
 
-    pub(super) fn record_call_plan(&mut self, node_id: NodeId, plan: sem::CallPlan) {
+    pub(super) fn record_call_plan(&mut self, node_id: NodeId, plan: CallPlan) {
         self.call_plans.insert(node_id, plan);
     }
 
-    pub(super) fn record_index_plan(&mut self, node_id: NodeId, plan: sem::IndexPlan) {
+    pub(super) fn record_index_plan(&mut self, node_id: NodeId, plan: IndexPlan) {
         self.index_plans.insert(node_id, plan);
     }
 
-    pub(super) fn record_match_plan(&mut self, node_id: NodeId, plan: sem::MatchPlan) {
+    pub(super) fn record_match_plan(&mut self, node_id: NodeId, plan: MatchPlan) {
         self.match_plans.insert(node_id, plan);
     }
 
-    pub(super) fn record_slice_plan(&mut self, node_id: NodeId, plan: sem::SlicePlan) {
+    pub(super) fn record_slice_plan(&mut self, node_id: NodeId, plan: SlicePlan) {
         self.slice_plans.insert(node_id, plan);
     }
 
-    pub(super) fn record_try_cleanup_plan(
-        &mut self,
-        node_id: NodeId,
-        cleanup: Vec<sem::ValueExpr>,
-    ) {
+    pub(super) fn record_string_fmt_plan(&mut self, node_id: NodeId, plan: StringFmtPlan) {
+        self.string_fmt_plans.insert(node_id, plan);
+    }
+
+    pub(super) fn record_try_cleanup_plan(&mut self, node_id: NodeId, cleanup: Vec<Expr>) {
         self.try_cleanup_plans.insert(node_id, cleanup);
     }
 
@@ -361,11 +343,12 @@ impl<'a> Elaborator<'a> {
     pub(super) fn lowering_plan_tables(
         &self,
     ) -> (
-        &sem::CallPlanMap,
-        &sem::IndexPlanMap,
-        &sem::MatchPlanMap,
-        &sem::SlicePlanMap,
-        &HashMap<NodeId, Vec<sem::ValueExpr>>,
+        &CallPlanMap,
+        &IndexPlanMap,
+        &MatchPlanMap,
+        &SlicePlanMap,
+        &HashMap<NodeId, Vec<Expr>>,
+        &HashMap<NodeId, StringFmtPlan>,
     ) {
         (
             &self.call_plans,
@@ -373,6 +356,7 @@ impl<'a> Elaborator<'a> {
             &self.match_plans,
             &self.slice_plans,
             &self.try_cleanup_plans,
+            &self.string_fmt_plans,
         )
     }
 
@@ -431,13 +415,20 @@ impl<'a> Elaborator<'a> {
     /// Create a new value expression with a fresh node ID.
     /// Used when elaboration synthesizes new nodes (e.g., implicit moves,
     /// closure captures, desugared loops).
-    pub(super) fn new_value(
-        &mut self,
-        kind: sem::ValueExprKind,
-        ty: TypeId,
-        span: Span,
-    ) -> sem::ValueExpr {
+    pub(super) fn new_value(&mut self, kind: ExprKind, ty: TypeId, span: Span) -> Expr {
         let id = self.node_id_gen.new_id();
-        sem::ValueExpr { id, kind, ty, span }
+        self.record_expr_type(id, ty);
+        Expr { id, kind, span }
+    }
+
+    /// Record a type for a synthetic node in the type_map.
+    pub(super) fn record_expr_type(&mut self, node_id: NodeId, ty: TypeId) {
+        let typ = self.type_map.type_table().get(ty).clone();
+        self.type_map.insert_node_type(
+            node_id,
+            typ,
+            "elaborate",
+            SyntheticReason::ElaborateSyntheticNode,
+        );
     }
 }

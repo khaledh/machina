@@ -5,9 +5,9 @@
 //! - lowering `on ...` handlers to synthetic methods, and
 //! - handler command sugar rewrites (`send/request/reply`).
 
+use crate::core::ast::visit_mut::{self, VisitorMut};
+use crate::core::ast::*;
 use crate::core::diag::Span;
-use crate::core::tree::visit_mut::{self, VisitorMut};
-use crate::core::tree::*;
 
 use super::{MACHINE_TARGET_ID_HELPER_FN, unit_expr};
 
@@ -327,6 +327,7 @@ impl VisitorMut for HandlerCommandSugarRewriter<'_> {
                         to: Box::new(to),
                         payload: Box::new(payload),
                         request_site_label: None,
+                        request_site_key: None,
                     }
                 };
                 expr.kind = ExprKind::Emit { kind };
@@ -367,6 +368,7 @@ impl VisitorMut for HandlerCommandSugarRewriter<'_> {
                 to: Box::new(to),
                 payload: Box::new(payload),
                 request_site_label,
+                request_site_key: None,
             }
         };
         expr.kind = ExprKind::Emit { kind };

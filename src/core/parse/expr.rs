@@ -435,6 +435,7 @@ impl<'a> Parser<'a> {
                 to: Box::new(to),
                 payload: Box::new(payload),
                 request_site_label,
+                request_site_key: None,
             },
             _ => return self.err_here(PEK::ExpectedPrimary(self.curr_token.clone())),
         };
@@ -752,7 +753,7 @@ impl<'a> Parser<'a> {
         &mut self,
         param_name: String,
         body: Expr,
-        span: crate::core::diag::Span,
+        span: Span,
     ) -> Expr {
         let param = Param {
             id: self.id_gen.new_id(),

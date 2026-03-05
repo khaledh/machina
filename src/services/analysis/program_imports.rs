@@ -2,6 +2,7 @@
 
 use std::collections::HashMap;
 
+use crate::core::ast::{MethodSig, ParamMode, TopLevelItem};
 use crate::core::capsule::{ModuleId, ModulePath};
 use crate::core::context::{
     CapsuleParsedContext, ModuleExportFacts, ResolvedContext, TypeCheckedContext,
@@ -12,7 +13,6 @@ use crate::core::resolve::{
     ImportedTraitPropertySig, ImportedTraitSig,
 };
 use crate::core::symbol_id::SymbolId;
-use crate::core::tree::{MethodSig, ParamMode, TopLevelItem};
 use crate::core::typecheck::type_map::{
     resolve_return_type_expr_with_params, resolve_type_def_with_args, resolve_type_expr_with_params,
 };

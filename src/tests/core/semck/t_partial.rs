@@ -1,11 +1,11 @@
 use std::collections::HashSet;
 
+use crate::core::ast::NodeId;
 use crate::core::context::{ParsedContext, TypeCheckedContext};
 use crate::core::lexer::{LexError, Lexer, Token};
 use crate::core::parse::Parser;
 use crate::core::resolve::resolve;
 use crate::core::semck::{SemCheckErrorKind, sem_check_partial};
-use crate::core::tree::NodeId;
 use crate::core::typecheck::type_check;
 
 fn typed_context(source: &str) -> TypeCheckedContext {

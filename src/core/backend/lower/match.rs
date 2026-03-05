@@ -3,6 +3,7 @@
 //! Implements switch-based lowering for enum/bool/int matches, using
 //! precomputed match plans to avoid pattern re-derivation.
 
+use crate::core::ast::{Expr, ExprKind, MatchArm};
 use crate::core::backend::lower::LowerToIrError;
 use crate::core::backend::lower::locals::LocalValue;
 use crate::core::backend::lower::lowerer::{BranchResult, FuncLowerer};
@@ -10,12 +11,15 @@ use crate::core::ir::IrTypeId;
 use crate::core::ir::{
     BlockId, CastKind, CmpOp, ConstValue, IrTypeKind, SwitchCase, Terminator, ValueId,
 };
-use crate::core::tree::semantic as sem;
+use crate::core::plans::{
+    MatchArmPlan, MatchBinding, MatchDecision, MatchDecisionNode, MatchPlace, MatchProjection,
+    MatchSwitch, MatchTest, MatchTestKind,
+};
 use crate::core::types::{Type, TypeId};
 
 pub(super) struct MatchLowerer<'a, 'b, 'g> {
     lowerer: &'a mut FuncLowerer<'b, 'g>,
-    expr: &'a sem::ValueExpr,
+    expr: &'a Expr,
     scrutinee_addr: ValueId,
     scrutinee_ty_id: TypeId,
 }
@@ -23,19 +27,19 @@ pub(super) struct MatchLowerer<'a, 'b, 'g> {
 impl<'a, 'b, 'g> MatchLowerer<'a, 'b, 'g> {
     pub(super) fn lower(
         lowerer: &'a mut FuncLowerer<'b, 'g>,
-        expr: &'a sem::ValueExpr,
-        scrutinee: &sem::ValueExpr,
-        arms: &'a [sem::MatchArm],
+        expr: &'a Expr,
+        scrutinee: &Expr,
+        arms: &'a [MatchArm],
     ) -> Result<BranchResult, LowerToIrError> {
         let plan = lowerer.match_plan(expr.id);
 
-        let scrutinee_ty_id = scrutinee.ty;
-        let scrutinee_ty = lowerer.type_map.type_table().get(scrutinee.ty).clone();
-        let scrutinee_addr = if let sem::ValueExprKind::Load { place } = &scrutinee.kind {
+        let scrutinee_ty_id = lowerer.type_id_for(scrutinee.id);
+        let scrutinee_ty = lowerer.type_map.type_table().get(scrutinee_ty_id).clone();
+        let scrutinee_addr = if let ExprKind::Load { expr } = &scrutinee.kind {
             // If the scrutinee is already an addressable place of aggregate type,
             // reuse that address and avoid copy materialization before matching.
             if !scrutinee_ty.is_scalar() {
-                lowerer.lower_place_addr(place)?.addr
+                lowerer.lower_place_addr(expr)?.addr
             } else {
                 let scrutinee_value = lowerer.lower_linear_expr_value(scrutinee)?;
                 let scrutinee_ir_ty = lowerer.type_lowerer.lower_type_id(scrutinee_ty_id);
@@ -73,8 +77,8 @@ impl<'a, 'b, 'g> MatchLowerer<'a, 'b, 'g> {
         let arm_plans = plan.arms;
 
         match decision {
-            sem::MatchDecision::Switch(switch) => helper.lower_switch(arms, &arm_plans, &switch),
-            sem::MatchDecision::DecisionTree(tree) => {
+            MatchDecision::Switch(switch) => helper.lower_switch(arms, &arm_plans, &switch),
+            MatchDecision::DecisionTree(tree) => {
                 helper.lower_decision_tree(arms, &arm_plans, &tree)
             }
         }
@@ -82,9 +86,9 @@ impl<'a, 'b, 'g> MatchLowerer<'a, 'b, 'g> {
 
     fn lower_decision_tree(
         &mut self,
-        arms: &[sem::MatchArm],
-        arm_plans: &[sem::MatchArmPlan],
-        tree: &sem::MatchDecisionNode,
+        arms: &[MatchArm],
+        arm_plans: &[MatchArmPlan],
+        tree: &MatchDecisionNode,
     ) -> Result<BranchResult, LowerToIrError> {
         if arms.len() != arm_plans.len() {
             panic!(
@@ -94,7 +98,7 @@ impl<'a, 'b, 'g> MatchLowerer<'a, 'b, 'g> {
             );
         }
 
-        // Pre-allocate arm blocks and mark which arms are reachable in the tree.
+        // Pre-allocate arm blocks and mark which arms are reachable in the plan.
         let mut arm_blocks = Vec::with_capacity(arms.len());
         for _ in 0..arms.len() {
             arm_blocks.push(self.lowerer.builder.add_block());
@@ -107,7 +111,12 @@ impl<'a, 'b, 'g> MatchLowerer<'a, 'b, 'g> {
         self.emit_decision_node(tree, entry_bb, &arm_blocks)?;
 
         let join = self.lowerer.begin_join(self.expr);
-        let join_sem_ty = self.lowerer.type_map.type_table().get(self.expr.ty).clone();
+        let join_sem_ty = self
+            .lowerer
+            .type_map
+            .type_table()
+            .get(self.lowerer.type_id_for(self.expr.id))
+            .clone();
 
         // Lower each reachable arm and branch into the join.
         let mut returned = vec![false; arms.len()];
@@ -123,7 +132,12 @@ impl<'a, 'b, 'g> MatchLowerer<'a, 'b, 'g> {
 
             match self.lowerer.lower_branching_value_expr(&arm.body)? {
                 BranchResult::Value(value) => {
-                    let arm_sem_ty = self.lowerer.type_map.type_table().get(arm.body.ty).clone();
+                    let arm_sem_ty = self
+                        .lowerer
+                        .type_map
+                        .type_table()
+                        .get(self.lowerer.type_id_for(arm.body.id))
+                        .clone();
                     let coerced = self.lowerer.coerce_value(value, &arm_sem_ty, &join_sem_ty);
                     join.emit_branch(self.lowerer, coerced, arm.body.span)?;
                 }
@@ -148,9 +162,9 @@ impl<'a, 'b, 'g> MatchLowerer<'a, 'b, 'g> {
 
     fn lower_switch(
         &mut self,
-        arms: &[sem::MatchArm],
-        arm_plans: &[sem::MatchArmPlan],
-        switch: &sem::MatchSwitch,
+        arms: &[MatchArm],
+        arm_plans: &[MatchArmPlan],
+        switch: &MatchSwitch,
     ) -> Result<BranchResult, LowerToIrError> {
         if arms.len() != arm_plans.len() {
             panic!(
@@ -207,7 +221,12 @@ impl<'a, 'b, 'g> MatchLowerer<'a, 'b, 'g> {
         }
 
         let join = self.lowerer.begin_join(self.expr);
-        let join_sem_ty = self.lowerer.type_map.type_table().get(self.expr.ty).clone();
+        let join_sem_ty = self
+            .lowerer
+            .type_map
+            .type_table()
+            .get(self.lowerer.type_id_for(self.expr.id))
+            .clone();
 
         // Lower each reachable arm and branch into the join.
         let mut returned = vec![false; arms.len()];
@@ -223,7 +242,12 @@ impl<'a, 'b, 'g> MatchLowerer<'a, 'b, 'g> {
 
             match self.lowerer.lower_branching_value_expr(&arm.body)? {
                 BranchResult::Value(value) => {
-                    let arm_sem_ty = self.lowerer.type_map.type_table().get(arm.body.ty).clone();
+                    let arm_sem_ty = self
+                        .lowerer
+                        .type_map
+                        .type_table()
+                        .get(self.lowerer.type_id_for(arm.body.id))
+                        .clone();
                     let coerced = self.lowerer.coerce_value(value, &arm_sem_ty, &join_sem_ty);
                     join.emit_branch(self.lowerer, coerced, arm.body.span)?;
                 }
@@ -248,12 +272,12 @@ impl<'a, 'b, 'g> MatchLowerer<'a, 'b, 'g> {
 
     fn emit_decision_node(
         &mut self,
-        node: &sem::MatchDecisionNode,
+        node: &MatchDecisionNode,
         entry_bb: BlockId,
         arm_blocks: &[BlockId],
     ) -> Result<(), LowerToIrError> {
         match node {
-            sem::MatchDecisionNode::Leaf { arm_index } => {
+            MatchDecisionNode::Leaf { arm_index } => {
                 self.lowerer.builder.select_block(entry_bb);
                 self.lowerer.builder.terminate(Terminator::Br {
                     target: arm_blocks[*arm_index],
@@ -261,12 +285,12 @@ impl<'a, 'b, 'g> MatchLowerer<'a, 'b, 'g> {
                 });
                 Ok(())
             }
-            sem::MatchDecisionNode::Unreachable => {
+            MatchDecisionNode::Unreachable => {
                 self.lowerer.builder.select_block(entry_bb);
                 self.lowerer.builder.terminate(Terminator::Unreachable);
                 Ok(())
             }
-            sem::MatchDecisionNode::Tests {
+            MatchDecisionNode::Tests {
                 tests,
                 on_match,
                 on_fail,
@@ -287,7 +311,7 @@ impl<'a, 'b, 'g> MatchLowerer<'a, 'b, 'g> {
     fn emit_tests_chain(
         &mut self,
         entry_bb: BlockId,
-        tests: &[sem::MatchTest],
+        tests: &[MatchTest],
         on_match_bb: BlockId,
         on_fail_bb: BlockId,
     ) -> Result<(), LowerToIrError> {
@@ -326,16 +350,16 @@ impl<'a, 'b, 'g> MatchLowerer<'a, 'b, 'g> {
         Ok(())
     }
 
-    fn lower_test_cond(&mut self, test: &sem::MatchTest) -> Result<ValueId, LowerToIrError> {
+    fn lower_test_cond(&mut self, test: &MatchTest) -> Result<ValueId, LowerToIrError> {
         let bool_ty = self.lowerer.type_lowerer.lower_type(&Type::Bool);
 
         match &test.kind {
-            sem::MatchTestKind::Bool { value } => {
+            MatchTestKind::Bool { value } => {
                 let (lhs, lhs_ty) = self.lower_place_value(&test.place)?;
                 let rhs = self.lowerer.builder.const_bool(*value, lhs_ty);
                 Ok(self.lowerer.builder.cmp(CmpOp::Eq, lhs, rhs, bool_ty))
             }
-            sem::MatchTestKind::Int {
+            MatchTestKind::Int {
                 value,
                 signed,
                 bits,
@@ -347,7 +371,7 @@ impl<'a, 'b, 'g> MatchLowerer<'a, 'b, 'g> {
                     .const_int(*value as i128, *signed, *bits, lhs_ty);
                 Ok(self.lowerer.builder.cmp(CmpOp::Eq, lhs, rhs, bool_ty))
             }
-            sem::MatchTestKind::EnumTag { tag, .. } => {
+            MatchTestKind::EnumTag { tag, .. } => {
                 let (lhs, tag_ty) = self.lower_discriminant(&test.place)?;
                 let tag_ir_ty = self.lowerer.type_lowerer.lower_type(&tag_ty);
                 let rhs = self
@@ -359,24 +383,24 @@ impl<'a, 'b, 'g> MatchLowerer<'a, 'b, 'g> {
         }
     }
 
-    fn collect_reachable_arms(&self, node: &sem::MatchDecisionNode, reachable: &mut [bool]) {
+    fn collect_reachable_arms(&self, node: &MatchDecisionNode, reachable: &mut [bool]) {
         match node {
-            sem::MatchDecisionNode::Leaf { arm_index } => {
+            MatchDecisionNode::Leaf { arm_index } => {
                 reachable[*arm_index] = true;
             }
-            sem::MatchDecisionNode::Tests {
+            MatchDecisionNode::Tests {
                 on_match, on_fail, ..
             } => {
                 self.collect_reachable_arms(on_match, reachable);
                 self.collect_reachable_arms(on_fail, reachable);
             }
-            sem::MatchDecisionNode::Unreachable => {}
+            MatchDecisionNode::Unreachable => {}
         }
     }
 
     fn lower_discriminant(
         &mut self,
-        discr: &sem::MatchPlace,
+        discr: &MatchPlace,
     ) -> Result<(ValueId, Type), LowerToIrError> {
         let (addr, ty) = self.lower_place_addr(discr)?;
 
@@ -413,7 +437,7 @@ impl<'a, 'b, 'g> MatchLowerer<'a, 'b, 'g> {
         Ok((value, ty))
     }
 
-    fn lower_bindings(&mut self, bindings: &[sem::MatchBinding]) -> Result<(), LowerToIrError> {
+    fn lower_bindings(&mut self, bindings: &[MatchBinding]) -> Result<(), LowerToIrError> {
         for binding in bindings {
             let (addr, ty) = self.lower_place_addr(&binding.source)?;
             let value_ty = self.lowerer.type_lowerer.lower_type(&ty);
@@ -447,7 +471,7 @@ impl<'a, 'b, 'g> MatchLowerer<'a, 'b, 'g> {
 
     fn lower_place_value(
         &mut self,
-        place: &sem::MatchPlace,
+        place: &MatchPlace,
     ) -> Result<(ValueId, IrTypeId), LowerToIrError> {
         let (addr, ty) = self.lower_place_addr(place)?;
         let ir_ty = self.lowerer.type_lowerer.lower_type(&ty);
@@ -460,10 +484,7 @@ impl<'a, 'b, 'g> MatchLowerer<'a, 'b, 'g> {
         Ok((value, ir_ty))
     }
 
-    fn lower_place_addr(
-        &mut self,
-        place: &sem::MatchPlace,
-    ) -> Result<(ValueId, Type), LowerToIrError> {
+    fn lower_place_addr(&mut self, place: &MatchPlace) -> Result<(ValueId, Type), LowerToIrError> {
         let mut addr = self.scrutinee_addr;
         let mut curr_ty = self
             .lowerer
@@ -474,7 +495,7 @@ impl<'a, 'b, 'g> MatchLowerer<'a, 'b, 'g> {
 
         for proj in &place.projections {
             match proj {
-                sem::MatchProjection::Deref => {
+                MatchProjection::Deref => {
                     let elem_ty = match curr_ty {
                         Type::Heap { elem_ty } | Type::Ref { elem_ty, .. } => elem_ty,
                         other => panic!("backend match deref on non-pointer type {:?}", other),
@@ -484,7 +505,7 @@ impl<'a, 'b, 'g> MatchLowerer<'a, 'b, 'g> {
                     addr = self.lowerer.builder.load(addr, ptr_ir_ty);
                     curr_ty = (*elem_ty).clone();
                 }
-                sem::MatchProjection::Field { index } => match &curr_ty {
+                MatchProjection::Field { index } => match &curr_ty {
                     Type::Tuple { .. } => {
                         let (field_ty, field_ir_ty) =
                             self.lowerer.tuple_field_from_type(&curr_ty, *index);
@@ -529,7 +550,7 @@ impl<'a, 'b, 'g> MatchLowerer<'a, 'b, 'g> {
                     }
                     other => panic!("backend match field projection on {:?}", other),
                 },
-                sem::MatchProjection::ByteOffset { offset } => {
+                MatchProjection::ByteOffset { offset } => {
                     addr = self.lowerer.byte_offset_addr(addr, *offset as u64);
                     curr_ty = place.ty.clone();
                 }

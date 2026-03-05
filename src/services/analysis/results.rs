@@ -8,13 +8,13 @@
 use std::collections::HashMap;
 use std::path::PathBuf;
 
+use crate::core::ast::{Module, NodeId, NodeIdGen};
 use crate::core::capsule::{ModuleId, ModulePath, ParsedModule};
 use crate::core::codegen_names::CodegenNameTable;
 use crate::core::context::{ResolvedContext, ResolvedTables, TypeCheckedContext, TypedTables};
 use crate::core::diag::Span;
 use crate::core::resolve::{Def, DefId, DefTable};
 use crate::core::symbol_id::{SymbolId, SymbolIdTable};
-use crate::core::tree::{Module, NodeId, NodeIdGen};
 use crate::core::typecheck::type_map::{CallSig, CallSigMap, GenericInstMap, TypeMap};
 use crate::core::types::Type;
 use crate::services::analysis::snapshot::FileId;

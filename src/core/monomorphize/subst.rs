@@ -2,10 +2,10 @@
 
 use std::collections::HashMap;
 
+use crate::core::ast::visit_mut::{VisitorMut, walk_type_expr};
+use crate::core::ast::*;
 use crate::core::diag::Span;
 use crate::core::resolve::{DefId, DefTable};
-use crate::core::tree::visit_mut::{VisitorMut, walk_type_expr};
-use crate::core::tree::*;
 use crate::core::typecheck::type_map::GenericInst;
 use crate::core::types::{FnParamMode, Type};
 

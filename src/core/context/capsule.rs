@@ -1,11 +1,11 @@
 use std::collections::HashMap;
 
+use crate::core::ast::{NodeId, NodeIdGen};
 use crate::core::capsule::{
     CapsuleParsed, ModuleId, ModulePath, ParsedModule as CapsuleModule, RequireKind,
 };
 use crate::core::resolve::{DefId, DefKind, DefTable, GlobalDefId};
 use crate::core::symbol_id::{SymbolId, SymbolIdTable};
-use crate::core::tree::{NodeId, NodeIdGen};
 
 /// Capsule-level parsed context produced by module discovery/parsing.
 ///

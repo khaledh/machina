@@ -3,8 +3,8 @@
 //! This module keeps constraint-application mechanics separate from the main
 //! solver orchestration loop.
 
+use crate::core::ast::NodeId;
 use crate::core::diag::Span;
-use crate::core::tree::NodeId;
 use crate::core::typecheck::constraints::{Constraint, ConstraintReason};
 use crate::core::typecheck::errors::{TEK, TypeCheckError};
 use crate::core::typecheck::unify::{TcUnifier, TcUnifyError};

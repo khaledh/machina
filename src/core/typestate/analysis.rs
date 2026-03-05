@@ -5,11 +5,11 @@
 
 use std::collections::HashSet;
 
-use crate::core::resolve::{REK, ResolveError};
-use crate::core::tree::{
+use crate::core::ast::{
     FuncDef, StructDefField, TypeExpr, TypeExprKind, TypestateDef, TypestateFields, TypestateItem,
     TypestateOnHandler, TypestateState, TypestateStateItem,
 };
+use crate::core::resolve::{REK, ResolveError};
 
 #[derive(Debug)]
 pub(super) struct TypestateAnalysis {

@@ -5,67 +5,80 @@
 
 use std::collections::HashMap;
 
-use crate::core::tree::semantic as sem;
-use crate::core::tree::{BinaryOp, NodeId};
+use crate::core::ast::{
+    ArrayLitInit, BinaryOp, BlockItem, EmitKind, Expr, ExprKind, MethodItem, Module, NodeId,
+    StmtExpr, StmtExprKind, StringFmtSegment, TopLevelItem,
+};
+use crate::core::plans::{
+    ArgLowering, CallPlanMap, IndexPlanMap, LoweringPlan, LoweringPlanMap, MatchPlanMap,
+    SegmentKind, SlicePlanMap, StringFmtPlan,
+};
 
 pub fn build_lowering_plans(
-    module: &sem::Module,
-    call_plans: &sem::CallPlanMap,
-    index_plans: &sem::IndexPlanMap,
-    match_plans: &sem::MatchPlanMap,
-    slice_plans: &sem::SlicePlanMap,
-    try_cleanup_plans: &HashMap<NodeId, Vec<sem::ValueExpr>>,
-) -> sem::LoweringPlanMap {
+    module: &Module,
+    call_plans: &CallPlanMap,
+    index_plans: &IndexPlanMap,
+    match_plans: &MatchPlanMap,
+    slice_plans: &SlicePlanMap,
+    try_cleanup_plans: &HashMap<NodeId, Vec<Expr>>,
+    string_fmt_plans: &HashMap<NodeId, StringFmtPlan>,
+) -> LoweringPlanMap {
     let mut builder = LoweringPlanBuilder {
         call_plans,
+        string_fmt_plans,
         plans: HashMap::new(),
     };
 
     builder.visit_module(module);
-    sem::LoweringPlanMap {
+    LoweringPlanMap {
         value_plans: builder.plans,
         call_plans: call_plans.clone(),
         index_plans: index_plans.clone(),
         match_plans: match_plans.clone(),
         slice_plans: slice_plans.clone(),
         try_cleanup_plans: try_cleanup_plans.clone(),
+        string_fmt_plans: string_fmt_plans.clone(),
     }
 }
 
 struct LoweringPlanBuilder<'a> {
-    call_plans: &'a sem::CallPlanMap,
-    plans: HashMap<NodeId, sem::LoweringPlan>,
+    call_plans: &'a CallPlanMap,
+    string_fmt_plans: &'a HashMap<NodeId, StringFmtPlan>,
+    plans: HashMap<NodeId, LoweringPlan>,
 }
 
 impl<'a> LoweringPlanBuilder<'a> {
-    fn visit_module(&mut self, module: &sem::Module) {
+    fn visit_module(&mut self, module: &Module) {
         for item in &module.top_level_items {
             match item {
-                sem::TopLevelItem::FuncDef(def) => self.visit_value_expr(&def.body),
-                sem::TopLevelItem::MethodBlock(block) => {
+                TopLevelItem::FuncDef(def) => self.visit_value_expr(&def.body),
+                TopLevelItem::MethodBlock(block) => {
                     for method_item in &block.method_items {
-                        if let sem::MethodItem::Def(def) = method_item {
+                        if let MethodItem::Def(def) = method_item {
                             self.visit_value_expr(&def.body);
                         }
                     }
                 }
-                sem::TopLevelItem::TypeDef(_)
-                | sem::TopLevelItem::TraitDef(_)
-                | sem::TopLevelItem::FuncDecl(_) => {}
+                TopLevelItem::TypeDef(_)
+                | TopLevelItem::TraitDef(_)
+                | TopLevelItem::FuncDecl(_)
+                | TopLevelItem::ProtocolDef(_)
+                | TopLevelItem::TypestateDef(_)
+                | TopLevelItem::ClosureDef(_) => {}
             }
         }
     }
 
-    fn visit_value_expr(&mut self, expr: &sem::ValueExpr) {
+    fn visit_value_expr(&mut self, expr: &Expr) {
         let plan = if self.is_linear_value_expr(expr) {
-            sem::LoweringPlan::Linear
+            LoweringPlan::Linear
         } else {
-            sem::LoweringPlan::Branching
+            LoweringPlan::Branching
         };
         self.plans.insert(expr.id, plan);
 
         match &expr.kind {
-            sem::ValueExprKind::Block { items, tail } => {
+            ExprKind::Block { items, tail } => {
                 for item in items {
                     self.visit_block_item(item);
                 }
@@ -74,52 +87,52 @@ impl<'a> LoweringPlanBuilder<'a> {
                 }
             }
 
-            sem::ValueExprKind::ArrayLit { init, .. } => match init {
-                sem::ArrayLitInit::Elems(elems) => {
+            ExprKind::ArrayLit { init, .. } => match init {
+                ArrayLitInit::Elems(elems) => {
                     for elem in elems {
                         self.visit_value_expr(elem);
                     }
                 }
-                sem::ArrayLitInit::Repeat(expr, _) => self.visit_value_expr(expr),
+                ArrayLitInit::Repeat(expr, _) => self.visit_value_expr(expr),
             },
-            sem::ValueExprKind::SetLit { elems, .. } => {
+            ExprKind::SetLit { elems, .. } => {
                 for elem in elems {
                     self.visit_value_expr(elem);
                 }
             }
-            sem::ValueExprKind::MapLit { entries, .. } => {
+            ExprKind::MapLit { entries, .. } => {
                 for entry in entries {
                     self.visit_value_expr(&entry.key);
                     self.visit_value_expr(&entry.value);
                 }
             }
-            sem::ValueExprKind::TupleLit(items) => {
+            ExprKind::TupleLit(items) => {
                 for item in items {
                     self.visit_value_expr(item);
                 }
             }
-            sem::ValueExprKind::StructLit { fields, .. } => {
+            ExprKind::StructLit { fields, .. } => {
                 for field in fields {
                     self.visit_value_expr(&field.value);
                 }
             }
-            sem::ValueExprKind::EnumVariant { payload, .. } => {
+            ExprKind::EnumVariant { payload, .. } => {
                 for value in payload {
                     self.visit_value_expr(value);
                 }
             }
-            sem::ValueExprKind::StructUpdate { target, fields } => {
+            ExprKind::StructUpdate { target, fields } => {
                 self.visit_value_expr(target);
                 for field in fields {
                     self.visit_value_expr(&field.value);
                 }
             }
 
-            sem::ValueExprKind::BinOp { left, right, .. } => {
+            ExprKind::BinOp { left, right, .. } => {
                 self.visit_value_expr(left);
                 self.visit_value_expr(right);
             }
-            sem::ValueExprKind::Try {
+            ExprKind::Try {
                 fallible_expr,
                 on_error,
             } => {
@@ -128,21 +141,21 @@ impl<'a> LoweringPlanBuilder<'a> {
                     self.visit_value_expr(handler);
                 }
             }
-            sem::ValueExprKind::UnaryOp { expr, .. }
-            | sem::ValueExprKind::HeapAlloc { expr }
-            | sem::ValueExprKind::Coerce { expr, .. } => {
+            ExprKind::UnaryOp { expr, .. }
+            | ExprKind::HeapAlloc { expr }
+            | ExprKind::Coerce { expr, .. } => {
                 self.visit_value_expr(expr);
             }
 
-            sem::ValueExprKind::Move { place }
-            | sem::ValueExprKind::ImplicitMove { place }
-            | sem::ValueExprKind::AddrOf { place }
-            | sem::ValueExprKind::Load { place }
-            | sem::ValueExprKind::Len { place } => {
-                self.visit_place_expr(place);
+            ExprKind::Move { expr }
+            | ExprKind::ImplicitMove { expr }
+            | ExprKind::AddrOf { expr }
+            | ExprKind::Load { expr }
+            | ExprKind::Len { expr } => {
+                self.visit_place_expr(expr);
             }
 
-            sem::ValueExprKind::If {
+            ExprKind::If {
                 cond,
                 then_body,
                 else_body,
@@ -152,8 +165,8 @@ impl<'a> LoweringPlanBuilder<'a> {
                 self.visit_value_expr(else_body);
             }
 
-            sem::ValueExprKind::Slice { target, start, end } => {
-                self.visit_place_expr(target);
+            ExprKind::Slice { target, start, end } => {
+                self.visit_value_expr(target);
                 if let Some(start) = start {
                     self.visit_value_expr(start);
                 }
@@ -161,143 +174,145 @@ impl<'a> LoweringPlanBuilder<'a> {
                     self.visit_value_expr(end);
                 }
             }
-            sem::ValueExprKind::MapGet { target, key } => {
+            ExprKind::MapGet { target, key } => {
                 self.visit_value_expr(target);
                 self.visit_value_expr(key);
             }
 
-            sem::ValueExprKind::Match { scrutinee, arms } => {
+            ExprKind::Match { scrutinee, arms } => {
                 self.visit_value_expr(scrutinee);
                 for arm in arms {
                     self.visit_value_expr(&arm.body);
                 }
             }
 
-            sem::ValueExprKind::Call { callee, args } => {
+            ExprKind::Call { callee, args } => {
                 self.visit_value_expr(callee);
                 for arg in args {
-                    self.visit_call_arg(arg);
+                    self.visit_value_expr(&arg.expr);
                 }
             }
-            sem::ValueExprKind::MethodCall { receiver, args, .. } => {
-                self.visit_method_receiver(receiver);
+            ExprKind::MethodCall { callee, args, .. } => {
+                self.visit_value_expr(callee);
                 for arg in args {
-                    self.visit_call_arg(arg);
+                    self.visit_value_expr(&arg.expr);
                 }
             }
-            sem::ValueExprKind::EmitSend { to, payload }
-            | sem::ValueExprKind::EmitRequest {
-                to,
-                payload,
-                request_site_key: _,
-            } => {
-                self.visit_value_expr(to);
-                self.visit_value_expr(payload);
-            }
-            sem::ValueExprKind::Reply { cap, value } => {
+            ExprKind::Emit { kind } => match kind {
+                EmitKind::Send { to, payload } | EmitKind::Request { to, payload, .. } => {
+                    self.visit_value_expr(to);
+                    self.visit_value_expr(payload);
+                }
+            },
+            ExprKind::Reply { cap, value } => {
                 self.visit_value_expr(cap);
                 self.visit_value_expr(value);
             }
 
-            sem::ValueExprKind::StringFmt { plan } => self.visit_string_fmt_plan(plan),
+            ExprKind::StringFmt { segments } => {
+                for segment in segments {
+                    match segment {
+                        StringFmtSegment::Literal { .. } => {}
+                        StringFmtSegment::Expr { expr, .. } => self.visit_value_expr(expr),
+                    }
+                }
+                // Also visit sub-expressions stored in the string_fmt_plan side table,
+                // since the fstring lowerer lowers those plan expressions directly.
+                if let Some(plan) = self.string_fmt_plans.get(&expr.id) {
+                    self.visit_string_fmt_plan(plan);
+                }
+            }
 
-            sem::ValueExprKind::UnitLit
-            | sem::ValueExprKind::IntLit(_)
-            | sem::ValueExprKind::BoolLit(_)
-            | sem::ValueExprKind::CharLit(_)
-            | sem::ValueExprKind::StringLit { .. }
-            | sem::ValueExprKind::Range { .. }
-            | sem::ValueExprKind::ClosureRef { .. } => {}
+            ExprKind::UnitLit
+            | ExprKind::IntLit(_)
+            | ExprKind::BoolLit(_)
+            | ExprKind::CharLit(_)
+            | ExprKind::StringLit { .. }
+            | ExprKind::Range { .. }
+            | ExprKind::ClosureRef { .. } => {}
+
+            // Place-only variants that won't appear at value position
+            ExprKind::Var { .. }
+            | ExprKind::ArrayIndex { .. }
+            | ExprKind::TupleField { .. }
+            | ExprKind::StructField { .. }
+            | ExprKind::Deref { .. }
+            | ExprKind::Closure { .. } => {}
         }
     }
 
-    fn visit_block_item(&mut self, item: &sem::BlockItem) {
+    fn visit_block_item(&mut self, item: &BlockItem) {
         match item {
-            sem::BlockItem::Stmt(stmt) => self.visit_stmt_expr(stmt),
-            sem::BlockItem::Expr(expr) => self.visit_value_expr(expr),
+            BlockItem::Stmt(stmt) => self.visit_stmt_expr(stmt),
+            BlockItem::Expr(expr) => self.visit_value_expr(expr),
         }
     }
 
-    fn visit_stmt_expr(&mut self, stmt: &sem::StmtExpr) {
+    fn visit_stmt_expr(&mut self, stmt: &StmtExpr) {
         match &stmt.kind {
-            sem::StmtExprKind::LetBind { value, .. } | sem::StmtExprKind::VarBind { value, .. } => {
+            StmtExprKind::LetBind { value, .. } | StmtExprKind::VarBind { value, .. } => {
                 self.visit_value_expr(value)
             }
-            sem::StmtExprKind::Assign {
+            StmtExprKind::Assign {
                 assignee, value, ..
             } => {
                 self.visit_place_expr(assignee);
                 self.visit_value_expr(value);
             }
-            sem::StmtExprKind::While { cond, body } => {
+            StmtExprKind::While { cond, body } => {
                 self.visit_value_expr(cond);
                 self.visit_value_expr(body);
             }
-            sem::StmtExprKind::For { iter, body, .. } => {
+            StmtExprKind::For { iter, body, .. } => {
                 self.visit_value_expr(iter);
                 self.visit_value_expr(body);
             }
-            sem::StmtExprKind::Return { value } => {
+            StmtExprKind::Return { value } => {
                 if let Some(value) = value {
                     self.visit_value_expr(value);
                 }
             }
-            sem::StmtExprKind::Defer { .. } | sem::StmtExprKind::Using { .. } => {
+            StmtExprKind::Defer { .. } | StmtExprKind::Using { .. } => {
                 unreachable!("syntax desugar must remove defer/using before lowering planning");
             }
-            sem::StmtExprKind::VarDecl { .. }
-            | sem::StmtExprKind::Break
-            | sem::StmtExprKind::Continue => {}
+            StmtExprKind::VarDecl { .. }
+            | StmtExprKind::Break
+            | StmtExprKind::Continue
+            | StmtExprKind::CompoundAssign { .. } => {}
         }
     }
 
-    fn visit_place_expr(&mut self, place: &sem::PlaceExpr) {
+    fn visit_place_expr(&mut self, place: &Expr) {
         match &place.kind {
-            sem::PlaceExprKind::Deref { value } => self.visit_value_expr(value),
-            sem::PlaceExprKind::ArrayIndex { target, indices } => {
+            ExprKind::Deref { expr } => self.visit_value_expr(expr),
+            ExprKind::ArrayIndex { target, indices } => {
                 self.visit_place_expr(target);
                 for index in indices {
                     self.visit_value_expr(index);
                 }
             }
-            sem::PlaceExprKind::TupleField { target, .. }
-            | sem::PlaceExprKind::StructField { target, .. } => self.visit_place_expr(target),
-            sem::PlaceExprKind::Var { .. } => {}
-        }
-    }
-
-    fn visit_call_arg(&mut self, arg: &sem::CallArg) {
-        match arg {
-            sem::CallArg::In { expr, .. } | sem::CallArg::Sink { expr, .. } => {
-                self.visit_value_expr(expr);
+            ExprKind::TupleField { target, .. } | ExprKind::StructField { target, .. } => {
+                self.visit_place_expr(target)
             }
-            sem::CallArg::InOut { place, .. } | sem::CallArg::Out { place, .. } => {
-                self.visit_place_expr(place);
-            }
+            ExprKind::Var { .. } => {}
+            _ => {}
         }
     }
 
-    fn visit_method_receiver(&mut self, receiver: &sem::MethodReceiver) {
-        match receiver {
-            sem::MethodReceiver::ValueExpr(expr) => self.visit_value_expr(expr),
-            sem::MethodReceiver::PlaceExpr(place) => self.visit_place_expr(place),
-        }
-    }
-
-    fn visit_string_fmt_plan(&mut self, plan: &sem::StringFmtPlan) {
+    fn visit_string_fmt_plan(&mut self, plan: &StringFmtPlan) {
         for segment in &plan.segments {
             match segment {
-                sem::SegmentKind::LiteralBytes(_) => {}
-                sem::SegmentKind::Bool { expr }
-                | sem::SegmentKind::Int { expr, .. }
-                | sem::SegmentKind::StringValue { expr } => self.visit_value_expr(expr),
+                SegmentKind::LiteralBytes(_) => {}
+                SegmentKind::Bool { expr }
+                | SegmentKind::Int { expr, .. }
+                | SegmentKind::StringValue { expr } => self.visit_value_expr(expr),
             }
         }
     }
 
-    fn is_linear_value_expr(&self, expr: &sem::ValueExpr) -> bool {
+    fn is_linear_value_expr(&self, expr: &Expr) -> bool {
         match &expr.kind {
-            sem::ValueExprKind::Block { items, tail } => {
+            ExprKind::Block { items, tail } => {
                 items.iter().all(|item| self.is_linear_block_item(item))
                     && tail
                         .as_deref()
@@ -305,65 +320,63 @@ impl<'a> LoweringPlanBuilder<'a> {
                         .unwrap_or(true)
             }
 
-            sem::ValueExprKind::UnitLit
-            | sem::ValueExprKind::IntLit(_)
-            | sem::ValueExprKind::BoolLit(_)
-            | sem::ValueExprKind::CharLit(_)
-            | sem::ValueExprKind::StringLit { .. }
-            | sem::ValueExprKind::Range { .. } => true,
+            ExprKind::UnitLit
+            | ExprKind::IntLit(_)
+            | ExprKind::BoolLit(_)
+            | ExprKind::CharLit(_)
+            | ExprKind::StringLit { .. }
+            | ExprKind::Range { .. } => true,
 
-            sem::ValueExprKind::ArrayLit { init, .. } => match init {
-                sem::ArrayLitInit::Elems(elems) => {
+            ExprKind::ArrayLit { init, .. } => match init {
+                ArrayLitInit::Elems(elems) => {
                     elems.iter().all(|elem| self.is_linear_value_expr(elem))
                 }
-                sem::ArrayLitInit::Repeat(expr, _) => self.is_linear_value_expr(expr),
+                ArrayLitInit::Repeat(expr, _) => self.is_linear_value_expr(expr),
             },
-            sem::ValueExprKind::MapLit { entries, .. } => entries.iter().all(|entry| {
+            ExprKind::MapLit { entries, .. } => entries.iter().all(|entry| {
                 self.is_linear_value_expr(&entry.key) && self.is_linear_value_expr(&entry.value)
             }),
 
-            sem::ValueExprKind::TupleLit(items) => {
-                items.iter().all(|item| self.is_linear_value_expr(item))
-            }
+            ExprKind::TupleLit(items) => items.iter().all(|item| self.is_linear_value_expr(item)),
 
-            sem::ValueExprKind::StructLit { fields, .. } => fields
+            ExprKind::StructLit { fields, .. } => fields
                 .iter()
                 .all(|field| self.is_linear_value_expr(&field.value)),
 
-            sem::ValueExprKind::StructUpdate { target, fields } => {
+            ExprKind::StructUpdate { target, fields } => {
                 self.is_linear_value_expr(target)
                     && fields
                         .iter()
                         .all(|field| self.is_linear_value_expr(&field.value))
             }
 
-            sem::ValueExprKind::EnumVariant { payload, .. } => {
+            ExprKind::EnumVariant { payload, .. } => {
                 payload.iter().all(|value| self.is_linear_value_expr(value))
             }
 
-            sem::ValueExprKind::UnaryOp { expr, .. } => self.is_linear_value_expr(expr),
-            sem::ValueExprKind::Try { .. } => false,
-            sem::ValueExprKind::HeapAlloc { expr } => self.is_linear_value_expr(expr),
+            ExprKind::UnaryOp { expr, .. } => self.is_linear_value_expr(expr),
+            ExprKind::Try { .. } => false,
+            ExprKind::HeapAlloc { expr } => self.is_linear_value_expr(expr),
 
-            sem::ValueExprKind::BinOp { left, op, right } => match op {
+            ExprKind::BinOp { left, op, right } => match op {
                 BinaryOp::LogicalAnd | BinaryOp::LogicalOr => false,
                 _ => self.is_linear_value_expr(left) && self.is_linear_value_expr(right),
             },
 
-            sem::ValueExprKind::Load { place } => self.is_linear_place_expr(place),
+            ExprKind::Load { expr } => self.is_linear_place_expr(expr),
 
-            sem::ValueExprKind::Move { place } | sem::ValueExprKind::ImplicitMove { place } => {
-                self.is_linear_place_expr(place)
+            ExprKind::Move { expr } | ExprKind::ImplicitMove { expr } => {
+                self.is_linear_place_expr(expr)
             }
 
-            sem::ValueExprKind::Coerce { expr, .. } => self.is_linear_value_expr(expr),
+            ExprKind::Coerce { expr, .. } => self.is_linear_value_expr(expr),
 
-            sem::ValueExprKind::AddrOf { place } => self.is_linear_place_expr(place),
+            ExprKind::AddrOf { expr } => self.is_linear_place_expr(expr),
 
-            sem::ValueExprKind::Len { place } => self.is_linear_place_expr(place),
+            ExprKind::Len { expr } => self.is_linear_place_expr(expr),
 
-            sem::ValueExprKind::Slice { target, start, end } => {
-                self.is_linear_place_expr(target)
+            ExprKind::Slice { target, start, end } => {
+                self.is_linear_value_expr(target)
                     && start
                         .as_deref()
                         .map(|expr| self.is_linear_value_expr(expr))
@@ -373,94 +386,91 @@ impl<'a> LoweringPlanBuilder<'a> {
                         .map(|expr| self.is_linear_value_expr(expr))
                         .unwrap_or(true)
             }
-            sem::ValueExprKind::MapGet { target, key } => {
+            ExprKind::MapGet { target, key } => {
                 self.is_linear_value_expr(target) && self.is_linear_value_expr(key)
             }
 
-            sem::ValueExprKind::StringFmt { plan } => {
-                plan.segments.iter().all(|segment| match segment {
-                    sem::SegmentKind::LiteralBytes(_) => true,
-                    sem::SegmentKind::Bool { expr }
-                    | sem::SegmentKind::Int { expr, .. }
-                    | sem::SegmentKind::StringValue { expr } => self.is_linear_value_expr(expr),
-                })
+            ExprKind::StringFmt { segments } => {
+                let ast_linear = segments.iter().all(|segment| match segment {
+                    StringFmtSegment::Literal { .. } => true,
+                    StringFmtSegment::Expr { expr, .. } => self.is_linear_value_expr(expr),
+                });
+                let plan_linear = self
+                    .string_fmt_plans
+                    .get(&expr.id)
+                    .map(|plan| {
+                        plan.segments.iter().all(|segment| match segment {
+                            SegmentKind::LiteralBytes(_) => true,
+                            SegmentKind::Bool { expr }
+                            | SegmentKind::Int { expr, .. }
+                            | SegmentKind::StringValue { expr } => self.is_linear_value_expr(expr),
+                        })
+                    })
+                    .unwrap_or(true);
+                ast_linear && plan_linear
             }
 
-            sem::ValueExprKind::Call { callee, args } => {
+            ExprKind::Call { callee, args } => {
                 self.is_linear_value_expr(callee)
-                    && args.iter().all(|arg| self.is_linear_call_arg(arg))
+                    && args.iter().all(|arg| self.is_linear_value_expr(&arg.expr))
                     && self.is_linear_call_plan(expr.id, false)
             }
 
-            sem::ValueExprKind::MethodCall { receiver, args, .. } => {
-                self.is_linear_method_receiver(receiver)
-                    && args.iter().all(|arg| self.is_linear_call_arg(arg))
+            ExprKind::MethodCall { callee, args, .. } => {
+                self.is_linear_value_expr(callee)
+                    && args.iter().all(|arg| self.is_linear_value_expr(&arg.expr))
                     && self.is_linear_call_plan(expr.id, true)
             }
-            sem::ValueExprKind::EmitSend { to, payload }
-            | sem::ValueExprKind::EmitRequest {
-                to,
-                payload,
-                request_site_key: _,
-            } => self.is_linear_value_expr(to) && self.is_linear_value_expr(payload),
-            sem::ValueExprKind::Reply { cap, value } => {
+            ExprKind::Emit { kind } => match kind {
+                EmitKind::Send { to, payload } | EmitKind::Request { to, payload, .. } => {
+                    self.is_linear_value_expr(to) && self.is_linear_value_expr(payload)
+                }
+            },
+            ExprKind::Reply { cap, value } => {
                 self.is_linear_value_expr(cap) && self.is_linear_value_expr(value)
             }
 
-            sem::ValueExprKind::ClosureRef { .. } => true,
+            ExprKind::ClosureRef { .. } => true,
 
             _ => false,
         }
     }
 
-    fn is_linear_call_arg(&self, arg: &sem::CallArg) -> bool {
-        match arg {
-            sem::CallArg::In { expr, .. } | sem::CallArg::Sink { expr, .. } => {
-                self.is_linear_value_expr(expr)
-            }
-            sem::CallArg::InOut { .. } | sem::CallArg::Out { .. } => false,
-        }
-    }
-
-    fn is_linear_method_receiver(&self, receiver: &sem::MethodReceiver) -> bool {
-        match receiver {
-            sem::MethodReceiver::ValueExpr(expr) => self.is_linear_value_expr(expr),
-            sem::MethodReceiver::PlaceExpr(_) => false,
-        }
-    }
-
-    fn is_linear_place_expr(&self, place: &sem::PlaceExpr) -> bool {
+    fn is_linear_place_expr(&self, place: &Expr) -> bool {
         match &place.kind {
-            sem::PlaceExprKind::Var { .. } => true,
-            sem::PlaceExprKind::Deref { value } => self.is_linear_value_expr(value),
-            sem::PlaceExprKind::TupleField { target, .. }
-            | sem::PlaceExprKind::StructField { target, .. } => self.is_linear_place_expr(target),
-            sem::PlaceExprKind::ArrayIndex { target, indices } => {
+            ExprKind::Var { .. } => true,
+            ExprKind::Deref { expr } => self.is_linear_value_expr(expr),
+            ExprKind::TupleField { target, .. } | ExprKind::StructField { target, .. } => {
+                self.is_linear_place_expr(target)
+            }
+            ExprKind::ArrayIndex { target, indices } => {
                 self.is_linear_place_expr(target)
                     && indices.iter().all(|index| self.is_linear_value_expr(index))
             }
+            _ => false,
         }
     }
 
-    fn is_linear_block_item(&self, item: &sem::BlockItem) -> bool {
+    fn is_linear_block_item(&self, item: &BlockItem) -> bool {
         match item {
-            sem::BlockItem::Stmt(stmt) => Self::is_linear_stmt(stmt),
-            sem::BlockItem::Expr(expr) => self.is_linear_value_expr(expr),
+            BlockItem::Stmt(stmt) => Self::is_linear_stmt(stmt),
+            BlockItem::Expr(expr) => self.is_linear_value_expr(expr),
         }
     }
 
-    fn is_linear_stmt(stmt: &sem::StmtExpr) -> bool {
+    fn is_linear_stmt(stmt: &StmtExpr) -> bool {
         match &stmt.kind {
-            sem::StmtExprKind::LetBind { .. }
-            | sem::StmtExprKind::VarBind { .. }
-            | sem::StmtExprKind::VarDecl { .. }
-            | sem::StmtExprKind::Assign { .. }
-            | sem::StmtExprKind::Return { .. } => true,
-            sem::StmtExprKind::While { .. }
-            | sem::StmtExprKind::For { .. }
-            | sem::StmtExprKind::Break
-            | sem::StmtExprKind::Continue => false,
-            sem::StmtExprKind::Defer { .. } | sem::StmtExprKind::Using { .. } => {
+            StmtExprKind::LetBind { .. }
+            | StmtExprKind::VarBind { .. }
+            | StmtExprKind::VarDecl { .. }
+            | StmtExprKind::Assign { .. }
+            | StmtExprKind::Return { .. } => true,
+            StmtExprKind::While { .. }
+            | StmtExprKind::For { .. }
+            | StmtExprKind::Break
+            | StmtExprKind::Continue
+            | StmtExprKind::CompoundAssign { .. } => false,
+            StmtExprKind::Defer { .. } | StmtExprKind::Using { .. } => {
                 unreachable!("syntax desugar must remove defer/using before linearity checks");
             }
         }
@@ -475,11 +485,8 @@ impl<'a> LoweringPlanBuilder<'a> {
             return false;
         }
 
-        plan.args.iter().all(|arg| {
-            matches!(
-                arg,
-                sem::ArgLowering::Direct(_) | sem::ArgLowering::PtrLen { .. }
-            )
-        })
+        plan.args
+            .iter()
+            .all(|arg| matches!(arg, ArgLowering::Direct(_) | ArgLowering::PtrLen { .. }))
     }
 }

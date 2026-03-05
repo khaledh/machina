@@ -1,7 +1,7 @@
 //! Module/function/method declaration orchestration.
 
 use super::*;
-use crate::core::tree::{FuncDecl, MethodItem};
+use crate::core::ast::{FuncDecl, MethodItem};
 
 impl<'a> ConstraintCollector<'a> {
     pub(super) fn collect_module(&mut self) {

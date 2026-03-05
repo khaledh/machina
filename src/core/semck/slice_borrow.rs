@@ -12,16 +12,16 @@
 use std::collections::{HashMap, HashSet};
 
 use crate::core::analysis::dataflow::solve_forward;
+use crate::core::ast::cfg::{AstBlockId, Cfg, CfgBuilder, CfgItem, CfgNode, CfgTerminator};
+use crate::core::ast::visit::{Visitor, walk_expr};
+use crate::core::ast::{
+    BindPattern, BindPatternKind, CallArg, Expr, ExprKind, FuncDef, ParamMode, StmtExpr,
+    StmtExprKind,
+};
 use crate::core::context::NormalizedContext;
 use crate::core::resolve::DefId;
 use crate::core::semck::liveness_util;
 use crate::core::semck::{SEK, SemCheckError, push_error};
-use crate::core::tree::cfg::{AstBlockId, Cfg, CfgBuilder, CfgItem, CfgNode, CfgTerminator};
-use crate::core::tree::visit::{Visitor, walk_expr};
-use crate::core::tree::{
-    BindPattern, BindPatternKind, CallArg, Expr, ExprKind, FuncDef, ParamMode, StmtExpr,
-    StmtExprKind,
-};
 use crate::core::types::Type;
 
 pub(super) fn check(ctx: &NormalizedContext) -> Vec<SemCheckError> {

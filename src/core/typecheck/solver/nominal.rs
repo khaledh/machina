@@ -6,9 +6,9 @@
 
 use std::collections::{HashMap, HashSet};
 
+use crate::core::ast::NodeId;
 use crate::core::capsule::ModuleId;
 use crate::core::resolve::{DefId, DefTable};
-use crate::core::tree::NodeId;
 use crate::core::typecheck::builtin_methods;
 use crate::core::typecheck::constraints::ExprObligation;
 use crate::core::typecheck::engine::{CollectedPropertySig, CollectedTraitSig};

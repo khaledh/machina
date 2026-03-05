@@ -5,8 +5,8 @@
 
 use std::collections::{HashMap, HashSet};
 
+use crate::core::ast::NodeId;
 use crate::core::resolve::DefId;
-use crate::core::tree::NodeId;
 use crate::core::typecheck::constraints::ExprObligation;
 use crate::core::typecheck::errors::{TEK, TypeCheckError};
 use crate::core::typecheck::unify::TcUnifier;

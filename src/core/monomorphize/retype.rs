@@ -2,10 +2,10 @@
 
 use std::collections::{HashMap, HashSet};
 
+use crate::core::ast::*;
 use crate::core::context::{ResolvedContext, TypeCheckedContext};
 use crate::core::resolve::{DefId, DefTable, ImportedFacts};
 use crate::core::symbol_id::SelectedCallable;
-use crate::core::tree::*;
 use crate::core::typecheck::TypeCheckError;
 use crate::core::typecheck::type_check_with_imported_facts;
 use crate::core::typecheck::type_map::{CallSigMap, TypeMap};
@@ -118,7 +118,7 @@ fn merge_typecheck_results(
         }
     }
 
-    // The tree carries no type payload; keep the monomorphized module.
+    // The AST carries no type payload; keep the monomorphized module.
     monomorphized_context.clone().with_type_map(
         merged_type_map,
         merged_call_sigs,

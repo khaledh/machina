@@ -5,8 +5,8 @@
 
 use std::collections::HashSet;
 
+use crate::core::ast::{BinaryOp, NodeId, UnaryOp};
 use crate::core::diag::Span;
-use crate::core::tree::{BinaryOp, NodeId, UnaryOp};
 use crate::core::typecheck::capability::ensure_equatable;
 use crate::core::typecheck::constraints::ExprObligation;
 use crate::core::typecheck::errors::{TEK, TypeCheckError};

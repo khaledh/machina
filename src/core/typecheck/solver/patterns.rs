@@ -5,11 +5,11 @@
 
 use std::collections::{HashMap, HashSet};
 
+use crate::core::ast::{BindPattern, BindPatternKind, MatchPattern, MatchPatternBinding, NodeId};
 use crate::core::capsule::ModuleId;
 use crate::core::context::ResolvedContext;
 use crate::core::diag::Span;
 use crate::core::resolve::{DefId, DefTable};
-use crate::core::tree::{BindPattern, BindPatternKind, MatchPattern, MatchPatternBinding, NodeId};
 use crate::core::typecheck::constraints::PatternObligation;
 use crate::core::typecheck::errors::{TEK, TypeCheckError};
 use crate::core::typecheck::type_map::{resolve_type_def_with_args, resolve_type_expr};
@@ -260,7 +260,7 @@ fn pattern_def_id(
 fn resolve_pattern_enum_type(
     pattern_id: NodeId,
     enum_name: &Option<String>,
-    type_args: &[crate::core::tree::TypeExpr],
+    type_args: &[crate::core::ast::TypeExpr],
     type_defs: &HashMap<String, Type>,
     def_table: &DefTable,
     ctx: &ResolvedContext,

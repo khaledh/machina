@@ -155,7 +155,7 @@ fn diagnostics_for_uri_filters_dependency_module_diagnostics() {
         run_id
     ));
     let app_dir = temp_dir.join("app");
-    fs::create_dir_all(&app_dir).expect("failed to create temp module tree");
+    fs::create_dir_all(&app_dir).expect("failed to create temp module ast");
 
     let entry_path = temp_dir.join("main.mc");
     let dep_path = app_dir.join("dep.mc");

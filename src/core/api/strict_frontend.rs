@@ -8,6 +8,7 @@
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
+use crate::core::ast::{Module, NodeId, NodeIdGen};
 use crate::core::capsule::compose::{flatten_capsule, merge_modules};
 use crate::core::capsule::{self, ModuleId};
 use crate::core::context::{
@@ -15,7 +16,6 @@ use crate::core::context::{
 };
 use crate::core::diag::CompileError;
 use crate::core::monomorphize;
-use crate::core::tree::{Module, NodeId, NodeIdGen};
 
 use std::fs;
 

@@ -1,5 +1,6 @@
 //! Branching (multi-block) lowering routines.
 
+use crate::core::ast::{BinaryOp, BlockItem, Expr, ExprKind, NodeId, StmtExpr, StmtExprKind};
 use crate::core::backend::lower::LowerToIrError;
 use crate::core::backend::lower::join::JoinSession;
 use crate::core::backend::lower::lowerer::{BranchResult, FuncLowerer, LoopContext, StmtOutcome};
@@ -8,8 +9,8 @@ use crate::core::ir::IrTypeId;
 use crate::core::ir::{
     BlockId, Callee, CastKind, CmpOp, ConstValue, SwitchCase, Terminator, ValueId,
 };
+use crate::core::plans::LoweringPlan;
 use crate::core::resolve::DefId;
-use crate::core::tree::{BinaryOp, NodeId, semantic as sem};
 use crate::core::types::{Type, TypeId};
 
 struct TryLoweringSetup {
@@ -31,14 +32,18 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
     fn lower_expr_to_join(
         &mut self,
         join: &JoinSession,
-        expr: &sem::ValueExpr,
+        expr: &Expr,
         span: crate::core::diag::Span,
         join_sem_ty: Option<&Type>,
     ) -> Result<bool, LowerToIrError> {
         match self.lower_branching_value_expr(expr)? {
             BranchResult::Value(value) => {
                 let branch_value = if let Some(join_sem_ty) = join_sem_ty {
-                    let branch_sem_ty = self.type_map.type_table().get(expr.ty).clone();
+                    let branch_sem_ty = self
+                        .type_map
+                        .type_table()
+                        .get(self.type_map.type_of(expr.id))
+                        .clone();
                     self.coerce_value(value, &branch_sem_ty, join_sem_ty)
                 } else {
                     value
@@ -76,20 +81,20 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
     /// execution continues after this expression.
     pub(super) fn lower_branching_value_expr(
         &mut self,
-        expr: &sem::ValueExpr,
+        expr: &Expr,
     ) -> Result<BranchResult, LowerToIrError> {
         match &expr.kind {
             // Block expression: process items sequentially.
-            sem::ValueExprKind::Block { items, tail } => {
+            ExprKind::Block { items, tail } => {
                 self.with_drop_scope(expr.id, |lowerer| {
                     for item in items {
                         match item {
-                            sem::BlockItem::Stmt(stmt) => {
+                            BlockItem::Stmt(stmt) => {
                                 if let Some(result) = lowerer.lower_stmt_expr_branching(stmt)? {
                                     return Ok(result);
                                 }
                             }
-                            sem::BlockItem::Expr(expr) => {
+                            BlockItem::Expr(expr) => {
                                 lowerer.annotate_expr(expr);
                                 // Statement-position expression: lower using the plan.
                                 if let BranchResult::Return = lowerer.lower_value_expr(expr)? {
@@ -108,19 +113,25 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
                     }
 
                     // Blocks without a tail produce unit.
-                    let ty = lowerer.type_lowerer.lower_type_id(expr.ty);
+                    let ty = lowerer
+                        .type_lowerer
+                        .lower_type_id(lowerer.type_map.type_of(expr.id));
                     let value = lowerer.builder.const_unit(ty);
                     Ok(BranchResult::Value(value))
                 })
             }
 
             // If expression: creates then/else blocks and a join block.
-            sem::ValueExprKind::If {
+            ExprKind::If {
                 cond,
                 then_body,
                 else_body,
             } => {
-                let join_sem_ty = self.type_map.type_table().get(expr.ty).clone();
+                let join_sem_ty = self
+                    .type_map
+                    .type_table()
+                    .get(self.type_map.type_of(expr.id))
+                    .clone();
                 // Lower the condition in the current block.
                 let cond_value = self.lower_linear_expr_value(cond)?;
 
@@ -149,7 +160,7 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
                 let else_returned =
                     self.lower_expr_to_join(&join, else_body, expr.span, Some(&join_sem_ty))?;
 
-                // If both branches return, the if expression never produces a value.
+                // If both branches return, the `if` expression never produces a value.
                 if then_returned && else_returned {
                     return Ok(BranchResult::Return);
                 }
@@ -158,7 +169,7 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
                 Ok(self.finalize_join_value(join))
             }
 
-            sem::ValueExprKind::BinOp { left, op, right }
+            ExprKind::BinOp { left, op, right }
                 if matches!(op, BinaryOp::LogicalAnd | BinaryOp::LogicalOr) =>
             {
                 // Short-circuit lowering: emit a conditional branch based on the LHS.
@@ -198,14 +209,16 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
                 // Emit the short-circuit value on the opposite branch.
                 join.restore_locals(self);
                 self.builder.select_block(short_bb);
-                let bool_ty = self.type_lowerer.lower_type_id(expr.ty);
+                let bool_ty = self
+                    .type_lowerer
+                    .lower_type_id(self.type_map.type_of(expr.id));
                 let short_value = self.builder.const_bool(short_val, bool_ty);
                 join.emit_branch(self, short_value, expr.span)?;
 
                 Ok(self.finalize_join_value(join))
             }
 
-            sem::ValueExprKind::Try {
+            ExprKind::Try {
                 fallible_expr,
                 on_error,
             } => {
@@ -216,24 +229,20 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
                 }
             }
 
-            // Match expression: switch on enum tags (decision tree not yet supported).
-            sem::ValueExprKind::Match { scrutinee, arms } => {
-                MatchLowerer::lower(self, expr, scrutinee, arms)
-            }
+            // Match expression: switch on enum tags.
+            ExprKind::Match { scrutinee, arms } => MatchLowerer::lower(self, expr, scrutinee, arms),
 
             // Other expressions: delegate to unified value lowering to avoid duplication.
             _ => match self.lowering_plan(expr.id) {
-                sem::LoweringPlan::Linear | sem::LoweringPlan::Branching => {
-                    self.lower_value_expr_value(expr)
-                }
+                LoweringPlan::Linear | LoweringPlan::Branching => self.lower_value_expr_value(expr),
             },
         }
     }
 
     pub(super) fn lower_try_propagate(
         &mut self,
-        expr: &sem::ValueExpr,
-        inner: &sem::ValueExpr,
+        expr: &Expr,
+        inner: &Expr,
     ) -> Result<BranchResult, LowerToIrError> {
         let union_value = match self.lower_value_expr(inner)? {
             BranchResult::Value(value) => value,
@@ -251,7 +260,7 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
         // Fast path: when operand and function return unions are identical,
         // propagation can return the original union value directly.
         let return_union_matches_operand = setup.union_ty == self.ret_ty;
-        let err_variants = self.try_err_variants(inner.ty, &setup.union_ty);
+        let err_variants = self.try_err_variants(self.type_map.type_of(inner.id), &setup.union_ty);
 
         if err_variants.len() != err_tys.len() {
             panic!(
@@ -290,9 +299,9 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
 
     pub(super) fn lower_try_handle(
         &mut self,
-        expr: &sem::ValueExpr,
-        fallible_expr: &sem::ValueExpr,
-        handler_expr: &sem::ValueExpr,
+        expr: &Expr,
+        fallible_expr: &Expr,
+        handler_expr: &Expr,
     ) -> Result<BranchResult, LowerToIrError> {
         let union_value = match self.lower_value_expr(fallible_expr)? {
             BranchResult::Value(value) => value,
@@ -331,11 +340,15 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
 
     fn lower_try_setup(
         &mut self,
-        expr: &sem::ValueExpr,
-        fallible_expr: &sem::ValueExpr,
+        expr: &Expr,
+        fallible_expr: &Expr,
         union_value: ValueId,
     ) -> Result<TryLoweringSetup, LowerToIrError> {
-        let union_ty = self.type_map.type_table().get(fallible_expr.ty).clone();
+        let union_ty = self
+            .type_map
+            .type_table()
+            .get(self.type_map.type_of(fallible_expr.id))
+            .clone();
         let Type::ErrorUnion { ok_ty, .. } = &union_ty else {
             panic!(
                 "backend try operator expects error union operand, found {:?}",
@@ -343,11 +356,13 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
             );
         };
         let ok_ty = ok_ty.as_ref().clone();
-        let join_expr_ty = self.try_join_expr_ty(expr.ty, &ok_ty);
-        let union_ir_ty = self.type_lowerer.lower_type_id(fallible_expr.ty);
+        let join_expr_ty = self.try_join_expr_ty(self.type_map.type_of(expr.id), &ok_ty);
+        let union_ir_ty = self
+            .type_lowerer
+            .lower_type_id(self.type_map.type_of(fallible_expr.id));
         let union_slot = self.materialize_value_slot(union_value, union_ir_ty);
         let (tag_ty, blob_ty, ok_payload_ty, ok_payload_offset) =
-            self.try_ok_variant_layout(fallible_expr.ty, &union_ty);
+            self.try_ok_variant_layout(self.type_map.type_of(fallible_expr.id), &union_ty);
 
         let tag = self.load_field(union_slot.addr, 0, tag_ty);
         let tag_zero = self.builder.const_int(0, false, 32, tag_ty);
@@ -356,11 +371,7 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
 
         let ok_bb = self.builder.add_block();
         let err_bb = self.builder.add_block();
-        let join_expr = sem::ValueExpr {
-            ty: join_expr_ty,
-            ..expr.clone()
-        };
-        let join = self.begin_join(&join_expr);
+        let join = self.begin_join_with_ty(join_expr_ty);
 
         self.builder.terminate(Terminator::CondBr {
             cond: is_ok,
@@ -537,19 +548,19 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
     /// Lowers a statement inside a branching block.
     fn lower_stmt_expr_branching(
         &mut self,
-        stmt: &sem::StmtExpr,
+        stmt: &StmtExpr,
     ) -> Result<Option<BranchResult>, LowerToIrError> {
         match &stmt.kind {
-            sem::StmtExprKind::While { cond, body } => {
+            StmtExprKind::While { cond, body } => {
                 self.annotate_stmt(stmt);
                 self.lower_while_stmt(cond, body)?;
                 Ok(None)
             }
-            sem::StmtExprKind::Break => {
+            StmtExprKind::Break => {
                 self.annotate_stmt(stmt);
                 Ok(Some(self.lower_break_stmt(stmt)?))
             }
-            sem::StmtExprKind::Continue => {
+            StmtExprKind::Continue => {
                 self.annotate_stmt(stmt);
                 Ok(Some(self.lower_continue_stmt(stmt)?))
             }
@@ -571,8 +582,8 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
     /// SSA form across the loop back-edge.
     pub(super) fn lower_while_stmt(
         &mut self,
-        cond: &sem::ValueExpr,
-        body: &sem::ValueExpr,
+        cond: &Expr,
+        body: &Expr,
     ) -> Result<(), LowerToIrError> {
         // Snapshot active drop scopes so we can restore them after lowering
         // control-flow edges that may exit the loop body early.
@@ -664,7 +675,7 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
     }
 
     /// Lowers a `break` statement by branching to the loop exit block.
-    fn lower_break_stmt(&mut self, stmt: &sem::StmtExpr) -> Result<BranchResult, LowerToIrError> {
+    fn lower_break_stmt(&mut self, stmt: &StmtExpr) -> Result<BranchResult, LowerToIrError> {
         let (target, defs, locals) = {
             let ctx = self.current_loop();
             (ctx.exit_bb, ctx.defs.clone(), ctx.locals.clone())
@@ -673,10 +684,7 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
     }
 
     /// Lowers a `continue` statement by branching to the loop header block.
-    fn lower_continue_stmt(
-        &mut self,
-        stmt: &sem::StmtExpr,
-    ) -> Result<BranchResult, LowerToIrError> {
+    fn lower_continue_stmt(&mut self, stmt: &StmtExpr) -> Result<BranchResult, LowerToIrError> {
         let (target, defs, locals) = {
             let ctx = self.current_loop();
             (ctx.header_bb, ctx.defs.clone(), ctx.locals.clone())

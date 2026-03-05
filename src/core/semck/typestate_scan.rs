@@ -4,8 +4,8 @@
 //! generated typestate method blocks -> generated handler defs. Keeping that
 //! traversal here lets the individual passes focus on their own facts/checks.
 
+use crate::core::ast::{MethodBlock, MethodDef, MethodItem, Module};
 use crate::core::machine::naming::{is_generated_handler_name, parse_generated_state_name};
-use crate::core::tree::{MethodBlock, MethodDef, MethodItem, Module};
 
 pub(super) struct GeneratedTypestateHandler<'a> {
     pub(super) typestate_name: String,

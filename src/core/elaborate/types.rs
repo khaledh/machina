@@ -3,14 +3,13 @@
 //! When elaboration generates new definitions (e.g., closure struct fields),
 //! it needs to produce `TypeExpr` AST nodes that represent those types.
 //! This module provides the machinery to convert internal `Type` values
-//! back into syntactic `TypeExpr` nodes that can appear in the semantic tree.
+//! back into syntactic `TypeExpr` nodes that can appear in the AST.
 //!
 //! This is essentially the inverse of type checking: given a resolved type,
 //! produce the AST representation that would parse to that type.
 
+use crate::core::ast::{FnTypeParam, ParamMode, RefinementKind, TypeExpr, TypeExprKind};
 use crate::core::diag::Span;
-use crate::core::tree::semantic as sem;
-use crate::core::tree::{ParamMode, RefinementKind};
 use crate::core::types::{FnParamMode, Type};
 
 use super::elaborator::Elaborator;
@@ -20,7 +19,7 @@ impl<'a> Elaborator<'a> {
     ///
     /// Used when synthesizing new definitions that need type annotations,
     /// such as closure struct fields and method signatures.
-    pub(super) fn type_expr_from_type(&mut self, ty: &Type, span: Span) -> sem::TypeExpr {
+    pub(super) fn type_expr_from_type(&mut self, ty: &Type, span: Span) -> TypeExpr {
         let id = self.node_id_gen.new_id();
         let kind = match ty {
             Type::Unknown => {
@@ -64,12 +63,12 @@ impl<'a> Elaborator<'a> {
                 if refinements.is_empty() {
                     self.named_type_expr(name)
                 } else {
-                    let base_expr = sem::TypeExpr {
+                    let base_expr = TypeExpr {
                         id: self.node_id_gen.new_id(),
                         kind: self.named_type_expr(name),
                         span,
                     };
-                    sem::TypeExprKind::Refined {
+                    TypeExprKind::Refined {
                         base_ty_expr: Box::new(base_expr),
                         refinements,
                     }
@@ -78,7 +77,7 @@ impl<'a> Elaborator<'a> {
             Type::Bool => self.named_type_expr("bool"),
             Type::Char => self.named_type_expr("char"),
             Type::String => self.named_type_expr("string"),
-            Type::ErrorUnion { ok_ty, err_tys } => sem::TypeExprKind::Union {
+            Type::ErrorUnion { ok_ty, err_tys } => TypeExprKind::Union {
                 variants: std::iter::once(ok_ty.as_ref())
                     .chain(err_tys.iter())
                     .map(|ty| self.type_expr_from_type(ty, span))
@@ -87,53 +86,53 @@ impl<'a> Elaborator<'a> {
             Type::Range { .. } => {
                 panic!("compiler bug: range value type not representable in type expressions");
             }
-            Type::Array { elem_ty, dims } => sem::TypeExprKind::Array {
+            Type::Array { elem_ty, dims } => TypeExprKind::Array {
                 elem_ty_expr: Box::new(self.type_expr_from_type(elem_ty, span)),
                 dims: dims.clone(),
             },
-            Type::DynArray { elem_ty } => sem::TypeExprKind::DynArray {
+            Type::DynArray { elem_ty } => TypeExprKind::DynArray {
                 elem_ty_expr: Box::new(self.type_expr_from_type(elem_ty, span)),
             },
-            Type::Pending { response_tys } => sem::TypeExprKind::Named {
+            Type::Pending { response_tys } => TypeExprKind::Named {
                 ident: "Pending".to_string(),
                 type_args: vec![self.response_set_type_arg_expr(response_tys, span)],
             },
-            Type::ReplyCap { response_tys } => sem::TypeExprKind::Named {
+            Type::ReplyCap { response_tys } => TypeExprKind::Named {
                 ident: "ReplyCap".to_string(),
                 type_args: vec![self.response_set_type_arg_expr(response_tys, span)],
             },
-            Type::Set { elem_ty } => sem::TypeExprKind::Named {
+            Type::Set { elem_ty } => TypeExprKind::Named {
                 ident: "set".to_string(),
                 type_args: vec![self.type_expr_from_type(elem_ty, span)],
             },
-            Type::Map { key_ty, value_ty } => sem::TypeExprKind::Named {
+            Type::Map { key_ty, value_ty } => TypeExprKind::Named {
                 ident: "map".to_string(),
                 type_args: vec![
                     self.type_expr_from_type(key_ty, span),
                     self.type_expr_from_type(value_ty, span),
                 ],
             },
-            Type::Tuple { field_tys } => sem::TypeExprKind::Tuple {
+            Type::Tuple { field_tys } => TypeExprKind::Tuple {
                 field_ty_exprs: field_tys
                     .iter()
                     .map(|field| self.type_expr_from_type(field, span))
                     .collect(),
             },
             Type::Struct { name, .. } | Type::Enum { name, .. } => self.named_type_expr(name),
-            Type::Slice { elem_ty } => sem::TypeExprKind::Slice {
+            Type::Slice { elem_ty } => TypeExprKind::Slice {
                 elem_ty_expr: Box::new(self.type_expr_from_type(elem_ty, span)),
             },
-            Type::Heap { elem_ty } => sem::TypeExprKind::Heap {
+            Type::Heap { elem_ty } => TypeExprKind::Heap {
                 elem_ty_expr: Box::new(self.type_expr_from_type(elem_ty, span)),
             },
-            Type::Ref { mutable, elem_ty } => sem::TypeExprKind::Ref {
+            Type::Ref { mutable, elem_ty } => TypeExprKind::Ref {
                 mutable: *mutable,
                 elem_ty_expr: Box::new(self.type_expr_from_type(elem_ty, span)),
             },
-            Type::Fn { params, ret_ty } => sem::TypeExprKind::Fn {
+            Type::Fn { params, ret_ty } => TypeExprKind::Fn {
                 params: params
                     .iter()
-                    .map(|param| sem::FnTypeParam {
+                    .map(|param| FnTypeParam {
                         mode: match param.mode {
                             FnParamMode::In => ParamMode::In,
                             FnParamMode::InOut => ParamMode::InOut,
@@ -147,17 +146,17 @@ impl<'a> Elaborator<'a> {
             },
         };
 
-        sem::TypeExpr { id, kind, span }
+        TypeExpr { id, kind, span }
     }
 
-    fn named_type_expr(&self, name: &str) -> sem::TypeExprKind {
-        sem::TypeExprKind::Named {
+    fn named_type_expr(&self, name: &str) -> TypeExprKind {
+        TypeExprKind::Named {
             ident: name.to_string(),
             type_args: Vec::new(),
         }
     }
 
-    fn response_set_type_arg_expr(&mut self, response_tys: &[Type], span: Span) -> sem::TypeExpr {
+    fn response_set_type_arg_expr(&mut self, response_tys: &[Type], span: Span) -> TypeExpr {
         if response_tys.len() <= 1 {
             return self.type_expr_from_type(
                 response_tys
@@ -166,9 +165,9 @@ impl<'a> Elaborator<'a> {
                 span,
             );
         }
-        sem::TypeExpr {
+        TypeExpr {
             id: self.node_id_gen.new_id(),
-            kind: sem::TypeExprKind::Union {
+            kind: TypeExprKind::Union {
                 variants: response_tys
                     .iter()
                     .map(|ty| self.type_expr_from_type(ty, span))

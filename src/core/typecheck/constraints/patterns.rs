@@ -1,5 +1,7 @@
 //! Pattern and match-arm constraint collection.
 
+use crate::core::ast::MatchPatternBinding;
+
 use super::*;
 
 impl<'a> ConstraintCollector<'a> {
@@ -31,7 +33,7 @@ impl<'a> ConstraintCollector<'a> {
             }
             MatchPattern::EnumVariant { bindings, .. } => {
                 for binding in bindings {
-                    if let crate::core::tree::MatchPatternBinding::Named { id, span, .. } = binding
+                    if let MatchPatternBinding::Named { id, span, .. } = binding
                         && let Some(def_id) = self.lookup_def_id(*id)
                     {
                         let bind_term = self.def_term(def_id);

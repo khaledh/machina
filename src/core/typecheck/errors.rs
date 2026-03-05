@@ -5,8 +5,8 @@
 
 use thiserror::Error;
 
+use crate::core::ast::{BindPattern, ExprKind};
 use crate::core::diag::{Span, SpannedError};
-use crate::core::tree::{BindPattern, ExprKind};
 use crate::core::types::Type;
 
 #[derive(Debug, Clone, Error)]
@@ -171,7 +171,7 @@ pub enum TypeCheckErrorKind {
     #[error("Tuple pattern length mismatch: expected {0}, found {1}")]
     TuplePatternLengthMismatch(usize, usize),
 
-    #[error("Uknown struct type: {0}")]
+    #[error("Unknown struct type: {0}")]
     UnknownStructType(String),
 
     #[error("Duplicate struct field: {0}")]

@@ -1,31 +1,34 @@
 //! Call lowering.
 
+use crate::core::ast::{CallArg, CallArgMode, Expr, ExprKind, NodeId, ParamMode};
 use crate::core::backend::lower::LowerToIrError;
 use crate::core::backend::lower::lowerer::{CallInputValue, FuncLowerer, LinearValue};
 use crate::core::diag::Span;
 use crate::core::ir::{Callee, CastKind, RuntimeFn, ValueId};
-use crate::core::resolve::{DefId, DefKind};
-use crate::core::tree::ParamMode;
-use crate::core::tree::{NodeId, semantic as sem};
+use crate::core::plans::{
+    ArgLowering, CallInput, CallPlan, CallTarget, IntrinsicCall, RuntimeCall,
+};
+use crate::core::resolve::{DefId, DefKind, DefTable};
 use crate::core::types::{Type, TypeId, TypeRenderConfig, render_type};
 use std::collections::BTreeMap;
 
-fn drop_def_for_value_expr(expr: &sem::ValueExpr) -> Option<DefId> {
+fn drop_def_for_value_expr(def_table: &DefTable, expr: &Expr) -> Option<DefId> {
     match &expr.kind {
-        sem::ValueExprKind::Move { place }
-        | sem::ValueExprKind::ImplicitMove { place }
-        | sem::ValueExprKind::Load { place } => drop_def_for_place_expr(place),
+        ExprKind::Move { expr: inner }
+        | ExprKind::ImplicitMove { expr: inner }
+        | ExprKind::Load { expr: inner } => drop_def_for_place_expr(def_table, inner),
         _ => None,
     }
 }
 
-fn drop_def_for_place_expr(place: &sem::PlaceExpr) -> Option<DefId> {
+fn drop_def_for_place_expr(def_table: &DefTable, place: &Expr) -> Option<DefId> {
     match &place.kind {
-        sem::PlaceExprKind::Var { def_id, .. } => Some(*def_id),
-        sem::PlaceExprKind::ArrayIndex { target, .. }
-        | sem::PlaceExprKind::TupleField { target, .. }
-        | sem::PlaceExprKind::StructField { target, .. } => drop_def_for_place_expr(target),
-        sem::PlaceExprKind::Deref { value } => drop_def_for_value_expr(value),
+        ExprKind::Var { .. } => Some(def_table.def_id(place.id)),
+        ExprKind::ArrayIndex { target, .. }
+        | ExprKind::TupleField { target, .. }
+        | ExprKind::StructField { target, .. } => drop_def_for_place_expr(def_table, target),
+        ExprKind::Deref { expr } => drop_def_for_value_expr(def_table, expr),
+        _ => None,
     }
 }
 
@@ -88,37 +91,39 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
         self.type_map.lookup_def_type_param_names(def_id).cloned()
     }
 
-    fn type_of_function_symbol_name(&self, args: &[sem::CallArg]) -> Option<String> {
+    fn type_of_function_symbol_name(&self, args: &[CallArg]) -> Option<String> {
         if args.len() != 1 {
             return None;
         }
-        let expr = match &args[0] {
-            sem::CallArg::In { expr, .. } | sem::CallArg::Sink { expr, .. } => expr,
-            sem::CallArg::InOut { .. } | sem::CallArg::Out { .. } => return None,
-        };
-        let place = Self::type_of_symbol_place(expr)?;
-        let sem::PlaceExprKind::Var { def_id, .. } = &place.kind else {
+        let arg = &args[0];
+        match arg.mode {
+            CallArgMode::Default | CallArgMode::Move => {}
+            CallArgMode::InOut | CallArgMode::Out => return None,
+        }
+        let place = Self::type_of_symbol_place(&arg.expr)?;
+        let ExprKind::Var { .. } = &place.kind else {
             return None;
         };
-        let def = self.def_table.lookup_def(*def_id)?;
+        let def_id = self.def_table.def_id(place.id);
+        let def = self.def_table.lookup_def(def_id)?;
         if !matches!(def.kind, DefKind::FuncDef { .. } | DefKind::FuncDecl { .. }) {
             return None;
         }
         let fn_ty = self.type_map.lookup_def_type(def)?;
-        let overrides = self.callable_type_param_names_for_type_of(*def_id);
+        let overrides = self.callable_type_param_names_for_type_of(def_id);
         Some(Self::render_type_for_type_of(&fn_ty, overrides.as_ref()))
     }
 
-    fn type_of_symbol_place(expr: &sem::ValueExpr) -> Option<&sem::PlaceExpr> {
+    fn type_of_symbol_place(expr: &Expr) -> Option<&Expr> {
         let mut current = expr;
         loop {
             match &current.kind {
-                sem::ValueExprKind::Load { place }
-                | sem::ValueExprKind::Move { place }
-                | sem::ValueExprKind::ImplicitMove { place } => return Some(place),
+                ExprKind::Load { expr: inner }
+                | ExprKind::Move { expr: inner }
+                | ExprKind::ImplicitMove { expr: inner } => return Some(inner),
                 // Type-check inserts coercions around function symbols; peel them
                 // to recover the underlying definition.
-                sem::ValueExprKind::Coerce { expr, .. } => {
+                ExprKind::Coerce { expr, .. } => {
                     current = expr;
                 }
                 _ => return None,
@@ -128,14 +133,15 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
 
     fn lower_type_of_intrinsic(
         &mut self,
-        expr: &sem::ValueExpr,
-        args: &[sem::CallArg],
-        call_plan: &sem::CallPlan,
+        expr: &Expr,
+        args: &[CallArg],
+        call_plan: &CallPlan,
     ) -> Result<Option<LinearValue>, LowerToIrError> {
+        let expr_ty = self.type_map.type_of(expr.id);
         // Function items are pure symbols; lowering them as runtime values is not
         // required for `type_of`, so read their polymorphic signature directly.
         if let Some(type_name) = self.type_of_function_symbol_name(args) {
-            let value = self.lower_static_string_value(expr.ty, type_name.as_bytes());
+            let value = self.lower_static_string_value(expr_ty, type_name.as_bytes());
             return Ok(Some(value));
         }
 
@@ -149,14 +155,11 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
             );
         }
 
-        let arg_type_id = match &args[0] {
-            sem::CallArg::In { expr, .. } | sem::CallArg::Sink { expr, .. } => expr.ty,
-            sem::CallArg::InOut { place, .. } | sem::CallArg::Out { place, .. } => place.ty,
-        };
+        let arg_type_id = self.type_map.type_of(args[0].expr.id);
         let type_name = self
             .format_nominal_for_type_of(arg_type_id)
             .unwrap_or_else(|| Self::render_type_for_type_of(&arg_values[0].ty, None));
-        let value = self.lower_static_string_value(expr.ty, type_name.as_bytes());
+        let value = self.lower_static_string_value(expr_ty, type_name.as_bytes());
         self.apply_call_drop_effects(call_plan, args, None, &arg_values)?;
         Ok(Some(value))
     }
@@ -190,10 +193,11 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
 
     fn lower_machine_payload_pack_intrinsic(
         &mut self,
-        expr: &sem::ValueExpr,
-        args: &[sem::CallArg],
-        call_plan: &sem::CallPlan,
+        expr: &Expr,
+        args: &[CallArg],
+        call_plan: &CallPlan,
     ) -> Result<Option<LinearValue>, LowerToIrError> {
+        let expr_ty = self.type_map.type_of(expr.id);
         let Some(mut arg_values) = self.lower_call_arg_values(args)? else {
             return Ok(None);
         };
@@ -215,10 +219,10 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
             self.pack_machine_payload_words(payload_arg.value, &payload_ty);
 
         // Materialize `(payload0, payload1)` tuple return.
-        let ret_ty = self.type_lowerer.lower_type_id(expr.ty);
+        let ret_ty = self.type_lowerer.lower_type_id(expr_ty);
         let ret_slot = self.alloc_value_slot(ret_ty);
-        let field0_ty = self.lower_tuple_field_ty(expr.ty, 0);
-        let field1_ty = self.lower_tuple_field_ty(expr.ty, 1);
+        let field0_ty = self.lower_tuple_field_ty(expr_ty, 0);
+        let field1_ty = self.lower_tuple_field_ty(expr_ty, 1);
         self.store_field(ret_slot.addr, 0, field0_ty, payload_word);
         self.store_field(ret_slot.addr, 1, field1_ty, layout_word);
         let packed = self.load_slot(&ret_slot);
@@ -229,13 +233,14 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
 
     fn call_input_from_value_expr(
         &mut self,
-        expr: &sem::ValueExpr,
+        expr: &Expr,
     ) -> Result<Option<CallInputValue>, LowerToIrError> {
-        let drop_def = drop_def_for_value_expr(expr);
+        let drop_def = drop_def_for_value_expr(self.def_table, expr);
         let Some(value) = self.lower_value_expr_opt(expr)? else {
             return Ok(None);
         };
-        let ty = self.type_map.type_table().get(expr.ty).clone();
+        let expr_ty = self.type_map.type_of(expr.id);
+        let ty = self.type_map.type_table().get(expr_ty).clone();
         Ok(Some(CallInputValue {
             value,
             ty,
@@ -246,11 +251,12 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
 
     fn call_input_from_place_expr(
         &mut self,
-        place: &sem::PlaceExpr,
+        place: &Expr,
     ) -> Result<CallInputValue, LowerToIrError> {
-        let drop_def = drop_def_for_place_expr(place);
+        let drop_def = drop_def_for_place_expr(self.def_table, place);
         let addr = self.lower_place_addr(place)?;
-        let ty = self.type_map.type_table().get(place.ty).clone();
+        let place_ty = self.type_map.type_of(place.id);
+        let ty = self.type_map.type_table().get(place_ty).clone();
         Ok(CallInputValue {
             value: addr.addr,
             ty,
@@ -261,19 +267,19 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
 
     fn lower_call_arg_values(
         &mut self,
-        args: &[sem::CallArg],
+        args: &[CallArg],
     ) -> Result<Option<Vec<CallInputValue>>, LowerToIrError> {
         let mut arg_values = Vec::with_capacity(args.len());
         for arg in args {
-            match arg {
-                sem::CallArg::In { expr, .. } | sem::CallArg::Sink { expr, .. } => {
-                    let Some(input) = self.call_input_from_value_expr(expr)? else {
+            match arg.mode {
+                CallArgMode::Default | CallArgMode::Move => {
+                    let Some(input) = self.call_input_from_value_expr(&arg.expr)? else {
                         return Ok(None);
                     };
                     arg_values.push(input);
                 }
-                sem::CallArg::InOut { place, .. } | sem::CallArg::Out { place, .. } => {
-                    arg_values.push(self.call_input_from_place_expr(place)?);
+                CallArgMode::InOut | CallArgMode::Out => {
+                    arg_values.push(self.call_input_from_place_expr(&arg.expr)?);
                 }
             }
         }
@@ -282,32 +288,34 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
 
     fn call_param_types(
         &self,
-        call_plan: &sem::CallPlan,
-        callee_expr: Option<&sem::ValueExpr>,
+        call_plan: &CallPlan,
+        callee_expr: Option<&Expr>,
         receiver_value: Option<&CallInputValue>,
     ) -> Option<Vec<Type>> {
         let fn_ty = match &call_plan.target {
-            sem::CallTarget::Direct(def_id) => {
+            CallTarget::Direct(def_id) => {
                 let def = self.def_table.lookup_def(*def_id)?;
                 self.type_map.lookup_def_type(def)?
             }
-            sem::CallTarget::Indirect => {
+            CallTarget::Indirect => {
                 if let Some(callee_expr) = callee_expr {
-                    self.type_map.type_table().get(callee_expr.ty).clone()
+                    let callee_ty = self.type_map.type_of(callee_expr.id);
+                    self.type_map.type_table().get(callee_ty).clone()
                 } else if let Some(receiver_value) = receiver_value {
                     receiver_value.ty.clone()
                 } else {
                     return None;
                 }
             }
-            sem::CallTarget::Intrinsic(sem::IntrinsicCall::TypeOf) => {
+            CallTarget::Intrinsic(IntrinsicCall::TypeOf) => {
                 // `type_of` is compile-time metadata extraction; it does not need
                 // argument conversion checks against callee parameter types.
                 return None;
             }
-            sem::CallTarget::Intrinsic(_) | sem::CallTarget::Runtime(_) => {
+            CallTarget::Intrinsic(_) | CallTarget::Runtime(_) => {
                 let callee_expr = callee_expr?;
-                self.type_map.type_table().get(callee_expr.ty).clone()
+                let callee_ty = self.type_map.type_of(callee_expr.id);
+                self.type_map.type_table().get(callee_ty).clone()
             }
         };
 
@@ -319,7 +327,7 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
 
     fn emit_call_conversion_checks(
         &mut self,
-        call_plan: &sem::CallPlan,
+        call_plan: &CallPlan,
         receiver_value: Option<&CallInputValue>,
         arg_values: &[CallInputValue],
         param_tys: &[Type],
@@ -359,10 +367,11 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
     /// Lowers a call expression, returning `None` if a subexpression returns.
     pub(super) fn lower_call_expr(
         &mut self,
-        expr: &sem::ValueExpr,
-        callee_expr: &sem::ValueExpr,
-        args: &[sem::CallArg],
+        expr: &Expr,
+        callee_expr: &Expr,
+        args: &[CallArg],
     ) -> Result<Option<LinearValue>, LowerToIrError> {
+        let expr_ty = self.type_map.type_of(expr.id);
         let call_plan = self.call_plan(expr.id);
 
         // Direct calls (no receiver) only for now.
@@ -375,39 +384,39 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
 
         // Resolve the callee.
         let callee = match &call_plan.target {
-            sem::CallTarget::Direct(def_id) => Callee::Direct(*def_id),
-            sem::CallTarget::Indirect => {
+            CallTarget::Direct(def_id) => Callee::Direct(*def_id),
+            CallTarget::Indirect => {
                 let Some(callee_value) = self.lower_value_expr_opt(callee_expr)? else {
                     return Ok(None);
                 };
                 Callee::Value(callee_value)
             }
-            sem::CallTarget::Intrinsic(intrinsic) => match intrinsic {
-                sem::IntrinsicCall::StringLen => {
+            CallTarget::Intrinsic(intrinsic) => match intrinsic {
+                IntrinsicCall::StringLen => {
                     panic!("backend call expr cannot lower string len without a receiver");
                 }
-                sem::IntrinsicCall::TypeOf => {
+                IntrinsicCall::TypeOf => {
                     return self.lower_type_of_intrinsic(expr, args, &call_plan);
                 }
-                sem::IntrinsicCall::MachinePayloadPack => {
+                IntrinsicCall::MachinePayloadPack => {
                     return self.lower_machine_payload_pack_intrinsic(expr, args, &call_plan);
                 }
-                sem::IntrinsicCall::DynArrayAppend => {
+                IntrinsicCall::DynArrayAppend => {
                     panic!("backend call expr cannot lower dyn-array intrinsic without a receiver");
                 }
-                sem::IntrinsicCall::SetInsert
-                | sem::IntrinsicCall::SetContains
-                | sem::IntrinsicCall::SetRemove
-                | sem::IntrinsicCall::SetClear
-                | sem::IntrinsicCall::MapInsert
-                | sem::IntrinsicCall::MapContainsKey
-                | sem::IntrinsicCall::MapGet
-                | sem::IntrinsicCall::MapRemove
-                | sem::IntrinsicCall::MapClear => {
+                IntrinsicCall::SetInsert
+                | IntrinsicCall::SetContains
+                | IntrinsicCall::SetRemove
+                | IntrinsicCall::SetClear
+                | IntrinsicCall::MapInsert
+                | IntrinsicCall::MapContainsKey
+                | IntrinsicCall::MapGet
+                | IntrinsicCall::MapRemove
+                | IntrinsicCall::MapClear => {
                     panic!("backend call expr cannot lower set intrinsic without a receiver");
                 }
             },
-            sem::CallTarget::Runtime(runtime) => Callee::Runtime(self.runtime_for_call(runtime)?),
+            CallTarget::Runtime(runtime) => Callee::Runtime(self.runtime_for_call(runtime)?),
         };
 
         // Lower argument expressions.
@@ -422,7 +431,7 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
         // Apply the call plan to reorder/transform arguments.
         let call_args =
             self.lower_call_args_from_plan(expr.id, expr.span, &call_plan, None, &mut arg_values)?;
-        let ty = self.type_lowerer.lower_type_id(expr.ty);
+        let ty = self.type_lowerer.lower_type_id(expr_ty);
         let result = self.builder.call(callee, call_args, ty);
         self.apply_call_drop_effects(&call_plan, args, None, &arg_values)?;
         Ok(Some(result))
@@ -431,10 +440,11 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
     /// Lowers a method call expression, returning `None` if a subexpression returns.
     pub(super) fn lower_method_call_expr(
         &mut self,
-        expr: &sem::ValueExpr,
-        receiver: &sem::MethodReceiver,
-        args: &[sem::CallArg],
+        expr: &Expr,
+        callee_expr: &Expr,
+        args: &[CallArg],
     ) -> Result<Option<LinearValue>, LowerToIrError> {
+        let expr_ty = self.type_map.type_of(expr.id);
         let call_plan = self.call_plan(expr.id);
 
         // Method calls must have a receiver.
@@ -445,43 +455,44 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
             );
         }
 
-        // Lower the receiver.
-        let mut receiver_value = match receiver {
-            sem::MethodReceiver::ValueExpr(expr) => {
-                let Some(input) = self.call_input_from_value_expr(expr)? else {
-                    return Ok(None);
-                };
-                input
-            }
-            sem::MethodReceiver::PlaceExpr(place) => self.call_input_from_place_expr(place)?,
+        // Lower the receiver. Determine if it is a place (InOut/Out self) or value
+        // from the first input mode in the call plan.
+        let receiver_is_place = !call_plan.input_modes.is_empty()
+            && matches!(call_plan.input_modes[0], ParamMode::InOut | ParamMode::Out);
+        let mut receiver_value = if receiver_is_place {
+            self.call_input_from_place_expr(callee_expr)?
+        } else {
+            let Some(input) = self.call_input_from_value_expr(callee_expr)? else {
+                return Ok(None);
+            };
+            input
         };
 
         // Resolve the callee.
         let callee = match &call_plan.target {
-            sem::CallTarget::Direct(def_id) => Callee::Direct(*def_id),
-            sem::CallTarget::Indirect => {
+            CallTarget::Direct(def_id) => Callee::Direct(*def_id),
+            CallTarget::Indirect => {
                 // For indirect method calls, treat the receiver as the callee value.
                 // The call plan still governs how the receiver/args are passed.
-                let callee_value = match receiver {
-                    sem::MethodReceiver::ValueExpr(_) => receiver_value.value,
-                    sem::MethodReceiver::PlaceExpr(_) => {
-                        let ty = self.type_lowerer.lower_type(&receiver_value.ty);
-                        self.builder.load(receiver_value.value, ty)
-                    }
+                let callee_value = if receiver_is_place {
+                    let ty = self.type_lowerer.lower_type(&receiver_value.ty);
+                    self.builder.load(receiver_value.value, ty)
+                } else {
+                    receiver_value.value
                 };
                 Callee::Value(callee_value)
             }
-            sem::CallTarget::Intrinsic(intrinsic) => {
+            CallTarget::Intrinsic(intrinsic) => {
                 return self.lower_method_intrinsic(
                     expr,
-                    receiver,
+                    receiver_is_place,
                     args,
                     &call_plan,
                     &mut receiver_value,
                     intrinsic,
                 );
             }
-            sem::CallTarget::Runtime(runtime) => Callee::Runtime(self.runtime_for_call(runtime)?),
+            CallTarget::Runtime(runtime) => Callee::Runtime(self.runtime_for_call(runtime)?),
         };
 
         // Lower argument expressions.
@@ -506,7 +517,7 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
             Some(&mut receiver_value),
             &mut arg_values,
         )?;
-        let ty = self.type_lowerer.lower_type_id(expr.ty);
+        let ty = self.type_lowerer.lower_type_id(expr_ty);
         let result = self.builder.call(callee, call_args, ty);
         self.apply_call_drop_effects(&call_plan, args, Some(&receiver_value), &arg_values)?;
         Ok(Some(result))
@@ -514,26 +525,27 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
 
     fn lower_method_intrinsic(
         &mut self,
-        expr: &sem::ValueExpr,
-        receiver: &sem::MethodReceiver,
-        args: &[sem::CallArg],
-        call_plan: &sem::CallPlan,
+        expr: &Expr,
+        receiver_is_place: bool,
+        args: &[CallArg],
+        call_plan: &CallPlan,
         receiver_value: &mut CallInputValue,
-        intrinsic: &sem::IntrinsicCall,
+        intrinsic: &IntrinsicCall,
     ) -> Result<Option<LinearValue>, LowerToIrError> {
+        let expr_ty = self.type_map.type_of(expr.id);
         match intrinsic {
-            sem::IntrinsicCall::MachinePayloadPack => {
+            IntrinsicCall::MachinePayloadPack => {
                 panic!("backend method intrinsic cannot lower payload-pack with receiver")
             }
-            sem::IntrinsicCall::StringLen => {
+            IntrinsicCall::StringLen => {
                 // String length is a field load; avoid emitting a runtime call.
-                self.lower_string_len_method(expr.span, receiver, receiver_value)
+                self.lower_string_len_method(expr.span, receiver_is_place, receiver_value)
                     .map(Some)
             }
-            sem::IntrinsicCall::TypeOf => {
+            IntrinsicCall::TypeOf => {
                 panic!("backend type_of intrinsic cannot lower with a method receiver");
             }
-            sem::IntrinsicCall::DynArrayAppend => {
+            IntrinsicCall::DynArrayAppend => {
                 let Some(mut arg_values) = self.lower_call_arg_values(args)? else {
                     return Ok(None);
                 };
@@ -552,7 +564,7 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
                 let elem_addr = self.ensure_call_input_addr(&mut arg_values[0]);
                 let size_val = self.runtime_size_const(&elem_ty);
                 let align_val = self.runtime_align_const(&elem_ty);
-                let ret_ty = self.type_lowerer.lower_type_id(expr.ty);
+                let ret_ty = self.type_lowerer.lower_type_id(expr_ty);
                 let result = self.builder.call(
                     Callee::Runtime(RuntimeFn::DynArrayAppendElem),
                     vec![dyn_addr, elem_addr, size_val, align_val],
@@ -562,7 +574,7 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
                 self.apply_call_drop_effects(call_plan, args, Some(receiver_value), &arg_values)?;
                 Ok(Some(result))
             }
-            sem::IntrinsicCall::SetInsert => {
+            IntrinsicCall::SetInsert => {
                 let Some(mut arg_values) = self.lower_call_arg_values(args)? else {
                     return Ok(None);
                 };
@@ -579,7 +591,7 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
                 let elem_addr = self.ensure_call_input_addr(&mut arg_values[0]);
                 let size_val = self.runtime_size_const(&elem_ty);
                 let align_val = self.runtime_align_const(&elem_ty);
-                let ret_ty = self.type_lowerer.lower_type_id(expr.ty);
+                let ret_ty = self.type_lowerer.lower_type_id(expr_ty);
                 let result = self.builder.call(
                     Callee::Runtime(RuntimeFn::SetInsertElem),
                     vec![set_addr, elem_addr, size_val, align_val],
@@ -588,7 +600,7 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
                 self.apply_call_drop_effects(call_plan, args, Some(receiver_value), &arg_values)?;
                 Ok(Some(result))
             }
-            sem::IntrinsicCall::SetContains | sem::IntrinsicCall::SetRemove => {
+            IntrinsicCall::SetContains | IntrinsicCall::SetRemove => {
                 let Some(mut arg_values) = self.lower_call_arg_values(args)? else {
                     return Ok(None);
                 };
@@ -604,10 +616,10 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
                 };
                 let elem_addr = self.ensure_call_input_addr(&mut arg_values[0]);
                 let size_val = self.runtime_size_const(&elem_ty);
-                let ret_ty = self.type_lowerer.lower_type_id(expr.ty);
+                let ret_ty = self.type_lowerer.lower_type_id(expr_ty);
                 let runtime = match intrinsic {
-                    sem::IntrinsicCall::SetContains => RuntimeFn::SetContainsElem,
-                    sem::IntrinsicCall::SetRemove => RuntimeFn::SetRemoveElem,
+                    IntrinsicCall::SetContains => RuntimeFn::SetContainsElem,
+                    IntrinsicCall::SetRemove => RuntimeFn::SetRemoveElem,
                     _ => unreachable!(),
                 };
                 let result = self.builder.call(
@@ -618,7 +630,7 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
                 self.apply_call_drop_effects(call_plan, args, Some(receiver_value), &arg_values)?;
                 Ok(Some(result))
             }
-            sem::IntrinsicCall::SetClear => {
+            IntrinsicCall::SetClear => {
                 let Some(arg_values) = self.lower_call_arg_values(args)? else {
                     return Ok(None);
                 };
@@ -629,14 +641,14 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
                     );
                 }
                 let (set_addr, _set_ty) = self.resolve_set_receiver(receiver_value);
-                let ret_ty = self.type_lowerer.lower_type_id(expr.ty);
+                let ret_ty = self.type_lowerer.lower_type_id(expr_ty);
                 let result =
                     self.builder
                         .call(Callee::Runtime(RuntimeFn::SetClear), vec![set_addr], ret_ty);
                 self.apply_call_drop_effects(call_plan, args, Some(receiver_value), &arg_values)?;
                 Ok(Some(result))
             }
-            sem::IntrinsicCall::MapInsert => {
+            IntrinsicCall::MapInsert => {
                 let Some(mut arg_values) = self.lower_call_arg_values(args)? else {
                     return Ok(None);
                 };
@@ -655,7 +667,7 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
                 let value_addr = self.ensure_call_input_addr(&mut arg_values[1]);
                 let key_size = self.runtime_size_const(&key_ty);
                 let value_size = self.runtime_size_const(&value_ty);
-                let ret_ty = self.type_lowerer.lower_type_id(expr.ty);
+                let ret_ty = self.type_lowerer.lower_type_id(expr_ty);
                 let result = self.builder.call(
                     Callee::Runtime(RuntimeFn::MapInsertOrAssign),
                     vec![map_addr, key_addr, value_addr, key_size, value_size],
@@ -664,7 +676,7 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
                 self.apply_call_drop_effects(call_plan, args, Some(receiver_value), &arg_values)?;
                 Ok(Some(result))
             }
-            sem::IntrinsicCall::MapContainsKey | sem::IntrinsicCall::MapRemove => {
+            IntrinsicCall::MapContainsKey | IntrinsicCall::MapRemove => {
                 let Some(mut arg_values) = self.lower_call_arg_values(args)? else {
                     return Ok(None);
                 };
@@ -682,11 +694,11 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
                 let key_size = self.runtime_size_const(&key_ty);
                 let value_size = self.runtime_size_const(&value_ty);
                 let runtime = match intrinsic {
-                    sem::IntrinsicCall::MapContainsKey => RuntimeFn::MapContainsKey,
-                    sem::IntrinsicCall::MapRemove => RuntimeFn::MapRemoveKey,
+                    IntrinsicCall::MapContainsKey => RuntimeFn::MapContainsKey,
+                    IntrinsicCall::MapRemove => RuntimeFn::MapRemoveKey,
                     _ => unreachable!(),
                 };
-                let ret_ty = self.type_lowerer.lower_type_id(expr.ty);
+                let ret_ty = self.type_lowerer.lower_type_id(expr_ty);
                 let result = self.builder.call(
                     Callee::Runtime(runtime),
                     vec![map_addr, key_addr, key_size, value_size],
@@ -695,7 +707,7 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
                 self.apply_call_drop_effects(call_plan, args, Some(receiver_value), &arg_values)?;
                 Ok(Some(result))
             }
-            sem::IntrinsicCall::MapGet => {
+            IntrinsicCall::MapGet => {
                 let Some(mut arg_values) = self.lower_call_arg_values(args)? else {
                     return Ok(None);
                 };
@@ -724,10 +736,10 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
                     bool_ty,
                 );
 
-                let union_ir_ty = self.type_lowerer.lower_type_id(expr.ty);
+                let union_ir_ty = self.type_lowerer.lower_type_id(expr_ty);
                 let union_slot = self.alloc_value_slot(union_ir_ty);
                 let (tag_ty, blob_ty, payload_offset, payload_ty) = {
-                    let layout = self.type_lowerer.enum_layout(expr.ty);
+                    let layout = self.type_lowerer.enum_layout(expr_ty);
                     let ok_variant = layout
                         .variants
                         .first()
@@ -758,7 +770,7 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
                 self.apply_call_drop_effects(call_plan, args, Some(receiver_value), &arg_values)?;
                 Ok(Some(result))
             }
-            sem::IntrinsicCall::MapClear => {
+            IntrinsicCall::MapClear => {
                 let Some(arg_values) = self.lower_call_arg_values(args)? else {
                     return Ok(None);
                 };
@@ -769,7 +781,7 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
                     );
                 }
                 let (map_addr, _map_ty) = self.resolve_map_receiver(receiver_value);
-                let ret_ty = self.type_lowerer.lower_type_id(expr.ty);
+                let ret_ty = self.type_lowerer.lower_type_id(expr_ty);
                 let result =
                     self.builder
                         .call(Callee::Runtime(RuntimeFn::MapClear), vec![map_addr], ret_ty);
@@ -844,7 +856,7 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
         &mut self,
         expr_id: NodeId,
         span: Span,
-        call_plan: &sem::CallPlan,
+        call_plan: &CallPlan,
         mut receiver_value: Option<&mut CallInputValue>,
         arg_values: &mut [CallInputValue],
     ) -> Result<Vec<ValueId>, LowerToIrError> {
@@ -858,18 +870,14 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
         let mut call_args = Vec::with_capacity(call_plan.args.len());
         for lowering in &call_plan.args {
             match lowering {
-                sem::ArgLowering::Direct(input) => {
+                ArgLowering::Direct(input) => {
                     let input_value = match input {
-                        sem::CallInput::Receiver => {
-                            receiver_value.as_deref_mut().unwrap_or_else(|| {
-                                panic!("backend call plan missing receiver value for {:?}", expr_id)
-                            })
-                        }
-                        sem::CallInput::Arg(index) => {
-                            arg_values.get_mut(*index).unwrap_or_else(|| {
-                                panic!("backend call arg index out of range: {index}")
-                            })
-                        }
+                        CallInput::Receiver => receiver_value.as_deref_mut().unwrap_or_else(|| {
+                            panic!("backend call plan missing receiver value for {:?}", expr_id)
+                        }),
+                        CallInput::Arg(index) => arg_values.get_mut(*index).unwrap_or_else(|| {
+                            panic!("backend call arg index out of range: {index}")
+                        }),
                     };
 
                     if input_value.is_addr || input_value.ty.is_scalar() {
@@ -881,14 +889,12 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
                         call_args.push(addr);
                     }
                 }
-                sem::ArgLowering::PtrLen { input, len_bits } => {
+                ArgLowering::PtrLen { input, len_bits } => {
                     let input_value = match input {
-                        sem::CallInput::Receiver => {
-                            receiver_value.as_deref().unwrap_or_else(|| {
-                                panic!("backend call plan missing receiver value for {:?}", expr_id)
-                            })
-                        }
-                        sem::CallInput::Arg(index) => arg_values.get(*index).unwrap_or_else(|| {
+                        CallInput::Receiver => receiver_value.as_deref().unwrap_or_else(|| {
+                            panic!("backend call plan missing receiver value for {:?}", expr_id)
+                        }),
+                        CallInput::Arg(index) => arg_values.get(*index).unwrap_or_else(|| {
                             panic!("backend call arg index out of range: {index}")
                         }),
                     };
@@ -906,20 +912,20 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
         Ok(call_args)
     }
 
-    fn runtime_for_call(&self, runtime: &sem::RuntimeCall) -> Result<RuntimeFn, LowerToIrError> {
+    fn runtime_for_call(&self, runtime: &RuntimeCall) -> Result<RuntimeFn, LowerToIrError> {
         match runtime {
-            sem::RuntimeCall::Print => Ok(RuntimeFn::Print),
-            sem::RuntimeCall::U64ToDec => Ok(RuntimeFn::U64ToDec),
-            sem::RuntimeCall::MemSet => Ok(RuntimeFn::MemSet),
-            sem::RuntimeCall::StringFromBytes => Ok(RuntimeFn::StringFromBytes),
-            sem::RuntimeCall::StringAppendBytes => Ok(RuntimeFn::StringAppendBytes),
+            RuntimeCall::Print => Ok(RuntimeFn::Print),
+            RuntimeCall::U64ToDec => Ok(RuntimeFn::U64ToDec),
+            RuntimeCall::MemSet => Ok(RuntimeFn::MemSet),
+            RuntimeCall::StringFromBytes => Ok(RuntimeFn::StringFromBytes),
+            RuntimeCall::StringAppendBytes => Ok(RuntimeFn::StringAppendBytes),
         }
     }
 
     fn lower_string_len_method(
         &mut self,
         span: Span,
-        receiver: &sem::MethodReceiver,
+        receiver_is_place: bool,
         receiver_value: &CallInputValue,
     ) -> Result<ValueId, LowerToIrError> {
         if !matches!(receiver_value.ty, Type::String) {
@@ -929,20 +935,13 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
             );
         }
 
-        let len = match receiver {
-            sem::MethodReceiver::ValueExpr(_) => {
-                let (_ptr, len) = self.lower_ptr_len_from_value(
-                    span,
-                    receiver_value.value,
-                    &receiver_value.ty,
-                    32,
-                )?;
-                len
-            }
-            sem::MethodReceiver::PlaceExpr(_) => {
-                let view = self.load_string_view(receiver_value.value);
-                view.len
-            }
+        let len = if receiver_is_place {
+            let view = self.load_string_view(receiver_value.value);
+            view.len
+        } else {
+            let (_ptr, len) =
+                self.lower_ptr_len_from_value(span, receiver_value.value, &receiver_value.ty, 32)?;
+            len
         };
 
         Ok(len)

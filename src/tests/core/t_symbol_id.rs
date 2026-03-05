@@ -1,14 +1,15 @@
 use crate::core::api::{ParseModuleOptions, parse_module_with_id_gen_and_options};
+use crate::core::ast::NodeIdGen;
+use crate::core::ast::TopLevelItem;
 use crate::core::capsule::ModulePath;
 use crate::core::context::ParsedContext;
 use crate::core::resolve::resolve;
-use crate::core::tree::TopLevelItem;
 
 use crate::core::context::ResolvedContext;
 use crate::core::symbol_id::{SymbolNs, SymbolPath};
 
 fn resolved_with_module_path(source: &str, module_path: &str) -> ResolvedContext {
-    let id_gen = crate::core::tree::NodeIdGen::new();
+    let id_gen = NodeIdGen::new();
     let (module, id_gen) = parse_module_with_id_gen_and_options(
         source,
         id_gen,
@@ -52,7 +53,7 @@ fn run() {}
     };
     let method_id = match &resolved.module.top_level_items[2] {
         TopLevelItem::MethodBlock(block) => match &block.method_items[0] {
-            crate::core::tree::MethodItem::Def(def) => {
+            crate::core::ast::MethodItem::Def(def) => {
                 resolved.def_table.lookup_node_def_id(def.id).unwrap()
             }
             _ => unreachable!(),

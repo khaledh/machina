@@ -204,7 +204,7 @@ fn infer_capsule_root_uses_git_workspace_without_cargo() {
         run_id
     ));
     let src_dir = temp_root.join("app").join("src");
-    fs::create_dir_all(&src_dir).expect("failed to create temp source tree");
+    fs::create_dir_all(&src_dir).expect("failed to create temp source ast");
     fs::create_dir_all(temp_root.join(".git")).expect("failed to create fake git dir");
     let entry = src_dir.join("main.mc");
     fs::write(&entry, "fn main() -> u64 { 0 }").expect("failed to write entry file");
@@ -224,7 +224,7 @@ fn infer_capsule_root_prefers_machina_toml_anchor() {
         run_id
     ));
     let nested = temp_root.join("workspace").join("pkg").join("src");
-    fs::create_dir_all(&nested).expect("failed to create temp source tree");
+    fs::create_dir_all(&nested).expect("failed to create temp source ast");
     fs::write(temp_root.join("workspace").join("machina.toml"), "")
         .expect("failed to create capsule root config");
     let entry = nested.join("main.mc");

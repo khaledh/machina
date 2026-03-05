@@ -2,13 +2,13 @@ use crate::core::api::{
     FrontendPolicy, ParseModuleOptions, ResolveInputs, parse_module_with_id_gen_and_options,
     resolve_stage_with_policy, typecheck_stage_with_policy,
 };
+use crate::core::ast::NodeIdGen;
 use crate::core::context::{ParsedContext, SemanticContext};
 use crate::core::elaborate::elaborate;
 use crate::core::lexer::{LexError, Lexer, Token};
 use crate::core::parse::Parser;
 use crate::core::resolve::resolve;
 use crate::core::semck::sem_check;
-use crate::core::tree::NodeIdGen;
 use crate::core::typecheck::type_check;
 
 pub(super) fn analyze(source: &str) -> SemanticContext {

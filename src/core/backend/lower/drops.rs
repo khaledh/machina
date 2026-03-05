@@ -1,13 +1,12 @@
 //! Drop-plan helpers for SSA lowering.
 
+use crate::core::ast::{CallArg, CallArgMode, Expr, ExprKind, InitInfo, NodeId, ParamMode};
 use crate::core::backend::lower::LowerToIrError;
 use crate::core::backend::lower::locals::LocalStorage;
 use crate::core::backend::lower::lowerer::{CallInputValue, FuncLowerer};
 use crate::core::ir::{Callee, ConstValue, RuntimeFn, SwitchCase, Terminator, ValueId};
+use crate::core::plans::{CallPlan, DropGuard, DropItem, DropPlanMap};
 use crate::core::resolve::DefId;
-use crate::core::tree::NodeId;
-use crate::core::tree::semantic as sem;
-use crate::core::tree::{InitInfo, ParamMode};
 use crate::core::types::Type;
 use crate::core::types::{EnumVariant, StructField, TypeId};
 use std::collections::HashMap;
@@ -22,7 +21,7 @@ enum OutProj<'a> {
 /// This struct only manages bookkeeping (scope stack + liveness flags). The
 /// caller is responsible for turning popped scopes into IR-level drop calls.
 pub(super) struct DropManager<'a> {
-    plans: Option<&'a sem::DropPlanMap>,
+    plans: Option<&'a DropPlanMap>,
     scopes: Vec<NodeId>,
     flags: HashMap<DefId, ValueId>,
     known_live: HashMap<DefId, bool>,
@@ -44,11 +43,11 @@ impl<'a> DropManager<'a> {
         }
     }
 
-    pub(super) fn set_plans(&mut self, plans: &'a sem::DropPlanMap) {
+    pub(super) fn set_plans(&mut self, plans: &'a DropPlanMap) {
         self.plans = Some(plans);
     }
 
-    pub(super) fn plans(&self) -> Option<&'a sem::DropPlanMap> {
+    pub(super) fn plans(&self) -> Option<&'a DropPlanMap> {
         self.plans
     }
 
@@ -216,11 +215,7 @@ fn has_nontrivial_drop(ty: &Type) -> bool {
 
 impl<'a, 'g> FuncLowerer<'a, 'g> {
     /// Initialize drop tracking for a function/method body root scope.
-    pub(super) fn init_root_drop_scope(
-        &mut self,
-        drop_plans: &'a sem::DropPlanMap,
-        root_scope: NodeId,
-    ) {
+    pub(super) fn init_root_drop_scope(&mut self, drop_plans: &'a DropPlanMap, root_scope: NodeId) {
         self.set_drop_plans(drop_plans);
         self.enter_drop_scope(root_scope);
     }
@@ -236,7 +231,7 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
         result
     }
 
-    pub(super) fn set_drop_plans(&mut self, drop_plans: &'a sem::DropPlanMap) {
+    pub(super) fn set_drop_plans(&mut self, drop_plans: &'a DropPlanMap) {
         self.drop_manager.set_plans(drop_plans);
     }
 
@@ -300,8 +295,8 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
     /// - mark out/inout destinations as initialized when applicable
     pub(super) fn apply_call_drop_effects(
         &mut self,
-        call_plan: &sem::CallPlan,
-        args: &[sem::CallArg],
+        call_plan: &CallPlan,
+        args: &[CallArg],
         receiver_value: Option<&CallInputValue>,
         arg_values: &[CallInputValue],
     ) -> Result<(), LowerToIrError> {
@@ -365,7 +360,7 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
 
     fn emit_call_input_drops(
         &mut self,
-        call_plan: &sem::CallPlan,
+        call_plan: &CallPlan,
         receiver_value: Option<&CallInputValue>,
         arg_values: &[CallInputValue],
     ) -> Result<(), LowerToIrError> {
@@ -401,7 +396,7 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
 
     fn clear_sink_input_drop_flags(
         &mut self,
-        call_plan: &sem::CallPlan,
+        call_plan: &CallPlan,
         receiver_value: Option<&CallInputValue>,
         arg_values: &[CallInputValue],
     ) {
@@ -442,22 +437,23 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
         }
     }
 
-    fn mark_call_out_init_flags(&mut self, args: &[sem::CallArg], arg_values: &[CallInputValue]) {
+    fn mark_call_out_init_flags(&mut self, args: &[CallArg], arg_values: &[CallInputValue]) {
         for (arg, input) in args.iter().zip(arg_values.iter()) {
-            match arg {
-                sem::CallArg::Out { place, init, .. } => {
+            match arg.mode {
+                CallArgMode::Out => {
                     let Some(def_id) = input.drop_def else {
                         continue;
                     };
-                    let should_set = match place.kind {
-                        sem::PlaceExprKind::Var { .. } => init.is_init || init.promotes_full,
-                        _ => init.promotes_full || self.out_place_promotes_full(place, init),
+                    let init = &arg.init;
+                    let should_set = match arg.expr.kind {
+                        ExprKind::Var { .. } => init.is_init || init.promotes_full,
+                        _ => init.promotes_full || self.out_place_promotes_full(&arg.expr, init),
                     };
                     if should_set {
                         self.set_drop_flag_for_def(def_id, true);
                     }
                 }
-                sem::CallArg::InOut { .. } => {
+                CallArgMode::InOut => {
                     if let Some(def_id) = input.drop_def {
                         self.set_drop_flag_for_def(def_id, true);
                     }
@@ -467,20 +463,21 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
         }
     }
 
-    fn out_place_promotes_full(&self, place: &sem::PlaceExpr, init: &InitInfo) -> bool {
+    fn out_place_promotes_full(&self, place: &Expr, init: &InitInfo) -> bool {
         if init.promotes_full || !init.is_init {
             return false;
         }
 
         let (base_def, proj) = match &place.kind {
-            sem::PlaceExprKind::StructField { target, field } => match &target.kind {
-                sem::PlaceExprKind::Var { def_id, .. } => {
-                    (*def_id, OutProj::Struct(field.as_str()))
-                }
+            ExprKind::StructField { target, field } => match &target.kind {
+                ExprKind::Var { .. } => (
+                    self.def_table.def_id(target.id),
+                    OutProj::Struct(field.as_str()),
+                ),
                 _ => return false,
             },
-            sem::PlaceExprKind::TupleField { target, index } => match &target.kind {
-                sem::PlaceExprKind::Var { def_id, .. } => (*def_id, OutProj::Tuple(*index)),
+            ExprKind::TupleField { target, index } => match &target.kind {
+                ExprKind::Var { .. } => (self.def_table.def_id(target.id), OutProj::Tuple(*index)),
                 _ => return false,
             },
             _ => return false,
@@ -514,7 +511,7 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
         Ok(())
     }
 
-    fn emit_drop_item(&mut self, item: &sem::DropItem) -> Result<(), LowerToIrError> {
+    fn emit_drop_item(&mut self, item: &DropItem) -> Result<(), LowerToIrError> {
         if self.drop_manager.known_live(item.def_id) == Some(false) {
             return Ok(());
         }
@@ -526,7 +523,7 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
         }
 
         match item.guard {
-            sem::DropGuard::Always => {
+            DropGuard::Always => {
                 if let Some(flag_addr) = self.drop_manager.flag(item.def_id) {
                     self.emit_drop_if_flag(flag_addr, |lowerer| {
                         lowerer.emit_drop_for_def(item.def_id, item.ty)
@@ -536,7 +533,7 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
                 }
                 Ok(())
             }
-            sem::DropGuard::IfInitialized => {
+            DropGuard::IfInitialized => {
                 let flag_addr = match self.drop_manager.flag(item.def_id) {
                     Some(addr) => addr,
                     None => {
@@ -667,7 +664,7 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
             Type::ErrorUnion { ok_ty, err_tys } => {
                 let variants = std::iter::once(EnumVariant {
                     name: "Ok".to_string(),
-                    payload: vec![(*ok_ty.clone())],
+                    payload: vec![*ok_ty.clone()],
                 })
                 .chain(
                     err_tys

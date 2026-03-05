@@ -1,10 +1,9 @@
 use std::collections::HashSet;
 
+use crate::core::ast::{Expr, MatchArm, MatchPattern};
 use crate::core::context::NormalizedContext;
 use crate::core::diag::Span;
 use crate::core::semck::{SEK, SemCheckError, push_error};
-use crate::core::tree::MatchPattern;
-use crate::core::tree::{Expr, MatchArm};
 use crate::core::typecheck::type_map::resolve_type_expr;
 use crate::core::types::{EnumVariant, Type};
 

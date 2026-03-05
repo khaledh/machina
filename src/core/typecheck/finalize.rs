@@ -2,16 +2,16 @@
 //!
 //! This pass materializes concrete `TypeMap`/`CallSigMap`/`GenericInstMap`
 //! outputs from solver results and collected obligations, then builds the
-//! typed tree context used by downstream compiler stages.
+//! typed AST context used by downstream compiler stages.
 
 use std::collections::{HashMap, HashSet};
 
+use crate::core::ast::NodeId;
+use crate::core::ast::visit::Visitor;
+use crate::core::ast::*;
 use crate::core::context::TypeCheckedContext;
 use crate::core::resolve::DefId;
 use crate::core::symbol_id::SelectedCallable;
-use crate::core::tree::NodeId;
-use crate::core::tree::visit::Visitor;
-use crate::core::tree::*;
 use crate::core::typecheck::InferUnifier;
 use crate::core::typecheck::builtin_methods;
 use crate::core::typecheck::constraints::{CallCallee, ExprObligation};
@@ -211,7 +211,7 @@ fn build_outputs(engine: &TypecheckEngine) -> FinalizeOutput {
             let params = arg_types
                 .into_iter()
                 .map(|ty| CallParam {
-                    mode: crate::core::tree::ParamMode::In,
+                    mode: ParamMode::In,
                     ty,
                 })
                 .collect::<Vec<_>>();
@@ -307,7 +307,7 @@ fn record_property_access_call_sigs(engine: &TypecheckEngine, builder: &mut Type
                         def_id: prop.getter_def,
                         selected: None,
                         receiver: Some(CallParam {
-                            mode: crate::core::tree::ParamMode::In,
+                            mode: ParamMode::In,
                             ty: target_ty,
                         }),
                         params: Vec::new(),
@@ -341,11 +341,11 @@ fn record_property_access_call_sigs(engine: &TypecheckEngine, builder: &mut Type
                         def_id: prop.setter_def,
                         selected: None,
                         receiver: Some(CallParam {
-                            mode: crate::core::tree::ParamMode::InOut,
+                            mode: ParamMode::InOut,
                             ty: target_ty,
                         }),
                         params: vec![CallParam {
-                            mode: crate::core::tree::ParamMode::In,
+                            mode: ParamMode::In,
                             ty: resolve_term(value, engine),
                         }],
                     },
@@ -568,10 +568,7 @@ fn resolve_method_call(
     let overloads = by_name.get(method_name)?;
     let sig = pick_overload(overloads, arg_types.len())?;
     let receiver = Some(CallParam {
-        mode: sig
-            .self_mode
-            .clone()
-            .unwrap_or(crate::core::tree::ParamMode::In),
+        mode: sig.self_mode.clone().unwrap_or(ParamMode::In),
         ty: receiver_ty,
     });
     Some(instantiate_call_sig(
@@ -628,10 +625,7 @@ fn resolve_method_call_by_def_id(
     let overloads = by_name.get(method_name)?;
     let sig = pick_def_id_overload(overloads, def_id, arg_types, expected_ret)?;
     let receiver = Some(CallParam {
-        mode: sig
-            .self_mode
-            .clone()
-            .unwrap_or(crate::core::tree::ParamMode::In),
+        mode: sig.self_mode.clone().unwrap_or(ParamMode::In),
         ty: receiver_ty,
     });
     Some(instantiate_call_sig(

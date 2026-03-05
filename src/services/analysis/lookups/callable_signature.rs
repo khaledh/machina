@@ -5,8 +5,8 @@
 //! - source param names/modes/types
 //! - typestate-name demangling
 
+use crate::core::ast::{CallableRef, Module, Param, ParamMode, TypeExpr, TypeExprKind, TypeParam};
 use crate::core::resolve::{DefId, DefKind, DefTable};
-use crate::core::tree::{CallableRef, Module, Param, ParamMode, TypeExpr, TypeExprKind, TypeParam};
 use crate::core::typecheck::type_map::TypeMap;
 use crate::core::types::{Type, TypeRenderConfig, render_type};
 

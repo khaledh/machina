@@ -1,11 +1,11 @@
 use std::collections::{HashMap, HashSet};
 
+use crate::core::ast::cfg::{Cfg, CfgItem, CfgTerminator};
+use crate::core::ast::visit::{Visitor, walk_expr};
+use crate::core::ast::{BindPattern, BindPatternKind, Expr, ExprKind, StmtExpr, StmtExprKind};
 use crate::core::context::NormalizedContext;
 use crate::core::resolve::DefId;
 use crate::core::semck::liveness_util;
-use crate::core::tree::cfg::{Cfg, CfgItem, CfgTerminator};
-use crate::core::tree::visit::{Visitor, walk_expr};
-use crate::core::tree::{BindPattern, BindPatternKind, Expr, ExprKind, StmtExpr, StmtExprKind};
 
 // ============================================================================
 // Public API

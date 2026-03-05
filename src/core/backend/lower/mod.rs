@@ -1,4 +1,4 @@
-//! SSA lowering from the semantic tree into the SSA IR.
+//! SSA lowering from the elaborated AST into the SSA IR.
 //!
 //! This module currently supports a subset of the language while the SSA
 //! pipeline is built out incrementally.
@@ -27,13 +27,14 @@ mod slots;
 mod types;
 mod util;
 
+use crate::core::ast::{FuncDef, MethodBlock, MethodDef, MethodItem, Module};
 use crate::core::backend::lower::drop_glue::DropGlueRegistry;
 use crate::core::backend::lower::globals::GlobalArena;
 use crate::core::backend::lower::lowerer::BranchResult;
 use crate::core::ir::IrTypeCache;
 use crate::core::ir::{Function, GlobalData};
+use crate::core::plans::{DropPlanMap, LoweringPlanMap, MachinePlanMap};
 use crate::core::resolve::DefTable;
-use crate::core::tree::semantic as sem;
 use crate::core::typecheck::type_map::TypeMap;
 use crate::core::types::Type;
 use lowerer::FuncLowerer;
@@ -52,7 +53,7 @@ pub struct LoweredModule {
 /// Options for module SSA lowering beyond the core semantic inputs.
 #[derive(Clone, Default)]
 pub struct LowerOpts<'a> {
-    pub machine_plans: Option<&'a sem::MachinePlanMap>,
+    pub machine_plans: Option<&'a MachinePlanMap>,
     pub trace_alloc: bool,
     pub trace_drops: bool,
     pub executable: bool,
@@ -69,15 +70,15 @@ pub use error::LowerToIrError;
 /// 4. Lowers the function body using branching expression lowering
 /// 5. Terminates with a return instruction if the body produces a value
 pub fn lower_func(
-    func: &sem::FuncDef,
+    func: &FuncDef,
     def_table: &DefTable,
     type_map: &TypeMap,
-    lowering_plans: &sem::LoweringPlanMap,
-    drop_plans: &sem::DropPlanMap,
+    lowering_plans: &LoweringPlanMap,
+    drop_plans: &DropPlanMap,
 ) -> Result<LoweredFunction, LowerToIrError> {
     let mut globals = GlobalArena::new();
     let mut drop_glue = DropGlueRegistry::new(def_table);
-    let empty_machine_plans = sem::MachinePlanMap::default();
+    let empty_machine_plans = MachinePlanMap::default();
     lower_func_with_globals(
         func,
         def_table,
@@ -95,11 +96,11 @@ pub fn lower_func(
 
 /// Lowers a semantic module with default options.
 pub fn lower_module(
-    module: &sem::Module,
+    module: &Module,
     def_table: &DefTable,
     type_map: &TypeMap,
-    lowering_plans: &sem::LoweringPlanMap,
-    drop_plans: &sem::DropPlanMap,
+    lowering_plans: &LoweringPlanMap,
+    drop_plans: &DropPlanMap,
 ) -> Result<LoweredModule, LowerToIrError> {
     lower_module_with_opts(
         module,
@@ -113,14 +114,14 @@ pub fn lower_module(
 
 /// Lowers a semantic module with configurable options.
 pub fn lower_module_with_opts(
-    module: &sem::Module,
+    module: &Module,
     def_table: &DefTable,
     type_map: &TypeMap,
-    lowering_plans: &sem::LoweringPlanMap,
-    drop_plans: &sem::DropPlanMap,
+    lowering_plans: &LoweringPlanMap,
+    drop_plans: &DropPlanMap,
     opts: &LowerOpts<'_>,
 ) -> Result<LoweredModule, LowerToIrError> {
-    let default_machine_plans = sem::MachinePlanMap::default();
+    let default_machine_plans = MachinePlanMap::default();
     let machine_plans = opts.machine_plans.unwrap_or(&default_machine_plans);
     lower_module_impl(
         module,
@@ -137,12 +138,12 @@ pub fn lower_module_with_opts(
 
 #[allow(clippy::too_many_arguments)]
 fn lower_module_impl(
-    module: &sem::Module,
+    module: &Module,
     def_table: &DefTable,
     type_map: &TypeMap,
-    lowering_plans: &sem::LoweringPlanMap,
-    drop_plans: &sem::DropPlanMap,
-    machine_plans: &sem::MachinePlanMap,
+    lowering_plans: &LoweringPlanMap,
+    drop_plans: &DropPlanMap,
+    machine_plans: &MachinePlanMap,
     trace_alloc: bool,
     trace_drops: bool,
     inject_entry_wrapper: bool,
@@ -175,7 +176,7 @@ fn lower_module_impl(
 
     for method_block in module.method_blocks() {
         for method_item in &method_block.method_items {
-            let sem::MethodItem::Def(method_def) = method_item else {
+            let MethodItem::Def(method_def) = method_item else {
                 continue;
             };
             let lowered = lower_method_def_with_globals(
@@ -229,13 +230,13 @@ fn lower_module_impl(
 
 #[allow(clippy::too_many_arguments)]
 fn lower_func_with_globals(
-    func: &sem::FuncDef,
+    func: &FuncDef,
     def_table: &DefTable,
-    module: Option<&sem::Module>,
+    module: Option<&Module>,
     type_map: &TypeMap,
-    lowering_plans: &sem::LoweringPlanMap,
-    machine_plans: &sem::MachinePlanMap,
-    drop_plans: &sem::DropPlanMap,
+    lowering_plans: &LoweringPlanMap,
+    machine_plans: &MachinePlanMap,
+    drop_plans: &DropPlanMap,
     trace_alloc: bool,
     trace_drops: bool,
     drop_glue: &mut DropGlueRegistry,
@@ -243,12 +244,13 @@ fn lower_func_with_globals(
 ) -> Result<LoweredFunction, LowerToIrError> {
     let globals_start = globals.len();
     let ret_ty = {
+        let func_def_id = def_table.def_id(func.id);
         let def = def_table
-            .lookup_def(func.def_id)
-            .unwrap_or_else(|| panic!("backend lower_func missing def {:?}", func.def_id));
+            .lookup_def(func_def_id)
+            .unwrap_or_else(|| panic!("backend lower_func missing def {:?}", func_def_id));
         let func_ty = type_map
             .lookup_def_type(def)
-            .unwrap_or_else(|| panic!("backend lower_func missing def type {:?}", func.def_id));
+            .unwrap_or_else(|| panic!("backend lower_func missing def type {:?}", func_def_id));
         match func_ty {
             Type::Fn { ret_ty, .. } => ret_ty,
             other => panic!("backend lower_func expected fn type, found {:?}", other),
@@ -292,7 +294,10 @@ fn lower_func_with_globals(
 
     // If the body produces a value (not an early return), emit the final return.
     if let BranchResult::Value(value) = result {
-        let body_ty = type_map.type_table().get(func.body.ty).clone();
+        let body_ty = type_map
+            .type_table()
+            .get(lowerer.type_map.type_of(func.body.id))
+            .clone();
         let value = lowerer.coerce_return_value(value, &body_ty);
         lowerer.emit_root_return(if ret_is_unit { None } else { Some(value) })?;
     }
@@ -309,14 +314,14 @@ fn lower_func_with_globals(
 
 #[allow(clippy::too_many_arguments)]
 fn lower_method_def_with_globals(
-    module: &sem::Module,
-    method_block: &sem::MethodBlock,
-    method_def: &sem::MethodDef,
+    module: &Module,
+    method_block: &MethodBlock,
+    method_def: &MethodDef,
     def_table: &DefTable,
     type_map: &TypeMap,
-    lowering_plans: &sem::LoweringPlanMap,
-    machine_plans: &sem::MachinePlanMap,
-    drop_plans: &sem::DropPlanMap,
+    lowering_plans: &LoweringPlanMap,
+    machine_plans: &MachinePlanMap,
+    drop_plans: &DropPlanMap,
     trace_alloc: bool,
     trace_drops: bool,
     drop_glue: &mut DropGlueRegistry,
@@ -364,7 +369,10 @@ fn lower_method_def_with_globals(
     // Lower the method body and emit the final return if it yields a value.
     let result = lowerer.lower_branching_value_expr(&method_def.body)?;
     if let BranchResult::Value(value) = result {
-        let body_ty = type_map.type_table().get(method_def.body.ty).clone();
+        let body_ty = type_map
+            .type_table()
+            .get(lowerer.type_map.type_of(method_def.body.id))
+            .clone();
         let value = lowerer.coerce_return_value(value, &body_ty);
         lowerer.emit_root_return(if ret_is_unit { None } else { Some(value) })?;
     }

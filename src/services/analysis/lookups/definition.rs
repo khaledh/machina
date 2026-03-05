@@ -1,8 +1,8 @@
 //! Definition resolution lookups (go-to-definition, def-at-span).
 
+use crate::core::ast::{Module, NodeId};
 use crate::core::diag::Span;
 use crate::core::resolve::{DefId, DefTable, UNKNOWN_DEF_ID};
-use crate::core::tree::{Module, NodeId};
 use crate::services::analysis::pipeline::LookupState;
 use crate::services::analysis::results::Location;
 use crate::services::analysis::snapshot::{AnalysisSnapshot, FileId};

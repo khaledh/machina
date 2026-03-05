@@ -1,10 +1,10 @@
 //! Completion site classification and cursor-context helpers.
 
+use crate::core::ast::visit;
+use crate::core::ast::visit::Visitor;
+use crate::core::ast::{BindPattern, MatchPattern, Module, TypeExpr, UsingBinding};
 use crate::core::diag::{Position, Span};
 use crate::core::resolve::DefId;
-use crate::core::tree::visit;
-use crate::core::tree::visit::Visitor;
-use crate::core::tree::{BindPattern, MatchPattern, Module, TypeExpr, UsingBinding};
 use crate::core::types::Type;
 use crate::services::analysis::syntax_index::node_at_span;
 

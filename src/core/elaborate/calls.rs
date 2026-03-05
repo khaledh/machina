@@ -12,9 +12,10 @@
 //! By computing this plan during elaboration, lowering can emit call code
 //! without re-examining signatures or type information.
 
-use crate::core::tree as ast;
-use crate::core::tree::semantic as sem;
-use crate::core::tree::{CallArgMode, NodeId, ParamMode};
+use crate::core::ast::{CallArg, CallArgMode, Expr, ExprKind, InitInfo, NodeId, ParamMode};
+use crate::core::plans::{
+    ArgLowering, CallInput, CallPlan, CallTarget, IntrinsicCall, RuntimeCall,
+};
 use crate::core::typecheck::type_map::{CallParam, CallSig};
 use crate::core::types::Type;
 
@@ -30,11 +31,11 @@ impl<'a> Elaborator<'a> {
         call_id: NodeId,
         method_name: Option<&str>,
         call_sig: &CallSig,
-    ) -> sem::CallPlan {
+    ) -> CallPlan {
         let def_id = call_sig.def_id;
         let mut target = def_id
-            .map(sem::CallTarget::Direct)
-            .unwrap_or(sem::CallTarget::Indirect);
+            .map(CallTarget::Direct)
+            .unwrap_or(CallTarget::Indirect);
 
         if def_id.is_none()
             && let Some(method_name) = method_name
@@ -47,7 +48,7 @@ impl<'a> Elaborator<'a> {
             )
         {
             target = match method_name {
-                "append" => sem::CallTarget::Intrinsic(sem::IntrinsicCall::DynArrayAppend),
+                "append" => CallTarget::Intrinsic(IntrinsicCall::DynArrayAppend),
                 _ => target,
             };
         }
@@ -62,10 +63,10 @@ impl<'a> Elaborator<'a> {
             )
         {
             target = match method_name {
-                "insert" => sem::CallTarget::Intrinsic(sem::IntrinsicCall::SetInsert),
-                "contains" => sem::CallTarget::Intrinsic(sem::IntrinsicCall::SetContains),
-                "remove" => sem::CallTarget::Intrinsic(sem::IntrinsicCall::SetRemove),
-                "clear" => sem::CallTarget::Intrinsic(sem::IntrinsicCall::SetClear),
+                "insert" => CallTarget::Intrinsic(IntrinsicCall::SetInsert),
+                "contains" => CallTarget::Intrinsic(IntrinsicCall::SetContains),
+                "remove" => CallTarget::Intrinsic(IntrinsicCall::SetRemove),
+                "clear" => CallTarget::Intrinsic(IntrinsicCall::SetClear),
                 _ => target,
             };
         }
@@ -80,11 +81,11 @@ impl<'a> Elaborator<'a> {
             )
         {
             target = match method_name {
-                "insert" => sem::CallTarget::Intrinsic(sem::IntrinsicCall::MapInsert),
-                "contains_key" => sem::CallTarget::Intrinsic(sem::IntrinsicCall::MapContainsKey),
-                "get" => sem::CallTarget::Intrinsic(sem::IntrinsicCall::MapGet),
-                "remove" => sem::CallTarget::Intrinsic(sem::IntrinsicCall::MapRemove),
-                "clear" => sem::CallTarget::Intrinsic(sem::IntrinsicCall::MapClear),
+                "insert" => CallTarget::Intrinsic(IntrinsicCall::MapInsert),
+                "contains_key" => CallTarget::Intrinsic(IntrinsicCall::MapContainsKey),
+                "get" => CallTarget::Intrinsic(IntrinsicCall::MapGet),
+                "remove" => CallTarget::Intrinsic(IntrinsicCall::MapRemove),
+                "clear" => CallTarget::Intrinsic(IntrinsicCall::MapClear),
                 _ => target,
             };
         }
@@ -97,7 +98,7 @@ impl<'a> Elaborator<'a> {
             // Typestate managed handles use this compiler-provided helper to
             // lower arbitrary payload values into `(payload0_ptr, layout_id)`.
             if def.name == "__mc_machine_payload_pack" {
-                target = sem::CallTarget::Intrinsic(sem::IntrinsicCall::MachinePayloadPack);
+                target = CallTarget::Intrinsic(IntrinsicCall::MachinePayloadPack);
             }
             // Intrinsics override the normal direct-call target with a lowering intent.
             if def.is_intrinsic() {
@@ -108,21 +109,19 @@ impl<'a> Elaborator<'a> {
                         Some(Type::String)
                     )
                 {
-                    target = sem::CallTarget::Intrinsic(sem::IntrinsicCall::StringLen);
+                    target = CallTarget::Intrinsic(IntrinsicCall::StringLen);
                 } else if intrinsic_name == "type_of" {
-                    target = sem::CallTarget::Intrinsic(sem::IntrinsicCall::TypeOf);
+                    target = CallTarget::Intrinsic(IntrinsicCall::TypeOf);
                 }
             } else if def.is_runtime() {
                 let runtime_name = def.link_name().unwrap_or(def.name.as_str());
                 target = match runtime_name {
-                    "__rt_print" => sem::CallTarget::Runtime(sem::RuntimeCall::Print),
-                    "__rt_u64_to_dec" => sem::CallTarget::Runtime(sem::RuntimeCall::U64ToDec),
-                    "__rt_memset" => sem::CallTarget::Runtime(sem::RuntimeCall::MemSet),
-                    "__rt_string_from_bytes" => {
-                        sem::CallTarget::Runtime(sem::RuntimeCall::StringFromBytes)
-                    }
+                    "__rt_print" => CallTarget::Runtime(RuntimeCall::Print),
+                    "__rt_u64_to_dec" => CallTarget::Runtime(RuntimeCall::U64ToDec),
+                    "__rt_memset" => CallTarget::Runtime(RuntimeCall::MemSet),
+                    "__rt_string_from_bytes" => CallTarget::Runtime(RuntimeCall::StringFromBytes),
                     "__rt_string_append_bytes" => {
-                        sem::CallTarget::Runtime(sem::RuntimeCall::StringAppendBytes)
+                        CallTarget::Runtime(RuntimeCall::StringAppendBytes)
                     }
                     "append" | "append_bytes"
                         if matches!(
@@ -130,7 +129,7 @@ impl<'a> Elaborator<'a> {
                             Some(Type::String)
                         ) =>
                     {
-                        sem::CallTarget::Runtime(sem::RuntimeCall::StringAppendBytes)
+                        CallTarget::Runtime(RuntimeCall::StringAppendBytes)
                     }
                     _ => target,
                 };
@@ -152,7 +151,7 @@ impl<'a> Elaborator<'a> {
         }
 
         let args = match target {
-            sem::CallTarget::Runtime(sem::RuntimeCall::Print) => {
+            CallTarget::Runtime(RuntimeCall::Print) => {
                 if has_receiver {
                     panic!("compiler bug: intrinsic print has receiver");
                 }
@@ -167,14 +166,14 @@ impl<'a> Elaborator<'a> {
                     panic!("compiler bug: intrinsic print expects string arg, got {arg_ty:?}");
                 }
                 vec![
-                    sem::ArgLowering::PtrLen {
-                        input: sem::CallInput::Arg(0),
+                    ArgLowering::PtrLen {
+                        input: CallInput::Arg(0),
                         len_bits: 32,
                     },
-                    sem::ArgLowering::Direct(sem::CallInput::Arg(1)),
+                    ArgLowering::Direct(CallInput::Arg(1)),
                 ]
             }
-            sem::CallTarget::Runtime(sem::RuntimeCall::U64ToDec) => {
+            CallTarget::Runtime(RuntimeCall::U64ToDec) => {
                 if has_receiver {
                     panic!("compiler bug: intrinsic u64_to_dec has receiver");
                 }
@@ -193,14 +192,14 @@ impl<'a> Elaborator<'a> {
                     panic!("compiler bug: intrinsic u64_to_dec expects u8[] arg, got {arg_ty:?}");
                 }
                 vec![
-                    sem::ArgLowering::PtrLen {
-                        input: sem::CallInput::Arg(0),
+                    ArgLowering::PtrLen {
+                        input: CallInput::Arg(0),
                         len_bits: 64,
                     },
-                    sem::ArgLowering::Direct(sem::CallInput::Arg(1)),
+                    ArgLowering::Direct(CallInput::Arg(1)),
                 ]
             }
-            sem::CallTarget::Runtime(sem::RuntimeCall::MemSet) => {
+            CallTarget::Runtime(RuntimeCall::MemSet) => {
                 if has_receiver {
                     panic!("compiler bug: intrinsic memset has receiver");
                 }
@@ -219,14 +218,14 @@ impl<'a> Elaborator<'a> {
                     panic!("compiler bug: intrinsic memset expects u8[] arg, got {arg_ty:?}");
                 }
                 vec![
-                    sem::ArgLowering::PtrLen {
-                        input: sem::CallInput::Arg(0),
+                    ArgLowering::PtrLen {
+                        input: CallInput::Arg(0),
                         len_bits: 64,
                     },
-                    sem::ArgLowering::Direct(sem::CallInput::Arg(1)),
+                    ArgLowering::Direct(CallInput::Arg(1)),
                 ]
             }
-            sem::CallTarget::Runtime(sem::RuntimeCall::StringFromBytes) => {
+            CallTarget::Runtime(RuntimeCall::StringFromBytes) => {
                 if has_receiver {
                     panic!("compiler bug: intrinsic string_from_bytes has receiver");
                 }
@@ -253,14 +252,14 @@ impl<'a> Elaborator<'a> {
                     );
                 }
                 vec![
-                    sem::ArgLowering::Direct(sem::CallInput::Arg(0)),
-                    sem::ArgLowering::PtrLen {
-                        input: sem::CallInput::Arg(1),
+                    ArgLowering::Direct(CallInput::Arg(0)),
+                    ArgLowering::PtrLen {
+                        input: CallInput::Arg(1),
                         len_bits: 64,
                     },
                 ]
             }
-            sem::CallTarget::Runtime(sem::RuntimeCall::StringAppendBytes) => {
+            CallTarget::Runtime(RuntimeCall::StringAppendBytes) => {
                 if !has_receiver {
                     panic!("compiler bug: intrinsic string append missing receiver");
                 }
@@ -288,14 +287,14 @@ impl<'a> Elaborator<'a> {
                     _ => panic!("compiler bug: invalid intrinsic param type"),
                 };
                 vec![
-                    sem::ArgLowering::Direct(sem::CallInput::Receiver),
-                    sem::ArgLowering::PtrLen {
-                        input: sem::CallInput::Arg(0),
+                    ArgLowering::Direct(CallInput::Receiver),
+                    ArgLowering::PtrLen {
+                        input: CallInput::Arg(0),
                         len_bits,
                     },
                 ]
             }
-            sem::CallTarget::Intrinsic(sem::IntrinsicCall::StringLen) => {
+            CallTarget::Intrinsic(IntrinsicCall::StringLen) => {
                 if !has_receiver {
                     panic!("compiler bug: intrinsic string len missing receiver");
                 }
@@ -305,9 +304,9 @@ impl<'a> Elaborator<'a> {
                         call_sig.params.len()
                     );
                 }
-                vec![sem::ArgLowering::Direct(sem::CallInput::Receiver)]
+                vec![ArgLowering::Direct(CallInput::Receiver)]
             }
-            sem::CallTarget::Intrinsic(sem::IntrinsicCall::TypeOf) => {
+            CallTarget::Intrinsic(IntrinsicCall::TypeOf) => {
                 if has_receiver {
                     panic!("compiler bug: type_of intrinsic has receiver");
                 }
@@ -317,9 +316,9 @@ impl<'a> Elaborator<'a> {
                         call_sig.params.len()
                     );
                 }
-                vec![sem::ArgLowering::Direct(sem::CallInput::Arg(0))]
+                vec![ArgLowering::Direct(CallInput::Arg(0))]
             }
-            sem::CallTarget::Intrinsic(sem::IntrinsicCall::MachinePayloadPack) => {
+            CallTarget::Intrinsic(IntrinsicCall::MachinePayloadPack) => {
                 if has_receiver {
                     panic!("compiler bug: payload-pack intrinsic has receiver");
                 }
@@ -329,9 +328,9 @@ impl<'a> Elaborator<'a> {
                         call_sig.params.len()
                     );
                 }
-                vec![sem::ArgLowering::Direct(sem::CallInput::Arg(0))]
+                vec![ArgLowering::Direct(CallInput::Arg(0))]
             }
-            sem::CallTarget::Intrinsic(sem::IntrinsicCall::DynArrayAppend) => {
+            CallTarget::Intrinsic(IntrinsicCall::DynArrayAppend) => {
                 if !has_receiver {
                     panic!("compiler bug: intrinsic dyn-array append missing receiver");
                 }
@@ -342,13 +341,13 @@ impl<'a> Elaborator<'a> {
                     );
                 }
                 vec![
-                    sem::ArgLowering::Direct(sem::CallInput::Receiver),
-                    sem::ArgLowering::Direct(sem::CallInput::Arg(0)),
+                    ArgLowering::Direct(CallInput::Receiver),
+                    ArgLowering::Direct(CallInput::Arg(0)),
                 ]
             }
-            sem::CallTarget::Intrinsic(sem::IntrinsicCall::SetInsert)
-            | sem::CallTarget::Intrinsic(sem::IntrinsicCall::SetContains)
-            | sem::CallTarget::Intrinsic(sem::IntrinsicCall::SetRemove) => {
+            CallTarget::Intrinsic(IntrinsicCall::SetInsert)
+            | CallTarget::Intrinsic(IntrinsicCall::SetContains)
+            | CallTarget::Intrinsic(IntrinsicCall::SetRemove) => {
                 if !has_receiver {
                     panic!("compiler bug: intrinsic set method missing receiver");
                 }
@@ -359,11 +358,11 @@ impl<'a> Elaborator<'a> {
                     );
                 }
                 vec![
-                    sem::ArgLowering::Direct(sem::CallInput::Receiver),
-                    sem::ArgLowering::Direct(sem::CallInput::Arg(0)),
+                    ArgLowering::Direct(CallInput::Receiver),
+                    ArgLowering::Direct(CallInput::Arg(0)),
                 ]
             }
-            sem::CallTarget::Intrinsic(sem::IntrinsicCall::SetClear) => {
+            CallTarget::Intrinsic(IntrinsicCall::SetClear) => {
                 if !has_receiver {
                     panic!("compiler bug: intrinsic set clear missing receiver");
                 }
@@ -373,9 +372,9 @@ impl<'a> Elaborator<'a> {
                         call_sig.params.len()
                     );
                 }
-                vec![sem::ArgLowering::Direct(sem::CallInput::Receiver)]
+                vec![ArgLowering::Direct(CallInput::Receiver)]
             }
-            sem::CallTarget::Intrinsic(sem::IntrinsicCall::MapInsert) => {
+            CallTarget::Intrinsic(IntrinsicCall::MapInsert) => {
                 if !has_receiver {
                     panic!("compiler bug: intrinsic map insert missing receiver");
                 }
@@ -386,14 +385,14 @@ impl<'a> Elaborator<'a> {
                     );
                 }
                 vec![
-                    sem::ArgLowering::Direct(sem::CallInput::Receiver),
-                    sem::ArgLowering::Direct(sem::CallInput::Arg(0)),
-                    sem::ArgLowering::Direct(sem::CallInput::Arg(1)),
+                    ArgLowering::Direct(CallInput::Receiver),
+                    ArgLowering::Direct(CallInput::Arg(0)),
+                    ArgLowering::Direct(CallInput::Arg(1)),
                 ]
             }
-            sem::CallTarget::Intrinsic(sem::IntrinsicCall::MapContainsKey)
-            | sem::CallTarget::Intrinsic(sem::IntrinsicCall::MapGet)
-            | sem::CallTarget::Intrinsic(sem::IntrinsicCall::MapRemove) => {
+            CallTarget::Intrinsic(IntrinsicCall::MapContainsKey)
+            | CallTarget::Intrinsic(IntrinsicCall::MapGet)
+            | CallTarget::Intrinsic(IntrinsicCall::MapRemove) => {
                 if !has_receiver {
                     panic!("compiler bug: intrinsic map method missing receiver");
                 }
@@ -404,11 +403,11 @@ impl<'a> Elaborator<'a> {
                     );
                 }
                 vec![
-                    sem::ArgLowering::Direct(sem::CallInput::Receiver),
-                    sem::ArgLowering::Direct(sem::CallInput::Arg(0)),
+                    ArgLowering::Direct(CallInput::Receiver),
+                    ArgLowering::Direct(CallInput::Arg(0)),
                 ]
             }
-            sem::CallTarget::Intrinsic(sem::IntrinsicCall::MapClear) => {
+            CallTarget::Intrinsic(IntrinsicCall::MapClear) => {
                 if !has_receiver {
                     panic!("compiler bug: intrinsic map clear missing receiver");
                 }
@@ -418,22 +417,22 @@ impl<'a> Elaborator<'a> {
                         call_sig.params.len()
                     );
                 }
-                vec![sem::ArgLowering::Direct(sem::CallInput::Receiver)]
+                vec![ArgLowering::Direct(CallInput::Receiver)]
             }
             _ => {
                 // Default lowering passes inputs straight through in ABI order.
                 let mut args = Vec::new();
                 if has_receiver {
-                    args.push(sem::ArgLowering::Direct(sem::CallInput::Receiver));
+                    args.push(ArgLowering::Direct(CallInput::Receiver));
                 }
                 for index in 0..call_sig.params.len() {
-                    args.push(sem::ArgLowering::Direct(sem::CallInput::Arg(index)));
+                    args.push(ArgLowering::Direct(CallInput::Arg(index)));
                 }
                 args
             }
         };
 
-        sem::CallPlan {
+        CallPlan {
             target,
             args,
             drop_mask,
@@ -451,43 +450,55 @@ impl<'a> Elaborator<'a> {
     }
 
     /// Elaborate a call argument using the parameter's passing mode.
-    pub(super) fn elab_call_arg(&mut self, param: &CallParam, arg: &ast::CallArg) -> sem::CallArg {
+    pub(super) fn elab_call_arg(&mut self, param: &CallParam, arg: &CallArg) -> CallArg {
         self.elab_call_arg_mode(param.mode.clone(), arg)
     }
 
-    /// Convert a call argument into its semantic form based on passing mode.
+    /// Convert a call argument into its elaborated form based on passing mode.
     ///
     /// - `In`: pass by value (elaborated as a value expression)
     /// - `InOut`: pass by mutable reference (elaborated as a place)
     /// - `Out`: uninitialized output (elaborated as a place with init info)
     /// - `Sink`: transfer ownership (may wrap in explicit move)
-    pub(super) fn elab_call_arg_mode(
-        &mut self,
-        mode: ParamMode,
-        arg: &ast::CallArg,
-    ) -> sem::CallArg {
+    pub(super) fn elab_call_arg_mode(&mut self, mode: ParamMode, arg: &CallArg) -> CallArg {
         match mode {
-            ParamMode::In => sem::CallArg::In {
-                expr: self.elab_value(&arg.expr),
-                span: arg.span,
-            },
+            ParamMode::In => {
+                let expr =
+                    if matches!(arg.expr.kind, ExprKind::Slice { .. }) && mode == ParamMode::In {
+                        self.elab_value(&arg.expr)
+                    } else {
+                        self.elab_value(&arg.expr)
+                    };
+                CallArg {
+                    mode: CallArgMode::Default,
+                    expr,
+                    init: InitInfo::default(),
+                    span: arg.span,
+                }
+            }
             ParamMode::InOut => {
-                if matches!(arg.expr.kind, ast::ExprKind::Slice { .. }) {
-                    return sem::CallArg::In {
+                if matches!(arg.expr.kind, ExprKind::Slice { .. }) {
+                    return CallArg {
+                        mode: CallArgMode::Default,
                         expr: self.elab_value(&arg.expr),
+                        init: InitInfo::default(),
                         span: arg.span,
                     };
                 }
-                sem::CallArg::InOut {
-                    place: self.elab_place(&arg.expr),
+                CallArg {
+                    mode: CallArgMode::InOut,
+                    expr: self.elab_place(&arg.expr),
+                    init: InitInfo::default(),
                     span: arg.span,
                 }
             }
             ParamMode::Out => {
                 let place = self.elab_place(&arg.expr);
-                sem::CallArg::Out {
-                    init: self.init_info_for_id(place.id),
-                    place,
+                let init = self.init_info_for_id(place.id);
+                CallArg {
+                    mode: CallArgMode::Out,
+                    expr: place,
+                    init,
                     span: arg.span,
                 }
             }
@@ -495,8 +506,8 @@ impl<'a> Elaborator<'a> {
                 let expr = if arg.mode == CallArgMode::Move {
                     let place = self.elab_place(&arg.expr);
                     self.new_value(
-                        sem::ValueExprKind::Move {
-                            place: Box::new(place),
+                        ExprKind::Move {
+                            expr: Box::new(place),
                         },
                         self.type_id_for(arg.expr.id),
                         arg.expr.span,
@@ -504,8 +515,10 @@ impl<'a> Elaborator<'a> {
                 } else {
                     self.elab_value(&arg.expr)
                 };
-                sem::CallArg::Sink {
+                CallArg {
+                    mode: CallArgMode::Move,
                     expr,
+                    init: InitInfo::default(),
                     span: arg.span,
                 }
             }
@@ -515,11 +528,11 @@ impl<'a> Elaborator<'a> {
     pub(super) fn elab_method_receiver(
         &mut self,
         receiver: &CallParam,
-        callee: &ast::Expr,
-    ) -> sem::MethodReceiver {
+        callee: &Expr,
+    ) -> Box<Expr> {
         match receiver.mode {
-            ParamMode::InOut => sem::MethodReceiver::PlaceExpr(self.elab_place(callee)),
-            _ => sem::MethodReceiver::ValueExpr(Box::new(self.elab_value(callee))),
+            ParamMode::InOut => Box::new(self.elab_place(callee)),
+            _ => Box::new(self.elab_value(callee)),
         }
     }
 }

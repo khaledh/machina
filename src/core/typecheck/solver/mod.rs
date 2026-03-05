@@ -26,11 +26,11 @@ mod term_utils;
 use std::collections::HashMap;
 use std::collections::HashSet;
 
+use crate::core::ast::NodeId;
+use crate::core::ast::{BindPattern, BindPatternKind};
 use crate::core::capsule::ModuleId;
 use crate::core::diag::Span;
 use crate::core::resolve::{DefId, DefKind, DefTable};
-use crate::core::tree::NodeId;
-use crate::core::tree::{BindPattern, BindPatternKind};
 use crate::core::typecheck::capability::ensure_hashable;
 use crate::core::typecheck::constraints::{
     ConstrainOutput, Constraint, ConstraintReason, ExprObligation,

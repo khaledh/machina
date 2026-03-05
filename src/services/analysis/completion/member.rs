@@ -4,10 +4,10 @@
 //! - `receiver.member` completions
 //! - `Name::...` qualified path completions
 
+use crate::core::ast::{MethodItem, TopLevelItem, TypeDefKind};
 use crate::core::capsule::ModuleId;
 use crate::core::context::ResolvedContext;
 use crate::core::resolve::{DefId, UNKNOWN_DEF_ID};
-use crate::core::tree::{MethodItem, TopLevelItem, TypeDefKind};
 use crate::core::types::Type;
 use crate::services::analysis::results::{CompletionItem, CompletionKind};
 

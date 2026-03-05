@@ -5,11 +5,11 @@ use crate::core::api::{
     resolve_typecheck_pipeline_with_policy, semcheck_stage_with_policy,
     typecheck_stage_with_policy,
 };
+use crate::core::ast::NodeIdGen;
 use crate::core::context::{
     ResolveStageInput, SemCheckStageOutput, TypecheckStageInput, TypecheckStageOutput,
 };
 use crate::core::diag::Span;
-use crate::core::tree::NodeIdGen;
 use crate::core::typecheck::type_map::CallSigMap;
 use std::mem;
 

@@ -155,10 +155,8 @@ Implemented constructs:
 - Managed handlers with request/reply forms used by flow checks.
 
 Evidence:
-- Parser: `src/core/parse/decl.rs` (`parse_protocol_def`, typestate role impl
-  parsing)
-- Tree model: `src/core/tree/model.rs` (`ProtocolDef`, `ProtocolFlow`,
-  `ProtocolRole`)
+- Parser: `src/core/parse/decl.rs` (`parse_protocol_def`, typestate role impl parsing)
+- Tree model: `src/core/ast/model.rs` (`ProtocolDef`, `ProtocolFlow`, `ProtocolRole`)
 
 ### Resolve Stage
 

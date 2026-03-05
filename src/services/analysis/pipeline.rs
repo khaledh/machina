@@ -13,6 +13,8 @@ use crate::core::api::{
     parse_module_with_id_gen_and_options, resolve_stage_with_policy, semcheck_stage_with_policy,
     typecheck_stage_with_policy,
 };
+use crate::core::ast::NodeId;
+use crate::core::ast::NodeIdGen;
 use crate::core::capsule::ModuleId;
 use crate::core::context::ParsedContext;
 use crate::core::context::ResolvedContext;
@@ -21,8 +23,6 @@ use crate::core::resolve::{
     ImportedCallableSig, ImportedFacts, ImportedModule, ImportedParamSig, ImportedSymbol,
     ImportedTraitMethodSig, ImportedTraitPropertySig, ImportedTraitSig,
 };
-use crate::core::tree::NodeId;
-use crate::core::tree::NodeIdGen;
 use crate::services::analysis::diagnostics::Diagnostic;
 use crate::services::analysis::query::{QueryKey, QueryKind, QueryResult, QueryRuntime};
 
@@ -473,12 +473,12 @@ fn hash_trait_property_sig(
     property.has_set.hash(hasher);
 }
 
-fn param_mode_tag(mode: &crate::core::tree::ParamMode) -> u8 {
+fn param_mode_tag(mode: &crate::core::ast::ParamMode) -> u8 {
     match mode {
-        crate::core::tree::ParamMode::In => 0,
-        crate::core::tree::ParamMode::InOut => 1,
-        crate::core::tree::ParamMode::Out => 2,
-        crate::core::tree::ParamMode::Sink => 3,
+        crate::core::ast::ParamMode::In => 0,
+        crate::core::ast::ParamMode::InOut => 1,
+        crate::core::ast::ParamMode::Out => 2,
+        crate::core::ast::ParamMode::Sink => 3,
     }
 }
 

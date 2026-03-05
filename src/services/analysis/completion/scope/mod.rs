@@ -8,6 +8,7 @@ mod locals;
 
 use std::collections::HashMap;
 
+use crate::core::ast::Module;
 use crate::core::diag::Position;
 use crate::core::resolve::DefId;
 use crate::services::analysis::results::CompletionItem;
@@ -29,10 +30,7 @@ pub(super) fn scope_completions(
     merge_scope_frames(scopes)
 }
 
-pub(super) fn enclosing_callable_def_id(
-    module: &crate::core::tree::Module,
-    cursor: Position,
-) -> Option<DefId> {
+pub(super) fn enclosing_callable_def_id(module: &Module, cursor: Position) -> Option<DefId> {
     locals::enclosing_callable_def_id(module, cursor)
 }
 

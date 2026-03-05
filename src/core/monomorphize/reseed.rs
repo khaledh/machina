@@ -2,10 +2,10 @@
 
 use std::collections::{HashMap, HashSet};
 
+use crate::core::ast::visit::{self, Visitor};
+use crate::core::ast::visit_mut::{self, VisitorMut};
+use crate::core::ast::*;
 use crate::core::resolve::{DefId, DefKind, DefTable};
-use crate::core::tree::visit::{self, Visitor};
-use crate::core::tree::visit_mut::{self, VisitorMut};
-use crate::core::tree::*;
 
 macro_rules! collect_id_and_walk {
     ($(fn $visit_fn:ident($ty:ty) => $walk_fn:ident;)+) => {
@@ -596,12 +596,7 @@ impl VisitorMut for NodeIdReseeder<'_> {
                 }
             }
             ExprKind::Emit { kind } => match kind {
-                EmitKind::Send { to, payload }
-                | EmitKind::Request {
-                    to,
-                    payload,
-                    request_site_label: _,
-                } => {
+                EmitKind::Send { to, payload } | EmitKind::Request { to, payload, .. } => {
                     self.visit_expr(to);
                     self.visit_expr(payload);
                 }
@@ -632,7 +627,13 @@ impl VisitorMut for NodeIdReseeder<'_> {
             | ExprKind::BoolLit(_)
             | ExprKind::CharLit(_)
             | ExprKind::StringLit { .. }
-            | ExprKind::Var { .. } => {}
+            | ExprKind::Var { .. }
+            | ExprKind::ClosureRef { .. } => {}
+            ExprKind::Load { expr } | ExprKind::Len { expr } => self.visit_expr(expr),
+            ExprKind::MapGet { target, key } => {
+                self.visit_expr(target);
+                self.visit_expr(key);
+            }
         }
     }
 }

@@ -9,12 +9,12 @@
 
 use std::collections::{HashMap, HashSet};
 
+use crate::core::ast::visit::{self, Visitor};
+use crate::core::ast::visit_mut::{self, VisitorMut};
+use crate::core::ast::*;
 use crate::core::diag::Span;
 use crate::core::machine::naming::GENERATED_FINAL_STATE_MARKER;
 use crate::core::resolve::{REK, ResolveError};
-use crate::core::tree::visit::{self, Visitor};
-use crate::core::tree::visit_mut::{self, VisitorMut};
-use crate::core::tree::*;
 
 mod analysis;
 mod ast_build;
@@ -54,7 +54,7 @@ use support_types::{
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct TypestateRoleImplRef {
-    pub id: crate::core::tree::NodeId,
+    pub id: NodeId,
     pub typestate_name: String,
     pub path: Vec<String>,
     pub peer_role_bindings: Vec<TypestatePeerRoleBindingRef>,
@@ -63,7 +63,7 @@ pub struct TypestateRoleImplRef {
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct TypestatePeerRoleBindingRef {
-    pub id: crate::core::tree::NodeId,
+    pub id: NodeId,
     pub field_name: String,
     pub role_name: String,
     pub field_ty: TypeExpr,
@@ -719,7 +719,7 @@ impl VisitorMut for CtorCallRewriter<'_> {
             }
         {
             // Parsed form of `Type::new(a, b)` arrives as enum-variant syntax in
-            // the parsed tree. Lower it to a plain call expression.
+            // the parsed AST. Lower it to a plain call expression.
             if variant == "spawn" && self.first_spawn_call_span.is_none() {
                 self.first_spawn_call_span = Some(expr.span);
             }

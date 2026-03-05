@@ -1,5 +1,7 @@
 use std::collections::{HashMap, HashSet};
 
+use crate::core::ast::visit::*;
+use crate::core::ast::*;
 use crate::core::capsule::{ModuleId, RequireKind};
 use crate::core::context::{
     CapsuleResolveStageInput, CapsuleResolveStageOutput, ImportEnv, ImportedSymbolBinding,
@@ -14,8 +16,6 @@ use crate::core::resolve::{
     Def, DefId, DefIdGen, DefKind, FuncAttrs, TraitAttrs, TypeAttrs, Visibility,
 };
 use crate::core::symbol_id::SymbolId;
-use crate::core::tree::visit::*;
-use crate::core::tree::*;
 use crate::core::types::{BUILTIN_TYPES, Type};
 use crate::core::typestate::TypestateRoleImplRef;
 
@@ -2387,7 +2387,7 @@ pub fn resolve_program(
     })
 }
 
-fn top_level_item_id(item: &TopLevelItem) -> crate::core::tree::NodeId {
+fn top_level_item_id(item: &TopLevelItem) -> NodeId {
     match item {
         TopLevelItem::ProtocolDef(protocol_def) => protocol_def.id,
         TopLevelItem::TraitDef(trait_def) => trait_def.id,

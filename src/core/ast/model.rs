@@ -1,8 +1,8 @@
 //! Abstract Syntax Tree.
 
+use crate::core::ast::NodeId;
 use crate::core::diag::Span;
 use crate::core::resolve::{DefId, DefTable};
-use crate::core::tree::NodeId;
 
 // -- Attributes --
 
@@ -985,7 +985,7 @@ pub enum ExprKind {
         body: Box<Expr>,
     },
 
-    // Semantic-tree only: elaboration inserts these, parser never emits them.
+    // Semantic-AST only: elaboration inserts these, parser never emits them.
     Coerce {
         kind: CoerceKind,
         expr: Box<Expr>,
@@ -1000,6 +1000,19 @@ pub enum ExprKind {
     Deref {
         expr: Box<Expr>,
     },
+    Load {
+        expr: Box<Expr>,
+    },
+    MapGet {
+        target: Box<Expr>,
+        key: Box<Expr>,
+    },
+    Len {
+        expr: Box<Expr>,
+    },
+    ClosureRef {
+        ident: String,
+    },
 }
 
 #[derive(Clone, Debug)]
@@ -1013,6 +1026,9 @@ pub enum EmitKind {
         payload: Box<Expr>,
         /// Optional site label from `request:label(...)` sugar.
         request_site_label: Option<String>,
+        /// Stable request-site identity used by runtime correlation plumbing.
+        /// Populated during elaboration; `None` before that.
+        request_site_key: Option<u64>,
     },
 }
 

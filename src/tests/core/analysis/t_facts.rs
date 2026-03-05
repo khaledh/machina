@@ -4,9 +4,9 @@ use std::sync::Arc;
 use crate::core::analysis::facts::{
     DefTableOverlay, FactOrigin, FactOverlayMap, SyntheticReason, TypeMapOverlay,
 };
+use crate::core::ast::NodeId;
 use crate::core::resolve::def_table::DefTable;
 use crate::core::resolve::{Def, DefId, DefKind};
-use crate::core::tree::NodeId;
 use crate::core::types::Type;
 
 #[test]

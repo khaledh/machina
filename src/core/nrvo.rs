@@ -1,9 +1,11 @@
+use crate::core::ast::EmitKind;
+use crate::core::ast::model::FuncDef;
+use crate::core::ast::model::{
+    ArrayLitInit, BlockItem, CallArgMode, Expr, ExprKind as VEK, StmtExpr, StmtExprKind as SEK,
+    StringFmtSegment,
+};
 use crate::core::context::{AnalyzedContext, SemanticContext};
 use crate::core::resolve::{DefId, DefTable};
-use crate::core::tree::semantic::{
-    ArrayLitInit, BlockItem, CallArg, FuncDef, MethodReceiver, PlaceExpr, PlaceExprKind as PEK,
-    SegmentKind, StmtExpr, StmtExprKind as SEK, ValueExpr, ValueExprKind as VEK,
-};
 use crate::core::typecheck::type_map::TypeMap;
 
 /// NRVO (Named Return Value Optimization) analyzer.
@@ -86,28 +88,30 @@ impl NrvoAnalyzer {
         }
 
         // Step 2: Find the returned variable def
-        let ret_var_def_id = Self::find_ret_var_def_id(&func_def.body);
+        let ret_var_def_id = Self::find_ret_var_def_id(def_table, &func_def.body);
 
         // Step 3: Check if the returned variable is only used as lvalue
         if let Some(var_def_id) = ret_var_def_id
-            && Self::is_nrvo_safe(&func_def.body, var_def_id)
+            && Self::is_nrvo_safe(def_table, &func_def.body, var_def_id)
         {
             def_table.mark_nrvo_eligible(var_def_id);
         }
     }
 
-    fn find_ret_var_def_id(expr: &ValueExpr) -> Option<DefId> {
+    fn find_ret_var_def_id(def_table: &DefTable, expr: &Expr) -> Option<DefId> {
         match &expr.kind {
-            VEK::Load { place } | VEK::Move { place } | VEK::ImplicitMove { place } => {
-                Self::place_var_def_id(place)
+            VEK::Load { expr } | VEK::Move { expr } | VEK::ImplicitMove { expr } => {
+                Self::expr_var_def_id(def_table, expr)
             }
 
-            VEK::Block { tail, .. } => tail.as_deref().and_then(Self::find_ret_var_def_id),
+            VEK::Block { tail, .. } => tail
+                .as_deref()
+                .and_then(|e| Self::find_ret_var_def_id(def_table, e)),
 
             VEK::Match { arms, .. } => {
                 let mut arm_def_id = None;
                 for arm in arms {
-                    let this_id = Self::find_ret_var_def_id(&arm.body);
+                    let this_id = Self::find_ret_var_def_id(def_table, &arm.body);
                     match (arm_def_id, this_id) {
                         (None, Some(id)) => arm_def_id = Some(id),
                         (Some(id), Some(this_id)) if id == this_id => {}
@@ -120,26 +124,34 @@ impl NrvoAnalyzer {
         }
     }
 
-    fn is_nrvo_safe(body: &ValueExpr, var_def_id: DefId) -> bool {
-        let checker = NrvoSafetyChecker::new(var_def_id);
+    fn is_nrvo_safe(def_table: &DefTable, body: &Expr, var_def_id: DefId) -> bool {
+        let checker = NrvoSafetyChecker::new(def_table, var_def_id);
         checker.check_expr(body, true) // true = at return position
     }
 
-    fn place_var_def_id(place: &PlaceExpr) -> Option<DefId> {
-        match &place.kind {
-            PEK::Var { def_id, .. } => Some(*def_id),
+    fn expr_var_def_id(def_table: &DefTable, expr: &Expr) -> Option<DefId> {
+        match &expr.kind {
+            VEK::Var { .. } => def_table.lookup_node_def_id(expr.id),
             _ => None,
         }
     }
 }
 
-struct NrvoSafetyChecker {
+struct NrvoSafetyChecker<'a> {
+    def_table: &'a DefTable,
     var_def_id: DefId,
 }
 
-impl NrvoSafetyChecker {
-    pub fn new(var_def_id: DefId) -> Self {
-        Self { var_def_id }
+impl<'a> NrvoSafetyChecker<'a> {
+    pub fn new(def_table: &'a DefTable, var_def_id: DefId) -> Self {
+        Self {
+            def_table,
+            var_def_id,
+        }
+    }
+
+    fn node_def_id(&self, expr: &Expr) -> Option<DefId> {
+        self.def_table.lookup_node_def_id(expr.id)
     }
 
     fn check_stmt_expr(&self, stmt_expr: &StmtExpr) -> bool {
@@ -161,6 +173,13 @@ impl NrvoSafetyChecker {
                     // Assignment to something else - check both sides don't use our var
                     self.check_place_value(assignee, false) && self.check_expr(value, false)
                 }
+            }
+            SEK::CompoundAssign {
+                assignee, value, ..
+            } => {
+                // Compound assignment reads and writes the assignee, so the var
+                // is used as rvalue — not safe unless it's a different variable.
+                self.check_place_value(assignee, false) && self.check_expr(value, false)
             }
 
             SEK::While { cond, body } => {
@@ -184,12 +203,12 @@ impl NrvoSafetyChecker {
         }
     }
 
-    fn check_expr(&self, expr: &ValueExpr, at_return: bool) -> bool {
+    fn check_expr(&self, expr: &Expr, at_return: bool) -> bool {
         match &expr.kind {
-            VEK::Load { place } | VEK::Move { place } | VEK::ImplicitMove { place } => {
-                self.check_place_value(place, at_return)
+            VEK::Load { expr } | VEK::Move { expr } | VEK::ImplicitMove { expr } => {
+                self.check_place_value(expr, at_return)
             }
-            VEK::AddrOf { place } => self.check_place_value(place, false),
+            VEK::AddrOf { expr } => self.check_place_value(expr, false),
 
             // Block expression: check all expressions, with last one in return context
             VEK::Block { items, tail } => {
@@ -227,20 +246,16 @@ impl NrvoSafetyChecker {
                 let args_ok = args.iter().all(|arg| self.check_call_arg(arg));
                 callee_ok && args_ok
             }
-            VEK::MethodCall { receiver, args, .. } => {
-                let receiver_ok = match receiver {
-                    MethodReceiver::ValueExpr(expr) => self.check_expr(expr, false),
-                    MethodReceiver::PlaceExpr(place) => self.check_place_lvalue(place),
-                };
+            VEK::MethodCall { callee, args, .. } => {
+                let callee_ok = self.check_expr(callee, false);
                 let args_ok = args.iter().all(|arg| self.check_call_arg(arg));
-                receiver_ok && args_ok
+                callee_ok && args_ok
             }
-            VEK::EmitSend { to, payload }
-            | VEK::EmitRequest {
-                to,
-                payload,
-                request_site_key: _,
-            } => self.check_expr(to, false) && self.check_expr(payload, false),
+            VEK::Emit { kind } => match kind {
+                EmitKind::Send { to, payload } | EmitKind::Request { to, payload, .. } => {
+                    self.check_expr(to, false) && self.check_expr(payload, false)
+                }
+            },
             VEK::Reply { cap, value } => {
                 self.check_expr(cap, false) && self.check_expr(value, false)
             }
@@ -268,7 +283,7 @@ impl NrvoSafetyChecker {
                 self.check_expr(target, false) && self.check_expr(key, false)
             }
 
-            VEK::Len { place } => self.check_place_lvalue(place),
+            VEK::Len { expr } => self.check_place_lvalue(expr),
 
             VEK::TupleLit(fields) => fields.iter().all(|e| self.check_expr(e, false)),
 
@@ -284,11 +299,9 @@ impl NrvoSafetyChecker {
                 target_ok && fields_ok
             }
 
-            VEK::StringFmt { plan } => plan.segments.iter().all(|segment| match segment {
-                SegmentKind::LiteralBytes(_) => true,
-                SegmentKind::Bool { expr }
-                | SegmentKind::Int { expr, .. }
-                | SegmentKind::StringValue { expr } => self.check_expr(expr, false),
+            VEK::StringFmt { segments } => segments.iter().all(|segment| match segment {
+                StringFmtSegment::Literal { .. } => true,
+                StringFmtSegment::Expr { expr, .. } => self.check_expr(expr, false),
             }),
 
             VEK::HeapAlloc { expr } => self.check_expr(expr, false),
@@ -319,41 +332,49 @@ impl NrvoSafetyChecker {
             | VEK::StringLit { .. }
             | VEK::EnumVariant { .. }
             | VEK::Range { .. }
-            | VEK::ClosureRef { .. } => true,
+            | VEK::ClosureRef { .. }
+            | VEK::Var { .. }
+            | VEK::ArrayIndex { .. }
+            | VEK::TupleField { .. }
+            | VEK::StructField { .. }
+            | VEK::Deref { .. }
+            | VEK::Closure { .. } => true,
         }
     }
 
-    fn is_lvalue_use(&self, expr: &PlaceExpr) -> bool {
+    fn is_lvalue_use(&self, expr: &Expr) -> bool {
         match &expr.kind {
-            PEK::Var { def_id, .. } => *def_id == self.var_def_id,
-            PEK::ArrayIndex { target, .. } => self.is_lvalue_use(target),
-            PEK::TupleField { target, .. } => self.is_lvalue_use(target),
-            PEK::StructField { target, .. } => self.is_lvalue_use(target),
-            PEK::Deref { .. } => false,
+            VEK::Var { .. } => self.node_def_id(expr) == Some(self.var_def_id),
+            VEK::ArrayIndex { target, .. } => self.is_lvalue_use(target),
+            VEK::TupleField { target, .. } => self.is_lvalue_use(target),
+            VEK::StructField { target, .. } => self.is_lvalue_use(target),
+            VEK::Deref { .. } => false,
+            _ => false,
         }
     }
 
-    fn check_place_lvalue(&self, place: &PlaceExpr) -> bool {
+    fn check_place_lvalue(&self, place: &Expr) -> bool {
         if self.is_lvalue_use(place) {
             return true;
         }
 
         match &place.kind {
-            PEK::ArrayIndex { target, indices } => {
+            VEK::ArrayIndex { target, indices } => {
                 self.check_place_lvalue(target)
                     && indices.iter().all(|index| self.check_expr(index, false))
             }
-            PEK::TupleField { target, .. } | PEK::StructField { target, .. } => {
+            VEK::TupleField { target, .. } | VEK::StructField { target, .. } => {
                 self.check_place_lvalue(target)
             }
-            PEK::Deref { value } => self.check_expr(value, false),
-            PEK::Var { .. } => true,
+            VEK::Deref { expr } => self.check_expr(expr, false),
+            VEK::Var { .. } => true,
+            _ => true,
         }
     }
 
-    fn check_place_value(&self, place: &PlaceExpr, at_return: bool) -> bool {
-        if let PEK::Var { def_id, .. } = &place.kind
-            && *def_id == self.var_def_id
+    fn check_place_value(&self, place: &Expr, at_return: bool) -> bool {
+        if let VEK::Var { .. } = &place.kind
+            && self.node_def_id(place) == Some(self.var_def_id)
         {
             return at_return;
         }
@@ -365,12 +386,10 @@ impl NrvoSafetyChecker {
         self.check_place_lvalue(place)
     }
 
-    fn check_call_arg(&self, arg: &CallArg) -> bool {
-        match arg {
-            CallArg::In { expr, .. } | CallArg::Sink { expr, .. } => self.check_expr(expr, false),
-            CallArg::InOut { place, .. } | CallArg::Out { place, .. } => {
-                self.check_place_lvalue(place)
-            }
+    fn check_call_arg(&self, arg: &crate::core::ast::model::CallArg) -> bool {
+        match arg.mode {
+            CallArgMode::Default | CallArgMode::Move => self.check_expr(&arg.expr, false),
+            CallArgMode::InOut | CallArgMode::Out => self.check_place_lvalue(&arg.expr),
         }
     }
 }

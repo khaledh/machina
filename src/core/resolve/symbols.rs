@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 
+use crate::core::ast::{EnumDefVariant, StructDefField, TypeExpr};
 use crate::core::resolve::DefId;
-use crate::core::tree::{EnumDefVariant, StructDefField, TypeExpr};
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum SymbolKind {

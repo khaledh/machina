@@ -12,13 +12,13 @@
 use std::collections::HashMap;
 use std::fmt;
 
-use crate::core::capsule::ModulePath;
-use crate::core::resolve::{DefId, DefTable};
-use crate::core::tree::ParamMode;
-use crate::core::tree::{
+use crate::core::ast::ParamMode;
+use crate::core::ast::{
     FunctionSig, MethodItem, MethodSig, Module, RefinementKind, TopLevelItem, TypeExpr,
     TypeExprKind, TypeParam,
 };
+use crate::core::capsule::ModulePath;
+use crate::core::resolve::{DefId, DefTable};
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct SymbolId {
@@ -261,7 +261,7 @@ impl SymbolIdTable {
                             SymbolNs::Type,
                         ),
                     );
-                    if let crate::core::tree::TypeDefKind::Enum { variants } = &type_def.kind {
+                    if let crate::core::ast::TypeDefKind::Enum { variants } = &type_def.kind {
                         for variant in variants {
                             table.record(
                                 def_table.lookup_node_def_id(variant.id),
@@ -404,7 +404,7 @@ fn callable_sig_key_for_method(
 
 fn callable_param_keys(
     type_params: &[TypeParam],
-    params: &[crate::core::tree::Param],
+    params: &[crate::core::ast::Param],
     def_table: &DefTable,
     module_path: &ModulePath,
 ) -> Vec<ParamKey> {

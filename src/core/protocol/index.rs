@@ -5,10 +5,10 @@
 
 use std::collections::{HashMap, HashSet};
 
+use crate::core::ast::{Module, ProtocolDef};
 use crate::core::context::TypestateRoleImplBinding;
 use crate::core::diag::Span;
 use crate::core::resolve::{DefId, DefTable};
-use crate::core::tree::{Module, ProtocolDef};
 use crate::core::typecheck::type_map::resolve_type_expr;
 use crate::core::types::Type;
 
@@ -88,7 +88,7 @@ pub struct ProtocolRequestContractFact {
 
 #[derive(Debug, Clone)]
 pub struct TypestateProtocolBindingFact {
-    pub node_id: crate::core::tree::NodeId,
+    pub node_id: crate::core::ast::NodeId,
     pub typestate_name: String,
     pub protocol_name: String,
     pub role_name: String,
@@ -100,7 +100,7 @@ pub struct TypestateProtocolBindingFact {
 
 #[derive(Debug, Clone)]
 pub struct TypestateProtocolPeerBindingFact {
-    pub node_id: crate::core::tree::NodeId,
+    pub node_id: crate::core::ast::NodeId,
     pub field_name: String,
     pub role_name: String,
     pub role_def_id: Option<DefId>,

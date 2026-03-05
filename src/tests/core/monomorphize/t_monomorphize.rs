@@ -1,3 +1,4 @@
+use crate::core::ast::{FuncDef, MethodItem, Module, TopLevelItem};
 use crate::core::context::ParsedContext;
 use crate::core::context::ResolvedContext;
 use crate::core::lexer::Lexer;
@@ -5,7 +6,6 @@ use crate::core::monomorphize::{monomorphize_resolved, monomorphize_resolved_wit
 use crate::core::parse::Parser;
 use crate::core::resolve::DefTable;
 use crate::core::resolve::resolve;
-use crate::core::tree::{FuncDef, MethodItem, Module, TopLevelItem};
 use crate::core::typecheck::type_check;
 
 fn resolve_context(source: &str) -> (ResolvedContext, DefTable) {

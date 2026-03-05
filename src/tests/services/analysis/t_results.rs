@@ -1,11 +1,11 @@
 use crate::core::api::{FrontendPolicy, ResolveInputs, resolve_stage_with_policy};
+use crate::core::ast::NodeIdGen;
 use crate::core::capsule::ModuleId;
 use crate::core::context::ParsedContext;
 use crate::core::context::ResolvedContext;
 use crate::core::lexer::{LexError, Lexer};
 use crate::core::parse::{Parser, ParserOptions};
 use crate::core::resolve::{ResolveError, resolve};
-use crate::core::tree::NodeIdGen;
 use crate::core::typecheck::type_check;
 use crate::services::analysis::results::{
     ResolvedModuleResult, SymbolLookup, TypeLookup, TypedModuleResult,

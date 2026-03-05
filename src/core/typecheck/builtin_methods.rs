@@ -4,7 +4,7 @@
 //! builtin methods on dynamic arrays, sets, and maps. Keeping this in one
 //! place prevents semantic drift between phases.
 
-use crate::core::tree::ParamMode;
+use crate::core::ast::ParamMode;
 use crate::core::types::Type;
 
 #[derive(Clone, Debug)]

@@ -9,9 +9,9 @@ use std::hash::Hash;
 use std::ops::Deref;
 use std::sync::Arc;
 
+use crate::core::ast::NodeId;
 use crate::core::resolve::def_table::DefTable;
 use crate::core::resolve::{Def, DefId};
-use crate::core::tree::NodeId;
 use crate::core::typecheck::type_map::TypeMap;
 use crate::core::types::{Type, TypeId};
 
@@ -269,6 +269,10 @@ impl DefTableOverlay {
         span: crate::core::diag::Span,
     ) {
         self.working.record_def_node(def_id, node_id, span);
+    }
+
+    pub fn record_use(&mut self, node_id: NodeId, def_id: DefId) {
+        self.working.record_use(node_id, def_id);
     }
 
     pub fn origin_for_def(&self, def_id: DefId) -> Option<FactOrigin> {

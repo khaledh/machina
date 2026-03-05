@@ -18,9 +18,9 @@
 //! use a conservative upper bound (20 chars for u64); string segments require
 //! runtime length queries.
 
+use crate::core::ast::{ExprKind, StringFmtSegment};
 use crate::core::elaborate::elaborator::Elaborator;
-use crate::core::tree as ast;
-use crate::core::tree::semantic as sem;
+use crate::core::plans::{FmtKind, LenTerm, SegmentKind, StringFmtPlan};
 use crate::core::types::Type;
 
 /// Maximum decimal digits in a u64 (used for reserve length estimation).
@@ -32,23 +32,23 @@ impl<'a> Elaborator<'a> {
     /// Build a formatting plan for a string interpolation expression.
     pub(in crate::core::elaborate::value) fn elab_string_fmt_plan(
         &mut self,
-        segments: &[ast::StringFmtSegment],
-    ) -> sem::StringFmtPlan {
+        segments: &[StringFmtSegment],
+    ) -> StringFmtPlan {
         let mut plan_segments = Vec::with_capacity(segments.len());
         let mut reserve_terms = Vec::new();
 
         for segment in segments {
             match segment {
-                ast::StringFmtSegment::Literal { value, .. } => {
+                StringFmtSegment::Literal { value, .. } => {
                     // Literal bytes contribute directly to both plan segments and reserve length.
-                    plan_segments.push(sem::SegmentKind::LiteralBytes(value.clone()));
-                    reserve_terms.push(sem::LenTerm::Literal(value.len()));
+                    plan_segments.push(SegmentKind::LiteralBytes(value.clone()));
+                    reserve_terms.push(LenTerm::Literal(value.len()));
                 }
-                ast::StringFmtSegment::Expr { expr, .. } => {
-                    if let ast::ExprKind::StringLit { value } = &expr.kind {
+                StringFmtSegment::Expr { expr, .. } => {
+                    if let ExprKind::StringLit { value } = &expr.kind {
                         // Inline string literals as literal bytes for cheaper view formatting.
-                        plan_segments.push(sem::SegmentKind::LiteralBytes(value.clone()));
-                        reserve_terms.push(sem::LenTerm::Literal(value.len()));
+                        plan_segments.push(SegmentKind::LiteralBytes(value.clone()));
+                        reserve_terms.push(LenTerm::Literal(value.len()));
                         continue;
                     }
 
@@ -62,25 +62,25 @@ impl<'a> Elaborator<'a> {
                             // String values require owned formatting and a dynamic reserve term.
                             let expr = self.elab_value(expr);
                             let segment_index = plan_segments.len();
-                            plan_segments.push(sem::SegmentKind::StringValue {
+                            plan_segments.push(SegmentKind::StringValue {
                                 expr: Box::new(expr),
                             });
-                            reserve_terms.push(sem::LenTerm::StringValue { segment_index });
+                            reserve_terms.push(LenTerm::StringValue { segment_index });
                         }
                         Type::Int { signed, bits, .. } => {
                             // Integers contribute a conservative literal reserve bound.
-                            plan_segments.push(sem::SegmentKind::Int {
+                            plan_segments.push(SegmentKind::Int {
                                 expr: Box::new(self.elab_value(expr)),
                                 signed,
                                 bits,
                             });
-                            reserve_terms.push(sem::LenTerm::Literal(MAX_U64_DEC_LEN));
+                            reserve_terms.push(LenTerm::Literal(MAX_U64_DEC_LEN));
                         }
                         Type::Bool => {
-                            plan_segments.push(sem::SegmentKind::Bool {
+                            plan_segments.push(SegmentKind::Bool {
                                 expr: Box::new(self.elab_value(expr)),
                             });
-                            reserve_terms.push(sem::LenTerm::Literal(MAX_BOOL_LEN));
+                            reserve_terms.push(LenTerm::Literal(MAX_BOOL_LEN));
                         }
                         _ => {
                             panic!("compiler bug: unsupported f-string expr type");
@@ -93,14 +93,14 @@ impl<'a> Elaborator<'a> {
         // Any dynamic string segment forces the owned formatter path.
         let kind = if plan_segments
             .iter()
-            .any(|segment| matches!(segment, sem::SegmentKind::StringValue { .. }))
+            .any(|segment| matches!(segment, SegmentKind::StringValue { .. }))
         {
-            sem::FmtKind::Owned
+            FmtKind::Owned
         } else {
-            sem::FmtKind::View
+            FmtKind::View
         };
 
-        sem::StringFmtPlan {
+        StringFmtPlan {
             kind,
             segments: plan_segments,
             reserve_terms,

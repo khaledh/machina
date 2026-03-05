@@ -1,10 +1,10 @@
 use crate::core::api::{FrontendPolicy, ResolveInputs, resolve_stage_with_policy};
+use crate::core::ast::NodeIdGen;
 use crate::core::context::ParsedContext;
 use crate::core::lexer::{LexError, Lexer, Token};
 use crate::core::parse::{Parser, ParserOptions};
 use crate::core::resolve::ImportedFacts;
 use crate::core::semck::sem_check;
-use crate::core::tree::NodeIdGen;
 use crate::core::typecheck::type_check_with_imported_facts;
 
 fn semcheck_typestate_source(source: &str) -> crate::core::context::SemanticCheckedContext {

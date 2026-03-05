@@ -6,6 +6,8 @@
 
 use std::collections::{HashMap, HashSet};
 
+use crate::core::ast::visit::{self, Visitor};
+use crate::core::ast::{EmitKind, Expr, ExprKind, MethodBlock, MethodItem, Module};
 use crate::core::context::SemCheckNormalizedContext;
 use crate::core::machine::naming::{
     is_generated_handler_name, parse_generated_handler_site_label, parse_generated_state_name,
@@ -14,8 +16,6 @@ use crate::core::protocol::event_extract::extract_emit_from_expr;
 use crate::core::resolve::DefTable;
 use crate::core::semck::typestate_scan::collect_generated_typestate_handlers;
 use crate::core::semck::{SEK, SemCheckError, push_error};
-use crate::core::tree::visit::{self, Visitor};
-use crate::core::tree::{EmitKind, Expr, ExprKind, MethodBlock, MethodItem, Module};
 use crate::core::typecheck::type_map::resolve_type_expr;
 use crate::core::types::Type;
 

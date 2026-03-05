@@ -2,16 +2,15 @@ use std::collections::{HashMap, HashSet};
 use std::ops::{Deref, DerefMut};
 use std::path::PathBuf;
 
+use crate::core::ast::{Module, NodeId, NodeIdGen, TypeExpr};
 use crate::core::capsule::{ModuleId, ModulePath};
 use crate::core::codegen_names::CodegenNameTable;
 use crate::core::diag::Span;
+use crate::core::plans::{DropPlanMap, LoweringPlanMap, MachinePlanMap};
 use crate::core::protocol::ProtocolIndex;
 use crate::core::resolve::{DefId, DefTable};
 use crate::core::semck::closure::capture::ClosureCapture;
 use crate::core::symbol_id::SymbolIdTable;
-use crate::core::tree::semantic::Module as SemanticModule;
-use crate::core::tree::semantic::{DropPlanMap, LoweringPlanMap, MachinePlanMap};
-use crate::core::tree::{Module, NodeId, NodeIdGen, TypeExpr};
 use crate::core::typecheck::type_map::{CallSigMap, GenericInstMap, TypeMap};
 use crate::core::types::Type;
 
@@ -435,7 +434,7 @@ impl DerefMut for SemanticCheckedContext {
 
 #[derive(Debug, Clone)]
 pub struct SemanticContext {
-    pub module: SemanticModule,
+    pub module: Module,
     pub payload: SemanticPayload,
 }
 
@@ -460,7 +459,7 @@ impl DerefMut for SemanticContext {
 
 #[derive(Debug, Clone)]
 pub struct AnalyzedContext {
-    pub module: SemanticModule,
+    pub module: Module,
     pub payload: SemanticPayload,
 }
 

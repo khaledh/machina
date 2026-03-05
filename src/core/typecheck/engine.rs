@@ -9,10 +9,10 @@
 
 use std::collections::{BTreeMap, HashMap, HashSet};
 
+use crate::core::ast::ParamMode;
 use crate::core::context::{ResolvedContext, TypeCheckedContext};
 use crate::core::diag::Span;
 use crate::core::resolve::{DefId, ImportedFacts};
-use crate::core::tree::ParamMode;
 use crate::core::typecheck::errors::TypeCheckError;
 use crate::core::types::{TyVarId, Type};
 

@@ -3,17 +3,15 @@
 //! The drop plan records scope-based drops and control-flow drop depths so
 //! SSA lowering can emit drops without re-deriving semantic intent.
 
+use crate::core::ast::{
+    ArrayLitInit, BindPattern, BindPatternKind, BlockItem, EmitKind, Expr, ExprKind, FuncDef,
+    MethodDef, MethodItem, Module, NodeId, ParamMode, StmtExpr, StmtExprKind,
+};
+use crate::core::plans::{DropGuard, DropItem, DropPlanMap, DropScopePlan};
 use crate::core::resolve::{DefId, DefTable};
-use crate::core::tree as ast;
-use crate::core::tree::semantic as sem;
-use crate::core::tree::semantic::{DropGuard, DropItem, DropPlanMap, DropScopePlan};
 use crate::core::typecheck::type_map::TypeMap;
 
-pub fn build_drop_plans(
-    module: &sem::Module,
-    def_table: &DefTable,
-    type_map: &TypeMap,
-) -> DropPlanMap {
+pub fn build_drop_plans(module: &Module, def_table: &DefTable, type_map: &TypeMap) -> DropPlanMap {
     let mut builder = DropPlanBuilder::new(def_table, type_map);
 
     for func_def in module.func_defs() {
@@ -22,7 +20,7 @@ pub fn build_drop_plans(
 
     for method_block in module.method_blocks() {
         for method_item in &method_block.method_items {
-            let sem::MethodItem::Def(method_def) = method_item else {
+            let MethodItem::Def(method_def) = method_item else {
                 continue;
             };
             builder.visit_method_def(method_def);
@@ -63,7 +61,7 @@ impl<'a> DropPlanBuilder<'a> {
         self.scope_stack.push(DropScopePlan::default());
     }
 
-    fn exit_scope(&mut self, id: ast::NodeId) {
+    fn exit_scope(&mut self, id: NodeId) {
         let scope = self
             .scope_stack
             .pop()
@@ -103,20 +101,23 @@ impl<'a> DropPlanBuilder<'a> {
         });
     }
 
-    fn register_pattern_drop(&mut self, pattern: &sem::BindPattern, guard: DropGuard) {
+    fn register_pattern_drop(&mut self, pattern: &BindPattern, guard: DropGuard) {
         match &pattern.kind {
-            sem::BindPatternKind::Name { def_id, .. } => self.register_def_drop(*def_id, guard),
-            sem::BindPatternKind::Array { patterns } => {
+            BindPatternKind::Name { .. } => {
+                let def_id = self.def_table.def_id(pattern.id);
+                self.register_def_drop(def_id, guard);
+            }
+            BindPatternKind::Array { patterns } => {
                 for pat in patterns {
                     self.register_pattern_drop(pat, guard);
                 }
             }
-            sem::BindPatternKind::Tuple { fields } => {
-                for field in fields {
-                    self.register_pattern_drop(&field.pattern, guard);
+            BindPatternKind::Tuple { patterns } => {
+                for pat in patterns {
+                    self.register_pattern_drop(pat, guard);
                 }
             }
-            sem::BindPatternKind::Struct { fields, .. } => {
+            BindPatternKind::Struct { fields, .. } => {
                 for field in fields {
                     self.register_pattern_drop(&field.pattern, guard);
                 }
@@ -126,12 +127,12 @@ impl<'a> DropPlanBuilder<'a> {
 
     // --- Tree walk ---
 
-    fn visit_func_def(&mut self, func_def: &sem::FuncDef) {
+    fn visit_func_def(&mut self, func_def: &FuncDef) {
         // Function-level scope for params and locals.
         self.enter_scope();
 
         for param in &func_def.sig.params {
-            if param.mode != ast::ParamMode::Sink {
+            if param.mode != ParamMode::Sink {
                 continue;
             }
             // Sink params can be moved; guard drops on the liveness flag.
@@ -143,12 +144,12 @@ impl<'a> DropPlanBuilder<'a> {
         self.exit_scope(func_def.id);
     }
 
-    fn visit_method_def(&mut self, method_def: &sem::MethodDef) {
+    fn visit_method_def(&mut self, method_def: &MethodDef) {
         // Method bodies get the same drop planning as functions.
         self.enter_scope();
 
         let self_param = &method_def.sig.self_param;
-        if self_param.mode == ast::ParamMode::Sink {
+        if self_param.mode == ParamMode::Sink {
             // Sink receiver can be moved; guard drops on the liveness flag.
             self.register_def_drop(
                 self.def_table.def_id(self_param.id),
@@ -157,7 +158,7 @@ impl<'a> DropPlanBuilder<'a> {
         }
 
         for param in &method_def.sig.params {
-            if param.mode != ast::ParamMode::Sink {
+            if param.mode != ParamMode::Sink {
                 continue;
             }
             // Sink params can be moved; guard drops on the liveness flag.
@@ -169,19 +170,14 @@ impl<'a> DropPlanBuilder<'a> {
         self.exit_scope(method_def.id);
     }
 
-    fn visit_block(
-        &mut self,
-        expr: &sem::ValueExpr,
-        items: &[sem::BlockItem],
-        tail: Option<&sem::ValueExpr>,
-    ) {
+    fn visit_block(&mut self, expr: &Expr, items: &[BlockItem], tail: Option<&Expr>) {
         // Each block introduces a new drop scope.
         self.enter_scope();
 
         for item in items {
             match item {
-                sem::BlockItem::Stmt(stmt) => self.visit_stmt_expr(stmt),
-                sem::BlockItem::Expr(expr) => self.visit_value_expr(expr),
+                BlockItem::Stmt(stmt) => self.visit_stmt_expr(stmt),
+                BlockItem::Expr(expr) => self.visit_value_expr(expr),
             }
         }
 
@@ -192,25 +188,26 @@ impl<'a> DropPlanBuilder<'a> {
         self.exit_scope(expr.id);
     }
 
-    fn visit_stmt_expr(&mut self, stmt: &sem::StmtExpr) {
+    fn visit_stmt_expr(&mut self, stmt: &StmtExpr) {
         match &stmt.kind {
-            sem::StmtExprKind::LetBind { pattern, value, .. }
-            | sem::StmtExprKind::VarBind { pattern, value, .. } => {
+            StmtExprKind::LetBind { pattern, value, .. }
+            | StmtExprKind::VarBind { pattern, value, .. } => {
                 self.visit_value_expr(value);
                 // Use drop flags for move-sensitive bindings so moved-out values
                 // don't get dropped at scope exit.
                 self.register_pattern_drop(pattern, DropGuard::IfInitialized);
             }
-            sem::StmtExprKind::VarDecl { def_id, .. } => {
-                self.register_def_drop(*def_id, DropGuard::IfInitialized);
+            StmtExprKind::VarDecl { .. } => {
+                let def_id = self.def_table.def_id(stmt.id);
+                self.register_def_drop(def_id, DropGuard::IfInitialized);
             }
-            sem::StmtExprKind::Assign {
+            StmtExprKind::Assign {
                 assignee, value, ..
             } => {
                 self.visit_place_expr(assignee);
                 self.visit_value_expr(value);
             }
-            sem::StmtExprKind::While { cond, body } => {
+            StmtExprKind::While { cond, body } => {
                 self.visit_value_expr(cond);
 
                 // Record the drop depth for breaks/continues inside this loop.
@@ -219,7 +216,7 @@ impl<'a> DropPlanBuilder<'a> {
                 self.visit_value_expr(body);
                 self.loop_stack.pop();
             }
-            sem::StmtExprKind::For {
+            StmtExprKind::For {
                 pattern,
                 iter,
                 body,
@@ -233,114 +230,110 @@ impl<'a> DropPlanBuilder<'a> {
                 self.visit_value_expr(body);
                 self.loop_stack.pop();
             }
-            sem::StmtExprKind::Break | sem::StmtExprKind::Continue => {
+            StmtExprKind::Break | StmtExprKind::Continue => {
                 if let Some(depth) = self.loop_stack.last().copied() {
                     // Lowering drops all scopes deeper than this depth.
                     self.plans.insert_depth(stmt.id, depth);
                 }
             }
-            sem::StmtExprKind::Return { value } => {
+            StmtExprKind::Return { value } => {
                 if let Some(value) = value {
                     self.visit_value_expr(value);
                 }
                 // Return exits all scopes in the function.
                 self.plans.insert_depth(stmt.id, 0);
             }
-            sem::StmtExprKind::Defer { .. } | sem::StmtExprKind::Using { .. } => {
+            StmtExprKind::Defer { .. } | StmtExprKind::Using { .. } => {
                 unreachable!("syntax desugar must remove defer/using before drop planning");
+            }
+            StmtExprKind::CompoundAssign { .. } => {
+                unreachable!("normalize must desugar compound assignment before drop planning");
             }
         }
     }
 
-    fn visit_place_expr(&mut self, place: &sem::PlaceExpr) {
+    fn visit_place_expr(&mut self, place: &Expr) {
         match &place.kind {
-            sem::PlaceExprKind::Var { .. } => {}
-            sem::PlaceExprKind::Deref { value } => self.visit_value_expr(value),
-            sem::PlaceExprKind::ArrayIndex { target, indices } => {
+            ExprKind::Var { .. } => {}
+            ExprKind::Deref { expr } => self.visit_value_expr(expr),
+            ExprKind::ArrayIndex { target, indices } => {
                 self.visit_place_expr(target);
                 for index in indices {
                     self.visit_value_expr(index);
                 }
             }
-            sem::PlaceExprKind::StructField { target, .. }
-            | sem::PlaceExprKind::TupleField { target, .. } => {
+            ExprKind::StructField { target, .. } | ExprKind::TupleField { target, .. } => {
                 self.visit_place_expr(target);
             }
+            _ => {}
         }
     }
 
-    fn visit_value_expr(&mut self, expr: &sem::ValueExpr) {
+    fn visit_value_expr(&mut self, expr: &Expr) {
         match &expr.kind {
-            sem::ValueExprKind::Block { items, tail } => {
+            ExprKind::Block { items, tail } => {
                 self.visit_block(expr, items, tail.as_deref());
             }
-            sem::ValueExprKind::UnitLit
-            | sem::ValueExprKind::IntLit(_)
-            | sem::ValueExprKind::BoolLit(_)
-            | sem::ValueExprKind::CharLit(_)
-            | sem::ValueExprKind::StringLit { .. }
-            | sem::ValueExprKind::Range { .. }
-            | sem::ValueExprKind::ClosureRef { .. } => {}
-            sem::ValueExprKind::StringFmt { plan } => {
-                for segment in &plan.segments {
-                    match segment {
-                        sem::SegmentKind::Bool { expr }
-                        | sem::SegmentKind::Int { expr, .. }
-                        | sem::SegmentKind::StringValue { expr } => {
-                            self.visit_value_expr(expr);
-                        }
-                        sem::SegmentKind::LiteralBytes(_) => {}
-                    }
-                }
+            ExprKind::UnitLit
+            | ExprKind::IntLit(_)
+            | ExprKind::BoolLit(_)
+            | ExprKind::CharLit(_)
+            | ExprKind::StringLit { .. }
+            | ExprKind::Range { .. }
+            | ExprKind::ClosureRef { .. } => {}
+            ExprKind::StringFmt { .. } => {
+                // StringFmt segments are handled via the plan side table; the
+                // AST variant carries raw segments that don't need
+                // drop-plan traversal.
             }
-            sem::ValueExprKind::ArrayLit { init, .. } => match init {
-                sem::ArrayLitInit::Elems(elems) => {
+            ExprKind::ArrayLit { init, .. } => match init {
+                ArrayLitInit::Elems(elems) => {
                     for elem in elems {
                         self.visit_value_expr(elem);
                     }
                 }
-                sem::ArrayLitInit::Repeat(expr, _) => {
+                ArrayLitInit::Repeat(expr, _) => {
                     self.visit_value_expr(expr);
                 }
             },
-            sem::ValueExprKind::SetLit { elems, .. } => {
+            ExprKind::SetLit { elems, .. } => {
                 for elem in elems {
                     self.visit_value_expr(elem);
                 }
             }
-            sem::ValueExprKind::MapLit { entries, .. } => {
+            ExprKind::MapLit { entries, .. } => {
                 for entry in entries {
                     self.visit_value_expr(&entry.key);
                     self.visit_value_expr(&entry.value);
                 }
             }
-            sem::ValueExprKind::TupleLit(items) => {
+            ExprKind::TupleLit(items) => {
                 for item in items {
                     self.visit_value_expr(item);
                 }
             }
-            sem::ValueExprKind::StructLit { fields, .. } => {
+            ExprKind::StructLit { fields, .. } => {
                 for field in fields {
                     self.visit_value_expr(&field.value);
                 }
             }
-            sem::ValueExprKind::EnumVariant { payload, .. } => {
+            ExprKind::EnumVariant { payload, .. } => {
                 for expr in payload {
                     self.visit_value_expr(expr);
                 }
             }
-            sem::ValueExprKind::StructUpdate { target, fields } => {
+            ExprKind::StructUpdate { target, fields } => {
                 self.visit_value_expr(target);
                 for field in fields {
                     self.visit_value_expr(&field.value);
                 }
             }
-            sem::ValueExprKind::BinOp { left, right, .. } => {
+            ExprKind::BinOp { left, right, .. } => {
                 self.visit_value_expr(left);
                 self.visit_value_expr(right);
             }
-            sem::ValueExprKind::UnaryOp { expr, .. } => self.visit_value_expr(expr),
-            sem::ValueExprKind::Try {
+            ExprKind::UnaryOp { expr, .. } => self.visit_value_expr(expr),
+            ExprKind::Try {
                 fallible_expr,
                 on_error,
             } => {
@@ -349,15 +342,13 @@ impl<'a> DropPlanBuilder<'a> {
                     self.visit_value_expr(handler);
                 }
             }
-            sem::ValueExprKind::HeapAlloc { expr } => self.visit_value_expr(expr),
-            sem::ValueExprKind::Move { place } | sem::ValueExprKind::ImplicitMove { place } => {
-                self.visit_place_expr(place)
+            ExprKind::HeapAlloc { expr } => self.visit_value_expr(expr),
+            ExprKind::Move { expr } | ExprKind::ImplicitMove { expr } => {
+                self.visit_place_expr(expr)
             }
-            sem::ValueExprKind::Coerce { expr, .. } => self.visit_value_expr(expr),
-            sem::ValueExprKind::AddrOf { place } | sem::ValueExprKind::Load { place } => {
-                self.visit_place_expr(place)
-            }
-            sem::ValueExprKind::If {
+            ExprKind::Coerce { expr, .. } => self.visit_value_expr(expr),
+            ExprKind::AddrOf { expr } | ExprKind::Load { expr } => self.visit_place_expr(expr),
+            ExprKind::If {
                 cond,
                 then_body,
                 else_body,
@@ -366,7 +357,7 @@ impl<'a> DropPlanBuilder<'a> {
                 self.visit_value_expr(then_body);
                 self.visit_value_expr(else_body);
             }
-            sem::ValueExprKind::Slice { target, start, end } => {
+            ExprKind::Slice { target, start, end } => {
                 self.visit_place_expr(target);
                 if let Some(start) = start {
                     self.visit_value_expr(start);
@@ -375,58 +366,53 @@ impl<'a> DropPlanBuilder<'a> {
                     self.visit_value_expr(end);
                 }
             }
-            sem::ValueExprKind::MapGet { target, key } => {
+            ExprKind::MapGet { target, key } => {
                 self.visit_value_expr(target);
                 self.visit_value_expr(key);
             }
-            sem::ValueExprKind::Len { place } => self.visit_place_expr(place),
-            sem::ValueExprKind::Match { scrutinee, arms } => {
+            ExprKind::Len { expr } => self.visit_place_expr(expr),
+            ExprKind::Match { scrutinee, arms } => {
                 self.visit_value_expr(scrutinee);
                 for arm in arms {
                     self.visit_value_expr(&arm.body);
                 }
             }
-            sem::ValueExprKind::Call { callee, args } => {
+            ExprKind::Call { callee, args } => {
                 self.visit_value_expr(callee);
                 for arg in args {
-                    match arg {
-                        sem::CallArg::In { expr, .. } | sem::CallArg::Sink { expr, .. } => {
-                            self.visit_value_expr(expr);
-                        }
-                        sem::CallArg::InOut { place, .. } | sem::CallArg::Out { place, .. } => {
-                            self.visit_place_expr(place);
-                        }
-                    }
+                    self.visit_value_expr(&arg.expr);
                 }
             }
-            sem::ValueExprKind::MethodCall { receiver, args, .. } => {
-                match receiver {
-                    sem::MethodReceiver::ValueExpr(expr) => self.visit_value_expr(expr),
-                    sem::MethodReceiver::PlaceExpr(place) => self.visit_place_expr(place),
-                }
+            ExprKind::MethodCall { callee, args, .. } => {
+                self.visit_value_expr(callee);
                 for arg in args {
-                    match arg {
-                        sem::CallArg::In { expr, .. } | sem::CallArg::Sink { expr, .. } => {
-                            self.visit_value_expr(expr);
-                        }
-                        sem::CallArg::InOut { place, .. } | sem::CallArg::Out { place, .. } => {
-                            self.visit_place_expr(place);
-                        }
-                    }
+                    self.visit_value_expr(&arg.expr);
                 }
             }
-            sem::ValueExprKind::EmitSend { to, payload }
-            | sem::ValueExprKind::EmitRequest {
-                to,
-                payload,
-                request_site_key: _,
-            } => {
-                self.visit_value_expr(to);
-                self.visit_value_expr(payload);
-            }
-            sem::ValueExprKind::Reply { cap, value } => {
+            ExprKind::Emit { kind } => match kind {
+                EmitKind::Send { to, payload } => {
+                    self.visit_value_expr(to);
+                    self.visit_value_expr(payload);
+                }
+                EmitKind::Request { to, payload, .. } => {
+                    self.visit_value_expr(to);
+                    self.visit_value_expr(payload);
+                }
+            },
+            ExprKind::Reply { cap, value } => {
                 self.visit_value_expr(cap);
                 self.visit_value_expr(value);
+            }
+            ExprKind::Var { .. }
+            | ExprKind::Deref { .. }
+            | ExprKind::ArrayIndex { .. }
+            | ExprKind::TupleField { .. }
+            | ExprKind::StructField { .. }
+            | ExprKind::Closure { .. } => {
+                // These are place expressions or closures that appear inline.
+                // Place expressions at value position would have been wrapped in
+                // Load/Move by elaboration. If they still appear raw, they don't
+                // require drop-plan traversal beyond what their sub-expressions need.
             }
         }
     }

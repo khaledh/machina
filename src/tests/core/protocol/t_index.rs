@@ -1,4 +1,5 @@
 use crate::core::api::{FrontendPolicy, ResolveInputs, resolve_stage_with_policy};
+use crate::core::ast::NodeIdGen;
 use crate::core::context::{ParsedContext, ResolvedContext};
 use crate::core::lexer::{LexError, Lexer, Token};
 use crate::core::parse::{Parser, ParserOptions};
@@ -11,7 +12,7 @@ fn resolve_source(source: &str) -> ResolvedContext {
         .expect("failed to tokenize");
     let mut parser = Parser::new_with_id_gen_and_options(
         &tokens,
-        crate::core::tree::NodeIdGen::new(),
+        NodeIdGen::new(),
         ParserOptions {
             experimental_typestate: true,
         },

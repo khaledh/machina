@@ -10,14 +10,13 @@
 //! `Elaborator` implementation to preserve behavior while making subsequent
 //! extraction work mechanical.
 
-use crate::core::tree as ast;
-use crate::core::tree::semantic as sem;
+use crate::core::ast::Module;
 
 use super::elaborator::Elaborator;
 use super::syntax_desugar;
 
 /// Run explicit pass boundaries for elaboration.
-pub(super) fn run(elaborator: &mut Elaborator<'_>, module: &ast::Module) -> sem::Module {
+pub(super) fn run(elaborator: &mut Elaborator<'_>, module: &Module) -> Module {
     elaborator.reset_module_state();
 
     // Pass 1: place/value lowering + plan capture.
@@ -27,8 +26,9 @@ pub(super) fn run(elaborator: &mut Elaborator<'_>, module: &ast::Module) -> sem:
     // Pass 2: materialize closure conversion artifacts into top-level items.
     elaborator.append_lifted_closure_items(&mut items);
 
-    // Pass 3: syntax-level desugaring over the semantic tree.
-    let mut module = sem::Module {
+    // Pass 3: syntax-level desugaring over the elaborated AST.
+    let mut module = Module {
+        requires: Vec::new(),
         top_level_items: items,
     };
     syntax_desugar::run(elaborator, &mut module);

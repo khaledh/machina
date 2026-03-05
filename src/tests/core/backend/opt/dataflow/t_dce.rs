@@ -59,7 +59,7 @@ fn test_dce_keeps_call() {
 
     let main_def = ctx.module.func_defs()[0];
     let side_def = ctx.module.func_defs()[1];
-    let side_id = side_def.def_id;
+    let side_id = ctx.def_table.def_id(side_def.id);
 
     let mut lowered = lower_func(
         main_def,

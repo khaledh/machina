@@ -1,13 +1,13 @@
 //! Syntax span indexing helpers for analysis queries.
 //!
-//! These utilities walk tree nodes once and provide reusable lookups used by
+//! These utilities walk AST nodes once and provide reusable lookups used by
 //! hover, go-to-definition, signature help, document symbols, and references.
 
 use std::collections::HashMap;
 
+use crate::core::ast::visit::{self, Visitor};
+use crate::core::ast::*;
 use crate::core::diag::{Position, Span};
-use crate::core::tree::visit::{self, Visitor};
-use crate::core::tree::*;
 use crate::services::analysis::results::DocumentSymbolKind;
 
 #[derive(Clone, Debug)]

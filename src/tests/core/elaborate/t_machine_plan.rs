@@ -23,7 +23,7 @@ fn fallback_prefix_len_stops_at_first_state_divergence() {
         ordinal,
         state_name: "S".to_string(),
         state_layout_ty: dummy_type_id(),
-        event_key: sem::MachineEventKeyPlan::Payload {
+        event_key: MachineEventKeyPlan::Payload {
             payload_ty: named_payload(event),
         },
         request_site_key_match: None,
@@ -54,15 +54,15 @@ fn fallback_prefix_len_stops_at_first_state_divergence() {
 fn dispatch_rows_include_local_and_fallback_channels() {
     let state_tag_by_name = HashMap::from([("A".to_string(), 1), ("B".to_string(), 2)]);
     let event_kinds = vec![
-        sem::MachineEventKindPlan {
-            key: sem::MachineEventKeyPlan::Payload {
+        MachineEventKindPlan {
+            key: MachineEventKeyPlan::Payload {
                 payload_ty: named_payload("Ping"),
             },
             payload_layout_ty: dummy_type_id(),
             kind: 1,
         },
-        sem::MachineEventKindPlan {
-            key: sem::MachineEventKeyPlan::Payload {
+        MachineEventKindPlan {
+            key: MachineEventKeyPlan::Payload {
                 payload_ty: named_payload("Pong"),
             },
             payload_layout_ty: dummy_type_id(),
@@ -150,7 +150,7 @@ fn dispatch_rows_include_local_and_fallback_channels() {
 
 #[test]
 fn fallback_prefix_len_requires_shared_handler_identity() {
-    let event_key = sem::MachineEventKeyPlan::Payload {
+    let event_key = MachineEventKeyPlan::Payload {
         payload_ty: named_payload("Ping"),
     };
     let state_a = StatePlanSeed {

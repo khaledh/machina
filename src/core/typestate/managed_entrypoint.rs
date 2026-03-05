@@ -46,7 +46,7 @@ fn wrap_main_with_managed_runtime(main: &mut FuncDef, node_id_gen: &mut NodeIdGe
         id: node_id_gen.new_id(),
         kind: ExprKind::BinOp {
             left: Box::new(var_expr("__mc_step_status", node_id_gen, span)),
-            op: crate::core::tree::BinaryOp::Eq,
+            op: BinaryOp::Eq,
             right: Box::new(int_expr(1, node_id_gen, span)),
         },
         span,
@@ -55,7 +55,7 @@ fn wrap_main_with_managed_runtime(main: &mut FuncDef, node_id_gen: &mut NodeIdGe
         id: node_id_gen.new_id(),
         kind: ExprKind::BinOp {
             left: Box::new(var_expr("__mc_rt", node_id_gen, span)),
-            op: crate::core::tree::BinaryOp::Ne,
+            op: BinaryOp::Ne,
             right: Box::new(int_expr(0, node_id_gen, span)),
         },
         span,

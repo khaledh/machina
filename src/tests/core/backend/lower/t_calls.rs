@@ -1,5 +1,5 @@
 use super::{analyze, assert_ir_eq, format_func, indoc, lower_func};
-use crate::core::tree::semantic::MethodItem;
+use crate::core::ast::MethodItem;
 
 #[test]
 fn test_lower_call_with_params() {
@@ -14,7 +14,7 @@ fn test_lower_call_with_params() {
     "});
     let add_def = ctx.module.func_defs()[0];
     let main_def = ctx.module.func_defs()[1];
-    let add_id = add_def.def_id;
+    let add_id = ctx.def_table.def_id(add_def.id);
 
     let lowered = lower_func(
         main_def,
@@ -55,7 +55,7 @@ fn test_lower_call_stmt() {
     "});
     let add_def = ctx.module.func_defs()[0];
     let main_def = ctx.module.func_defs()[1];
-    let add_id = add_def.def_id;
+    let add_id = ctx.def_table.def_id(add_def.id);
 
     let lowered = lower_func(
         main_def,
@@ -109,7 +109,7 @@ fn test_lower_method_call_param() {
             MethodItem::Decl(_) => None,
         })
         .expect("missing method def");
-    let method_def_id = method_def.def_id;
+    let method_def_id = ctx.def_table.def_id(method_def.id);
 
     let main_def = ctx.module.func_defs()[0];
 
@@ -190,7 +190,7 @@ fn test_lower_call_array_to_slice_arg() {
     "});
     let take_def = ctx.module.func_defs()[0];
     let main_def = ctx.module.func_defs()[1];
-    let take_id = take_def.def_id;
+    let take_id = ctx.def_table.def_id(take_def.id);
 
     let lowered = lower_func(
         main_def,
@@ -268,7 +268,7 @@ fn test_lower_indirect_call() {
     "});
     let add_def = ctx.module.func_defs()[0];
     let main_def = ctx.module.func_defs()[1];
-    let add_id = add_def.def_id;
+    let add_id = ctx.def_table.def_id(add_def.id);
 
     let lowered = lower_func(
         main_def,

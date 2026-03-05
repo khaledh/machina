@@ -7,14 +7,14 @@
 use std::collections::HashMap;
 
 use crate::core::analysis::dataflow::{DataflowGraph, solve_forward};
+use crate::core::ast::cfg::{AstBlockId, Cfg, CfgBuilder, CfgItem, CfgNode};
+use crate::core::ast::visit::{self, Visitor};
+use crate::core::ast::{Expr, ExprKind, MethodBlock, MethodDef, Module, NodeId, StmtExpr};
 use crate::core::context::SemCheckNormalizedContext;
 use crate::core::machine::naming::{is_generated_handler_name, is_generated_state_name};
 use crate::core::resolve::{DefId, DefTable};
 use crate::core::semck::typestate_scan::collect_generated_typestate_handlers;
 use crate::core::semck::{SEK, SemCheckError, push_error};
-use crate::core::tree::cfg::{AstBlockId, Cfg, CfgBuilder, CfgItem, CfgNode};
-use crate::core::tree::visit::{self, Visitor};
-use crate::core::tree::{Expr, ExprKind, MethodBlock, MethodDef, Module, NodeId, StmtExpr};
 use crate::core::typecheck::type_map::resolve_type_expr;
 use crate::core::types::{Type, TypeAssignability, type_assignable};
 
@@ -84,7 +84,7 @@ struct ReplyCapParam {
 }
 
 fn collect_handler_reply_caps(
-    def_table: &crate::core::resolve::DefTable,
+    def_table: &DefTable,
     module: &Module,
     method_def: &MethodDef,
 ) -> Vec<ReplyCapParam> {
@@ -114,7 +114,7 @@ struct ReplySite {
 }
 
 fn check_handler_reply_calls(
-    def_table: &crate::core::resolve::DefTable,
+    def_table: &DefTable,
     method_def: &MethodDef,
     cap_params: &[ReplyCapParam],
     type_map: &crate::core::typecheck::type_map::TypeMap,
@@ -174,7 +174,7 @@ enum ReplyCapFlowState {
 }
 
 fn check_handler_reply_cap_linearity(
-    def_table: &crate::core::resolve::DefTable,
+    def_table: &DefTable,
     method_def: &MethodDef,
     cap_params: &[ReplyCapParam],
 ) -> Vec<SemCheckError> {

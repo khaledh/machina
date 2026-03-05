@@ -43,13 +43,15 @@
 //! ```
 
 use crate::core::analysis::facts::SyntheticReason;
+use crate::core::ast::{
+    BindPattern, BindPatternKind, Expr, ExprKind, FuncDef, FunctionSig, MethodBlock, MethodDef,
+    MethodItem, MethodSig, Module, NodeId, Param, ParamMode, SelfParam, StructDefField,
+    TopLevelItem, TypeDef, TypeDefKind, TypeExpr,
+};
 use crate::core::codegen_names::CodegenNameTable;
 use crate::core::diag::Span;
 use crate::core::resolve::{DefId, DefKind, TypeAttrs};
 use crate::core::semck::closure::capture::CaptureMode;
-use crate::core::tree as ast;
-use crate::core::tree::semantic as sem;
-use crate::core::tree::{NodeId, ParamMode};
 use crate::core::types::{StructField, Type, TypeId};
 
 use super::elaborator::{CaptureField, ClosureContext, ClosureInfo, Elaborator};
@@ -60,26 +62,31 @@ use std::collections::HashSet;
 /// Closure conversion synthesizes method defs that do not exist in the initial
 /// resolved symbol table. Add stable backend names so downstream IR/codegen
 /// formatting can print and reference them.
-pub(super) fn register_lifted_method_symbols(module: &sem::Module, symbols: &mut CodegenNameTable) {
+pub(super) fn register_lifted_method_symbols(
+    module: &Module,
+    def_table: &crate::core::analysis::facts::DefTableOverlay,
+    symbols: &mut CodegenNameTable,
+) {
     let mut used_names: HashSet<String> = symbols.def_names.values().cloned().collect();
     for method_block in module.method_blocks() {
         let type_name = method_block.type_name.as_str();
         for method_item in &method_block.method_items {
             let method_def = match method_item {
-                sem::MethodItem::Def(method_def) => method_def,
-                sem::MethodItem::Decl(_) => continue,
+                MethodItem::Def(method_def) => method_def,
+                MethodItem::Decl(_) => continue,
             };
-            if symbols.def_names.contains_key(&method_def.def_id) {
+            let method_def_id = def_table.def_id(method_def.id);
+            if symbols.def_names.contains_key(&method_def_id) {
                 continue;
             }
             let base_name = format!("{type_name}${}", method_def.sig.name);
             let name = if used_names.contains(&base_name) {
-                format!("{base_name}${}", method_def.def_id.0)
+                format!("{base_name}${}", method_def_id.0)
             } else {
                 base_name
             };
             used_names.insert(name.clone());
-            symbols.register_generated_def(method_def.def_id, name);
+            symbols.register_generated_def(method_def_id, name);
         }
     }
 }
@@ -87,17 +94,14 @@ pub(super) fn register_lifted_method_symbols(module: &sem::Module, symbols: &mut
 impl<'a> Elaborator<'a> {
     /// Append lifted closure artifacts (types/methods/functions) to module
     /// items. This is the closure-conversion materialization boundary.
-    pub(super) fn append_lifted_closure_items(
-        &mut self,
-        top_level_items: &mut Vec<sem::TopLevelItem>,
-    ) {
-        top_level_items.extend(self.closure_types.drain(..).map(sem::TopLevelItem::TypeDef));
+    pub(super) fn append_lifted_closure_items(&mut self, top_level_items: &mut Vec<TopLevelItem>) {
+        top_level_items.extend(self.closure_types.drain(..).map(TopLevelItem::TypeDef));
         top_level_items.extend(
             self.closure_methods
                 .drain(..)
-                .map(sem::TopLevelItem::MethodBlock),
+                .map(TopLevelItem::MethodBlock),
         );
-        top_level_items.extend(self.closure_funcs.drain(..).map(sem::TopLevelItem::FuncDef));
+        top_level_items.extend(self.closure_funcs.drain(..).map(TopLevelItem::FuncDef));
     }
 
     /// Returns true when a closure has no captures (or no capture metadata).
@@ -118,27 +122,16 @@ impl<'a> Elaborator<'a> {
             let def = self.def_or_panic(def_id, "closure capture");
             let name = def.name.clone();
             let base_ty = self.def_type_or_panic(&def, "closure capture");
-            let base_ty_id = self.def_type_id_or_panic(&def, "closure capture");
             // Move captures store the value itself; borrow captures store refs.
-            let (field_ty, field_ty_id, field_ty_expr) = match capture.mode {
-                CaptureMode::Move => (
-                    base_ty.clone(),
-                    base_ty_id,
-                    self.type_expr_from_type(&base_ty, span),
-                ),
+            let (field_ty, field_ty_expr) = match capture.mode {
+                CaptureMode::Move => (base_ty.clone(), self.type_expr_from_type(&base_ty, span)),
                 CaptureMode::ImmBorrow | CaptureMode::MutBorrow => {
                     let field_ty = Type::Ref {
                         mutable: capture.mode == CaptureMode::MutBorrow,
                         elem_ty: Box::new(base_ty.clone()),
                     };
-                    let field_ty_node = self.node_id_gen.new_id();
-                    let field_ty_id = self.insert_node_type_for(
-                        field_ty_node,
-                        field_ty.clone(),
-                        SyntheticReason::ClosureLowering,
-                    );
                     let field_ty_expr = self.type_expr_from_type(&field_ty, span);
-                    (field_ty, field_ty_id, field_ty_expr)
+                    (field_ty, field_ty_expr)
                 }
             };
             fields.push(CaptureField {
@@ -146,9 +139,7 @@ impl<'a> Elaborator<'a> {
                 name,
                 mode: capture.mode,
                 base_ty,
-                base_ty_id,
                 field_ty,
-                field_ty_id,
                 field_ty_expr,
             });
         }
@@ -161,9 +152,9 @@ impl<'a> Elaborator<'a> {
         &mut self,
         ident: &str,
         def_id: DefId,
-        params: &[ast::Param],
-        return_ty: &ast::TypeExpr,
-        body: &ast::Expr,
+        params: &[Param],
+        return_ty: &TypeExpr,
+        body: &Expr,
         span: Span,
         expr_id: NodeId,
     ) {
@@ -201,11 +192,11 @@ impl<'a> Elaborator<'a> {
             SyntheticReason::ClosureLowering,
         );
 
-        let func_def = sem::FuncDef {
+        self.def_table.record_use(func_id, def_id);
+        let func_def = FuncDef {
             id: func_id,
-            def_id,
             attrs: Vec::new(),
-            sig: sem::FunctionSig {
+            sig: FunctionSig {
                 name: ident.to_string(),
                 type_params: Vec::new(),
                 params: params.to_vec(),
@@ -237,19 +228,19 @@ impl<'a> Elaborator<'a> {
         );
         let fields = captures
             .iter()
-            .map(|capture| sem::StructDefField {
+            .map(|capture| StructDefField {
                 id: self.node_id_gen.new_id(),
                 name: capture.name.clone(),
                 ty: capture.field_ty_expr.clone(),
                 span,
             })
             .collect();
-        let type_def = sem::TypeDef {
+        let type_def = TypeDef {
             id: self.node_id_gen.new_id(),
             attrs: Vec::new(),
             name: type_name.clone(),
             type_params: Vec::new(),
-            kind: sem::TypeDefKind::Struct { fields },
+            kind: TypeDefKind::Struct { fields },
             span,
         };
         self.def_table
@@ -297,9 +288,9 @@ impl<'a> Elaborator<'a> {
         &mut self,
         ident: &str,
         def_id: DefId,
-        params: &[ast::Param],
-        return_ty: &ast::TypeExpr,
-        body: &ast::Expr,
+        params: &[Param],
+        return_ty: &TypeExpr,
+        body: &Expr,
         span: Span,
         expr_id: NodeId,
     ) -> ClosureInfo {
@@ -333,7 +324,7 @@ impl<'a> Elaborator<'a> {
         };
         self.closure_info.insert(def_id, info.clone());
 
-        let self_param = sem::SelfParam {
+        let self_param = SelfParam {
             id: self.node_id_gen.new_id(),
             mode: ParamMode::In,
             span,
@@ -348,11 +339,11 @@ impl<'a> Elaborator<'a> {
         );
 
         self.closure_stack.push(ClosureContext::new(&info));
-        let method_def = sem::MethodDef {
+        self.def_table.record_use(method_id, def_id);
+        let method_def = MethodDef {
             id: method_id,
-            def_id,
             attrs: Vec::new(),
-            sig: sem::MethodSig {
+            sig: MethodSig {
                 name: "invoke".to_string(),
                 type_params: Vec::new(),
                 self_param,
@@ -365,11 +356,11 @@ impl<'a> Elaborator<'a> {
         };
         self.closure_stack.pop();
 
-        self.closure_methods.push(sem::MethodBlock {
+        self.closure_methods.push(MethodBlock {
             id: self.node_id_gen.new_id(),
             type_name: info.type_name.clone(),
             trait_name: None,
-            method_items: vec![sem::MethodItem::Def(method_def)],
+            method_items: vec![MethodItem::Def(method_def)],
             span,
         });
         info
@@ -382,7 +373,7 @@ impl<'a> Elaborator<'a> {
     /// can be resolved to the closure's struct type.
     pub(super) fn record_closure_binding(
         &mut self,
-        pattern: &ast::BindPattern,
+        pattern: &BindPattern,
         closure_def_id: DefId,
         info: &ClosureInfo,
     ) {
@@ -394,15 +385,15 @@ impl<'a> Elaborator<'a> {
         }
     }
 
-    fn collect_bind_pattern_defs(&self, pattern: &ast::BindPattern, out: &mut Vec<DefId>) {
+    fn collect_bind_pattern_defs(&self, pattern: &BindPattern, out: &mut Vec<DefId>) {
         match &pattern.kind {
-            ast::BindPatternKind::Name { .. } => out.push(self.def_id_for(pattern.id)),
-            ast::BindPatternKind::Array { patterns } | ast::BindPatternKind::Tuple { patterns } => {
+            BindPatternKind::Name { .. } => out.push(self.def_id_for(pattern.id)),
+            BindPatternKind::Array { patterns } | BindPatternKind::Tuple { patterns } => {
                 for pattern in patterns {
                     self.collect_bind_pattern_defs(pattern, out);
                 }
             }
-            ast::BindPatternKind::Struct { fields, .. } => {
+            BindPatternKind::Struct { fields, .. } => {
                 for field in fields {
                     self.collect_bind_pattern_defs(&field.pattern, out);
                 }
@@ -421,9 +412,9 @@ impl<'a> Elaborator<'a> {
     ///
     /// Handles direct closure literals, variables bound to closures, and
     /// move/implicit-move wrappers around either.
-    pub(super) fn closure_call_info(&mut self, callee: &ast::Expr) -> Option<(DefId, ClosureInfo)> {
+    pub(super) fn closure_call_info(&mut self, callee: &Expr) -> Option<(DefId, ClosureInfo)> {
         match &callee.kind {
-            ast::ExprKind::Closure {
+            ExprKind::Closure {
                 ident,
                 params,
                 return_ty,
@@ -447,7 +438,7 @@ impl<'a> Elaborator<'a> {
                     ),
                 ))
             }
-            ast::ExprKind::Var { .. } => {
+            ExprKind::Var { .. } => {
                 let def_id = self.def_id_for(callee.id);
                 self.closure_bindings
                     .get(&def_id)
@@ -457,14 +448,14 @@ impl<'a> Elaborator<'a> {
                             .map(|info| (*closure_def_id, info.clone()))
                     })
             }
-            ast::ExprKind::Move { expr } | ast::ExprKind::ImplicitMove { expr } => {
+            ExprKind::Move { expr } | ExprKind::ImplicitMove { expr } => {
                 self.closure_call_info(expr)
             }
             _ => None,
         }
     }
 
-    /// Rewrite a reference to a captured variable as an access through `env`.
+    /// Rewrite a reference to a captured variable as access through `env`.
     ///
     /// Returns `Some(place)` if `def_id` refers to a captured variable in the
     /// current closure context. The place is either `env.<field>` for move
@@ -474,36 +465,34 @@ impl<'a> Elaborator<'a> {
         def_id: DefId,
         place_id: NodeId,
         span: Span,
-    ) -> Option<sem::PlaceExpr> {
+    ) -> Option<Expr> {
         let ctx = self.closure_stack.last()?.clone();
         let field = ctx.capture_field(def_id)?.clone();
         let env_id = self.node_id_gen.new_id();
-        let env_place = sem::PlaceExpr {
+        self.insert_node_type_for(env_id, ctx.ty.clone(), SyntheticReason::ClosureLowering);
+        self.def_table.record_use(env_id, ctx.self_def_id);
+        let env_place = Expr {
             id: env_id,
-            kind: sem::PlaceExprKind::Var {
+            kind: ExprKind::Var {
                 ident: "env".to_string(),
-                def_id: ctx.self_def_id,
             },
-            ty: ctx.type_id,
             span,
         };
-        self.insert_node_type_for(env_id, ctx.ty.clone(), SyntheticReason::ClosureLowering);
 
         let field_place_id = self.node_id_gen.new_id();
-        let field_place = sem::PlaceExpr {
-            id: field_place_id,
-            kind: sem::PlaceExprKind::StructField {
-                target: Box::new(env_place.clone()),
-                field: field.name.clone(),
-            },
-            ty: field.field_ty_id,
-            span,
-        };
         self.insert_node_type_for(
             field_place_id,
             field.field_ty.clone(),
             SyntheticReason::ClosureLowering,
         );
+        let field_place = Expr {
+            id: field_place_id,
+            kind: ExprKind::StructField {
+                target: Box::new(env_place.clone()),
+                field: field.name.clone(),
+            },
+            span,
+        };
 
         if field.mode == CaptureMode::Move {
             // For move captures, env.<field> is already the place.
@@ -512,43 +501,40 @@ impl<'a> Elaborator<'a> {
                 field.base_ty.clone(),
                 SyntheticReason::ClosureLowering,
             );
-            return Some(sem::PlaceExpr {
+            return Some(Expr {
                 id: place_id,
-                kind: sem::PlaceExprKind::StructField {
+                kind: ExprKind::StructField {
                     target: Box::new(env_place),
                     field: field.name.clone(),
                 },
-                ty: field.base_ty_id,
                 span,
             });
         }
 
         let load_id = self.node_id_gen.new_id();
-        let load = sem::ValueExpr {
-            id: load_id,
-            kind: sem::ValueExprKind::Load {
-                place: Box::new(field_place),
-            },
-            ty: field.field_ty_id,
-            span,
-        };
         self.insert_node_type_for(
             load_id,
             field.field_ty.clone(),
             SyntheticReason::ClosureLowering,
         );
+        let load = Expr {
+            id: load_id,
+            kind: ExprKind::Load {
+                expr: Box::new(field_place),
+            },
+            span,
+        };
 
         self.insert_node_type_for(
             place_id,
             field.base_ty.clone(),
             SyntheticReason::ClosureLowering,
         );
-        Some(sem::PlaceExpr {
+        Some(Expr {
             id: place_id,
-            kind: sem::PlaceExprKind::Deref {
-                value: Box::new(load),
+            kind: ExprKind::Deref {
+                expr: Box::new(load),
             },
-            ty: field.base_ty_id,
             span,
         })
     }
@@ -557,26 +543,21 @@ impl<'a> Elaborator<'a> {
     ///
     /// For move captures, produces `move <var>`. For borrow captures,
     /// produces `addr_of <var>`.
-    pub(super) fn capture_value_for_def(
-        &mut self,
-        capture: &CaptureField,
-        span: Span,
-    ) -> sem::ValueExpr {
+    pub(super) fn capture_value_for_def(&mut self, capture: &CaptureField, span: Span) -> Expr {
         let place_id = self.node_id_gen.new_id();
-        let place = sem::PlaceExpr {
-            id: place_id,
-            kind: sem::PlaceExprKind::Var {
-                ident: capture.name.clone(),
-                def_id: capture.def_id,
-            },
-            ty: capture.base_ty_id,
-            span,
-        };
         self.insert_node_type_for(
             place_id,
             capture.base_ty.clone(),
             SyntheticReason::ClosureLowering,
         );
+        self.def_table.record_use(place_id, capture.def_id);
+        let place = Expr {
+            id: place_id,
+            kind: ExprKind::Var {
+                ident: capture.name.clone(),
+            },
+            span,
+        };
 
         if capture.mode == CaptureMode::Move {
             let move_id = self.node_id_gen.new_id();
@@ -585,12 +566,11 @@ impl<'a> Elaborator<'a> {
                 capture.base_ty.clone(),
                 SyntheticReason::ClosureLowering,
             );
-            return sem::ValueExpr {
+            return Expr {
                 id: move_id,
-                kind: sem::ValueExprKind::Move {
-                    place: Box::new(place),
+                kind: ExprKind::Move {
+                    expr: Box::new(place),
                 },
-                ty: capture.base_ty_id,
                 span,
             };
         }
@@ -601,12 +581,11 @@ impl<'a> Elaborator<'a> {
             capture.field_ty.clone(),
             SyntheticReason::ClosureLowering,
         );
-        sem::ValueExpr {
+        Expr {
             id: addr_id,
-            kind: sem::ValueExprKind::AddrOf {
-                place: Box::new(place),
+            kind: ExprKind::AddrOf {
+                expr: Box::new(place),
             },
-            ty: capture.field_ty_id,
             span,
         }
     }

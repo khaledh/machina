@@ -3,7 +3,7 @@
 use crate::core::backend::lower::LowerToIrError;
 use crate::core::backend::lower::lowerer::{FuncLowerer, LinearValue, ValueSlot};
 use crate::core::ir::{BinOp, Callee, CastKind, IrTypeId, RuntimeFn, ValueId};
-use crate::core::tree::semantic as sem;
+use crate::core::plans::{LenTerm, SegmentKind, StringFmtPlan};
 use crate::core::types::Type;
 
 const MAX_U64_DEC_LEN: usize = 20;
@@ -24,7 +24,7 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
     /// Lowers a view f-string, returning `None` if a segment returns early.
     pub(super) fn lower_string_fmt_view(
         &mut self,
-        plan: &sem::StringFmtPlan,
+        plan: &StringFmtPlan,
         string_ty: IrTypeId,
     ) -> Result<Option<LinearValue>, LowerToIrError> {
         let total_len = self.string_fmt_plan_len(plan);
@@ -103,14 +103,14 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
         Ok(Some(self.load_slot(&slot)))
     }
 
-    fn string_fmt_plan_len(&self, plan: &sem::StringFmtPlan) -> usize {
+    fn string_fmt_plan_len(&self, plan: &StringFmtPlan) -> usize {
         let mut total = 0usize;
         for term in &plan.reserve_terms {
             match term {
-                sem::LenTerm::Literal(value) => {
+                LenTerm::Literal(value) => {
                     total = total.saturating_add(*value);
                 }
-                sem::LenTerm::StringValue { .. } => {
+                LenTerm::StringValue { .. } => {
                     panic!("backend view f-string received string reserve term");
                 }
             }
@@ -123,7 +123,7 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
     /// Lowers an owned f-string, returning `None` if a segment returns early.
     pub(super) fn lower_string_fmt_owned(
         &mut self,
-        plan: &sem::StringFmtPlan,
+        plan: &StringFmtPlan,
         string_ty: IrTypeId,
     ) -> Result<Option<LinearValue>, LowerToIrError> {
         let u64_ty = self.type_lowerer.lower_type(&Type::uint(64));
@@ -140,7 +140,7 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
         // Pre-reserve capacity by summing literal and string lengths.
         let mut base_total = 0u64;
         for term in &plan.reserve_terms {
-            if let sem::LenTerm::Literal(value) = term {
+            if let LenTerm::Literal(value) = term {
                 base_total = base_total.saturating_add(*value as u64);
             }
         }
@@ -149,7 +149,7 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
             .const_int(base_total as i128, false, 64, u64_ty);
 
         for term in &plan.reserve_terms {
-            let sem::LenTerm::StringValue { segment_index } = term else {
+            let LenTerm::StringValue { segment_index } = term else {
                 continue;
             };
             let len = string_lens
@@ -267,7 +267,7 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
     /// Lowers format segments, propagating early returns from segment expressions.
     fn lower_fmt_segments(
         &mut self,
-        plan: &sem::StringFmtPlan,
+        plan: &StringFmtPlan,
         u8_ptr_ty: IrTypeId,
         u64_ty: IrTypeId,
     ) -> LowerFmtSegmentsResult {
@@ -276,7 +276,7 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
 
         for (index, segment) in plan.segments.iter().enumerate() {
             match segment {
-                sem::SegmentKind::LiteralBytes(value) => {
+                SegmentKind::LiteralBytes(value) => {
                     if value.is_empty() {
                         continue;
                     }
@@ -291,7 +291,7 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
                         len: len_val,
                     });
                 }
-                sem::SegmentKind::StringValue { expr } => {
+                SegmentKind::StringValue { expr } => {
                     let Some(value) = self.lower_value_expr_opt(expr)? else {
                         return Ok(None);
                     };
@@ -300,7 +300,7 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
                     string_lens[index] = Some(len);
                     segments.push(LoweredFmtSegment::StringValue { ptr, len });
                 }
-                sem::SegmentKind::Int { expr, signed, bits } => {
+                SegmentKind::Int { expr, signed, bits } => {
                     let Some(value) = self.lower_value_expr_opt(expr)? else {
                         return Ok(None);
                     };
@@ -316,7 +316,7 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
                         signed: *signed,
                     });
                 }
-                sem::SegmentKind::Bool { expr } => {
+                SegmentKind::Bool { expr } => {
                     let Some(value) = self.lower_value_expr_opt(expr)? else {
                         return Ok(None);
                     };

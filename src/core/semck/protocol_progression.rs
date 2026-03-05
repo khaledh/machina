@@ -7,6 +7,8 @@
 use std::collections::HashMap;
 
 use crate::core::analysis::dataflow::DataflowGraph;
+use crate::core::ast::cfg::{AstBlockId, CfgBuilder, CfgItem};
+use crate::core::ast::{Expr, ExprKind, StmtExprKind};
 use crate::core::context::{
     ProtocolHandlerProgressionFact, ProtocolProgressionCfg, ProtocolProgressionEmit,
     ProtocolProgressionEvent, ProtocolProgressionFacts, ProtocolProgressionReturnState,
@@ -15,8 +17,6 @@ use crate::core::context::{
 use crate::core::machine::naming::parse_generated_state_name;
 use crate::core::protocol::event_extract::extract_emit_from_expr;
 use crate::core::semck::typestate_scan::collect_generated_typestate_handlers;
-use crate::core::tree::cfg::{AstBlockId, CfgBuilder, CfgItem};
-use crate::core::tree::{Expr, ExprKind, StmtExprKind};
 use crate::core::typecheck::type_map::resolve_type_expr;
 
 pub(super) fn extract(ctx: &SemCheckNormalizedContext) -> ProtocolProgressionFacts {

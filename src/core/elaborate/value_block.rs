@@ -7,76 +7,78 @@
 //! The dedicated `syntax_desugar` pass rewrites them into lower-level `while`
 //! form later in the elaborate pipeline.
 
+use crate::core::ast::{BindPattern, BlockItem, Expr, ExprKind, StmtExpr, StmtExprKind};
 use crate::core::elaborate::elaborator::Elaborator;
-use crate::core::tree as ast;
-use crate::core::tree::semantic as sem;
 use crate::core::types::Type;
 
 impl<'a> Elaborator<'a> {
     /// Elaborate a single block item (statement or expression).
     pub(in crate::core::elaborate::value) fn elab_block_item(
         &mut self,
-        item: &ast::BlockItem,
-    ) -> sem::BlockItem {
+        item: &BlockItem,
+    ) -> BlockItem {
         match item {
-            ast::BlockItem::Stmt(stmt) => sem::BlockItem::Stmt(self.elab_stmt_expr(stmt)),
-            ast::BlockItem::Expr(expr) => sem::BlockItem::Expr(self.elab_value(expr)),
+            BlockItem::Stmt(stmt) => BlockItem::Stmt(self.elab_stmt_expr(stmt)),
+            BlockItem::Expr(expr) => BlockItem::Expr(self.elab_value(expr)),
         }
     }
 
-    fn elab_stmt_expr(&mut self, stmt: &ast::StmtExpr) -> sem::StmtExpr {
-        let is_let = matches!(stmt.kind, ast::StmtExprKind::LetBind { .. });
+    fn elab_stmt_expr(&mut self, stmt: &StmtExpr) -> StmtExpr {
+        let is_let = matches!(stmt.kind, StmtExprKind::LetBind { .. });
         let kind = match &stmt.kind {
-            ast::StmtExprKind::LetBind {
+            StmtExprKind::LetBind {
                 pattern,
                 decl_ty,
                 value,
             }
-            | ast::StmtExprKind::VarBind {
+            | StmtExprKind::VarBind {
                 pattern,
                 decl_ty,
                 value,
             } => {
                 let value = self.elab_bind_value(pattern, value);
-                let bind_ty = self.type_map.type_table().get(value.ty).clone();
+                let bind_ty = self
+                    .type_map
+                    .type_table()
+                    .get(self.type_id_for(value.id))
+                    .clone();
                 let pattern = self.elab_bind_pattern(pattern, &bind_ty);
                 if is_let {
-                    sem::StmtExprKind::LetBind {
+                    StmtExprKind::LetBind {
                         pattern,
                         decl_ty: decl_ty.clone(),
                         value,
                     }
                 } else {
-                    sem::StmtExprKind::VarBind {
+                    StmtExprKind::VarBind {
                         pattern,
                         decl_ty: decl_ty.clone(),
                         value,
                     }
                 }
             }
-            ast::StmtExprKind::VarDecl { ident, decl_ty } => sem::StmtExprKind::VarDecl {
+            StmtExprKind::VarDecl { ident, decl_ty } => StmtExprKind::VarDecl {
                 ident: ident.clone(),
-                def_id: self.def_id_for(stmt.id),
                 decl_ty: decl_ty.clone(),
             },
-            ast::StmtExprKind::Assign {
+            StmtExprKind::Assign {
                 assignee, value, ..
             } => {
                 let place = self.elab_place(assignee);
-                sem::StmtExprKind::Assign {
+                StmtExprKind::Assign {
                     assignee: Box::new(place.clone()),
                     value: Box::new(self.elab_value(value)),
                     init: self.init_info_for_id(place.id),
                 }
             }
-            ast::StmtExprKind::CompoundAssign { .. } => {
+            StmtExprKind::CompoundAssign { .. } => {
                 panic!("normalize must desugar compound assignment before elaborate");
             }
-            ast::StmtExprKind::While { cond, body } => sem::StmtExprKind::While {
+            StmtExprKind::While { cond, body } => StmtExprKind::While {
                 cond: Box::new(self.elab_value(cond)),
                 body: Box::new(self.elab_value(body)),
             },
-            ast::StmtExprKind::For {
+            StmtExprKind::For {
                 pattern,
                 iter,
                 body,
@@ -84,46 +86,39 @@ impl<'a> Elaborator<'a> {
                 let iter_value = self.elab_value(iter);
                 let elem_ty = self.for_iter_elem_type(iter);
                 let pattern = self.elab_bind_pattern(pattern, &elem_ty);
-                sem::StmtExprKind::For {
+                StmtExprKind::For {
                     pattern,
                     iter: Box::new(iter_value),
                     body: Box::new(self.elab_value(body)),
                 }
             }
-            ast::StmtExprKind::Defer { value } => sem::StmtExprKind::Defer {
+            StmtExprKind::Defer { value } => StmtExprKind::Defer {
                 value: Box::new(self.elab_value(value)),
             },
-            ast::StmtExprKind::Using {
+            StmtExprKind::Using {
                 binding,
                 value,
                 body,
-            } => sem::StmtExprKind::Using {
-                pattern: sem::BindPattern {
-                    id: binding.id,
-                    kind: sem::BindPatternKind::Name {
-                        ident: binding.ident.clone(),
-                        def_id: self.def_id_for(binding.id),
-                    },
-                    span: binding.span,
-                },
+            } => StmtExprKind::Using {
+                binding: binding.clone(),
                 value: Box::new(self.elab_value(value)),
                 body: Box::new(self.elab_value(body)),
             },
-            ast::StmtExprKind::Break => sem::StmtExprKind::Break,
-            ast::StmtExprKind::Continue => sem::StmtExprKind::Continue,
-            ast::StmtExprKind::Return { value } => sem::StmtExprKind::Return {
+            StmtExprKind::Break => StmtExprKind::Break,
+            StmtExprKind::Continue => StmtExprKind::Continue,
+            StmtExprKind::Return { value } => StmtExprKind::Return {
                 value: value.as_ref().map(|expr| Box::new(self.elab_value(expr))),
             },
         };
 
-        sem::StmtExpr {
+        StmtExpr {
             id: stmt.id,
             kind,
             span: stmt.span,
         }
     }
 
-    fn for_iter_elem_type(&self, iter: &ast::Expr) -> Type {
+    fn for_iter_elem_type(&self, iter: &Expr) -> Type {
         let iter_ty = self
             .type_map
             .type_table()
@@ -137,12 +132,8 @@ impl<'a> Elaborator<'a> {
     /// When binding a closure, records the mapping from the bound variable(s)
     /// to the closure's DefId so that later references can be resolved to the
     /// correct closure type.
-    fn elab_bind_value(
-        &mut self,
-        pattern: &ast::BindPattern,
-        value: &ast::Expr,
-    ) -> Box<sem::ValueExpr> {
-        if let ast::ExprKind::Closure {
+    fn elab_bind_value(&mut self, pattern: &BindPattern, value: &Expr) -> Box<Expr> {
+        if let ExprKind::Closure {
             ident,
             params,
             return_ty,

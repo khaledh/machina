@@ -3,9 +3,9 @@
 
 use std::collections::{HashMap, HashSet};
 
+use crate::core::ast::visit_mut::{self, VisitorMut};
+use crate::core::ast::*;
 use crate::core::diag::Span;
-use crate::core::tree::visit_mut::{self, VisitorMut};
-use crate::core::tree::*;
 
 /// Shared lowering inputs for methods/handlers within one source state.
 pub(super) struct StateLoweringContext<'a> {

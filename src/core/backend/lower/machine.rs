@@ -17,8 +17,10 @@ use crate::core::ir::{
     Callee, CastKind, CmpOp, FunctionBuilder, FunctionSig, GlobalId, IrStructField, IrTypeCache,
     IrTypeId, IrTypeKind, RuntimeFn, Terminator, ValueId,
 };
+use crate::core::plans::{
+    MachineDescriptorPlan, MachineDispatchThunkPlan, MachineEventKeyPlan, MachinePlanMap,
+};
 use crate::core::resolve::{DefId, DefKind, DefTable};
-use crate::core::tree::semantic as sem;
 use crate::core::typecheck::type_map::TypeMap;
 use crate::core::types::{FnParam, Type};
 
@@ -27,7 +29,7 @@ pub(super) type PayloadDropRegistrations = Vec<(u64, DefId)>;
 /// Collects payload layout-id -> drop-glue registrations needed by machine
 /// envelope cleanup paths.
 pub(super) fn collect_machine_payload_drop_registrations(
-    machine_plans: &sem::MachinePlanMap,
+    machine_plans: &MachinePlanMap,
     type_map: &TypeMap,
     drop_glue: &mut DropGlueRegistry,
 ) -> PayloadDropRegistrations {
@@ -57,7 +59,7 @@ pub(super) fn collect_machine_payload_drop_registrations(
 /// they return `MC_DISPATCH_FAULT` immediately until full decode/dispatch
 /// wiring is connected in the runtime bootstrap path.
 pub(super) fn append_machine_runtime_artifacts(
-    machine_plans: &sem::MachinePlanMap,
+    machine_plans: &MachinePlanMap,
     payload_drop_regs: &PayloadDropRegistrations,
     def_table: &DefTable,
     type_map: &TypeMap,
@@ -94,7 +96,7 @@ pub(super) fn append_machine_runtime_artifacts(
 }
 
 fn assign_thunk_def_ids(
-    machine_plans: &sem::MachinePlanMap,
+    machine_plans: &MachinePlanMap,
     first_def_id: DefId,
 ) -> HashMap<DefId, DefId> {
     let mut plans: Vec<_> = machine_plans.thunks.iter().collect();
@@ -114,7 +116,7 @@ fn assign_thunk_def_ids(
 }
 
 fn append_dispatch_thunks(
-    machine_plans: &sem::MachinePlanMap,
+    machine_plans: &MachinePlanMap,
     def_table: &DefTable,
     type_map: &TypeMap,
     thunk_ids: &HashMap<DefId, DefId>,
@@ -146,7 +148,7 @@ fn append_dispatch_thunks(
 }
 
 fn append_bootstrap_registration_fn(
-    machine_plans: &sem::MachinePlanMap,
+    machine_plans: &MachinePlanMap,
     payload_drop_regs: &PayloadDropRegistrations,
     type_map: &TypeMap,
     first_def_id: DefId,
@@ -241,7 +243,7 @@ fn append_bootstrap_registration_fn(
 }
 
 fn append_descriptor_id_helpers(
-    machine_plans: &sem::MachinePlanMap,
+    machine_plans: &MachinePlanMap,
     type_map: &TypeMap,
     def_table: &DefTable,
     funcs: &mut Vec<LoweredFunction>,
@@ -306,7 +308,7 @@ fn build_descriptor_id_helper(
 }
 
 fn build_dispatch_thunk(
-    plan: &sem::MachineDispatchThunkPlan,
+    plan: &MachineDispatchThunkPlan,
     thunk_def_id: DefId,
     descriptor_global: Option<GlobalId>,
     def_table: &DefTable,
@@ -689,7 +691,7 @@ fn load_struct_field(
 }
 
 fn append_descriptor_globals(
-    machine_plans: &sem::MachinePlanMap,
+    machine_plans: &MachinePlanMap,
     thunk_ids: &HashMap<DefId, DefId>,
     globals: &mut GlobalArena,
 ) -> HashMap<String, (GlobalId, usize)> {
@@ -708,7 +710,7 @@ fn append_descriptor_globals(
 }
 
 fn serialize_descriptor(
-    desc: &sem::MachineDescriptorPlan,
+    desc: &MachineDescriptorPlan,
     thunk_ids: &HashMap<DefId, DefId>,
     payload_layout_ids: &PayloadLayoutIdMap,
 ) -> Vec<u8> {
@@ -742,11 +744,11 @@ fn serialize_descriptor(
         let payload_layout_id = payload_layout_ids.get(&payload_key).copied().unwrap_or(0);
         push_u64(&mut bytes, payload_layout_id);
         match &event.key {
-            sem::MachineEventKeyPlan::Payload { payload_ty } => {
+            MachineEventKeyPlan::Payload { payload_ty } => {
                 push_u8(&mut bytes, 0);
                 push_string(&mut bytes, &payload_ty.to_string());
             }
-            sem::MachineEventKeyPlan::Response {
+            MachineEventKeyPlan::Response {
                 selector_ty,
                 response_ty,
             } => {

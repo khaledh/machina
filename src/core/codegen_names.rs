@@ -6,8 +6,8 @@
 
 use std::collections::HashMap;
 
+use crate::core::ast::Module;
 use crate::core::resolve::{DefId, DefTable};
-use crate::core::tree::Module;
 
 #[derive(Debug, Clone)]
 pub struct CodegenNameTable {

@@ -10,17 +10,17 @@
 use std::collections::{HashMap, HashSet};
 
 use crate::core::analysis::dataflow::solve_forward;
+use crate::core::ast::cfg::{AstBlockId, CfgBuilder, CfgItem, CfgNode, CfgTerminator};
+use crate::core::ast::visit::{Visitor, walk_expr};
+use crate::core::ast::{
+    BindPattern, BindPatternKind, CaptureSpec, Expr, ExprKind, FuncDef, NodeId, ParamMode,
+    StmtExpr, StmtExprKind,
+};
 use crate::core::context::NormalizedContext;
 use crate::core::diag::Span;
 use crate::core::resolve::{DefId, DefKind};
 use crate::core::semck::ast_liveness::{self, AstLiveness};
 use crate::core::semck::{SEK, SemCheckError};
-use crate::core::tree::cfg::{AstBlockId, CfgBuilder, CfgItem, CfgNode, CfgTerminator};
-use crate::core::tree::visit::{Visitor, walk_expr};
-use crate::core::tree::{
-    BindPattern, BindPatternKind, CaptureSpec, Expr, ExprKind, FuncDef, NodeId, ParamMode,
-    StmtExpr, StmtExprKind,
-};
 
 pub struct MoveCheckResult {
     pub errors: Vec<SemCheckError>,

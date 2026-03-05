@@ -3,6 +3,7 @@ use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
 use crate::core::api::{FrontendPolicy, ResolveInputs, resolve_stage_with_policy};
+use crate::core::ast::NodeIdGen;
 use crate::core::capsule::{
     CapsuleError, ModuleLoader, ModulePath, discover_and_parse_capsule_with_loader,
 };
@@ -12,7 +13,6 @@ use crate::core::parse::{Parser, ParserOptions};
 use crate::core::resolve::{
     DefKind, ResolveError, ResolveErrorKind, Visibility, resolve, resolve_partial, resolve_program,
 };
-use crate::core::tree::NodeIdGen;
 
 struct MockLoader {
     modules: HashMap<String, String>,

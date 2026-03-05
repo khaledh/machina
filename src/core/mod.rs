@@ -2,6 +2,7 @@
 
 pub mod analysis;
 pub mod api;
+pub mod ast;
 pub mod backend;
 pub mod capsule;
 pub mod codegen_names;
@@ -14,11 +15,11 @@ pub mod machine;
 pub mod monomorphize;
 pub mod nrvo;
 pub mod parse;
+pub mod plans;
 pub mod protocol;
 pub mod resolve;
 pub mod semck;
 pub mod symbol_id;
-pub mod tree;
 pub mod typecheck;
 pub mod types;
 pub mod typestate;

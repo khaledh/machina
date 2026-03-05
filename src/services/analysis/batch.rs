@@ -8,10 +8,10 @@ use std::collections::HashMap;
 use crate::core::api::{
     FrontendPolicy, ResolveInputs, resolve_stage_with_policy, typecheck_stage_with_policy,
 };
+use crate::core::ast::NodeId;
 use crate::core::capsule::ModuleId;
 use crate::core::context::ParsedContext;
 use crate::core::resolve::{ImportedFacts, ResolveError, attach_def_owners};
-use crate::core::tree::NodeId;
 use crate::core::typecheck::TypeCheckError;
 use crate::services::analysis::db::AnalysisDb;
 use crate::services::analysis::query::{QueryCancelled, QueryKey, QueryKind};

@@ -1,6 +1,10 @@
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
+use crate::core::ast::visit::{self, Visitor};
+use crate::core::ast::{
+    Expr, ExprKind, MethodBlock, TopLevelItem, TypeExpr, TypeExprKind, TypeParam,
+};
 use crate::core::capsule::bind::CapsuleBindings;
 use crate::core::capsule::compose::{flatten_capsule, flatten_capsule_module};
 use crate::core::capsule::{
@@ -11,10 +15,6 @@ use crate::core::lexer::{LexError, Lexer, Token};
 use crate::core::monomorphize::{build_retype_context, monomorphize_with_plan};
 use crate::core::parse::Parser;
 use crate::core::resolve::resolve;
-use crate::core::tree::visit::{self, Visitor};
-use crate::core::tree::{
-    Expr, ExprKind, MethodBlock, TopLevelItem, TypeExpr, TypeExprKind, TypeParam,
-};
 use crate::core::typecheck::type_check;
 use crate::driver::compile::{CompileOptions, compile};
 
@@ -574,10 +574,10 @@ fn flatten_capsule_mangles_private_dependency_function_names() {
     let mut callable_names = Vec::new();
     for item in &flattened.top_level_items {
         match item {
-            crate::core::tree::TopLevelItem::FuncDecl(func_decl) => {
+            TopLevelItem::FuncDecl(func_decl) => {
                 callable_names.push(func_decl.sig.name.clone());
             }
-            crate::core::tree::TopLevelItem::FuncDef(func_def) => {
+            TopLevelItem::FuncDef(func_def) => {
                 callable_names.push(func_def.sig.name.clone());
             }
             _ => {}
@@ -685,7 +685,7 @@ fn flatten_capsule_tracks_top_level_item_owners() {
     let mut owner_by_func = HashMap::new();
 
     for item in &flattened.module.top_level_items {
-        if let crate::core::tree::TopLevelItem::FuncDef(def) = item {
+        if let TopLevelItem::FuncDef(def) = item {
             let owner = flattened
                 .top_level_owners
                 .get(&def.id)

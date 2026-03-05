@@ -1,5 +1,6 @@
 //! Shared lowering helpers for locals, views, bounds, and blob operations.
 
+use crate::core::ast::Expr;
 use crate::core::backend::lower::LowerToIrError;
 use crate::core::backend::lower::locals::{LocalStorage, LocalValue};
 use crate::core::backend::lower::lowerer::{BaseView, CallInputValue, FuncLowerer, LoopContext};
@@ -8,7 +9,6 @@ use crate::core::ir::{
     BinOp, Callee, CastKind, CmpOp, IrTypeId, IrTypeKind, RuntimeFn, Terminator, ValueId,
 };
 use crate::core::resolve::DefId;
-use crate::core::tree::semantic as sem;
 use crate::core::types::{Type, TypeAssignability, type_assignable};
 
 const MACHINE_PAYLOAD_LAYOUT_OWNED_MASK: u64 = 1u64 << 63;
@@ -707,11 +707,15 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
     /// Resolves a place to its base address after peeling heap/ref indirections.
     pub(super) fn resolve_deref_base(
         &mut self,
-        target: &sem::PlaceExpr,
+        target: &Expr,
         deref_count: usize,
     ) -> Result<(ValueId, Type), LowerToIrError> {
         let mut base = self.lower_place_addr(target)?;
-        let mut curr_ty = self.type_map.type_table().get(target.ty).clone();
+        let mut curr_ty = self
+            .type_map
+            .type_table()
+            .get(self.type_map.type_of(target.id))
+            .clone();
 
         for _ in 0..deref_count {
             let elem_ty = match curr_ty {

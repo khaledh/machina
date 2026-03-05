@@ -1,4 +1,4 @@
-//! Elaboration pass: transform a normalized tree into a semantic tree.
+//! Elaboration pass: enrich the AST with plan side tables for lowering.
 //!
 //! This pass sits between semantic checking and lowering. Its job is to
 //! pre-compute semantic constructs so that lowering can focus on code
@@ -24,8 +24,8 @@
 //!   and value expressions, inserting explicit load/move nodes based on
 //!   semantic analysis results.
 //!
-//! The output semantic tree contains all information needed for lowering to
-//! proceed without further semantic reasoning.
+//! The output is the enriched AST plus plan side tables — all the information
+//! needed for lowering to proceed without further semantic reasoning.
 
 use crate::core::analysis::facts::{DefTableOverlay, TypeMapOverlay};
 use crate::core::context::{ElaborateStageInput, ElaborateStageOutput};
@@ -50,7 +50,7 @@ use crate::core::elaborate::elaborator::Elaborator;
 use crate::core::elaborate::lowering_plan::build_lowering_plans;
 use crate::core::elaborate::machine_plan::build_machine_plans;
 
-/// Transform a normalized tree into a semantic tree using the results from
+/// Elaborate the AST: enrich it with plan side tables using the results from
 /// semantic analysis.
 ///
 /// Internal stage entrypoint; prefer `crate::core::api::elaborate_stage` from
@@ -96,7 +96,7 @@ pub fn elaborate(ctx: ElaborateStageInput) -> ElaborateStageOutput {
     );
 
     let module = pipeline::run(&mut elaborator, &module);
-    let (call_plans, index_plans, match_plans, slice_plans, try_cleanup_plans) =
+    let (call_plans, index_plans, match_plans, slice_plans, try_cleanup_plans, string_fmt_plans) =
         elaborator.lowering_plan_tables();
     let lowering_plans = build_lowering_plans(
         &module,
@@ -105,12 +105,13 @@ pub fn elaborate(ctx: ElaborateStageInput) -> ElaborateStageOutput {
         match_plans,
         slice_plans,
         try_cleanup_plans,
+        string_fmt_plans,
     );
     let drop_plans = build_drop_plans(&module, &def_table, &type_map);
     let machine_plans = build_machine_plans(&module, &def_table, &type_map, &typestate_role_impls);
 
     let mut symbols = symbols;
-    register_lifted_method_symbols(&module, &mut symbols);
+    register_lifted_method_symbols(&module, &def_table, &mut symbols);
 
     ElaborateStageOutput {
         module,

@@ -1,7 +1,7 @@
 use super::{analyze, analyze_typestate, assert_ir_eq, format_func, indoc, lower_module};
+use crate::core::ast::MethodItem;
 use crate::core::backend::lower::{LowerOpts, lower_module_with_opts};
 use crate::core::ir::IrTypeKind;
-use crate::core::tree::semantic as sem;
 use std::collections::HashMap;
 
 #[test]
@@ -57,8 +57,8 @@ fn test_lower_module_method_defs() {
         .iter()
         .flat_map(|block| block.method_items.iter())
         .find_map(|item| match item {
-            sem::MethodItem::Def(def) => Some(def.def_id),
-            sem::MethodItem::Decl(_) => None,
+            MethodItem::Def(def) => Some(ctx.def_table.def_id(def.id)),
+            MethodItem::Decl(_) => None,
         })
         .expect("missing method def");
 

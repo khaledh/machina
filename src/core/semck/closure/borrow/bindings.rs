@@ -6,10 +6,10 @@
 use std::collections::HashMap;
 
 use crate::core::analysis::dataflow::solve_forward;
+use crate::core::ast::cfg::{AstBlockId, Cfg, CfgItem, CfgNode};
+use crate::core::ast::{BindPatternKind, Expr, ExprKind, StmtExprKind};
 use crate::core::resolve::{DefId, DefTable};
 use crate::core::semck::closure::capture::{CaptureMode, ClosureCapture};
-use crate::core::tree::cfg::{AstBlockId, Cfg, CfgItem, CfgNode};
-use crate::core::tree::{BindPatternKind, Expr, ExprKind, StmtExprKind};
 
 use super::{CaptureMap, ClosureBindings};
 

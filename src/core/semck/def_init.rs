@@ -9,17 +9,17 @@
 use std::collections::{HashMap, HashSet};
 
 use crate::core::analysis::dataflow::{DataflowGraph, solve_forward};
-use crate::core::context::NormalizedContext;
-use crate::core::diag::Span;
-use crate::core::resolve::{DefId, DefKind, DefTable};
-use crate::core::semck::{SEK, SemCheckError, push_error};
-use crate::core::tree::cfg::{AstBlockId, CfgBuilder, CfgItem, CfgNode, CfgTerminator};
-use crate::core::tree::visit::{Visitor, walk_expr};
-use crate::core::tree::{
+use crate::core::ast::cfg::{AstBlockId, CfgBuilder, CfgItem, CfgNode, CfgTerminator};
+use crate::core::ast::visit::{Visitor, walk_expr};
+use crate::core::ast::{
     ArrayLitInit, BindPattern, BindPatternKind, BlockItem, CallArgMode, EmitKind, Expr, ExprKind,
     FuncDef, MatchPattern, MatchPatternBinding, NodeId, ParamMode, StmtExpr, StmtExprKind,
     StringFmtSegment,
 };
+use crate::core::context::NormalizedContext;
+use crate::core::diag::Span;
+use crate::core::resolve::{DefId, DefKind, DefTable};
+use crate::core::semck::{SEK, SemCheckError, push_error};
 use crate::core::types::Type;
 
 pub(super) struct DefInitResult {
@@ -1050,7 +1050,7 @@ impl<'a> DefInitChecker<'a> {
                 let else_state = self.with_init(self.initialized.clone(), |this| {
                     this.check_expr(else_body);
                 });
-                // After the if: only defs initialized in BOTH branches are safe.
+                // After the `if` only defs initialized in BOTH branches are safe.
                 self.initialized = intersect_states(&[then_state, else_state]);
             }
             ExprKind::Match { scrutinee, arms } => {
@@ -1128,12 +1128,7 @@ impl<'a> DefInitChecker<'a> {
                 }
             }
             ExprKind::Emit { kind } => match kind {
-                EmitKind::Send { to, payload }
-                | EmitKind::Request {
-                    to,
-                    payload,
-                    request_site_label: _,
-                } => {
+                EmitKind::Send { to, payload } | EmitKind::Request { to, payload, .. } => {
                     self.check_expr(to);
                     self.check_expr(payload);
                 }
@@ -1219,7 +1214,13 @@ impl<'a> DefInitChecker<'a> {
             | ExprKind::StringLit { .. }
             | ExprKind::UnitLit
             | ExprKind::Range { .. }
-            | ExprKind::Closure { .. } => {}
+            | ExprKind::Closure { .. }
+            | ExprKind::ClosureRef { .. } => {}
+            ExprKind::Load { expr } | ExprKind::Len { expr } => self.check_expr(expr),
+            ExprKind::MapGet { target, key } => {
+                self.check_expr(target);
+                self.check_expr(key);
+            }
         }
     }
 
