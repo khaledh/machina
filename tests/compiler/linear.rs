@@ -294,3 +294,209 @@ fn linear_type_allows_receiver_annotation_for_same_named_actions() {
         "unexpected stdout: {stdout}"
     );
 }
+
+#[test]
+fn linear_type_hosted_create_returns_initial_state() {
+    let run = run_program(
+        "linear_type_hosted_create_initial_state",
+        r#"
+            @linear
+            type PullRequest = {
+                id: u64,
+
+                states {
+                    Draft,
+                    Review,
+                }
+
+                actions {
+                    submit: Draft -> Review,
+                }
+
+                roles {
+                    Author { submit }
+                }
+            }
+
+            PullRequest :: {
+                fn submit(self) -> Review {
+                    println("submit");
+                    Review {}
+                }
+            }
+
+            machine PRService hosts PullRequest(key: id) {
+                fn new() -> Self {
+                    Self {}
+                }
+            }
+
+            @machines
+            fn main() -> () | MachineError | SessionError {
+                let service = PRService::spawn()?;
+                let draft = service.create(PullRequest as Author)?;
+                let _review = draft.submit()?;
+            }
+        "#,
+    );
+
+    assert_eq!(run.status.code(), Some(0));
+    let stdout = String::from_utf8_lossy(&run.stdout);
+    assert_eq!(stdout, "submit\n", "unexpected stdout: {stdout}");
+}
+
+#[test]
+fn linear_type_hosted_resume_returns_state_union() {
+    let source = r#"
+        @linear
+        type PullRequest = {
+            id: u64,
+
+            states {
+                Draft,
+                Review,
+                @final Merged,
+            }
+
+            actions {
+                submit: Draft -> Review,
+                merge: Review -> Merged,
+            }
+
+            roles {
+                Author { submit, merge }
+            }
+        }
+
+        PullRequest :: {
+            fn submit(self) -> Review {
+                Review {}
+            }
+
+            fn merge(self) -> Merged {
+                Merged {}
+            }
+        }
+
+        machine PRService hosts PullRequest(key: id) {
+            fn new() -> Self {
+                Self {}
+            }
+        }
+
+        @machines
+        fn main() -> () | MachineError | SessionError {
+            let service = PRService::spawn()?;
+            let session = service.resume(PullRequest as Author, 42)?;
+
+            match session {
+                PullRequest::Draft => {}
+                PullRequest::Review => {}
+                PullRequest::Merged => {}
+            }
+        }
+    "#;
+
+    compile_linear_source(source, "tests/fixtures/linear/hosted_resume_union.mc")
+        .expect("hosted resume should typecheck with a union of states");
+}
+
+#[test]
+fn linear_type_hosted_create_rejects_unknown_role() {
+    let source = r#"
+        @linear
+        type PullRequest = {
+            id: u64,
+
+            states {
+                Draft,
+            }
+
+            actions {}
+
+            roles {
+                Author {}
+            }
+        }
+
+        machine PRService hosts PullRequest(key: id) {
+            fn new() -> Self {
+                Self {}
+            }
+        }
+
+        @machines
+        fn main() -> () | MachineError | SessionError {
+            let service = PRService::spawn()?;
+            let _session = service.create(PullRequest as Reviewer)?;
+        }
+    "#;
+
+    let errors = check_linear_source(source, "tests/fixtures/linear/hosted_unknown_role.mc")
+        .expect_err("creating a session for an unknown role should be rejected");
+    let rendered = format!("{errors:#?}");
+    assert!(
+        rendered.contains("role")
+            || rendered.contains("Reviewer")
+            || rendered.contains("MC-SESSION-UNKNOWN-ROLE"),
+        "expected an unknown-role diagnostic, got: {rendered}"
+    );
+}
+
+#[test]
+fn linear_type_hosted_create_rejects_machine_host_mismatch() {
+    let source = r#"
+        @linear
+        type PullRequest = {
+            id: u64,
+
+            states {
+                Draft,
+            }
+
+            actions {}
+
+            roles {
+                Author {}
+            }
+        }
+
+        @linear
+        type Issue = {
+            id: u64,
+
+            states {
+                Open,
+            }
+
+            actions {}
+
+            roles {
+                Author {}
+            }
+        }
+
+        machine PRService hosts PullRequest(key: id) {
+            fn new() -> Self {
+                Self {}
+            }
+        }
+
+        @machines
+        fn main() -> () | MachineError | SessionError {
+            let service = PRService::spawn()?;
+            let _session = service.create(Issue as Author)?;
+        }
+    "#;
+
+    let errors = check_linear_source(source, "tests/fixtures/linear/hosted_machine_mismatch.mc")
+        .expect_err("creating a session for the wrong hosted type should be rejected");
+    let rendered = format!("{errors:#?}");
+    assert!(
+        rendered.contains("hosts")
+            || rendered.contains("Issue")
+            || rendered.contains("PullRequest")
+            || rendered.contains("MC-SESSION-HOST-MISMATCH"),
+        "expected a machine-host mismatch diagnostic, got: {rendered}"
+    );
+}
