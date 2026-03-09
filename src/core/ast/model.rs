@@ -426,6 +426,7 @@ pub enum TypeDefKind {
     Alias { aliased_ty: TypeExpr },
     Struct { fields: Vec<StructDefField> },
     Enum { variants: Vec<EnumDefVariant> },
+    Linear { linear: LinearTypeDef },
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -441,6 +442,51 @@ pub struct EnumDefVariant {
     pub id: NodeId,
     pub name: String,
     pub payload: Vec<TypeExpr>,
+    pub span: Span,
+}
+
+#[derive(Clone, Debug)]
+pub struct LinearTypeDef {
+    pub fields: Vec<StructDefField>,
+    pub states: Vec<LinearStateVariant>,
+    pub actions: Vec<LinearTransitionDecl>,
+    pub triggers: Vec<LinearTransitionDecl>,
+    pub roles: Vec<LinearRoleDecl>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct LinearStateVariant {
+    pub id: NodeId,
+    pub attrs: Vec<Attribute>,
+    pub name: String,
+    pub payload: Vec<TypeExpr>,
+    pub span: Span,
+}
+
+#[derive(Clone, Debug)]
+pub struct LinearTransitionDecl {
+    pub id: NodeId,
+    pub name: String,
+    pub params: Vec<LinearTransitionParam>,
+    pub source_state: String,
+    pub target_state: String,
+    pub error_ty_expr: Option<TypeExpr>,
+    pub span: Span,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct LinearTransitionParam {
+    pub id: NodeId,
+    pub name: String,
+    pub ty: TypeExpr,
+    pub span: Span,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct LinearRoleDecl {
+    pub id: NodeId,
+    pub name: String,
+    pub allowed_actions: Vec<String>,
     pub span: Span,
 }
 
@@ -605,6 +651,7 @@ pub struct MethodSig {
 pub struct SelfParam {
     pub id: NodeId,
     pub mode: ParamMode,
+    pub receiver_ty_expr: Option<TypeExpr>,
     pub span: Span,
 }
 

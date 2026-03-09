@@ -891,6 +891,9 @@ impl SymbolResolver {
                         variants: variants.clone(),
                     },
                 ),
+                TypeDefKind::Linear { .. } => {
+                    unimplemented!("linear types are not resolved yet")
+                }
             };
 
             // Create a new Def

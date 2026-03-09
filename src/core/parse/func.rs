@@ -185,9 +185,16 @@ impl<'a> Parser<'a> {
             return self.err_here(PEK::ExpectedSelf(self.curr_token.clone()));
         }
         self.advance();
+        let receiver_ty_expr = if self.curr_token.kind == TK::Colon {
+            self.advance();
+            Some(self.parse_type_expr()?)
+        } else {
+            None
+        };
         let self_param = SelfParam {
             id: self.id_gen.new_id(),
             mode: self_mode,
+            receiver_ty_expr,
             span: self.close(self_marker),
         };
 
@@ -247,6 +254,7 @@ impl<'a> Parser<'a> {
                         self_param: SelfParam {
                             id: self.id_gen.new_id(),
                             mode: ParamMode::In,
+                            receiver_ty_expr: None,
                             span: self.close(accessor_marker),
                         },
                         params: Vec::new(),
@@ -315,6 +323,7 @@ impl<'a> Parser<'a> {
                         self_param: SelfParam {
                             id: self.id_gen.new_id(),
                             mode: ParamMode::InOut,
+                            receiver_ty_expr: None,
                             span: self.close(accessor_marker),
                         },
                         params: vec![param],

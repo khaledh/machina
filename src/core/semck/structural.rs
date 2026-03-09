@@ -57,6 +57,7 @@ impl<'a> StructuralChecker<'a> {
                     );
                 }
                 TypeDefKind::Alias { .. } => {}
+                TypeDefKind::Linear { .. } => {}
             }
         }
 

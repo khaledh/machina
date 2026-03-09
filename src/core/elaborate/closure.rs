@@ -327,6 +327,7 @@ impl<'a> Elaborator<'a> {
         let self_param = SelfParam {
             id: self.node_id_gen.new_id(),
             mode: ParamMode::In,
+            receiver_ty_expr: None,
             span,
         };
         self.def_table

@@ -139,6 +139,7 @@ pub(crate) fn resolve_type_def_with_args(
             &mut in_progress,
             false,
         ),
+        TypeDefKind::Linear { .. } => unimplemented!("linear types are not resolved yet"),
     }
 }
 
@@ -678,6 +679,9 @@ fn resolve_named_type(
                         in_progress,
                         allow_error_union,
                     ),
+                    TypeDefKind::Linear { .. } => {
+                        unimplemented!("linear types are not resolved yet")
+                    }
                 };
             }
 
@@ -744,6 +748,9 @@ fn resolve_named_type(
                     in_progress,
                     allow_error_union,
                 ),
+                TypeDefKind::Linear { .. } => {
+                    unimplemented!("linear types are not resolved yet")
+                }
             }
         }
         _ => Err(TEK::UnknownType.at(type_expr.span)),

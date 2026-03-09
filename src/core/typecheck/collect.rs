@@ -176,6 +176,9 @@ fn collect_type_defs(
                         name: type_def.name.clone(),
                         variants,
                     }),
+                TypeDefKind::Linear { .. } => {
+                    unimplemented!("linear types are not collected yet")
+                }
             };
 
         match resolved {

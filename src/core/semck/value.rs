@@ -188,6 +188,32 @@ impl<'a> ValueChecker<'a> {
                     }
                 }
             }
+            TypeDefKind::Linear { linear } => {
+                for field in &linear.fields {
+                    self.check_type_expr(&field.ty);
+                }
+                for state in &linear.states {
+                    for payload_ty in &state.payload {
+                        self.check_type_expr(payload_ty);
+                    }
+                }
+                for action in &linear.actions {
+                    for param in &action.params {
+                        self.check_type_expr(&param.ty);
+                    }
+                    if let Some(error_ty_expr) = &action.error_ty_expr {
+                        self.check_type_expr(error_ty_expr);
+                    }
+                }
+                for trigger in &linear.triggers {
+                    for param in &trigger.params {
+                        self.check_type_expr(&param.ty);
+                    }
+                    if let Some(error_ty_expr) = &trigger.error_ty_expr {
+                        self.check_type_expr(error_ty_expr);
+                    }
+                }
+            }
         }
     }
 

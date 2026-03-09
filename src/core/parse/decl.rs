@@ -336,7 +336,13 @@ impl<'a> Parser<'a> {
         let type_params = self.parse_type_params()?;
         self.consume(&TK::Equals)?;
 
-        let kind = if self.curr_token.kind == TK::LBrace {
+        let is_linear = attrs.iter().any(|attr| attr.name == "linear");
+
+        let kind = if is_linear {
+            TypeDefKind::Linear {
+                linear: self.parse_linear_type_def()?,
+            }
+        } else if self.curr_token.kind == TK::LBrace {
             self.parse_struct_def()?
         } else if matches!(&self.curr_token.kind, TK::Ident(_))
             && matches!(
@@ -843,5 +849,181 @@ impl<'a> Parser<'a> {
         }
 
         Ok(TypeDefKind::Enum { variants })
+    }
+
+    fn parse_linear_type_def(&mut self) -> Result<LinearTypeDef, ParseError> {
+        self.consume(&TK::LBrace)?;
+
+        let mut fields = Vec::new();
+        let mut states = Vec::new();
+        let mut actions = Vec::new();
+        let mut triggers = Vec::new();
+        let mut roles = Vec::new();
+
+        while self.curr_token.kind != TK::RBrace {
+            let attrs = self.parse_attribute_list()?;
+            if self.is_contextual_keyword("states") {
+                if !attrs.is_empty() {
+                    return Err(PEK::AttributeNotAllowed.at(attrs[0].span));
+                }
+                states = self.parse_linear_states_block()?;
+            } else if self.is_contextual_keyword("actions") {
+                if !attrs.is_empty() {
+                    return Err(PEK::AttributeNotAllowed.at(attrs[0].span));
+                }
+                actions = self.parse_linear_transition_block("actions")?;
+            } else if self.is_contextual_keyword("triggers") {
+                if !attrs.is_empty() {
+                    return Err(PEK::AttributeNotAllowed.at(attrs[0].span));
+                }
+                triggers = self.parse_linear_transition_block("triggers")?;
+            } else if self.is_contextual_keyword("roles") {
+                if !attrs.is_empty() {
+                    return Err(PEK::AttributeNotAllowed.at(attrs[0].span));
+                }
+                roles = self.parse_linear_roles_block()?;
+            } else {
+                if !attrs.is_empty() {
+                    return Err(PEK::AttributeNotAllowed.at(attrs[0].span));
+                }
+                fields.push(self.parse_struct_def_field()?);
+            }
+
+            if matches!(self.curr_token.kind, TK::Comma | TK::Semicolon) {
+                self.advance();
+            }
+        }
+
+        self.consume(&TK::RBrace)?;
+        Ok(LinearTypeDef {
+            fields,
+            states,
+            actions,
+            triggers,
+            roles,
+        })
+    }
+
+    fn parse_linear_states_block(&mut self) -> Result<Vec<LinearStateVariant>, ParseError> {
+        self.consume_contextual_keyword("states")?;
+        self.consume(&TK::LBrace)?;
+
+        let mut states = Vec::new();
+        while self.curr_token.kind != TK::RBrace {
+            let attrs = self.parse_attribute_list()?;
+            let marker = self.mark();
+            let name = self.parse_ident()?;
+            let payload = if self.curr_token.kind == TK::LParen {
+                self.advance();
+                let tys =
+                    self.parse_list(TK::Comma, TK::RParen, |parser| parser.parse_type_expr())?;
+                self.consume(&TK::RParen)?;
+                tys
+            } else {
+                Vec::new()
+            };
+            states.push(LinearStateVariant {
+                id: self.id_gen.new_id(),
+                attrs,
+                name,
+                payload,
+                span: self.close(marker),
+            });
+            if self.curr_token.kind == TK::Comma {
+                self.advance();
+            }
+        }
+
+        self.consume(&TK::RBrace)?;
+        Ok(states)
+    }
+
+    fn parse_linear_transition_block(
+        &mut self,
+        keyword: &str,
+    ) -> Result<Vec<LinearTransitionDecl>, ParseError> {
+        self.consume_contextual_keyword(keyword)?;
+        self.consume(&TK::LBrace)?;
+
+        let mut decls = Vec::new();
+        while self.curr_token.kind != TK::RBrace {
+            decls.push(self.parse_linear_transition_decl()?);
+            if self.curr_token.kind == TK::Comma {
+                self.advance();
+            }
+        }
+
+        self.consume(&TK::RBrace)?;
+        Ok(decls)
+    }
+
+    fn parse_linear_transition_decl(&mut self) -> Result<LinearTransitionDecl, ParseError> {
+        let marker = self.mark();
+        let name = self.parse_ident()?;
+        let params = if self.curr_token.kind == TK::LParen {
+            self.advance();
+            let params = self.parse_list(TK::Comma, TK::RParen, |parser| {
+                let marker = parser.mark();
+                let name = parser.parse_ident()?;
+                parser.consume(&TK::Colon)?;
+                let ty = parser.parse_type_expr()?;
+                Ok(LinearTransitionParam {
+                    id: parser.id_gen.new_id(),
+                    name,
+                    ty,
+                    span: parser.close(marker),
+                })
+            })?;
+            self.consume(&TK::RParen)?;
+            params
+        } else {
+            Vec::new()
+        };
+        self.consume(&TK::Colon)?;
+        let source_state = self.parse_ident()?;
+        self.consume(&TK::Arrow)?;
+        let target_state = self.parse_ident()?;
+        let error_ty_expr = if self.curr_token.kind == TK::Pipe {
+            self.advance();
+            Some(self.parse_type_expr()?)
+        } else {
+            None
+        };
+        Ok(LinearTransitionDecl {
+            id: self.id_gen.new_id(),
+            name,
+            params,
+            source_state,
+            target_state,
+            error_ty_expr,
+            span: self.close(marker),
+        })
+    }
+
+    fn parse_linear_roles_block(&mut self) -> Result<Vec<LinearRoleDecl>, ParseError> {
+        self.consume_contextual_keyword("roles")?;
+        self.consume(&TK::LBrace)?;
+
+        let mut roles = Vec::new();
+        while self.curr_token.kind != TK::RBrace {
+            let marker = self.mark();
+            let name = self.parse_ident()?;
+            self.consume(&TK::LBrace)?;
+            let allowed_actions =
+                self.parse_list(TK::Comma, TK::RBrace, |parser| parser.parse_ident())?;
+            self.consume(&TK::RBrace)?;
+            roles.push(LinearRoleDecl {
+                id: self.id_gen.new_id(),
+                name,
+                allowed_actions,
+                span: self.close(marker),
+            });
+            if self.curr_token.kind == TK::Comma {
+                self.advance();
+            }
+        }
+
+        self.consume(&TK::RBrace)?;
+        Ok(roles)
     }
 }

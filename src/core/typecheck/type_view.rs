@@ -74,6 +74,7 @@ impl<'a, M: TypeDefLookup> TypeViewResolver<'a, M> {
                 variants: Vec::new(),
                 state: ExpansionState::Shallow,
             })),
+            TypeDefKind::Linear { .. } => None,
             _ => None,
         }
     }

@@ -654,6 +654,7 @@ fn final_state_marker_method_def(span: Span, node_id_gen: &mut NodeIdGen) -> Met
             self_param: SelfParam {
                 id: node_id_gen.new_id(),
                 mode: ParamMode::In,
+                receiver_ty_expr: None,
                 span,
             },
             params: Vec::new(),

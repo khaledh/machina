@@ -376,9 +376,106 @@ impl TypeDefKind {
                     }
                 }
             }
+            TypeDefKind::Linear { linear } => {
+                writeln!(f, "{}Linear:", pad)?;
+                if !linear.fields.is_empty() {
+                    writeln!(f, "{}  Fields:", pad)?;
+                    for field in &linear.fields {
+                        field.fmt_with_indent(f, level + 3)?;
+                    }
+                }
+                if !linear.states.is_empty() {
+                    writeln!(f, "{}  States:", pad)?;
+                    for state in &linear.states {
+                        let attrs = if state.attrs.is_empty() {
+                            String::new()
+                        } else {
+                            format!(
+                                " @{}",
+                                state
+                                    .attrs
+                                    .iter()
+                                    .map(|attr| attr.name.as_str())
+                                    .collect::<Vec<_>>()
+                                    .join(", @")
+                            )
+                        };
+                        if state.payload.is_empty() {
+                            writeln!(f, "{}    - {}{} [{}]", pad, state.name, attrs, state.id)?;
+                        } else {
+                            let payload = state
+                                .payload
+                                .iter()
+                                .map(ToString::to_string)
+                                .collect::<Vec<_>>()
+                                .join(", ");
+                            writeln!(
+                                f,
+                                "{}    - {}({}){} [{}]",
+                                pad, state.name, payload, attrs, state.id
+                            )?;
+                        }
+                    }
+                }
+                if !linear.actions.is_empty() {
+                    writeln!(f, "{}  Actions:", pad)?;
+                    for action in &linear.actions {
+                        fmt_linear_transition_decl(f, level + 2, action)?;
+                    }
+                }
+                if !linear.triggers.is_empty() {
+                    writeln!(f, "{}  Triggers:", pad)?;
+                    for trigger in &linear.triggers {
+                        fmt_linear_transition_decl(f, level + 2, trigger)?;
+                    }
+                }
+                if !linear.roles.is_empty() {
+                    writeln!(f, "{}  Roles:", pad)?;
+                    for role in &linear.roles {
+                        writeln!(
+                            f,
+                            "{}    - {} {{ {} }} [{}]",
+                            pad,
+                            role.name,
+                            role.allowed_actions.join(", "),
+                            role.id
+                        )?;
+                    }
+                }
+            }
         }
         Ok(())
     }
+}
+
+fn fmt_linear_transition_decl(
+    f: &mut fmt::Formatter<'_>,
+    level: usize,
+    decl: &LinearTransitionDecl,
+) -> fmt::Result {
+    let pad = indent(level);
+    let params = if decl.params.is_empty() {
+        String::new()
+    } else {
+        format!(
+            "({})",
+            decl.params
+                .iter()
+                .map(|param| format!("{}: {}", param.name, param.ty))
+                .collect::<Vec<_>>()
+                .join(", ")
+        )
+    };
+    let error_suffix = decl
+        .error_ty_expr
+        .as_ref()
+        .map(|err_ty| format!(" | {}", err_ty))
+        .unwrap_or_default();
+    writeln!(
+        f,
+        "{}- {}{}: {} -> {}{} [{}]",
+        pad, decl.name, params, decl.source_state, decl.target_state, error_suffix, decl.id
+    )
 }
 
 impl ArrayLitInit {

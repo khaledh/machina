@@ -53,6 +53,7 @@ pub(super) fn lower_state_method(
             self_param: SelfParam {
                 id: node_id_gen.new_id(),
                 mode: ParamMode::Sink,
+                receiver_ty_expr: None,
                 span: ctx.span,
             },
             params: method.sig.params,

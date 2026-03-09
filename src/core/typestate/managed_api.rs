@@ -44,6 +44,7 @@ fn build_handle_method(spec: HandleMethodSpec<'_>, node_id_gen: &mut NodeIdGen) 
             self_param: SelfParam {
                 id: node_id_gen.new_id(),
                 mode: ParamMode::In,
+                receiver_ty_expr: None,
                 span,
             },
             params: spec.params,

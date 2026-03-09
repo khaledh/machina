@@ -3243,3 +3243,96 @@ fn test_parse_try_or_arm_sugar_wraps_match_handler_closure() {
     };
     assert_eq!(arms.len(), 3);
 }
+
+#[test]
+fn test_parse_linear_type_blocks() {
+    let source = r#"
+        @linear
+        type Door = {
+            id: u64,
+
+            states {
+                Closed,
+                @final Locked(u64),
+            }
+
+            actions {
+                open: Closed -> Locked | DoorError,
+            }
+
+            triggers {
+                timeout: Locked -> Closed,
+            }
+
+            roles {
+                Owner { open }
+            }
+        }
+    "#;
+
+    let module = parse_module(source).expect("Failed to parse");
+    let type_defs = module.type_defs();
+    assert_eq!(type_defs.len(), 1);
+
+    let type_def = type_defs[0];
+    match &type_def.kind {
+        TypeDefKind::Linear { linear } => {
+            assert_eq!(linear.fields.len(), 1);
+            assert_eq!(linear.fields[0].name, "id");
+
+            assert_eq!(linear.states.len(), 2);
+            assert_eq!(linear.states[0].name, "Closed");
+            assert!(linear.states[0].payload.is_empty());
+            assert_eq!(linear.states[1].name, "Locked");
+            assert_eq!(linear.states[1].payload.len(), 1);
+            assert_eq!(linear.states[1].attrs.len(), 1);
+            assert_eq!(linear.states[1].attrs[0].name, "final");
+
+            assert_eq!(linear.actions.len(), 1);
+            assert_eq!(linear.actions[0].name, "open");
+            assert_eq!(linear.actions[0].source_state, "Closed");
+            assert_eq!(linear.actions[0].target_state, "Locked");
+            assert_eq!(linear.actions[0].params.len(), 0);
+            assert!(linear.actions[0].error_ty_expr.is_some());
+
+            assert_eq!(linear.triggers.len(), 1);
+            assert_eq!(linear.triggers[0].name, "timeout");
+            assert_eq!(linear.triggers[0].source_state, "Locked");
+            assert_eq!(linear.triggers[0].target_state, "Closed");
+
+            assert_eq!(linear.roles.len(), 1);
+            assert_eq!(linear.roles[0].name, "Owner");
+            assert_eq!(linear.roles[0].allowed_actions, vec!["open".to_string()]);
+        }
+        _ => panic!("Expected linear type"),
+    }
+}
+
+#[test]
+fn test_parse_method_receiver_type_annotation() {
+    let source = r#"
+        Door :: {
+            fn close(self: Closed) -> Closed;
+        }
+    "#;
+
+    let module = parse_module(source).expect("Failed to parse");
+    let method_blocks = module.method_blocks();
+    assert_eq!(method_blocks.len(), 1);
+    let MethodItem::Decl(method_decl) = &method_blocks[0].method_items[0] else {
+        panic!("Expected method declaration");
+    };
+    let receiver_ty_expr = method_decl
+        .sig
+        .self_param
+        .receiver_ty_expr
+        .as_ref()
+        .expect("Expected receiver type annotation");
+    match &receiver_ty_expr.kind {
+        TypeExprKind::Named { ident, type_args } => {
+            assert_eq!(ident, "Closed");
+            assert!(type_args.is_empty());
+        }
+        _ => panic!("Expected named receiver type"),
+    }
+}

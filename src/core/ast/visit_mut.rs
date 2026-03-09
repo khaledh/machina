@@ -105,6 +105,22 @@ pub trait VisitorMut {
         walk_enum_def_variant(self, variant)
     }
 
+    fn visit_linear_type_def(&mut self, linear: &mut LinearTypeDef) {
+        walk_linear_type_def(self, linear)
+    }
+
+    fn visit_linear_state_variant(&mut self, state: &mut LinearStateVariant) {
+        walk_linear_state_variant(self, state)
+    }
+
+    fn visit_linear_transition_decl(&mut self, decl: &mut LinearTransitionDecl) {
+        walk_linear_transition_decl(self, decl)
+    }
+
+    fn visit_linear_transition_param(&mut self, param: &mut LinearTransitionParam) {
+        walk_linear_transition_param(self, param)
+    }
+
     // --- Type Expressions ---
 
     fn visit_type_expr(&mut self, type_expr: &mut TypeExpr) {
@@ -375,7 +391,49 @@ pub fn walk_type_def<V: VisitorMut + ?Sized>(v: &mut V, type_def: &mut TypeDef) 
         TypeDefKind::Alias { aliased_ty } => v.visit_type_expr(aliased_ty),
         TypeDefKind::Struct { fields } => v.visit_struct_def_fields(fields),
         TypeDefKind::Enum { variants } => v.visit_enum_def_variants(variants),
+        TypeDefKind::Linear { linear } => v.visit_linear_type_def(linear),
     }
+}
+
+pub fn walk_linear_type_def<V: VisitorMut + ?Sized>(v: &mut V, linear: &mut LinearTypeDef) {
+    v.visit_struct_def_fields(&mut linear.fields);
+    for state in &mut linear.states {
+        v.visit_linear_state_variant(state);
+    }
+    for action in &mut linear.actions {
+        v.visit_linear_transition_decl(action);
+    }
+    for trigger in &mut linear.triggers {
+        v.visit_linear_transition_decl(trigger);
+    }
+}
+
+pub fn walk_linear_state_variant<V: VisitorMut + ?Sized>(
+    v: &mut V,
+    state: &mut LinearStateVariant,
+) {
+    for payload in &mut state.payload {
+        v.visit_type_expr(payload);
+    }
+}
+
+pub fn walk_linear_transition_decl<V: VisitorMut + ?Sized>(
+    v: &mut V,
+    decl: &mut LinearTransitionDecl,
+) {
+    for param in &mut decl.params {
+        v.visit_linear_transition_param(param);
+    }
+    if let Some(error_ty_expr) = &mut decl.error_ty_expr {
+        v.visit_type_expr(error_ty_expr);
+    }
+}
+
+pub fn walk_linear_transition_param<V: VisitorMut + ?Sized>(
+    v: &mut V,
+    param: &mut LinearTransitionParam,
+) {
+    v.visit_type_expr(&mut param.ty);
 }
 
 pub fn walk_struct_def_fields<V: VisitorMut + ?Sized>(v: &mut V, fields: &mut [StructDefField]) {
