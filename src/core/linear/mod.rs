@@ -63,7 +63,6 @@ struct LinearValueState {
 
 #[derive(Clone, Debug)]
 struct LinearBindingState {
-    actual_ident: String,
     value_state: LinearValueState,
     consumed: bool,
 }
@@ -804,7 +803,6 @@ fn rewrite_expr_with_linear_env(
         env.insert(
             "self".to_string(),
             LinearBindingState {
-                actual_ident: "self".to_string(),
                 value_state: LinearValueState {
                     type_name: type_name.to_string(),
                     state_name: state_name.to_string(),
@@ -1153,9 +1151,6 @@ fn rewrite_expr_in_scope(
             let Some(binding) = env.get(&source_ident) else {
                 return None;
             };
-            if binding.actual_ident != source_ident {
-                *ident = binding.actual_ident.clone();
-            }
             if binding.consumed {
                 errors.push(REK::LinearUseAfterConsume(source_ident).at(expr.span));
             }
@@ -1184,18 +1179,9 @@ fn rewrite_stmt_in_scope(
             if let Some(ident) = bind_pattern_name_mut(pattern) {
                 let source_ident = ident.clone();
                 if let Some(result_state) = result_state {
-                    let actual_ident = if env.contains_key(&source_ident) {
-                        fresh_linear_binding_name(&source_ident, node_id_gen)
-                    } else {
-                        source_ident.clone()
-                    };
-                    if actual_ident != source_ident {
-                        *ident = actual_ident.clone();
-                    }
                     env.insert(
                         source_ident,
                         LinearBindingState {
-                            actual_ident,
                             value_state: result_state,
                             consumed: false,
                         },
@@ -1264,7 +1250,6 @@ fn rewrite_stmt_in_scope(
                 body_env.insert(
                     binding.ident.clone(),
                     LinearBindingState {
-                        actual_ident: binding.ident.clone(),
                         value_state: result_state,
                         consumed: false,
                     },
@@ -1491,10 +1476,6 @@ fn bind_pattern_name_mut(pattern: &mut crate::core::ast::BindPattern) -> Option<
 
 fn direct_action_method_name(source_state: &str, action_name: &str) -> String {
     format!("__linear__{source_state}__{action_name}")
-}
-
-fn fresh_linear_binding_name(source_ident: &str, node_id_gen: &mut NodeIdGen) -> String {
-    format!("{source_ident}$linear${}", node_id_gen.new_id().0)
 }
 
 fn action_key(action: &LinearTransitionDecl) -> (String, String) {
