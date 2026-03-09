@@ -1019,6 +1019,41 @@ fn test_resolve_function_decl_conflicts_with_def() {
 }
 
 #[test]
+fn test_resolve_allows_same_scope_local_rebinding() {
+    let source = r#"
+        fn bump(x: u64) -> u64 {
+            let x = x + 1;
+            let x = x + 1;
+            x
+        }
+    "#;
+
+    let result = resolve_source(source);
+    assert!(result.is_ok(), "expected rebinding to resolve");
+}
+
+#[test]
+fn test_resolve_duplicate_names_in_single_bind_pattern_still_error() {
+    let source = r#"
+        fn main() {
+            let (x, x) = (1, 2);
+        }
+    "#;
+
+    let result = resolve_source(source);
+    assert!(result.is_err());
+
+    if let Err(errors) = result {
+        assert!(
+            errors.iter().any(
+                |e| matches!(e.kind(), ResolveErrorKind::SymbolAlreadyDefined(name) if name == "x")
+            ),
+            "expected duplicate pattern binding error, got {errors:?}"
+        );
+    }
+}
+
+#[test]
 fn test_resolve_unknown_attribute() {
     let source = "@nope fn foo() -> u64 { 0 }";
     let result = resolve_source(source);

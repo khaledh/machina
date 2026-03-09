@@ -381,6 +381,27 @@ impl SymbolResolver {
         }
     }
 
+    fn insert_local_binding_symbol(&mut self, name: &str, symbol: Symbol, span: Span) {
+        let scope = self.scopes.last_mut().unwrap();
+        match scope.defs.get(name) {
+            None => {
+                scope.defs.insert(name.to_string(), symbol);
+            }
+            Some(Symbol {
+                kind: SymbolKind::Var { .. },
+                ..
+            }) => {
+                // Rebinding a local name replaces the current-scope binding
+                // from this point forward while leaving earlier RHS resolution
+                // against the previous binding intact.
+                scope.defs.insert(name.to_string(), symbol);
+            }
+            Some(_) => {
+                self.err(span, REK::SymbolAlreadyDefined(name.to_string()));
+            }
+        }
+    }
+
     fn register_param(&mut self, name: &str, mode: ParamMode, id: NodeId, span: Span, index: u32) {
         let is_mutable = matches!(mode, ParamMode::InOut | ParamMode::Out | ParamMode::Sink);
         let def_id = self.def_id_gen.new_id();
@@ -1297,8 +1318,22 @@ impl SymbolResolver {
     }
 
     fn check_bind_pattern(&mut self, pattern: &BindPattern, is_mutable: bool) {
+        let mut seen_names = HashSet::new();
+        self.check_bind_pattern_namespaced(pattern, is_mutable, &mut seen_names);
+    }
+
+    fn check_bind_pattern_namespaced(
+        &mut self,
+        pattern: &BindPattern,
+        is_mutable: bool,
+        seen_names: &mut HashSet<String>,
+    ) {
         match &pattern.kind {
             BindPatternKind::Name { ident: var_name } => {
+                if !seen_names.insert(var_name.clone()) {
+                    self.err(pattern.span, REK::SymbolAlreadyDefined(var_name.clone()));
+                    return;
+                }
                 let def_id = self.def_id_gen.new_id();
                 let def = Def {
                     id: def_id,
@@ -1310,7 +1345,7 @@ impl SymbolResolver {
                 };
                 self.def_table_builder
                     .record_def(def, pattern.id, pattern.span);
-                self.insert_symbol(
+                self.insert_local_binding_symbol(
                     var_name,
                     Symbol {
                         name: var_name.to_string(),
@@ -1322,13 +1357,13 @@ impl SymbolResolver {
             BindPatternKind::Array { patterns } => {
                 // Recursively check each sub-pattern
                 for pattern in patterns {
-                    self.check_bind_pattern(pattern, is_mutable);
+                    self.check_bind_pattern_namespaced(pattern, is_mutable, seen_names);
                 }
             }
             BindPatternKind::Tuple { patterns } => {
                 // Recursively check each sub-pattern
                 for pattern in patterns {
-                    self.check_bind_pattern(pattern, is_mutable);
+                    self.check_bind_pattern_namespaced(pattern, is_mutable, seen_names);
                 }
             }
             BindPatternKind::Struct {
@@ -1354,7 +1389,7 @@ impl SymbolResolver {
 
                 // Bind each field's sub-pattern
                 for field in fields {
-                    self.check_bind_pattern(&field.pattern, is_mutable);
+                    self.check_bind_pattern_namespaced(&field.pattern, is_mutable, seen_names);
                 }
             }
         }
@@ -1886,7 +1921,7 @@ impl Visitor for SymbolResolver {
                     },
                 };
                 self.def_table_builder.record_def(def, stmt.id, stmt.span);
-                self.insert_symbol(
+                self.insert_local_binding_symbol(
                     ident,
                     Symbol {
                         name: ident.clone(),
@@ -1954,7 +1989,7 @@ impl Visitor for SymbolResolver {
                         .def_table_builder
                         .record_def(def, binding.id, binding.span);
                     resolver.def_table_builder.record_use(stmt.id, def_id);
-                    resolver.insert_symbol(
+                    resolver.insert_local_binding_symbol(
                         &binding.ident,
                         Symbol {
                             name: binding.ident.clone(),

@@ -256,6 +256,35 @@ fn test_defer_runs_before_try_propagates_error() {
     assert_eq!(stdout, "cleanup\n", "unexpected stdout: {stdout}");
 }
 
+#[test]
+fn test_same_scope_name_rebinding_for_let_var_and_params() {
+    let run = run_program(
+        "same_scope_name_rebinding",
+        r#"
+            fn bump(x: u64) {
+                let x = x + 1;
+                println(x);
+            }
+
+            fn main() {
+                let x = 1;
+                let x = x + 1;
+                println(x);
+
+                var y = 1;
+                var y = y + 2;
+                println(y);
+
+                bump(5);
+            }
+        "#,
+    );
+    assert_eq!(run.status.code(), Some(0));
+
+    let stdout = String::from_utf8_lossy(&run.stdout);
+    assert_eq!(stdout, "2\n3\n6\n", "unexpected stdout: {stdout}");
+}
+
 fn with_temp_program(
     name: &str,
     entry_source: &str,
