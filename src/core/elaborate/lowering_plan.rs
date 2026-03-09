@@ -64,6 +64,7 @@ impl<'a> LoweringPlanBuilder<'a> {
                 | TopLevelItem::FuncDecl(_)
                 | TopLevelItem::ProtocolDef(_)
                 | TopLevelItem::TypestateDef(_)
+                | TopLevelItem::MachineDef(_)
                 | TopLevelItem::ClosureDef(_) => {}
             }
         }

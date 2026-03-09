@@ -65,6 +65,26 @@ pub trait VisitorMut {
         walk_typestate_def(self, typestate_def)
     }
 
+    fn visit_machine_def(&mut self, machine_def: &mut MachineDef) {
+        walk_machine_def(self, machine_def)
+    }
+
+    fn visit_machine_item(&mut self, item: &mut MachineItem) {
+        walk_machine_item(self, item)
+    }
+
+    fn visit_machine_fields(&mut self, fields: &mut MachineFields) {
+        walk_machine_fields(self, fields)
+    }
+
+    fn visit_machine_transition_handler(&mut self, handler: &mut MachineTransitionHandler) {
+        walk_machine_transition_handler(self, handler)
+    }
+
+    fn visit_machine_on_handler(&mut self, handler: &mut MachineOnHandler) {
+        walk_machine_on_handler(self, handler)
+    }
+
     fn visit_typestate_item(&mut self, item: &mut TypestateItem) {
         walk_typestate_item(self, item)
     }
@@ -241,6 +261,7 @@ pub fn walk_module<V: VisitorMut + ?Sized>(v: &mut V, module: &mut Module) {
             TopLevelItem::TraitDef(trait_def) => v.visit_trait_def(trait_def),
             TopLevelItem::TypeDef(type_def) => v.visit_type_def(type_def),
             TopLevelItem::TypestateDef(typestate_def) => v.visit_typestate_def(typestate_def),
+            TopLevelItem::MachineDef(machine_def) => v.visit_machine_def(machine_def),
             TopLevelItem::FuncDecl(func_decl) => v.visit_func_decl(func_decl),
             TopLevelItem::FuncDef(func_def) => v.visit_func_def(func_def),
             TopLevelItem::MethodBlock(method_block) => v.visit_method_block(method_block),
@@ -305,6 +326,51 @@ pub fn walk_protocol_trigger<V: VisitorMut + ?Sized>(v: &mut V, trigger: &mut Pr
 
 pub fn walk_protocol_effect<V: VisitorMut + ?Sized>(v: &mut V, effect: &mut ProtocolEffect) {
     v.visit_type_expr(&mut effect.payload_ty);
+}
+
+pub fn walk_machine_def<V: VisitorMut + ?Sized>(v: &mut V, machine_def: &mut MachineDef) {
+    for item in &mut machine_def.items {
+        v.visit_machine_item(item);
+    }
+}
+
+pub fn walk_machine_item<V: VisitorMut + ?Sized>(v: &mut V, item: &mut MachineItem) {
+    match item {
+        MachineItem::Fields(fields) => v.visit_machine_fields(fields),
+        MachineItem::Constructor(constructor) => v.visit_func_def(constructor),
+        MachineItem::Action(handler) | MachineItem::Trigger(handler) => {
+            v.visit_machine_transition_handler(handler)
+        }
+        MachineItem::On(handler) => v.visit_machine_on_handler(handler),
+    }
+}
+
+pub fn walk_machine_fields<V: VisitorMut + ?Sized>(v: &mut V, fields: &mut MachineFields) {
+    v.visit_struct_def_fields(&mut fields.fields);
+}
+
+pub fn walk_machine_transition_handler<V: VisitorMut + ?Sized>(
+    v: &mut V,
+    handler: &mut MachineTransitionHandler,
+) {
+    for param in &mut handler.params {
+        v.visit_param(param);
+    }
+    if let Some(ret_ty_expr) = &mut handler.ret_ty_expr {
+        v.visit_type_expr(ret_ty_expr);
+    }
+    v.visit_expr(&mut handler.body);
+}
+
+pub fn walk_machine_on_handler<V: VisitorMut + ?Sized>(v: &mut V, handler: &mut MachineOnHandler) {
+    v.visit_type_expr(&mut handler.selector_ty);
+    for param in &mut handler.params {
+        v.visit_param(param);
+    }
+    if let Some(provenance) = &mut handler.provenance {
+        v.visit_param(&mut provenance.param);
+    }
+    v.visit_expr(&mut handler.body);
 }
 
 pub fn walk_trait_def<V: VisitorMut + ?Sized>(v: &mut V, trait_def: &mut TraitDef) {

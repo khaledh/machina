@@ -41,6 +41,7 @@ fn semantic_token_kind_for_def(kind: &DefKind) -> Option<SemanticTokenKind> {
     match kind {
         DefKind::ProtocolDef => Some(SemanticTokenKind::Type),
         DefKind::ProtocolRole => Some(SemanticTokenKind::EnumVariant),
+        DefKind::MachineDef => None,
         DefKind::TypeDef { .. } => Some(SemanticTokenKind::Type),
         DefKind::TraitDef { .. } => Some(SemanticTokenKind::Trait),
         DefKind::FuncDef { .. } | DefKind::FuncDecl { .. } => Some(SemanticTokenKind::Function),

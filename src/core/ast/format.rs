@@ -32,6 +32,7 @@ impl fmt::Display for Module {
                 TopLevelItem::TraitDef(trait_def) => trait_def.fmt_with_indent(f, 0)?,
                 TopLevelItem::TypeDef(type_def) => type_def.fmt_with_indent(f, 0)?,
                 TopLevelItem::TypestateDef(typestate_def) => typestate_def.fmt_with_indent(f, 0)?,
+                TopLevelItem::MachineDef(machine_def) => machine_def.fmt_with_indent(f, 0)?,
                 TopLevelItem::FuncDecl(func_decl) => func_decl.fmt_with_indent(f, 0)?,
                 TopLevelItem::FuncDef(func_def) => func_def.fmt_with_indent(f, 0)?,
                 TopLevelItem::MethodBlock(method_block) => method_block.fmt_with_indent(f, 0)?,
@@ -226,6 +227,96 @@ impl TypestateDef {
             item.fmt_with_indent(f, level + 2)?;
         }
         Ok(())
+    }
+}
+
+impl MachineDef {
+    fn fmt_with_indent(&self, f: &mut fmt::Formatter<'_>, level: usize) -> fmt::Result {
+        let pad = indent(level);
+        writeln!(f, "{}MachineDef [{}]", pad, self.id)?;
+        writeln!(f, "{}Name: {}", indent(level + 1), self.name)?;
+        writeln!(
+            f,
+            "{}Hosts: {} (key: {}) [{}]",
+            indent(level + 1),
+            self.host.type_name,
+            self.host.key_field,
+            self.host.id
+        )?;
+        if !self.items.is_empty() {
+            writeln!(f, "{}Items:", indent(level + 1))?;
+            for item in &self.items {
+                item.fmt_with_indent(f, level + 2)?;
+            }
+        }
+        Ok(())
+    }
+}
+
+impl MachineItem {
+    fn fmt_with_indent(&self, f: &mut fmt::Formatter<'_>, level: usize) -> fmt::Result {
+        match self {
+            MachineItem::Fields(fields) => fields.fmt_with_indent(f, level),
+            MachineItem::Constructor(func_def) => func_def.fmt_with_indent(f, level),
+            MachineItem::Action(handler) => handler.fmt_with_indent(f, level, "Action"),
+            MachineItem::Trigger(handler) => handler.fmt_with_indent(f, level, "Trigger"),
+            MachineItem::On(handler) => handler.fmt_with_indent(f, level),
+        }
+    }
+}
+
+impl MachineFields {
+    fn fmt_with_indent(&self, f: &mut fmt::Formatter<'_>, level: usize) -> fmt::Result {
+        writeln!(f, "{}MachineFields [{}]", indent(level), self.id)?;
+        for field in &self.fields {
+            field.fmt_with_indent(f, level + 1)?;
+        }
+        Ok(())
+    }
+}
+
+impl MachineTransitionHandler {
+    fn fmt_with_indent(
+        &self,
+        f: &mut fmt::Formatter<'_>,
+        level: usize,
+        kind: &'static str,
+    ) -> fmt::Result {
+        writeln!(f, "{}{} [{}]", indent(level), kind, self.id)?;
+        writeln!(f, "{}Name: {}", indent(level + 1), self.name)?;
+        writeln!(
+            f,
+            "{}Instance Param: {}",
+            indent(level + 1),
+            self.instance_param
+        )?;
+        if !self.params.is_empty() {
+            writeln!(f, "{}Params:", indent(level + 1))?;
+            for param in &self.params {
+                writeln!(f, "{}{}", indent(level + 2), param)?;
+            }
+        }
+        if let Some(ret_ty_expr) = &self.ret_ty_expr {
+            writeln!(f, "{}Return Type: {}", indent(level + 1), ret_ty_expr)?;
+        }
+        self.body.fmt_with_indent(f, level + 1)
+    }
+}
+
+impl MachineOnHandler {
+    fn fmt_with_indent(&self, f: &mut fmt::Formatter<'_>, level: usize) -> fmt::Result {
+        writeln!(f, "{}On [{}]", indent(level), self.id)?;
+        writeln!(f, "{}Selector: {}", indent(level + 1), self.selector_ty)?;
+        if !self.params.is_empty() {
+            writeln!(f, "{}Params:", indent(level + 1))?;
+            for param in &self.params {
+                writeln!(f, "{}{}", indent(level + 2), param)?;
+            }
+        }
+        if let Some(provenance) = &self.provenance {
+            writeln!(f, "{}Provenance: {}", indent(level + 1), provenance.param)?;
+        }
+        self.body.fmt_with_indent(f, level + 1)
     }
 }
 

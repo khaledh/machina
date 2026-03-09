@@ -208,6 +208,72 @@ fn linear_type_missing_action_method_reports_targeted_error() {
 }
 
 #[test]
+fn machine_host_unknown_type_reports_targeted_error() {
+    let errors = resolve_errors(
+        r#"
+        machine DoorService hosts Door(key: id) {}
+        "#,
+    );
+
+    assert!(errors.iter().any(|err| {
+        matches!(
+            err.kind(),
+            ResolveErrorKind::MachineHostedTypeUndefined(machine, ty)
+                if machine == "DoorService" && ty == "Door"
+        )
+    }));
+}
+
+#[test]
+fn machine_host_non_linear_type_reports_targeted_error() {
+    let errors = resolve_errors(
+        r#"
+        type Door = { id: u64 }
+
+        machine DoorService hosts Door(key: id) {}
+        "#,
+    );
+
+    assert!(errors.iter().any(|err| {
+        matches!(
+            err.kind(),
+            ResolveErrorKind::MachineHostedTypeNotLinear(machine, ty)
+                if machine == "DoorService" && ty == "Door"
+        )
+    }));
+}
+
+#[test]
+fn machine_host_invalid_key_field_reports_targeted_error() {
+    let errors = resolve_errors(
+        r#"
+        @linear
+        type Door = {
+            id: u64,
+
+            states { Closed, Open }
+
+            actions { open: Closed -> Open }
+        }
+
+        Door :: {
+            fn open(self) -> Open { Open {} }
+        }
+
+        machine DoorService hosts Door(key: missing) {}
+        "#,
+    );
+
+    assert!(errors.iter().any(|err| {
+        matches!(
+            err.kind(),
+            ResolveErrorKind::MachineInvalidKeyField(machine, ty, field)
+                if machine == "DoorService" && ty == "Door" && field == "missing"
+        )
+    }));
+}
+
+#[test]
 fn typestate_duplicate_state_and_invalid_transition_return_report_errors() {
     let source = r#"
 typestate Connection {
@@ -2569,6 +2635,7 @@ fn top_level_item_has_for(item: &TopLevelItem) -> bool {
         | TopLevelItem::FuncDecl(_)
         | TopLevelItem::ProtocolDef(_)
         | TopLevelItem::TypestateDef(_)
+        | TopLevelItem::MachineDef(_)
         | TopLevelItem::ClosureDef(_) => false,
     }
 }
@@ -2589,6 +2656,7 @@ fn top_level_item_has_defer_or_using(item: &TopLevelItem) -> bool {
         | TopLevelItem::FuncDecl(_)
         | TopLevelItem::ProtocolDef(_)
         | TopLevelItem::TypestateDef(_)
+        | TopLevelItem::MachineDef(_)
         | TopLevelItem::ClosureDef(_) => false,
     }
 }
@@ -2612,6 +2680,7 @@ fn top_level_item_has_cleanup_before_control_transfer(
         | TopLevelItem::FuncDecl(_)
         | TopLevelItem::ProtocolDef(_)
         | TopLevelItem::TypestateDef(_)
+        | TopLevelItem::MachineDef(_)
         | TopLevelItem::ClosureDef(_) => false,
     }
 }
@@ -2632,6 +2701,7 @@ fn top_level_item_first_bare_try_id(item: &TopLevelItem) -> Option<NodeId> {
         | TopLevelItem::FuncDecl(_)
         | TopLevelItem::ProtocolDef(_)
         | TopLevelItem::TypestateDef(_)
+        | TopLevelItem::MachineDef(_)
         | TopLevelItem::ClosureDef(_) => None,
     }
 }

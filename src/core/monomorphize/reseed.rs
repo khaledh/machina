@@ -89,6 +89,7 @@ pub(super) fn collect_node_ids_in_top_level_item(item: &TopLevelItem) -> Vec<Nod
         TopLevelItem::TraitDef(trait_def) => collector.visit_trait_def(trait_def),
         TopLevelItem::TypeDef(type_def) => collector.visit_type_def(type_def),
         TopLevelItem::TypestateDef(typestate_def) => collector.visit_typestate_def(typestate_def),
+        TopLevelItem::MachineDef(machine_def) => collector.visit_machine_def(machine_def),
         TopLevelItem::FuncDecl(func_decl) => collector.visit_func_decl(func_decl),
         TopLevelItem::FuncDef(func_def) => collector.visit_func_def(func_def),
         TopLevelItem::MethodBlock(method_block) => collector.visit_method_block(method_block),
@@ -203,7 +204,8 @@ pub(super) fn rewrite_calls_in_item(
         TopLevelItem::ProtocolDef(_)
         | TopLevelItem::TypeDef(_)
         | TopLevelItem::TraitDef(_)
-        | TopLevelItem::TypestateDef(_) => {}
+        | TopLevelItem::TypestateDef(_)
+        | TopLevelItem::MachineDef(_) => {}
     }
 }
 
@@ -288,6 +290,7 @@ pub(super) fn reseed_ids_in_item(item: &mut TopLevelItem, node_id_gen: &mut Node
         TopLevelItem::TraitDef(trait_def) => reseeder.visit_trait_def(trait_def),
         TopLevelItem::TypeDef(type_def) => reseeder.visit_type_def(type_def),
         TopLevelItem::TypestateDef(typestate_def) => reseeder.visit_typestate_def(typestate_def),
+        TopLevelItem::MachineDef(machine_def) => reseeder.visit_machine_def(machine_def),
         TopLevelItem::FuncDecl(func_decl) => reseeder.visit_func_decl(func_decl),
         TopLevelItem::FuncDef(func_def) => reseeder.visit_func_def(func_def),
         TopLevelItem::MethodBlock(method_block) => reseeder.visit_method_block(method_block),

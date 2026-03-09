@@ -306,6 +306,7 @@ fn top_level_item_id(item: &TopLevelItem) -> NodeId {
         TopLevelItem::TraitDef(trait_def) => trait_def.id,
         TopLevelItem::TypeDef(type_def) => type_def.id,
         TopLevelItem::TypestateDef(typestate_def) => typestate_def.id,
+        TopLevelItem::MachineDef(machine_def) => machine_def.id,
         TopLevelItem::FuncDecl(func_decl) => func_decl.id,
         TopLevelItem::FuncDef(func_def) => func_def.id,
         TopLevelItem::MethodBlock(method_block) => method_block.id,

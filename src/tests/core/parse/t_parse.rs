@@ -3336,3 +3336,33 @@ fn test_parse_method_receiver_type_annotation() {
         _ => panic!("Expected named receiver type"),
     }
 }
+
+#[test]
+fn test_parse_machine_host_def() {
+    let source = r#"
+        machine DoorService hosts Door(key: id) {
+            fields { counter: u64 }
+
+            action open(door, code: u64) -> Open {
+                code;
+                Open {}
+            }
+
+            trigger timeout(door) {
+                door;
+            }
+
+            on Tick(tick: Tick) {
+                tick;
+            }
+        }
+    "#;
+
+    let module = parse_module(source).expect("Failed to parse");
+    assert_eq!(module.machine_defs().len(), 1);
+    let machine = module.machine_defs()[0];
+    assert_eq!(machine.name, "DoorService");
+    assert_eq!(machine.host.type_name, "Door");
+    assert_eq!(machine.host.key_field, "id");
+    assert_eq!(machine.items.len(), 4);
+}

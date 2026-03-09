@@ -579,6 +579,31 @@ pub(super) fn from_resolve_error(error: &ResolveError) -> Diagnostic {
             metadata.insert("name".to_string(), DiagnosticValue::String(name.clone()));
             "MC-TYPE-USE-AFTER-CONSUME"
         }
+        ResolveErrorKind::MachineHostedTypeUndefined(machine, ty) => {
+            metadata.insert(
+                "machine".to_string(),
+                DiagnosticValue::String(machine.clone()),
+            );
+            metadata.insert("type".to_string(), DiagnosticValue::String(ty.clone()));
+            "MC-MACHINE-HOSTED-TYPE-UNDEFINED"
+        }
+        ResolveErrorKind::MachineHostedTypeNotLinear(machine, ty) => {
+            metadata.insert(
+                "machine".to_string(),
+                DiagnosticValue::String(machine.clone()),
+            );
+            metadata.insert("type".to_string(), DiagnosticValue::String(ty.clone()));
+            "MC-MACHINE-HOSTED-TYPE-NOT-LINEAR"
+        }
+        ResolveErrorKind::MachineInvalidKeyField(machine, ty, field) => {
+            metadata.insert(
+                "machine".to_string(),
+                DiagnosticValue::String(machine.clone()),
+            );
+            metadata.insert("type".to_string(), DiagnosticValue::String(ty.clone()));
+            metadata.insert("field".to_string(), DiagnosticValue::String(field.clone()));
+            "MC-MACHINE-INVALID-KEY-FIELD"
+        }
     };
     Diagnostic {
         phase: DiagnosticPhase::Resolve,

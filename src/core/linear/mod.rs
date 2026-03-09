@@ -9,13 +9,14 @@ use std::collections::{HashMap, HashSet};
 
 use crate::core::ast::{
     ArrayLitInit, BlockItem, Expr, ExprKind, LinearRoleDecl, LinearStateVariant,
-    LinearTransitionDecl, MethodBlock, MethodDef, MethodItem, Module, NodeIdGen, Param, ParamMode,
-    StmtExpr, StmtExprKind, TopLevelItem, TypeDef, TypeDefKind, TypeExpr, TypeExprKind,
+    LinearTransitionDecl, MachineDef, MethodBlock, MethodDef, MethodItem, Module, NodeIdGen, Param,
+    ParamMode, StmtExpr, StmtExprKind, TopLevelItem, TypeDef, TypeDefKind, TypeExpr, TypeExprKind,
 };
 use crate::core::resolve::{REK, ResolveError};
 
 pub fn validate_module(module: &Module) -> Vec<ResolveError> {
     let method_blocks = method_blocks_by_type(module);
+    let type_defs = type_defs_by_name(module);
     let mut errors = Vec::new();
     for type_def in module.type_defs() {
         let TypeDefKind::Linear { linear } = &type_def.kind else {
@@ -27,6 +28,9 @@ pub fn validate_module(module: &Module) -> Vec<ResolveError> {
             method_blocks.get(&type_def.name),
             &mut errors,
         );
+    }
+    for machine_def in module.machine_defs() {
+        validate_machine_def(machine_def, &type_defs, &mut errors);
     }
     errors
 }
@@ -99,6 +103,49 @@ fn validate_linear_type(
     );
     validate_roles(type_name, &linear.roles, &linear.actions, errors);
     validate_action_methods(type_name, &linear.actions, method_blocks, errors);
+}
+
+fn validate_machine_def(
+    machine_def: &MachineDef,
+    type_defs: &HashMap<String, &TypeDef>,
+    errors: &mut Vec<ResolveError>,
+) {
+    let Some(type_def) = type_defs.get(&machine_def.host.type_name) else {
+        errors.push(
+            REK::MachineHostedTypeUndefined(
+                machine_def.name.clone(),
+                machine_def.host.type_name.clone(),
+            )
+            .at(machine_def.host.span),
+        );
+        return;
+    };
+
+    let TypeDefKind::Linear { linear } = &type_def.kind else {
+        errors.push(
+            REK::MachineHostedTypeNotLinear(
+                machine_def.name.clone(),
+                machine_def.host.type_name.clone(),
+            )
+            .at(machine_def.host.span),
+        );
+        return;
+    };
+
+    let has_key_field = linear
+        .fields
+        .iter()
+        .any(|field| field.name == machine_def.host.key_field);
+    if !has_key_field {
+        errors.push(
+            REK::MachineInvalidKeyField(
+                machine_def.name.clone(),
+                machine_def.host.type_name.clone(),
+                machine_def.host.key_field.clone(),
+            )
+            .at(machine_def.host.span),
+        );
+    }
 }
 
 fn collect_states(
@@ -586,6 +633,14 @@ fn method_blocks_by_type(module: &Module) -> HashMap<String, Vec<&MethodBlock>> 
             .push(method_block);
     }
     blocks
+}
+
+fn type_defs_by_name(module: &Module) -> HashMap<String, &TypeDef> {
+    let mut type_defs = HashMap::new();
+    for type_def in module.type_defs() {
+        type_defs.insert(type_def.name.clone(), type_def);
+    }
+    type_defs
 }
 
 fn collect_direct_linear_infos(module: &Module) -> HashMap<String, DirectLinearInfo> {

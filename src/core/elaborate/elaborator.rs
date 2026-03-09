@@ -202,6 +202,7 @@ impl<'a> Elaborator<'a> {
             TopLevelItem::TypestateDef(_) => {
                 panic!("compiler bug: typestate defs should be desugared before elaborate")
             }
+            TopLevelItem::MachineDef(_) => None,
             TopLevelItem::FuncDecl(decl) => Some(TopLevelItem::FuncDecl(FuncDecl {
                 id: decl.id,
                 attrs: decl.attrs.clone(),

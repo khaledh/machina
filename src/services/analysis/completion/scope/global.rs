@@ -31,6 +31,9 @@ pub(super) fn global_scope(resolved: &ResolvedContext) -> HashMap<String, Comple
             TopLevelItem::TypestateDef(typestate_def) => {
                 allowed_nodes.insert(typestate_def.id);
             }
+            TopLevelItem::MachineDef(machine_def) => {
+                allowed_nodes.insert(machine_def.id);
+            }
             TopLevelItem::FuncDecl(func_decl) => {
                 allowed_nodes.insert(func_decl.id);
             }
@@ -80,6 +83,7 @@ pub(super) fn completion_kind_for_def(kind: &DefKind) -> Option<CompletionKind> 
         DefKind::FuncDef { .. } | DefKind::FuncDecl { .. } => Some(CompletionKind::Function),
         DefKind::TypeDef { .. } => Some(CompletionKind::Type),
         DefKind::TraitDef { .. } => Some(CompletionKind::Trait),
+        DefKind::MachineDef => None,
         DefKind::LocalVar { .. } => Some(CompletionKind::Variable),
         DefKind::Param { .. } => Some(CompletionKind::Parameter),
         DefKind::TypeParam => Some(CompletionKind::TypeParameter),

@@ -55,6 +55,16 @@ impl Module {
             .collect()
     }
 
+    pub fn machine_defs(&self) -> Vec<&MachineDef> {
+        self.top_level_items
+            .iter()
+            .filter_map(|item| match item {
+                TopLevelItem::MachineDef(machine_def) => Some(machine_def),
+                _ => None,
+            })
+            .collect()
+    }
+
     pub fn trait_defs(&self) -> Vec<&TraitDef> {
         self.top_level_items
             .iter()
@@ -154,7 +164,8 @@ impl Module {
                 TopLevelItem::ProtocolDef(_)
                 | TopLevelItem::TypeDef(_)
                 | TopLevelItem::TraitDef(_)
-                | TopLevelItem::TypestateDef(_) => vec![],
+                | TopLevelItem::TypestateDef(_)
+                | TopLevelItem::MachineDef(_) => vec![],
             })
             .collect()
     }
@@ -168,10 +179,65 @@ pub enum TopLevelItem {
     TraitDef(TraitDef),
     TypeDef(TypeDef),
     TypestateDef(TypestateDef),
+    MachineDef(MachineDef),
     FuncDecl(FuncDecl),       // function declaration
     FuncDef(FuncDef),         // function definition
     MethodBlock(MethodBlock), // method declarations/definitions
     ClosureDef(ClosureDef),   // closure definition (generated)
+}
+
+#[derive(Clone, Debug)]
+pub struct MachineDef {
+    pub id: NodeId,
+    pub name: String,
+    pub host: MachineHost,
+    pub items: Vec<MachineItem>,
+    pub span: Span,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct MachineHost {
+    pub id: NodeId,
+    pub type_name: String,
+    pub key_field: String,
+    pub span: Span,
+}
+
+#[derive(Clone, Debug)]
+pub enum MachineItem {
+    Fields(MachineFields),
+    Constructor(FuncDef),
+    Action(MachineTransitionHandler),
+    Trigger(MachineTransitionHandler),
+    On(MachineOnHandler),
+}
+
+#[derive(Clone, Debug)]
+pub struct MachineFields {
+    pub id: NodeId,
+    pub fields: Vec<StructDefField>,
+    pub span: Span,
+}
+
+#[derive(Clone, Debug)]
+pub struct MachineTransitionHandler {
+    pub id: NodeId,
+    pub name: String,
+    pub instance_param: String,
+    pub params: Vec<Param>,
+    pub ret_ty_expr: Option<TypeExpr>,
+    pub body: Expr,
+    pub span: Span,
+}
+
+#[derive(Clone, Debug)]
+pub struct MachineOnHandler {
+    pub id: NodeId,
+    pub selector_ty: TypeExpr,
+    pub params: Vec<Param>,
+    pub provenance: Option<TypestateHandlerProvenance>,
+    pub body: Expr,
+    pub span: Span,
 }
 
 #[derive(Clone, Debug)]

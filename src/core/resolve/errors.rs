@@ -235,6 +235,15 @@ pub enum ResolveErrorKind {
 
     #[error("Use after consume of linear value `{0}`")]
     LinearUseAfterConsume(String),
+
+    #[error("Machine `{0}` hosts undefined type `{1}`")]
+    MachineHostedTypeUndefined(String, String),
+
+    #[error("Machine `{0}` can only host `@linear type` `{1}`")]
+    MachineHostedTypeNotLinear(String, String),
+
+    #[error("Machine `{0}` key field `{2}` is not declared on hosted type `{1}`")]
+    MachineInvalidKeyField(String, String, String),
 }
 
 pub type ResolveError = SpannedError<ResolveErrorKind>;

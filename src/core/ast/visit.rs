@@ -79,6 +79,26 @@ pub trait Visitor {
         walk_typestate_def(self, typestate_def)
     }
 
+    fn visit_machine_def(&mut self, machine_def: &MachineDef) {
+        walk_machine_def(self, machine_def)
+    }
+
+    fn visit_machine_item(&mut self, item: &MachineItem) {
+        walk_machine_item(self, item)
+    }
+
+    fn visit_machine_fields(&mut self, fields: &MachineFields) {
+        walk_machine_fields(self, fields)
+    }
+
+    fn visit_machine_transition_handler(&mut self, handler: &MachineTransitionHandler) {
+        walk_machine_transition_handler(self, handler)
+    }
+
+    fn visit_machine_on_handler(&mut self, handler: &MachineOnHandler) {
+        walk_machine_on_handler(self, handler)
+    }
+
     fn visit_typestate_item(&mut self, item: &TypestateItem) {
         walk_typestate_item(self, item)
     }
@@ -255,6 +275,7 @@ pub fn walk_module<V: Visitor + ?Sized>(v: &mut V, module: &Module) {
             TopLevelItem::TraitDef(trait_def) => v.visit_trait_def(trait_def),
             TopLevelItem::TypeDef(type_def) => v.visit_type_def(type_def),
             TopLevelItem::TypestateDef(typestate_def) => v.visit_typestate_def(typestate_def),
+            TopLevelItem::MachineDef(machine_def) => v.visit_machine_def(machine_def),
             TopLevelItem::FuncDecl(func_decl) => v.visit_func_decl(func_decl),
             TopLevelItem::FuncDef(func_def) => v.visit_func_def(func_def),
             TopLevelItem::MethodBlock(method_block) => v.visit_method_block(method_block),
@@ -384,6 +405,51 @@ pub fn walk_typestate_on_handler<V: Visitor + ?Sized>(v: &mut V, handler: &Types
         v.visit_param(&provenance.param);
     }
     v.visit_type_expr(&handler.ret_ty_expr);
+    v.visit_expr(&handler.body);
+}
+
+pub fn walk_machine_def<V: Visitor + ?Sized>(v: &mut V, machine_def: &MachineDef) {
+    for item in &machine_def.items {
+        v.visit_machine_item(item);
+    }
+}
+
+pub fn walk_machine_item<V: Visitor + ?Sized>(v: &mut V, item: &MachineItem) {
+    match item {
+        MachineItem::Fields(fields) => v.visit_machine_fields(fields),
+        MachineItem::Constructor(constructor) => v.visit_func_def(constructor),
+        MachineItem::Action(handler) | MachineItem::Trigger(handler) => {
+            v.visit_machine_transition_handler(handler)
+        }
+        MachineItem::On(handler) => v.visit_machine_on_handler(handler),
+    }
+}
+
+pub fn walk_machine_fields<V: Visitor + ?Sized>(v: &mut V, fields: &MachineFields) {
+    v.visit_struct_def_fields(&fields.fields);
+}
+
+pub fn walk_machine_transition_handler<V: Visitor + ?Sized>(
+    v: &mut V,
+    handler: &MachineTransitionHandler,
+) {
+    for param in &handler.params {
+        v.visit_param(param);
+    }
+    if let Some(ret_ty_expr) = &handler.ret_ty_expr {
+        v.visit_type_expr(ret_ty_expr);
+    }
+    v.visit_expr(&handler.body);
+}
+
+pub fn walk_machine_on_handler<V: Visitor + ?Sized>(v: &mut V, handler: &MachineOnHandler) {
+    v.visit_type_expr(&handler.selector_ty);
+    for param in &handler.params {
+        v.visit_param(param);
+    }
+    if let Some(provenance) = &handler.provenance {
+        v.visit_param(&provenance.param);
+    }
     v.visit_expr(&handler.body);
 }
 

@@ -11,6 +11,9 @@ pub enum SymbolKind {
     ProtocolRole {
         def_id: DefId,
     },
+    MachineDef {
+        def_id: DefId,
+    },
     Var {
         def_id: DefId,
         is_mutable: bool,
@@ -43,6 +46,7 @@ impl std::fmt::Display for SymbolKind {
         match self {
             SymbolKind::ProtocolDef { .. } => write!(f, "protocol_def"),
             SymbolKind::ProtocolRole { .. } => write!(f, "protocol_role"),
+            SymbolKind::MachineDef { .. } => write!(f, "machine_def"),
             SymbolKind::Var { .. } => write!(f, "var"),
             SymbolKind::TypeParam { .. } => write!(f, "type_param"),
             SymbolKind::Func { overloads } => write!(f, "func[{} overloads]", overloads.len()),
@@ -77,6 +81,7 @@ impl Symbol {
         match &self.kind {
             SymbolKind::ProtocolDef { def_id } => *def_id,
             SymbolKind::ProtocolRole { def_id } => *def_id,
+            SymbolKind::MachineDef { def_id } => *def_id,
             SymbolKind::Var { def_id, .. } => *def_id,
             SymbolKind::TypeParam { def_id } => *def_id,
             SymbolKind::Func { overloads } => overloads

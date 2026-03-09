@@ -7,6 +7,13 @@ impl<'a> Parser<'a> {
         match &self.curr_token.kind {
             TK::KwType => self.parse_type_def(attrs).map(TopLevelItem::TypeDef),
             TK::KwTrait => self.parse_trait_def(attrs).map(TopLevelItem::TraitDef),
+            TK::Ident(ident) if ident == "machine" => {
+                if attrs.is_empty() {
+                    self.parse_machine_def().map(TopLevelItem::MachineDef)
+                } else {
+                    Err(PEK::AttributeNotAllowed.at(attrs[0].span))
+                }
+            }
             TK::KwProtocol => {
                 if !self.options.experimental_typestate {
                     return self.err_here(PEK::FeatureDisabled {
@@ -367,6 +374,193 @@ impl<'a> Parser<'a> {
             name,
             type_params,
             kind,
+            span: self.close(marker),
+        })
+    }
+
+    fn parse_machine_def(&mut self) -> Result<MachineDef, ParseError> {
+        let marker = self.mark();
+        self.consume_contextual_keyword("machine")?;
+        let name = self.parse_ident()?;
+        self.consume_contextual_keyword("hosts")?;
+        let host = self.parse_machine_host()?;
+        self.consume(&TK::LBrace)?;
+
+        let mut items = Vec::new();
+        while self.curr_token.kind != TK::RBrace {
+            let attrs = self.parse_attribute_list()?;
+            if !attrs.is_empty() {
+                return Err(PEK::AttributeNotAllowed.at(attrs[0].span));
+            }
+
+            if self.is_contextual_keyword("fields") {
+                items.push(MachineItem::Fields(self.parse_machine_fields()?));
+            } else if self.is_contextual_keyword("action") {
+                items.push(MachineItem::Action(
+                    self.parse_machine_transition_handler("action", &name)?,
+                ));
+            } else if self.is_contextual_keyword("trigger") {
+                items.push(MachineItem::Trigger(
+                    self.parse_machine_transition_handler("trigger", &name)?,
+                ));
+            } else if self.curr_token.kind == TK::KwOn {
+                items.push(MachineItem::On(self.parse_machine_on_handler(&name)?));
+            } else if self.curr_token.kind == TK::KwFn {
+                items.push(MachineItem::Constructor(
+                    self.parse_machine_func_def(&name)?,
+                ));
+            } else {
+                return self.err_here(PEK::ExpectedDecl(self.curr_token.clone()));
+            }
+
+            if matches!(self.curr_token.kind, TK::Comma | TK::Semicolon) {
+                self.advance();
+            }
+        }
+
+        self.consume(&TK::RBrace)?;
+        Ok(MachineDef {
+            id: self.id_gen.new_id(),
+            name,
+            host,
+            items,
+            span: self.close(marker),
+        })
+    }
+
+    fn parse_machine_host(&mut self) -> Result<MachineHost, ParseError> {
+        let marker = self.mark();
+        let type_name = self.parse_ident()?;
+        self.consume(&TK::LParen)?;
+        self.consume_contextual_keyword("key")?;
+        self.consume(&TK::Colon)?;
+        let key_field = self.parse_ident()?;
+        self.consume(&TK::RParen)?;
+        Ok(MachineHost {
+            id: self.id_gen.new_id(),
+            type_name,
+            key_field,
+            span: self.close(marker),
+        })
+    }
+
+    fn parse_machine_fields(&mut self) -> Result<MachineFields, ParseError> {
+        let marker = self.mark();
+        self.consume_contextual_keyword("fields")?;
+        self.consume(&TK::LBrace)?;
+        let fields = self.parse_list(TK::Comma, TK::RBrace, |parser| {
+            parser.parse_struct_def_field()
+        })?;
+        self.consume(&TK::RBrace)?;
+        Ok(MachineFields {
+            id: self.id_gen.new_id(),
+            fields,
+            span: self.close(marker),
+        })
+    }
+
+    fn parse_machine_func_def(&mut self, machine_name: &str) -> Result<FuncDef, ParseError> {
+        let marker = self.mark();
+        let sig = self.parse_func_sig()?;
+        if self.curr_token.kind == TK::Semicolon {
+            return self.expected_token(TK::LBrace);
+        }
+
+        let prev_base = self.closure_base.clone();
+        let prev_index = self.closure_index;
+        self.closure_base = Some(format!("{machine_name}${}", sig.name));
+        self.closure_index = 0;
+        let body = self.parse_block()?;
+        self.closure_base = prev_base;
+        self.closure_index = prev_index;
+
+        Ok(FuncDef {
+            id: self.id_gen.new_id(),
+            attrs: Vec::new(),
+            sig,
+            body,
+            span: self.close(marker),
+        })
+    }
+
+    fn parse_machine_transition_handler(
+        &mut self,
+        keyword: &str,
+        machine_name: &str,
+    ) -> Result<MachineTransitionHandler, ParseError> {
+        let marker = self.mark();
+        self.consume_contextual_keyword(keyword)?;
+        let name = self.parse_ident()?;
+        self.consume(&TK::LParen)?;
+        let instance_param = self.parse_ident()?;
+        let params = if self.curr_token.kind == TK::Comma {
+            self.advance();
+            self.parse_list(TK::Comma, TK::RParen, |parser| parser.parse_param())?
+        } else {
+            Vec::new()
+        };
+        self.consume(&TK::RParen)?;
+        let ret_ty_expr = if keyword == "action" {
+            self.consume(&TK::Arrow)?;
+            Some(self.parse_type_expr()?)
+        } else {
+            None
+        };
+
+        let prev_base = self.closure_base.clone();
+        let prev_index = self.closure_index;
+        self.closure_base = Some(format!("{machine_name}${keyword}${name}"));
+        self.closure_index = 0;
+        let body = self.parse_block()?;
+        self.closure_base = prev_base;
+        self.closure_index = prev_index;
+
+        Ok(MachineTransitionHandler {
+            id: self.id_gen.new_id(),
+            name,
+            instance_param,
+            params,
+            ret_ty_expr,
+            body,
+            span: self.close(marker),
+        })
+    }
+
+    fn parse_machine_on_handler(
+        &mut self,
+        machine_name: &str,
+    ) -> Result<MachineOnHandler, ParseError> {
+        let marker = self.mark();
+        self.consume_keyword(TK::KwOn)?;
+        let selector_ty = self.parse_type_expr()?;
+        let params = if self.curr_token.kind == TK::LParen {
+            self.consume(&TK::LParen)?;
+            let params = self.parse_typestate_on_handler_params(&selector_ty)?;
+            self.consume(&TK::RParen)?;
+            params
+        } else {
+            Vec::new()
+        };
+        let provenance = if self.curr_token.kind == TK::KwFor {
+            Some(self.parse_typestate_on_handler_provenance()?)
+        } else {
+            None
+        };
+
+        let prev_base = self.closure_base.clone();
+        let prev_index = self.closure_index;
+        self.closure_base = Some(format!("{machine_name}$on"));
+        self.closure_index = 0;
+        let body = self.parse_block()?;
+        self.closure_base = prev_base;
+        self.closure_index = prev_index;
+
+        Ok(MachineOnHandler {
+            id: self.id_gen.new_id(),
+            selector_ty,
+            params,
+            provenance,
+            body,
             span: self.close(marker),
         })
     }

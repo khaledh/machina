@@ -467,6 +467,7 @@ impl SymbolResolver {
         match kind {
             SymbolKind::ProtocolDef { .. } => DefKind::ProtocolDef,
             SymbolKind::ProtocolRole { .. } => DefKind::ProtocolRole,
+            SymbolKind::MachineDef { .. } => DefKind::MachineDef,
             SymbolKind::TraitDef { .. } => DefKind::TraitDef {
                 attrs: TraitAttrs::default(),
             },
@@ -735,6 +736,9 @@ impl SymbolResolver {
         // Populate type definitions
         self.populate_type_defs(&module.type_defs());
 
+        // Populate machine definitions
+        self.populate_machine_defs(&module.machine_defs());
+
         // Populate callable declarations
         self.populate_callables(&module.callables());
 
@@ -948,6 +952,27 @@ impl SymbolResolver {
                     kind: symbol_kind,
                 },
                 type_def.span,
+            );
+        }
+    }
+
+    fn populate_machine_defs(&mut self, machine_defs: &[&MachineDef]) {
+        for &machine_def in machine_defs {
+            let def_id = self.def_id_gen.new_id();
+            let def = Def {
+                id: def_id,
+                name: machine_def.name.clone(),
+                kind: DefKind::MachineDef,
+            };
+            self.def_table_builder
+                .record_def(def, machine_def.id, machine_def.span);
+            self.insert_symbol(
+                &machine_def.name,
+                Symbol {
+                    name: machine_def.name.clone(),
+                    kind: SymbolKind::MachineDef { def_id },
+                },
+                machine_def.span,
             );
         }
     }
@@ -1706,6 +1731,12 @@ impl Visitor for SymbolResolver {
         });
     }
 
+    fn visit_machine_def(&mut self, _machine_def: &MachineDef) {
+        // Hosted linear-type semantics are introduced incrementally. The
+        // frontend validates the host clause early; deeper machine-body resolve
+        // and typing lands in later hosted-mode slices.
+    }
+
     fn visit_type_expr(&mut self, type_expr: &TypeExpr) {
         match &type_expr.kind {
             TypeExprKind::Infer => {}
@@ -2439,6 +2470,7 @@ fn top_level_item_id(item: &TopLevelItem) -> NodeId {
         TopLevelItem::TraitDef(trait_def) => trait_def.id,
         TopLevelItem::TypeDef(type_def) => type_def.id,
         TopLevelItem::TypestateDef(typestate_def) => typestate_def.id,
+        TopLevelItem::MachineDef(machine_def) => machine_def.id,
         TopLevelItem::FuncDecl(func_decl) => func_decl.id,
         TopLevelItem::FuncDef(func_def) => func_def.id,
         TopLevelItem::MethodBlock(method_block) => method_block.id,

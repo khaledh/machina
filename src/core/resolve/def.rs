@@ -63,6 +63,7 @@ impl DefIdGen {
 pub enum DefKind {
     ProtocolDef,
     ProtocolRole,
+    MachineDef,
     TraitDef {
         attrs: TraitAttrs,
     },
@@ -120,6 +121,7 @@ impl fmt::Display for DefKind {
         match self {
             DefKind::ProtocolDef => write!(f, "ProtocolDef"),
             DefKind::ProtocolRole => write!(f, "ProtocolRole"),
+            DefKind::MachineDef => write!(f, "MachineDef"),
             DefKind::TraitDef { .. } => write!(f, "TraitDef"),
             DefKind::TypeDef { .. } => write!(f, "TypeDef"),
             DefKind::TypeParam => write!(f, "TypeParam"),
@@ -194,6 +196,7 @@ impl Def {
     pub fn is_public(&self) -> bool {
         match &self.kind {
             DefKind::TraitDef { attrs } => attrs.visibility == Visibility::Public,
+            DefKind::MachineDef => false,
             DefKind::TypeDef { attrs } => attrs.visibility == Visibility::Public,
             DefKind::FuncDef { attrs } | DefKind::FuncDecl { attrs } => {
                 attrs.visibility == Visibility::Public
