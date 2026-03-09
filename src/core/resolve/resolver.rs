@@ -510,6 +510,14 @@ impl SymbolResolver {
                         resolved.intrinsic = true;
                     }
                 }
+                "linear" => {
+                    if !attr.args.is_empty() {
+                        self.err(
+                            attr.span,
+                            REK::AttrWrongArgCount(attr.name.clone(), 0, attr.args.len()),
+                        );
+                    }
+                }
                 "link_name" => {
                     self.err(
                         attr.span,

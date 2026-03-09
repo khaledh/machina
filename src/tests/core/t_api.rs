@@ -46,6 +46,16 @@ fn semcheck_errors_typestate(source: &str) -> Vec<crate::core::semck::SemCheckEr
     semcheck_stage(typed).expect_err("expected semcheck errors for typestate api test")
 }
 
+fn resolve_errors(source: &str) -> Vec<crate::core::resolve::ResolveError> {
+    let parsed = parsed_context(source);
+    let out = resolve_stage_with_policy(parsed, ResolveInputs::default(), FrontendPolicy::Strict);
+    assert!(
+        out.context.is_none(),
+        "strict resolve should stop on validation errors"
+    );
+    out.errors
+}
+
 #[test]
 fn resolve_policy_strict_vs_partial() {
     let source = r#"
@@ -82,6 +92,119 @@ typestate Connection {
     assert!(out.errors.iter().any(
         |err| matches!(err.kind(), ResolveErrorKind::TypestateMissingNew(name) if name == "Connection")
     ));
+}
+
+#[test]
+fn linear_type_missing_states_reports_targeted_error() {
+    let errors = resolve_errors(
+        r#"
+        @linear
+        type Door = {
+            actions {
+                open: Closed -> Open,
+            }
+        }
+        "#,
+    );
+
+    assert!(
+        errors.iter().any(
+            |err| matches!(err.kind(), ResolveErrorKind::LinearNoStates(name) if name == "Door")
+        )
+    );
+}
+
+#[test]
+fn linear_type_unknown_role_action_reports_targeted_error() {
+    let errors = resolve_errors(
+        r#"
+        @linear
+        type PullRequest = {
+            states {
+                Draft,
+                Review,
+            }
+
+            actions {
+                submit: Draft -> Review,
+            }
+
+            roles {
+                Author { submit, approve }
+            }
+        }
+        "#,
+    );
+
+    assert!(errors.iter().any(|err| {
+        matches!(
+            err.kind(),
+            ResolveErrorKind::LinearUnknownActionInRole(ty, role, action)
+                if ty == "PullRequest" && role == "Author" && action == "approve"
+        )
+    }));
+}
+
+#[test]
+fn linear_type_ambiguous_receiver_reports_targeted_error() {
+    let errors = resolve_errors(
+        r#"
+        @linear
+        type PullRequest = {
+            states {
+                Draft,
+                Review,
+            }
+
+            actions {
+                comment(text: string): Draft -> Draft,
+                comment(text: string): Review -> Review,
+            }
+        }
+
+        PullRequest :: {
+            fn comment(self, text: string) -> Draft {
+                text;
+                Draft {}
+            }
+        }
+        "#,
+    );
+
+    assert!(errors.iter().any(|err| {
+        matches!(
+            err.kind(),
+            ResolveErrorKind::LinearMethodAmbiguousReceiver(ty, action)
+                if ty == "PullRequest" && action == "comment"
+        )
+    }));
+}
+
+#[test]
+fn linear_type_missing_action_method_reports_targeted_error() {
+    let errors = resolve_errors(
+        r#"
+        @linear
+        type Door = {
+            states {
+                Closed,
+                Open,
+            }
+
+            actions {
+                open: Closed -> Open,
+            }
+        }
+        "#,
+    );
+
+    assert!(errors.iter().any(|err| {
+        matches!(
+            err.kind(),
+            ResolveErrorKind::LinearMethodMissingAction(ty, action, source)
+                if ty == "Door" && action == "open" && source == "Closed"
+        )
+    }));
 }
 
 #[test]

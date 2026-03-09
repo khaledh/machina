@@ -242,12 +242,13 @@ pub fn resolve_stage_with_policy(
     policy: FrontendPolicy,
 ) -> ResolveStageResult {
     let typestate_role_impls = typestate::collect_role_impl_refs(&input.module);
-    let mut typestate_errors = typestate::desugar_module(&mut input.module, &mut input.node_id_gen);
-    if policy == FrontendPolicy::Strict && !typestate_errors.is_empty() {
+    let mut frontend_errors = typestate::desugar_module(&mut input.module, &mut input.node_id_gen);
+    frontend_errors.extend(crate::core::linear::validate_module(&input.module));
+    if policy == FrontendPolicy::Strict && !frontend_errors.is_empty() {
         return ResolveStageResult {
             context: None,
             imported_facts: ImportedFacts::default(),
-            errors: typestate_errors,
+            errors: frontend_errors,
         };
     }
     let output = resolve_with_imports_and_symbols_and_typestate_roles_partial(
@@ -264,8 +265,8 @@ pub fn resolve_stage_with_policy(
         &context.def_table,
         &context.typestate_role_impls,
     );
-    typestate_errors.extend(output.errors);
-    let errors = typestate_errors;
+    frontend_errors.extend(output.errors);
+    let errors = frontend_errors;
     match policy {
         FrontendPolicy::Strict if !errors.is_empty() => ResolveStageResult {
             context: None,

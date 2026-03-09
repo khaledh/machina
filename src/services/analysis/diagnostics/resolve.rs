@@ -448,6 +448,133 @@ pub(super) fn from_resolve_error(error: &ResolveError) -> Diagnostic {
         ResolveErrorKind::TypestateSpawnRequiresMachinesOptIn => {
             "MC-TYPESTATE-SPAWN-REQUIRES-MACHINES-OPT-IN"
         }
+        ResolveErrorKind::LinearNoStates(name) => {
+            metadata.insert("type".to_string(), DiagnosticValue::String(name.clone()));
+            "MC-TYPE-NO-STATES"
+        }
+        ResolveErrorKind::LinearNoNonFinalStates(name) => {
+            metadata.insert("type".to_string(), DiagnosticValue::String(name.clone()));
+            "MC-TYPE-NO-NON-FINAL-STATES"
+        }
+        ResolveErrorKind::LinearDuplicateState(name, state) => {
+            metadata.insert("type".to_string(), DiagnosticValue::String(name.clone()));
+            metadata.insert("state".to_string(), DiagnosticValue::String(state.clone()));
+            "MC-TYPE-DUPLICATE-STATE"
+        }
+        ResolveErrorKind::LinearUnknownStateInAction(name, action, state) => {
+            metadata.insert("type".to_string(), DiagnosticValue::String(name.clone()));
+            metadata.insert(
+                "action".to_string(),
+                DiagnosticValue::String(action.clone()),
+            );
+            metadata.insert("state".to_string(), DiagnosticValue::String(state.clone()));
+            "MC-TYPE-UNKNOWN-STATE-IN-ACTION"
+        }
+        ResolveErrorKind::LinearUnknownStateInTrigger(name, trigger, state) => {
+            metadata.insert("type".to_string(), DiagnosticValue::String(name.clone()));
+            metadata.insert(
+                "trigger".to_string(),
+                DiagnosticValue::String(trigger.clone()),
+            );
+            metadata.insert("state".to_string(), DiagnosticValue::String(state.clone()));
+            "MC-TYPE-UNKNOWN-STATE-IN-TRIGGER"
+        }
+        ResolveErrorKind::LinearDuplicateAction(name, action, state) => {
+            metadata.insert("type".to_string(), DiagnosticValue::String(name.clone()));
+            metadata.insert(
+                "action".to_string(),
+                DiagnosticValue::String(action.clone()),
+            );
+            metadata.insert("state".to_string(), DiagnosticValue::String(state.clone()));
+            "MC-TYPE-DUPLICATE-ACTION"
+        }
+        ResolveErrorKind::LinearDuplicateTrigger(name, trigger, state) => {
+            metadata.insert("type".to_string(), DiagnosticValue::String(name.clone()));
+            metadata.insert(
+                "trigger".to_string(),
+                DiagnosticValue::String(trigger.clone()),
+            );
+            metadata.insert("state".to_string(), DiagnosticValue::String(state.clone()));
+            "MC-TYPE-DUPLICATE-TRIGGER"
+        }
+        ResolveErrorKind::LinearFinalStateAsSource(name, transition, state) => {
+            metadata.insert("type".to_string(), DiagnosticValue::String(name.clone()));
+            metadata.insert(
+                "transition".to_string(),
+                DiagnosticValue::String(transition.clone()),
+            );
+            metadata.insert("state".to_string(), DiagnosticValue::String(state.clone()));
+            "MC-TYPE-FINAL-STATE-AS-SOURCE"
+        }
+        ResolveErrorKind::LinearUnknownActionInRole(name, role, action) => {
+            metadata.insert("type".to_string(), DiagnosticValue::String(name.clone()));
+            metadata.insert("role".to_string(), DiagnosticValue::String(role.clone()));
+            metadata.insert(
+                "action".to_string(),
+                DiagnosticValue::String(action.clone()),
+            );
+            "MC-TYPE-UNKNOWN-ACTION-IN-ROLE"
+        }
+        ResolveErrorKind::LinearUnknownStateAttribute(name, state, attr) => {
+            metadata.insert("type".to_string(), DiagnosticValue::String(name.clone()));
+            metadata.insert("state".to_string(), DiagnosticValue::String(state.clone()));
+            metadata.insert(
+                "attribute".to_string(),
+                DiagnosticValue::String(attr.clone()),
+            );
+            "MC-TYPE-UNKNOWN-STATE-ATTRIBUTE"
+        }
+        ResolveErrorKind::LinearMethodMissingAction(name, action, state) => {
+            metadata.insert("type".to_string(), DiagnosticValue::String(name.clone()));
+            metadata.insert(
+                "action".to_string(),
+                DiagnosticValue::String(action.clone()),
+            );
+            metadata.insert("state".to_string(), DiagnosticValue::String(state.clone()));
+            "MC-METHOD-MISSING-ACTION"
+        }
+        ResolveErrorKind::LinearMethodAmbiguousReceiver(name, action) => {
+            metadata.insert("type".to_string(), DiagnosticValue::String(name.clone()));
+            metadata.insert(
+                "action".to_string(),
+                DiagnosticValue::String(action.clone()),
+            );
+            "MC-METHOD-AMBIGUOUS-RECEIVER"
+        }
+        ResolveErrorKind::LinearMethodSourceStateMismatch(name, action, expected, found) => {
+            metadata.insert("type".to_string(), DiagnosticValue::String(name.clone()));
+            metadata.insert(
+                "action".to_string(),
+                DiagnosticValue::String(action.clone()),
+            );
+            metadata.insert(
+                "expected".to_string(),
+                DiagnosticValue::String(expected.clone()),
+            );
+            metadata.insert("found".to_string(), DiagnosticValue::String(found.clone()));
+            "MC-METHOD-SOURCE-STATE-MISMATCH"
+        }
+        ResolveErrorKind::LinearMethodTargetStateMismatch(name, action, expected, found) => {
+            metadata.insert("type".to_string(), DiagnosticValue::String(name.clone()));
+            metadata.insert(
+                "action".to_string(),
+                DiagnosticValue::String(action.clone()),
+            );
+            metadata.insert(
+                "expected".to_string(),
+                DiagnosticValue::String(expected.clone()),
+            );
+            metadata.insert("found".to_string(), DiagnosticValue::String(found.clone()));
+            "MC-METHOD-TARGET-STATE-MISMATCH"
+        }
+        ResolveErrorKind::LinearMethodParamMismatch(name, action) => {
+            metadata.insert("type".to_string(), DiagnosticValue::String(name.clone()));
+            metadata.insert(
+                "action".to_string(),
+                DiagnosticValue::String(action.clone()),
+            );
+            "MC-METHOD-PARAM-MISMATCH"
+        }
     };
     Diagnostic {
         phase: DiagnosticPhase::Resolve,

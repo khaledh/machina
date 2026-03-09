@@ -11,6 +11,7 @@ pub mod diag;
 pub mod elaborate;
 pub mod ir;
 pub mod lexer;
+pub mod linear;
 pub mod machine;
 pub mod monomorphize;
 pub mod nrvo;

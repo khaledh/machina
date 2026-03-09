@@ -183,6 +183,55 @@ pub enum ResolveErrorKind {
 
     #[error("Managed typestate spawn requires `@machines fn main(...)` entrypoint opt-in")]
     TypestateSpawnRequiresMachinesOptIn,
+
+    #[error("Linear type `{0}` must declare at least one state")]
+    LinearNoStates(String),
+
+    #[error("Linear type `{0}` must declare at least one non-`@final` state")]
+    LinearNoNonFinalStates(String),
+
+    #[error("Linear type `{0}` has duplicate state `{1}`")]
+    LinearDuplicateState(String, String),
+
+    #[error("Unknown state `{2}` referenced by action `{1}` in linear type `{0}`")]
+    LinearUnknownStateInAction(String, String, String),
+
+    #[error("Unknown state `{2}` referenced by trigger `{1}` in linear type `{0}`")]
+    LinearUnknownStateInTrigger(String, String, String),
+
+    #[error("Linear type `{0}` has duplicate action `{1}` for source state `{2}`")]
+    LinearDuplicateAction(String, String, String),
+
+    #[error("Linear type `{0}` has duplicate trigger `{1}` for source state `{2}`")]
+    LinearDuplicateTrigger(String, String, String),
+
+    #[error("Transition `{1}` in linear type `{0}` uses final state `{2}` as a source")]
+    LinearFinalStateAsSource(String, String, String),
+
+    #[error("Role `{1}` in linear type `{0}` references unknown action `{2}`")]
+    LinearUnknownActionInRole(String, String, String),
+
+    #[error("Unknown state attribute `{2}` on linear type `{0}` state `{1}`")]
+    LinearUnknownStateAttribute(String, String, String),
+
+    #[error(
+        "Declared action `{1}` for source state `{2}` in linear type `{0}` has no matching method"
+    )]
+    LinearMethodMissingAction(String, String, String),
+
+    #[error(
+        "Methods implementing overloaded action `{1}` in linear type `{0}` must annotate the receiver state"
+    )]
+    LinearMethodAmbiguousReceiver(String, String),
+
+    #[error("Method `{1}` in linear type `{0}` expects receiver state `{2}`, found `{3}`")]
+    LinearMethodSourceStateMismatch(String, String, String, String),
+
+    #[error("Method `{1}` in linear type `{0}` must return `{2}`, found `{3}`")]
+    LinearMethodTargetStateMismatch(String, String, String, String),
+
+    #[error("Method `{1}` in linear type `{0}` does not match the declared action parameters")]
+    LinearMethodParamMismatch(String, String),
 }
 
 pub type ResolveError = SpannedError<ResolveErrorKind>;
