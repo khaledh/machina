@@ -156,6 +156,49 @@ fn linear_type_rejects_use_after_consume() {
 }
 
 #[test]
+fn linear_type_rejects_wrong_state_action() {
+    let source = r#"
+        @linear
+        type Door = {
+            states {
+                Closed,
+                Open,
+            }
+
+            actions {
+                open: Closed -> Open,
+                close: Open -> Closed,
+            }
+        }
+
+        Door :: {
+            fn open(self) -> Open {
+                Open {}
+            }
+
+            fn close(self) -> Closed {
+                Closed {}
+            }
+        }
+
+        fn main() {
+            let door = Door::Closed {};
+            let _door = door.close();
+        }
+    "#;
+
+    let errors = check_linear_source(source, "tests/fixtures/linear/wrong_state_action.mc")
+        .expect_err("wrong-state actions should be rejected");
+    let rendered = format!("{errors:#?}");
+    assert!(
+        rendered.contains("Function overload not found")
+            || rendered.contains("OverloadNoMatch")
+            || rendered.contains("MC-TYPECHECK-OverloadNoMatch"),
+        "expected wrong-state action diagnostic, got: {rendered}"
+    );
+}
+
+#[test]
 fn linear_type_requires_receiver_annotation_for_ambiguous_actions() {
     let source = r#"
         @linear
