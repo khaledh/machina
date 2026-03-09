@@ -1056,6 +1056,14 @@ impl<'a> Parser<'a> {
         self.consume(&TK::DoubleColon)?;
         let variant = self.parse_ident()?;
 
+        if self.allow_struct_lit && self.curr_token.kind == TK::LBrace {
+            return self.parse_struct_lit_with_args(
+                marker,
+                format!("{enum_name}::{variant}"),
+                type_args,
+            );
+        }
+
         let payload = if self.curr_token.kind == TK::LParen {
             self.advance();
             let payload = self.parse_list(TK::Comma, TK::RParen, |parser| parser.parse_expr(0))?;

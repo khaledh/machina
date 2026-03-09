@@ -1,13 +1,16 @@
-//! Frontend validation for `@linear type` declarations.
+//! Frontend validation and direct-mode lowering for `@linear type` declarations.
 //!
-//! This pass runs before resolve so we can reject invalid linear-type
-//! declarations while the source shape is still intact.
+//! Validation runs before resolve so we can reject invalid linear-type
+//! declarations while the source shape is still intact. After validation, the
+//! direct-mode form is lowered into ordinary enums + method blocks so the rest
+//! of the compiler can reuse existing type/method machinery.
 
 use std::collections::{HashMap, HashSet};
 
 use crate::core::ast::{
-    LinearRoleDecl, LinearStateVariant, LinearTransitionDecl, MethodBlock, MethodDef, MethodItem,
-    Module, Param, TopLevelItem, TypeDef, TypeDefKind, TypeExpr, TypeExprKind,
+    ArrayLitInit, BlockItem, Expr, ExprKind, LinearRoleDecl, LinearStateVariant,
+    LinearTransitionDecl, MethodBlock, MethodDef, MethodItem, Module, NodeIdGen, Param, ParamMode,
+    StmtExpr, StmtExprKind, TopLevelItem, TypeDef, TypeDefKind, TypeExpr, TypeExprKind,
 };
 use crate::core::resolve::{REK, ResolveError};
 
@@ -26,6 +29,36 @@ pub fn validate_module(module: &Module) -> Vec<ResolveError> {
         );
     }
     errors
+}
+
+pub fn desugar_module(module: &mut Module, node_id_gen: &mut NodeIdGen) {
+    let infos = collect_direct_linear_infos(module);
+    if infos.is_empty() {
+        return;
+    }
+
+    rewrite_linear_type_defs(module, &infos);
+    rewrite_linear_method_blocks(module, &infos);
+    rewrite_linear_exprs(module, &infos, node_id_gen);
+}
+
+#[derive(Clone, Debug)]
+struct DirectLinearInfo {
+    type_name: String,
+    state_names: HashSet<String>,
+    action_by_source_and_name: HashMap<(String, String), DirectActionInfo>,
+}
+
+#[derive(Clone, Debug)]
+struct DirectActionInfo {
+    internal_name: String,
+    target_state: String,
+}
+
+#[derive(Clone, Debug)]
+struct LinearValueState {
+    type_name: String,
+    state_name: String,
 }
 
 fn validate_linear_type(
@@ -547,6 +580,593 @@ fn method_blocks_by_type(module: &Module) -> HashMap<String, Vec<&MethodBlock>> 
             .push(method_block);
     }
     blocks
+}
+
+fn collect_direct_linear_infos(module: &Module) -> HashMap<String, DirectLinearInfo> {
+    let mut infos = HashMap::new();
+    for type_def in module.type_defs() {
+        let TypeDefKind::Linear { linear } = &type_def.kind else {
+            continue;
+        };
+
+        let state_names = linear
+            .states
+            .iter()
+            .map(|state| state.name.clone())
+            .collect::<HashSet<_>>();
+        let mut action_by_source_and_name = HashMap::new();
+        for action in &linear.actions {
+            action_by_source_and_name.insert(
+                (action.source_state.clone(), action.name.clone()),
+                DirectActionInfo {
+                    internal_name: direct_action_method_name(&action.source_state, &action.name),
+                    target_state: action.target_state.clone(),
+                },
+            );
+        }
+
+        infos.insert(
+            type_def.name.clone(),
+            DirectLinearInfo {
+                type_name: type_def.name.clone(),
+                state_names,
+                action_by_source_and_name,
+            },
+        );
+    }
+    infos
+}
+
+fn rewrite_linear_type_defs(module: &mut Module, infos: &HashMap<String, DirectLinearInfo>) {
+    for type_def in &mut module.top_level_items {
+        let TopLevelItem::TypeDef(type_def) = type_def else {
+            continue;
+        };
+        let Some(info) = infos.get(&type_def.name) else {
+            continue;
+        };
+        let TypeDefKind::Linear { linear } = &type_def.kind else {
+            continue;
+        };
+        type_def.kind = TypeDefKind::Enum {
+            variants: linear
+                .states
+                .iter()
+                .map(|state| crate::core::ast::EnumDefVariant {
+                    id: state.id,
+                    name: state.name.clone(),
+                    payload: state.payload.clone(),
+                    span: state.span,
+                })
+                .collect(),
+        };
+        let _ = info;
+    }
+}
+
+fn rewrite_linear_method_blocks(module: &mut Module, infos: &HashMap<String, DirectLinearInfo>) {
+    for item in &mut module.top_level_items {
+        let TopLevelItem::MethodBlock(method_block) = item else {
+            continue;
+        };
+        let Some(info) = infos.get(&method_block.type_name) else {
+            continue;
+        };
+
+        for method_item in &mut method_block.method_items {
+            let method = match method_item {
+                MethodItem::Decl(method) => {
+                    rewrite_linear_method_sig(&mut method.sig, info);
+                    continue;
+                }
+                MethodItem::Def(method) => method,
+            };
+
+            let source_state = method_source_state(&method.sig, info);
+            rewrite_linear_method_sig(&mut method.sig, info);
+            if let Some(source_state) = source_state {
+                rewrite_expr_with_linear_env(
+                    &mut method.body,
+                    infos,
+                    Some(&info.type_name),
+                    Some(&source_state),
+                );
+            } else {
+                rewrite_expr_with_linear_env(&mut method.body, infos, Some(&info.type_name), None);
+            }
+        }
+    }
+}
+
+fn rewrite_linear_method_sig(sig: &mut crate::core::ast::MethodSig, info: &DirectLinearInfo) {
+    if let Some(source_state) = method_source_state(sig, info)
+        && let Some(action) = info
+            .action_by_source_and_name
+            .get(&(source_state, sig.name.clone()))
+    {
+        sig.name = action.internal_name.clone();
+        sig.self_param.mode = ParamMode::Sink;
+        sig.self_param.receiver_ty_expr = None;
+        rewrite_return_type_to_linear_enum(&mut sig.ret_ty_expr, info);
+    }
+}
+
+fn method_source_state(
+    sig: &crate::core::ast::MethodSig,
+    info: &DirectLinearInfo,
+) -> Option<String> {
+    if let Some(receiver_ty) = sig.self_param.receiver_ty_expr.as_ref()
+        && let Some(name) = named_type_name(receiver_ty)
+    {
+        return Some(name);
+    }
+
+    let mut matches = info
+        .action_by_source_and_name
+        .keys()
+        .filter_map(|(source_state, action_name)| {
+            if action_name == &sig.name {
+                Some(source_state.clone())
+            } else {
+                None
+            }
+        })
+        .collect::<Vec<_>>();
+    if matches.len() == 1 {
+        return matches.pop();
+    }
+    None
+}
+
+fn rewrite_return_type_to_linear_enum(ret_ty_expr: &mut TypeExpr, info: &DirectLinearInfo) {
+    match &mut ret_ty_expr.kind {
+        TypeExprKind::Named { ident, type_args } if type_args.is_empty() => {
+            if info.state_names.contains(ident) {
+                *ident = info.type_name.clone();
+            }
+        }
+        TypeExprKind::Union { variants } => {
+            if let Some(first) = variants.first_mut() {
+                rewrite_return_type_to_linear_enum(first, info);
+            }
+        }
+        _ => {}
+    }
+}
+
+fn rewrite_linear_exprs(
+    module: &mut Module,
+    infos: &HashMap<String, DirectLinearInfo>,
+    _node_id_gen: &mut NodeIdGen,
+) {
+    for item in &mut module.top_level_items {
+        match item {
+            TopLevelItem::FuncDef(func) => {
+                rewrite_expr_with_linear_env(&mut func.body, infos, None, None);
+            }
+            TopLevelItem::MethodBlock(method_block) => {
+                if infos.contains_key(&method_block.type_name) {
+                    continue;
+                }
+                for method_item in &mut method_block.method_items {
+                    if let MethodItem::Def(method) = method_item {
+                        rewrite_expr_with_linear_env(&mut method.body, infos, None, None);
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+}
+
+fn rewrite_expr_with_linear_env(
+    expr: &mut Expr,
+    infos: &HashMap<String, DirectLinearInfo>,
+    current_linear_type: Option<&str>,
+    self_state: Option<&str>,
+) -> Option<LinearValueState> {
+    let mut env = HashMap::new();
+    if let (Some(type_name), Some(state_name)) = (current_linear_type, self_state) {
+        env.insert(
+            "self".to_string(),
+            LinearValueState {
+                type_name: type_name.to_string(),
+                state_name: state_name.to_string(),
+            },
+        );
+    }
+    rewrite_expr_in_scope(expr, infos, current_linear_type, &mut env)
+}
+
+fn rewrite_expr_in_scope(
+    expr: &mut Expr,
+    infos: &HashMap<String, DirectLinearInfo>,
+    current_linear_type: Option<&str>,
+    env: &mut HashMap<String, LinearValueState>,
+) -> Option<LinearValueState> {
+    match &mut expr.kind {
+        ExprKind::Block { items, tail } => {
+            let mut scope_env = env.clone();
+            for item in items {
+                match item {
+                    BlockItem::Stmt(stmt) => {
+                        rewrite_stmt_in_scope(stmt, infos, current_linear_type, &mut scope_env)
+                    }
+                    BlockItem::Expr(expr) => {
+                        let _ =
+                            rewrite_expr_in_scope(expr, infos, current_linear_type, &mut scope_env);
+                    }
+                }
+            }
+            tail.as_mut().and_then(|tail| {
+                rewrite_expr_in_scope(tail, infos, current_linear_type, &mut scope_env)
+            })
+        }
+        ExprKind::MethodCall {
+            callee,
+            method_name,
+            args,
+        } => {
+            let callee_state = rewrite_expr_in_scope(callee, infos, current_linear_type, env);
+            for arg in args {
+                let _ = rewrite_expr_in_scope(&mut arg.expr, infos, current_linear_type, env);
+            }
+            let Some(callee_state) = callee_state else {
+                return None;
+            };
+            let Some(info) = infos.get(&callee_state.type_name) else {
+                return None;
+            };
+            let Some(action) = info
+                .action_by_source_and_name
+                .get(&(callee_state.state_name.clone(), method_name.clone()))
+            else {
+                return None;
+            };
+            *method_name = action.internal_name.clone();
+            Some(LinearValueState {
+                type_name: info.type_name.clone(),
+                state_name: action.target_state.clone(),
+            })
+        }
+        ExprKind::StructLit { name, fields, .. } => {
+            for field in fields.iter_mut() {
+                let _ = rewrite_expr_in_scope(&mut field.value, infos, current_linear_type, env);
+            }
+            if !fields.is_empty() {
+                return None;
+            }
+
+            if let Some((type_name, state_name)) = parse_qualified_linear_state_name(name, infos) {
+                expr.kind = ExprKind::EnumVariant {
+                    enum_name: type_name.clone(),
+                    type_args: Vec::new(),
+                    variant: state_name.clone(),
+                    payload: Vec::new(),
+                };
+                return Some(LinearValueState {
+                    type_name,
+                    state_name,
+                });
+            }
+
+            let Some(type_name) = current_linear_type else {
+                return None;
+            };
+            let Some(info) = infos.get(type_name) else {
+                return None;
+            };
+            if info.state_names.contains(name) {
+                let state_name = name.clone();
+                expr.kind = ExprKind::EnumVariant {
+                    enum_name: type_name.to_string(),
+                    type_args: Vec::new(),
+                    variant: state_name.clone(),
+                    payload: Vec::new(),
+                };
+                return Some(LinearValueState {
+                    type_name: type_name.to_string(),
+                    state_name,
+                });
+            }
+            None
+        }
+        ExprKind::Call { callee, args } => {
+            let _ = rewrite_expr_in_scope(callee, infos, current_linear_type, env);
+            for arg in args.iter_mut() {
+                let _ = rewrite_expr_in_scope(&mut arg.expr, infos, current_linear_type, env);
+            }
+
+            let ExprKind::Var { ident } = &callee.kind else {
+                return None;
+            };
+            let state_name = ident.clone();
+            let Some(type_name) = current_linear_type else {
+                return None;
+            };
+            let Some(info) = infos.get(type_name) else {
+                return None;
+            };
+            if !info.state_names.contains(&state_name) {
+                return None;
+            }
+
+            let payload = args.iter().map(|arg| arg.expr.clone()).collect::<Vec<_>>();
+            expr.kind = ExprKind::EnumVariant {
+                enum_name: type_name.to_string(),
+                type_args: Vec::new(),
+                variant: state_name.clone(),
+                payload,
+            };
+            Some(LinearValueState {
+                type_name: type_name.to_string(),
+                state_name,
+            })
+        }
+        ExprKind::EnumVariant {
+            enum_name,
+            variant,
+            payload,
+            ..
+        } => {
+            for value in payload {
+                let _ = rewrite_expr_in_scope(value, infos, current_linear_type, env);
+            }
+            if infos.contains_key(enum_name) {
+                return Some(LinearValueState {
+                    type_name: enum_name.clone(),
+                    state_name: variant.clone(),
+                });
+            }
+            None
+        }
+        ExprKind::Match { scrutinee, arms } => {
+            let _ = rewrite_expr_in_scope(scrutinee, infos, current_linear_type, env);
+            for arm in arms {
+                let mut arm_env = env.clone();
+                let _ =
+                    rewrite_expr_in_scope(&mut arm.body, infos, current_linear_type, &mut arm_env);
+            }
+            None
+        }
+        ExprKind::If {
+            cond,
+            then_body,
+            else_body,
+        } => {
+            let _ = rewrite_expr_in_scope(cond, infos, current_linear_type, env);
+            let mut then_env = env.clone();
+            let mut else_env = env.clone();
+            let _ = rewrite_expr_in_scope(then_body, infos, current_linear_type, &mut then_env);
+            let _ = rewrite_expr_in_scope(else_body, infos, current_linear_type, &mut else_env);
+            None
+        }
+        ExprKind::TupleLit(values) => {
+            for value in values {
+                let _ = rewrite_expr_in_scope(value, infos, current_linear_type, env);
+            }
+            None
+        }
+        ExprKind::ArrayLit { init, .. } => {
+            match init {
+                ArrayLitInit::Elems(values) => {
+                    for value in values {
+                        let _ = rewrite_expr_in_scope(value, infos, current_linear_type, env);
+                    }
+                }
+                ArrayLitInit::Repeat(value, _) => {
+                    let _ = rewrite_expr_in_scope(value, infos, current_linear_type, env);
+                }
+            }
+            None
+        }
+        ExprKind::SetLit { elems, .. } => {
+            for elem in elems {
+                let _ = rewrite_expr_in_scope(elem, infos, current_linear_type, env);
+            }
+            None
+        }
+        ExprKind::MapLit { entries, .. } => {
+            for entry in entries {
+                let _ = rewrite_expr_in_scope(&mut entry.key, infos, current_linear_type, env);
+                let _ = rewrite_expr_in_scope(&mut entry.value, infos, current_linear_type, env);
+            }
+            None
+        }
+        ExprKind::Var { ident } => env.get(ident).cloned(),
+        _ => {
+            walk_child_exprs(expr, infos, current_linear_type, env);
+            None
+        }
+    }
+}
+
+fn rewrite_stmt_in_scope(
+    stmt: &mut StmtExpr,
+    infos: &HashMap<String, DirectLinearInfo>,
+    current_linear_type: Option<&str>,
+    env: &mut HashMap<String, LinearValueState>,
+) {
+    match &mut stmt.kind {
+        StmtExprKind::LetBind { pattern, value, .. }
+        | StmtExprKind::VarBind { pattern, value, .. } => {
+            let result_state = rewrite_expr_in_scope(value, infos, current_linear_type, env);
+            if let Some(ident) = bind_pattern_name(pattern) {
+                if let Some(result_state) = result_state {
+                    env.insert(ident.to_string(), result_state);
+                } else {
+                    env.remove(ident);
+                }
+            }
+        }
+        StmtExprKind::Assign {
+            assignee, value, ..
+        }
+        | StmtExprKind::CompoundAssign {
+            assignee, value, ..
+        } => {
+            let _ = rewrite_expr_in_scope(assignee, infos, current_linear_type, env);
+            let _ = rewrite_expr_in_scope(value, infos, current_linear_type, env);
+        }
+        StmtExprKind::While { cond, body } => {
+            let _ = rewrite_expr_in_scope(cond, infos, current_linear_type, env);
+            let mut body_env = env.clone();
+            let _ = rewrite_expr_in_scope(body, infos, current_linear_type, &mut body_env);
+        }
+        StmtExprKind::For { iter, body, .. } => {
+            let _ = rewrite_expr_in_scope(iter, infos, current_linear_type, env);
+            let mut body_env = env.clone();
+            let _ = rewrite_expr_in_scope(body, infos, current_linear_type, &mut body_env);
+        }
+        StmtExprKind::Defer { value } => {
+            let _ = rewrite_expr_in_scope(value, infos, current_linear_type, env);
+        }
+        StmtExprKind::Using {
+            value,
+            body,
+            binding,
+        } => {
+            let result_state = rewrite_expr_in_scope(value, infos, current_linear_type, env);
+            let mut body_env = env.clone();
+            if let Some(result_state) = result_state {
+                body_env.insert(binding.ident.clone(), result_state);
+            }
+            let _ = rewrite_expr_in_scope(body, infos, current_linear_type, &mut body_env);
+        }
+        StmtExprKind::Return { value } => {
+            if let Some(value) = value {
+                let _ = rewrite_expr_in_scope(value, infos, current_linear_type, env);
+            }
+        }
+        StmtExprKind::VarDecl { ident, .. } => {
+            env.remove(ident);
+        }
+        StmtExprKind::Break | StmtExprKind::Continue => {}
+    }
+}
+
+fn walk_child_exprs(
+    expr: &mut Expr,
+    infos: &HashMap<String, DirectLinearInfo>,
+    current_linear_type: Option<&str>,
+    env: &mut HashMap<String, LinearValueState>,
+) {
+    match &mut expr.kind {
+        ExprKind::BinOp { left, right, .. } => {
+            let _ = rewrite_expr_in_scope(left, infos, current_linear_type, env);
+            let _ = rewrite_expr_in_scope(right, infos, current_linear_type, env);
+        }
+        ExprKind::UnaryOp { expr, .. }
+        | ExprKind::HeapAlloc { expr }
+        | ExprKind::Move { expr }
+        | ExprKind::Coerce { expr, .. }
+        | ExprKind::ImplicitMove { expr }
+        | ExprKind::AddrOf { expr }
+        | ExprKind::Deref { expr }
+        | ExprKind::Load { expr }
+        | ExprKind::Len { expr } => {
+            let _ = rewrite_expr_in_scope(expr, infos, current_linear_type, env);
+        }
+        ExprKind::Try {
+            fallible_expr,
+            on_error,
+        } => {
+            let _ = rewrite_expr_in_scope(fallible_expr, infos, current_linear_type, env);
+            if let Some(on_error) = on_error {
+                let _ = rewrite_expr_in_scope(on_error, infos, current_linear_type, env);
+            }
+        }
+        ExprKind::StructUpdate { target, fields } => {
+            let _ = rewrite_expr_in_scope(target, infos, current_linear_type, env);
+            for field in fields {
+                let _ = rewrite_expr_in_scope(&mut field.value, infos, current_linear_type, env);
+            }
+        }
+        ExprKind::Range { start, end } => {
+            let _ = rewrite_expr_in_scope(start, infos, current_linear_type, env);
+            let _ = rewrite_expr_in_scope(end, infos, current_linear_type, env);
+        }
+        ExprKind::Slice { target, start, end } => {
+            let _ = rewrite_expr_in_scope(target, infos, current_linear_type, env);
+            if let Some(start) = start {
+                let _ = rewrite_expr_in_scope(start, infos, current_linear_type, env);
+            }
+            if let Some(end) = end {
+                let _ = rewrite_expr_in_scope(end, infos, current_linear_type, env);
+            }
+        }
+        ExprKind::TupleField { target, .. } | ExprKind::StructField { target, .. } => {
+            let _ = rewrite_expr_in_scope(target, infos, current_linear_type, env);
+        }
+        ExprKind::ArrayIndex { target, indices } => {
+            let _ = rewrite_expr_in_scope(target, infos, current_linear_type, env);
+            for index in indices {
+                let _ = rewrite_expr_in_scope(index, infos, current_linear_type, env);
+            }
+        }
+        ExprKind::Reply { cap, value } => {
+            let _ = rewrite_expr_in_scope(cap, infos, current_linear_type, env);
+            let _ = rewrite_expr_in_scope(value, infos, current_linear_type, env);
+        }
+        ExprKind::Closure { body, .. } => {
+            let mut closure_env = HashMap::new();
+            let _ = rewrite_expr_in_scope(body, infos, current_linear_type, &mut closure_env);
+        }
+        ExprKind::MapGet { target, key } => {
+            let _ = rewrite_expr_in_scope(target, infos, current_linear_type, env);
+            let _ = rewrite_expr_in_scope(key, infos, current_linear_type, env);
+        }
+        ExprKind::StringFmt { segments } => {
+            for segment in segments {
+                if let crate::core::ast::StringFmtSegment::Expr { expr, .. } = segment {
+                    let _ = rewrite_expr_in_scope(expr, infos, current_linear_type, env);
+                }
+            }
+        }
+        ExprKind::Call { .. }
+        | ExprKind::MethodCall { .. }
+        | ExprKind::StructLit { .. }
+        | ExprKind::EnumVariant { .. }
+        | ExprKind::Match { .. }
+        | ExprKind::If { .. }
+        | ExprKind::Block { .. }
+        | ExprKind::TupleLit(..)
+        | ExprKind::ArrayLit { .. }
+        | ExprKind::SetLit { .. }
+        | ExprKind::MapLit { .. }
+        | ExprKind::Var { .. }
+        | ExprKind::UnitLit
+        | ExprKind::IntLit(_)
+        | ExprKind::BoolLit(_)
+        | ExprKind::CharLit(_)
+        | ExprKind::StringLit { .. }
+        | ExprKind::Emit { .. }
+        | ExprKind::ClosureRef { .. } => {}
+    }
+}
+
+fn parse_qualified_linear_state_name(
+    name: &str,
+    infos: &HashMap<String, DirectLinearInfo>,
+) -> Option<(String, String)> {
+    let (type_name, state_name) = name.split_once("::")?;
+    let info = infos.get(type_name)?;
+    if info.state_names.contains(state_name) {
+        Some((type_name.to_string(), state_name.to_string()))
+    } else {
+        None
+    }
+}
+
+fn bind_pattern_name(pattern: &crate::core::ast::BindPattern) -> Option<&str> {
+    match &pattern.kind {
+        crate::core::ast::BindPatternKind::Name { ident } => Some(ident.as_str()),
+        _ => None,
+    }
+}
+
+fn direct_action_method_name(source_state: &str, action_name: &str) -> String {
+    format!("__linear__{source_state}__{action_name}")
 }
 
 fn action_key(action: &LinearTransitionDecl) -> (String, String) {
