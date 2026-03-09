@@ -232,6 +232,9 @@ pub enum ResolveErrorKind {
 
     #[error("Method `{1}` in linear type `{0}` does not match the declared action parameters")]
     LinearMethodParamMismatch(String, String),
+
+    #[error("Use after consume of linear value `{0}`")]
+    LinearUseAfterConsume(String),
 }
 
 pub type ResolveError = SpannedError<ResolveErrorKind>;

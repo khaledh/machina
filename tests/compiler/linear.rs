@@ -193,6 +193,7 @@ fn linear_type_requires_receiver_annotation_for_ambiguous_actions() {
     assert!(
         rendered.contains("receiver")
             || rendered.contains("ambiguous")
+            || rendered.contains("LinearMethodAmbiguousReceiver")
             || rendered.contains("MC-METHOD-AMBIGUOUS-RECEIVER"),
         "expected ambiguous receiver diagnostic, got: {rendered}"
     );

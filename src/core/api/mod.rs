@@ -251,7 +251,10 @@ pub fn resolve_stage_with_policy(
             errors: frontend_errors,
         };
     }
-    crate::core::linear::desugar_module(&mut input.module, &mut input.node_id_gen);
+    frontend_errors.extend(crate::core::linear::desugar_module(
+        &mut input.module,
+        &mut input.node_id_gen,
+    ));
     let output = resolve_with_imports_and_symbols_and_typestate_roles_partial(
         input,
         inputs.imported_modules,

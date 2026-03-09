@@ -575,6 +575,10 @@ pub(super) fn from_resolve_error(error: &ResolveError) -> Diagnostic {
             );
             "MC-METHOD-PARAM-MISMATCH"
         }
+        ResolveErrorKind::LinearUseAfterConsume(name) => {
+            metadata.insert("name".to_string(), DiagnosticValue::String(name.clone()));
+            "MC-TYPE-USE-AFTER-CONSUME"
+        }
     };
     Diagnostic {
         phase: DiagnosticPhase::Resolve,
