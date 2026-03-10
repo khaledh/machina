@@ -1215,7 +1215,8 @@ impl<'a> DefInitChecker<'a> {
             | ExprKind::UnitLit
             | ExprKind::Range { .. }
             | ExprKind::Closure { .. }
-            | ExprKind::ClosureRef { .. } => {}
+            | ExprKind::ClosureRef { .. }
+            | ExprKind::RoleProjection { .. } => {}
             ExprKind::Load { expr } | ExprKind::Len { expr } => self.check_expr(expr),
             ExprKind::MapGet { target, key } => {
                 self.check_expr(target);

@@ -97,6 +97,13 @@ impl<'a> ConstraintCollector<'a> {
                     );
                 }
             }
+            ExprKind::RoleProjection { .. } => {
+                self.push_eq(
+                    expr_ty.clone(),
+                    Type::Unit,
+                    ConstraintReason::Expr(expr.id, expr.span),
+                );
+            }
             ExprKind::Block { items, tail } => {
                 for item in items {
                     self.collect_block_item(item);

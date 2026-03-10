@@ -79,6 +79,23 @@ impl<'a> Parser<'a> {
             self.parse_postfix()?
         };
 
+        if min_bp == 0
+            && self.is_contextual_keyword("as")
+            && let ExprKind::Var { ident } = &lhs.kind
+        {
+            let type_name = ident.clone();
+            self.consume_contextual_keyword("as")?;
+            let role_name = self.parse_ident()?;
+            lhs = Expr {
+                id: self.id_gen.new_id(),
+                kind: ExprKind::RoleProjection {
+                    type_name,
+                    role_name,
+                },
+                span: self.close(marker),
+            };
+        }
+
         if self.allow_range_expr && matches!(self.curr_token.kind, TK::DotDot) {
             self.advance();
             let allow_range_expr = self.allow_range_expr;

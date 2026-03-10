@@ -1078,6 +1078,7 @@ fn rewrite_expr_in_scope(
             }
             None
         }
+        ExprKind::RoleProjection { .. } => None,
         ExprKind::Match { scrutinee, arms } => {
             let _ = rewrite_expr_in_scope(
                 scrutinee,
@@ -1499,6 +1500,7 @@ fn walk_child_exprs(
         | ExprKind::SetLit { .. }
         | ExprKind::MapLit { .. }
         | ExprKind::Var { .. }
+        | ExprKind::RoleProjection { .. }
         | ExprKind::UnitLit
         | ExprKind::IntLit(_)
         | ExprKind::BoolLit(_)

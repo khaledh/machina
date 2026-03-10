@@ -1033,6 +1033,10 @@ pub enum ExprKind {
     Var {
         ident: String,
     },
+    RoleProjection {
+        type_name: String,
+        role_name: String,
+    },
     ArrayIndex {
         target: Box<Expr>,
         indices: Vec<Expr>,

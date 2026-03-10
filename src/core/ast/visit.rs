@@ -791,7 +791,8 @@ pub fn walk_expr<V: Visitor + ?Sized>(v: &mut V, expr: &Expr) {
         | ExprKind::CharLit(_)
         | ExprKind::StringLit { .. }
         | ExprKind::UnitLit
-        | ExprKind::Var { .. } => {}
+        | ExprKind::Var { .. }
+        | ExprKind::RoleProjection { .. } => {}
 
         ExprKind::Range { start, end } => {
             v.visit_expr(start);

@@ -931,6 +931,63 @@ fn test_parse_enum_variant_expr_with_payload() {
 }
 
 #[test]
+fn test_parse_role_projection_expr() {
+    let source = r#"
+        fn main() -> () {
+            PullRequest as Author
+        }
+    "#;
+
+    let funcs = parse_source(source).expect("Failed to parse");
+    let func = &funcs[0];
+
+    let tail = block_tail(&func.body);
+    match &tail.kind {
+        ExprKind::RoleProjection {
+            type_name,
+            role_name,
+        } => {
+            assert_eq!(type_name, "PullRequest");
+            assert_eq!(role_name, "Author");
+        }
+        _ => panic!("Expected role projection expr"),
+    }
+}
+
+#[test]
+fn test_parse_role_projection_in_method_call_arg() {
+    let source = r#"
+        fn main(service: PRService) -> () {
+            service.create(PullRequest as Author)
+        }
+    "#;
+
+    let funcs = parse_source(source).expect("Failed to parse");
+    let func = &funcs[0];
+
+    let tail = block_tail(&func.body);
+    match &tail.kind {
+        ExprKind::MethodCall {
+            method_name, args, ..
+        } => {
+            assert_eq!(method_name, "create");
+            assert_eq!(args.len(), 1);
+            match &args[0].expr.kind {
+                ExprKind::RoleProjection {
+                    type_name,
+                    role_name,
+                } => {
+                    assert_eq!(type_name, "PullRequest");
+                    assert_eq!(role_name, "Author");
+                }
+                _ => panic!("Expected role projection arg"),
+            }
+        }
+        _ => panic!("Expected method call"),
+    }
+}
+
+#[test]
 fn test_parse_struct_update_expr() {
     let source = r#"
         type Color = Red | Green

@@ -1404,6 +1404,16 @@ impl Expr {
             ExprKind::Var { ident, .. } => {
                 writeln!(f, "{}Var({}) [{}]", pad, ident, self.id)?;
             }
+            ExprKind::RoleProjection {
+                type_name,
+                role_name,
+            } => {
+                writeln!(
+                    f,
+                    "{}RoleProjection({} as {}) [{}]",
+                    pad, type_name, role_name, self.id
+                )?;
+            }
             ExprKind::If {
                 cond,
                 then_body,

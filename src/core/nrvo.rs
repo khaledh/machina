@@ -338,7 +338,8 @@ impl<'a> NrvoSafetyChecker<'a> {
             | VEK::TupleField { .. }
             | VEK::StructField { .. }
             | VEK::Deref { .. }
-            | VEK::Closure { .. } => true,
+            | VEK::Closure { .. }
+            | VEK::RoleProjection { .. } => true,
         }
     }
 

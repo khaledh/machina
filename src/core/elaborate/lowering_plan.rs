@@ -230,7 +230,8 @@ impl<'a> LoweringPlanBuilder<'a> {
             | ExprKind::CharLit(_)
             | ExprKind::StringLit { .. }
             | ExprKind::Range { .. }
-            | ExprKind::ClosureRef { .. } => {}
+            | ExprKind::ClosureRef { .. }
+            | ExprKind::RoleProjection { .. } => {}
 
             // Place-only variants that won't appear at value position
             ExprKind::Var { .. }

@@ -404,6 +404,7 @@ impl<'a> DropPlanBuilder<'a> {
                 self.visit_value_expr(value);
             }
             ExprKind::Var { .. }
+            | ExprKind::RoleProjection { .. }
             | ExprKind::Deref { .. }
             | ExprKind::ArrayIndex { .. }
             | ExprKind::TupleField { .. }

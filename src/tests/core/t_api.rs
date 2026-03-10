@@ -2785,7 +2785,8 @@ fn value_has_for(value: &Expr) -> bool {
         | ExprKind::TupleField { .. }
         | ExprKind::StructField { .. }
         | ExprKind::Deref { .. }
-        | ExprKind::Closure { .. } => false,
+        | ExprKind::Closure { .. }
+        | ExprKind::RoleProjection { .. } => false,
     }
 }
 
@@ -2890,7 +2891,8 @@ fn value_has_defer_or_using(value: &Expr) -> bool {
         | ExprKind::TupleField { .. }
         | ExprKind::StructField { .. }
         | ExprKind::Deref { .. }
-        | ExprKind::Closure { .. } => false,
+        | ExprKind::Closure { .. }
+        | ExprKind::RoleProjection { .. } => false,
     }
 }
 
@@ -3015,7 +3017,8 @@ fn value_has_cleanup_before_control_transfer(value: &Expr, kind: ControlTransfer
         | ExprKind::TupleField { .. }
         | ExprKind::StructField { .. }
         | ExprKind::Deref { .. }
-        | ExprKind::Closure { .. } => false,
+        | ExprKind::Closure { .. }
+        | ExprKind::RoleProjection { .. } => false,
     }
 }
 
@@ -3109,7 +3112,8 @@ fn value_first_bare_try_id(value: &Expr) -> Option<NodeId> {
         | ExprKind::TupleField { .. }
         | ExprKind::StructField { .. }
         | ExprKind::Deref { .. }
-        | ExprKind::Closure { .. } => None,
+        | ExprKind::Closure { .. }
+        | ExprKind::RoleProjection { .. } => None,
     }
 }
 

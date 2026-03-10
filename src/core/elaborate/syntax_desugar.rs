@@ -628,6 +628,7 @@ impl<'a, 'b> SyntaxDesugarCtx<'a, 'b> {
             | ExprKind::StringLit { .. }
             | ExprKind::StringFmt { .. }
             | ExprKind::ClosureRef { .. }
+            | ExprKind::RoleProjection { .. }
             | ExprKind::Var { .. }
             | ExprKind::Deref { .. }
             | ExprKind::TupleField { .. }

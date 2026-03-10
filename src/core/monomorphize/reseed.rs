@@ -631,7 +631,8 @@ impl VisitorMut for NodeIdReseeder<'_> {
             | ExprKind::CharLit(_)
             | ExprKind::StringLit { .. }
             | ExprKind::Var { .. }
-            | ExprKind::ClosureRef { .. } => {}
+            | ExprKind::ClosureRef { .. }
+            | ExprKind::RoleProjection { .. } => {}
             ExprKind::Load { expr } | ExprKind::Len { expr } => self.visit_expr(expr),
             ExprKind::MapGet { target, key } => {
                 self.visit_expr(target);

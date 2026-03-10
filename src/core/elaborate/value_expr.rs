@@ -541,6 +541,7 @@ impl<'a> Elaborator<'a> {
             | ExprKind::Closure { .. }
             | ExprKind::Move { .. }
             | ExprKind::ImplicitMove { .. }
+            | ExprKind::RoleProjection { .. }
             | ExprKind::Var { .. }
             | ExprKind::TupleField { .. }
             | ExprKind::StructField { .. }
