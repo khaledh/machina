@@ -5,7 +5,7 @@ use crate::core::context::ParsedContext;
 use crate::core::context::ResolvedContext;
 use crate::core::lexer::{LexError, Lexer};
 use crate::core::parse::{Parser, ParserOptions};
-use crate::core::resolve::{ResolveError, resolve};
+use crate::core::resolve::ResolveError;
 use crate::core::typecheck::type_check;
 use crate::services::analysis::results::{
     ResolvedModuleResult, SymbolLookup, TypeLookup, TypedModuleResult,
@@ -21,7 +21,14 @@ fn resolve_source(source: &str) -> Result<ResolvedContext, Vec<ResolveError>> {
     let mut parser = Parser::new_with_id_gen(&tokens, id_gen);
     let module = parser.parse().expect("parsing should succeed");
     let parsed = ParsedContext::new(module, parser.into_id_gen());
-    resolve(parsed)
+    let out = resolve_stage_with_policy(parsed, ResolveInputs::default(), FrontendPolicy::Strict);
+    if out.errors.is_empty() {
+        Ok(out
+            .context
+            .expect("strict resolve should produce context on success"))
+    } else {
+        Err(out.errors)
+    }
 }
 
 fn resolve_source_with_typestate(source: &str) -> Result<ResolvedContext, Vec<ResolveError>> {
@@ -204,4 +211,51 @@ typestate Gateway : Auth::Client {
             .unwrap_or(0),
         gateway_bindings
     );
+}
+
+#[test]
+fn linear_index_roundtrip_matches_between_context_and_result() {
+    let source = r#"
+@linear
+type PullRequest = {
+    id: u64,
+
+    states {
+        Draft,
+        Review,
+    }
+
+    actions {
+        submit: Draft -> Review,
+    }
+
+    roles {
+        Author { submit }
+    }
+}
+
+PullRequest :: {
+    fn submit(self) -> Review {
+        Review {}
+    }
+}
+
+machine PRService hosts PullRequest(key: id) {
+    fn new() -> Self {
+        Self {}
+    }
+}
+"#;
+
+    let resolved = resolve_source(source).expect("resolve should succeed");
+    let type_count = resolved.linear_index.types.len();
+    let host_count = resolved.linear_index.machine_hosts.len();
+
+    let result = ResolvedModuleResult::from_context(ModuleId(10), resolved.clone());
+    assert_eq!(result.linear_index.types.len(), type_count);
+    assert_eq!(result.linear_index.machine_hosts.len(), host_count);
+
+    let roundtrip = result.into_context();
+    assert_eq!(roundtrip.linear_index.types.len(), type_count);
+    assert_eq!(roundtrip.linear_index.machine_hosts.len(), host_count);
 }

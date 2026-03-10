@@ -142,6 +142,7 @@ pub(crate) fn monomorphize_with_plan(
     let symbol_ids = tables.symbol_ids;
     let mut node_id_gen = tables.node_id_gen;
     let typestate_role_impls = tables.typestate_role_impls;
+    let linear_index = tables.linear_index;
     let protocol_index = tables.protocol_index;
     let mut stats = MonomorphizeStats {
         requested_instantiations: generic_insts.len(),
@@ -161,6 +162,7 @@ pub(crate) fn monomorphize_with_plan(
                     symbols,
                     node_id_gen,
                     typestate_role_impls,
+                    linear_index: linear_index.clone(),
                     protocol_index: protocol_index.clone(),
                 },
             },
@@ -434,6 +436,7 @@ pub(crate) fn monomorphize_with_plan(
                 symbols,
                 node_id_gen,
                 typestate_role_impls,
+                linear_index,
                 protocol_index,
             },
         },

@@ -13,6 +13,7 @@ use crate::core::capsule::{ModuleId, ModulePath, ParsedModule};
 use crate::core::codegen_names::CodegenNameTable;
 use crate::core::context::{ResolvedContext, ResolvedTables, TypeCheckedContext, TypedTables};
 use crate::core::diag::Span;
+use crate::core::linear::LinearIndex;
 use crate::core::resolve::{Def, DefId, DefTable};
 use crate::core::symbol_id::{SymbolId, SymbolIdTable};
 use crate::core::typecheck::type_map::{CallSig, CallSigMap, GenericInstMap, TypeMap};
@@ -45,6 +46,7 @@ pub struct ResolvedModuleResult {
     pub symbols: CodegenNameTable,
     pub node_id_gen: NodeIdGen,
     pub typestate_role_impls: Vec<crate::core::context::TypestateRoleImplBinding>,
+    pub linear_index: LinearIndex,
     pub protocol_index: crate::core::protocol::ProtocolIndex,
 }
 
@@ -62,6 +64,7 @@ impl ResolvedModuleResult {
             symbols,
             node_id_gen,
             typestate_role_impls,
+            linear_index,
             protocol_index,
         } = tables;
         Self {
@@ -74,6 +77,7 @@ impl ResolvedModuleResult {
             symbols,
             node_id_gen,
             typestate_role_impls,
+            linear_index,
             protocol_index,
         }
     }
@@ -89,6 +93,7 @@ impl ResolvedModuleResult {
                 symbols: self.symbols,
                 node_id_gen: self.node_id_gen,
                 typestate_role_impls: self.typestate_role_impls,
+                linear_index: self.linear_index,
                 protocol_index: self.protocol_index,
             },
         }
@@ -109,6 +114,7 @@ pub struct TypedModuleResult {
     pub symbols: CodegenNameTable,
     pub node_id_gen: NodeIdGen,
     pub typestate_role_impls: Vec<crate::core::context::TypestateRoleImplBinding>,
+    pub linear_index: LinearIndex,
     pub protocol_index: crate::core::protocol::ProtocolIndex,
 }
 
@@ -272,6 +278,7 @@ impl TypedModuleResult {
             symbols,
             node_id_gen,
             typestate_role_impls,
+            linear_index,
             protocol_index,
         } = resolved;
         Self {
@@ -287,6 +294,7 @@ impl TypedModuleResult {
             symbols,
             node_id_gen,
             typestate_role_impls,
+            linear_index,
             protocol_index,
         }
     }
@@ -303,6 +311,7 @@ impl TypedModuleResult {
                     symbols: self.symbols,
                     node_id_gen: self.node_id_gen,
                     typestate_role_impls: self.typestate_role_impls,
+                    linear_index: self.linear_index,
                     protocol_index: self.protocol_index,
                 },
                 type_map: self.type_map,

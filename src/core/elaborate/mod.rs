@@ -79,6 +79,7 @@ pub fn elaborate(ctx: ElaborateStageInput) -> ElaborateStageOutput {
         symbols,
         node_id_gen,
         typestate_role_impls,
+        linear_index,
         protocol_index,
     } = resolved;
     let mut node_id_gen = node_id_gen;
@@ -125,6 +126,7 @@ pub fn elaborate(ctx: ElaborateStageInput) -> ElaborateStageOutput {
                     symbols,
                     node_id_gen,
                     typestate_role_impls,
+                    linear_index,
                     protocol_index,
                 },
                 type_map: type_map.into_inner(),

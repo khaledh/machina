@@ -35,6 +35,85 @@ pub fn validate_module(module: &Module) -> Vec<ResolveError> {
     errors
 }
 
+#[derive(Clone, Debug, Default)]
+pub struct LinearIndex {
+    pub types: HashMap<String, LinearTypeInfo>,
+    pub machine_hosts: HashMap<String, LinearHostInfo>,
+}
+
+#[derive(Clone, Debug)]
+pub struct LinearTypeInfo {
+    pub state_names: Vec<String>,
+    pub initial_state: Option<String>,
+    pub roles: HashMap<String, LinearRoleInfo>,
+}
+
+#[derive(Clone, Debug)]
+pub struct LinearRoleInfo {
+    pub allowed_actions: Vec<String>,
+}
+
+#[derive(Clone, Debug)]
+pub struct LinearHostInfo {
+    pub hosted_type_name: String,
+    pub key_field: String,
+}
+
+pub fn build_linear_index(module: &Module) -> LinearIndex {
+    let mut types = HashMap::new();
+    for type_def in module.type_defs() {
+        let TypeDefKind::Linear { linear } = &type_def.kind else {
+            continue;
+        };
+
+        let roles = linear
+            .roles
+            .iter()
+            .map(|role| {
+                (
+                    role.name.clone(),
+                    LinearRoleInfo {
+                        allowed_actions: role.allowed_actions.clone(),
+                    },
+                )
+            })
+            .collect();
+
+        let state_names = linear
+            .states
+            .iter()
+            .map(|state| state.name.clone())
+            .collect::<Vec<_>>();
+
+        let initial_state = linear.states.first().map(|state| state.name.clone());
+
+        types.insert(
+            type_def.name.clone(),
+            LinearTypeInfo {
+                state_names,
+                initial_state,
+                roles,
+            },
+        );
+    }
+
+    let mut machine_hosts = HashMap::new();
+    for machine_def in module.machine_defs() {
+        machine_hosts.insert(
+            machine_def.name.clone(),
+            LinearHostInfo {
+                hosted_type_name: machine_def.host.type_name.clone(),
+                key_field: machine_def.host.key_field.clone(),
+            },
+        );
+    }
+
+    LinearIndex {
+        types,
+        machine_hosts,
+    }
+}
+
 pub fn desugar_module(module: &mut Module, node_id_gen: &mut NodeIdGen) -> Vec<ResolveError> {
     let infos = collect_direct_linear_infos(module);
     if infos.is_empty() {

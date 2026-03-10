@@ -244,6 +244,7 @@ pub fn resolve_stage_with_policy(
     let typestate_role_impls = typestate::collect_role_impl_refs(&input.module);
     let mut frontend_errors = typestate::desugar_module(&mut input.module, &mut input.node_id_gen);
     frontend_errors.extend(crate::core::linear::validate_module(&input.module));
+    input.linear_index = crate::core::linear::build_linear_index(&input.module);
     if policy == FrontendPolicy::Strict && !frontend_errors.is_empty() {
         return ResolveStageResult {
             context: None,

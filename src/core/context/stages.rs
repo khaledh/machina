@@ -6,6 +6,7 @@ use crate::core::ast::{Module, NodeId, NodeIdGen, TypeExpr};
 use crate::core::capsule::{ModuleId, ModulePath};
 use crate::core::codegen_names::CodegenNameTable;
 use crate::core::diag::Span;
+use crate::core::linear::LinearIndex;
 use crate::core::plans::{DropPlanMap, LoweringPlanMap, MachinePlanMap};
 use crate::core::protocol::ProtocolIndex;
 use crate::core::resolve::{DefId, DefTable};
@@ -23,6 +24,7 @@ pub struct ResolvedTables {
     pub symbols: CodegenNameTable,
     pub node_id_gen: NodeIdGen,
     pub typestate_role_impls: Vec<TypestateRoleImplBinding>,
+    pub linear_index: LinearIndex,
     /// Canonical protocol facts extracted from resolved protocol definitions
     /// and typestate role bindings.
     pub protocol_index: ProtocolIndex,
@@ -226,6 +228,7 @@ pub struct ParsedContext {
     pub node_id_gen: NodeIdGen,
     pub source_path: Option<PathBuf>,
     pub module_path: Option<ModulePath>,
+    pub linear_index: LinearIndex,
 }
 
 /// Stage contract alias: resolve input.
@@ -238,6 +241,7 @@ impl ParsedContext {
             node_id_gen,
             source_path: None,
             module_path: None,
+            linear_index: LinearIndex::default(),
         }
     }
 
@@ -257,6 +261,7 @@ impl ParsedContext {
             node_id_gen,
             source_path,
             module_path,
+            linear_index,
         } = self;
 
         if def_table.source_path().is_none() {
@@ -279,6 +284,7 @@ impl ParsedContext {
                 symbols,
                 node_id_gen,
                 typestate_role_impls: Vec::new(),
+                linear_index,
                 protocol_index: ProtocolIndex::default(),
             },
         }

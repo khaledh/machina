@@ -43,6 +43,7 @@ impl NrvoAnalyzer {
             symbols,
             node_id_gen,
             typestate_role_impls,
+            linear_index,
             protocol_index,
         } = resolved;
 
@@ -64,6 +65,7 @@ impl NrvoAnalyzer {
                         symbols,
                         node_id_gen,
                         typestate_role_impls,
+                        linear_index,
                         protocol_index,
                     },
                     type_map,

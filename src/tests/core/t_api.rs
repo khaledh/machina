@@ -274,6 +274,62 @@ fn machine_host_invalid_key_field_reports_targeted_error() {
 }
 
 #[test]
+fn machine_host_facts_are_recorded_in_resolved_context() {
+    let source = r#"
+        @linear
+        type PullRequest = {
+            id: u64,
+
+            states {
+                Draft,
+                Review,
+            }
+
+            actions {
+                submit: Draft -> Review,
+            }
+
+            roles {
+                Author { submit }
+            }
+        }
+
+        PullRequest :: {
+            fn submit(self) -> Review {
+                Review {}
+            }
+        }
+
+        machine PRService hosts PullRequest(key: id) {
+            fn new() -> Self {
+                Self {}
+            }
+        }
+    "#;
+
+    let parsed = parsed_context(source);
+    let out = resolve_stage_with_policy(parsed, ResolveInputs::default(), FrontendPolicy::Strict);
+    let resolved = out.context.expect("expected resolved context");
+
+    let host = resolved
+        .linear_index
+        .machine_hosts
+        .get("PRService")
+        .expect("expected machine host facts");
+    assert_eq!(host.hosted_type_name, "PullRequest");
+    assert_eq!(host.key_field, "id");
+
+    let linear_ty = resolved
+        .linear_index
+        .types
+        .get("PullRequest")
+        .expect("expected linear type facts");
+    assert_eq!(linear_ty.initial_state.as_deref(), Some("Draft"));
+    assert_eq!(linear_ty.state_names, vec!["Draft", "Review"]);
+    assert!(linear_ty.roles.contains_key("Author"));
+}
+
+#[test]
 fn typestate_duplicate_state_and_invalid_transition_return_report_errors() {
     let source = r#"
 typestate Connection {
