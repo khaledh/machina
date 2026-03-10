@@ -394,6 +394,25 @@ impl<'a> ConstraintCollector<'a> {
                     .iter()
                     .map(|arg| self.collect_expr(&arg.expr, None))
                     .collect::<Vec<_>>();
+                if method_name == "create"
+                    && args.len() == 1
+                    && let ExprKind::RoleProjection {
+                        type_name,
+                        role_name,
+                    } = &args[0].expr.kind
+                {
+                    self.out
+                        .expr_obligations
+                        .push(ExprObligation::LinearMachineCreate {
+                            expr_id: expr.id,
+                            receiver: receiver_ty,
+                            type_name: type_name.clone(),
+                            role_name: role_name.clone(),
+                            result: expr_ty.clone(),
+                            span: expr.span,
+                        });
+                    return expr_ty;
+                }
                 self.out.call_obligations.push(CallObligation {
                     call_node: expr.id,
                     span: expr.span,

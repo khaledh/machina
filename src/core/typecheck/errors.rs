@@ -324,6 +324,12 @@ pub enum TypeCheckErrorKind {
     #[error("Function overload is ambiguous: {0}")]
     OverloadAmbiguous(String),
 
+    #[error("Machine {0} hosts linear type {1}, not {2}")]
+    LinearSessionHostMismatch(String, String, String),
+
+    #[error("Linear type {0} does not define role {1}")]
+    LinearSessionUnknownRole(String, String),
+
     #[error("Cannot access private callable: {0}")]
     CallableNotAccessible(String),
 

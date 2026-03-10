@@ -19,6 +19,7 @@ mod diag_utils;
 mod expr_ops;
 mod index;
 mod joins;
+mod linear;
 mod nominal;
 mod patterns;
 mod term_utils;
@@ -228,6 +229,7 @@ fn solve_expr_stage(
         &engine.env().type_defs,
         &engine.env().type_symbols,
         &engine.context().def_owners,
+        &engine.context().linear_index,
         &engine.env().property_sigs,
         &engine.env().trait_sigs,
         &constrain.var_trait_bounds,
@@ -309,6 +311,7 @@ fn retry_expr_stage(
         &engine.env().type_defs,
         &engine.env().type_symbols,
         &engine.context().def_owners,
+        &engine.context().linear_index,
         &engine.env().property_sigs,
         &engine.env().trait_sigs,
         &constrain.var_trait_bounds,
@@ -437,6 +440,7 @@ fn check_expr_obligations(
     type_defs: &HashMap<String, Type>,
     type_symbols: &HashMap<String, DefId>,
     def_owners: &HashMap<DefId, ModuleId>,
+    linear_index: &crate::core::linear::LinearIndex,
     property_sigs: &HashMap<String, HashMap<String, CollectedPropertySig>>,
     trait_sigs: &HashMap<String, CollectedTraitSig>,
     var_trait_bounds: &HashMap<TyVarId, Vec<String>>,
@@ -485,6 +489,16 @@ fn check_expr_obligations(
         ) {
             continue;
         }
+        if linear::try_check_expr_obligation_linear(
+            obligation,
+            unifier,
+            type_defs,
+            linear_index,
+            &mut errors,
+            &mut covered_exprs,
+        ) {
+            continue;
+        }
         if expr_ops::try_check_expr_obligation_ops(
             obligation,
             unifier,
@@ -519,6 +533,9 @@ fn check_expr_obligations(
             | ExprObligation::StructField { .. }
             | ExprObligation::StructFieldAssign { .. } => {
                 unreachable!("nominal obligations are handled by solve::nominal");
+            }
+            ExprObligation::LinearMachineCreate { .. } => {
+                unreachable!("linear obligations are handled by solve::linear");
             }
         }
     }
@@ -617,6 +634,16 @@ fn should_retry_post_call_expr_obligation(
         ExprObligation::Try {
             callable_def_id: _, ..
         } => true,
+        ExprObligation::LinearMachineCreate {
+            receiver, result, ..
+        } => {
+            // `create` depends on the receiver's hosted-machine handle type,
+            // which may only become concrete after ordinary call solving
+            // resolves the earlier `spawn()?` expression.
+            let receiver_ty = term_utils::resolve_term(receiver, unifier);
+            let result_ty = term_utils::resolve_term(result, unifier);
+            term_utils::is_unresolved(&receiver_ty) || term_utils::is_unresolved(&result_ty)
+        }
         _ => false,
     }
 }

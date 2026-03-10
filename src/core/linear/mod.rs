@@ -146,6 +146,8 @@ pub fn desugar_module(module: &mut Module, node_id_gen: &mut NodeIdGen) -> Vec<R
 struct DirectLinearInfo {
     type_name: String,
     state_names: HashSet<String>,
+    initial_state: Option<String>,
+    role_names: HashSet<String>,
     action_by_source_and_name: HashMap<(String, String), DirectActionInfo>,
 }
 
@@ -778,6 +780,12 @@ fn collect_direct_linear_infos(module: &Module) -> HashMap<String, DirectLinearI
             .iter()
             .map(|state| state.name.clone())
             .collect::<HashSet<_>>();
+        let initial_state = linear.states.first().map(|state| state.name.clone());
+        let role_names = linear
+            .roles
+            .iter()
+            .map(|role| role.name.clone())
+            .collect::<HashSet<_>>();
         let mut action_by_source_and_name = HashMap::new();
         for action in &linear.actions {
             action_by_source_and_name.insert(
@@ -794,6 +802,8 @@ fn collect_direct_linear_infos(module: &Module) -> HashMap<String, DirectLinearI
             DirectLinearInfo {
                 type_name: type_def.name.clone(),
                 state_names,
+                initial_state,
+                role_names,
                 action_by_source_and_name,
             },
         );
@@ -1055,7 +1065,7 @@ fn rewrite_expr_in_scope(
             };
             let callee_state =
                 rewrite_expr_in_scope(callee, infos, current_linear_type, env, errors, node_id_gen);
-            for arg in args {
+            for arg in args.iter_mut() {
                 let _ = rewrite_expr_in_scope(
                     &mut arg.expr,
                     infos,
@@ -1064,6 +1074,21 @@ fn rewrite_expr_in_scope(
                     errors,
                     node_id_gen,
                 );
+            }
+            if method_name == "create"
+                && args.len() == 1
+                && let ExprKind::RoleProjection {
+                    type_name,
+                    role_name,
+                } = &args[0].expr.kind
+                && let Some(info) = infos.get(type_name)
+                && info.role_names.contains(role_name)
+                && let Some(initial_state) = info.initial_state.clone()
+            {
+                return Some(LinearValueState {
+                    type_name: type_name.clone(),
+                    state_name: initial_state,
+                });
             }
             let Some(callee_state) = callee_state else {
                 return None;
@@ -1200,6 +1225,30 @@ fn rewrite_expr_in_scope(
                 });
             }
             None
+        }
+        ExprKind::Try {
+            fallible_expr,
+            on_error,
+        } => {
+            let result_state = rewrite_expr_in_scope(
+                fallible_expr,
+                infos,
+                current_linear_type,
+                env,
+                errors,
+                node_id_gen,
+            );
+            if let Some(on_error) = on_error {
+                let _ = rewrite_expr_in_scope(
+                    on_error,
+                    infos,
+                    current_linear_type,
+                    env,
+                    errors,
+                    node_id_gen,
+                );
+            }
+            result_state
         }
         ExprKind::RoleProjection { .. } => None,
         ExprKind::Match { scrutinee, arms } => {
