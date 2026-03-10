@@ -7,11 +7,14 @@
 
 use std::collections::{HashMap, HashSet};
 
+use crate::core::ast::visit_mut::{self, VisitorMut};
 use crate::core::ast::{
-    ArrayLitInit, BlockItem, Expr, ExprKind, LinearRoleDecl, LinearStateVariant,
-    LinearTransitionDecl, MachineDef, MethodBlock, MethodDef, MethodItem, Module, NodeIdGen, Param,
-    ParamMode, StmtExpr, StmtExprKind, TopLevelItem, TypeDef, TypeDefKind, TypeExpr, TypeExprKind,
+    ArrayLitInit, BlockItem, EnumDefVariant, Expr, ExprKind, FuncDef, LinearRoleDecl,
+    LinearStateVariant, LinearTransitionDecl, MachineDef, MethodBlock, MethodDef, MethodItem,
+    Module, NodeIdGen, Param, ParamMode, StmtExpr, StmtExprKind, TopLevelItem, TypeDef,
+    TypeDefKind, TypeExpr, TypeExprKind,
 };
+use crate::core::diag::Span;
 use crate::core::resolve::{REK, ResolveError};
 
 pub fn validate_module(module: &Module) -> Vec<ResolveError> {
@@ -57,6 +60,7 @@ pub struct LinearRoleInfo {
 pub struct LinearHostInfo {
     pub hosted_type_name: String,
     pub key_field: String,
+    pub handle_type_name: String,
 }
 
 pub fn build_linear_index(module: &Module) -> LinearIndex {
@@ -104,6 +108,7 @@ pub fn build_linear_index(module: &Module) -> LinearIndex {
             LinearHostInfo {
                 hosted_type_name: machine_def.host.type_name.clone(),
                 key_field: machine_def.host.key_field.clone(),
+                handle_type_name: machine_handle_type_name(&machine_def.name),
             },
         );
     }
@@ -116,13 +121,25 @@ pub fn build_linear_index(module: &Module) -> LinearIndex {
 
 pub fn desugar_module(module: &mut Module, node_id_gen: &mut NodeIdGen) -> Vec<ResolveError> {
     let infos = collect_direct_linear_infos(module);
+    let machine_infos = collect_machine_spawn_infos(module);
+    if !machine_infos.is_empty() {
+        ensure_hosted_support_types(module, node_id_gen);
+        append_machine_spawn_support(module, &machine_infos, node_id_gen);
+    }
     if infos.is_empty() {
+        if !machine_infos.is_empty() {
+            rewrite_machine_spawn_calls(module, &machine_infos, node_id_gen);
+        }
         return Vec::new();
     }
 
     rewrite_linear_type_defs(module, &infos);
     rewrite_linear_method_blocks(module, &infos, node_id_gen);
-    rewrite_linear_exprs(module, &infos, node_id_gen)
+    let errors = rewrite_linear_exprs(module, &infos, node_id_gen);
+    if !machine_infos.is_empty() {
+        rewrite_machine_spawn_calls(module, &machine_infos, node_id_gen);
+    }
+    errors
 }
 
 #[derive(Clone, Debug)]
@@ -130,6 +147,13 @@ struct DirectLinearInfo {
     type_name: String,
     state_names: HashSet<String>,
     action_by_source_and_name: HashMap<(String, String), DirectActionInfo>,
+}
+
+#[derive(Clone, Debug)]
+struct MachineSpawnInfo {
+    machine_name: String,
+    handle_type_name: String,
+    spawn_fn_name: String,
 }
 
 #[derive(Clone, Debug)]
@@ -148,6 +172,26 @@ struct LinearValueState {
 struct LinearBindingState {
     value_state: LinearValueState,
     consumed: bool,
+}
+
+fn machine_handle_type_name(machine_name: &str) -> String {
+    format!("__mc_machine_handle_{machine_name}")
+}
+
+fn machine_spawn_fn_name(machine_name: &str) -> String {
+    format!("__mc_machine_spawn_{machine_name}")
+}
+
+fn collect_machine_spawn_infos(module: &Module) -> Vec<MachineSpawnInfo> {
+    module
+        .machine_defs()
+        .into_iter()
+        .map(|machine_def| MachineSpawnInfo {
+            machine_name: machine_def.name.clone(),
+            handle_type_name: machine_handle_type_name(&machine_def.name),
+            spawn_fn_name: machine_spawn_fn_name(&machine_def.name),
+        })
+        .collect()
 }
 
 fn validate_linear_type(
@@ -1587,6 +1631,241 @@ fn walk_child_exprs(
         | ExprKind::StringLit { .. }
         | ExprKind::Emit { .. }
         | ExprKind::ClosureRef { .. } => {}
+    }
+}
+
+fn ensure_hosted_support_types(module: &mut Module, node_id_gen: &mut NodeIdGen) {
+    // Hosted linear tests mention these error unions before full hosted session
+    // semantics exist. Seed minimal definitions now so later slices can focus
+    // on `create`/`resume` typing instead of missing-type noise.
+    ensure_type_def(
+        module,
+        "MachineError",
+        TopLevelItem::TypeDef(TypeDef {
+            id: node_id_gen.new_id(),
+            attrs: Vec::new(),
+            name: "MachineError".to_string(),
+            type_params: Vec::new(),
+            kind: TypeDefKind::Enum {
+                variants: vec![EnumDefVariant {
+                    id: node_id_gen.new_id(),
+                    name: "SpawnFailed".to_string(),
+                    payload: Vec::new(),
+                    span: Span::default(),
+                }],
+            },
+            span: Span::default(),
+        }),
+    );
+    ensure_type_def(
+        module,
+        "SessionError",
+        TopLevelItem::TypeDef(TypeDef {
+            id: node_id_gen.new_id(),
+            attrs: Vec::new(),
+            name: "SessionError".to_string(),
+            type_params: Vec::new(),
+            kind: TypeDefKind::Enum {
+                variants: vec![
+                    EnumDefVariant {
+                        id: node_id_gen.new_id(),
+                        name: "InstanceNotFound".to_string(),
+                        payload: Vec::new(),
+                        span: Span::default(),
+                    },
+                    EnumDefVariant {
+                        id: node_id_gen.new_id(),
+                        name: "InvalidState".to_string(),
+                        payload: Vec::new(),
+                        span: Span::default(),
+                    },
+                ],
+            },
+            span: Span::default(),
+        }),
+    );
+}
+
+fn ensure_type_def(module: &mut Module, type_name: &str, item: TopLevelItem) {
+    let already_exists = module
+        .top_level_items
+        .iter()
+        .any(|existing| matches!(existing, TopLevelItem::TypeDef(def) if def.name == type_name));
+    if !already_exists {
+        module.top_level_items.insert(0, item);
+    }
+}
+
+fn append_machine_spawn_support(
+    module: &mut Module,
+    machine_infos: &[MachineSpawnInfo],
+    node_id_gen: &mut NodeIdGen,
+) {
+    for info in machine_infos {
+        // Each hosted machine needs a concrete handle type plus a generated
+        // spawn helper so `MachineName::spawn()` can lower into ordinary calls.
+        module.top_level_items.push(build_machine_handle_type_def(
+            &info.handle_type_name,
+            node_id_gen,
+        ));
+        module
+            .top_level_items
+            .push(TopLevelItem::FuncDef(build_machine_spawn_func(
+                info,
+                node_id_gen,
+            )));
+    }
+}
+
+fn build_machine_handle_type_def(type_name: &str, node_id_gen: &mut NodeIdGen) -> TopLevelItem {
+    TopLevelItem::TypeDef(TypeDef {
+        id: node_id_gen.new_id(),
+        attrs: Vec::new(),
+        name: type_name.to_string(),
+        type_params: Vec::new(),
+        kind: TypeDefKind::Struct {
+            fields: vec![crate::core::ast::StructDefField {
+                id: node_id_gen.new_id(),
+                name: "_id".to_string(),
+                ty: TypeExpr {
+                    id: node_id_gen.new_id(),
+                    kind: TypeExprKind::Named {
+                        ident: "u64".to_string(),
+                        type_args: Vec::new(),
+                    },
+                    span: Span::default(),
+                },
+                span: Span::default(),
+            }],
+        },
+        span: Span::default(),
+    })
+}
+
+fn build_machine_spawn_func(info: &MachineSpawnInfo, node_id_gen: &mut NodeIdGen) -> FuncDef {
+    let span = Span::default();
+    FuncDef {
+        id: node_id_gen.new_id(),
+        attrs: Vec::new(),
+        sig: crate::core::ast::FunctionSig {
+            name: info.spawn_fn_name.clone(),
+            type_params: Vec::new(),
+            params: Vec::new(),
+            ret_ty_expr: TypeExpr {
+                id: node_id_gen.new_id(),
+                kind: TypeExprKind::Union {
+                    variants: vec![
+                        TypeExpr {
+                            id: node_id_gen.new_id(),
+                            kind: TypeExprKind::Named {
+                                ident: info.handle_type_name.clone(),
+                                type_args: Vec::new(),
+                            },
+                            span,
+                        },
+                        TypeExpr {
+                            id: node_id_gen.new_id(),
+                            kind: TypeExprKind::Named {
+                                ident: "MachineError".to_string(),
+                                type_args: Vec::new(),
+                            },
+                            span,
+                        },
+                    ],
+                },
+                span,
+            },
+            span,
+        },
+        body: Expr {
+            id: node_id_gen.new_id(),
+            kind: ExprKind::Block {
+                items: Vec::new(),
+                // This helper is intentionally minimal for the current slice:
+                // it only manufactures a typed machine handle so the next
+                // `create`/`resume` typing work has a stable surface to target.
+                tail: Some(Box::new(Expr {
+                    id: node_id_gen.new_id(),
+                    kind: ExprKind::StructLit {
+                        name: info.handle_type_name.clone(),
+                        type_args: Vec::new(),
+                        fields: vec![crate::core::ast::StructLitField {
+                            id: node_id_gen.new_id(),
+                            name: "_id".to_string(),
+                            value: Expr {
+                                id: node_id_gen.new_id(),
+                                kind: ExprKind::IntLit(1),
+                                span,
+                            },
+                            span,
+                        }],
+                    },
+                    span,
+                })),
+            },
+            span,
+        },
+        span,
+    }
+}
+
+fn rewrite_machine_spawn_calls(
+    module: &mut Module,
+    machine_infos: &[MachineSpawnInfo],
+    node_id_gen: &mut NodeIdGen,
+) {
+    let spawn_fns = machine_infos
+        .iter()
+        .map(|info| (info.machine_name.clone(), info.spawn_fn_name.clone()))
+        .collect::<HashMap<_, _>>();
+    let mut rewriter = MachineSpawnCallRewriter {
+        spawn_fns: &spawn_fns,
+        node_id_gen,
+    };
+    rewriter.visit_module(module);
+}
+
+struct MachineSpawnCallRewriter<'a> {
+    spawn_fns: &'a HashMap<String, String>,
+    node_id_gen: &'a mut NodeIdGen,
+}
+
+impl VisitorMut for MachineSpawnCallRewriter<'_> {
+    fn visit_expr(&mut self, expr: &mut Expr) {
+        visit_mut::walk_expr(self, expr);
+
+        if let ExprKind::EnumVariant {
+            enum_name,
+            variant,
+            payload,
+            ..
+        } = &mut expr.kind
+            && variant == "spawn"
+            && let Some(spawn_fn_name) = self.spawn_fns.get(enum_name)
+        {
+            // Parsed `Type::spawn(...)` arrives as enum-variant syntax, just
+            // like the existing constructor sugar. Lower it to a plain call so
+            // later stages stay unaware of the source spelling.
+            let args = std::mem::take(payload)
+                .into_iter()
+                .map(|arg| crate::core::ast::CallArg {
+                    mode: crate::core::ast::CallArgMode::Default,
+                    expr: arg,
+                    init: crate::core::ast::InitInfo::default(),
+                    span: expr.span,
+                })
+                .collect();
+            expr.kind = ExprKind::Call {
+                callee: Box::new(Expr {
+                    id: self.node_id_gen.new_id(),
+                    kind: ExprKind::Var {
+                        ident: spawn_fn_name.clone(),
+                    },
+                    span: expr.span,
+                }),
+                args,
+            };
+        }
     }
 }
 
