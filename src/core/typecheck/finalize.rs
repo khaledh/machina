@@ -248,6 +248,8 @@ fn build_outputs(engine: &TypecheckEngine) -> FinalizeOutput {
     // struct-field obligations and rewritten by normalize when a call signature
     // entry exists for the field node id. Materialize those entries here.
     record_property_access_call_sigs(engine, &mut builder);
+    record_linear_machine_create_call_sigs(engine, &mut builder);
+    record_linear_session_call_sigs(engine, &mut builder);
 
     let (mut type_map, call_sigs, generic_insts) = builder.finish();
     nominal_keys.hydrate(&mut type_map);
@@ -354,6 +356,128 @@ fn record_property_access_call_sigs(engine: &TypecheckEngine, builder: &mut Type
             _ => {}
         }
     }
+}
+
+fn record_linear_session_call_sigs(engine: &TypecheckEngine, builder: &mut TypeMapBuilder) {
+    for obligation in &engine.state().constrain.expr_obligations {
+        let ExprObligation::LinearSessionAction {
+            expr_id,
+            receiver,
+            type_name: _,
+            source_state,
+            action_name,
+            arg_terms,
+            result,
+            ..
+        } = obligation
+        else {
+            continue;
+        };
+        let receiver_ty = resolve_term(receiver, engine);
+        let internal_name =
+            crate::core::linear::direct_action_method_name(source_state, action_name);
+        let Some(helper_def_id) = lookup_named_function(engine, &internal_name) else {
+            continue;
+        };
+        let params = arg_terms
+            .iter()
+            .map(|term| CallParam {
+                mode: ParamMode::In,
+                ty: resolve_term(term, engine),
+            })
+            .collect::<Vec<_>>();
+        let expected_ret = resolve_term(result, engine);
+        builder.record_call_sig(
+            *expr_id,
+            CallSig {
+                def_id: Some(helper_def_id),
+                selected: Some(SelectedCallable::Local(helper_def_id)),
+                receiver: Some(CallParam {
+                    mode: ParamMode::Sink,
+                    ty: receiver_ty,
+                }),
+                params,
+            },
+        );
+        builder.record_node_type(*expr_id, expected_ret);
+    }
+}
+
+fn record_linear_machine_create_call_sigs(engine: &TypecheckEngine, builder: &mut TypeMapBuilder) {
+    for obligation in &engine.state().constrain.expr_obligations {
+        let ExprObligation::LinearMachineCreate {
+            expr_id,
+            receiver,
+            type_name,
+            role_name,
+            result,
+            ..
+        } = obligation
+        else {
+            continue;
+        };
+        let receiver_ty = resolve_term(receiver, engine);
+        let Some((machine_name, host_info)) = machine_host_for_receiver(engine, &receiver_ty)
+        else {
+            continue;
+        };
+        if host_info.hosted_type_name != *type_name {
+            continue;
+        }
+        let helper_name =
+            crate::core::linear::machine_create_fn_name(machine_name, type_name, role_name);
+        let Some(helper_def_id) = lookup_named_function(engine, &helper_name) else {
+            continue;
+        };
+        let expected_ret = resolve_term(result, engine);
+        builder.record_call_sig(
+            *expr_id,
+            CallSig {
+                def_id: Some(helper_def_id),
+                selected: Some(SelectedCallable::Local(helper_def_id)),
+                receiver: Some(CallParam {
+                    mode: ParamMode::In,
+                    ty: receiver_ty,
+                }),
+                params: Vec::new(),
+            },
+        );
+        builder.record_node_type(*expr_id, expected_ret);
+    }
+}
+
+fn machine_host_for_receiver<'a>(
+    engine: &'a TypecheckEngine,
+    receiver_ty: &Type,
+) -> Option<(&'a str, &'a crate::core::linear::LinearHostInfo)> {
+    let Type::Struct { name, .. } = receiver_ty.peel_heap() else {
+        return None;
+    };
+    engine
+        .context()
+        .linear_index
+        .machine_hosts
+        .iter()
+        .find_map(|(machine_name, host_info)| {
+            (host_info.handle_type_name == *name).then_some((machine_name.as_str(), host_info))
+        })
+}
+
+fn lookup_named_function(engine: &TypecheckEngine, name: &str) -> Option<DefId> {
+    engine
+        .context()
+        .def_table
+        .defs()
+        .iter()
+        .find(|def| {
+            def.name == name
+                && matches!(
+                    def.kind,
+                    crate::core::resolve::DefKind::FuncDef { .. }
+                        | crate::core::resolve::DefKind::FuncDecl { .. }
+                )
+        })
+        .map(|def| def.id)
 }
 
 fn selected_callable_for_finalize(

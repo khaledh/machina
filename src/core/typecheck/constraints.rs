@@ -196,6 +196,17 @@ pub(crate) enum ExprObligation {
         result: Type,
         span: Span,
     },
+    LinearSessionAction {
+        expr_id: NodeId,
+        receiver: Type,
+        type_name: String,
+        source_state: String,
+        action_name: String,
+        arg_terms: Vec<Type>,
+        expected_arg_tys: Vec<Type>,
+        result: Type,
+        span: Span,
+    },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

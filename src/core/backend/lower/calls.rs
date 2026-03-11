@@ -325,6 +325,43 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
         Some(params.into_iter().map(|param| param.ty).collect())
     }
 
+    /// Returns the callee's declared semantic return type before any expression-level
+    /// widening (for example `T` flowing into `T | SessionError`).
+    fn call_result_type(
+        &self,
+        call_plan: &CallPlan,
+        callee_expr: Option<&Expr>,
+        receiver_value: Option<&CallInputValue>,
+    ) -> Option<Type> {
+        let fn_ty = match &call_plan.target {
+            CallTarget::Direct(def_id) => {
+                let def = self.def(*def_id);
+                self.type_map.lookup_def_type(def)?
+            }
+            CallTarget::Indirect => {
+                if let Some(callee_expr) = callee_expr {
+                    let callee_ty = self.type_map.type_of(callee_expr.id);
+                    self.type_map.type_table().get(callee_ty).clone()
+                } else if let Some(receiver_value) = receiver_value {
+                    receiver_value.ty.clone()
+                } else {
+                    return None;
+                }
+            }
+            CallTarget::Intrinsic(IntrinsicCall::TypeOf) => return Some(Type::String),
+            CallTarget::Intrinsic(_) | CallTarget::Runtime(_) => {
+                let callee_expr = callee_expr?;
+                let callee_ty = self.type_map.type_of(callee_expr.id);
+                self.type_map.type_table().get(callee_ty).clone()
+            }
+        };
+
+        let Type::Fn { ret_ty, .. } = fn_ty else {
+            return None;
+        };
+        Some(*ret_ty)
+    }
+
     fn emit_call_conversion_checks(
         &mut self,
         call_plan: &CallPlan,
@@ -431,10 +468,18 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
         // Apply the call plan to reorder/transform arguments.
         let call_args =
             self.lower_call_args_from_plan(expr.id, expr.span, &call_plan, None, &mut arg_values)?;
-        let ty = self.type_lowerer.lower_type_id(expr_ty);
-        let result = self.builder.call(callee, call_args, ty);
+        let call_result_ty = self
+            .call_result_type(&call_plan, Some(callee_expr), None)
+            .unwrap_or_else(|| self.type_map.type_table().get(expr_ty).clone());
+        let ir_call_result_ty = self.type_lowerer.lower_type(&call_result_ty);
+        let result = self.builder.call(callee, call_args, ir_call_result_ty);
         self.apply_call_drop_effects(&call_plan, args, None, &arg_values)?;
-        Ok(Some(result))
+        let expr_sem_ty = self.type_map.type_table().get(expr_ty).clone();
+        Ok(Some(self.coerce_value(
+            result,
+            &call_result_ty,
+            &expr_sem_ty,
+        )))
     }
 
     /// Lowers a method call expression, returning `None` if a subexpression returns.
@@ -517,10 +562,18 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
             Some(&mut receiver_value),
             &mut arg_values,
         )?;
-        let ty = self.type_lowerer.lower_type_id(expr_ty);
-        let result = self.builder.call(callee, call_args, ty);
+        let call_result_ty = self
+            .call_result_type(&call_plan, None, Some(&receiver_value))
+            .unwrap_or_else(|| self.type_map.type_table().get(expr_ty).clone());
+        let ir_call_result_ty = self.type_lowerer.lower_type(&call_result_ty);
+        let result = self.builder.call(callee, call_args, ir_call_result_ty);
         self.apply_call_drop_effects(&call_plan, args, Some(&receiver_value), &arg_values)?;
-        Ok(Some(result))
+        let expr_sem_ty = self.type_map.type_table().get(expr_ty).clone();
+        Ok(Some(self.coerce_value(
+            result,
+            &call_result_ty,
+            &expr_sem_ty,
+        )))
     }
 
     fn lower_method_intrinsic(

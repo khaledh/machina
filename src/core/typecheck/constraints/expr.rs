@@ -394,6 +394,62 @@ impl<'a> ConstraintCollector<'a> {
                     .iter()
                     .map(|arg| self.collect_expr(&arg.expr, None))
                     .collect::<Vec<_>>();
+                if let Some(hosted_action) = self.ctx.linear_index.hosted_action_exprs.get(&expr.id)
+                {
+                    let expected_arg_tys = self
+                        .ctx
+                        .linear_index
+                        .types
+                        .get(&hosted_action.type_name)
+                        .and_then(|type_info| {
+                            type_info.actions.get(&(
+                                hosted_action.source_state.clone(),
+                                hosted_action.action_name.clone(),
+                            ))
+                        })
+                        .map(|action| {
+                            action
+                                .params
+                                .iter()
+                                .map(|ty_expr| {
+                                    // Linear action parameter types have already been validated
+                                    // against the declaration surface, so failing to resolve them
+                                    // here indicates the linear metadata and the typechecker fell
+                                    // out of sync.
+                                    self.resolve_type_in_scope(ty_expr).unwrap_or_else(|err| {
+                                        panic!(
+                                            "compiler bug: failed to resolve hosted linear action param type for {}::{} from {}: {err:?}",
+                                            hosted_action.source_state,
+                                            hosted_action.action_name,
+                                            hosted_action.type_name,
+                                        )
+                                    })
+                                })
+                                .collect::<Vec<_>>()
+                        })
+                        .unwrap_or_else(|| {
+                            panic!(
+                                "compiler bug: missing hosted linear action metadata for {}::{} on {}",
+                                hosted_action.source_state,
+                                hosted_action.action_name,
+                                hosted_action.type_name,
+                            )
+                        });
+                    self.out
+                        .expr_obligations
+                        .push(ExprObligation::LinearSessionAction {
+                            expr_id: expr.id,
+                            receiver: receiver_ty,
+                            type_name: hosted_action.type_name.clone(),
+                            source_state: hosted_action.source_state.clone(),
+                            action_name: hosted_action.action_name.clone(),
+                            arg_terms,
+                            expected_arg_tys,
+                            result: expr_ty.clone(),
+                            span: expr.span,
+                        });
+                    return expr_ty;
+                }
                 if method_name == "create"
                     && args.len() == 1
                     && let ExprKind::RoleProjection {

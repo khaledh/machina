@@ -11,7 +11,7 @@ use crate::core::ast::visit_mut::{self, VisitorMut};
 use crate::core::ast::{
     ArrayLitInit, BlockItem, EnumDefVariant, Expr, ExprKind, FuncDef, LinearRoleDecl,
     LinearStateVariant, LinearTransitionDecl, MachineDef, MethodBlock, MethodDef, MethodItem,
-    Module, NodeIdGen, Param, ParamMode, StmtExpr, StmtExprKind, TopLevelItem, TypeDef,
+    Module, NodeId, NodeIdGen, Param, ParamMode, StmtExpr, StmtExprKind, TopLevelItem, TypeDef,
     TypeDefKind, TypeExpr, TypeExprKind,
 };
 use crate::core::diag::Span;
@@ -42,6 +42,7 @@ pub fn validate_module(module: &Module) -> Vec<ResolveError> {
 pub struct LinearIndex {
     pub types: HashMap<String, LinearTypeInfo>,
     pub machine_hosts: HashMap<String, LinearHostInfo>,
+    pub hosted_action_exprs: HashMap<NodeId, HostedActionExprInfo>,
 }
 
 #[derive(Clone, Debug)]
@@ -49,6 +50,7 @@ pub struct LinearTypeInfo {
     pub state_names: Vec<String>,
     pub initial_state: Option<String>,
     pub roles: HashMap<String, LinearRoleInfo>,
+    pub actions: HashMap<(String, String), LinearActionInfo>,
 }
 
 #[derive(Clone, Debug)]
@@ -61,6 +63,19 @@ pub struct LinearHostInfo {
     pub hosted_type_name: String,
     pub key_field: String,
     pub handle_type_name: String,
+}
+
+#[derive(Clone, Debug)]
+pub struct LinearActionInfo {
+    pub target_state: String,
+    pub params: Vec<TypeExpr>,
+}
+
+#[derive(Clone, Debug)]
+pub struct HostedActionExprInfo {
+    pub type_name: String,
+    pub source_state: String,
+    pub action_name: String,
 }
 
 pub fn build_linear_index(module: &Module) -> LinearIndex {
@@ -89,6 +104,20 @@ pub fn build_linear_index(module: &Module) -> LinearIndex {
             .map(|state| state.name.clone())
             .collect::<Vec<_>>();
 
+        let actions = linear
+            .actions
+            .iter()
+            .map(|action| {
+                (
+                    (action.source_state.clone(), action.name.clone()),
+                    LinearActionInfo {
+                        target_state: action.target_state.clone(),
+                        params: action.params.iter().map(|param| param.ty.clone()).collect(),
+                    },
+                )
+            })
+            .collect();
+
         let initial_state = linear.states.first().map(|state| state.name.clone());
 
         types.insert(
@@ -97,6 +126,7 @@ pub fn build_linear_index(module: &Module) -> LinearIndex {
                 state_names,
                 initial_state,
                 roles,
+                actions,
             },
         );
     }
@@ -116,15 +146,21 @@ pub fn build_linear_index(module: &Module) -> LinearIndex {
     LinearIndex {
         types,
         machine_hosts,
+        hosted_action_exprs: HashMap::new(),
     }
 }
 
-pub fn desugar_module(module: &mut Module, node_id_gen: &mut NodeIdGen) -> Vec<ResolveError> {
+pub fn desugar_module(
+    module: &mut Module,
+    node_id_gen: &mut NodeIdGen,
+    linear_index: &mut LinearIndex,
+) -> Vec<ResolveError> {
     let infos = collect_direct_linear_infos(module);
     let machine_infos = collect_machine_spawn_infos(module);
     if !machine_infos.is_empty() {
         ensure_hosted_support_types(module, node_id_gen);
         append_machine_spawn_support(module, &machine_infos, node_id_gen);
+        rewrite_machine_constructor_self_types(module, &machine_infos);
     }
     if infos.is_empty() {
         if !machine_infos.is_empty() {
@@ -134,8 +170,8 @@ pub fn desugar_module(module: &mut Module, node_id_gen: &mut NodeIdGen) -> Vec<R
     }
 
     rewrite_linear_type_defs(module, &infos);
-    rewrite_linear_method_blocks(module, &infos, node_id_gen);
-    let errors = rewrite_linear_exprs(module, &infos, node_id_gen);
+    rewrite_linear_method_blocks(module, &infos, linear_index, node_id_gen);
+    let errors = rewrite_linear_exprs(module, &infos, linear_index, node_id_gen);
     if !machine_infos.is_empty() {
         rewrite_machine_spawn_calls(module, &machine_infos, node_id_gen);
     }
@@ -154,6 +190,9 @@ struct DirectLinearInfo {
 #[derive(Clone, Debug)]
 struct MachineSpawnInfo {
     machine_name: String,
+    hosted_type_name: String,
+    initial_state: Option<String>,
+    role_names: Vec<String>,
     handle_type_name: String,
     spawn_fn_name: String,
 }
@@ -174,6 +213,7 @@ struct LinearValueState {
 struct LinearBindingState {
     value_state: LinearValueState,
     consumed: bool,
+    hosted: bool,
 }
 
 fn machine_handle_type_name(machine_name: &str) -> String {
@@ -184,14 +224,32 @@ fn machine_spawn_fn_name(machine_name: &str) -> String {
     format!("__mc_machine_spawn_{machine_name}")
 }
 
+pub(crate) fn machine_create_fn_name(
+    machine_name: &str,
+    type_name: &str,
+    role_name: &str,
+) -> String {
+    format!("__mc_machine_create_{machine_name}_{type_name}_{role_name}")
+}
+
 fn collect_machine_spawn_infos(module: &Module) -> Vec<MachineSpawnInfo> {
+    let type_defs = type_defs_by_name(module);
     module
         .machine_defs()
         .into_iter()
-        .map(|machine_def| MachineSpawnInfo {
-            machine_name: machine_def.name.clone(),
-            handle_type_name: machine_handle_type_name(&machine_def.name),
-            spawn_fn_name: machine_spawn_fn_name(&machine_def.name),
+        .filter_map(|machine_def| {
+            let type_def = type_defs.get(&machine_def.host.type_name)?;
+            let TypeDefKind::Linear { linear } = &type_def.kind else {
+                return None;
+            };
+            Some(MachineSpawnInfo {
+                machine_name: machine_def.name.clone(),
+                hosted_type_name: machine_def.host.type_name.clone(),
+                initial_state: linear.states.first().map(|state| state.name.clone()),
+                role_names: linear.roles.iter().map(|role| role.name.clone()).collect(),
+                handle_type_name: machine_handle_type_name(&machine_def.name),
+                spawn_fn_name: machine_spawn_fn_name(&machine_def.name),
+            })
         })
         .collect()
 }
@@ -841,6 +899,7 @@ fn rewrite_linear_type_defs(module: &mut Module, infos: &HashMap<String, DirectL
 fn rewrite_linear_method_blocks(
     module: &mut Module,
     infos: &HashMap<String, DirectLinearInfo>,
+    linear_index: &mut LinearIndex,
     node_id_gen: &mut NodeIdGen,
 ) {
     for item in &mut module.top_level_items {
@@ -866,6 +925,7 @@ fn rewrite_linear_method_blocks(
                 rewrite_expr_with_linear_env(
                     &mut method.body,
                     infos,
+                    linear_index,
                     Some(&info.type_name),
                     Some(&source_state),
                     node_id_gen,
@@ -874,6 +934,7 @@ fn rewrite_linear_method_blocks(
                 rewrite_expr_with_linear_env(
                     &mut method.body,
                     infos,
+                    linear_index,
                     Some(&info.type_name),
                     None,
                     node_id_gen,
@@ -942,6 +1003,7 @@ fn rewrite_return_type_to_linear_enum(ret_ty_expr: &mut TypeExpr, info: &DirectL
 fn rewrite_linear_exprs(
     module: &mut Module,
     infos: &HashMap<String, DirectLinearInfo>,
+    linear_index: &mut LinearIndex,
     node_id_gen: &mut NodeIdGen,
 ) -> Vec<ResolveError> {
     let mut errors = Vec::new();
@@ -951,6 +1013,7 @@ fn rewrite_linear_exprs(
                 errors.extend(rewrite_expr_with_linear_env(
                     &mut func.body,
                     infos,
+                    linear_index,
                     None,
                     None,
                     node_id_gen,
@@ -965,6 +1028,7 @@ fn rewrite_linear_exprs(
                         errors.extend(rewrite_expr_with_linear_env(
                             &mut method.body,
                             infos,
+                            linear_index,
                             None,
                             None,
                             node_id_gen,
@@ -981,6 +1045,7 @@ fn rewrite_linear_exprs(
 fn rewrite_expr_with_linear_env(
     expr: &mut Expr,
     infos: &HashMap<String, DirectLinearInfo>,
+    linear_index: &mut LinearIndex,
     current_linear_type: Option<&str>,
     self_state: Option<&str>,
     node_id_gen: &mut NodeIdGen,
@@ -996,12 +1061,14 @@ fn rewrite_expr_with_linear_env(
                     state_name: state_name.to_string(),
                 },
                 consumed: false,
+                hosted: false,
             },
         );
     }
     let _ = rewrite_expr_in_scope(
         expr,
         infos,
+        linear_index,
         current_linear_type,
         &mut env,
         &mut errors,
@@ -1013,11 +1080,12 @@ fn rewrite_expr_with_linear_env(
 fn rewrite_expr_in_scope(
     expr: &mut Expr,
     infos: &HashMap<String, DirectLinearInfo>,
+    linear_index: &mut LinearIndex,
     current_linear_type: Option<&str>,
     env: &mut HashMap<String, LinearBindingState>,
     errors: &mut Vec<ResolveError>,
     node_id_gen: &mut NodeIdGen,
-) -> Option<LinearValueState> {
+) -> Option<LinearBindingState> {
     match &mut expr.kind {
         ExprKind::Block { items, tail } => {
             let mut scope_env = env.clone();
@@ -1026,6 +1094,7 @@ fn rewrite_expr_in_scope(
                     BlockItem::Stmt(stmt) => rewrite_stmt_in_scope(
                         stmt,
                         infos,
+                        linear_index,
                         current_linear_type,
                         &mut scope_env,
                         errors,
@@ -1035,6 +1104,7 @@ fn rewrite_expr_in_scope(
                         let _ = rewrite_expr_in_scope(
                             expr,
                             infos,
+                            linear_index,
                             current_linear_type,
                             &mut scope_env,
                             errors,
@@ -1047,6 +1117,7 @@ fn rewrite_expr_in_scope(
                 rewrite_expr_in_scope(
                     tail,
                     infos,
+                    linear_index,
                     current_linear_type,
                     &mut scope_env,
                     errors,
@@ -1063,12 +1134,20 @@ fn rewrite_expr_in_scope(
                 ExprKind::Var { ident } => Some(ident.clone()),
                 _ => None,
             };
-            let callee_state =
-                rewrite_expr_in_scope(callee, infos, current_linear_type, env, errors, node_id_gen);
+            let callee_state = rewrite_expr_in_scope(
+                callee,
+                infos,
+                linear_index,
+                current_linear_type,
+                env,
+                errors,
+                node_id_gen,
+            );
             for arg in args.iter_mut() {
                 let _ = rewrite_expr_in_scope(
                     &mut arg.expr,
                     infos,
+                    linear_index,
                     current_linear_type,
                     env,
                     errors,
@@ -1085,21 +1164,26 @@ fn rewrite_expr_in_scope(
                 && info.role_names.contains(role_name)
                 && let Some(initial_state) = info.initial_state.clone()
             {
-                return Some(LinearValueState {
-                    type_name: type_name.clone(),
-                    state_name: initial_state,
+                return Some(LinearBindingState {
+                    value_state: LinearValueState {
+                        type_name: type_name.clone(),
+                        state_name: initial_state,
+                    },
+                    consumed: false,
+                    hosted: true,
                 });
             }
             let Some(callee_state) = callee_state else {
                 return None;
             };
-            let Some(info) = infos.get(&callee_state.type_name) else {
+            let Some(info) = infos.get(&callee_state.value_state.type_name) else {
                 return None;
             };
-            let Some(action) = info
-                .action_by_source_and_name
-                .get(&(callee_state.state_name.clone(), method_name.clone()))
-            else {
+            let action_name = method_name.clone();
+            let Some(action) = info.action_by_source_and_name.get(&(
+                callee_state.value_state.state_name.clone(),
+                action_name.clone(),
+            )) else {
                 return None;
             };
             *method_name = action.internal_name.clone();
@@ -1108,9 +1192,28 @@ fn rewrite_expr_in_scope(
             {
                 binding.consumed = true;
             }
-            Some(LinearValueState {
-                type_name: info.type_name.clone(),
-                state_name: action.target_state.clone(),
+            if callee_state.hosted {
+                // Hosted action calls still rewrite to the same internal method
+                // names as direct mode, but typecheck needs to treat the result
+                // as fallible (`... | SessionError`). Record the original action
+                // identity here so constraint collection can emit a dedicated
+                // hosted-session obligation later.
+                linear_index.hosted_action_exprs.insert(
+                    expr.id,
+                    HostedActionExprInfo {
+                        type_name: info.type_name.clone(),
+                        source_state: callee_state.value_state.state_name.clone(),
+                        action_name,
+                    },
+                );
+            }
+            Some(LinearBindingState {
+                value_state: LinearValueState {
+                    type_name: info.type_name.clone(),
+                    state_name: action.target_state.clone(),
+                },
+                consumed: false,
+                hosted: callee_state.hosted,
             })
         }
         ExprKind::StructLit { name, fields, .. } => {
@@ -1118,6 +1221,7 @@ fn rewrite_expr_in_scope(
                 let _ = rewrite_expr_in_scope(
                     &mut field.value,
                     infos,
+                    linear_index,
                     current_linear_type,
                     env,
                     errors,
@@ -1135,9 +1239,13 @@ fn rewrite_expr_in_scope(
                     variant: state_name.clone(),
                     payload: Vec::new(),
                 };
-                return Some(LinearValueState {
-                    type_name,
-                    state_name,
+                return Some(LinearBindingState {
+                    value_state: LinearValueState {
+                        type_name,
+                        state_name,
+                    },
+                    consumed: false,
+                    hosted: false,
                 });
             }
 
@@ -1155,20 +1263,32 @@ fn rewrite_expr_in_scope(
                     variant: state_name.clone(),
                     payload: Vec::new(),
                 };
-                return Some(LinearValueState {
-                    type_name: type_name.to_string(),
-                    state_name,
+                return Some(LinearBindingState {
+                    value_state: LinearValueState {
+                        type_name: type_name.to_string(),
+                        state_name,
+                    },
+                    consumed: false,
+                    hosted: false,
                 });
             }
             None
         }
         ExprKind::Call { callee, args } => {
-            let _ =
-                rewrite_expr_in_scope(callee, infos, current_linear_type, env, errors, node_id_gen);
+            let _ = rewrite_expr_in_scope(
+                callee,
+                infos,
+                linear_index,
+                current_linear_type,
+                env,
+                errors,
+                node_id_gen,
+            );
             for arg in args.iter_mut() {
                 let _ = rewrite_expr_in_scope(
                     &mut arg.expr,
                     infos,
+                    linear_index,
                     current_linear_type,
                     env,
                     errors,
@@ -1197,9 +1317,13 @@ fn rewrite_expr_in_scope(
                 variant: state_name.clone(),
                 payload,
             };
-            Some(LinearValueState {
-                type_name: type_name.to_string(),
-                state_name,
+            Some(LinearBindingState {
+                value_state: LinearValueState {
+                    type_name: type_name.to_string(),
+                    state_name,
+                },
+                consumed: false,
+                hosted: false,
             })
         }
         ExprKind::EnumVariant {
@@ -1212,6 +1336,7 @@ fn rewrite_expr_in_scope(
                 let _ = rewrite_expr_in_scope(
                     value,
                     infos,
+                    linear_index,
                     current_linear_type,
                     env,
                     errors,
@@ -1219,9 +1344,13 @@ fn rewrite_expr_in_scope(
                 );
             }
             if infos.contains_key(enum_name) {
-                return Some(LinearValueState {
-                    type_name: enum_name.clone(),
-                    state_name: variant.clone(),
+                return Some(LinearBindingState {
+                    value_state: LinearValueState {
+                        type_name: enum_name.clone(),
+                        state_name: variant.clone(),
+                    },
+                    consumed: false,
+                    hosted: false,
                 });
             }
             None
@@ -1233,6 +1362,7 @@ fn rewrite_expr_in_scope(
             let result_state = rewrite_expr_in_scope(
                 fallible_expr,
                 infos,
+                linear_index,
                 current_linear_type,
                 env,
                 errors,
@@ -1242,6 +1372,7 @@ fn rewrite_expr_in_scope(
                 let _ = rewrite_expr_in_scope(
                     on_error,
                     infos,
+                    linear_index,
                     current_linear_type,
                     env,
                     errors,
@@ -1255,6 +1386,7 @@ fn rewrite_expr_in_scope(
             let _ = rewrite_expr_in_scope(
                 scrutinee,
                 infos,
+                linear_index,
                 current_linear_type,
                 env,
                 errors,
@@ -1265,6 +1397,7 @@ fn rewrite_expr_in_scope(
                 let _ = rewrite_expr_in_scope(
                     &mut arm.body,
                     infos,
+                    linear_index,
                     current_linear_type,
                     &mut arm_env,
                     errors,
@@ -1278,13 +1411,21 @@ fn rewrite_expr_in_scope(
             then_body,
             else_body,
         } => {
-            let _ =
-                rewrite_expr_in_scope(cond, infos, current_linear_type, env, errors, node_id_gen);
+            let _ = rewrite_expr_in_scope(
+                cond,
+                infos,
+                linear_index,
+                current_linear_type,
+                env,
+                errors,
+                node_id_gen,
+            );
             let mut then_env = env.clone();
             let mut else_env = env.clone();
             let _ = rewrite_expr_in_scope(
                 then_body,
                 infos,
+                linear_index,
                 current_linear_type,
                 &mut then_env,
                 errors,
@@ -1293,6 +1434,7 @@ fn rewrite_expr_in_scope(
             let _ = rewrite_expr_in_scope(
                 else_body,
                 infos,
+                linear_index,
                 current_linear_type,
                 &mut else_env,
                 errors,
@@ -1305,6 +1447,7 @@ fn rewrite_expr_in_scope(
                 let _ = rewrite_expr_in_scope(
                     value,
                     infos,
+                    linear_index,
                     current_linear_type,
                     env,
                     errors,
@@ -1320,6 +1463,7 @@ fn rewrite_expr_in_scope(
                         let _ = rewrite_expr_in_scope(
                             value,
                             infos,
+                            linear_index,
                             current_linear_type,
                             env,
                             errors,
@@ -1331,6 +1475,7 @@ fn rewrite_expr_in_scope(
                     let _ = rewrite_expr_in_scope(
                         value,
                         infos,
+                        linear_index,
                         current_linear_type,
                         env,
                         errors,
@@ -1345,6 +1490,7 @@ fn rewrite_expr_in_scope(
                 let _ = rewrite_expr_in_scope(
                     elem,
                     infos,
+                    linear_index,
                     current_linear_type,
                     env,
                     errors,
@@ -1358,6 +1504,7 @@ fn rewrite_expr_in_scope(
                 let _ = rewrite_expr_in_scope(
                     &mut entry.key,
                     infos,
+                    linear_index,
                     current_linear_type,
                     env,
                     errors,
@@ -1366,6 +1513,7 @@ fn rewrite_expr_in_scope(
                 let _ = rewrite_expr_in_scope(
                     &mut entry.value,
                     infos,
+                    linear_index,
                     current_linear_type,
                     env,
                     errors,
@@ -1382,10 +1530,18 @@ fn rewrite_expr_in_scope(
             if binding.consumed {
                 errors.push(REK::LinearUseAfterConsume(source_ident).at(expr.span));
             }
-            Some(binding.value_state.clone())
+            Some(binding.clone())
         }
         _ => {
-            walk_child_exprs(expr, infos, current_linear_type, env, errors, node_id_gen);
+            walk_child_exprs(
+                expr,
+                infos,
+                linear_index,
+                current_linear_type,
+                env,
+                errors,
+                node_id_gen,
+            );
             None
         }
     }
@@ -1394,6 +1550,7 @@ fn rewrite_expr_in_scope(
 fn rewrite_stmt_in_scope(
     stmt: &mut StmtExpr,
     infos: &HashMap<String, DirectLinearInfo>,
+    linear_index: &mut LinearIndex,
     current_linear_type: Option<&str>,
     env: &mut HashMap<String, LinearBindingState>,
     errors: &mut Vec<ResolveError>,
@@ -1402,18 +1559,19 @@ fn rewrite_stmt_in_scope(
     match &mut stmt.kind {
         StmtExprKind::LetBind { pattern, value, .. }
         | StmtExprKind::VarBind { pattern, value, .. } => {
-            let result_state =
-                rewrite_expr_in_scope(value, infos, current_linear_type, env, errors, node_id_gen);
+            let result_state = rewrite_expr_in_scope(
+                value,
+                infos,
+                linear_index,
+                current_linear_type,
+                env,
+                errors,
+                node_id_gen,
+            );
             if let Some(ident) = bind_pattern_name_mut(pattern) {
                 let source_ident = ident.clone();
                 if let Some(result_state) = result_state {
-                    env.insert(
-                        source_ident,
-                        LinearBindingState {
-                            value_state: result_state,
-                            consumed: false,
-                        },
-                    );
+                    env.insert(source_ident, result_state);
                 } else {
                     env.remove(&source_ident);
                 }
@@ -1428,21 +1586,37 @@ fn rewrite_stmt_in_scope(
             let _ = rewrite_expr_in_scope(
                 assignee,
                 infos,
+                linear_index,
                 current_linear_type,
                 env,
                 errors,
                 node_id_gen,
             );
-            let _ =
-                rewrite_expr_in_scope(value, infos, current_linear_type, env, errors, node_id_gen);
+            let _ = rewrite_expr_in_scope(
+                value,
+                infos,
+                linear_index,
+                current_linear_type,
+                env,
+                errors,
+                node_id_gen,
+            );
         }
         StmtExprKind::While { cond, body } => {
-            let _ =
-                rewrite_expr_in_scope(cond, infos, current_linear_type, env, errors, node_id_gen);
+            let _ = rewrite_expr_in_scope(
+                cond,
+                infos,
+                linear_index,
+                current_linear_type,
+                env,
+                errors,
+                node_id_gen,
+            );
             let mut body_env = env.clone();
             let _ = rewrite_expr_in_scope(
                 body,
                 infos,
+                linear_index,
                 current_linear_type,
                 &mut body_env,
                 errors,
@@ -1450,12 +1624,20 @@ fn rewrite_stmt_in_scope(
             );
         }
         StmtExprKind::For { iter, body, .. } => {
-            let _ =
-                rewrite_expr_in_scope(iter, infos, current_linear_type, env, errors, node_id_gen);
+            let _ = rewrite_expr_in_scope(
+                iter,
+                infos,
+                linear_index,
+                current_linear_type,
+                env,
+                errors,
+                node_id_gen,
+            );
             let mut body_env = env.clone();
             let _ = rewrite_expr_in_scope(
                 body,
                 infos,
+                linear_index,
                 current_linear_type,
                 &mut body_env,
                 errors,
@@ -1463,29 +1645,38 @@ fn rewrite_stmt_in_scope(
             );
         }
         StmtExprKind::Defer { value } => {
-            let _ =
-                rewrite_expr_in_scope(value, infos, current_linear_type, env, errors, node_id_gen);
+            let _ = rewrite_expr_in_scope(
+                value,
+                infos,
+                linear_index,
+                current_linear_type,
+                env,
+                errors,
+                node_id_gen,
+            );
         }
         StmtExprKind::Using {
             value,
             body,
             binding,
         } => {
-            let result_state =
-                rewrite_expr_in_scope(value, infos, current_linear_type, env, errors, node_id_gen);
+            let result_state = rewrite_expr_in_scope(
+                value,
+                infos,
+                linear_index,
+                current_linear_type,
+                env,
+                errors,
+                node_id_gen,
+            );
             let mut body_env = env.clone();
             if let Some(result_state) = result_state {
-                body_env.insert(
-                    binding.ident.clone(),
-                    LinearBindingState {
-                        value_state: result_state,
-                        consumed: false,
-                    },
-                );
+                body_env.insert(binding.ident.clone(), result_state);
             }
             let _ = rewrite_expr_in_scope(
                 body,
                 infos,
+                linear_index,
                 current_linear_type,
                 &mut body_env,
                 errors,
@@ -1497,6 +1688,7 @@ fn rewrite_stmt_in_scope(
                 let _ = rewrite_expr_in_scope(
                     value,
                     infos,
+                    linear_index,
                     current_linear_type,
                     env,
                     errors,
@@ -1514,6 +1706,7 @@ fn rewrite_stmt_in_scope(
 fn walk_child_exprs(
     expr: &mut Expr,
     infos: &HashMap<String, DirectLinearInfo>,
+    linear_index: &mut LinearIndex,
     current_linear_type: Option<&str>,
     env: &mut HashMap<String, LinearBindingState>,
     errors: &mut Vec<ResolveError>,
@@ -1521,10 +1714,24 @@ fn walk_child_exprs(
 ) {
     match &mut expr.kind {
         ExprKind::BinOp { left, right, .. } => {
-            let _ =
-                rewrite_expr_in_scope(left, infos, current_linear_type, env, errors, node_id_gen);
-            let _ =
-                rewrite_expr_in_scope(right, infos, current_linear_type, env, errors, node_id_gen);
+            let _ = rewrite_expr_in_scope(
+                left,
+                infos,
+                linear_index,
+                current_linear_type,
+                env,
+                errors,
+                node_id_gen,
+            );
+            let _ = rewrite_expr_in_scope(
+                right,
+                infos,
+                linear_index,
+                current_linear_type,
+                env,
+                errors,
+                node_id_gen,
+            );
         }
         ExprKind::UnaryOp { expr, .. }
         | ExprKind::HeapAlloc { expr }
@@ -1535,8 +1742,15 @@ fn walk_child_exprs(
         | ExprKind::Deref { expr }
         | ExprKind::Load { expr }
         | ExprKind::Len { expr } => {
-            let _ =
-                rewrite_expr_in_scope(expr, infos, current_linear_type, env, errors, node_id_gen);
+            let _ = rewrite_expr_in_scope(
+                expr,
+                infos,
+                linear_index,
+                current_linear_type,
+                env,
+                errors,
+                node_id_gen,
+            );
         }
         ExprKind::Try {
             fallible_expr,
@@ -1545,6 +1759,7 @@ fn walk_child_exprs(
             let _ = rewrite_expr_in_scope(
                 fallible_expr,
                 infos,
+                linear_index,
                 current_linear_type,
                 env,
                 errors,
@@ -1554,6 +1769,7 @@ fn walk_child_exprs(
                 let _ = rewrite_expr_in_scope(
                     on_error,
                     infos,
+                    linear_index,
                     current_linear_type,
                     env,
                     errors,
@@ -1562,12 +1778,20 @@ fn walk_child_exprs(
             }
         }
         ExprKind::StructUpdate { target, fields } => {
-            let _ =
-                rewrite_expr_in_scope(target, infos, current_linear_type, env, errors, node_id_gen);
+            let _ = rewrite_expr_in_scope(
+                target,
+                infos,
+                linear_index,
+                current_linear_type,
+                env,
+                errors,
+                node_id_gen,
+            );
             for field in fields {
                 let _ = rewrite_expr_in_scope(
                     &mut field.value,
                     infos,
+                    linear_index,
                     current_linear_type,
                     env,
                     errors,
@@ -1576,18 +1800,40 @@ fn walk_child_exprs(
             }
         }
         ExprKind::Range { start, end } => {
-            let _ =
-                rewrite_expr_in_scope(start, infos, current_linear_type, env, errors, node_id_gen);
-            let _ =
-                rewrite_expr_in_scope(end, infos, current_linear_type, env, errors, node_id_gen);
+            let _ = rewrite_expr_in_scope(
+                start,
+                infos,
+                linear_index,
+                current_linear_type,
+                env,
+                errors,
+                node_id_gen,
+            );
+            let _ = rewrite_expr_in_scope(
+                end,
+                infos,
+                linear_index,
+                current_linear_type,
+                env,
+                errors,
+                node_id_gen,
+            );
         }
         ExprKind::Slice { target, start, end } => {
-            let _ =
-                rewrite_expr_in_scope(target, infos, current_linear_type, env, errors, node_id_gen);
+            let _ = rewrite_expr_in_scope(
+                target,
+                infos,
+                linear_index,
+                current_linear_type,
+                env,
+                errors,
+                node_id_gen,
+            );
             if let Some(start) = start {
                 let _ = rewrite_expr_in_scope(
                     start,
                     infos,
+                    linear_index,
                     current_linear_type,
                     env,
                     errors,
@@ -1598,6 +1844,7 @@ fn walk_child_exprs(
                 let _ = rewrite_expr_in_scope(
                     end,
                     infos,
+                    linear_index,
                     current_linear_type,
                     env,
                     errors,
@@ -1606,16 +1853,31 @@ fn walk_child_exprs(
             }
         }
         ExprKind::TupleField { target, .. } | ExprKind::StructField { target, .. } => {
-            let _ =
-                rewrite_expr_in_scope(target, infos, current_linear_type, env, errors, node_id_gen);
+            let _ = rewrite_expr_in_scope(
+                target,
+                infos,
+                linear_index,
+                current_linear_type,
+                env,
+                errors,
+                node_id_gen,
+            );
         }
         ExprKind::ArrayIndex { target, indices } => {
-            let _ =
-                rewrite_expr_in_scope(target, infos, current_linear_type, env, errors, node_id_gen);
+            let _ = rewrite_expr_in_scope(
+                target,
+                infos,
+                linear_index,
+                current_linear_type,
+                env,
+                errors,
+                node_id_gen,
+            );
             for index in indices {
                 let _ = rewrite_expr_in_scope(
                     index,
                     infos,
+                    linear_index,
                     current_linear_type,
                     env,
                     errors,
@@ -1624,16 +1886,31 @@ fn walk_child_exprs(
             }
         }
         ExprKind::Reply { cap, value } => {
-            let _ =
-                rewrite_expr_in_scope(cap, infos, current_linear_type, env, errors, node_id_gen);
-            let _ =
-                rewrite_expr_in_scope(value, infos, current_linear_type, env, errors, node_id_gen);
+            let _ = rewrite_expr_in_scope(
+                cap,
+                infos,
+                linear_index,
+                current_linear_type,
+                env,
+                errors,
+                node_id_gen,
+            );
+            let _ = rewrite_expr_in_scope(
+                value,
+                infos,
+                linear_index,
+                current_linear_type,
+                env,
+                errors,
+                node_id_gen,
+            );
         }
         ExprKind::Closure { body, .. } => {
             let mut closure_env = HashMap::new();
             let _ = rewrite_expr_in_scope(
                 body,
                 infos,
+                linear_index,
                 current_linear_type,
                 &mut closure_env,
                 errors,
@@ -1641,10 +1918,24 @@ fn walk_child_exprs(
             );
         }
         ExprKind::MapGet { target, key } => {
-            let _ =
-                rewrite_expr_in_scope(target, infos, current_linear_type, env, errors, node_id_gen);
-            let _ =
-                rewrite_expr_in_scope(key, infos, current_linear_type, env, errors, node_id_gen);
+            let _ = rewrite_expr_in_scope(
+                target,
+                infos,
+                linear_index,
+                current_linear_type,
+                env,
+                errors,
+                node_id_gen,
+            );
+            let _ = rewrite_expr_in_scope(
+                key,
+                infos,
+                linear_index,
+                current_linear_type,
+                env,
+                errors,
+                node_id_gen,
+            );
         }
         ExprKind::StringFmt { segments } => {
             for segment in segments {
@@ -1652,6 +1943,7 @@ fn walk_child_exprs(
                     let _ = rewrite_expr_in_scope(
                         expr,
                         infos,
+                        linear_index,
                         current_linear_type,
                         env,
                         errors,
@@ -1763,6 +2055,21 @@ fn append_machine_spawn_support(
                 info,
                 node_id_gen,
             )));
+        for role_name in &info.role_names {
+            if info.initial_state.is_none() {
+                continue;
+            }
+            // Hosted `create(...)` stays a normal method call at the surface,
+            // but currently lowers through a generated helper so downstream
+            // stages can treat it like any other direct call.
+            module
+                .top_level_items
+                .push(TopLevelItem::FuncDef(build_machine_create_func(
+                    info,
+                    role_name,
+                    node_id_gen,
+                )));
+        }
     }
 }
 
@@ -1858,6 +2165,86 @@ fn build_machine_spawn_func(info: &MachineSpawnInfo, node_id_gen: &mut NodeIdGen
     }
 }
 
+fn build_machine_create_func(
+    info: &MachineSpawnInfo,
+    role_name: &str,
+    node_id_gen: &mut NodeIdGen,
+) -> FuncDef {
+    let span = Span::default();
+    let initial_state = info
+        .initial_state
+        .as_ref()
+        .expect("hosted linear types must have an initial state");
+    FuncDef {
+        id: node_id_gen.new_id(),
+        attrs: Vec::new(),
+        sig: crate::core::ast::FunctionSig {
+            name: machine_create_fn_name(&info.machine_name, &info.hosted_type_name, role_name),
+            type_params: Vec::new(),
+            params: vec![Param {
+                id: node_id_gen.new_id(),
+                ident: "self".to_string(),
+                mode: ParamMode::In,
+                typ: TypeExpr {
+                    id: node_id_gen.new_id(),
+                    kind: TypeExprKind::Named {
+                        ident: info.handle_type_name.clone(),
+                        type_args: Vec::new(),
+                    },
+                    span,
+                },
+                span,
+            }],
+            ret_ty_expr: TypeExpr {
+                id: node_id_gen.new_id(),
+                kind: TypeExprKind::Union {
+                    variants: vec![
+                        TypeExpr {
+                            id: node_id_gen.new_id(),
+                            kind: TypeExprKind::Named {
+                                ident: info.hosted_type_name.clone(),
+                                type_args: Vec::new(),
+                            },
+                            span,
+                        },
+                        TypeExpr {
+                            id: node_id_gen.new_id(),
+                            kind: TypeExprKind::Named {
+                                ident: "SessionError".to_string(),
+                                type_args: Vec::new(),
+                            },
+                            span,
+                        },
+                    ],
+                },
+                span,
+            },
+            span,
+        },
+        body: Expr {
+            id: node_id_gen.new_id(),
+            kind: ExprKind::Block {
+                items: Vec::new(),
+                // This helper is intentionally minimal for the current hosted
+                // slice: it manufactures the initial state directly so create
+                // can typecheck and lower before runtime-backed instances land.
+                tail: Some(Box::new(Expr {
+                    id: node_id_gen.new_id(),
+                    kind: ExprKind::EnumVariant {
+                        enum_name: info.hosted_type_name.clone(),
+                        variant: initial_state.clone(),
+                        type_args: Vec::new(),
+                        payload: Vec::new(),
+                    },
+                    span,
+                })),
+            },
+            span,
+        },
+        span,
+    }
+}
+
 fn rewrite_machine_spawn_calls(
     module: &mut Module,
     machine_infos: &[MachineSpawnInfo],
@@ -1870,6 +2257,18 @@ fn rewrite_machine_spawn_calls(
     let mut rewriter = MachineSpawnCallRewriter {
         spawn_fns: &spawn_fns,
         node_id_gen,
+    };
+    rewriter.visit_module(module);
+}
+
+fn rewrite_machine_constructor_self_types(module: &mut Module, machine_infos: &[MachineSpawnInfo]) {
+    let handle_types = machine_infos
+        .iter()
+        .map(|info| (info.machine_name.clone(), info.handle_type_name.clone()))
+        .collect::<HashMap<_, _>>();
+    let mut rewriter = MachineConstructorSelfRewriter {
+        handle_types: &handle_types,
+        current_handle_type: None,
     };
     rewriter.visit_module(module);
 }
@@ -1918,6 +2317,73 @@ impl VisitorMut for MachineSpawnCallRewriter<'_> {
     }
 }
 
+struct MachineConstructorSelfRewriter<'a> {
+    handle_types: &'a HashMap<String, String>,
+    current_handle_type: Option<String>,
+}
+
+impl VisitorMut for MachineConstructorSelfRewriter<'_> {
+    fn visit_machine_def(&mut self, machine_def: &mut MachineDef) {
+        let prev = self.current_handle_type.clone();
+        self.current_handle_type = self.handle_types.get(&machine_def.name).cloned();
+        visit_mut::walk_machine_def(self, machine_def);
+        self.current_handle_type = prev;
+    }
+
+    fn visit_func_def(&mut self, func_def: &mut FuncDef) {
+        if self.current_handle_type.is_none() {
+            visit_mut::walk_func_def(self, func_def);
+            return;
+        }
+        visit_mut::walk_func_def(self, func_def);
+    }
+
+    fn visit_type_expr(&mut self, type_expr: &mut TypeExpr) {
+        if let (Some(handle_type), TypeExprKind::Named { ident, type_args }) =
+            (&self.current_handle_type, &mut type_expr.kind)
+            && ident == "Self"
+        {
+            *ident = handle_type.clone();
+            type_args.clear();
+            return;
+        }
+        visit_mut::walk_type_expr(self, type_expr);
+    }
+
+    fn visit_expr(&mut self, expr: &mut Expr) {
+        if let (
+            Some(handle_type),
+            ExprKind::StructLit {
+                name,
+                type_args,
+                fields,
+                ..
+            },
+        ) = (&self.current_handle_type, &mut expr.kind)
+            && name == "Self"
+        {
+            *name = handle_type.clone();
+            type_args.clear();
+            if fields.is_empty() {
+                // Constructors are still placeholders in the hosted-mode
+                // rollout. Synthesize the minimal handle field so examples can
+                // return `Self {}` before real machine allocation lands.
+                fields.push(crate::core::ast::StructLitField {
+                    id: expr.id,
+                    name: "_id".to_string(),
+                    value: Expr {
+                        id: expr.id,
+                        kind: ExprKind::IntLit(0),
+                        span: expr.span,
+                    },
+                    span: expr.span,
+                });
+            }
+        }
+        visit_mut::walk_expr(self, expr);
+    }
+}
+
 fn parse_qualified_linear_state_name(
     name: &str,
     infos: &HashMap<String, DirectLinearInfo>,
@@ -1938,7 +2404,7 @@ fn bind_pattern_name_mut(pattern: &mut crate::core::ast::BindPattern) -> Option<
     }
 }
 
-fn direct_action_method_name(source_state: &str, action_name: &str) -> String {
+pub(crate) fn direct_action_method_name(source_state: &str, action_name: &str) -> String {
     format!("__linear__{source_state}__{action_name}")
 }
 

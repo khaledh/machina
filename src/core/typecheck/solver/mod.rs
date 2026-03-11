@@ -534,7 +534,8 @@ fn check_expr_obligations(
             | ExprObligation::StructFieldAssign { .. } => {
                 unreachable!("nominal obligations are handled by solve::nominal");
             }
-            ExprObligation::LinearMachineCreate { .. } => {
+            ExprObligation::LinearMachineCreate { .. }
+            | ExprObligation::LinearSessionAction { .. } => {
                 unreachable!("linear obligations are handled by solve::linear");
             }
         }
@@ -644,6 +645,7 @@ fn should_retry_post_call_expr_obligation(
             let result_ty = term_utils::resolve_term(result, unifier);
             term_utils::is_unresolved(&receiver_ty) || term_utils::is_unresolved(&result_ty)
         }
+        ExprObligation::LinearSessionAction { .. } => false,
         _ => false,
     }
 }
