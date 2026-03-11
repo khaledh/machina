@@ -1,0 +1,1297 @@
+//! Direct-mode lowering for `@linear type` declarations.
+//!
+//! Transforms linear types into forms the rest of the compiler already handles:
+//!
+//! - **Type defs**: `@linear type Door = { states { Closed, Open }, ... }`
+//!   becomes `type Door = Closed | Open` (an ordinary enum).
+//!
+//! - **Method blocks**: action methods like `fn open(self) -> Open { ... }` are
+//!   renamed to internal names (e.g., `__linear__Closed__open`), their receiver
+//!   becomes a sink parameter, and their return type is rewritten to the parent
+//!   enum type.
+//!
+//! - **Expressions**: action calls like `door.open()` are rewritten to use the
+//!   internal method name, with state tracking through an environment that maps
+//!   bindings to their current linear state. This enables:
+//!   - Correct method dispatch based on the caller's known state
+//!   - Use-after-consume detection (calling an action on an already-consumed binding)
+//!   - Hosted provenance tracking (bindings from `create(...)` propagate `hosted: true`
+//!     through action chains, so the type checker can make those calls fallible)
+
+use std::collections::{HashMap, HashSet};
+
+use crate::core::ast::{
+    ArrayLitInit, BlockItem, Expr, ExprKind, MethodItem, Module, NodeIdGen, ParamMode, StmtExpr,
+    StmtExprKind, TopLevelItem, TypeDefKind, TypeExpr, TypeExprKind,
+};
+use crate::core::resolve::{REK, ResolveError};
+
+use super::index::{HostedActionExprInfo, LinearIndex};
+
+// -- Internal data structures ----------------------------------------
+
+/// Per-linear-type info collected before rewriting. Contains the data needed
+/// to rewrite method names, track states, and dispatch actions.
+#[derive(Clone, Debug)]
+pub(super) struct DirectLinearInfo {
+    pub type_name: String,
+    pub state_names: HashSet<String>,
+    pub initial_state: Option<String>,
+    pub role_names: HashSet<String>,
+    /// Maps (source_state, action_name) → internal method name + target state.
+    pub action_by_source_and_name: HashMap<(String, String), DirectActionInfo>,
+}
+
+#[derive(Clone, Debug)]
+pub(super) struct DirectActionInfo {
+    pub internal_name: String,
+    pub target_state: String,
+}
+
+/// Tracks the linear type and current state of a value flowing through
+/// expression rewriting.
+#[derive(Clone, Debug)]
+struct LinearValueState {
+    type_name: String,
+    state_name: String,
+}
+
+/// Per-binding state in the rewriting environment. Tracks whether the binding
+/// has been consumed (for use-after-consume detection) and whether it originated
+/// from a hosted `create(...)` call (for hosted action fallibility).
+#[derive(Clone, Debug)]
+struct LinearBindingState {
+    value_state: LinearValueState,
+    consumed: bool,
+    /// `true` if this binding came from `service.create(Type as Role)?` or from
+    /// a subsequent hosted action call. The type checker uses this (via
+    /// `hosted_action_exprs` in the linear index) to emit fallible obligations.
+    hosted: bool,
+}
+
+// -- Collection ------------------------------------------------------
+
+/// Collect per-linear-type rewriting info from the module's type definitions.
+pub(super) fn collect_direct_linear_infos(module: &Module) -> HashMap<String, DirectLinearInfo> {
+    let mut infos = HashMap::new();
+    for type_def in module.type_defs() {
+        let TypeDefKind::Linear { linear } = &type_def.kind else {
+            continue;
+        };
+
+        let state_names = linear
+            .states
+            .iter()
+            .map(|state| state.name.clone())
+            .collect::<HashSet<_>>();
+        let initial_state = linear.states.first().map(|state| state.name.clone());
+        let role_names = linear
+            .roles
+            .iter()
+            .map(|role| role.name.clone())
+            .collect::<HashSet<_>>();
+        let mut action_by_source_and_name = HashMap::new();
+        for action in &linear.actions {
+            action_by_source_and_name.insert(
+                (action.source_state.clone(), action.name.clone()),
+                DirectActionInfo {
+                    internal_name: direct_action_method_name(&action.source_state, &action.name),
+                    target_state: action.target_state.clone(),
+                },
+            );
+        }
+
+        infos.insert(
+            type_def.name.clone(),
+            DirectLinearInfo {
+                type_name: type_def.name.clone(),
+                state_names,
+                initial_state,
+                role_names,
+                action_by_source_and_name,
+            },
+        );
+    }
+    infos
+}
+
+// -- Type def rewriting ----------------------------------------------
+
+/// Rewrite `@linear type` definitions into ordinary enum definitions.
+/// States become enum variants.
+pub(super) fn rewrite_linear_type_defs(
+    module: &mut Module,
+    infos: &HashMap<String, DirectLinearInfo>,
+) {
+    for type_def in &mut module.top_level_items {
+        let TopLevelItem::TypeDef(type_def) = type_def else {
+            continue;
+        };
+        let Some(_info) = infos.get(&type_def.name) else {
+            continue;
+        };
+        let TypeDefKind::Linear { linear } = &type_def.kind else {
+            continue;
+        };
+        type_def.kind = TypeDefKind::Enum {
+            variants: linear
+                .states
+                .iter()
+                .map(|state| crate::core::ast::EnumDefVariant {
+                    id: state.id,
+                    name: state.name.clone(),
+                    payload: state.payload.clone(),
+                    span: state.span,
+                })
+                .collect(),
+        };
+    }
+}
+
+// -- Method block rewriting ------------------------------------------
+
+/// Rewrite method blocks for linear types: rename action methods to their
+/// internal names, change receiver to sink mode, and rewrite bodies.
+pub(super) fn rewrite_linear_method_blocks(
+    module: &mut Module,
+    infos: &HashMap<String, DirectLinearInfo>,
+    linear_index: &mut LinearIndex,
+    node_id_gen: &mut NodeIdGen,
+) {
+    for item in &mut module.top_level_items {
+        let TopLevelItem::MethodBlock(method_block) = item else {
+            continue;
+        };
+        let Some(info) = infos.get(&method_block.type_name) else {
+            continue;
+        };
+
+        for method_item in &mut method_block.method_items {
+            let method = match method_item {
+                MethodItem::Decl(method) => {
+                    rewrite_linear_method_sig(&mut method.sig, info);
+                    continue;
+                }
+                MethodItem::Def(method) => method,
+            };
+
+            let source_state = method_source_state(&method.sig, info);
+            rewrite_linear_method_sig(&mut method.sig, info);
+            if let Some(source_state) = source_state {
+                rewrite_expr_with_linear_env(
+                    &mut method.body,
+                    infos,
+                    linear_index,
+                    Some(&info.type_name),
+                    Some(&source_state),
+                    node_id_gen,
+                );
+            } else {
+                rewrite_expr_with_linear_env(
+                    &mut method.body,
+                    infos,
+                    linear_index,
+                    Some(&info.type_name),
+                    None,
+                    node_id_gen,
+                );
+            }
+        }
+    }
+}
+
+fn rewrite_linear_method_sig(sig: &mut crate::core::ast::MethodSig, info: &DirectLinearInfo) {
+    if let Some(source_state) = method_source_state(sig, info)
+        && let Some(action) = info
+            .action_by_source_and_name
+            .get(&(source_state, sig.name.clone()))
+    {
+        sig.name = action.internal_name.clone();
+        sig.self_param.mode = ParamMode::Sink;
+        sig.self_param.receiver_ty_expr = None;
+        rewrite_return_type_to_linear_enum(&mut sig.ret_ty_expr, info);
+    }
+}
+
+/// Determine which source state a method implements, either from an explicit
+/// receiver annotation (`self: Draft`) or by finding a unique action match.
+fn method_source_state(
+    sig: &crate::core::ast::MethodSig,
+    info: &DirectLinearInfo,
+) -> Option<String> {
+    if let Some(receiver_ty) = sig.self_param.receiver_ty_expr.as_ref()
+        && let Some(name) = named_type_name(receiver_ty)
+    {
+        return Some(name);
+    }
+
+    // No explicit receiver — look for a unique action with this method name.
+    let mut matches = info
+        .action_by_source_and_name
+        .keys()
+        .filter_map(|(source_state, action_name)| {
+            if action_name == &sig.name {
+                Some(source_state.clone())
+            } else {
+                None
+            }
+        })
+        .collect::<Vec<_>>();
+    if matches.len() == 1 {
+        return matches.pop();
+    }
+    None
+}
+
+/// Rewrite bare state names in return types to the parent enum type.
+/// e.g., `-> Open` becomes `-> Door` when `Open` is a state of `Door`.
+fn rewrite_return_type_to_linear_enum(ret_ty_expr: &mut TypeExpr, info: &DirectLinearInfo) {
+    match &mut ret_ty_expr.kind {
+        TypeExprKind::Named { ident, type_args } if type_args.is_empty() => {
+            if info.state_names.contains(ident) {
+                *ident = info.type_name.clone();
+            }
+        }
+        TypeExprKind::Union { variants } => {
+            if let Some(first) = variants.first_mut() {
+                rewrite_return_type_to_linear_enum(first, info);
+            }
+        }
+        _ => {}
+    }
+}
+
+// -- Expression rewriting --------------------------------------------
+
+/// Rewrite expressions in function bodies and non-linear method blocks.
+pub(super) fn rewrite_linear_exprs(
+    module: &mut Module,
+    infos: &HashMap<String, DirectLinearInfo>,
+    linear_index: &mut LinearIndex,
+    node_id_gen: &mut NodeIdGen,
+) -> Vec<ResolveError> {
+    let mut errors = Vec::new();
+    for item in &mut module.top_level_items {
+        match item {
+            TopLevelItem::FuncDef(func) => {
+                errors.extend(rewrite_expr_with_linear_env(
+                    &mut func.body,
+                    infos,
+                    linear_index,
+                    None,
+                    None,
+                    node_id_gen,
+                ));
+            }
+            TopLevelItem::MethodBlock(method_block) => {
+                if infos.contains_key(&method_block.type_name) {
+                    continue;
+                }
+                for method_item in &mut method_block.method_items {
+                    if let MethodItem::Def(method) = method_item {
+                        errors.extend(rewrite_expr_with_linear_env(
+                            &mut method.body,
+                            infos,
+                            linear_index,
+                            None,
+                            None,
+                            node_id_gen,
+                        ));
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+    errors
+}
+
+/// Set up the binding environment and rewrite a single expression tree.
+fn rewrite_expr_with_linear_env(
+    expr: &mut Expr,
+    infos: &HashMap<String, DirectLinearInfo>,
+    linear_index: &mut LinearIndex,
+    current_linear_type: Option<&str>,
+    self_state: Option<&str>,
+    node_id_gen: &mut NodeIdGen,
+) -> Vec<ResolveError> {
+    let mut env = HashMap::new();
+    let mut errors = Vec::new();
+    if let (Some(type_name), Some(state_name)) = (current_linear_type, self_state) {
+        env.insert(
+            "self".to_string(),
+            LinearBindingState {
+                value_state: LinearValueState {
+                    type_name: type_name.to_string(),
+                    state_name: state_name.to_string(),
+                },
+                consumed: false,
+                hosted: false,
+            },
+        );
+    }
+    let _ = rewrite_expr_in_scope(
+        expr,
+        infos,
+        linear_index,
+        current_linear_type,
+        &mut env,
+        &mut errors,
+        node_id_gen,
+    );
+    errors
+}
+
+/// Recursively rewrite an expression, tracking linear binding states through
+/// the environment. Returns the linear state of the expression's result (if any).
+fn rewrite_expr_in_scope(
+    expr: &mut Expr,
+    infos: &HashMap<String, DirectLinearInfo>,
+    linear_index: &mut LinearIndex,
+    current_linear_type: Option<&str>,
+    env: &mut HashMap<String, LinearBindingState>,
+    errors: &mut Vec<ResolveError>,
+    node_id_gen: &mut NodeIdGen,
+) -> Option<LinearBindingState> {
+    match &mut expr.kind {
+        ExprKind::Block { items, tail } => {
+            let mut scope_env = env.clone();
+            for item in items {
+                match item {
+                    BlockItem::Stmt(stmt) => rewrite_stmt_in_scope(
+                        stmt,
+                        infos,
+                        linear_index,
+                        current_linear_type,
+                        &mut scope_env,
+                        errors,
+                        node_id_gen,
+                    ),
+                    BlockItem::Expr(expr) => {
+                        let _ = rewrite_expr_in_scope(
+                            expr,
+                            infos,
+                            linear_index,
+                            current_linear_type,
+                            &mut scope_env,
+                            errors,
+                            node_id_gen,
+                        );
+                    }
+                }
+            }
+            tail.as_mut().and_then(|tail| {
+                rewrite_expr_in_scope(
+                    tail,
+                    infos,
+                    linear_index,
+                    current_linear_type,
+                    &mut scope_env,
+                    errors,
+                    node_id_gen,
+                )
+            })
+        }
+        ExprKind::MethodCall {
+            callee,
+            method_name,
+            args,
+        } => {
+            let callee_source_ident = match &callee.kind {
+                ExprKind::Var { ident } => Some(ident.clone()),
+                _ => None,
+            };
+            let callee_state = rewrite_expr_in_scope(
+                callee,
+                infos,
+                linear_index,
+                current_linear_type,
+                env,
+                errors,
+                node_id_gen,
+            );
+            for arg in args.iter_mut() {
+                let _ = rewrite_expr_in_scope(
+                    &mut arg.expr,
+                    infos,
+                    linear_index,
+                    current_linear_type,
+                    env,
+                    errors,
+                    node_id_gen,
+                );
+            }
+
+            // Hosted `create(Type as Role)` — seed the binding as hosted with
+            // the initial state so downstream action calls get hosted treatment.
+            if method_name == "create"
+                && args.len() == 1
+                && let ExprKind::RoleProjection {
+                    type_name,
+                    role_name,
+                } = &args[0].expr.kind
+                && let Some(info) = infos.get(type_name)
+                && info.role_names.contains(role_name)
+                && let Some(initial_state) = info.initial_state.clone()
+            {
+                return Some(LinearBindingState {
+                    value_state: LinearValueState {
+                        type_name: type_name.clone(),
+                        state_name: initial_state,
+                    },
+                    consumed: false,
+                    hosted: true,
+                });
+            }
+
+            // Direct-mode action dispatch: look up the action by the callee's
+            // current state and the method name.
+            let Some(callee_state) = callee_state else {
+                return None;
+            };
+            let Some(info) = infos.get(&callee_state.value_state.type_name) else {
+                return None;
+            };
+            let action_name = method_name.clone();
+            let Some(action) = info.action_by_source_and_name.get(&(
+                callee_state.value_state.state_name.clone(),
+                action_name.clone(),
+            )) else {
+                return None;
+            };
+            *method_name = action.internal_name.clone();
+            if let Some(source_ident) = callee_source_ident
+                && let Some(binding) = env.get_mut(&source_ident)
+            {
+                binding.consumed = true;
+            }
+
+            // For hosted bindings, record the expression so the type checker
+            // can emit a fallible obligation (`TargetState | SessionError`).
+            if callee_state.hosted {
+                linear_index.hosted_action_exprs.insert(
+                    expr.id,
+                    HostedActionExprInfo {
+                        type_name: info.type_name.clone(),
+                        source_state: callee_state.value_state.state_name.clone(),
+                        action_name,
+                    },
+                );
+            }
+
+            // Propagate hosted provenance through the action chain.
+            Some(LinearBindingState {
+                value_state: LinearValueState {
+                    type_name: info.type_name.clone(),
+                    state_name: action.target_state.clone(),
+                },
+                consumed: false,
+                hosted: callee_state.hosted,
+            })
+        }
+        ExprKind::StructLit { name, fields, .. } => {
+            for field in fields.iter_mut() {
+                let _ = rewrite_expr_in_scope(
+                    &mut field.value,
+                    infos,
+                    linear_index,
+                    current_linear_type,
+                    env,
+                    errors,
+                    node_id_gen,
+                );
+            }
+            if !fields.is_empty() {
+                return None;
+            }
+
+            // Qualified state construction: `Door::Closed {}` → enum variant.
+            if let Some((type_name, state_name)) = parse_qualified_linear_state_name(name, infos) {
+                expr.kind = ExprKind::EnumVariant {
+                    enum_name: type_name.clone(),
+                    type_args: Vec::new(),
+                    variant: state_name.clone(),
+                    payload: Vec::new(),
+                };
+                return Some(LinearBindingState {
+                    value_state: LinearValueState {
+                        type_name,
+                        state_name,
+                    },
+                    consumed: false,
+                    hosted: false,
+                });
+            }
+
+            // Unqualified state construction inside a method body: `Closed {}`.
+            let Some(type_name) = current_linear_type else {
+                return None;
+            };
+            let Some(info) = infos.get(type_name) else {
+                return None;
+            };
+            if info.state_names.contains(name) {
+                let state_name = name.clone();
+                expr.kind = ExprKind::EnumVariant {
+                    enum_name: type_name.to_string(),
+                    type_args: Vec::new(),
+                    variant: state_name.clone(),
+                    payload: Vec::new(),
+                };
+                return Some(LinearBindingState {
+                    value_state: LinearValueState {
+                        type_name: type_name.to_string(),
+                        state_name,
+                    },
+                    consumed: false,
+                    hosted: false,
+                });
+            }
+            None
+        }
+        ExprKind::Call { callee, args } => {
+            let _ = rewrite_expr_in_scope(
+                callee,
+                infos,
+                linear_index,
+                current_linear_type,
+                env,
+                errors,
+                node_id_gen,
+            );
+            for arg in args.iter_mut() {
+                let _ = rewrite_expr_in_scope(
+                    &mut arg.expr,
+                    infos,
+                    linear_index,
+                    current_linear_type,
+                    env,
+                    errors,
+                    node_id_gen,
+                );
+            }
+
+            // State construction with payload: `Locked(code)` inside a method body.
+            let ExprKind::Var { ident } = &callee.kind else {
+                return None;
+            };
+            let state_name = ident.clone();
+            let Some(type_name) = current_linear_type else {
+                return None;
+            };
+            let Some(info) = infos.get(type_name) else {
+                return None;
+            };
+            if !info.state_names.contains(&state_name) {
+                return None;
+            }
+
+            let payload = args.iter().map(|arg| arg.expr.clone()).collect::<Vec<_>>();
+            expr.kind = ExprKind::EnumVariant {
+                enum_name: type_name.to_string(),
+                type_args: Vec::new(),
+                variant: state_name.clone(),
+                payload,
+            };
+            Some(LinearBindingState {
+                value_state: LinearValueState {
+                    type_name: type_name.to_string(),
+                    state_name,
+                },
+                consumed: false,
+                hosted: false,
+            })
+        }
+        ExprKind::EnumVariant {
+            enum_name,
+            variant,
+            payload,
+            ..
+        } => {
+            for value in payload {
+                let _ = rewrite_expr_in_scope(
+                    value,
+                    infos,
+                    linear_index,
+                    current_linear_type,
+                    env,
+                    errors,
+                    node_id_gen,
+                );
+            }
+            if infos.contains_key(enum_name) {
+                return Some(LinearBindingState {
+                    value_state: LinearValueState {
+                        type_name: enum_name.clone(),
+                        state_name: variant.clone(),
+                    },
+                    consumed: false,
+                    hosted: false,
+                });
+            }
+            None
+        }
+        // `?` propagates the linear state of the inner expression, so
+        // `service.create(...)? ` correctly seeds the binding.
+        ExprKind::Try {
+            fallible_expr,
+            on_error,
+        } => {
+            let result_state = rewrite_expr_in_scope(
+                fallible_expr,
+                infos,
+                linear_index,
+                current_linear_type,
+                env,
+                errors,
+                node_id_gen,
+            );
+            if let Some(on_error) = on_error {
+                let _ = rewrite_expr_in_scope(
+                    on_error,
+                    infos,
+                    linear_index,
+                    current_linear_type,
+                    env,
+                    errors,
+                    node_id_gen,
+                );
+            }
+            result_state
+        }
+        ExprKind::RoleProjection { .. } => None,
+        ExprKind::Match { scrutinee, arms } => {
+            let _ = rewrite_expr_in_scope(
+                scrutinee,
+                infos,
+                linear_index,
+                current_linear_type,
+                env,
+                errors,
+                node_id_gen,
+            );
+            for arm in arms {
+                let mut arm_env = env.clone();
+                let _ = rewrite_expr_in_scope(
+                    &mut arm.body,
+                    infos,
+                    linear_index,
+                    current_linear_type,
+                    &mut arm_env,
+                    errors,
+                    node_id_gen,
+                );
+            }
+            None
+        }
+        ExprKind::If {
+            cond,
+            then_body,
+            else_body,
+        } => {
+            let _ = rewrite_expr_in_scope(
+                cond,
+                infos,
+                linear_index,
+                current_linear_type,
+                env,
+                errors,
+                node_id_gen,
+            );
+            let mut then_env = env.clone();
+            let mut else_env = env.clone();
+            let _ = rewrite_expr_in_scope(
+                then_body,
+                infos,
+                linear_index,
+                current_linear_type,
+                &mut then_env,
+                errors,
+                node_id_gen,
+            );
+            let _ = rewrite_expr_in_scope(
+                else_body,
+                infos,
+                linear_index,
+                current_linear_type,
+                &mut else_env,
+                errors,
+                node_id_gen,
+            );
+            None
+        }
+        ExprKind::TupleLit(values) => {
+            for value in values {
+                let _ = rewrite_expr_in_scope(
+                    value,
+                    infos,
+                    linear_index,
+                    current_linear_type,
+                    env,
+                    errors,
+                    node_id_gen,
+                );
+            }
+            None
+        }
+        ExprKind::ArrayLit { init, .. } => {
+            match init {
+                ArrayLitInit::Elems(values) => {
+                    for value in values {
+                        let _ = rewrite_expr_in_scope(
+                            value,
+                            infos,
+                            linear_index,
+                            current_linear_type,
+                            env,
+                            errors,
+                            node_id_gen,
+                        );
+                    }
+                }
+                ArrayLitInit::Repeat(value, _) => {
+                    let _ = rewrite_expr_in_scope(
+                        value,
+                        infos,
+                        linear_index,
+                        current_linear_type,
+                        env,
+                        errors,
+                        node_id_gen,
+                    );
+                }
+            }
+            None
+        }
+        ExprKind::SetLit { elems, .. } => {
+            for elem in elems {
+                let _ = rewrite_expr_in_scope(
+                    elem,
+                    infos,
+                    linear_index,
+                    current_linear_type,
+                    env,
+                    errors,
+                    node_id_gen,
+                );
+            }
+            None
+        }
+        ExprKind::MapLit { entries, .. } => {
+            for entry in entries {
+                let _ = rewrite_expr_in_scope(
+                    &mut entry.key,
+                    infos,
+                    linear_index,
+                    current_linear_type,
+                    env,
+                    errors,
+                    node_id_gen,
+                );
+                let _ = rewrite_expr_in_scope(
+                    &mut entry.value,
+                    infos,
+                    linear_index,
+                    current_linear_type,
+                    env,
+                    errors,
+                    node_id_gen,
+                );
+            }
+            None
+        }
+        ExprKind::Var { ident } => {
+            let source_ident = ident.clone();
+            let Some(binding) = env.get(&source_ident) else {
+                return None;
+            };
+            if binding.consumed {
+                errors.push(REK::LinearUseAfterConsume(source_ident).at(expr.span));
+            }
+            Some(binding.clone())
+        }
+        _ => {
+            walk_child_exprs(
+                expr,
+                infos,
+                linear_index,
+                current_linear_type,
+                env,
+                errors,
+                node_id_gen,
+            );
+            None
+        }
+    }
+}
+
+// -- Statement rewriting ---------------------------------------------
+
+fn rewrite_stmt_in_scope(
+    stmt: &mut StmtExpr,
+    infos: &HashMap<String, DirectLinearInfo>,
+    linear_index: &mut LinearIndex,
+    current_linear_type: Option<&str>,
+    env: &mut HashMap<String, LinearBindingState>,
+    errors: &mut Vec<ResolveError>,
+    node_id_gen: &mut NodeIdGen,
+) {
+    match &mut stmt.kind {
+        StmtExprKind::LetBind { pattern, value, .. }
+        | StmtExprKind::VarBind { pattern, value, .. } => {
+            let result_state = rewrite_expr_in_scope(
+                value,
+                infos,
+                linear_index,
+                current_linear_type,
+                env,
+                errors,
+                node_id_gen,
+            );
+            if let Some(ident) = bind_pattern_name_mut(pattern) {
+                let source_ident = ident.clone();
+                if let Some(result_state) = result_state {
+                    env.insert(source_ident, result_state);
+                } else {
+                    env.remove(&source_ident);
+                }
+            }
+        }
+        StmtExprKind::Assign {
+            assignee, value, ..
+        }
+        | StmtExprKind::CompoundAssign {
+            assignee, value, ..
+        } => {
+            let _ = rewrite_expr_in_scope(
+                assignee,
+                infos,
+                linear_index,
+                current_linear_type,
+                env,
+                errors,
+                node_id_gen,
+            );
+            let _ = rewrite_expr_in_scope(
+                value,
+                infos,
+                linear_index,
+                current_linear_type,
+                env,
+                errors,
+                node_id_gen,
+            );
+        }
+        StmtExprKind::While { cond, body } => {
+            let _ = rewrite_expr_in_scope(
+                cond,
+                infos,
+                linear_index,
+                current_linear_type,
+                env,
+                errors,
+                node_id_gen,
+            );
+            let mut body_env = env.clone();
+            let _ = rewrite_expr_in_scope(
+                body,
+                infos,
+                linear_index,
+                current_linear_type,
+                &mut body_env,
+                errors,
+                node_id_gen,
+            );
+        }
+        StmtExprKind::For { iter, body, .. } => {
+            let _ = rewrite_expr_in_scope(
+                iter,
+                infos,
+                linear_index,
+                current_linear_type,
+                env,
+                errors,
+                node_id_gen,
+            );
+            let mut body_env = env.clone();
+            let _ = rewrite_expr_in_scope(
+                body,
+                infos,
+                linear_index,
+                current_linear_type,
+                &mut body_env,
+                errors,
+                node_id_gen,
+            );
+        }
+        StmtExprKind::Defer { value } => {
+            let _ = rewrite_expr_in_scope(
+                value,
+                infos,
+                linear_index,
+                current_linear_type,
+                env,
+                errors,
+                node_id_gen,
+            );
+        }
+        StmtExprKind::Using {
+            value,
+            body,
+            binding,
+        } => {
+            let result_state = rewrite_expr_in_scope(
+                value,
+                infos,
+                linear_index,
+                current_linear_type,
+                env,
+                errors,
+                node_id_gen,
+            );
+            let mut body_env = env.clone();
+            if let Some(result_state) = result_state {
+                body_env.insert(binding.ident.clone(), result_state);
+            }
+            let _ = rewrite_expr_in_scope(
+                body,
+                infos,
+                linear_index,
+                current_linear_type,
+                &mut body_env,
+                errors,
+                node_id_gen,
+            );
+        }
+        StmtExprKind::Return { value } => {
+            if let Some(value) = value {
+                let _ = rewrite_expr_in_scope(
+                    value,
+                    infos,
+                    linear_index,
+                    current_linear_type,
+                    env,
+                    errors,
+                    node_id_gen,
+                );
+            }
+        }
+        StmtExprKind::VarDecl { ident, .. } => {
+            env.remove(ident);
+        }
+        StmtExprKind::Break | StmtExprKind::Continue => {}
+    }
+}
+
+// -- Child expression walking ----------------------------------------
+//
+// For expression kinds that don't produce linear state themselves but may
+// contain sub-expressions that do. Delegates back to `rewrite_expr_in_scope`.
+
+fn walk_child_exprs(
+    expr: &mut Expr,
+    infos: &HashMap<String, DirectLinearInfo>,
+    linear_index: &mut LinearIndex,
+    current_linear_type: Option<&str>,
+    env: &mut HashMap<String, LinearBindingState>,
+    errors: &mut Vec<ResolveError>,
+    node_id_gen: &mut NodeIdGen,
+) {
+    match &mut expr.kind {
+        ExprKind::BinOp { left, right, .. } => {
+            let _ = rewrite_expr_in_scope(
+                left,
+                infos,
+                linear_index,
+                current_linear_type,
+                env,
+                errors,
+                node_id_gen,
+            );
+            let _ = rewrite_expr_in_scope(
+                right,
+                infos,
+                linear_index,
+                current_linear_type,
+                env,
+                errors,
+                node_id_gen,
+            );
+        }
+        ExprKind::UnaryOp { expr, .. }
+        | ExprKind::HeapAlloc { expr }
+        | ExprKind::Move { expr }
+        | ExprKind::Coerce { expr, .. }
+        | ExprKind::ImplicitMove { expr }
+        | ExprKind::AddrOf { expr }
+        | ExprKind::Deref { expr }
+        | ExprKind::Load { expr }
+        | ExprKind::Len { expr } => {
+            let _ = rewrite_expr_in_scope(
+                expr,
+                infos,
+                linear_index,
+                current_linear_type,
+                env,
+                errors,
+                node_id_gen,
+            );
+        }
+        ExprKind::Try {
+            fallible_expr,
+            on_error,
+        } => {
+            let _ = rewrite_expr_in_scope(
+                fallible_expr,
+                infos,
+                linear_index,
+                current_linear_type,
+                env,
+                errors,
+                node_id_gen,
+            );
+            if let Some(on_error) = on_error {
+                let _ = rewrite_expr_in_scope(
+                    on_error,
+                    infos,
+                    linear_index,
+                    current_linear_type,
+                    env,
+                    errors,
+                    node_id_gen,
+                );
+            }
+        }
+        ExprKind::StructUpdate { target, fields } => {
+            let _ = rewrite_expr_in_scope(
+                target,
+                infos,
+                linear_index,
+                current_linear_type,
+                env,
+                errors,
+                node_id_gen,
+            );
+            for field in fields {
+                let _ = rewrite_expr_in_scope(
+                    &mut field.value,
+                    infos,
+                    linear_index,
+                    current_linear_type,
+                    env,
+                    errors,
+                    node_id_gen,
+                );
+            }
+        }
+        ExprKind::Range { start, end } => {
+            let _ = rewrite_expr_in_scope(
+                start,
+                infos,
+                linear_index,
+                current_linear_type,
+                env,
+                errors,
+                node_id_gen,
+            );
+            let _ = rewrite_expr_in_scope(
+                end,
+                infos,
+                linear_index,
+                current_linear_type,
+                env,
+                errors,
+                node_id_gen,
+            );
+        }
+        ExprKind::Slice { target, start, end } => {
+            let _ = rewrite_expr_in_scope(
+                target,
+                infos,
+                linear_index,
+                current_linear_type,
+                env,
+                errors,
+                node_id_gen,
+            );
+            if let Some(start) = start {
+                let _ = rewrite_expr_in_scope(
+                    start,
+                    infos,
+                    linear_index,
+                    current_linear_type,
+                    env,
+                    errors,
+                    node_id_gen,
+                );
+            }
+            if let Some(end) = end {
+                let _ = rewrite_expr_in_scope(
+                    end,
+                    infos,
+                    linear_index,
+                    current_linear_type,
+                    env,
+                    errors,
+                    node_id_gen,
+                );
+            }
+        }
+        ExprKind::TupleField { target, .. } | ExprKind::StructField { target, .. } => {
+            let _ = rewrite_expr_in_scope(
+                target,
+                infos,
+                linear_index,
+                current_linear_type,
+                env,
+                errors,
+                node_id_gen,
+            );
+        }
+        ExprKind::ArrayIndex { target, indices } => {
+            let _ = rewrite_expr_in_scope(
+                target,
+                infos,
+                linear_index,
+                current_linear_type,
+                env,
+                errors,
+                node_id_gen,
+            );
+            for index in indices {
+                let _ = rewrite_expr_in_scope(
+                    index,
+                    infos,
+                    linear_index,
+                    current_linear_type,
+                    env,
+                    errors,
+                    node_id_gen,
+                );
+            }
+        }
+        ExprKind::Reply { cap, value } => {
+            let _ = rewrite_expr_in_scope(
+                cap,
+                infos,
+                linear_index,
+                current_linear_type,
+                env,
+                errors,
+                node_id_gen,
+            );
+            let _ = rewrite_expr_in_scope(
+                value,
+                infos,
+                linear_index,
+                current_linear_type,
+                env,
+                errors,
+                node_id_gen,
+            );
+        }
+        ExprKind::Closure { body, .. } => {
+            let mut closure_env = HashMap::new();
+            let _ = rewrite_expr_in_scope(
+                body,
+                infos,
+                linear_index,
+                current_linear_type,
+                &mut closure_env,
+                errors,
+                node_id_gen,
+            );
+        }
+        ExprKind::MapGet { target, key } => {
+            let _ = rewrite_expr_in_scope(
+                target,
+                infos,
+                linear_index,
+                current_linear_type,
+                env,
+                errors,
+                node_id_gen,
+            );
+            let _ = rewrite_expr_in_scope(
+                key,
+                infos,
+                linear_index,
+                current_linear_type,
+                env,
+                errors,
+                node_id_gen,
+            );
+        }
+        ExprKind::StringFmt { segments } => {
+            for segment in segments {
+                if let crate::core::ast::StringFmtSegment::Expr { expr, .. } = segment {
+                    let _ = rewrite_expr_in_scope(
+                        expr,
+                        infos,
+                        linear_index,
+                        current_linear_type,
+                        env,
+                        errors,
+                        node_id_gen,
+                    );
+                }
+            }
+        }
+        // These are handled by dedicated arms in `rewrite_expr_in_scope`.
+        ExprKind::Call { .. }
+        | ExprKind::MethodCall { .. }
+        | ExprKind::StructLit { .. }
+        | ExprKind::EnumVariant { .. }
+        | ExprKind::Match { .. }
+        | ExprKind::If { .. }
+        | ExprKind::Block { .. }
+        | ExprKind::TupleLit(..)
+        | ExprKind::ArrayLit { .. }
+        | ExprKind::SetLit { .. }
+        | ExprKind::MapLit { .. }
+        | ExprKind::Var { .. }
+        | ExprKind::RoleProjection { .. }
+        | ExprKind::UnitLit
+        | ExprKind::IntLit(_)
+        | ExprKind::BoolLit(_)
+        | ExprKind::CharLit(_)
+        | ExprKind::StringLit { .. }
+        | ExprKind::Emit { .. }
+        | ExprKind::ClosureRef { .. } => {}
+    }
+}
+
+// -- Helpers ---------------------------------------------------------
+
+fn parse_qualified_linear_state_name(
+    name: &str,
+    infos: &HashMap<String, DirectLinearInfo>,
+) -> Option<(String, String)> {
+    let (type_name, state_name) = name.split_once("::")?;
+    let info = infos.get(type_name)?;
+    if info.state_names.contains(state_name) {
+        Some((type_name.to_string(), state_name.to_string()))
+    } else {
+        None
+    }
+}
+
+fn bind_pattern_name_mut(pattern: &mut crate::core::ast::BindPattern) -> Option<&mut String> {
+    match &mut pattern.kind {
+        crate::core::ast::BindPatternKind::Name { ident } => Some(ident),
+        _ => None,
+    }
+}
+
+/// The internal method name for a direct-mode action. Encodes the source state
+/// to avoid name collisions when multiple actions share the same name.
+pub(crate) fn direct_action_method_name(source_state: &str, action_name: &str) -> String {
+    format!("__linear__{source_state}__{action_name}")
+}
+
+fn named_type_name(ty_expr: &TypeExpr) -> Option<String> {
+    match &ty_expr.kind {
+        TypeExprKind::Named { ident, type_args } if type_args.is_empty() => Some(ident.clone()),
+        _ => None,
+    }
+}
