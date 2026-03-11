@@ -244,6 +244,20 @@ pub enum ResolveErrorKind {
 
     #[error("Machine `{0}` key field `{2}` is not declared on hosted type `{1}`")]
     MachineInvalidKeyField(String, String, String),
+
+    #[error("Machine `{0}` must implement trigger handler `{1}`")]
+    MachineMissingTriggerHandler(String, String),
+
+    #[error(
+        "Machine `{0}` declares {1} handler `{2}` that is not declared on the hosted linear type"
+    )]
+    MachineExtraHandler(String, &'static str, String),
+
+    #[error("Machine `{0}` {1} handler `{2}` does not match the declared transition signature")]
+    MachineHandlerTypeMismatch(String, &'static str, String),
+
+    #[error("Machine `{0}` action override `{1}` must preserve the base action's error cases")]
+    MachineOverrideErrorSubset(String, String),
 }
 
 pub type ResolveError = SpannedError<ResolveErrorKind>;

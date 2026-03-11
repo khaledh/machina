@@ -500,3 +500,199 @@ fn linear_type_hosted_create_rejects_machine_host_mismatch() {
         "expected a machine-host mismatch diagnostic, got: {rendered}"
     );
 }
+
+#[test]
+fn linear_type_machine_requires_trigger_handlers() {
+    let source = r#"
+        @linear
+        type PullRequest = {
+            id: u64,
+
+            states {
+                Draft,
+                Review,
+            }
+
+            actions {}
+
+            triggers {
+                ci_passed: Draft -> Review,
+            }
+
+            roles {
+                Author {}
+            }
+        }
+
+        machine PRService hosts PullRequest(key: id) {
+            fn new() -> Self {
+                Self {}
+            }
+        }
+    "#;
+
+    let errors = compile_linear_source(
+        source,
+        "tests/fixtures/linear/machine_missing_trigger_handler.mc",
+    )
+    .expect_err("machines should be required to implement every trigger handler");
+    let rendered = format!("{errors:#?}");
+    assert!(
+        rendered.contains("MC-MACHINE-MISSING-TRIGGER-HANDLER")
+            || rendered.contains("missing trigger")
+            || rendered.contains("ci_passed"),
+        "expected missing trigger handler diagnostic, got: {rendered}"
+    );
+}
+
+#[test]
+fn linear_type_machine_rejects_extra_action_override() {
+    let source = r#"
+        @linear
+        type PullRequest = {
+            id: u64,
+
+            states {
+                Draft,
+                Review,
+            }
+
+            actions {
+                submit: Draft -> Review,
+            }
+
+            roles {
+                Author { submit }
+            }
+        }
+
+        PullRequest :: {
+            fn submit(self) -> Review {
+                Review {}
+            }
+        }
+
+        machine PRService hosts PullRequest(key: id) {
+            fn new() -> Self {
+                Self {}
+            }
+
+            action merge(review) -> Review {
+                review
+            }
+        }
+    "#;
+
+    let errors = compile_linear_source(source, "tests/fixtures/linear/machine_extra_action.mc")
+        .expect_err("undeclared machine action overrides should be rejected");
+    let rendered = format!("{errors:#?}");
+    assert!(
+        rendered.contains("MC-MACHINE-EXTRA-HANDLER")
+            || rendered.contains("extra handler")
+            || rendered.contains("merge"),
+        "expected extra machine handler diagnostic, got: {rendered}"
+    );
+}
+
+#[test]
+fn linear_type_machine_rejects_extra_trigger_params() {
+    let source = r#"
+        @linear
+        type PullRequest = {
+            id: u64,
+
+            states {
+                Draft,
+                Review,
+            }
+
+            actions {}
+
+            triggers {
+                ci_passed: Draft -> Review,
+            }
+
+            roles {
+                Author {}
+            }
+        }
+
+        machine PRService hosts PullRequest(key: id) {
+            fn new() -> Self {
+                Self {}
+            }
+
+            trigger ci_passed(draft, extra: u64) {
+                draft;
+                extra;
+            }
+        }
+    "#;
+
+    let errors = compile_linear_source(
+        source,
+        "tests/fixtures/linear/machine_trigger_extra_params.mc",
+    )
+    .expect_err("trigger handlers with extra params should be rejected");
+    let rendered = format!("{errors:#?}");
+    assert!(
+        rendered.contains("MC-MACHINE-HANDLER-TYPE-MISMATCH")
+            || rendered.contains("parameter")
+            || rendered.contains("ci_passed"),
+        "expected machine handler type mismatch diagnostic, got: {rendered}"
+    );
+}
+
+#[test]
+fn linear_type_machine_rejects_override_error_subset() {
+    let source = r#"
+        type IoError = DiskFull | Busy
+
+        @linear
+        type PullRequest = {
+            id: u64,
+
+            states {
+                Draft,
+                Review,
+            }
+
+            actions {
+                submit: Draft -> Review | IoError,
+            }
+
+            roles {
+                Author { submit }
+            }
+        }
+
+        PullRequest :: {
+            fn submit(self) -> Review | IoError {
+                Review {}
+            }
+        }
+
+        machine PRService hosts PullRequest(key: id) {
+            fn new() -> Self {
+                Self {}
+            }
+
+            action submit(draft) -> Review {
+                draft.submit()?
+            }
+        }
+    "#;
+
+    let errors = compile_linear_source(
+        source,
+        "tests/fixtures/linear/machine_override_error_subset.mc",
+    )
+    .expect_err("machine action overrides must not drop base action errors");
+    let rendered = format!("{errors:#?}");
+    assert!(
+        rendered.contains("MC-MACHINE-OVERRIDE-ERROR-SUBSET")
+            || rendered.contains("error subset")
+            || rendered.contains("submit"),
+        "expected machine override error-subset diagnostic, got: {rendered}"
+    );
+}

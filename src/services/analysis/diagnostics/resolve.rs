@@ -604,6 +604,52 @@ pub(super) fn from_resolve_error(error: &ResolveError) -> Diagnostic {
             metadata.insert("field".to_string(), DiagnosticValue::String(field.clone()));
             "MC-MACHINE-INVALID-KEY-FIELD"
         }
+        ResolveErrorKind::MachineMissingTriggerHandler(machine, trigger) => {
+            metadata.insert(
+                "machine".to_string(),
+                DiagnosticValue::String(machine.clone()),
+            );
+            metadata.insert(
+                "trigger".to_string(),
+                DiagnosticValue::String(trigger.clone()),
+            );
+            "MC-MACHINE-MISSING-TRIGGER-HANDLER"
+        }
+        ResolveErrorKind::MachineExtraHandler(machine, kind, name) => {
+            metadata.insert(
+                "machine".to_string(),
+                DiagnosticValue::String(machine.clone()),
+            );
+            metadata.insert(
+                "kind".to_string(),
+                DiagnosticValue::String((*kind).to_string()),
+            );
+            metadata.insert("name".to_string(), DiagnosticValue::String(name.clone()));
+            "MC-MACHINE-EXTRA-HANDLER"
+        }
+        ResolveErrorKind::MachineHandlerTypeMismatch(machine, kind, name) => {
+            metadata.insert(
+                "machine".to_string(),
+                DiagnosticValue::String(machine.clone()),
+            );
+            metadata.insert(
+                "kind".to_string(),
+                DiagnosticValue::String((*kind).to_string()),
+            );
+            metadata.insert("name".to_string(), DiagnosticValue::String(name.clone()));
+            "MC-MACHINE-HANDLER-TYPE-MISMATCH"
+        }
+        ResolveErrorKind::MachineOverrideErrorSubset(machine, action) => {
+            metadata.insert(
+                "machine".to_string(),
+                DiagnosticValue::String(machine.clone()),
+            );
+            metadata.insert(
+                "action".to_string(),
+                DiagnosticValue::String(action.clone()),
+            );
+            "MC-MACHINE-OVERRIDE-ERROR-SUBSET"
+        }
     };
     Diagnostic {
         phase: DiagnosticPhase::Resolve,

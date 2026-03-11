@@ -7,13 +7,15 @@
 //! - Method blocks: each declared action has a matching method with correct
 //!   receiver, return type, and parameters; overloaded actions require explicit
 //!   receiver state annotations
-//! - Machines: hosted type exists, is linear, key field is valid
+//! - Machines: hosted type exists, is linear, key field is valid, and machine
+//!   handlers match the hosted action/trigger declarations
 
 use std::collections::{HashMap, HashSet};
 
 use crate::core::ast::{
-    LinearRoleDecl, LinearStateVariant, LinearTransitionDecl, MachineDef, MethodBlock, MethodDef,
-    MethodItem, Module, TopLevelItem, TypeDef, TypeDefKind, TypeExpr, TypeExprKind,
+    LinearRoleDecl, LinearStateVariant, LinearTransitionDecl, MachineDef, MachineItem,
+    MachineTransitionHandler, MethodBlock, MethodDef, MethodItem, Module, TopLevelItem, TypeDef,
+    TypeDefKind, TypeExpr, TypeExprKind,
 };
 use crate::core::resolve::{REK, ResolveError};
 
@@ -444,6 +446,139 @@ fn validate_machine_def(
             .at(machine_def.host.span),
         );
     }
+
+    validate_machine_handlers(machine_def, linear, errors);
+}
+
+fn validate_machine_handlers(
+    machine_def: &MachineDef,
+    linear: &crate::core::ast::LinearTypeDef,
+    errors: &mut Vec<ResolveError>,
+) {
+    let actions_by_name: HashMap<&str, &LinearTransitionDecl> = linear
+        .actions
+        .iter()
+        .map(|decl| (decl.name.as_str(), decl))
+        .collect();
+    let triggers_by_name: HashMap<&str, &LinearTransitionDecl> = linear
+        .triggers
+        .iter()
+        .map(|decl| (decl.name.as_str(), decl))
+        .collect();
+    let mut seen_trigger_handlers = HashSet::new();
+
+    for item in &machine_def.items {
+        match item {
+            MachineItem::Action(handler) => {
+                let Some(action) = actions_by_name.get(handler.name.as_str()).copied() else {
+                    errors.push(
+                        REK::MachineExtraHandler(
+                            machine_def.name.clone(),
+                            "action",
+                            handler.name.clone(),
+                        )
+                        .at(handler.span),
+                    );
+                    continue;
+                };
+                validate_machine_transition_handler(
+                    machine_def,
+                    "action",
+                    action,
+                    handler,
+                    true,
+                    errors,
+                );
+            }
+            MachineItem::Trigger(handler) => {
+                let Some(trigger) = triggers_by_name.get(handler.name.as_str()).copied() else {
+                    errors.push(
+                        REK::MachineExtraHandler(
+                            machine_def.name.clone(),
+                            "trigger",
+                            handler.name.clone(),
+                        )
+                        .at(handler.span),
+                    );
+                    continue;
+                };
+                seen_trigger_handlers.insert(trigger.name.clone());
+                validate_machine_transition_handler(
+                    machine_def,
+                    "trigger",
+                    trigger,
+                    handler,
+                    false,
+                    errors,
+                );
+            }
+            _ => {}
+        }
+    }
+
+    for trigger in &linear.triggers {
+        if !seen_trigger_handlers.contains(&trigger.name) {
+            errors.push(
+                REK::MachineMissingTriggerHandler(machine_def.name.clone(), trigger.name.clone())
+                    .at(machine_def.host.span),
+            );
+        }
+    }
+}
+
+fn validate_machine_transition_handler(
+    machine_def: &MachineDef,
+    kind: &'static str,
+    decl: &LinearTransitionDecl,
+    handler: &MachineTransitionHandler,
+    check_error_superset: bool,
+    errors: &mut Vec<ResolveError>,
+) {
+    // The leading machine handler binder always stands for the declared source
+    // state, so only the trailing params and return shape need structural
+    // validation here.
+    if !params_match(&decl.params, &handler.params) {
+        errors.push(
+            REK::MachineHandlerTypeMismatch(machine_def.name.clone(), kind, handler.name.clone())
+                .at(handler.span),
+        );
+        return;
+    }
+
+    if kind == "action" {
+        let Some(ret_ty_expr) = &handler.ret_ty_expr else {
+            errors.push(
+                REK::MachineHandlerTypeMismatch(
+                    machine_def.name.clone(),
+                    kind,
+                    handler.name.clone(),
+                )
+                .at(handler.span),
+            );
+            return;
+        };
+
+        if !return_type_matches(decl, ret_ty_expr) {
+            if check_error_superset
+                && target_state_matches(decl, ret_ty_expr)
+                && !error_superset_matches(decl, ret_ty_expr)
+            {
+                errors.push(
+                    REK::MachineOverrideErrorSubset(machine_def.name.clone(), handler.name.clone())
+                        .at(ret_ty_expr.span),
+                );
+            } else {
+                errors.push(
+                    REK::MachineHandlerTypeMismatch(
+                        machine_def.name.clone(),
+                        kind,
+                        handler.name.clone(),
+                    )
+                    .at(ret_ty_expr.span),
+                );
+            }
+        }
+    }
 }
 
 // -- Helpers ---------------------------------------------------------
@@ -512,6 +647,37 @@ fn return_type_matches(action: &LinearTransitionDecl, ret_ty_expr: &TypeExpr) ->
             .iter()
             .zip(expected_errs.iter())
             .all(|(lhs, rhs)| same_type_expr(lhs, rhs))
+}
+
+fn target_state_matches(action: &LinearTransitionDecl, ret_ty_expr: &TypeExpr) -> bool {
+    if action.error_ty_expr.is_none() {
+        return named_type_name(ret_ty_expr).is_some_and(|name| name == action.target_state);
+    }
+
+    let TypeExprKind::Union { variants } = &ret_ty_expr.kind else {
+        return false;
+    };
+    let Some((ok, _)) = variants.split_first() else {
+        return false;
+    };
+    named_type_name(ok).is_some_and(|name| name == action.target_state)
+}
+
+fn error_superset_matches(action: &LinearTransitionDecl, ret_ty_expr: &TypeExpr) -> bool {
+    let Some(error_ty_expr) = &action.error_ty_expr else {
+        return true;
+    };
+    let TypeExprKind::Union { variants } = &ret_ty_expr.kind else {
+        return false;
+    };
+    let Some((_, errs)) = variants.split_first() else {
+        return false;
+    };
+    let expected_errs = flatten_union_variants(error_ty_expr);
+    errs.len() >= expected_errs.len()
+        && expected_errs
+            .iter()
+            .all(|expected| errs.iter().any(|found| same_type_expr(found, expected)))
 }
 
 fn flatten_union_variants<'a>(ty_expr: &'a TypeExpr) -> Vec<&'a TypeExpr> {
