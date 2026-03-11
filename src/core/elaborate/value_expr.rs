@@ -287,10 +287,22 @@ impl<'a> Elaborator<'a> {
                     call_id = expr.id
                 )
             });
+        // Hosted `create`/`resume` calls carry a source-level role projection
+        // argument (`PullRequest as Author`) that is consumed during type
+        // checking and does not become a runtime call argument.
+        let runtime_args = if matches!(method_name, "create" | "resume")
+            && matches!(
+                args.first().map(|arg| &arg.expr.kind),
+                Some(ExprKind::RoleProjection { .. })
+            ) {
+            &args[1..]
+        } else {
+            args
+        };
         let args = call_sig
             .params
             .iter()
-            .zip(args.iter())
+            .zip(runtime_args.iter())
             .map(|(param, arg)| self.elab_call_arg(param, arg))
             .collect();
         let plan = self.build_call_plan(expr.id, Some(method_name), &call_sig);

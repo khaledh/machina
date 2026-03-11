@@ -196,6 +196,16 @@ pub(crate) enum ExprObligation {
         result: Type,
         span: Span,
     },
+    LinearMachineResume {
+        expr_id: NodeId,
+        receiver: Type,
+        type_name: String,
+        role_name: String,
+        key_term: Type,
+        expected_key_ty: Type,
+        result: Type,
+        span: Span,
+    },
     LinearSessionAction {
         expr_id: NodeId,
         receiver: Type,

@@ -469,6 +469,43 @@ impl<'a> ConstraintCollector<'a> {
                         });
                     return expr_ty;
                 }
+                if method_name == "resume"
+                    && args.len() == 2
+                    && let ExprKind::RoleProjection {
+                        type_name,
+                        role_name,
+                    } = &args[0].expr.kind
+                {
+                    let key_term = self.collect_expr(&args[1].expr, None);
+                    let expected_key_ty = self
+                        .ctx
+                        .linear_index
+                        .machine_hosts
+                        .values()
+                        .find(|host| host.hosted_type_name == *type_name)
+                        .map(|host| {
+                            self.resolve_type_in_scope(&host.key_ty).unwrap_or_else(|err| {
+                                panic!(
+                                    "compiler bug: failed to resolve hosted linear key type for {}: {err:?}",
+                                    type_name,
+                                )
+                            })
+                        })
+                        .unwrap_or(Type::Unknown);
+                    self.out
+                        .expr_obligations
+                        .push(ExprObligation::LinearMachineResume {
+                            expr_id: expr.id,
+                            receiver: receiver_ty,
+                            type_name: type_name.clone(),
+                            role_name: role_name.clone(),
+                            key_term,
+                            expected_key_ty,
+                            result: expr_ty.clone(),
+                            span: expr.span,
+                        });
+                    return expr_ty;
+                }
                 self.out.call_obligations.push(CallObligation {
                     call_node: expr.id,
                     span: expr.span,

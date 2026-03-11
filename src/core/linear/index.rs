@@ -49,6 +49,7 @@ pub struct LinearRoleInfo {
 pub struct LinearHostInfo {
     pub hosted_type_name: String,
     pub key_field: String,
+    pub key_ty: TypeExpr,
     /// Name of the generated struct type that represents a handle to this machine.
     pub handle_type_name: String,
 }
@@ -72,6 +73,12 @@ pub struct HostedActionExprInfo {
 }
 
 pub fn build_linear_index(module: &Module) -> LinearIndex {
+    let module_type_defs = module.type_defs();
+    let type_defs = module_type_defs
+        .iter()
+        .map(|type_def| (type_def.name.clone(), *type_def))
+        .collect::<HashMap<_, _>>();
+
     let mut types = HashMap::new();
     for type_def in module.type_defs() {
         let TypeDefKind::Linear { linear } = &type_def.kind else {
@@ -126,11 +133,28 @@ pub fn build_linear_index(module: &Module) -> LinearIndex {
 
     let mut machine_hosts = HashMap::new();
     for machine_def in module.machine_defs() {
+        // The index is built even for invalid source so early validation can
+        // report targeted machine-host diagnostics. Skip malformed host entries
+        // here and let validation own the user-facing error.
+        let Some(type_def) = type_defs.get(&machine_def.host.type_name) else {
+            continue;
+        };
+        let TypeDefKind::Linear { linear } = &type_def.kind else {
+            continue;
+        };
+        let Some(key_field) = linear
+            .fields
+            .iter()
+            .find(|field| field.name == machine_def.host.key_field)
+        else {
+            continue;
+        };
         machine_hosts.insert(
             machine_def.name.clone(),
             LinearHostInfo {
                 hosted_type_name: machine_def.host.type_name.clone(),
                 key_field: machine_def.host.key_field.clone(),
+                key_ty: key_field.ty.clone(),
                 handle_type_name: machine_handle_type_name(&machine_def.name),
             },
         );

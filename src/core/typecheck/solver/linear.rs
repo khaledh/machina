@@ -48,6 +48,34 @@ pub(super) fn try_check_expr_obligation_linear(
         );
     }
 
+    if let ExprObligation::LinearMachineResume {
+        expr_id,
+        receiver,
+        type_name,
+        role_name,
+        key_term,
+        expected_key_ty,
+        result,
+        span,
+    } = obligation
+    {
+        return check_linear_machine_resume(
+            *expr_id,
+            receiver,
+            type_name,
+            role_name,
+            key_term,
+            expected_key_ty,
+            result,
+            *span,
+            unifier,
+            type_defs,
+            linear_index,
+            errors,
+            covered_exprs,
+        );
+    }
+
     let ExprObligation::LinearMachineCreate {
         expr_id,
         receiver,
@@ -164,6 +192,101 @@ fn check_linear_session_action(
         return true;
     };
 
+    let session_error_ty = type_defs
+        .get("SessionError")
+        .cloned()
+        .unwrap_or(Type::Enum {
+            name: "SessionError".to_string(),
+            variants: Vec::new(),
+        });
+    let session_result_ty = Type::ErrorUnion {
+        ok_ty: Box::new(hosted_ty.clone()),
+        err_tys: vec![session_error_ty],
+    };
+
+    if let Err(err) = unifier.unify(
+        &term_utils::canonicalize_type(result.clone()),
+        &term_utils::canonicalize_type(session_result_ty),
+    ) {
+        errors.push(super::constraint_checks::unify_error_to_diag(err, span));
+    }
+
+    covered_exprs.insert(expr_id);
+    true
+}
+
+fn check_linear_machine_resume(
+    expr_id: NodeId,
+    receiver: &Type,
+    type_name: &str,
+    role_name: &str,
+    key_term: &Type,
+    expected_key_ty: &Type,
+    result: &Type,
+    span: crate::core::diag::Span,
+    unifier: &mut TcUnifier,
+    type_defs: &HashMap<String, Type>,
+    linear_index: &LinearIndex,
+    errors: &mut Vec<TypeCheckError>,
+    covered_exprs: &mut HashSet<NodeId>,
+) -> bool {
+    let receiver_ty = term_utils::resolve_term(receiver, unifier);
+    if term_utils::is_unresolved(&receiver_ty) {
+        return true;
+    }
+    let Some((machine_name, host_info)) = machine_host_for_receiver(&receiver_ty, linear_index)
+    else {
+        crate::core::typecheck::tc_push_error!(
+            errors,
+            span,
+            TEK::OverloadNoMatch("resume".to_string())
+        );
+        covered_exprs.insert(expr_id);
+        return true;
+    };
+
+    if host_info.hosted_type_name != *type_name {
+        crate::core::typecheck::tc_push_error!(
+            errors,
+            span,
+            TEK::LinearSessionHostMismatch(
+                machine_name.to_string(),
+                host_info.hosted_type_name.clone(),
+                type_name.to_string(),
+            )
+        );
+        covered_exprs.insert(expr_id);
+        return true;
+    }
+
+    let Some(type_info) = linear_index.types.get(type_name) else {
+        crate::core::typecheck::tc_push_error!(errors, span, TEK::UnknownType);
+        covered_exprs.insert(expr_id);
+        return true;
+    };
+
+    if !type_info.roles.contains_key(role_name) {
+        crate::core::typecheck::tc_push_error!(
+            errors,
+            span,
+            TEK::LinearSessionUnknownRole(type_name.to_string(), role_name.to_string())
+        );
+        covered_exprs.insert(expr_id);
+        return true;
+    }
+
+    if let Err(err) = unifier.unify(
+        &term_utils::canonicalize_type(key_term.clone()),
+        &term_utils::canonicalize_type(expected_key_ty.clone()),
+    ) {
+        errors.push(super::constraint_checks::unify_error_to_diag(err, span));
+    }
+
+    let Some(hosted_ty) = type_defs.get(type_name) else {
+        crate::core::typecheck::tc_push_error!(errors, span, TEK::UnknownType);
+        covered_exprs.insert(expr_id);
+        return true;
+    };
     let session_error_ty = type_defs
         .get("SessionError")
         .cloned()

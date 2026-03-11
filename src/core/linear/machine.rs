@@ -39,6 +39,7 @@ pub(super) struct MachineSpawnInfo {
     pub hosted_type_name: String,
     pub initial_state: Option<String>,
     pub role_names: Vec<String>,
+    pub key_ty: TypeExpr,
     pub handle_type_name: String,
     pub spawn_fn_name: String,
 }
@@ -61,6 +62,14 @@ pub(crate) fn machine_create_fn_name(
     format!("__mc_machine_create_{machine_name}_{type_name}_{role_name}")
 }
 
+pub(crate) fn machine_resume_fn_name(
+    machine_name: &str,
+    type_name: &str,
+    role_name: &str,
+) -> String {
+    format!("__mc_machine_resume_{machine_name}_{type_name}_{role_name}")
+}
+
 // ── Collection ──────────────────────────────────────────────────────
 
 pub(super) fn collect_machine_spawn_infos(module: &Module) -> Vec<MachineSpawnInfo> {
@@ -73,11 +82,16 @@ pub(super) fn collect_machine_spawn_infos(module: &Module) -> Vec<MachineSpawnIn
             let TypeDefKind::Linear { linear } = &type_def.kind else {
                 return None;
             };
+            let key_field = linear
+                .fields
+                .iter()
+                .find(|field| field.name == machine_def.host.key_field)?;
             Some(MachineSpawnInfo {
                 machine_name: machine_def.name.clone(),
                 hosted_type_name: machine_def.host.type_name.clone(),
                 initial_state: linear.states.first().map(|state| state.name.clone()),
                 role_names: linear.roles.iter().map(|role| role.name.clone()).collect(),
+                key_ty: key_field.ty.clone(),
                 handle_type_name: machine_handle_type_name(&machine_def.name),
                 spawn_fn_name: machine_spawn_fn_name(&machine_def.name),
             })
@@ -175,6 +189,13 @@ pub(super) fn append_machine_spawn_support(
             module
                 .top_level_items
                 .push(TopLevelItem::FuncDef(build_machine_create_func(
+                    info,
+                    role_name,
+                    node_id_gen,
+                )));
+            module
+                .top_level_items
+                .push(TopLevelItem::FuncDef(build_machine_resume_func(
                     info,
                     role_name,
                     node_id_gen,
@@ -340,6 +361,95 @@ fn build_machine_create_func(
                     kind: ExprKind::EnumVariant {
                         enum_name: info.hosted_type_name.clone(),
                         variant: initial_state.clone(),
+                        type_args: Vec::new(),
+                        payload: Vec::new(),
+                    },
+                    span,
+                })),
+            },
+            span,
+        },
+        span,
+    }
+}
+
+/// Generate: `fn __mc_machine_resume_X_T_R(self: HandleType, key: KeyTy) -> T | SessionError { T::InitialState }`
+fn build_machine_resume_func(
+    info: &MachineSpawnInfo,
+    role_name: &str,
+    node_id_gen: &mut NodeIdGen,
+) -> FuncDef {
+    let span = Span::default();
+    let fallback_state = info
+        .initial_state
+        .as_ref()
+        .expect("hosted linear types must have an initial state");
+    FuncDef {
+        id: node_id_gen.new_id(),
+        attrs: Vec::new(),
+        sig: crate::core::ast::FunctionSig {
+            name: machine_resume_fn_name(&info.machine_name, &info.hosted_type_name, role_name),
+            type_params: Vec::new(),
+            params: vec![
+                Param {
+                    id: node_id_gen.new_id(),
+                    ident: "self".to_string(),
+                    mode: ParamMode::In,
+                    typ: TypeExpr {
+                        id: node_id_gen.new_id(),
+                        kind: TypeExprKind::Named {
+                            ident: info.handle_type_name.clone(),
+                            type_args: Vec::new(),
+                        },
+                        span,
+                    },
+                    span,
+                },
+                Param {
+                    id: node_id_gen.new_id(),
+                    ident: "key".to_string(),
+                    mode: ParamMode::In,
+                    typ: info.key_ty.clone(),
+                    span,
+                },
+            ],
+            ret_ty_expr: TypeExpr {
+                id: node_id_gen.new_id(),
+                kind: TypeExprKind::Union {
+                    variants: vec![
+                        TypeExpr {
+                            id: node_id_gen.new_id(),
+                            kind: TypeExprKind::Named {
+                                ident: info.hosted_type_name.clone(),
+                                type_args: Vec::new(),
+                            },
+                            span,
+                        },
+                        TypeExpr {
+                            id: node_id_gen.new_id(),
+                            kind: TypeExprKind::Named {
+                                ident: "SessionError".to_string(),
+                                type_args: Vec::new(),
+                            },
+                            span,
+                        },
+                    ],
+                },
+                span,
+            },
+            span,
+        },
+        // Placeholder body: resume semantics are not runtime-backed yet, so we
+        // return a deterministic state shape to keep the generated surface valid.
+        body: Expr {
+            id: node_id_gen.new_id(),
+            kind: ExprKind::Block {
+                items: Vec::new(),
+                tail: Some(Box::new(Expr {
+                    id: node_id_gen.new_id(),
+                    kind: ExprKind::EnumVariant {
+                        enum_name: info.hosted_type_name.clone(),
+                        variant: fallback_state.clone(),
                         type_args: Vec::new(),
                         payload: Vec::new(),
                     },

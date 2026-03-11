@@ -249,6 +249,7 @@ fn build_outputs(engine: &TypecheckEngine) -> FinalizeOutput {
     // entry exists for the field node id. Materialize those entries here.
     record_property_access_call_sigs(engine, &mut builder);
     record_linear_machine_create_call_sigs(engine, &mut builder);
+    record_linear_machine_resume_call_sigs(engine, &mut builder);
     record_linear_session_call_sigs(engine, &mut builder);
 
     let (mut type_map, call_sigs, generic_insts) = builder.finish();
@@ -440,6 +441,54 @@ fn record_linear_machine_create_call_sigs(engine: &TypecheckEngine, builder: &mu
                     ty: receiver_ty,
                 }),
                 params: Vec::new(),
+            },
+        );
+        builder.record_node_type(*expr_id, expected_ret);
+    }
+}
+
+fn record_linear_machine_resume_call_sigs(engine: &TypecheckEngine, builder: &mut TypeMapBuilder) {
+    for obligation in &engine.state().constrain.expr_obligations {
+        let ExprObligation::LinearMachineResume {
+            expr_id,
+            receiver,
+            type_name,
+            role_name,
+            key_term,
+            result,
+            ..
+        } = obligation
+        else {
+            continue;
+        };
+        let receiver_ty = resolve_term(receiver, engine);
+        let Some((machine_name, host_info)) = machine_host_for_receiver(engine, &receiver_ty)
+        else {
+            continue;
+        };
+        if host_info.hosted_type_name != *type_name {
+            continue;
+        }
+        let helper_name =
+            crate::core::linear::machine_resume_fn_name(machine_name, type_name, role_name);
+        let Some(helper_def_id) = lookup_named_function(engine, &helper_name) else {
+            continue;
+        };
+        let expected_ret = resolve_term(result, engine);
+        let key_ty = resolve_term(key_term, engine);
+        builder.record_call_sig(
+            *expr_id,
+            CallSig {
+                def_id: Some(helper_def_id),
+                selected: Some(SelectedCallable::Local(helper_def_id)),
+                receiver: Some(CallParam {
+                    mode: ParamMode::In,
+                    ty: receiver_ty,
+                }),
+                params: vec![CallParam {
+                    mode: ParamMode::In,
+                    ty: key_ty,
+                }],
             },
         );
         builder.record_node_type(*expr_id, expected_ret);
