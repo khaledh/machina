@@ -520,6 +520,115 @@ fn linear_type_hosted_resume_returns_state_union() {
 }
 
 #[test]
+fn linear_type_hosted_wait_typechecks_for_trigger_driven_state() {
+    let source = r#"
+        type CIPassed = {}
+        type CIFailed = {}
+
+        @linear
+        type PullRequest = {
+            id: u64,
+
+            states {
+                Draft,
+                PendingCI,
+                Review,
+            }
+
+            actions {
+                submit: Draft -> PendingCI,
+            }
+
+            triggers {
+                CIPassed: PendingCI -> Review,
+                CIFailed: PendingCI -> Draft,
+            }
+
+            roles {
+                Author { submit }
+            }
+        }
+
+        PullRequest :: {
+            fn submit(self) -> PendingCI {
+                PendingCI {}
+            }
+        }
+
+        machine PRService hosts PullRequest(key: id) {
+            fn new() -> Self {
+                Self {}
+            }
+
+            trigger CIPassed(pending) {
+                pending;
+                Review {}
+            }
+
+            trigger CIFailed(pending) {
+                pending;
+                Draft {}
+            }
+        }
+
+        @machines
+        fn main() -> () | MachineError | SessionError {
+            let service = PRService::spawn()?;
+            let draft = service.create(PullRequest as Author)?;
+            let pending = draft.submit()?;
+            let next = pending.wait()?;
+
+            // Today `wait()?` resumes as the hosted enum type, so the match
+            // still needs a fallback arm even though only `Draft` and `Review`
+            // are reachable from `PendingCI`. We can tighten this once the
+            // type system grows a way to represent state subsets explicitly.
+            match next {
+                PullRequest::Draft => {}
+                PullRequest::Review => {}
+                _ => {}
+            }
+        }
+    "#;
+
+    compile_linear_source(source, "tests/fixtures/linear/hosted_wait_union.mc")
+        .expect("hosted wait should typecheck for trigger-driven hosted states");
+}
+
+#[test]
+fn linear_type_direct_mode_rejects_wait() {
+    let source = r#"
+        type CIPassed = {}
+
+        @linear
+        type PullRequest = {
+            states {
+                PendingCI,
+                Review,
+            }
+
+            triggers {
+                CIPassed: PendingCI -> Review,
+            }
+        }
+
+        fn main() {
+            let pending = PullRequest::PendingCI {};
+            let _next = pending.wait();
+        }
+    "#;
+
+    let errors = compile_linear_source(source, "tests/fixtures/linear/direct_wait_rejected.mc")
+        .expect_err("direct-mode linear values should not support wait()");
+    let rendered = format!("{errors:#?}");
+    assert!(
+        rendered.contains("OverloadNoMatch(\"wait\")")
+            || rendered.contains("wait")
+            || rendered.contains("MC-TYPECHECK-OVERLOAD-NO-MATCH"),
+        "expected direct-mode wait rejection, got: {rendered}"
+    );
+}
+
+#[test]
 fn linear_type_hosted_create_rejects_unknown_role() {
     let source = r#"
         @linear

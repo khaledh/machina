@@ -24,6 +24,10 @@
 //!   surface for `self.deliver(key, event)`. These currently return a placeholder
 //!   `DeliverResult` until instance-backed delivery lands.
 //!
+//! - **Wait helpers**: a per-machine-per-state function used as the typed
+//!   surface for hosted `session.wait()`. These currently return a placeholder
+//!   next state until runtime-backed waiter registration lands.
+//!
 //! - **Self-type rewriting**: `Self` references in machine constructor bodies are
 //!   rewritten to the generated handle type, so `Self {}` returns the right struct.
 //!
@@ -90,6 +94,14 @@ pub(super) struct MachineDeliverInfo {
     pub fn_name: String,
 }
 
+#[derive(Clone, Debug)]
+pub(super) struct MachineWaitInfo {
+    pub hosted_type_name: String,
+    pub handle_type_name: String,
+    pub placeholder_target_state: String,
+    pub fn_name: String,
+}
+
 // ── Name generation ─────────────────────────────────────────────────
 
 pub(crate) fn machine_handle_type_name(machine_name: &str) -> String {
@@ -130,6 +142,14 @@ pub(crate) fn machine_on_handler_fn_name(machine_name: &str, handler_index: usiz
 
 pub(crate) fn machine_deliver_fn_name(machine_name: &str, event_type_name: &str) -> String {
     format!("__mc_machine_deliver_{machine_name}_{event_type_name}")
+}
+
+pub(crate) fn machine_wait_fn_name(
+    machine_name: &str,
+    type_name: &str,
+    source_state: &str,
+) -> String {
+    format!("__mc_machine_wait_{machine_name}_{type_name}_{source_state}")
 }
 
 // ── Collection ──────────────────────────────────────────────────────
@@ -311,6 +331,43 @@ pub(super) fn collect_machine_deliver_infos(module: &Module) -> Vec<MachineDeliv
         .collect()
 }
 
+pub(super) fn collect_machine_wait_infos(module: &Module) -> Vec<MachineWaitInfo> {
+    let type_defs = super::type_defs_by_name(module);
+    module
+        .machine_defs()
+        .into_iter()
+        .flat_map(|machine_def| {
+            let Some(type_def) = type_defs.get(&machine_def.host.type_name) else {
+                return Vec::new();
+            };
+            let TypeDefKind::Linear { linear } = &type_def.kind else {
+                return Vec::new();
+            };
+            let handle_type_name = machine_handle_type_name(&machine_def.name);
+            let mut waits = Vec::new();
+            let mut seen_states = HashMap::<String, String>::new();
+            for trigger in &linear.triggers {
+                seen_states
+                    .entry(trigger.source_state.clone())
+                    .or_insert_with(|| trigger.target_state.clone());
+            }
+            for (source_state, fallback_target_state) in seen_states {
+                waits.push(MachineWaitInfo {
+                    hosted_type_name: machine_def.host.type_name.clone(),
+                    handle_type_name: handle_type_name.clone(),
+                    placeholder_target_state: fallback_target_state,
+                    fn_name: machine_wait_fn_name(
+                        &machine_def.name,
+                        &machine_def.host.type_name,
+                        &source_state,
+                    ),
+                });
+            }
+            waits
+        })
+        .collect()
+}
+
 // ── Support type generation ─────────────────────────────────────────
 
 /// Ensure `MachineError` and `SessionError` enum types exist in the module.
@@ -417,6 +474,7 @@ pub(super) fn append_machine_spawn_support(
     trigger_handler_infos: &[MachineTriggerHandlerInfo],
     on_handler_infos: &[MachineOnHandlerInfo],
     deliver_infos: &[MachineDeliverInfo],
+    wait_infos: &[MachineWaitInfo],
     node_id_gen: &mut NodeIdGen,
 ) {
     for info in machine_infos {
@@ -484,6 +542,15 @@ pub(super) fn append_machine_spawn_support(
             .top_level_items
             .push(TopLevelItem::FuncDef(build_machine_deliver_func(
                 deliver_info,
+                node_id_gen,
+            )));
+    }
+
+    for wait_info in wait_infos {
+        module
+            .top_level_items
+            .push(TopLevelItem::FuncDef(build_machine_wait_func(
+                wait_info,
                 node_id_gen,
             )));
     }
@@ -975,6 +1042,95 @@ fn build_machine_deliver_func(info: &MachineDeliverInfo, node_id_gen: &mut NodeI
                     kind: ExprKind::EnumVariant {
                         enum_name: "DeliverResult".to_string(),
                         variant: "Delivered".to_string(),
+                        type_args: Vec::new(),
+                        payload: Vec::new(),
+                    },
+                    span,
+                })),
+            },
+            span,
+        },
+        span,
+    }
+}
+
+fn build_machine_wait_func(info: &MachineWaitInfo, node_id_gen: &mut NodeIdGen) -> FuncDef {
+    let span = Span::default();
+    FuncDef {
+        id: node_id_gen.new_id(),
+        attrs: Vec::new(),
+        sig: crate::core::ast::FunctionSig {
+            name: info.fn_name.clone(),
+            type_params: Vec::new(),
+            params: vec![
+                Param {
+                    id: node_id_gen.new_id(),
+                    ident: "self".to_string(),
+                    mode: ParamMode::In,
+                    typ: TypeExpr {
+                        id: node_id_gen.new_id(),
+                        kind: TypeExprKind::Named {
+                            ident: info.handle_type_name.clone(),
+                            type_args: Vec::new(),
+                        },
+                        span,
+                    },
+                    span,
+                },
+                Param {
+                    id: node_id_gen.new_id(),
+                    ident: "instance".to_string(),
+                    mode: ParamMode::In,
+                    typ: TypeExpr {
+                        id: node_id_gen.new_id(),
+                        kind: TypeExprKind::Named {
+                            ident: info.hosted_type_name.clone(),
+                            type_args: Vec::new(),
+                        },
+                        span,
+                    },
+                    span,
+                },
+            ],
+            // Waiting on a hosted session is still a session operation, so the
+            // helper returns the hosted state enum widened with `SessionError`.
+            ret_ty_expr: TypeExpr {
+                id: node_id_gen.new_id(),
+                kind: TypeExprKind::Union {
+                    variants: vec![
+                        TypeExpr {
+                            id: node_id_gen.new_id(),
+                            kind: TypeExprKind::Named {
+                                ident: info.hosted_type_name.clone(),
+                                type_args: Vec::new(),
+                            },
+                            span,
+                        },
+                        TypeExpr {
+                            id: node_id_gen.new_id(),
+                            kind: TypeExprKind::Named {
+                                ident: "SessionError".to_string(),
+                                type_args: Vec::new(),
+                            },
+                            span,
+                        },
+                    ],
+                },
+                span,
+            },
+            span,
+        },
+        // Placeholder body: waiter registration and wakeups are a later
+        // runtime slice, so for now we return one valid trigger target shape.
+        body: Expr {
+            id: node_id_gen.new_id(),
+            kind: ExprKind::Block {
+                items: Vec::new(),
+                tail: Some(Box::new(Expr {
+                    id: node_id_gen.new_id(),
+                    kind: ExprKind::EnumVariant {
+                        enum_name: info.hosted_type_name.clone(),
+                        variant: info.placeholder_target_state.clone(),
                         type_args: Vec::new(),
                         payload: Vec::new(),
                     },

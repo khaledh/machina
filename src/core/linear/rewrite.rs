@@ -640,6 +640,61 @@ fn rewrite_expr_in_scope(
                 });
             }
 
+            // Hosted `wait()` lowers to a generated helper tied to the source
+            // machine. We only expose it on hosted bindings in states that
+            // actually have trigger-driven successors; all other cases should
+            // keep reporting `wait` as unavailable.
+            if method_name == "wait" && args.is_empty() {
+                let Some(callee_state) = callee_state.as_ref() else {
+                    return None;
+                };
+                if let Some(source_ident) = callee_source_ident.clone()
+                    && let Some(binding) = env.get_mut(&source_ident)
+                {
+                    binding.consumed = true;
+                }
+
+                if let Some(hosted) = &callee_state.hosted
+                    && let Some(host_info) = linear_index.machine_hosts.get(&hosted.machine_name)
+                    && let Some(wait_fn_name) = host_info
+                        .wait_helpers
+                        .get(&callee_state.value_state.state_name)
+                {
+                    expr.kind = ExprKind::Call {
+                        callee: Box::new(Expr {
+                            id: node_id_gen.new_id(),
+                            kind: ExprKind::Var {
+                                ident: wait_fn_name.clone(),
+                            },
+                            span: expr.span,
+                        }),
+                        args: vec![
+                            crate::core::ast::CallArg {
+                                mode: crate::core::ast::CallArgMode::Default,
+                                expr: Expr {
+                                    id: node_id_gen.new_id(),
+                                    kind: ExprKind::Var {
+                                        ident: hosted.handle_binding.clone(),
+                                    },
+                                    span: expr.span,
+                                },
+                                init: crate::core::ast::InitInfo::default(),
+                                span: expr.span,
+                            },
+                            crate::core::ast::CallArg {
+                                mode: crate::core::ast::CallArgMode::Default,
+                                expr: (**callee).clone(),
+                                init: crate::core::ast::InitInfo::default(),
+                                span: expr.span,
+                            },
+                        ],
+                    };
+                }
+                // `wait()` resumes as one of several possible states, so we
+                // intentionally stop tracking a single concrete linear state.
+                return None;
+            }
+
             // Direct-mode action dispatch: look up the action by the callee's
             // current state and the method name.
             let Some(callee_state) = callee_state else {

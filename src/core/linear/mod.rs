@@ -67,6 +67,7 @@ pub fn desugar_module(
     let trigger_handler_infos = machine::collect_machine_trigger_handler_infos(module);
     let on_handler_infos = machine::collect_machine_on_handler_infos(module);
     let deliver_infos = machine::collect_machine_deliver_infos(module);
+    let wait_infos = machine::collect_machine_wait_infos(module);
 
     // Generate hosted support types and machine surface before direct-mode lowering,
     // since the generated types (MachineError, SessionError, handle structs) need to
@@ -80,6 +81,7 @@ pub fn desugar_module(
             &trigger_handler_infos,
             &on_handler_infos,
             &deliver_infos,
+            &wait_infos,
             node_id_gen,
         );
         machine::rewrite_machine_constructor_self_types(module, &machine_infos);

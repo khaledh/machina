@@ -15,7 +15,7 @@ use crate::core::ast::{Module, NodeId, TypeDefKind, TypeExpr};
 
 use super::machine::{
     machine_action_override_fn_name, machine_deliver_fn_name, machine_handle_type_name,
-    machine_trigger_handler_fn_name,
+    machine_trigger_handler_fn_name, machine_wait_fn_name,
 };
 
 /// Metadata index for linear types, built after parsing and threaded through
@@ -71,6 +71,10 @@ pub struct LinearHostInfo {
     pub action_overrides: HashMap<String, String>,
     /// Generated deliver helpers keyed by trigger event type name.
     pub deliver_helpers: HashMap<String, String>,
+    /// Generated wait helpers keyed by source state name. Only states with at
+    /// least one declared trigger get a helper; others should keep reporting
+    /// `wait` as unavailable.
+    pub wait_helpers: HashMap<String, String>,
 }
 
 #[derive(Clone, Debug)]
@@ -224,6 +228,19 @@ pub fn build_linear_index(module: &Module) -> LinearIndex {
                 )
             })
             .collect();
+        let wait_helpers = linear
+            .triggers
+            .iter()
+            .fold(HashMap::new(), |mut acc, trigger| {
+                acc.entry(trigger.source_state.clone()).or_insert_with(|| {
+                    machine_wait_fn_name(
+                        &machine_def.name,
+                        &machine_def.host.type_name,
+                        &trigger.source_state,
+                    )
+                });
+                acc
+            });
         machine_hosts.insert(
             machine_def.name.clone(),
             LinearHostInfo {
@@ -233,6 +250,7 @@ pub fn build_linear_index(module: &Module) -> LinearIndex {
                 handle_type_name: machine_handle_type_name(&machine_def.name),
                 action_overrides,
                 deliver_helpers,
+                wait_helpers,
             },
         );
     }
