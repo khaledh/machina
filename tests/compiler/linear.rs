@@ -622,6 +622,8 @@ fn linear_type_hosted_create_rejects_machine_host_mismatch() {
 #[test]
 fn linear_type_machine_requires_trigger_handlers() {
     let source = r#"
+        type CIPassed = {}
+
         @linear
         type PullRequest = {
             id: u64,
@@ -634,7 +636,7 @@ fn linear_type_machine_requires_trigger_handlers() {
             actions {}
 
             triggers {
-                ci_passed: Draft -> Review,
+                CIPassed: Draft -> Review,
             }
 
             roles {
@@ -658,7 +660,7 @@ fn linear_type_machine_requires_trigger_handlers() {
     assert!(
         rendered.contains("MC-MACHINE-MISSING-TRIGGER-HANDLER")
             || rendered.contains("missing trigger")
-            || rendered.contains("ci_passed"),
+            || rendered.contains("CIPassed"),
         "expected missing trigger handler diagnostic, got: {rendered}"
     );
 }
@@ -666,6 +668,8 @@ fn linear_type_machine_requires_trigger_handlers() {
 #[test]
 fn linear_type_machine_accepts_valid_trigger_handler_body() {
     let source = r#"
+        type CIPassed = {}
+
         @linear
         type PullRequest = {
             id: u64,
@@ -678,7 +682,7 @@ fn linear_type_machine_accepts_valid_trigger_handler_body() {
             actions {}
 
             triggers {
-                ci_passed: Draft -> Review,
+                CIPassed: Draft -> Review,
             }
 
             roles {
@@ -691,7 +695,7 @@ fn linear_type_machine_accepts_valid_trigger_handler_body() {
                 Self {}
             }
 
-            trigger ci_passed(draft) {
+            trigger CIPassed(draft) {
                 draft;
                 Review {}
             }
@@ -708,6 +712,8 @@ fn linear_type_machine_accepts_valid_trigger_handler_body() {
 #[test]
 fn linear_type_machine_rejects_trigger_wrong_target_state() {
     let source = r#"
+        type CIPassed = {}
+
         @linear
         type PullRequest = {
             id: u64,
@@ -720,7 +726,7 @@ fn linear_type_machine_rejects_trigger_wrong_target_state() {
             actions {}
 
             triggers {
-                ci_passed: Draft -> Review,
+                CIPassed: Draft -> Review,
             }
 
             roles {
@@ -733,7 +739,7 @@ fn linear_type_machine_rejects_trigger_wrong_target_state() {
                 Self {}
             }
 
-            trigger ci_passed(draft) {
+            trigger CIPassed(draft) {
                 draft;
                 Draft {}
             }
@@ -749,7 +755,7 @@ fn linear_type_machine_rejects_trigger_wrong_target_state() {
     assert!(
         rendered.contains("MC-MACHINE-HANDLER-TYPE-MISMATCH")
             || rendered.contains("target state")
-            || rendered.contains("ci_passed"),
+            || rendered.contains("CIPassed"),
         "expected trigger target mismatch diagnostic, got: {rendered}"
     );
 }
@@ -806,6 +812,8 @@ fn linear_type_machine_rejects_extra_action_override() {
 #[test]
 fn linear_type_machine_rejects_extra_trigger_params() {
     let source = r#"
+        type CIPassed = {}
+
         @linear
         type PullRequest = {
             id: u64,
@@ -818,7 +826,7 @@ fn linear_type_machine_rejects_extra_trigger_params() {
             actions {}
 
             triggers {
-                ci_passed: Draft -> Review,
+                CIPassed: Draft -> Review,
             }
 
             roles {
@@ -831,7 +839,7 @@ fn linear_type_machine_rejects_extra_trigger_params() {
                 Self {}
             }
 
-            trigger ci_passed(draft, extra: u64) {
+            trigger CIPassed(draft, extra: u64) {
                 draft;
                 extra;
             }
@@ -847,8 +855,181 @@ fn linear_type_machine_rejects_extra_trigger_params() {
     assert!(
         rendered.contains("MC-MACHINE-HANDLER-TYPE-MISMATCH")
             || rendered.contains("parameter")
-            || rendered.contains("ci_passed"),
+            || rendered.contains("CIPassed"),
         "expected machine handler type mismatch diagnostic, got: {rendered}"
+    );
+}
+
+#[test]
+fn linear_type_machine_deliver_accepts_declared_event_type() {
+    let source = r#"
+        type CIPassed = {
+            pr_id: u64,
+        }
+
+        @linear
+        type PullRequest = {
+            id: u64,
+
+            states {
+                Draft,
+                Review,
+            }
+
+            actions {}
+
+            triggers {
+                CIPassed: Draft -> Review,
+            }
+
+            roles {
+                Author {}
+            }
+        }
+
+        machine PRService hosts PullRequest(key: id) {
+            fn new() -> Self {
+                Self {}
+            }
+
+            trigger CIPassed(draft) {
+                draft;
+                Review {}
+            }
+
+            on CIPassed(event) {
+                match self.deliver(event.pr_id, event) {
+                    Delivered => {}
+                    InstanceNotFound => {}
+                    InvalidState => {}
+                }
+            }
+        }
+    "#;
+
+    compile_linear_source(
+        source,
+        "tests/fixtures/linear/machine_deliver_declared_event.mc",
+    )
+    .expect("declared trigger event delivery should compile");
+}
+
+#[test]
+fn linear_type_machine_deliver_rejects_key_type_mismatch() {
+    let source = r#"
+        type CIPassed = {
+            pr_id: u64,
+        }
+
+        @linear
+        type PullRequest = {
+            id: u64,
+
+            states {
+                Draft,
+                Review,
+            }
+
+            actions {}
+
+            triggers {
+                CIPassed: Draft -> Review,
+            }
+
+            roles {
+                Author {}
+            }
+        }
+
+        machine PRService hosts PullRequest(key: id) {
+            fn new() -> Self {
+                Self {}
+            }
+
+            trigger CIPassed(draft) {
+                draft;
+                Review {}
+            }
+
+            on CIPassed(event) {
+                let _result = self.deliver("wrong", event);
+            }
+        }
+    "#;
+
+    let errors = compile_linear_source(
+        source,
+        "tests/fixtures/linear/machine_deliver_wrong_key_type.mc",
+    )
+    .expect_err("deliver should reject key type mismatches");
+    let rendered = format!("{errors:#?}");
+    assert!(
+        rendered.contains("deliver")
+            || rendered.contains("key")
+            || rendered.contains("MC-MACHINE-DELIVER-KEY-TYPE"),
+        "expected deliver key type diagnostic, got: {rendered}"
+    );
+}
+
+#[test]
+fn linear_type_machine_deliver_rejects_unknown_event_type() {
+    let source = r#"
+        type CIPassed = {
+            pr_id: u64,
+        }
+
+        type CIFailed = {
+            pr_id: u64,
+        }
+
+        @linear
+        type PullRequest = {
+            id: u64,
+
+            states {
+                Draft,
+                Review,
+            }
+
+            actions {}
+
+            triggers {
+                CIPassed: Draft -> Review,
+            }
+
+            roles {
+                Author {}
+            }
+        }
+
+        machine PRService hosts PullRequest(key: id) {
+            fn new() -> Self {
+                Self {}
+            }
+
+            trigger CIPassed(draft) {
+                draft;
+                Review {}
+            }
+
+            on CIFailed(event) {
+                let _result = self.deliver(event.pr_id, event);
+            }
+        }
+    "#;
+
+    let errors = compile_linear_source(
+        source,
+        "tests/fixtures/linear/machine_deliver_unknown_event.mc",
+    )
+    .expect_err("deliver should reject undeclared trigger event types");
+    let rendered = format!("{errors:#?}");
+    assert!(
+        rendered.contains("deliver")
+            || rendered.contains("trigger")
+            || rendered.contains("CIFailed")
+            || rendered.contains("MC-MACHINE-DELIVER-UNKNOWN-TRIGGER"),
+        "expected deliver unknown-trigger diagnostic, got: {rendered}"
     );
 }
 

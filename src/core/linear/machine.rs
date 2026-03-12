@@ -15,6 +15,11 @@
 //!   returns `HostedType | SessionError`. `service.create(PullRequest as Author)`
 //!   is rewritten to call this.
 //!
+//! - **On-handler helpers**: a per-machine-per-handler function that carries the
+//!   body of each `on` handler through ordinary resolve/typecheck. Machine bodies
+//!   are still parse-only overall, so generated helpers are the narrowest way to
+//!   make `on` bodies semantic without committing to full machine execution yet.
+//!
 //! - **Self-type rewriting**: `Self` references in machine constructor bodies are
 //!   rewritten to the generated handle type, so `Self {}` returns the right struct.
 //!
@@ -65,6 +70,14 @@ pub(super) struct MachineTriggerHandlerInfo {
     pub fn_name: String,
 }
 
+#[derive(Clone, Debug)]
+pub(super) struct MachineOnHandlerInfo {
+    pub handle_type_name: String,
+    pub params: Vec<Param>,
+    pub body: Expr,
+    pub fn_name: String,
+}
+
 // ── Name generation ─────────────────────────────────────────────────
 
 pub(crate) fn machine_handle_type_name(machine_name: &str) -> String {
@@ -97,6 +110,10 @@ pub(crate) fn machine_action_override_fn_name(machine_name: &str, action_name: &
 
 pub(crate) fn machine_trigger_handler_fn_name(machine_name: &str, trigger_name: &str) -> String {
     format!("__mc_machine_trigger_{machine_name}_{trigger_name}")
+}
+
+pub(crate) fn machine_on_handler_fn_name(machine_name: &str, handler_index: usize) -> String {
+    format!("__mc_machine_on_{machine_name}_{handler_index}")
 }
 
 // ── Collection ──────────────────────────────────────────────────────
@@ -214,6 +231,36 @@ pub(super) fn collect_machine_trigger_handler_infos(
         .collect()
 }
 
+pub(super) fn collect_machine_on_handler_infos(module: &Module) -> Vec<MachineOnHandlerInfo> {
+    module
+        .machine_defs()
+        .into_iter()
+        .flat_map(|machine_def| {
+            let handle_type_name = machine_handle_type_name(&machine_def.name);
+            machine_def
+                .items
+                .iter()
+                .enumerate()
+                .filter_map(|(index, item)| {
+                    let MachineItem::On(handler) = item else {
+                        return None;
+                    };
+                    let mut params = handler.params.clone();
+                    if let Some(provenance) = &handler.provenance {
+                        params.push(provenance.param.clone());
+                    }
+                    Some(MachineOnHandlerInfo {
+                        handle_type_name: handle_type_name.clone(),
+                        params,
+                        body: handler.body.clone(),
+                        fn_name: machine_on_handler_fn_name(&machine_def.name, index),
+                    })
+                })
+                .collect::<Vec<_>>()
+        })
+        .collect()
+}
+
 // ── Support type generation ─────────────────────────────────────────
 
 /// Ensure `MachineError` and `SessionError` enum types exist in the module.
@@ -285,6 +332,7 @@ pub(super) fn append_machine_spawn_support(
     machine_infos: &[MachineSpawnInfo],
     action_override_infos: &[MachineActionOverrideInfo],
     trigger_handler_infos: &[MachineTriggerHandlerInfo],
+    on_handler_infos: &[MachineOnHandlerInfo],
     node_id_gen: &mut NodeIdGen,
 ) {
     for info in machine_infos {
@@ -334,6 +382,15 @@ pub(super) fn append_machine_spawn_support(
             .top_level_items
             .push(TopLevelItem::FuncDef(build_machine_trigger_handler_func(
                 trigger_info,
+                node_id_gen,
+            )));
+    }
+
+    for on_info in on_handler_infos {
+        module
+            .top_level_items
+            .push(TopLevelItem::FuncDef(build_machine_on_handler_func(
+                on_info,
                 node_id_gen,
             )));
     }
@@ -704,6 +761,50 @@ fn build_machine_trigger_handler_func(
                 id: node_id_gen.new_id(),
                 kind: TypeExprKind::Named {
                     ident: info.hosted_type_name.clone(),
+                    type_args: Vec::new(),
+                },
+                span,
+            },
+            span,
+        },
+        body: info.body.clone(),
+        span,
+    }
+}
+
+fn build_machine_on_handler_func(
+    info: &MachineOnHandlerInfo,
+    node_id_gen: &mut NodeIdGen,
+) -> FuncDef {
+    let span = Span::default();
+    FuncDef {
+        id: node_id_gen.new_id(),
+        attrs: Vec::new(),
+        sig: crate::core::ast::FunctionSig {
+            name: info.fn_name.clone(),
+            type_params: Vec::new(),
+            params: std::iter::once(Param {
+                id: node_id_gen.new_id(),
+                ident: "self".to_string(),
+                mode: ParamMode::In,
+                typ: TypeExpr {
+                    id: node_id_gen.new_id(),
+                    kind: TypeExprKind::Named {
+                        ident: info.handle_type_name.clone(),
+                        type_args: Vec::new(),
+                    },
+                    span,
+                },
+                span,
+            })
+            .chain(info.params.iter().cloned())
+            .collect(),
+            // `on` handlers are machine-level message handlers. For now they
+            // are modeled as side-effecting helpers that return unit.
+            ret_ty_expr: TypeExpr {
+                id: node_id_gen.new_id(),
+                kind: TypeExprKind::Named {
+                    ident: "()".to_string(),
                     type_args: Vec::new(),
                 },
                 span,
