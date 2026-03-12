@@ -346,6 +346,62 @@ fn linear_type_hosted_create_returns_initial_state() {
 }
 
 #[test]
+fn linear_type_hosted_action_uses_machine_override_when_present() {
+    let run = run_program(
+        "linear_type_hosted_action_override_dispatch",
+        r#"
+            @linear
+            type PullRequest = {
+                id: u64,
+
+                states {
+                    Draft,
+                    Review,
+                }
+
+                actions {
+                    submit: Draft -> Review,
+                }
+
+                roles {
+                    Author { submit }
+                }
+            }
+
+            PullRequest :: {
+                fn submit(self) -> Review {
+                    println("base");
+                    Review {}
+                }
+            }
+
+            machine PRService hosts PullRequest(key: id) {
+                fn new() -> Self {
+                    Self {}
+                }
+
+                action submit(draft) -> Review {
+                    draft;
+                    println("override");
+                    Review {}
+                }
+            }
+
+            @machines
+            fn main() -> () | MachineError | SessionError {
+                let service = PRService::spawn()?;
+                let draft = service.create(PullRequest as Author)?;
+                let _review = draft.submit()?;
+            }
+        "#,
+    );
+
+    assert_eq!(run.status.code(), Some(0));
+    let stdout = String::from_utf8_lossy(&run.stdout);
+    assert_eq!(stdout, "override\n", "unexpected stdout: {stdout}");
+}
+
+#[test]
 fn linear_type_hosted_resume_returns_state_union() {
     let source = r#"
         @linear

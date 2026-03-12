@@ -26,8 +26,8 @@ use std::collections::HashMap;
 
 use crate::core::ast::visit_mut::{self, VisitorMut};
 use crate::core::ast::{
-    EnumDefVariant, Expr, ExprKind, FuncDef, MachineDef, Module, NodeIdGen, Param, ParamMode,
-    TopLevelItem, TypeDef, TypeDefKind, TypeExpr, TypeExprKind,
+    EnumDefVariant, Expr, ExprKind, FuncDef, MachineDef, MachineItem, Module, NodeIdGen, Param,
+    ParamMode, TopLevelItem, TypeDef, TypeDefKind, TypeExpr, TypeExprKind,
 };
 use crate::core::diag::Span;
 
@@ -44,13 +44,24 @@ pub(super) struct MachineSpawnInfo {
     pub spawn_fn_name: String,
 }
 
+#[derive(Clone, Debug)]
+pub(super) struct MachineActionOverrideInfo {
+    pub hosted_type_name: String,
+    pub handle_type_name: String,
+    pub instance_param_name: String,
+    pub params: Vec<Param>,
+    pub ret_ty_expr: TypeExpr,
+    pub body: Expr,
+    pub fn_name: String,
+}
+
 // ── Name generation ─────────────────────────────────────────────────
 
 pub(crate) fn machine_handle_type_name(machine_name: &str) -> String {
     format!("__mc_machine_handle_{machine_name}")
 }
 
-fn machine_spawn_fn_name(machine_name: &str) -> String {
+pub(crate) fn machine_spawn_fn_name(machine_name: &str) -> String {
     format!("__mc_machine_spawn_{machine_name}")
 }
 
@@ -68,6 +79,10 @@ pub(crate) fn machine_resume_fn_name(
     role_name: &str,
 ) -> String {
     format!("__mc_machine_resume_{machine_name}_{type_name}_{role_name}")
+}
+
+pub(crate) fn machine_action_override_fn_name(machine_name: &str, action_name: &str) -> String {
+    format!("__mc_machine_action_{machine_name}_{action_name}")
 }
 
 // ── Collection ──────────────────────────────────────────────────────
@@ -95,6 +110,50 @@ pub(super) fn collect_machine_spawn_infos(module: &Module) -> Vec<MachineSpawnIn
                 handle_type_name: machine_handle_type_name(&machine_def.name),
                 spawn_fn_name: machine_spawn_fn_name(&machine_def.name),
             })
+        })
+        .collect()
+}
+
+pub(super) fn collect_machine_action_override_infos(
+    module: &Module,
+) -> Vec<MachineActionOverrideInfo> {
+    let type_defs = super::type_defs_by_name(module);
+    module
+        .machine_defs()
+        .into_iter()
+        .flat_map(|machine_def| {
+            let Some(type_def) = type_defs.get(&machine_def.host.type_name) else {
+                return Vec::new();
+            };
+            let TypeDefKind::Linear { linear } = &type_def.kind else {
+                return Vec::new();
+            };
+            let action_by_name = linear
+                .actions
+                .iter()
+                .map(|action| (action.name.as_str(), action))
+                .collect::<HashMap<_, _>>();
+            let handle_type_name = machine_handle_type_name(&machine_def.name);
+            machine_def
+                .items
+                .iter()
+                .filter_map(|item| {
+                    let MachineItem::Action(handler) = item else {
+                        return None;
+                    };
+                    action_by_name.get(handler.name.as_str())?;
+                    let ret_ty_expr = handler.ret_ty_expr.clone()?;
+                    Some(MachineActionOverrideInfo {
+                        hosted_type_name: machine_def.host.type_name.clone(),
+                        handle_type_name: handle_type_name.clone(),
+                        instance_param_name: handler.instance_param.clone(),
+                        params: handler.params.clone(),
+                        ret_ty_expr,
+                        body: handler.body.clone(),
+                        fn_name: machine_action_override_fn_name(&machine_def.name, &handler.name),
+                    })
+                })
+                .collect::<Vec<_>>()
         })
         .collect()
 }
@@ -168,6 +227,7 @@ fn ensure_type_def(module: &mut Module, type_name: &str, item: TopLevelItem) {
 pub(super) fn append_machine_spawn_support(
     module: &mut Module,
     machine_infos: &[MachineSpawnInfo],
+    action_override_infos: &[MachineActionOverrideInfo],
     node_id_gen: &mut NodeIdGen,
 ) {
     for info in machine_infos {
@@ -201,6 +261,15 @@ pub(super) fn append_machine_spawn_support(
                     node_id_gen,
                 )));
         }
+    }
+
+    for override_info in action_override_infos {
+        module
+            .top_level_items
+            .push(TopLevelItem::FuncDef(build_machine_action_override_func(
+                override_info,
+                node_id_gen,
+            )));
     }
 }
 
@@ -459,6 +528,130 @@ fn build_machine_resume_func(
             span,
         },
         span,
+    }
+}
+
+fn build_machine_action_override_func(
+    info: &MachineActionOverrideInfo,
+    node_id_gen: &mut NodeIdGen,
+) -> FuncDef {
+    let span = Span::default();
+    FuncDef {
+        id: node_id_gen.new_id(),
+        attrs: Vec::new(),
+        sig: crate::core::ast::FunctionSig {
+            name: info.fn_name.clone(),
+            type_params: Vec::new(),
+            params: std::iter::once(Param {
+                id: node_id_gen.new_id(),
+                ident: "self".to_string(),
+                mode: ParamMode::In,
+                typ: TypeExpr {
+                    id: node_id_gen.new_id(),
+                    kind: TypeExprKind::Named {
+                        ident: info.handle_type_name.clone(),
+                        type_args: Vec::new(),
+                    },
+                    span,
+                },
+                span,
+            })
+            .chain(std::iter::once(Param {
+                id: node_id_gen.new_id(),
+                ident: info.instance_param_name.clone(),
+                // The generated helper takes the source-state value by ordinary
+                // input. Linearity has already been enforced in the source
+                // program; using `sink` here would trigger the structural
+                // checker for an internal helper over the lowered enum type.
+                mode: ParamMode::In,
+                typ: TypeExpr {
+                    id: node_id_gen.new_id(),
+                    kind: TypeExprKind::Named {
+                        ident: info.hosted_type_name.clone(),
+                        type_args: Vec::new(),
+                    },
+                    span,
+                },
+                span,
+            }))
+            .chain(info.params.iter().cloned())
+            .collect(),
+            // Hosted overrides always behave like session operations, so the
+            // generated helper widens the base action return to include
+            // `SessionError`.
+            ret_ty_expr: widen_machine_override_return_type(
+                &info.ret_ty_expr,
+                &info.hosted_type_name,
+                node_id_gen,
+            ),
+            span,
+        },
+        body: info.body.clone(),
+        span,
+    }
+}
+
+fn widen_machine_override_return_type(
+    ret_ty_expr: &TypeExpr,
+    hosted_type_name: &str,
+    node_id_gen: &mut NodeIdGen,
+) -> TypeExpr {
+    let span = ret_ty_expr.span;
+    match &ret_ty_expr.kind {
+        TypeExprKind::Named { .. } => TypeExpr {
+            id: node_id_gen.new_id(),
+            kind: TypeExprKind::Union {
+                variants: vec![
+                    TypeExpr {
+                        id: node_id_gen.new_id(),
+                        kind: TypeExprKind::Named {
+                            ident: hosted_type_name.to_string(),
+                            type_args: Vec::new(),
+                        },
+                        span,
+                    },
+                    TypeExpr {
+                        id: node_id_gen.new_id(),
+                        kind: TypeExprKind::Named {
+                            ident: "SessionError".to_string(),
+                            type_args: Vec::new(),
+                        },
+                        span,
+                    },
+                ],
+            },
+            span,
+        },
+        TypeExprKind::Union { variants } => {
+            // Linear action declarations use the first union variant as the
+            // success/target state and the remaining variants as errors. The
+            // generated machine helper widens that success arm to the hosted
+            // enum type while preserving the declared error arms.
+            let mut widened = Vec::with_capacity(variants.len() + 1);
+            widened.push(TypeExpr {
+                id: node_id_gen.new_id(),
+                kind: TypeExprKind::Named {
+                    ident: hosted_type_name.to_string(),
+                    type_args: Vec::new(),
+                },
+                span,
+            });
+            widened.extend(variants.iter().skip(1).cloned());
+            widened.push(TypeExpr {
+                id: node_id_gen.new_id(),
+                kind: TypeExprKind::Named {
+                    ident: "SessionError".to_string(),
+                    type_args: Vec::new(),
+                },
+                span,
+            });
+            TypeExpr {
+                id: node_id_gen.new_id(),
+                kind: TypeExprKind::Union { variants: widened },
+                span,
+            }
+        }
+        _ => ret_ty_expr.clone(),
     }
 }
 

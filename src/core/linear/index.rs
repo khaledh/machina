@@ -13,7 +13,7 @@ use std::collections::HashMap;
 
 use crate::core::ast::{Module, NodeId, TypeDefKind, TypeExpr};
 
-use super::machine::machine_handle_type_name;
+use super::machine::{machine_action_override_fn_name, machine_handle_type_name};
 
 /// Metadata index for linear types, built after parsing and threaded through
 /// the compiler pipeline. The `hosted_action_exprs` map is populated during
@@ -23,6 +23,10 @@ use super::machine::machine_handle_type_name;
 pub struct LinearIndex {
     pub types: HashMap<String, LinearTypeInfo>,
     pub machine_hosts: HashMap<String, LinearHostInfo>,
+    /// Generated machine action override helpers keyed by function name. The
+    /// rewriter uses this to seed the source-state binding when rewriting the
+    /// cloned helper bodies.
+    pub action_override_fns: HashMap<String, GeneratedActionOverrideInfo>,
     /// Expression IDs of method calls on hosted bindings. Populated by the
     /// direct-mode rewriter when it encounters an action call on a binding
     /// that originated from `create(...)`. The type checker uses these to
@@ -52,6 +56,17 @@ pub struct LinearHostInfo {
     pub key_ty: TypeExpr,
     /// Name of the generated struct type that represents a handle to this machine.
     pub handle_type_name: String,
+    /// Generated override helper functions keyed by action name. When present,
+    /// hosted action calls dispatch through these helpers instead of the base
+    /// linear action implementation.
+    pub action_overrides: HashMap<String, String>,
+}
+
+#[derive(Clone, Debug)]
+pub struct GeneratedActionOverrideInfo {
+    pub hosted_type_name: String,
+    pub source_state: String,
+    pub instance_param_name: String,
 }
 
 #[derive(Clone, Debug)]
@@ -132,6 +147,7 @@ pub fn build_linear_index(module: &Module) -> LinearIndex {
     }
 
     let mut machine_hosts = HashMap::new();
+    let mut action_override_fns = HashMap::new();
     for machine_def in module.machine_defs() {
         // The index is built even for invalid source so early validation can
         // report targeted machine-host diagnostics. Skip malformed host entries
@@ -149,6 +165,8 @@ pub fn build_linear_index(module: &Module) -> LinearIndex {
         else {
             continue;
         };
+        let action_overrides =
+            collect_machine_action_overrides(machine_def, linear, &mut action_override_fns);
         machine_hosts.insert(
             machine_def.name.clone(),
             LinearHostInfo {
@@ -156,6 +174,7 @@ pub fn build_linear_index(module: &Module) -> LinearIndex {
                 key_field: machine_def.host.key_field.clone(),
                 key_ty: key_field.ty.clone(),
                 handle_type_name: machine_handle_type_name(&machine_def.name),
+                action_overrides,
             },
         );
     }
@@ -163,6 +182,58 @@ pub fn build_linear_index(module: &Module) -> LinearIndex {
     LinearIndex {
         types,
         machine_hosts,
+        action_override_fns,
         hosted_action_exprs: HashMap::new(),
     }
+}
+
+fn collect_machine_action_overrides(
+    machine_def: &crate::core::ast::MachineDef,
+    linear: &crate::core::ast::LinearTypeDef,
+    generated: &mut HashMap<String, GeneratedActionOverrideInfo>,
+) -> HashMap<String, String> {
+    let mut action_counts = HashMap::<&str, usize>::new();
+    for action in &linear.actions {
+        *action_counts.entry(action.name.as_str()).or_default() += 1;
+    }
+
+    let mut overrides = HashMap::new();
+    for item in &machine_def.items {
+        let crate::core::ast::MachineItem::Action(handler) = item else {
+            continue;
+        };
+        // Leave malformed or ambiguous overrides to validation. The runtime
+        // dispatch map only includes handlers we can identify unambiguously.
+        if !linear
+            .actions
+            .iter()
+            .any(|action| action.name == handler.name)
+        {
+            continue;
+        }
+        if action_counts
+            .get(handler.name.as_str())
+            .copied()
+            .unwrap_or_default()
+            != 1
+        {
+            continue;
+        }
+        let fn_name = machine_action_override_fn_name(&machine_def.name, &handler.name);
+        generated.insert(
+            fn_name.clone(),
+            GeneratedActionOverrideInfo {
+                hosted_type_name: machine_def.host.type_name.clone(),
+                source_state: linear
+                    .actions
+                    .iter()
+                    .find(|action| action.name == handler.name)
+                    .map(|action| action.source_state.clone())
+                    .unwrap_or_default(),
+                instance_param_name: handler.instance_param.clone(),
+            },
+        );
+        overrides.insert(handler.name.clone(), fn_name);
+    }
+    overrides
 }

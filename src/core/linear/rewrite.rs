@@ -15,8 +15,9 @@
 //!   bindings to their current linear state. This enables:
 //!   - Correct method dispatch based on the caller's known state
 //!   - Use-after-consume detection (calling an action on an already-consumed binding)
-//!   - Hosted provenance tracking (bindings from `create(...)` propagate `hosted: true`
-//!     through action chains, so the type checker can make those calls fallible)
+//!   - Hosted provenance tracking (bindings from `create(...)` carry their
+//!     originating machine, so hosted action calls can either become fallible
+//!     base session actions or dispatch through machine override helpers)
 
 use std::collections::{HashMap, HashSet};
 
@@ -27,6 +28,7 @@ use crate::core::ast::{
 use crate::core::resolve::{REK, ResolveError};
 
 use super::index::{HostedActionExprInfo, LinearIndex};
+use super::machine::machine_spawn_fn_name;
 
 // -- Internal data structures ----------------------------------------
 
@@ -63,10 +65,22 @@ struct LinearValueState {
 struct LinearBindingState {
     value_state: LinearValueState,
     consumed: bool,
-    /// `true` if this binding came from `service.create(Type as Role)?` or from
-    /// a subsequent hosted action call. The type checker uses this (via
-    /// `hosted_action_exprs` in the linear index) to emit fallible obligations.
-    hosted: bool,
+    /// Hosted provenance for session values created from `machine.create(...)`.
+    /// We keep the producing machine name and the local handle binding name so
+    /// hosted action calls can lower to machine override helpers when one
+    /// exists.
+    hosted: Option<HostedProvenance>,
+}
+
+#[derive(Clone, Debug)]
+struct HostedProvenance {
+    machine_name: String,
+    handle_binding: String,
+}
+
+#[derive(Clone, Debug)]
+struct MachineBindingState {
+    machine_name: String,
 }
 
 // -- Collection ------------------------------------------------------
@@ -184,6 +198,7 @@ pub(super) fn rewrite_linear_method_blocks(
                     linear_index,
                     Some(&info.type_name),
                     Some(&source_state),
+                    &[],
                     node_id_gen,
                 );
             } else {
@@ -193,6 +208,7 @@ pub(super) fn rewrite_linear_method_blocks(
                     linear_index,
                     Some(&info.type_name),
                     None,
+                    &[],
                     node_id_gen,
                 );
             }
@@ -274,12 +290,36 @@ pub(super) fn rewrite_linear_exprs(
     for item in &mut module.top_level_items {
         match item {
             TopLevelItem::FuncDef(func) => {
+                let override_info = linear_index
+                    .action_override_fns
+                    .get(&func.sig.name)
+                    .cloned();
+                let seeded_bindings = override_info
+                    .as_ref()
+                    .map(|override_info| {
+                        vec![(
+                            override_info.instance_param_name.clone(),
+                            LinearBindingState {
+                                value_state: LinearValueState {
+                                    type_name: override_info.hosted_type_name.clone(),
+                                    state_name: override_info.source_state.clone(),
+                                },
+                                consumed: false,
+                                hosted: None,
+                            },
+                        )]
+                    })
+                    .unwrap_or_default();
+                let current_linear_type = override_info
+                    .as_ref()
+                    .map(|override_info| override_info.hosted_type_name.as_str());
                 errors.extend(rewrite_expr_with_linear_env(
                     &mut func.body,
                     infos,
                     linear_index,
+                    current_linear_type,
                     None,
-                    None,
+                    &seeded_bindings,
                     node_id_gen,
                 ));
             }
@@ -295,9 +335,55 @@ pub(super) fn rewrite_linear_exprs(
                             linear_index,
                             None,
                             None,
+                            &[],
                             node_id_gen,
                         ));
                     }
+                }
+            }
+            TopLevelItem::MachineDef(machine_def) => {
+                let Some(info) = infos.get(&machine_def.host.type_name) else {
+                    continue;
+                };
+
+                for machine_item in &mut machine_def.items {
+                    let source_state = match machine_item {
+                        crate::core::ast::MachineItem::Action(handler) => {
+                            unique_machine_action_source_state(info, &handler.name)
+                        }
+                        _ => None,
+                    };
+
+                    let Some(source_state) = source_state else {
+                        continue;
+                    };
+
+                    let handler = match machine_item {
+                        crate::core::ast::MachineItem::Action(handler) => handler,
+                        _ => continue,
+                    };
+
+                    rewrite_expr_with_linear_env(
+                        &mut handler.body,
+                        infos,
+                        linear_index,
+                        Some(&info.type_name),
+                        None,
+                        &[(
+                            handler.instance_param.clone(),
+                            LinearBindingState {
+                                value_state: LinearValueState {
+                                    type_name: info.type_name.clone(),
+                                    state_name: source_state,
+                                },
+                                consumed: false,
+                                hosted: None,
+                            },
+                        )],
+                        node_id_gen,
+                    )
+                    .into_iter()
+                    .for_each(|err| errors.push(err));
                 }
             }
             _ => {}
@@ -313,9 +399,11 @@ fn rewrite_expr_with_linear_env(
     linear_index: &mut LinearIndex,
     current_linear_type: Option<&str>,
     self_state: Option<&str>,
+    seeded_bindings: &[(String, LinearBindingState)],
     node_id_gen: &mut NodeIdGen,
 ) -> Vec<ResolveError> {
     let mut env = HashMap::new();
+    let mut machine_env = HashMap::new();
     let mut errors = Vec::new();
     if let (Some(type_name), Some(state_name)) = (current_linear_type, self_state) {
         env.insert(
@@ -326,9 +414,12 @@ fn rewrite_expr_with_linear_env(
                     state_name: state_name.to_string(),
                 },
                 consumed: false,
-                hosted: false,
+                hosted: None,
             },
         );
+    }
+    for (name, binding_state) in seeded_bindings {
+        env.insert(name.clone(), binding_state.clone());
     }
     let _ = rewrite_expr_in_scope(
         expr,
@@ -336,6 +427,7 @@ fn rewrite_expr_with_linear_env(
         linear_index,
         current_linear_type,
         &mut env,
+        &mut machine_env,
         &mut errors,
         node_id_gen,
     );
@@ -350,12 +442,14 @@ fn rewrite_expr_in_scope(
     linear_index: &mut LinearIndex,
     current_linear_type: Option<&str>,
     env: &mut HashMap<String, LinearBindingState>,
+    machine_env: &mut HashMap<String, MachineBindingState>,
     errors: &mut Vec<ResolveError>,
     node_id_gen: &mut NodeIdGen,
 ) -> Option<LinearBindingState> {
     match &mut expr.kind {
         ExprKind::Block { items, tail } => {
             let mut scope_env = env.clone();
+            let mut scope_machine_env = machine_env.clone();
             for item in items {
                 match item {
                     BlockItem::Stmt(stmt) => rewrite_stmt_in_scope(
@@ -364,6 +458,7 @@ fn rewrite_expr_in_scope(
                         linear_index,
                         current_linear_type,
                         &mut scope_env,
+                        &mut scope_machine_env,
                         errors,
                         node_id_gen,
                     ),
@@ -374,6 +469,7 @@ fn rewrite_expr_in_scope(
                             linear_index,
                             current_linear_type,
                             &mut scope_env,
+                            &mut scope_machine_env,
                             errors,
                             node_id_gen,
                         );
@@ -387,6 +483,7 @@ fn rewrite_expr_in_scope(
                     linear_index,
                     current_linear_type,
                     &mut scope_env,
+                    &mut scope_machine_env,
                     errors,
                     node_id_gen,
                 )
@@ -407,6 +504,7 @@ fn rewrite_expr_in_scope(
                 linear_index,
                 current_linear_type,
                 env,
+                machine_env,
                 errors,
                 node_id_gen,
             );
@@ -417,6 +515,7 @@ fn rewrite_expr_in_scope(
                     linear_index,
                     current_linear_type,
                     env,
+                    machine_env,
                     errors,
                     node_id_gen,
                 );
@@ -433,6 +532,8 @@ fn rewrite_expr_in_scope(
                 && let Some(info) = infos.get(type_name)
                 && info.role_names.contains(role_name)
                 && let Some(initial_state) = info.initial_state.clone()
+                && let Some(machine_ident) = callee_source_ident.clone()
+                && let Some(machine_binding) = machine_env.get(&machine_ident)
             {
                 return Some(LinearBindingState {
                     value_state: LinearValueState {
@@ -440,7 +541,10 @@ fn rewrite_expr_in_scope(
                         state_name: initial_state,
                     },
                     consumed: false,
-                    hosted: true,
+                    hosted: Some(HostedProvenance {
+                        machine_name: machine_binding.machine_name.clone(),
+                        handle_binding: machine_ident,
+                    }),
                 });
             }
 
@@ -466,9 +570,43 @@ fn rewrite_expr_in_scope(
                 binding.consumed = true;
             }
 
-            // For hosted bindings, record the expression so the type checker
-            // can emit a fallible obligation (`TargetState | SessionError`).
-            if callee_state.hosted {
+            if let Some(hosted) = &callee_state.hosted
+                && let Some(host_info) = linear_index.machine_hosts.get(&hosted.machine_name)
+                && let Some(override_fn_name) = host_info.action_overrides.get(&action_name)
+            {
+                let mut override_args = Vec::with_capacity(args.len() + 2);
+                override_args.push(crate::core::ast::CallArg {
+                    mode: crate::core::ast::CallArgMode::Default,
+                    expr: Expr {
+                        id: node_id_gen.new_id(),
+                        kind: ExprKind::Var {
+                            ident: hosted.handle_binding.clone(),
+                        },
+                        span: expr.span,
+                    },
+                    init: crate::core::ast::InitInfo::default(),
+                    span: expr.span,
+                });
+                override_args.push(crate::core::ast::CallArg {
+                    mode: crate::core::ast::CallArgMode::Default,
+                    expr: (**callee).clone(),
+                    init: crate::core::ast::InitInfo::default(),
+                    span: expr.span,
+                });
+                override_args.extend(args.iter().cloned());
+                expr.kind = ExprKind::Call {
+                    callee: Box::new(Expr {
+                        id: node_id_gen.new_id(),
+                        kind: ExprKind::Var {
+                            ident: override_fn_name.clone(),
+                        },
+                        span: expr.span,
+                    }),
+                    args: override_args,
+                };
+            } else if callee_state.hosted.is_some() {
+                // Hosted bindings without overrides still use the existing
+                // fallible session-action typing path.
                 linear_index.hosted_action_exprs.insert(
                     expr.id,
                     HostedActionExprInfo {
@@ -497,6 +635,7 @@ fn rewrite_expr_in_scope(
                     linear_index,
                     current_linear_type,
                     env,
+                    machine_env,
                     errors,
                     node_id_gen,
                 );
@@ -519,7 +658,7 @@ fn rewrite_expr_in_scope(
                         state_name,
                     },
                     consumed: false,
-                    hosted: false,
+                    hosted: None,
                 });
             }
 
@@ -544,7 +683,7 @@ fn rewrite_expr_in_scope(
                         state_name,
                     },
                     consumed: false,
-                    hosted: false,
+                    hosted: None,
                 });
             }
             None
@@ -556,6 +695,7 @@ fn rewrite_expr_in_scope(
                 linear_index,
                 current_linear_type,
                 env,
+                machine_env,
                 errors,
                 node_id_gen,
             );
@@ -566,6 +706,7 @@ fn rewrite_expr_in_scope(
                     linear_index,
                     current_linear_type,
                     env,
+                    machine_env,
                     errors,
                     node_id_gen,
                 );
@@ -599,7 +740,7 @@ fn rewrite_expr_in_scope(
                     state_name,
                 },
                 consumed: false,
-                hosted: false,
+                hosted: None,
             })
         }
         ExprKind::EnumVariant {
@@ -615,6 +756,7 @@ fn rewrite_expr_in_scope(
                     linear_index,
                     current_linear_type,
                     env,
+                    machine_env,
                     errors,
                     node_id_gen,
                 );
@@ -626,7 +768,7 @@ fn rewrite_expr_in_scope(
                         state_name: variant.clone(),
                     },
                     consumed: false,
-                    hosted: false,
+                    hosted: None,
                 });
             }
             None
@@ -643,6 +785,7 @@ fn rewrite_expr_in_scope(
                 linear_index,
                 current_linear_type,
                 env,
+                machine_env,
                 errors,
                 node_id_gen,
             );
@@ -653,6 +796,7 @@ fn rewrite_expr_in_scope(
                     linear_index,
                     current_linear_type,
                     env,
+                    machine_env,
                     errors,
                     node_id_gen,
                 );
@@ -667,17 +811,20 @@ fn rewrite_expr_in_scope(
                 linear_index,
                 current_linear_type,
                 env,
+                machine_env,
                 errors,
                 node_id_gen,
             );
             for arm in arms {
                 let mut arm_env = env.clone();
+                let mut arm_machine_env = machine_env.clone();
                 let _ = rewrite_expr_in_scope(
                     &mut arm.body,
                     infos,
                     linear_index,
                     current_linear_type,
                     &mut arm_env,
+                    &mut arm_machine_env,
                     errors,
                     node_id_gen,
                 );
@@ -695,17 +842,21 @@ fn rewrite_expr_in_scope(
                 linear_index,
                 current_linear_type,
                 env,
+                machine_env,
                 errors,
                 node_id_gen,
             );
             let mut then_env = env.clone();
             let mut else_env = env.clone();
+            let mut then_machine_env = machine_env.clone();
+            let mut else_machine_env = machine_env.clone();
             let _ = rewrite_expr_in_scope(
                 then_body,
                 infos,
                 linear_index,
                 current_linear_type,
                 &mut then_env,
+                &mut then_machine_env,
                 errors,
                 node_id_gen,
             );
@@ -715,6 +866,7 @@ fn rewrite_expr_in_scope(
                 linear_index,
                 current_linear_type,
                 &mut else_env,
+                &mut else_machine_env,
                 errors,
                 node_id_gen,
             );
@@ -728,6 +880,7 @@ fn rewrite_expr_in_scope(
                     linear_index,
                     current_linear_type,
                     env,
+                    machine_env,
                     errors,
                     node_id_gen,
                 );
@@ -744,6 +897,7 @@ fn rewrite_expr_in_scope(
                             linear_index,
                             current_linear_type,
                             env,
+                            machine_env,
                             errors,
                             node_id_gen,
                         );
@@ -756,6 +910,7 @@ fn rewrite_expr_in_scope(
                         linear_index,
                         current_linear_type,
                         env,
+                        machine_env,
                         errors,
                         node_id_gen,
                     );
@@ -771,6 +926,7 @@ fn rewrite_expr_in_scope(
                     linear_index,
                     current_linear_type,
                     env,
+                    machine_env,
                     errors,
                     node_id_gen,
                 );
@@ -785,6 +941,7 @@ fn rewrite_expr_in_scope(
                     linear_index,
                     current_linear_type,
                     env,
+                    machine_env,
                     errors,
                     node_id_gen,
                 );
@@ -794,6 +951,7 @@ fn rewrite_expr_in_scope(
                     linear_index,
                     current_linear_type,
                     env,
+                    machine_env,
                     errors,
                     node_id_gen,
                 );
@@ -817,6 +975,7 @@ fn rewrite_expr_in_scope(
                 linear_index,
                 current_linear_type,
                 env,
+                machine_env,
                 errors,
                 node_id_gen,
             );
@@ -833,6 +992,7 @@ fn rewrite_stmt_in_scope(
     linear_index: &mut LinearIndex,
     current_linear_type: Option<&str>,
     env: &mut HashMap<String, LinearBindingState>,
+    machine_env: &mut HashMap<String, MachineBindingState>,
     errors: &mut Vec<ResolveError>,
     node_id_gen: &mut NodeIdGen,
 ) {
@@ -845,6 +1005,7 @@ fn rewrite_stmt_in_scope(
                 linear_index,
                 current_linear_type,
                 env,
+                machine_env,
                 errors,
                 node_id_gen,
             );
@@ -852,8 +1013,13 @@ fn rewrite_stmt_in_scope(
                 let source_ident = ident.clone();
                 if let Some(result_state) = result_state {
                     env.insert(source_ident, result_state);
+                    machine_env.remove(ident);
+                } else if let Some(machine_name) = machine_spawn_machine_name(value, linear_index) {
+                    machine_env.insert(source_ident.clone(), MachineBindingState { machine_name });
+                    env.remove(ident);
                 } else {
                     env.remove(&source_ident);
+                    machine_env.remove(ident);
                 }
             }
         }
@@ -869,6 +1035,7 @@ fn rewrite_stmt_in_scope(
                 linear_index,
                 current_linear_type,
                 env,
+                machine_env,
                 errors,
                 node_id_gen,
             );
@@ -878,6 +1045,7 @@ fn rewrite_stmt_in_scope(
                 linear_index,
                 current_linear_type,
                 env,
+                machine_env,
                 errors,
                 node_id_gen,
             );
@@ -889,16 +1057,19 @@ fn rewrite_stmt_in_scope(
                 linear_index,
                 current_linear_type,
                 env,
+                machine_env,
                 errors,
                 node_id_gen,
             );
             let mut body_env = env.clone();
+            let mut body_machine_env = machine_env.clone();
             let _ = rewrite_expr_in_scope(
                 body,
                 infos,
                 linear_index,
                 current_linear_type,
                 &mut body_env,
+                &mut body_machine_env,
                 errors,
                 node_id_gen,
             );
@@ -910,16 +1081,19 @@ fn rewrite_stmt_in_scope(
                 linear_index,
                 current_linear_type,
                 env,
+                machine_env,
                 errors,
                 node_id_gen,
             );
             let mut body_env = env.clone();
+            let mut body_machine_env = machine_env.clone();
             let _ = rewrite_expr_in_scope(
                 body,
                 infos,
                 linear_index,
                 current_linear_type,
                 &mut body_env,
+                &mut body_machine_env,
                 errors,
                 node_id_gen,
             );
@@ -931,6 +1105,7 @@ fn rewrite_stmt_in_scope(
                 linear_index,
                 current_linear_type,
                 env,
+                machine_env,
                 errors,
                 node_id_gen,
             );
@@ -946,10 +1121,12 @@ fn rewrite_stmt_in_scope(
                 linear_index,
                 current_linear_type,
                 env,
+                machine_env,
                 errors,
                 node_id_gen,
             );
             let mut body_env = env.clone();
+            let mut body_machine_env = machine_env.clone();
             if let Some(result_state) = result_state {
                 body_env.insert(binding.ident.clone(), result_state);
             }
@@ -959,6 +1136,7 @@ fn rewrite_stmt_in_scope(
                 linear_index,
                 current_linear_type,
                 &mut body_env,
+                &mut body_machine_env,
                 errors,
                 node_id_gen,
             );
@@ -971,6 +1149,7 @@ fn rewrite_stmt_in_scope(
                     linear_index,
                     current_linear_type,
                     env,
+                    machine_env,
                     errors,
                     node_id_gen,
                 );
@@ -994,6 +1173,7 @@ fn walk_child_exprs(
     linear_index: &mut LinearIndex,
     current_linear_type: Option<&str>,
     env: &mut HashMap<String, LinearBindingState>,
+    machine_env: &mut HashMap<String, MachineBindingState>,
     errors: &mut Vec<ResolveError>,
     node_id_gen: &mut NodeIdGen,
 ) {
@@ -1005,6 +1185,7 @@ fn walk_child_exprs(
                 linear_index,
                 current_linear_type,
                 env,
+                machine_env,
                 errors,
                 node_id_gen,
             );
@@ -1014,6 +1195,7 @@ fn walk_child_exprs(
                 linear_index,
                 current_linear_type,
                 env,
+                machine_env,
                 errors,
                 node_id_gen,
             );
@@ -1033,6 +1215,7 @@ fn walk_child_exprs(
                 linear_index,
                 current_linear_type,
                 env,
+                machine_env,
                 errors,
                 node_id_gen,
             );
@@ -1047,6 +1230,7 @@ fn walk_child_exprs(
                 linear_index,
                 current_linear_type,
                 env,
+                machine_env,
                 errors,
                 node_id_gen,
             );
@@ -1057,6 +1241,7 @@ fn walk_child_exprs(
                     linear_index,
                     current_linear_type,
                     env,
+                    machine_env,
                     errors,
                     node_id_gen,
                 );
@@ -1069,6 +1254,7 @@ fn walk_child_exprs(
                 linear_index,
                 current_linear_type,
                 env,
+                machine_env,
                 errors,
                 node_id_gen,
             );
@@ -1079,6 +1265,7 @@ fn walk_child_exprs(
                     linear_index,
                     current_linear_type,
                     env,
+                    machine_env,
                     errors,
                     node_id_gen,
                 );
@@ -1091,6 +1278,7 @@ fn walk_child_exprs(
                 linear_index,
                 current_linear_type,
                 env,
+                machine_env,
                 errors,
                 node_id_gen,
             );
@@ -1100,6 +1288,7 @@ fn walk_child_exprs(
                 linear_index,
                 current_linear_type,
                 env,
+                machine_env,
                 errors,
                 node_id_gen,
             );
@@ -1111,6 +1300,7 @@ fn walk_child_exprs(
                 linear_index,
                 current_linear_type,
                 env,
+                machine_env,
                 errors,
                 node_id_gen,
             );
@@ -1121,6 +1311,7 @@ fn walk_child_exprs(
                     linear_index,
                     current_linear_type,
                     env,
+                    machine_env,
                     errors,
                     node_id_gen,
                 );
@@ -1132,6 +1323,7 @@ fn walk_child_exprs(
                     linear_index,
                     current_linear_type,
                     env,
+                    machine_env,
                     errors,
                     node_id_gen,
                 );
@@ -1144,6 +1336,7 @@ fn walk_child_exprs(
                 linear_index,
                 current_linear_type,
                 env,
+                machine_env,
                 errors,
                 node_id_gen,
             );
@@ -1155,6 +1348,7 @@ fn walk_child_exprs(
                 linear_index,
                 current_linear_type,
                 env,
+                machine_env,
                 errors,
                 node_id_gen,
             );
@@ -1165,6 +1359,7 @@ fn walk_child_exprs(
                     linear_index,
                     current_linear_type,
                     env,
+                    machine_env,
                     errors,
                     node_id_gen,
                 );
@@ -1177,6 +1372,7 @@ fn walk_child_exprs(
                 linear_index,
                 current_linear_type,
                 env,
+                machine_env,
                 errors,
                 node_id_gen,
             );
@@ -1186,18 +1382,21 @@ fn walk_child_exprs(
                 linear_index,
                 current_linear_type,
                 env,
+                machine_env,
                 errors,
                 node_id_gen,
             );
         }
         ExprKind::Closure { body, .. } => {
             let mut closure_env = HashMap::new();
+            let mut closure_machine_env = HashMap::new();
             let _ = rewrite_expr_in_scope(
                 body,
                 infos,
                 linear_index,
                 current_linear_type,
                 &mut closure_env,
+                &mut closure_machine_env,
                 errors,
                 node_id_gen,
             );
@@ -1209,6 +1408,7 @@ fn walk_child_exprs(
                 linear_index,
                 current_linear_type,
                 env,
+                machine_env,
                 errors,
                 node_id_gen,
             );
@@ -1218,6 +1418,7 @@ fn walk_child_exprs(
                 linear_index,
                 current_linear_type,
                 env,
+                machine_env,
                 errors,
                 node_id_gen,
             );
@@ -1231,6 +1432,7 @@ fn walk_child_exprs(
                         linear_index,
                         current_linear_type,
                         env,
+                        machine_env,
                         errors,
                         node_id_gen,
                     );
@@ -1276,11 +1478,62 @@ fn parse_qualified_linear_state_name(
     }
 }
 
+fn machine_spawn_machine_name(expr: &Expr, linear_index: &LinearIndex) -> Option<String> {
+    match &expr.kind {
+        ExprKind::Try { fallible_expr, .. } => {
+            machine_spawn_machine_name(fallible_expr, linear_index)
+        }
+        // The linear rewriter may inspect bindings both before and after the
+        // machine spawn sugar runs. Accept both `PRService::spawn()`'s parsed
+        // `EnumVariant` form and the lowered `__mc_machine_spawn_PRService()`
+        // call form so hosted provenance seeding stays robust across ordering.
+        ExprKind::EnumVariant {
+            enum_name, variant, ..
+        } if variant == "spawn" => linear_index
+            .machine_hosts
+            .contains_key(enum_name)
+            .then(|| enum_name.clone()),
+        ExprKind::Call { callee, .. } => {
+            let ExprKind::Var { ident } = &callee.kind else {
+                return None;
+            };
+            linear_index.machine_hosts.keys().find_map(|machine_name| {
+                if ident == &machine_spawn_fn_name(machine_name) {
+                    Some(machine_name.clone())
+                } else {
+                    None
+                }
+            })
+        }
+        _ => None,
+    }
+}
+
 fn bind_pattern_name_mut(pattern: &mut crate::core::ast::BindPattern) -> Option<&mut String> {
     match &mut pattern.kind {
         crate::core::ast::BindPatternKind::Name { ident } => Some(ident),
         _ => None,
     }
+}
+
+/// Find the unique source state for a machine action override name.
+///
+/// Same-named actions across multiple source states are intentionally treated
+/// as ambiguous here. Validation already rejects missing receiver annotations
+/// for that case, so the rewriter simply declines to seed a linear `self` state
+/// until the declaration becomes unambiguous.
+fn unique_machine_action_source_state(
+    info: &DirectLinearInfo,
+    action_name: &str,
+) -> Option<String> {
+    let mut matches =
+        info.action_by_source_and_name
+            .keys()
+            .filter_map(|(source_state, candidate_name)| {
+                (candidate_name == action_name).then(|| source_state.clone())
+            });
+    let first = matches.next()?;
+    matches.next().is_none().then_some(first)
 }
 
 /// The internal method name for a direct-mode action. Encodes the source state

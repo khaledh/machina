@@ -63,13 +63,19 @@ pub fn desugar_module(
 ) -> Vec<ResolveError> {
     let infos = rewrite::collect_direct_linear_infos(module);
     let machine_infos = machine::collect_machine_spawn_infos(module);
+    let action_override_infos = machine::collect_machine_action_override_infos(module);
 
     // Generate hosted support types and machine surface before direct-mode lowering,
     // since the generated types (MachineError, SessionError, handle structs) need to
     // exist before resolve sees them.
     if !machine_infos.is_empty() {
         machine::ensure_hosted_support_types(module, node_id_gen);
-        machine::append_machine_spawn_support(module, &machine_infos, node_id_gen);
+        machine::append_machine_spawn_support(
+            module,
+            &machine_infos,
+            &action_override_infos,
+            node_id_gen,
+        );
         machine::rewrite_machine_constructor_self_types(module, &machine_infos);
     }
 
