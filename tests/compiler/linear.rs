@@ -966,6 +966,7 @@ fn linear_type_machine_deliver_rejects_key_type_mismatch() {
     assert!(
         rendered.contains("deliver")
             || rendered.contains("key")
+            || rendered.contains("LinearMachineDeliverKeyTypeMismatch")
             || rendered.contains("MC-MACHINE-DELIVER-KEY-TYPE"),
         "expected deliver key type diagnostic, got: {rendered}"
     );

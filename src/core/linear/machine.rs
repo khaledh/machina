@@ -20,6 +20,10 @@
 //!   are still parse-only overall, so generated helpers are the narrowest way to
 //!   make `on` bodies semantic without committing to full machine execution yet.
 //!
+//! - **Deliver helpers**: a per-machine-per-trigger function used as the typed
+//!   surface for `self.deliver(key, event)`. These currently return a placeholder
+//!   `DeliverResult` until instance-backed delivery lands.
+//!
 //! - **Self-type rewriting**: `Self` references in machine constructor bodies are
 //!   rewritten to the generated handle type, so `Self {}` returns the right struct.
 //!
@@ -78,6 +82,14 @@ pub(super) struct MachineOnHandlerInfo {
     pub fn_name: String,
 }
 
+#[derive(Clone, Debug)]
+pub(super) struct MachineDeliverInfo {
+    pub handle_type_name: String,
+    pub key_ty: TypeExpr,
+    pub event_type_name: String,
+    pub fn_name: String,
+}
+
 // ── Name generation ─────────────────────────────────────────────────
 
 pub(crate) fn machine_handle_type_name(machine_name: &str) -> String {
@@ -114,6 +126,10 @@ pub(crate) fn machine_trigger_handler_fn_name(machine_name: &str, trigger_name: 
 
 pub(crate) fn machine_on_handler_fn_name(machine_name: &str, handler_index: usize) -> String {
     format!("__mc_machine_on_{machine_name}_{handler_index}")
+}
+
+pub(crate) fn machine_deliver_fn_name(machine_name: &str, event_type_name: &str) -> String {
+    format!("__mc_machine_deliver_{machine_name}_{event_type_name}")
 }
 
 // ── Collection ──────────────────────────────────────────────────────
@@ -261,6 +277,40 @@ pub(super) fn collect_machine_on_handler_infos(module: &Module) -> Vec<MachineOn
         .collect()
 }
 
+pub(super) fn collect_machine_deliver_infos(module: &Module) -> Vec<MachineDeliverInfo> {
+    let type_defs = super::type_defs_by_name(module);
+    module
+        .machine_defs()
+        .into_iter()
+        .flat_map(|machine_def| {
+            let Some(type_def) = type_defs.get(&machine_def.host.type_name) else {
+                return Vec::new();
+            };
+            let TypeDefKind::Linear { linear } = &type_def.kind else {
+                return Vec::new();
+            };
+            let Some(key_field) = linear
+                .fields
+                .iter()
+                .find(|field| field.name == machine_def.host.key_field)
+            else {
+                return Vec::new();
+            };
+            let handle_type_name = machine_handle_type_name(&machine_def.name);
+            linear
+                .triggers
+                .iter()
+                .map(|trigger| MachineDeliverInfo {
+                    handle_type_name: handle_type_name.clone(),
+                    key_ty: key_field.ty.clone(),
+                    event_type_name: trigger.name.clone(),
+                    fn_name: machine_deliver_fn_name(&machine_def.name, &trigger.name),
+                })
+                .collect::<Vec<_>>()
+        })
+        .collect()
+}
+
 // ── Support type generation ─────────────────────────────────────────
 
 /// Ensure `MachineError` and `SessionError` enum types exist in the module.
@@ -312,6 +362,39 @@ pub(super) fn ensure_hosted_support_types(module: &mut Module, node_id_gen: &mut
             span: Span::default(),
         }),
     );
+    ensure_type_def(
+        module,
+        "DeliverResult",
+        TopLevelItem::TypeDef(TypeDef {
+            id: node_id_gen.new_id(),
+            attrs: Vec::new(),
+            name: "DeliverResult".to_string(),
+            type_params: Vec::new(),
+            kind: TypeDefKind::Enum {
+                variants: vec![
+                    EnumDefVariant {
+                        id: node_id_gen.new_id(),
+                        name: "Delivered".to_string(),
+                        payload: Vec::new(),
+                        span: Span::default(),
+                    },
+                    EnumDefVariant {
+                        id: node_id_gen.new_id(),
+                        name: "InstanceNotFound".to_string(),
+                        payload: Vec::new(),
+                        span: Span::default(),
+                    },
+                    EnumDefVariant {
+                        id: node_id_gen.new_id(),
+                        name: "InvalidState".to_string(),
+                        payload: Vec::new(),
+                        span: Span::default(),
+                    },
+                ],
+            },
+            span: Span::default(),
+        }),
+    );
 }
 
 fn ensure_type_def(module: &mut Module, type_name: &str, item: TopLevelItem) {
@@ -333,6 +416,7 @@ pub(super) fn append_machine_spawn_support(
     action_override_infos: &[MachineActionOverrideInfo],
     trigger_handler_infos: &[MachineTriggerHandlerInfo],
     on_handler_infos: &[MachineOnHandlerInfo],
+    deliver_infos: &[MachineDeliverInfo],
     node_id_gen: &mut NodeIdGen,
 ) {
     for info in machine_infos {
@@ -391,6 +475,15 @@ pub(super) fn append_machine_spawn_support(
             .top_level_items
             .push(TopLevelItem::FuncDef(build_machine_on_handler_func(
                 on_info,
+                node_id_gen,
+            )));
+    }
+
+    for deliver_info in deliver_infos {
+        module
+            .top_level_items
+            .push(TopLevelItem::FuncDef(build_machine_deliver_func(
+                deliver_info,
                 node_id_gen,
             )));
     }
@@ -812,6 +905,84 @@ fn build_machine_on_handler_func(
             span,
         },
         body: info.body.clone(),
+        span,
+    }
+}
+
+fn build_machine_deliver_func(info: &MachineDeliverInfo, node_id_gen: &mut NodeIdGen) -> FuncDef {
+    let span = Span::default();
+    FuncDef {
+        id: node_id_gen.new_id(),
+        attrs: Vec::new(),
+        sig: crate::core::ast::FunctionSig {
+            name: info.fn_name.clone(),
+            type_params: Vec::new(),
+            params: vec![
+                Param {
+                    id: node_id_gen.new_id(),
+                    ident: "self".to_string(),
+                    mode: ParamMode::In,
+                    typ: TypeExpr {
+                        id: node_id_gen.new_id(),
+                        kind: TypeExprKind::Named {
+                            ident: info.handle_type_name.clone(),
+                            type_args: Vec::new(),
+                        },
+                        span,
+                    },
+                    span,
+                },
+                Param {
+                    id: node_id_gen.new_id(),
+                    ident: "key".to_string(),
+                    mode: ParamMode::In,
+                    typ: info.key_ty.clone(),
+                    span,
+                },
+                Param {
+                    id: node_id_gen.new_id(),
+                    ident: "event".to_string(),
+                    mode: ParamMode::In,
+                    typ: TypeExpr {
+                        id: node_id_gen.new_id(),
+                        kind: TypeExprKind::Named {
+                            ident: info.event_type_name.clone(),
+                            type_args: Vec::new(),
+                        },
+                        span,
+                    },
+                    span,
+                },
+            ],
+            ret_ty_expr: TypeExpr {
+                id: node_id_gen.new_id(),
+                kind: TypeExprKind::Named {
+                    ident: "DeliverResult".to_string(),
+                    type_args: Vec::new(),
+                },
+                span,
+            },
+            span,
+        },
+        // Placeholder body: the typed surface exists now, but instance-backed
+        // delivery semantics will land with the runtime work.
+        body: Expr {
+            id: node_id_gen.new_id(),
+            kind: ExprKind::Block {
+                items: Vec::new(),
+                tail: Some(Box::new(Expr {
+                    id: node_id_gen.new_id(),
+                    kind: ExprKind::EnumVariant {
+                        enum_name: "DeliverResult".to_string(),
+                        variant: "Delivered".to_string(),
+                        type_args: Vec::new(),
+                        payload: Vec::new(),
+                    },
+                    span,
+                })),
+            },
+            span,
+        },
         span,
     }
 }

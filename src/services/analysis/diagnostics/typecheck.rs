@@ -343,6 +343,8 @@ macro_rules! with_typecheck_variants {
             LinearSessionHostMismatch,
             LinearSessionUnknownRole,
             LinearSessionActionNotAllowed,
+            LinearMachineDeliverUnknownTrigger,
+            LinearMachineDeliverKeyTypeMismatch,
             CallableNotAccessible,
             PropertyNotAccessible,
             TraitBoundNotSatisfied,

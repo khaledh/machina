@@ -250,6 +250,7 @@ fn build_outputs(engine: &TypecheckEngine) -> FinalizeOutput {
     record_property_access_call_sigs(engine, &mut builder);
     record_linear_machine_create_call_sigs(engine, &mut builder);
     record_linear_machine_resume_call_sigs(engine, &mut builder);
+    record_linear_machine_deliver_call_sigs(engine, &mut builder);
     record_linear_session_call_sigs(engine, &mut builder);
 
     let (mut type_map, call_sigs, generic_insts) = builder.finish();
@@ -502,6 +503,64 @@ fn record_linear_machine_resume_call_sigs(engine: &TypecheckEngine, builder: &mu
                     mode: ParamMode::In,
                     ty: key_ty,
                 }],
+            },
+        );
+        builder.record_node_type(*expr_id, expected_ret);
+    }
+}
+
+fn record_linear_machine_deliver_call_sigs(engine: &TypecheckEngine, builder: &mut TypeMapBuilder) {
+    for obligation in &engine.state().constrain.expr_obligations {
+        let ExprObligation::LinearMachineDeliver {
+            expr_id,
+            receiver,
+            key_term,
+            event_term,
+            result,
+            ..
+        } = obligation
+        else {
+            continue;
+        };
+        let receiver_ty = resolve_term(receiver, engine);
+        let Some((_machine_name, host_info)) = machine_host_for_receiver(engine, &receiver_ty)
+        else {
+            continue;
+        };
+        let event_ty = resolve_term(event_term, engine);
+        let Some(event_type_name) = (match event_ty.peel_heap() {
+            Type::Struct { name, .. } | Type::Enum { name, .. } => Some(name),
+            _ => None,
+        }) else {
+            continue;
+        };
+        let Some(helper_name) = host_info.deliver_helpers.get(&event_type_name) else {
+            continue;
+        };
+        let Some(helper_def_id) = lookup_named_function(engine, helper_name) else {
+            continue;
+        };
+        let expected_ret = resolve_term(result, engine);
+        let key_ty = resolve_term(key_term, engine);
+        builder.record_call_sig(
+            *expr_id,
+            CallSig {
+                def_id: Some(helper_def_id),
+                selected: Some(SelectedCallable::Local(helper_def_id)),
+                receiver: Some(CallParam {
+                    mode: ParamMode::In,
+                    ty: receiver_ty,
+                }),
+                params: vec![
+                    CallParam {
+                        mode: ParamMode::In,
+                        ty: key_ty,
+                    },
+                    CallParam {
+                        mode: ParamMode::In,
+                        ty: event_ty,
+                    },
+                ],
             },
         );
         builder.record_node_type(*expr_id, expected_ret);

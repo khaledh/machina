@@ -14,7 +14,8 @@ use std::collections::HashMap;
 use crate::core::ast::{Module, NodeId, TypeDefKind, TypeExpr};
 
 use super::machine::{
-    machine_action_override_fn_name, machine_handle_type_name, machine_trigger_handler_fn_name,
+    machine_action_override_fn_name, machine_deliver_fn_name, machine_handle_type_name,
+    machine_trigger_handler_fn_name,
 };
 
 /// Metadata index for linear types, built after parsing and threaded through
@@ -48,6 +49,8 @@ pub struct LinearTypeInfo {
     pub roles: HashMap<String, LinearRoleInfo>,
     /// Keyed by (source_state, action_name).
     pub actions: HashMap<(String, String), LinearActionInfo>,
+    /// Trigger event types keyed by type name.
+    pub triggers: HashMap<String, LinearTriggerInfo>,
 }
 
 #[derive(Clone, Debug)]
@@ -66,6 +69,8 @@ pub struct LinearHostInfo {
     /// hosted action calls dispatch through these helpers instead of the base
     /// linear action implementation.
     pub action_overrides: HashMap<String, String>,
+    /// Generated deliver helpers keyed by trigger event type name.
+    pub deliver_helpers: HashMap<String, String>,
 }
 
 #[derive(Clone, Debug)]
@@ -90,6 +95,12 @@ pub struct LinearActionInfo {
     /// AST-level parameter types from the action declaration. Resolved to
     /// semantic types by the constraint collector when emitting obligations.
     pub params: Vec<TypeExpr>,
+}
+
+#[derive(Clone, Debug)]
+pub struct LinearTriggerInfo {
+    pub source_state: String,
+    pub target_state: String,
 }
 
 /// Marker recorded by the rewriter for each expression that is a hosted
@@ -154,6 +165,19 @@ pub fn build_linear_index(module: &Module) -> LinearIndex {
             .collect();
 
         let initial_state = linear.states.first().map(|state| state.name.clone());
+        let triggers = linear
+            .triggers
+            .iter()
+            .map(|trigger| {
+                (
+                    trigger.name.clone(),
+                    LinearTriggerInfo {
+                        source_state: trigger.source_state.clone(),
+                        target_state: trigger.target_state.clone(),
+                    },
+                )
+            })
+            .collect();
 
         types.insert(
             type_def.name.clone(),
@@ -162,6 +186,7 @@ pub fn build_linear_index(module: &Module) -> LinearIndex {
                 initial_state,
                 roles,
                 actions,
+                triggers,
             },
         );
     }
@@ -189,6 +214,16 @@ pub fn build_linear_index(module: &Module) -> LinearIndex {
         let action_overrides =
             collect_machine_action_overrides(machine_def, linear, &mut action_override_fns);
         collect_machine_trigger_handlers(machine_def, linear, &mut trigger_handler_fns);
+        let deliver_helpers = linear
+            .triggers
+            .iter()
+            .map(|trigger| {
+                (
+                    trigger.name.clone(),
+                    machine_deliver_fn_name(&machine_def.name, &trigger.name),
+                )
+            })
+            .collect();
         machine_hosts.insert(
             machine_def.name.clone(),
             LinearHostInfo {
@@ -197,6 +232,7 @@ pub fn build_linear_index(module: &Module) -> LinearIndex {
                 key_ty: key_field.ty.clone(),
                 handle_type_name: machine_handle_type_name(&machine_def.name),
                 action_overrides,
+                deliver_helpers,
             },
         );
     }

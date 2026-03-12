@@ -536,7 +536,8 @@ fn check_expr_obligations(
             }
             ExprObligation::LinearMachineCreate { .. }
             | ExprObligation::LinearMachineResume { .. }
-            | ExprObligation::LinearSessionAction { .. } => {
+            | ExprObligation::LinearSessionAction { .. }
+            | ExprObligation::LinearMachineDeliver { .. } => {
                 unreachable!("linear obligations are handled by solve::linear");
             }
         }
@@ -657,6 +658,22 @@ fn should_retry_post_call_expr_obligation(
             let result_ty = term_utils::resolve_term(result, unifier);
             term_utils::is_unresolved(&receiver_ty)
                 || term_utils::is_unresolved(&key_ty)
+                || term_utils::is_unresolved(&result_ty)
+        }
+        ExprObligation::LinearMachineDeliver {
+            receiver,
+            key_term,
+            event_term,
+            result,
+            ..
+        } => {
+            let receiver_ty = term_utils::resolve_term(receiver, unifier);
+            let key_ty = term_utils::resolve_term(key_term, unifier);
+            let event_ty = term_utils::resolve_term(event_term, unifier);
+            let result_ty = term_utils::resolve_term(result, unifier);
+            term_utils::is_unresolved(&receiver_ty)
+                || term_utils::is_unresolved(&key_ty)
+                || term_utils::is_unresolved(&event_ty)
                 || term_utils::is_unresolved(&result_ty)
         }
         ExprObligation::LinearSessionAction { .. } => false,

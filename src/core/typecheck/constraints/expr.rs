@@ -551,6 +551,21 @@ impl<'a> ConstraintCollector<'a> {
                         });
                     return expr_ty;
                 }
+                if method_name == "deliver" && args.len() == 2 {
+                    let key_term = self.collect_expr(&args[0].expr, None);
+                    let event_term = self.collect_expr(&args[1].expr, None);
+                    self.out
+                        .expr_obligations
+                        .push(ExprObligation::LinearMachineDeliver {
+                            expr_id: expr.id,
+                            receiver: receiver_ty,
+                            key_term,
+                            event_term,
+                            result: expr_ty.clone(),
+                            span: expr.span,
+                        });
+                    return expr_ty;
+                }
                 self.out.call_obligations.push(CallObligation {
                     call_node: expr.id,
                     span: expr.span,
