@@ -13,7 +13,9 @@ use std::collections::HashMap;
 
 use crate::core::ast::{Module, NodeId, TypeDefKind, TypeExpr};
 
-use super::machine::{machine_action_override_fn_name, machine_handle_type_name};
+use super::machine::{
+    machine_action_override_fn_name, machine_handle_type_name, machine_trigger_handler_fn_name,
+};
 
 /// Metadata index for linear types, built after parsing and threaded through
 /// the compiler pipeline. The `hosted_action_exprs` map is populated during
@@ -27,6 +29,10 @@ pub struct LinearIndex {
     /// rewriter uses this to seed the source-state binding when rewriting the
     /// cloned helper bodies.
     pub action_override_fns: HashMap<String, GeneratedActionOverrideInfo>,
+    /// Generated machine trigger helpers keyed by function name. Trigger
+    /// helpers are synthesized before resolve so their bodies can typecheck as
+    /// ordinary functions, but they still need linear source-state seeding.
+    pub trigger_handler_fns: HashMap<String, GeneratedTriggerHandlerInfo>,
     /// Expression IDs of method calls on hosted bindings. Populated by the
     /// direct-mode rewriter when it encounters an action call on a binding
     /// that originated from `create(...)`. The type checker uses these to
@@ -66,6 +72,15 @@ pub struct LinearHostInfo {
 pub struct GeneratedActionOverrideInfo {
     pub hosted_type_name: String,
     pub source_state: String,
+    pub instance_param_name: String,
+}
+
+#[derive(Clone, Debug)]
+pub struct GeneratedTriggerHandlerInfo {
+    pub machine_name: String,
+    pub hosted_type_name: String,
+    pub source_state: String,
+    pub target_state: String,
     pub instance_param_name: String,
 }
 
@@ -153,6 +168,7 @@ pub fn build_linear_index(module: &Module) -> LinearIndex {
 
     let mut machine_hosts = HashMap::new();
     let mut action_override_fns = HashMap::new();
+    let mut trigger_handler_fns = HashMap::new();
     for machine_def in module.machine_defs() {
         // The index is built even for invalid source so early validation can
         // report targeted machine-host diagnostics. Skip malformed host entries
@@ -172,6 +188,7 @@ pub fn build_linear_index(module: &Module) -> LinearIndex {
         };
         let action_overrides =
             collect_machine_action_overrides(machine_def, linear, &mut action_override_fns);
+        collect_machine_trigger_handlers(machine_def, linear, &mut trigger_handler_fns);
         machine_hosts.insert(
             machine_def.name.clone(),
             LinearHostInfo {
@@ -188,6 +205,7 @@ pub fn build_linear_index(module: &Module) -> LinearIndex {
         types,
         machine_hosts,
         action_override_fns,
+        trigger_handler_fns,
         hosted_action_exprs: HashMap::new(),
     }
 }
@@ -241,4 +259,36 @@ fn collect_machine_action_overrides(
         overrides.insert(handler.name.clone(), fn_name);
     }
     overrides
+}
+
+fn collect_machine_trigger_handlers(
+    machine_def: &crate::core::ast::MachineDef,
+    linear: &crate::core::ast::LinearTypeDef,
+    generated: &mut HashMap<String, GeneratedTriggerHandlerInfo>,
+) {
+    let triggers_by_name = linear
+        .triggers
+        .iter()
+        .map(|trigger| (trigger.name.as_str(), trigger))
+        .collect::<HashMap<_, _>>();
+
+    for item in &machine_def.items {
+        let crate::core::ast::MachineItem::Trigger(handler) = item else {
+            continue;
+        };
+        let Some(trigger) = triggers_by_name.get(handler.name.as_str()).copied() else {
+            continue;
+        };
+        let fn_name = machine_trigger_handler_fn_name(&machine_def.name, &handler.name);
+        generated.insert(
+            fn_name,
+            GeneratedTriggerHandlerInfo {
+                machine_name: machine_def.name.clone(),
+                hosted_type_name: machine_def.host.type_name.clone(),
+                source_state: trigger.source_state.clone(),
+                target_state: trigger.target_state.clone(),
+                instance_param_name: handler.instance_param.clone(),
+            },
+        );
+    }
 }

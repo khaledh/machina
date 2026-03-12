@@ -664,6 +664,97 @@ fn linear_type_machine_requires_trigger_handlers() {
 }
 
 #[test]
+fn linear_type_machine_accepts_valid_trigger_handler_body() {
+    let source = r#"
+        @linear
+        type PullRequest = {
+            id: u64,
+
+            states {
+                Draft,
+                Review,
+            }
+
+            actions {}
+
+            triggers {
+                ci_passed: Draft -> Review,
+            }
+
+            roles {
+                Author {}
+            }
+        }
+
+        machine PRService hosts PullRequest(key: id) {
+            fn new() -> Self {
+                Self {}
+            }
+
+            trigger ci_passed(draft) {
+                draft;
+                Review {}
+            }
+        }
+    "#;
+
+    compile_linear_source(
+        source,
+        "tests/fixtures/linear/machine_trigger_valid_body.mc",
+    )
+    .expect("valid trigger handlers should compile");
+}
+
+#[test]
+fn linear_type_machine_rejects_trigger_wrong_target_state() {
+    let source = r#"
+        @linear
+        type PullRequest = {
+            id: u64,
+
+            states {
+                Draft,
+                Review,
+            }
+
+            actions {}
+
+            triggers {
+                ci_passed: Draft -> Review,
+            }
+
+            roles {
+                Author {}
+            }
+        }
+
+        machine PRService hosts PullRequest(key: id) {
+            fn new() -> Self {
+                Self {}
+            }
+
+            trigger ci_passed(draft) {
+                draft;
+                Draft {}
+            }
+        }
+    "#;
+
+    let errors = compile_linear_source(
+        source,
+        "tests/fixtures/linear/machine_trigger_wrong_target.mc",
+    )
+    .expect_err("trigger handlers returning the wrong state should be rejected");
+    let rendered = format!("{errors:#?}");
+    assert!(
+        rendered.contains("MC-MACHINE-HANDLER-TYPE-MISMATCH")
+            || rendered.contains("target state")
+            || rendered.contains("ci_passed"),
+        "expected trigger target mismatch diagnostic, got: {rendered}"
+    );
+}
+
+#[test]
 fn linear_type_machine_rejects_extra_action_override() {
     let source = r#"
         @linear

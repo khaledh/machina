@@ -55,6 +55,16 @@ pub(super) struct MachineActionOverrideInfo {
     pub fn_name: String,
 }
 
+#[derive(Clone, Debug)]
+pub(super) struct MachineTriggerHandlerInfo {
+    pub hosted_type_name: String,
+    pub handle_type_name: String,
+    pub instance_param_name: String,
+    pub params: Vec<Param>,
+    pub body: Expr,
+    pub fn_name: String,
+}
+
 // ── Name generation ─────────────────────────────────────────────────
 
 pub(crate) fn machine_handle_type_name(machine_name: &str) -> String {
@@ -83,6 +93,10 @@ pub(crate) fn machine_resume_fn_name(
 
 pub(crate) fn machine_action_override_fn_name(machine_name: &str, action_name: &str) -> String {
     format!("__mc_machine_action_{machine_name}_{action_name}")
+}
+
+pub(crate) fn machine_trigger_handler_fn_name(machine_name: &str, trigger_name: &str) -> String {
+    format!("__mc_machine_trigger_{machine_name}_{trigger_name}")
 }
 
 // ── Collection ──────────────────────────────────────────────────────
@@ -151,6 +165,48 @@ pub(super) fn collect_machine_action_override_infos(
                         ret_ty_expr,
                         body: handler.body.clone(),
                         fn_name: machine_action_override_fn_name(&machine_def.name, &handler.name),
+                    })
+                })
+                .collect::<Vec<_>>()
+        })
+        .collect()
+}
+
+pub(super) fn collect_machine_trigger_handler_infos(
+    module: &Module,
+) -> Vec<MachineTriggerHandlerInfo> {
+    let type_defs = super::type_defs_by_name(module);
+    module
+        .machine_defs()
+        .into_iter()
+        .flat_map(|machine_def| {
+            let Some(type_def) = type_defs.get(&machine_def.host.type_name) else {
+                return Vec::new();
+            };
+            let TypeDefKind::Linear { linear } = &type_def.kind else {
+                return Vec::new();
+            };
+            let triggers_by_name = linear
+                .triggers
+                .iter()
+                .map(|trigger| (trigger.name.as_str(), trigger))
+                .collect::<HashMap<_, _>>();
+            let handle_type_name = machine_handle_type_name(&machine_def.name);
+            machine_def
+                .items
+                .iter()
+                .filter_map(|item| {
+                    let MachineItem::Trigger(handler) = item else {
+                        return None;
+                    };
+                    let _ = triggers_by_name.get(handler.name.as_str())?;
+                    Some(MachineTriggerHandlerInfo {
+                        hosted_type_name: machine_def.host.type_name.clone(),
+                        handle_type_name: handle_type_name.clone(),
+                        instance_param_name: handler.instance_param.clone(),
+                        params: handler.params.clone(),
+                        body: handler.body.clone(),
+                        fn_name: machine_trigger_handler_fn_name(&machine_def.name, &handler.name),
                     })
                 })
                 .collect::<Vec<_>>()
@@ -228,6 +284,7 @@ pub(super) fn append_machine_spawn_support(
     module: &mut Module,
     machine_infos: &[MachineSpawnInfo],
     action_override_infos: &[MachineActionOverrideInfo],
+    trigger_handler_infos: &[MachineTriggerHandlerInfo],
     node_id_gen: &mut NodeIdGen,
 ) {
     for info in machine_infos {
@@ -268,6 +325,15 @@ pub(super) fn append_machine_spawn_support(
             .top_level_items
             .push(TopLevelItem::FuncDef(build_machine_action_override_func(
                 override_info,
+                node_id_gen,
+            )));
+    }
+
+    for trigger_info in trigger_handler_infos {
+        module
+            .top_level_items
+            .push(TopLevelItem::FuncDef(build_machine_trigger_handler_func(
+                trigger_info,
                 node_id_gen,
             )));
     }
@@ -584,6 +650,64 @@ fn build_machine_action_override_func(
                 &info.hosted_type_name,
                 node_id_gen,
             ),
+            span,
+        },
+        body: info.body.clone(),
+        span,
+    }
+}
+
+fn build_machine_trigger_handler_func(
+    info: &MachineTriggerHandlerInfo,
+    node_id_gen: &mut NodeIdGen,
+) -> FuncDef {
+    let span = Span::default();
+    FuncDef {
+        id: node_id_gen.new_id(),
+        attrs: Vec::new(),
+        sig: crate::core::ast::FunctionSig {
+            name: info.fn_name.clone(),
+            type_params: Vec::new(),
+            params: std::iter::once(Param {
+                id: node_id_gen.new_id(),
+                ident: "self".to_string(),
+                mode: ParamMode::In,
+                typ: TypeExpr {
+                    id: node_id_gen.new_id(),
+                    kind: TypeExprKind::Named {
+                        ident: info.handle_type_name.clone(),
+                        type_args: Vec::new(),
+                    },
+                    span,
+                },
+                span,
+            })
+            .chain(std::iter::once(Param {
+                id: node_id_gen.new_id(),
+                ident: info.instance_param_name.clone(),
+                mode: ParamMode::In,
+                typ: TypeExpr {
+                    id: node_id_gen.new_id(),
+                    kind: TypeExprKind::Named {
+                        ident: info.hosted_type_name.clone(),
+                        type_args: Vec::new(),
+                    },
+                    span,
+                },
+                span,
+            }))
+            .chain(info.params.iter().cloned())
+            .collect(),
+            // Trigger handlers are machine-internal and authoritative, so they
+            // return only the next hosted state, not a fallible session result.
+            ret_ty_expr: TypeExpr {
+                id: node_id_gen.new_id(),
+                kind: TypeExprKind::Named {
+                    ident: info.hosted_type_name.clone(),
+                    type_args: Vec::new(),
+                },
+                span,
+            },
             span,
         },
         body: info.body.clone(),

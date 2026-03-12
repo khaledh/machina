@@ -42,11 +42,19 @@ pub(super) struct DirectLinearInfo {
     pub role_names: HashSet<String>,
     /// Maps (source_state, action_name) → internal method name + target state.
     pub action_by_source_and_name: HashMap<(String, String), DirectActionInfo>,
+    /// Maps trigger name → source/target state names from the declaration.
+    pub triggers_by_name: HashMap<String, DirectTriggerInfo>,
 }
 
 #[derive(Clone, Debug)]
 pub(super) struct DirectActionInfo {
     pub internal_name: String,
+    pub target_state: String,
+}
+
+#[derive(Clone, Debug)]
+pub(super) struct DirectTriggerInfo {
+    pub source_state: String,
     pub target_state: String,
 }
 
@@ -115,6 +123,19 @@ pub(super) fn collect_direct_linear_infos(module: &Module) -> HashMap<String, Di
                 },
             );
         }
+        let triggers_by_name = linear
+            .triggers
+            .iter()
+            .map(|trigger| {
+                (
+                    trigger.name.clone(),
+                    DirectTriggerInfo {
+                        source_state: trigger.source_state.clone(),
+                        target_state: trigger.target_state.clone(),
+                    },
+                )
+            })
+            .collect::<HashMap<_, _>>();
 
         infos.insert(
             type_def.name.clone(),
@@ -124,6 +145,7 @@ pub(super) fn collect_direct_linear_infos(module: &Module) -> HashMap<String, Di
                 initial_state,
                 role_names,
                 action_by_source_and_name,
+                triggers_by_name,
             },
         );
     }
@@ -193,7 +215,7 @@ pub(super) fn rewrite_linear_method_blocks(
             let source_state = method_source_state(&method.sig, info);
             rewrite_linear_method_sig(&mut method.sig, info);
             if let Some(source_state) = source_state {
-                rewrite_expr_with_linear_env(
+                let _ = rewrite_expr_with_linear_env(
                     &mut method.body,
                     infos,
                     linear_index,
@@ -203,7 +225,7 @@ pub(super) fn rewrite_linear_method_blocks(
                     node_id_gen,
                 );
             } else {
-                rewrite_expr_with_linear_env(
+                let _ = rewrite_expr_with_linear_env(
                     &mut method.body,
                     infos,
                     linear_index,
@@ -295,26 +317,46 @@ pub(super) fn rewrite_linear_exprs(
                     .action_override_fns
                     .get(&func.sig.name)
                     .cloned();
-                let seeded_bindings = override_info
-                    .as_ref()
-                    .map(|override_info| {
-                        vec![(
-                            override_info.instance_param_name.clone(),
-                            LinearBindingState {
-                                value_state: LinearValueState {
-                                    type_name: override_info.hosted_type_name.clone(),
-                                    state_name: override_info.source_state.clone(),
-                                },
-                                consumed: false,
-                                hosted: None,
+                let trigger_info = linear_index
+                    .trigger_handler_fns
+                    .get(&func.sig.name)
+                    .cloned();
+                let seeded_bindings = if let Some(override_info) = &override_info {
+                    vec![(
+                        override_info.instance_param_name.clone(),
+                        LinearBindingState {
+                            value_state: LinearValueState {
+                                type_name: override_info.hosted_type_name.clone(),
+                                state_name: override_info.source_state.clone(),
                             },
-                        )]
-                    })
-                    .unwrap_or_default();
+                            consumed: false,
+                            hosted: None,
+                        },
+                    )]
+                } else if let Some(trigger_info) = &trigger_info {
+                    vec![(
+                        trigger_info.instance_param_name.clone(),
+                        LinearBindingState {
+                            value_state: LinearValueState {
+                                type_name: trigger_info.hosted_type_name.clone(),
+                                state_name: trigger_info.source_state.clone(),
+                            },
+                            consumed: false,
+                            hosted: None,
+                        },
+                    )]
+                } else {
+                    Vec::new()
+                };
                 let current_linear_type = override_info
                     .as_ref()
-                    .map(|override_info| override_info.hosted_type_name.as_str());
-                errors.extend(rewrite_expr_with_linear_env(
+                    .map(|override_info| override_info.hosted_type_name.as_str())
+                    .or_else(|| {
+                        trigger_info
+                            .as_ref()
+                            .map(|trigger_info| trigger_info.hosted_type_name.as_str())
+                    });
+                let (rewrite_errors, result_state) = rewrite_expr_with_linear_env(
                     &mut func.body,
                     infos,
                     linear_index,
@@ -322,7 +364,21 @@ pub(super) fn rewrite_linear_exprs(
                     None,
                     &seeded_bindings,
                     node_id_gen,
-                ));
+                );
+                errors.extend(rewrite_errors);
+
+                if let (Some(trigger_info), Some(result_state)) = (&trigger_info, result_state) {
+                    if result_state.value_state.state_name != trigger_info.target_state {
+                        errors.push(
+                            REK::MachineHandlerTypeMismatch(
+                                trigger_info.machine_name.clone(),
+                                "trigger",
+                                func.sig.name.clone(),
+                            )
+                            .at(func.body.span),
+                        );
+                    }
+                }
             }
             TopLevelItem::MethodBlock(method_block) => {
                 if infos.contains_key(&method_block.type_name) {
@@ -330,7 +386,7 @@ pub(super) fn rewrite_linear_exprs(
                 }
                 for method_item in &mut method_block.method_items {
                     if let MethodItem::Def(method) = method_item {
-                        errors.extend(rewrite_expr_with_linear_env(
+                        let (rewrite_errors, _) = rewrite_expr_with_linear_env(
                             &mut method.body,
                             infos,
                             linear_index,
@@ -338,7 +394,8 @@ pub(super) fn rewrite_linear_exprs(
                             None,
                             &[],
                             node_id_gen,
-                        ));
+                        );
+                        errors.extend(rewrite_errors);
                     }
                 }
             }
@@ -348,43 +405,76 @@ pub(super) fn rewrite_linear_exprs(
                 };
 
                 for machine_item in &mut machine_def.items {
-                    let source_state = match machine_item {
+                    match machine_item {
                         crate::core::ast::MachineItem::Action(handler) => {
-                            unique_machine_action_source_state(info, &handler.name)
+                            let Some(source_state) =
+                                unique_machine_action_source_state(info, &handler.name)
+                            else {
+                                continue;
+                            };
+
+                            let (rewrite_errors, _) = rewrite_expr_with_linear_env(
+                                &mut handler.body,
+                                infos,
+                                linear_index,
+                                Some(&info.type_name),
+                                None,
+                                &[(
+                                    handler.instance_param.clone(),
+                                    LinearBindingState {
+                                        value_state: LinearValueState {
+                                            type_name: info.type_name.clone(),
+                                            state_name: source_state,
+                                        },
+                                        consumed: false,
+                                        hosted: None,
+                                    },
+                                )],
+                                node_id_gen,
+                            );
+                            errors.extend(rewrite_errors);
                         }
-                        _ => None,
-                    };
+                        crate::core::ast::MachineItem::Trigger(handler) => {
+                            let Some(trigger) = info.triggers_by_name.get(&handler.name) else {
+                                continue;
+                            };
 
-                    let Some(source_state) = source_state else {
-                        continue;
-                    };
+                            let (rewrite_errors, result_state) = rewrite_expr_with_linear_env(
+                                &mut handler.body,
+                                infos,
+                                linear_index,
+                                Some(&info.type_name),
+                                None,
+                                &[(
+                                    handler.instance_param.clone(),
+                                    LinearBindingState {
+                                        value_state: LinearValueState {
+                                            type_name: info.type_name.clone(),
+                                            state_name: trigger.source_state.clone(),
+                                        },
+                                        consumed: false,
+                                        hosted: None,
+                                    },
+                                )],
+                                node_id_gen,
+                            );
+                            errors.extend(rewrite_errors);
 
-                    let handler = match machine_item {
-                        crate::core::ast::MachineItem::Action(handler) => handler,
-                        _ => continue,
-                    };
-
-                    rewrite_expr_with_linear_env(
-                        &mut handler.body,
-                        infos,
-                        linear_index,
-                        Some(&info.type_name),
-                        None,
-                        &[(
-                            handler.instance_param.clone(),
-                            LinearBindingState {
-                                value_state: LinearValueState {
-                                    type_name: info.type_name.clone(),
-                                    state_name: source_state,
-                                },
-                                consumed: false,
-                                hosted: None,
-                            },
-                        )],
-                        node_id_gen,
-                    )
-                    .into_iter()
-                    .for_each(|err| errors.push(err));
+                            if let Some(result_state) = result_state
+                                && result_state.value_state.state_name != trigger.target_state
+                            {
+                                errors.push(
+                                    REK::MachineHandlerTypeMismatch(
+                                        machine_def.name.clone(),
+                                        "trigger",
+                                        handler.name.clone(),
+                                    )
+                                    .at(handler.body.span),
+                                );
+                            }
+                        }
+                        _ => {}
+                    }
                 }
             }
             _ => {}
@@ -402,7 +492,7 @@ fn rewrite_expr_with_linear_env(
     self_state: Option<&str>,
     seeded_bindings: &[(String, LinearBindingState)],
     node_id_gen: &mut NodeIdGen,
-) -> Vec<ResolveError> {
+) -> (Vec<ResolveError>, Option<LinearBindingState>) {
     let mut env = HashMap::new();
     let mut machine_env = HashMap::new();
     let mut errors = Vec::new();
@@ -422,7 +512,7 @@ fn rewrite_expr_with_linear_env(
     for (name, binding_state) in seeded_bindings {
         env.insert(name.clone(), binding_state.clone());
     }
-    let _ = rewrite_expr_in_scope(
+    let result_state = rewrite_expr_in_scope(
         expr,
         infos,
         linear_index,
@@ -432,7 +522,7 @@ fn rewrite_expr_with_linear_env(
         &mut errors,
         node_id_gen,
     );
-    errors
+    (errors, result_state)
 }
 
 /// Recursively rewrite an expression, tracking linear binding states through
