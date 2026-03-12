@@ -83,8 +83,13 @@ pub struct LinearActionInfo {
 #[derive(Clone, Debug)]
 pub struct HostedActionExprInfo {
     pub type_name: String,
+    pub role_name: String,
     pub source_state: String,
     pub action_name: String,
+    /// Number of synthetic leading runtime args inserted by rewriting before
+    /// the user-visible action arguments. Plain hosted method calls use 0;
+    /// override dispatch helpers use 2 (`machine_handle`, `instance`).
+    pub runtime_arg_prefix: usize,
 }
 
 pub fn build_linear_index(module: &Module) -> LinearIndex {

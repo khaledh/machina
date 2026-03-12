@@ -374,6 +374,19 @@ fn record_linear_session_call_sigs(engine: &TypecheckEngine, builder: &mut TypeM
         else {
             continue;
         };
+        // Hosted overrides rewrite the source method call into an ordinary
+        // helper call before constraints are collected. The hosted session
+        // obligation still validates role permissions and result typing, but
+        // the actual call target should remain the rewritten override helper.
+        if engine
+            .context()
+            .linear_index
+            .hosted_action_exprs
+            .get(expr_id)
+            .is_some_and(|info| info.runtime_arg_prefix > 0)
+        {
+            continue;
+        }
         let receiver_ty = resolve_term(receiver, engine);
         let internal_name =
             crate::core::linear::direct_action_method_name(source_state, action_name);

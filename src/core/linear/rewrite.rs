@@ -76,6 +76,7 @@ struct LinearBindingState {
 struct HostedProvenance {
     machine_name: String,
     handle_binding: String,
+    role_name: String,
 }
 
 #[derive(Clone, Debug)]
@@ -544,6 +545,7 @@ fn rewrite_expr_in_scope(
                     hosted: Some(HostedProvenance {
                         machine_name: machine_binding.machine_name.clone(),
                         handle_binding: machine_ident,
+                        role_name: role_name.clone(),
                     }),
                 });
             }
@@ -604,15 +606,27 @@ fn rewrite_expr_in_scope(
                     }),
                     args: override_args,
                 };
-            } else if callee_state.hosted.is_some() {
+                linear_index.hosted_action_exprs.insert(
+                    expr.id,
+                    HostedActionExprInfo {
+                        type_name: info.type_name.clone(),
+                        role_name: hosted.role_name.clone(),
+                        source_state: callee_state.value_state.state_name.clone(),
+                        action_name,
+                        runtime_arg_prefix: 2,
+                    },
+                );
+            } else if let Some(hosted) = &callee_state.hosted {
                 // Hosted bindings without overrides still use the existing
                 // fallible session-action typing path.
                 linear_index.hosted_action_exprs.insert(
                     expr.id,
                     HostedActionExprInfo {
                         type_name: info.type_name.clone(),
+                        role_name: hosted.role_name.clone(),
                         source_state: callee_state.value_state.state_name.clone(),
                         action_name,
+                        runtime_arg_prefix: 0,
                     },
                 );
             }

@@ -342,6 +342,7 @@ macro_rules! with_typecheck_variants {
             OverloadAmbiguous,
             LinearSessionHostMismatch,
             LinearSessionUnknownRole,
+            LinearSessionActionNotAllowed,
             CallableNotAccessible,
             PropertyNotAccessible,
             TraitBoundNotSatisfied,

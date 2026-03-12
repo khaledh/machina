@@ -210,6 +210,7 @@ pub(crate) enum ExprObligation {
         expr_id: NodeId,
         receiver: Type,
         type_name: String,
+        role_name: String,
         source_state: String,
         action_name: String,
         arg_terms: Vec<Type>,

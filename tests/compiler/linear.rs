@@ -402,6 +402,68 @@ fn linear_type_hosted_action_uses_machine_override_when_present() {
 }
 
 #[test]
+fn linear_type_hosted_action_rejects_role_disallowed() {
+    let source = r#"
+        @linear
+        type Approval = {
+            id: u64,
+
+            states {
+                Review,
+                Approved,
+            }
+
+            actions {
+                comment(text: string): Review -> Review,
+                approve: Review -> Approved,
+            }
+
+            roles {
+                Author { comment }
+                Reviewer { comment, approve }
+            }
+        }
+
+        Approval :: {
+            fn comment(self, text: string) -> Review {
+                println(text);
+                Review {}
+            }
+
+            fn approve(self) -> Approved {
+                Approved {}
+            }
+        }
+
+        machine ApprovalService hosts Approval(key: id) {
+            fn new() -> Self {
+                Self {}
+            }
+        }
+
+        @machines
+        fn main() -> () | MachineError | SessionError {
+            let service = ApprovalService::spawn()?;
+            let review = service.create(Approval as Author)?;
+            let _approved = review.approve()?;
+        }
+    "#;
+
+    let errors = check_linear_source(
+        source,
+        "tests/fixtures/linear/hosted_role_disallowed_action.mc",
+    )
+    .expect_err("hosted sessions should reject actions not allowed for the role");
+    let rendered = format!("{errors:#?}");
+    assert!(
+        rendered.contains("MC-SESSION-ACTION-NOT-ALLOWED")
+            || rendered.contains("not available")
+            || (rendered.contains("approve") && rendered.contains("Author")),
+        "expected a role-based session action diagnostic, got: {rendered}"
+    );
+}
+
+#[test]
 fn linear_type_hosted_resume_returns_state_union() {
     let source = r#"
         @linear

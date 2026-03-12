@@ -4,6 +4,75 @@ use super::*;
 use crate::core::ast::{ArrayLitInit, Param, StructLitField};
 
 impl<'a> ConstraintCollector<'a> {
+    fn hosted_action_expected_arg_tys(
+        &self,
+        hosted_action: &crate::core::linear::HostedActionExprInfo,
+    ) -> Vec<Type> {
+        self.ctx
+            .linear_index
+            .types
+            .get(&hosted_action.type_name)
+            .and_then(|type_info| {
+                type_info.actions.get(&(
+                    hosted_action.source_state.clone(),
+                    hosted_action.action_name.clone(),
+                ))
+            })
+            .map(|action| {
+                action
+                    .params
+                    .iter()
+                    .map(|ty_expr| {
+                        // Linear action parameter types have already been validated against the
+                        // declaration surface, so failing to resolve them here indicates the
+                        // linear metadata and the typechecker fell out of sync.
+                        self.resolve_type_in_scope(ty_expr).unwrap_or_else(|err| {
+                            panic!(
+                                "compiler bug: failed to resolve hosted linear action param type for {}::{} from {}: {err:?}",
+                                hosted_action.source_state,
+                                hosted_action.action_name,
+                                hosted_action.type_name,
+                            )
+                        })
+                    })
+                    .collect::<Vec<_>>()
+            })
+            .unwrap_or_else(|| {
+                panic!(
+                    "compiler bug: missing hosted linear action metadata for {}::{} on {}",
+                    hosted_action.source_state, hosted_action.action_name, hosted_action.type_name,
+                )
+            })
+    }
+
+    fn emit_hosted_action_obligation(
+        &mut self,
+        expr: &Expr,
+        receiver_ty: Type,
+        arg_terms: Vec<Type>,
+        hosted_action: &crate::core::linear::HostedActionExprInfo,
+        expr_ty: Type,
+    ) -> Type {
+        let runtime_arg_prefix = hosted_action.runtime_arg_prefix.min(arg_terms.len());
+        let session_arg_terms = arg_terms[runtime_arg_prefix..].to_vec();
+        let expected_arg_tys = self.hosted_action_expected_arg_tys(hosted_action);
+        self.out
+            .expr_obligations
+            .push(ExprObligation::LinearSessionAction {
+                expr_id: expr.id,
+                receiver: receiver_ty,
+                type_name: hosted_action.type_name.clone(),
+                role_name: hosted_action.role_name.clone(),
+                source_state: hosted_action.source_state.clone(),
+                action_name: hosted_action.action_name.clone(),
+                arg_terms: session_arg_terms,
+                expected_arg_tys,
+                result: expr_ty.clone(),
+                span: expr.span,
+            });
+        expr_ty
+    }
+
     pub(super) fn collect_expr(&mut self, expr: &Expr, expected: Option<Type>) -> Type {
         let expr_ty = self.node_term(expr.id);
 
@@ -380,6 +449,28 @@ impl<'a> ConstraintCollector<'a> {
                 }
             }
             ExprKind::Call { callee, args } => {
+                if let Some(hosted_action) = self.ctx.linear_index.hosted_action_exprs.get(&expr.id)
+                {
+                    let callee_ty = self.collect_expr(callee, None);
+                    let arg_terms = args
+                        .iter()
+                        .map(|arg| self.collect_expr(&arg.expr, None))
+                        .collect::<Vec<_>>();
+                    let result_ty = self.emit_hosted_action_obligation(
+                        expr,
+                        callee_ty,
+                        arg_terms,
+                        hosted_action,
+                        expr_ty.clone(),
+                    );
+                    // Override-dispatched hosted actions are rewritten into
+                    // ordinary helper calls before constraints are collected.
+                    // Keep collecting the underlying call obligation so
+                    // finalize still records the helper call target, while the
+                    // hosted session obligation above handles role/result rules.
+                    self.collect_call(expr, callee, args);
+                    return result_ty;
+                }
                 // Calls are represented as obligations because overload/generic
                 // resolution needs solver-time type information.
                 self.collect_call(expr, callee, args);
@@ -396,59 +487,13 @@ impl<'a> ConstraintCollector<'a> {
                     .collect::<Vec<_>>();
                 if let Some(hosted_action) = self.ctx.linear_index.hosted_action_exprs.get(&expr.id)
                 {
-                    let expected_arg_tys = self
-                        .ctx
-                        .linear_index
-                        .types
-                        .get(&hosted_action.type_name)
-                        .and_then(|type_info| {
-                            type_info.actions.get(&(
-                                hosted_action.source_state.clone(),
-                                hosted_action.action_name.clone(),
-                            ))
-                        })
-                        .map(|action| {
-                            action
-                                .params
-                                .iter()
-                                .map(|ty_expr| {
-                                    // Linear action parameter types have already been validated
-                                    // against the declaration surface, so failing to resolve them
-                                    // here indicates the linear metadata and the typechecker fell
-                                    // out of sync.
-                                    self.resolve_type_in_scope(ty_expr).unwrap_or_else(|err| {
-                                        panic!(
-                                            "compiler bug: failed to resolve hosted linear action param type for {}::{} from {}: {err:?}",
-                                            hosted_action.source_state,
-                                            hosted_action.action_name,
-                                            hosted_action.type_name,
-                                        )
-                                    })
-                                })
-                                .collect::<Vec<_>>()
-                        })
-                        .unwrap_or_else(|| {
-                            panic!(
-                                "compiler bug: missing hosted linear action metadata for {}::{} on {}",
-                                hosted_action.source_state,
-                                hosted_action.action_name,
-                                hosted_action.type_name,
-                            )
-                        });
-                    self.out
-                        .expr_obligations
-                        .push(ExprObligation::LinearSessionAction {
-                            expr_id: expr.id,
-                            receiver: receiver_ty,
-                            type_name: hosted_action.type_name.clone(),
-                            source_state: hosted_action.source_state.clone(),
-                            action_name: hosted_action.action_name.clone(),
-                            arg_terms,
-                            expected_arg_tys,
-                            result: expr_ty.clone(),
-                            span: expr.span,
-                        });
-                    return expr_ty;
+                    return self.emit_hosted_action_obligation(
+                        expr,
+                        receiver_ty,
+                        arg_terms,
+                        hosted_action,
+                        expr_ty.clone(),
+                    );
                 }
                 if method_name == "create"
                     && args.len() == 1

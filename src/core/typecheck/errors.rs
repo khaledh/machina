@@ -330,6 +330,9 @@ pub enum TypeCheckErrorKind {
     #[error("Linear type {0} does not define role {1}")]
     LinearSessionUnknownRole(String, String),
 
+    #[error("`{0}` is not available on {1}::{2} (session role: {3})")]
+    LinearSessionActionNotAllowed(String, String, String, String),
+
     #[error("Cannot access private callable: {0}")]
     CallableNotAccessible(String),
 

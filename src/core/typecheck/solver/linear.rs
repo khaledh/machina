@@ -27,22 +27,28 @@ pub(super) fn try_check_expr_obligation_linear(
         expr_id,
         receiver: _,
         type_name,
+        role_name,
+        source_state,
+        action_name,
         arg_terms,
         expected_arg_tys,
         result,
         span,
-        ..
     } = obligation
     {
         return check_linear_session_action(
             *expr_id,
             type_name,
+            role_name,
+            source_state,
+            action_name,
             arg_terms,
             expected_arg_tys,
             result,
             *span,
             unifier,
             type_defs,
+            linear_index,
             errors,
             covered_exprs,
         );
@@ -168,15 +174,54 @@ pub(super) fn try_check_expr_obligation_linear(
 fn check_linear_session_action(
     expr_id: NodeId,
     type_name: &str,
+    role_name: &str,
+    source_state: &str,
+    action_name: &str,
     arg_terms: &[Type],
     expected_arg_tys: &[Type],
     result: &Type,
     span: crate::core::diag::Span,
     unifier: &mut TcUnifier,
     type_defs: &HashMap<String, Type>,
+    linear_index: &LinearIndex,
     errors: &mut Vec<TypeCheckError>,
     covered_exprs: &mut HashSet<NodeId>,
 ) -> bool {
+    let Some(type_info) = linear_index.types.get(type_name) else {
+        crate::core::typecheck::tc_push_error!(errors, span, TEK::UnknownType);
+        covered_exprs.insert(expr_id);
+        return true;
+    };
+
+    let Some(role_info) = type_info.roles.get(role_name) else {
+        crate::core::typecheck::tc_push_error!(
+            errors,
+            span,
+            TEK::LinearSessionUnknownRole(type_name.to_string(), role_name.to_string())
+        );
+        covered_exprs.insert(expr_id);
+        return true;
+    };
+
+    if !role_info
+        .allowed_actions
+        .iter()
+        .any(|allowed| allowed == action_name)
+    {
+        crate::core::typecheck::tc_push_error!(
+            errors,
+            span,
+            TEK::LinearSessionActionNotAllowed(
+                action_name.to_string(),
+                type_name.to_string(),
+                source_state.to_string(),
+                role_name.to_string(),
+            )
+        );
+        covered_exprs.insert(expr_id);
+        return true;
+    }
+
     for (arg_ty, expected_ty) in arg_terms.iter().zip(expected_arg_tys.iter()) {
         if let Err(err) = unifier.unify(
             &term_utils::canonicalize_type(arg_ty.clone()),
