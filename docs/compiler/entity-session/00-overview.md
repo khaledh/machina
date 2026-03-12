@@ -62,6 +62,8 @@ action implementations; the machine overrides only the actions that need
 infrastructure access:
 
 ```mc
+type CIPassed = {}  // event type — declared externally, referenced as trigger
+
 @linear
 type PullRequest = {
     id: u64,
@@ -83,7 +85,7 @@ type PullRequest = {
     }
 
     triggers {
-        ci_passed: PendingCI -> Review,
+        CIPassed: PendingCI -> Review,
     }
 
     roles {
@@ -109,7 +111,7 @@ machine PRService hosts PullRequest(key: id) {
 
     // approve, merge — no override needed, base runs directly
 
-    trigger ci_passed(pending) { Review {} }
+    trigger CIPassed(pending) { Review {} }
 
     // ...
 }
@@ -283,7 +285,7 @@ Three handler types coexist:
 - **`on` handlers** — machine-level, message-driven (via mailbox).
 
 The relationship: external message → `on` handler → `self.deliver(key,
-trigger)` → trigger handler → state transition. `on` handlers operate on the
+event)` → trigger handler → state transition. `on` handlers operate on the
 machine as a whole; `action` and `trigger` handlers operate on specific
 instances.
 
@@ -308,15 +310,20 @@ hover: PullRequest::Draft (as Author)
   available: submit, revise, comment, add_reviewer
 ```
 
-### Actions vs Triggers
+### Actions vs Triggers (Events)
 
 - **Actions** are client-driven — invoked through a session, subject to role
   permissions.
 - **Triggers** are system-driven — delivered by the machine via
-  `self.deliver(key, trigger)`, not subject to role permissions.
+  `self.deliver(key, event)`, not subject to role permissions. Trigger names
+  are externally declared event types (regular types, typically structs).
 
-Both cause state transitions. Both undergo runtime state validation. The
-distinction is in how they arrive, not in what they do.
+An **event** is just a typed value. A **trigger** is the role an event type
+plays in a linear type's transition table. One machine emits an event; another
+machine receives it and can deliver it as a trigger.
+
+Both actions and triggers cause state transitions. Both undergo runtime state
+validation. The distinction is in how they arrive, not in what they do.
 
 ---
 
@@ -390,8 +397,11 @@ Sessions close this gap.
 - **session**: a typed, linear capability for interacting with one instance
   through one role.
 - **action**: a client-driven state transition, invoked through a session.
-- **trigger**: a system-driven state transition, delivered by the machine to an
-  instance.
+- **event**: a typed value (regular type) that flows between machines. The
+  sender emits an event; the receiver handles it.
+- **trigger**: the role an event type plays in a linear type's transition table.
+  A system-driven state transition, delivered by the machine to an instance via
+  `self.deliver(key, event)`.
 - **transport**: the runtime mechanism used to carry session actions and results.
 
 V2 terms (see [04-channel.md](04-channel.md)):
@@ -473,7 +483,7 @@ The V1 core is **`@linear type` + machine + session**.
 
 - `machine ... hosts Type(key: field)` with action overrides, `trigger`, and
   `on` handlers.
-- `self.deliver(key, trigger)` for routing triggers to instances.
+- `self.deliver(key, event)` for routing events as triggers to instances.
 - Cross-machine composition via blocking session calls in action handlers.
 - Machine-owned persistence (API shape open, architectural role fixed).
 - Identity key designated at machine hosting site.
@@ -496,7 +506,6 @@ The V1 core is **`@linear type` + machine + session**.
 ### Channels and event flow
 
 - `channel` declarations — typed message pipes for streaming and fan-out.
-- `events { }` block in linear types — declares emittable event types.
 - `emit` routing to co-hosted channels.
 - Iterator/pipe integration for channel readers.
 - `self.listen()` pull-to-push bridge for machine-to-machine subscriptions.

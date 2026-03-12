@@ -9,8 +9,9 @@
 5. No action or trigger may have a `@final` state as its source.
 6. Same-named actions/triggers with different source states are allowed.
 7. Same-named actions/triggers with the same source state are disallowed.
-8. Each role must reference declared actions in its permission set.
-9. Roles do not constrain triggers.
+8. Trigger names must be externally declared types (event types).
+9. Each role must reference declared actions in its permission set.
+10. Roles do not constrain triggers.
 
 ## Method Block Validation
 

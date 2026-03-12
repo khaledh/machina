@@ -15,7 +15,10 @@ Two kinds of input can cause a state transition:
 - **Action** — client-driven. Invoked through a session. Subject to role
   permissions.
 - **Trigger** — system-driven. Delivered by the machine via
-  `self.deliver(key, trigger)`. Not subject to role permissions.
+  `self.deliver(key, event)`. Not subject to role permissions. Triggers
+  reference externally declared event types — an event is just a regular type;
+  a trigger is the role that event type plays in a linear type's transition
+  table.
 
 Both are declared in the type with the same shape:
 
@@ -25,7 +28,7 @@ actions {
 }
 
 triggers {
-    ci_passed: PendingCI -> Review,
+    CIPassed: PendingCI -> Review,
 }
 ```
 
@@ -79,6 +82,10 @@ A `@linear type` combines struct-like fields, enum-like states, transition
 rules, and access control in a single declaration:
 
 ```mc
+// Event types — ordinary types referenced as triggers
+type CIPassed = { commit_sha: string }
+type CIFailed = { reason: string }
+
 @linear
 type PullRequest = {
     // Fields — struct-like, shared across all states
@@ -107,10 +114,11 @@ type PullRequest = {
         merge: Approved -> Merged,
     }
 
-    // Triggers — system-driven transitions, delivered by the machine
+    // Triggers — system-driven transitions, delivered by the machine.
+    // Trigger names are externally declared event types.
     triggers {
-        ci_passed: PendingCI -> Review,
-        ci_failed(reason: string): PendingCI -> Draft,
+        CIPassed: PendingCI -> Review,
+        CIFailed: PendingCI -> Draft,
     }
 
     // Roles — permission sets over actions
@@ -128,7 +136,7 @@ The structure mirrors what programmers already know:
 | Top-level fields | Struct fields | Data shared across all states |
 | `states { }` | Enum variants | Possible states, with optional payloads |
 | `actions { }` | Transition rules | Client-driven state changes |
-| `triggers { }` | Transition rules | System-driven state changes |
+| `triggers { }` | Transition rules | System-driven state changes (event types) |
 | `roles { }` | Access control | Who can invoke which actions |
 
 ## Direct Mode (Typestate)
@@ -246,22 +254,38 @@ types are separated by `|`:
 Triggers are declared inside a `triggers { }` block:
 
 ```mc
-triggers {
-    ci_passed: PendingCI -> Review,
-    ci_failed(reason: string): PendingCI -> Draft,
+type CIPassed = { commit_sha: string }
+type CIFailed = { reason: string }
+
+@linear
+type PullRequest = {
+    // ...
+    triggers {
+        CIPassed: PendingCI -> Review,
+        CIFailed: PendingCI -> Draft,
+    }
 }
 ```
 
-`name(params...): SourceState -> TargetState` declares a system-driven state
-transition. Triggers are delivered by the machine to instances, caused by
-external systems, correlated replies from other machines, timers, or other
-asynchronous sources.
+`EventType: SourceState -> TargetState` declares a system-driven state
+transition. Trigger names are externally declared event types — regular types
+(typically structs) that carry whatever payload the event needs. The `triggers`
+block maps these event types to state transitions.
 
-Triggers follow the same syntax rules as actions. The distinction is in how they
-are invoked: actions are invoked by session holders; triggers are delivered by
-the machine via `self.deliver()`. Both undergo the same runtime state check: if
-the instance is not in the trigger's declared source state, delivery fails with
-a typed result (see [02-machine.md](02-machine.md#selfdeliverkey-trigger)).
+An **event** is just a typed value. A **trigger** is the role that event type
+plays in a linear type's transition table. The same event type could be emitted
+by one machine and received by another — the sender emits an event; the
+receiver handles it as a trigger.
+
+Triggers are delivered by the machine to instances via `self.deliver(key, event)`,
+caused by external systems, correlated replies from other machines, timers, or
+other asynchronous sources.
+
+The distinction between actions and triggers is in how they arrive: actions are
+invoked by session holders; triggers are delivered by the machine. Both undergo
+the same runtime state check: if the instance is not in the trigger's declared
+source state, delivery fails with a typed result (see
+[02-machine.md](02-machine.md#selfdeliverkey-event)).
 
 ## Roles
 
@@ -358,28 +382,26 @@ File :: {
 }
 ```
 
-## Events (V2)
+## Events and Triggers — Unified Model
 
-In V2, an `events { }` block declares which types the linear type can emit.
-Event types are plain types defined elsewhere and referenced by name:
+Events and triggers are two perspectives on the same concept:
 
-```mc
-type CommentAdded = { author: UserId, text: string }
-type ReviewerAssigned = { reviewer: UserId }
+- An **event** is a typed value (a regular type, typically a struct).
+- A **trigger** is the role an event type plays in a linear type's transition
+  table.
 
-@linear
-type PullRequest = {
-    // ... fields, states, actions, triggers, roles ...
+One machine emits an event; another machine receives it. If the receiving
+machine's hosted linear type declares that event type as a trigger, the machine
+can deliver it to an instance to cause a state transition.
 
-    events {
-        CommentAdded,
-        ReviewerAssigned,
-    }
-}
-```
+This means there is no separate `events { }` block. The `triggers { }` block
+already declares which event types drive state transitions. Machines emit
+whatever types they need via `emit`; the `triggers` block on the receiving side
+determines which of those types cause transitions.
 
-The `events` block constrains what handlers can `emit`. The compiler validates
-that `emit` calls inside machine handlers only emit declared event types.
+In V2, channels route emitted values between machines (see
+[04-channel.md](04-channel.md)). The `emit` primitive and channel routing work
+with ordinary types — the same types that appear as triggers.
 
 ## Blocking Semantics (Direct Mode)
 

@@ -5,6 +5,9 @@ base action implementations. The machine **overrides** only the actions that
 need infrastructure access, and provides trigger and `on` handlers.
 
 ```mc
+type CIPassed = { commit_sha: string }
+type CIFailed = { reason: string }
+
 machine PRService hosts PullRequest(key: id) {
     fields {
         ci_service: Machine<CIService>,
@@ -26,12 +29,13 @@ machine PRService hosts PullRequest(key: id) {
     // run directly.
 
     // --- Trigger handlers (system-driven) ---
+    // Trigger names are event types declared externally.
 
-    trigger ci_passed(pending) {
+    trigger CIPassed(pending) {
         Review {}
     }
 
-    trigger ci_failed(pending, reason: string) {
+    trigger CIFailed(pending) {
         Draft {}
     }
 
@@ -39,9 +43,9 @@ machine PRService hosts PullRequest(key: id) {
 
     on CIResult(result) for RunCI(req) {
         if result.success {
-            self.deliver(req.pr_id, ci_passed {});
+            self.deliver(req.pr_id, CIPassed { commit_sha: result.sha });
         } else {
-            self.deliver(req.pr_id, ci_failed { reason: result.reason });
+            self.deliver(req.pr_id, CIFailed { reason: result.reason });
         }
     }
 }
@@ -108,11 +112,12 @@ action write(file, data: Bytes) -> Open | IoError | QuotaExceeded {
 
 ### Trigger Handlers
 
-`trigger name(instance_param, params...) { body }`
+`trigger EventType(instance_param) { body }`
 
 Trigger handlers are always provided by the machine — triggers have no base
 implementation in the type's method block because they are system-driven, not
-client-driven.
+client-driven. The trigger name is the event type name (PascalCase), matching
+the externally declared type that appears in the linear type's `triggers` block.
 
 ### Handler Parameters
 
@@ -163,8 +168,12 @@ internal use (e.g., writing to a log, updating a counter). They do not affect
 control flow or the session reply — the only thing that determines the next
 state is the handler's return expression. In V2, emitted values are
 additionally delivered to co-hosted channels (see
-[04-channel.md](04-channel.md)). Also in V2, the type's `events { }` block
-constrains what can be emitted (see [01-entity.md](01-entity.md#events-v2)).
+[04-channel.md](04-channel.md)).
+
+Emitted values are ordinary types — the same types that can appear as triggers
+in another linear type's `triggers` block. This is the event/trigger
+unification: one machine emits an event; another machine receives it and
+delivers it as a trigger.
 
 A handler can emit zero or many values. The final expression is the new state.
 
@@ -189,8 +198,8 @@ machine's general mailbox — lifecycle messages, correlated replies from other
 machines, timers, administrative commands, etc.
 
 `on` handlers operate on the machine as a whole, not on a specific instance.
-They can route external triggers to instances using
-`self.deliver(key, trigger)`.
+They can route external events to instances as triggers using
+`self.deliver(key, event)`.
 
 Three handler types coexist in a machine:
 - `action` handlers — instance-level, client-driven (via sessions).
@@ -200,19 +209,21 @@ Three handler types coexist in a machine:
 The typical flow from external input to state change:
 
 ```
-external message  →  on handler  →  self.deliver(key, trigger)  →  trigger handler  →  state transition
+external message  →  on handler  →  self.deliver(key, event)  →  trigger handler  →  state transition
 ```
 
 `on` handlers are the entry point for external messages. They decide which
 instance to target and which trigger to deliver. `trigger` handlers apply the
 state transition. This separation keeps the type's workflow graph clean —
-triggers are declared in the type; how they arrive is the machine's concern.
+triggers are declared in the type (as event types); how they arrive is the
+machine's concern.
 
-## `self.deliver(key, trigger)`
+## `self.deliver(key, event)`
 
-Routes a trigger to a specific instance by identity key. The machine's `on`
+Routes an event to a specific instance by identity key. The machine's `on`
 handler bridges between the mailbox world (correlated replies, external
-messages) and the type's state graph.
+messages) and the type's state graph. The event must be a type declared in the
+hosted linear type's `triggers` block.
 
 `self.deliver()` returns a typed result indicating what happened:
 
@@ -235,7 +246,7 @@ outcome and can react accordingly.
 ```mc
 on CIResult(result) for RunCI(req) {
     if result.success {
-        match self.deliver(req.pr_id, ci_passed {}) {
+        match self.deliver(req.pr_id, CIPassed { commit_sha: result.sha }) {
             _: Delivered => {}
             _: InstanceNotFound => {
                 // PR was removed before CI completed
@@ -245,7 +256,7 @@ on CIResult(result) for RunCI(req) {
             }
         }
     } else {
-        self.deliver(req.pr_id, ci_failed { reason: result.reason });
+        self.deliver(req.pr_id, CIFailed { reason: result.reason });
     }
 }
 ```
@@ -256,9 +267,9 @@ can be ignored:
 ```mc
 on CIResult(result) for RunCI(req) {
     if result.success {
-        self.deliver(req.pr_id, ci_passed {});
+        self.deliver(req.pr_id, CIPassed { commit_sha: result.sha });
     } else {
-        self.deliver(req.pr_id, ci_failed { reason: result.reason });
+        self.deliver(req.pr_id, CIFailed { reason: result.reason });
     }
 }
 ```

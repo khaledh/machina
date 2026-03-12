@@ -180,8 +180,8 @@ Dispatch (per hosted type):
 | 4 (approve)  | 3 (Review)     | thunk_54 | 4 (Approved) |
 | 5 (reject)   | 3 (Review)     | thunk_55 | 1 (Draft)    |
 | 6 (merge)    | 4 (Approved)   | thunk_56 | 5 (Merged)   |
-| 7 (ci_passed)| 2 (PendingCI)  | thunk_57 | 3 (Review)   |
-| 8 (ci_failed)| 2 (PendingCI)  | thunk_58 | 1 (Draft)    |
+| 7 (CIPassed) | 2 (PendingCI)  | thunk_57 | 3 (Review)   |
+| 8 (CIFailed) | 2 (PendingCI)  | thunk_58 | 1 (Draft)    |
 +--------------+----------------+----------+--------------+
 ```
 

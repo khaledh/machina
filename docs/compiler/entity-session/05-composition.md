@@ -47,8 +47,8 @@ styles are complementary:
   to the type's state graph.
 - **Request/reply with `on` handlers** — asynchronous, message-driven, used at
   the machine level for external system integration. Replies arrive as separate
-  messages in the machine's mailbox, routed to instances via
-  `self.deliver()`.
+  messages in the machine's mailbox, routed to instances as triggers via
+  `self.deliver(key, event)`.
 
 The blocking style is syntactic sugar over the same underlying request/reply
 mechanism. The runtime handles the interleaving.

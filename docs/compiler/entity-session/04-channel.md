@@ -44,8 +44,8 @@ system. They should not grow roles, lifecycle hooks, or session-like semantics.
 
 ## Emitting Values from Handlers
 
-Handlers emit typed values via `emit`. In V2, the linear type's `events { }`
-block declares which types are emittable:
+Handlers emit typed values via `emit`. Emitted values are ordinary types —
+the same types that can appear as triggers in linear type `triggers` blocks:
 
 ```mc
 type CommentAdded = { author: UserId, text: string }

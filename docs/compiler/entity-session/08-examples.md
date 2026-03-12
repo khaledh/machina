@@ -57,9 +57,13 @@ match door {
 
 This example uses the full V1 core: `@linear type` + machine + session.
 
-### Linear Type
+### Event Types and Linear Type
 
 ```mc
+// Event types — ordinary types used as triggers by PullRequest
+type CIPassed = { commit_sha: string }
+type CIFailed = { reason: string }
+
 @linear
 type PullRequest = {
     id: u64,
@@ -86,8 +90,8 @@ type PullRequest = {
     }
 
     triggers {
-        ci_passed: PendingCI -> Review,
-        ci_failed(reason: string): PendingCI -> Draft,
+        CIPassed: PendingCI -> Review,
+        CIFailed: PendingCI -> Draft,
     }
 
     roles {
@@ -132,16 +136,16 @@ machine PRService hosts PullRequest(key: id) {
     // No overrides needed for revise, comment, add_reviewer, approve,
     // reject, merge — base implementations run directly.
 
-    // Trigger handlers
-    trigger ci_passed(pending) { Review {} }
-    trigger ci_failed(pending, reason: string) { Draft {} }
+    // Trigger handlers — names match externally declared event types
+    trigger CIPassed(pending) { Review {} }
+    trigger CIFailed(pending) { Draft {} }
 
     // Machine-level handler — bridges external message to trigger
     on CIResult(result) for RunCI(req) {
         if result.success {
-            self.deliver(req.pr_id, ci_passed {});
+            self.deliver(req.pr_id, CIPassed { commit_sha: result.sha });
         } else {
-            self.deliver(req.pr_id, ci_failed { reason: result.reason });
+            self.deliver(req.pr_id, CIFailed { reason: result.reason });
         }
     }
 }
@@ -247,22 +251,16 @@ pending.submit();
 This example extends the core with channels, `emit`, events, and reactive
 subscriptions. These are V2 features — see [04-channel.md](04-channel.md).
 
-### Event Types and Linear Type with Events Block
+### Event Types
 
 ```mc
 type CommentAdded = { author: UserId, text: string }
 type ReviewerAssigned = { reviewer: UserId }
-
-@linear
-type PullRequest = {
-    // ... same fields and states as above ...
-
-    events {
-        CommentAdded,
-        ReviewerAssigned,
-    }
-}
 ```
+
+Event types are ordinary types. They can be emitted by handlers and routed
+to channels. If another linear type declares them in its `triggers` block,
+they can also drive state transitions.
 
 ### Channel
 
