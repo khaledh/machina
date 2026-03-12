@@ -7,6 +7,7 @@
 pub mod call_plan;
 pub mod drop_plan;
 pub mod index_plan;
+pub mod linear_machine_plan;
 pub mod lowering_plan;
 pub mod machine_plan;
 pub mod match_plan;
@@ -15,6 +16,7 @@ pub mod string_fmt;
 pub use call_plan::*;
 pub use drop_plan::*;
 pub use index_plan::*;
+pub use linear_machine_plan::*;
 pub use lowering_plan::*;
 pub use machine_plan::*;
 pub use match_plan::*;

@@ -7,7 +7,7 @@ use crate::core::capsule::{ModuleId, ModulePath};
 use crate::core::codegen_names::CodegenNameTable;
 use crate::core::diag::Span;
 use crate::core::linear::LinearIndex;
-use crate::core::plans::{DropPlanMap, LoweringPlanMap, MachinePlanMap};
+use crate::core::plans::{DropPlanMap, LinearMachinePlanMap, LoweringPlanMap, MachinePlanMap};
 use crate::core::protocol::ProtocolIndex;
 use crate::core::resolve::{DefId, DefTable};
 use crate::core::semck::closure::capture::ClosureCapture;
@@ -188,6 +188,7 @@ pub struct SemanticPlans {
     pub lowering_plans: LoweringPlanMap,
     pub drop_plans: DropPlanMap,
     pub machine_plans: MachinePlanMap,
+    pub linear_machine_plans: LinearMachinePlanMap,
 }
 
 #[derive(Debug, Clone)]
@@ -196,6 +197,7 @@ pub struct SemanticPayload {
     pub lowering_plans: LoweringPlanMap,
     pub drop_plans: DropPlanMap,
     pub machine_plans: MachinePlanMap,
+    pub linear_machine_plans: LinearMachinePlanMap,
 }
 
 impl SemanticPayload {
@@ -204,6 +206,7 @@ impl SemanticPayload {
             lowering_plans: self.lowering_plans.clone(),
             drop_plans: self.drop_plans.clone(),
             machine_plans: self.machine_plans.clone(),
+            linear_machine_plans: self.linear_machine_plans.clone(),
         }
     }
 }

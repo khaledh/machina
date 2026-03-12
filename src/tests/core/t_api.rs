@@ -2623,6 +2623,229 @@ typestate Connection {
     );
 }
 
+#[test]
+fn linear_machine_plan_captures_deterministic_state_tags() {
+    let source = r#"
+type CIPassed = {}
+type CIFailed = {}
+
+@linear
+type PullRequest = {
+    id: u64,
+
+    states {
+        Draft,
+        PendingCI,
+        Review,
+    }
+
+    actions {
+        submit: Draft -> PendingCI,
+    }
+
+    triggers {
+        CIPassed: PendingCI -> Review,
+        CIFailed: PendingCI -> Draft,
+    }
+
+    roles {
+        Author { submit }
+    }
+}
+
+PullRequest :: {
+    fn submit(self) -> PendingCI {
+        PendingCI {}
+    }
+}
+
+machine PRService hosts PullRequest(key: id) {
+    fn new() -> Self {
+        Self {}
+    }
+
+    trigger CIPassed(pending) {
+        Review {}
+    }
+
+    trigger CIFailed(pending) {
+        Draft {}
+    }
+}
+"#;
+
+    let semantic = elaborate_linear_semantic(source);
+    let plan = semantic
+        .linear_machine_plans
+        .machines
+        .get("PRService")
+        .expect("expected linear machine plan");
+
+    assert_eq!(plan.machine_name, "PRService");
+    assert_eq!(plan.hosted_type_name, "PullRequest");
+    assert_eq!(plan.key_field_name, "id");
+    assert_eq!(
+        plan.key_ty,
+        Type::Int {
+            signed: false,
+            bits: 64,
+            bounds: None,
+            nonzero: false,
+        }
+    );
+    assert_eq!(plan.initial_state_tag, 1);
+    assert_eq!(
+        plan.state_tags
+            .iter()
+            .map(|state| (state.state_name.as_str(), state.tag))
+            .collect::<Vec<_>>(),
+        vec![("Draft", 1), ("PendingCI", 2), ("Review", 3)]
+    );
+}
+
+#[test]
+fn linear_machine_plan_prefers_overrides_and_tracks_generated_helpers() {
+    let source = r#"
+type CIPassed = {}
+
+@linear
+type PullRequest = {
+    id: u64,
+
+    states {
+        Draft,
+        PendingCI,
+        Review,
+    }
+
+    actions {
+        submit: Draft -> PendingCI,
+        merge: Review -> Review,
+    }
+
+    triggers {
+        CIPassed: PendingCI -> Review,
+    }
+
+    roles {
+        Author { submit, merge }
+    }
+}
+
+PullRequest :: {
+    fn submit(self) -> PendingCI {
+        PendingCI {}
+    }
+
+    fn merge(self) -> Review {
+        Review {}
+    }
+}
+
+machine PRService hosts PullRequest(key: id) {
+    fn new() -> Self {
+        Self {}
+    }
+
+    action submit(draft) -> PendingCI {
+        draft;
+        PendingCI {}
+    }
+
+    trigger CIPassed(pending) {
+        Review {}
+    }
+}
+"#;
+
+    let semantic = elaborate_linear_semantic(source);
+    let plan = semantic
+        .linear_machine_plans
+        .machines
+        .get("PRService")
+        .expect("expected linear machine plan");
+    let def_table = &semantic.def_table;
+
+    assert_eq!(
+        def_name(def_table, plan.handle_type_def_id),
+        "__mc_machine_handle_PRService"
+    );
+    assert_eq!(
+        def_name(def_table, plan.spawn_fn_def_id),
+        "__mc_machine_spawn_PRService"
+    );
+    assert_eq!(
+        def_name(
+            def_table,
+            *plan
+                .create_fn_def_ids
+                .get("Author")
+                .expect("expected create helper for Author"),
+        ),
+        "__mc_machine_create_PRService_PullRequest_Author"
+    );
+    assert_eq!(
+        def_name(
+            def_table,
+            *plan
+                .resume_fn_def_ids
+                .get("Author")
+                .expect("expected resume helper for Author"),
+        ),
+        "__mc_machine_resume_PRService_PullRequest_Author"
+    );
+    assert_eq!(
+        def_name(
+            def_table,
+            *plan
+                .deliver_fn_def_ids
+                .get("CIPassed")
+                .expect("expected deliver helper for CIPassed"),
+        ),
+        "__mc_machine_deliver_PRService_CIPassed"
+    );
+    assert_eq!(
+        def_name(
+            def_table,
+            *plan
+                .wait_fn_def_ids
+                .get("PendingCI")
+                .expect("expected wait helper for PendingCI"),
+        ),
+        "__mc_machine_wait_PRService_PullRequest_PendingCI"
+    );
+
+    let submit_plan = plan
+        .actions
+        .iter()
+        .find(|action| action.action_name == "submit")
+        .expect("expected submit action plan");
+    assert_eq!(
+        def_name(def_table, submit_plan.handler_def_id),
+        "__mc_machine_action_PRService_submit"
+    );
+
+    let merge_plan = plan
+        .actions
+        .iter()
+        .find(|action| action.action_name == "merge")
+        .expect("expected merge action plan");
+    assert_eq!(
+        def_name(def_table, merge_plan.handler_def_id),
+        "__linear__Review__merge"
+    );
+
+    let trigger_plan = plan
+        .triggers
+        .iter()
+        .find(|trigger| trigger.event_type_name == "CIPassed")
+        .expect("expected trigger plan for CIPassed");
+    assert_eq!(
+        def_name(def_table, trigger_plan.handler_def_id),
+        "__mc_machine_trigger_PRService_CIPassed"
+    );
+}
+
 fn elaborate_typestate_semantic(source: &str) -> crate::core::context::SemanticContext {
     let parsed = parsed_context_typestate(source);
     let resolved =
@@ -2639,6 +2862,35 @@ fn elaborate_typestate_semantic(source: &str) -> crate::core::context::SemanticC
     .expect("typecheck should succeed for typestate elaborate test");
     let sem_checked = semcheck_stage(typed).expect("semcheck should succeed for typestate test");
     elaborate_stage(sem_checked)
+}
+
+fn elaborate_linear_semantic(source: &str) -> crate::core::context::SemanticContext {
+    let parsed = parsed_context(source);
+    let resolved =
+        resolve_stage_with_policy(parsed, ResolveInputs::default(), FrontendPolicy::Strict);
+    let resolved_ctx = resolved
+        .context
+        .expect("resolve should succeed for linear elaborate test");
+    let typed = typecheck_stage_with_policy(
+        resolved_ctx,
+        resolved.imported_facts,
+        FrontendPolicy::Strict,
+    )
+    .context
+    .expect("typecheck should succeed for linear elaborate test");
+    let sem_checked = semcheck_stage(typed).expect("semcheck should succeed for linear test");
+    elaborate_stage(sem_checked)
+}
+
+fn def_name(
+    def_table: &crate::core::resolve::DefTable,
+    def_id: crate::core::resolve::DefId,
+) -> String {
+    def_table
+        .lookup_def(def_id)
+        .expect("expected def for plan id")
+        .name
+        .clone()
 }
 
 fn semantic_module_has_for(module: &Module) -> bool {
