@@ -25,6 +25,7 @@ use crate::core::ast::{
     ArrayLitInit, BlockItem, Expr, ExprKind, MethodItem, Module, NodeIdGen, ParamMode, StmtExpr,
     StmtExprKind, TopLevelItem, TypeDefKind, TypeExpr, TypeExprKind,
 };
+use crate::core::diag::Span;
 use crate::core::resolve::{REK, ResolveError};
 
 use super::index::{HostedActionExprInfo, LinearIndex};
@@ -37,6 +38,8 @@ use super::machine::machine_spawn_fn_name;
 #[derive(Clone, Debug)]
 pub(super) struct DirectLinearInfo {
     pub type_name: String,
+    /// Shared top-level fields carried by every state variant, in declaration order.
+    pub shared_fields: Vec<DirectSharedFieldInfo>,
     pub state_names: HashSet<String>,
     pub initial_state: Option<String>,
     pub role_names: HashSet<String>,
@@ -50,6 +53,12 @@ pub(super) struct DirectLinearInfo {
 pub(super) struct DirectActionInfo {
     pub internal_name: String,
     pub target_state: String,
+}
+
+#[derive(Clone, Debug)]
+pub(super) struct DirectSharedFieldInfo {
+    pub name: String,
+    pub ty: TypeExpr,
 }
 
 #[derive(Clone, Debug)]
@@ -107,6 +116,14 @@ pub(super) fn collect_direct_linear_infos(module: &Module) -> HashMap<String, Di
             .iter()
             .map(|state| state.name.clone())
             .collect::<HashSet<_>>();
+        let shared_fields = linear
+            .fields
+            .iter()
+            .map(|field| DirectSharedFieldInfo {
+                name: field.name.clone(),
+                ty: field.ty.clone(),
+            })
+            .collect::<Vec<_>>();
         let initial_state = linear.states.first().map(|state| state.name.clone());
         let role_names = linear
             .roles
@@ -141,6 +158,7 @@ pub(super) fn collect_direct_linear_infos(module: &Module) -> HashMap<String, Di
             type_def.name.clone(),
             DirectLinearInfo {
                 type_name: type_def.name.clone(),
+                shared_fields,
                 state_names,
                 initial_state,
                 role_names,
@@ -170,6 +188,11 @@ pub(super) fn rewrite_linear_type_defs(
         let TypeDefKind::Linear { linear } = &type_def.kind else {
             continue;
         };
+        let shared_payload_tys = _info
+            .shared_fields
+            .iter()
+            .map(|field| field.ty.clone())
+            .collect::<Vec<_>>();
         type_def.kind = TypeDefKind::Enum {
             variants: linear
                 .states
@@ -177,7 +200,11 @@ pub(super) fn rewrite_linear_type_defs(
                 .map(|state| crate::core::ast::EnumDefVariant {
                     id: state.id,
                     name: state.name.clone(),
-                    payload: state.payload.clone(),
+                    payload: shared_payload_tys
+                        .iter()
+                        .cloned()
+                        .chain(state.payload.clone())
+                        .collect(),
                     span: state.span,
                 })
                 .collect(),
@@ -220,6 +247,7 @@ pub(super) fn rewrite_linear_method_blocks(
                     infos,
                     linear_index,
                     Some(&info.type_name),
+                    Some("self"),
                     Some(&source_state),
                     &[],
                     node_id_gen,
@@ -230,6 +258,7 @@ pub(super) fn rewrite_linear_method_blocks(
                     infos,
                     linear_index,
                     Some(&info.type_name),
+                    None,
                     None,
                     &[],
                     node_id_gen,
@@ -361,6 +390,15 @@ pub(super) fn rewrite_linear_exprs(
                     infos,
                     linear_index,
                     current_linear_type,
+                    if override_info.is_some() {
+                        override_info
+                            .as_ref()
+                            .map(|info| info.instance_param_name.as_str())
+                    } else {
+                        trigger_info
+                            .as_ref()
+                            .map(|info| info.instance_param_name.as_str())
+                    },
                     None,
                     &seeded_bindings,
                     node_id_gen,
@@ -392,6 +430,7 @@ pub(super) fn rewrite_linear_exprs(
                             linear_index,
                             None,
                             None,
+                            None,
                             &[],
                             node_id_gen,
                         );
@@ -418,6 +457,7 @@ pub(super) fn rewrite_linear_exprs(
                                 infos,
                                 linear_index,
                                 Some(&info.type_name),
+                                Some(&handler.instance_param),
                                 None,
                                 &[(
                                     handler.instance_param.clone(),
@@ -444,6 +484,7 @@ pub(super) fn rewrite_linear_exprs(
                                 infos,
                                 linear_index,
                                 Some(&info.type_name),
+                                Some(&handler.instance_param),
                                 None,
                                 &[(
                                     handler.instance_param.clone(),
@@ -489,6 +530,7 @@ fn rewrite_expr_with_linear_env(
     infos: &HashMap<String, DirectLinearInfo>,
     linear_index: &mut LinearIndex,
     current_linear_type: Option<&str>,
+    carry_binding_name: Option<&str>,
     self_state: Option<&str>,
     seeded_bindings: &[(String, LinearBindingState)],
     node_id_gen: &mut NodeIdGen,
@@ -496,9 +538,11 @@ fn rewrite_expr_with_linear_env(
     let mut env = HashMap::new();
     let mut machine_env = HashMap::new();
     let mut errors = Vec::new();
-    if let (Some(type_name), Some(state_name)) = (current_linear_type, self_state) {
+    if let (Some(type_name), Some(binding_name), Some(state_name)) =
+        (current_linear_type, carry_binding_name, self_state)
+    {
         env.insert(
-            "self".to_string(),
+            binding_name.to_string(),
             LinearBindingState {
                 value_state: LinearValueState {
                     type_name: type_name.to_string(),
@@ -799,17 +843,23 @@ fn rewrite_expr_in_scope(
                     node_id_gen,
                 );
             }
-            if !fields.is_empty() {
-                return None;
-            }
-
             // Qualified state construction: `Door::Closed {}` → enum variant.
             if let Some((type_name, state_name)) = parse_qualified_linear_state_name(name, infos) {
+                let Some(info) = infos.get(&type_name) else {
+                    return None;
+                };
+                let payload = linear_state_payload_from_fields(
+                    fields,
+                    info,
+                    carry_binding_name(env),
+                    expr.span,
+                    node_id_gen,
+                )?;
                 expr.kind = ExprKind::EnumVariant {
                     enum_name: type_name.clone(),
                     type_args: Vec::new(),
                     variant: state_name.clone(),
-                    payload: Vec::new(),
+                    payload,
                 };
                 return Some(LinearBindingState {
                     value_state: LinearValueState {
@@ -830,11 +880,18 @@ fn rewrite_expr_in_scope(
             };
             if info.state_names.contains(name) {
                 let state_name = name.clone();
+                let payload = linear_state_payload_from_fields(
+                    fields,
+                    info,
+                    carry_binding_name(env),
+                    expr.span,
+                    node_id_gen,
+                )?;
                 expr.kind = ExprKind::EnumVariant {
                     enum_name: type_name.to_string(),
                     type_args: Vec::new(),
                     variant: state_name.clone(),
-                    payload: Vec::new(),
+                    payload,
                 };
                 return Some(LinearBindingState {
                     value_state: LinearValueState {
@@ -883,6 +940,12 @@ fn rewrite_expr_in_scope(
                 return None;
             };
             if !info.state_names.contains(&state_name) {
+                return None;
+            }
+            if !info.shared_fields.is_empty() {
+                // Shared-field-bearing states need struct-literal construction
+                // so the carried field values can be supplied explicitly (and
+                // later auto-propagated from `self`).
                 return None;
             }
 
@@ -1634,6 +1697,93 @@ fn parse_qualified_linear_state_name(
         Some((type_name.to_string(), state_name.to_string()))
     } else {
         None
+    }
+}
+
+fn linear_state_payload_from_fields(
+    fields: &[crate::core::ast::StructLitField],
+    info: &DirectLinearInfo,
+    carry_binding_name: Option<&str>,
+    span: Span,
+    node_id_gen: &mut NodeIdGen,
+) -> Option<Vec<Expr>> {
+    if fields.is_empty() && info.shared_fields.is_empty() {
+        return Some(Vec::new());
+    }
+
+    let mut payload = Vec::with_capacity(info.shared_fields.len());
+    let mut used = HashSet::new();
+    for shared_field in &info.shared_fields {
+        if let Some(field) = fields.iter().find(|field| field.name == shared_field.name) {
+            payload.push(field.value.clone());
+            used.insert(shared_field.name.clone());
+        } else if let Some(binding_name) = carry_binding_name {
+            // Shared fields are preserved across transitions automatically.
+            // If the user omits one in a returned state literal, carry it from
+            // the current state value (`self` in methods, the instance param in
+            // machine handlers) just like the old typestate lowering.
+            payload.push(build_linear_carried_field_expr(
+                binding_name,
+                &shared_field.name,
+                span,
+                node_id_gen,
+            ));
+        } else {
+            return None;
+        }
+    }
+
+    // We only support shared-field struct construction in this slice. Any
+    // extra fields would imply state-local named payloads, which linear states
+    // do not support yet.
+    if fields.iter().any(|field| !used.contains(&field.name)) {
+        return None;
+    }
+
+    Some(payload)
+}
+
+/// Choose the binding that should implicitly carry shared fields across a
+/// transition. We prefer `self` in ordinary methods; otherwise, use the unique
+/// live linear binding in scope (e.g. the instance parameter in machine
+/// action/trigger handlers). If there is no unique candidate, require the
+/// caller to spell shared fields explicitly.
+fn carry_binding_name(env: &HashMap<String, LinearBindingState>) -> Option<&str> {
+    if env.contains_key("self") {
+        return Some("self");
+    }
+
+    let mut candidates = env
+        .iter()
+        .filter(|(_, binding)| !binding.consumed)
+        .map(|(name, _)| name.as_str());
+    let first = candidates.next()?;
+    if candidates.next().is_none() {
+        Some(first)
+    } else {
+        None
+    }
+}
+
+fn build_linear_carried_field_expr(
+    binding_name: &str,
+    field_name: &str,
+    span: Span,
+    node_id_gen: &mut NodeIdGen,
+) -> Expr {
+    Expr {
+        id: node_id_gen.new_id(),
+        kind: ExprKind::StructField {
+            target: Box::new(Expr {
+                id: node_id_gen.new_id(),
+                kind: ExprKind::Var {
+                    ident: binding_name.to_string(),
+                },
+                span,
+            }),
+            field: field_name.to_string(),
+        },
+        span,
     }
 }
 

@@ -13,6 +13,7 @@ use crate::core::backend::lower::machine_layout::{build_payload_layout_ids, payl
 use crate::core::backend::lower::types::TypeLowerer;
 use crate::core::ir::builder::FunctionBuilder;
 use crate::core::ir::{BlockId, Function, FunctionSig, GlobalId, IrTypeCache, IrTypeId, ValueId};
+use crate::core::linear::LinearIndex;
 use crate::core::plans::{
     CallPlan, IndexPlan, LinearMachinePlanMap, LoweringPlan, LoweringPlanMap, MachineEventKeyPlan,
     MachinePlanMap, MatchPlan, SlicePlan,
@@ -68,6 +69,7 @@ pub(super) struct FuncLowerer<'a, 'g> {
     pub(crate) def_table: &'a DefTable,
     pub(super) type_lowerer: TypeLowerer<'a>,
     pub(crate) type_map: &'a TypeMap,
+    pub(super) linear_index: &'a LinearIndex,
     pub(super) machine_plans: Option<&'a MachinePlanMap>,
     // This gets threaded through now so later hosted-machine lowering can
     // consume the elaborated linear machine plans without widening
@@ -177,6 +179,7 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
         func: &FuncDef,
         def_table: &'a DefTable,
         module: Option<&'a Module>,
+        linear_index: &'a LinearIndex,
         type_map: &'a TypeMap,
         lowering_plans: &'a LoweringPlanMap,
         machine_plans: Option<&'a MachinePlanMap>,
@@ -248,6 +251,7 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
         Self {
             def_table,
             type_map,
+            linear_index,
             machine_plans,
             linear_machine_plans,
             type_lowerer,
@@ -276,6 +280,7 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
         method_def: &MethodDef,
         def_table: &'a DefTable,
         module: &'a Module,
+        linear_index: &'a LinearIndex,
         type_map: &'a TypeMap,
         lowering_plans: &'a LoweringPlanMap,
         machine_plans: Option<&'a MachinePlanMap>,
@@ -377,6 +382,7 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
         Self {
             def_table,
             type_map,
+            linear_index,
             machine_plans,
             linear_machine_plans,
             type_lowerer,
@@ -401,6 +407,7 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
         name: String,
         param_ty: Type,
         def_table: &'a DefTable,
+        linear_index: &'a LinearIndex,
         type_map: &'a TypeMap,
         lowering_plans: &'a LoweringPlanMap,
         drop_glue: &'g mut DropGlueRegistry,
@@ -420,6 +427,7 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
         Self {
             def_table,
             type_map,
+            linear_index,
             machine_plans: None,
             linear_machine_plans: None,
             type_lowerer,

@@ -117,6 +117,81 @@ fn linear_type_direct_mode_supports_state_payload_matching() {
 }
 
 #[test]
+fn linear_type_direct_mode_supports_shared_field_access() {
+    let run = run_program(
+        "linear_type_shared_field_access",
+        r#"
+            @linear
+            type Approval = {
+                id: u64,
+
+                states {
+                    Review,
+                    Approved,
+                }
+
+                actions {
+                    approve: Review -> Approved,
+                }
+            }
+
+            Approval :: {
+                fn approve(self) -> Approved {
+                    Approved {}
+                }
+            }
+
+            fn main() {
+                let review = Approval::Review { id: 7 };
+                println(review.id);
+            }
+        "#,
+    );
+
+    assert_eq!(run.status.code(), Some(0));
+    let stdout = String::from_utf8_lossy(&run.stdout);
+    assert_eq!(stdout, "7\n", "unexpected stdout: {stdout}");
+}
+
+#[test]
+fn linear_type_direct_mode_preserves_shared_fields_across_transitions() {
+    let run = run_program(
+        "linear_type_shared_field_preservation",
+        r#"
+            @linear
+            type Approval = {
+                id: u64,
+
+                states {
+                    Review,
+                    Approved,
+                }
+
+                actions {
+                    approve: Review -> Approved,
+                }
+            }
+
+            Approval :: {
+                fn approve(self) -> Approved {
+                    Approved {}
+                }
+            }
+
+            fn main() {
+                let review = Approval::Review { id: 7 };
+                let approved = review.approve();
+                println(approved.id);
+            }
+        "#,
+    );
+
+    assert_eq!(run.status.code(), Some(0));
+    let stdout = String::from_utf8_lossy(&run.stdout);
+    assert_eq!(stdout, "7\n", "unexpected stdout: {stdout}");
+}
+
+#[test]
 fn linear_type_rejects_use_after_consume() {
     let source = r#"
         @linear

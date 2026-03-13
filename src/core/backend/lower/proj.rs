@@ -85,4 +85,36 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
             other => panic!("backend struct field on non-struct type {:?}", other),
         }
     }
+
+    /// Resolves a shared field carried by every variant of a lowered linear
+    /// enum. Shared fields are prepended to each variant payload in declaration
+    /// order, so every variant must expose the same field type and byte offset.
+    pub(super) fn linear_shared_field_from_type(
+        &mut self,
+        ty: &Type,
+        field: &str,
+    ) -> Option<(Type, IrTypeId, u64)> {
+        let Type::Enum { name, variants } = ty else {
+            return None;
+        };
+        let info = self.linear_index.types.get(name)?;
+        let shared_index = info
+            .shared_fields
+            .iter()
+            .position(|shared| shared.name == field)?;
+        let first_variant = variants.first()?;
+        let field_ty = first_variant.payload.get(shared_index)?.clone();
+        let field_ir_ty = self.type_lowerer.lower_type(&field_ty);
+
+        let layout = self.type_lowerer.enum_layout_for_type(ty);
+        let first_layout = layout.variants.first()?;
+        let field_offset = *first_layout.field_offsets.get(shared_index)?;
+
+        debug_assert!(layout.variants.iter().all(|variant| {
+            variant.field_tys.get(shared_index) == Some(&field_ir_ty)
+                && variant.field_offsets.get(shared_index) == Some(&field_offset)
+        }));
+
+        Some((field_ty, field_ir_ty, field_offset))
+    }
 }

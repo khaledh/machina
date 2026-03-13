@@ -30,6 +30,7 @@ use std::collections::HashSet;
 use crate::core::ast::NodeId;
 use crate::core::ast::{BindPattern, BindPatternKind};
 use crate::core::capsule::ModuleId;
+use crate::core::context::ResolvedContext;
 use crate::core::diag::Span;
 use crate::core::resolve::{DefId, DefKind, DefTable};
 use crate::core::typecheck::capability::ensure_hashable;
@@ -226,6 +227,7 @@ fn solve_expr_stage(
         &constrain.def_terms,
         unifier,
         &engine.context().def_table,
+        engine.context(),
         &engine.env().type_defs,
         &engine.env().type_symbols,
         &engine.context().def_owners,
@@ -308,6 +310,7 @@ fn retry_expr_stage(
         &constrain.def_terms,
         unifier,
         &engine.context().def_table,
+        engine.context(),
         &engine.env().type_defs,
         &engine.env().type_symbols,
         &engine.context().def_owners,
@@ -437,6 +440,7 @@ fn check_expr_obligations(
     def_terms: &HashMap<DefId, Type>,
     unifier: &mut TcUnifier,
     def_table: &DefTable,
+    context: &ResolvedContext,
     type_defs: &HashMap<String, Type>,
     type_symbols: &HashMap<String, DefId>,
     def_owners: &HashMap<DefId, ModuleId>,
@@ -478,9 +482,11 @@ fn check_expr_obligations(
             obligation,
             unifier,
             def_table,
+            context,
             type_defs,
             type_symbols,
             def_owners,
+            linear_index,
             property_sigs,
             trait_sigs,
             var_trait_bounds,

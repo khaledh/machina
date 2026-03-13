@@ -43,6 +43,8 @@ pub struct LinearIndex {
 
 #[derive(Clone, Debug)]
 pub struct LinearTypeInfo {
+    /// Shared top-level fields carried by every state variant, in declaration order.
+    pub shared_fields: Vec<LinearSharedFieldInfo>,
     pub state_names: Vec<String>,
     /// The first declared state — used as the initial state for `create(...)`.
     pub initial_state: Option<String>,
@@ -51,6 +53,12 @@ pub struct LinearTypeInfo {
     pub actions: HashMap<(String, String), LinearActionInfo>,
     /// Trigger event types keyed by type name.
     pub triggers: HashMap<String, LinearTriggerInfo>,
+}
+
+#[derive(Clone, Debug)]
+pub struct LinearSharedFieldInfo {
+    pub name: String,
+    pub ty: TypeExpr,
 }
 
 #[derive(Clone, Debug)]
@@ -147,6 +155,14 @@ pub fn build_linear_index(module: &Module) -> LinearIndex {
                 )
             })
             .collect();
+        let shared_fields = linear
+            .fields
+            .iter()
+            .map(|field| LinearSharedFieldInfo {
+                name: field.name.clone(),
+                ty: field.ty.clone(),
+            })
+            .collect();
 
         let state_names = linear
             .states
@@ -186,6 +202,7 @@ pub fn build_linear_index(module: &Module) -> LinearIndex {
         types.insert(
             type_def.name.clone(),
             LinearTypeInfo {
+                shared_fields,
                 state_names,
                 initial_state,
                 roles,

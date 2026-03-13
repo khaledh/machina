@@ -8,11 +8,13 @@ use std::collections::{HashMap, HashSet};
 
 use crate::core::ast::NodeId;
 use crate::core::capsule::ModuleId;
+use crate::core::context::ResolvedContext;
 use crate::core::resolve::{DefId, DefTable};
 use crate::core::typecheck::builtin_methods;
 use crate::core::typecheck::constraints::ExprObligation;
 use crate::core::typecheck::engine::{CollectedPropertySig, CollectedTraitSig};
 use crate::core::typecheck::errors::{TEK, TypeCheckError};
+use crate::core::typecheck::type_map::resolve_type_expr;
 use crate::core::typecheck::unify::TcUnifier;
 use crate::core::types::{TyVarId, Type, TypeAssignability, type_assignable};
 
@@ -21,9 +23,11 @@ pub(super) fn try_check_expr_obligation_nominal(
     obligation: &ExprObligation,
     unifier: &mut TcUnifier,
     def_table: &DefTable,
+    context: &ResolvedContext,
     type_defs: &HashMap<String, Type>,
     type_symbols: &HashMap<String, DefId>,
     def_owners: &HashMap<DefId, ModuleId>,
+    linear_index: &crate::core::linear::LinearIndex,
     property_sigs: &HashMap<String, HashMap<String, CollectedPropertySig>>,
     trait_sigs: &HashMap<String, CollectedTraitSig>,
     var_trait_bounds: &HashMap<TyVarId, Vec<String>>,
@@ -332,6 +336,40 @@ pub(super) fn try_check_expr_obligation_nominal(
                         let _ = unifier.unify(result, &Type::Unknown);
                     }
                 }
+                Type::Enum { name, .. } => {
+                    if let Some(type_def_id) =
+                        super::access_utils::type_def_id_for_nominal_name(name, type_symbols)
+                        && super::access_utils::is_external_opaque_access(
+                            *caller_def_id,
+                            type_def_id,
+                            def_table,
+                            def_owners,
+                        )
+                    {
+                        let diag_name = def_table
+                            .lookup_def(type_def_id)
+                            .map(|def| def.name.clone())
+                            .unwrap_or_else(|| super::diag_utils::compact_nominal_name(name));
+                        crate::core::typecheck::tc_push_error!(
+                            errors,
+                            *span,
+                            TEK::OpaqueFieldAccess(diag_name, field.clone())
+                        );
+                        covered_exprs.insert(*expr_id);
+                        return true;
+                    }
+                    if let Some(shared_field_ty) = resolve_linear_shared_field_ty(
+                        name,
+                        field,
+                        linear_index,
+                        def_table,
+                        context,
+                    ) {
+                        let _ = unifier.unify(result, &shared_field_ty);
+                    } else {
+                        let _ = unifier.unify(result, &Type::Unknown);
+                    }
+                }
                 ty if super::term_utils::is_unresolved(ty) => {}
                 _ => {
                     crate::core::typecheck::tc_push_error!(
@@ -490,6 +528,59 @@ pub(super) fn try_check_expr_obligation_nominal(
                         let _ = unifier.unify(assignee, &Type::Unknown);
                     }
                 }
+                Type::Enum { name, .. } => {
+                    if let Some(type_def_id) =
+                        super::access_utils::type_def_id_for_nominal_name(name, type_symbols)
+                        && super::access_utils::is_external_opaque_access(
+                            *caller_def_id,
+                            type_def_id,
+                            def_table,
+                            def_owners,
+                        )
+                    {
+                        let diag_name = def_table
+                            .lookup_def(type_def_id)
+                            .map(|def| def.name.clone())
+                            .unwrap_or_else(|| super::diag_utils::compact_nominal_name(name));
+                        crate::core::typecheck::tc_push_error!(
+                            errors,
+                            *span,
+                            TEK::OpaqueFieldAccess(diag_name, field.clone())
+                        );
+                        covered_exprs.insert(*stmt_id);
+                        return true;
+                    }
+                    if let Some(shared_field_ty) = resolve_linear_shared_field_ty(
+                        name,
+                        field,
+                        linear_index,
+                        def_table,
+                        context,
+                    ) {
+                        let _ = unifier.unify(assignee, &shared_field_ty);
+                        if super::assignability::solve_assignable(
+                            &value_ty,
+                            &shared_field_ty,
+                            unifier,
+                        )
+                        .is_err()
+                        {
+                            let value_ty =
+                                super::term_utils::canonicalize_type(unifier.apply(&value_ty));
+                            if super::term_utils::is_unresolved(&value_ty) {
+                                return true;
+                            }
+                            crate::core::typecheck::tc_push_error!(
+                                errors,
+                                *span,
+                                TEK::AssignTypeMismatch(shared_field_ty, value_ty,)
+                            );
+                            covered_exprs.insert(*stmt_id);
+                        }
+                    } else {
+                        let _ = unifier.unify(assignee, &Type::Unknown);
+                    }
+                }
                 ty if super::term_utils::is_unresolved(ty) => {}
                 _ => {
                     crate::core::typecheck::tc_push_error!(
@@ -504,4 +595,19 @@ pub(super) fn try_check_expr_obligation_nominal(
         }
         _ => false,
     }
+}
+
+fn resolve_linear_shared_field_ty(
+    type_name: &str,
+    field_name: &str,
+    linear_index: &crate::core::linear::LinearIndex,
+    def_table: &DefTable,
+    context: &ResolvedContext,
+) -> Option<Type> {
+    let linear_ty = linear_index.types.get(type_name)?;
+    let shared_field = linear_ty
+        .shared_fields
+        .iter()
+        .find(|shared_field| shared_field.name == field_name)?;
+    resolve_type_expr(def_table, context, &shared_field.ty).ok()
 }

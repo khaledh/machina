@@ -2,7 +2,7 @@
 
 use crate::core::ast::{Expr, ExprKind};
 use crate::core::backend::lower::LowerToIrError;
-use crate::core::ir::{IrTypeId, IrTypeKind, ValueId};
+use crate::core::ir::{CastKind, IrTypeId, IrTypeKind, ValueId};
 use crate::core::plans::IndexBaseKind;
 use crate::core::types::Type;
 
@@ -51,6 +51,21 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
                     self.type_map.type_of(place.id),
                 ) {
                     return Ok(place_addr);
+                }
+                if let Some((_field_ty, field_ir_ty, field_offset)) =
+                    self.linear_shared_field_from_type(&base_ty, field)
+                {
+                    let enum_layout = self.type_lowerer.enum_layout_for_type(&base_ty);
+                    let blob_ptr = self.field_addr_typed(base_addr, 1, enum_layout.blob_ty);
+                    let field_bytes = self.byte_offset_addr(blob_ptr, field_offset);
+                    let field_ptr_ty = self.type_lowerer.ptr_to(field_ir_ty);
+                    let addr = self
+                        .builder
+                        .cast(CastKind::PtrToPtr, field_bytes, field_ptr_ty);
+                    return Ok(PlaceAddr {
+                        addr,
+                        value_ty: field_ir_ty,
+                    });
                 }
                 let (field_index, _field_ty, field_ir_ty) =
                     self.struct_field_from_type(&base_ty, field);

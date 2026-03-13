@@ -52,6 +52,7 @@ pub(super) struct MachineSpawnInfo {
     pub hosted_type_name: String,
     pub initial_state: Option<String>,
     pub role_names: Vec<String>,
+    pub shared_fields: Vec<(String, TypeExpr)>,
     pub key_ty: TypeExpr,
     pub handle_type_name: String,
     pub spawn_fn_name: String,
@@ -98,6 +99,7 @@ pub(super) struct MachineDeliverInfo {
 pub(super) struct MachineWaitInfo {
     pub hosted_type_name: String,
     pub handle_type_name: String,
+    pub shared_field_tys: Vec<TypeExpr>,
     pub placeholder_target_state: String,
     pub fn_name: String,
 }
@@ -173,6 +175,11 @@ pub(super) fn collect_machine_spawn_infos(module: &Module) -> Vec<MachineSpawnIn
                 hosted_type_name: machine_def.host.type_name.clone(),
                 initial_state: linear.states.first().map(|state| state.name.clone()),
                 role_names: linear.roles.iter().map(|role| role.name.clone()).collect(),
+                shared_fields: linear
+                    .fields
+                    .iter()
+                    .map(|field| (field.name.clone(), field.ty.clone()))
+                    .collect(),
                 key_ty: key_field.ty.clone(),
                 handle_type_name: machine_handle_type_name(&machine_def.name),
                 spawn_fn_name: machine_spawn_fn_name(&machine_def.name),
@@ -344,6 +351,11 @@ pub(super) fn collect_machine_wait_infos(module: &Module) -> Vec<MachineWaitInfo
                 return Vec::new();
             };
             let handle_type_name = machine_handle_type_name(&machine_def.name);
+            let shared_field_tys = linear
+                .fields
+                .iter()
+                .map(|field| field.ty.clone())
+                .collect::<Vec<_>>();
             let mut waits = Vec::new();
             let mut seen_states = HashMap::<String, String>::new();
             for trigger in &linear.triggers {
@@ -355,6 +367,7 @@ pub(super) fn collect_machine_wait_infos(module: &Module) -> Vec<MachineWaitInfo
                 waits.push(MachineWaitInfo {
                     hosted_type_name: machine_def.host.type_name.clone(),
                     handle_type_name: handle_type_name.clone(),
+                    shared_field_tys: shared_field_tys.clone(),
                     placeholder_target_state: fallback_target_state,
                     fn_name: machine_wait_fn_name(
                         &machine_def.name,
@@ -703,7 +716,9 @@ fn build_machine_create_func(
             },
             span,
         },
-        // Placeholder body: returns the initial state variant directly.
+        // Placeholder body: returns the initial state variant directly. Until
+        // runtime-backed create lands, seed shared fields with placeholder
+        // values so generated helpers remain well-typed.
         body: Expr {
             id: node_id_gen.new_id(),
             kind: ExprKind::Block {
@@ -714,7 +729,10 @@ fn build_machine_create_func(
                         enum_name: info.hosted_type_name.clone(),
                         variant: initial_state.clone(),
                         type_args: Vec::new(),
-                        payload: Vec::new(),
+                        payload: placeholder_shared_field_payload(
+                            info.shared_fields.iter().map(|(_, ty)| ty),
+                            node_id_gen,
+                        ),
                     },
                     span,
                 })),
@@ -792,7 +810,8 @@ fn build_machine_resume_func(
             span,
         },
         // Placeholder body: resume semantics are not runtime-backed yet, so we
-        // return a deterministic state shape to keep the generated surface valid.
+        // return a deterministic state shape to keep the generated surface
+        // valid. Shared fields use the same placeholder seeding as create.
         body: Expr {
             id: node_id_gen.new_id(),
             kind: ExprKind::Block {
@@ -803,7 +822,10 @@ fn build_machine_resume_func(
                         enum_name: info.hosted_type_name.clone(),
                         variant: fallback_state.clone(),
                         type_args: Vec::new(),
-                        payload: Vec::new(),
+                        payload: placeholder_shared_field_payload(
+                            info.shared_fields.iter().map(|(_, ty)| ty),
+                            node_id_gen,
+                        ),
                     },
                     span,
                 })),
@@ -1122,6 +1144,8 @@ fn build_machine_wait_func(info: &MachineWaitInfo, node_id_gen: &mut NodeIdGen) 
         },
         // Placeholder body: waiter registration and wakeups are a later
         // runtime slice, so for now we return one valid trigger target shape.
+        // Shared fields use placeholder seeding so the helper remains
+        // well-typed for linear types with carried fields like `id`.
         body: Expr {
             id: node_id_gen.new_id(),
             kind: ExprKind::Block {
@@ -1132,7 +1156,10 @@ fn build_machine_wait_func(info: &MachineWaitInfo, node_id_gen: &mut NodeIdGen) 
                         enum_name: info.hosted_type_name.clone(),
                         variant: info.placeholder_target_state.clone(),
                         type_args: Vec::new(),
-                        payload: Vec::new(),
+                        payload: placeholder_shared_field_payload(
+                            info.shared_field_tys.iter(),
+                            node_id_gen,
+                        ),
                     },
                     span,
                 })),
@@ -1141,6 +1168,43 @@ fn build_machine_wait_func(info: &MachineWaitInfo, node_id_gen: &mut NodeIdGen) 
         },
         span,
     }
+}
+
+fn placeholder_shared_field_payload<'a>(
+    tys: impl IntoIterator<Item = &'a TypeExpr>,
+    node_id_gen: &mut NodeIdGen,
+) -> Vec<Expr> {
+    tys.into_iter()
+        .map(|ty| placeholder_expr_for_type(ty, node_id_gen))
+        .collect()
+}
+
+fn placeholder_expr_for_type(ty: &TypeExpr, node_id_gen: &mut NodeIdGen) -> Expr {
+    let span = Span::default();
+    let kind = match &ty.kind {
+        TypeExprKind::Named { ident, type_args } if type_args.is_empty() => match ident.as_str() {
+            "bool" => ExprKind::BoolLit(false),
+            "char" => ExprKind::CharLit('\0'),
+            "string" => ExprKind::StringLit {
+                value: String::new(),
+            },
+            _ if is_builtin_int_name(ident) => ExprKind::IntLit(0),
+            _ => ExprKind::UnitLit,
+        },
+        _ => ExprKind::UnitLit,
+    };
+    Expr {
+        id: node_id_gen.new_id(),
+        kind,
+        span,
+    }
+}
+
+fn is_builtin_int_name(name: &str) -> bool {
+    matches!(
+        name,
+        "u8" | "u16" | "u32" | "u64" | "usize" | "i8" | "i16" | "i32" | "i64" | "isize"
+    )
 }
 
 fn widen_machine_override_return_type(

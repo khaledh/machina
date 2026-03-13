@@ -5,6 +5,7 @@ use crate::core::backend::lower::globals::GlobalArena;
 use crate::core::backend::lower::lowerer::FuncLowerer;
 use crate::core::backend::lower::{LowerToIrError, LoweredFunction};
 use crate::core::ir::Terminator;
+use crate::core::linear::LinearIndex;
 use crate::core::plans::LoweringPlanMap;
 use crate::core::resolve::{DefId, DefTable};
 use crate::core::typecheck::nominal::NominalKey;
@@ -103,6 +104,7 @@ impl DropGlueRegistry {
     ) -> Result<Vec<LoweredFunction>, LowerToIrError> {
         let mut funcs = Vec::new();
         let empty_plans = LoweringPlanMap::default();
+        let empty_linear_index = LinearIndex::default();
         let mut pending: Vec<(NominalKey, Type)> = self.tys.drain().collect();
         while let Some((nominal_key, ty)) = pending.pop() {
             let def_id =
@@ -125,6 +127,7 @@ impl DropGlueRegistry {
                 func_name,
                 ty.clone(),
                 def_table,
+                &empty_linear_index,
                 type_map,
                 &empty_plans,
                 self,
