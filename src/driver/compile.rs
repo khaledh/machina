@@ -260,6 +260,7 @@ fn run_lower_stage(
         &analyzed.drop_plans,
         &backend::lower::LowerOpts {
             machine_plans: Some(&analyzed.machine_plans),
+            linear_machine_plans: Some(&analyzed.linear_machine_plans),
             trace_alloc: opts.trace_alloc,
             trace_drops: opts.trace_drops,
             executable: true,

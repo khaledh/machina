@@ -14,8 +14,8 @@ use crate::core::backend::lower::types::TypeLowerer;
 use crate::core::ir::builder::FunctionBuilder;
 use crate::core::ir::{BlockId, Function, FunctionSig, GlobalId, IrTypeCache, IrTypeId, ValueId};
 use crate::core::plans::{
-    CallPlan, IndexPlan, LoweringPlan, LoweringPlanMap, MachineEventKeyPlan, MachinePlanMap,
-    MatchPlan, SlicePlan,
+    CallPlan, IndexPlan, LinearMachinePlanMap, LoweringPlan, LoweringPlanMap, MachineEventKeyPlan,
+    MachinePlanMap, MatchPlan, SlicePlan,
 };
 use crate::core::resolve::{Def, DefId, DefTable};
 use crate::core::typecheck::type_map::TypeMap;
@@ -69,6 +69,11 @@ pub(super) struct FuncLowerer<'a, 'g> {
     pub(super) type_lowerer: TypeLowerer<'a>,
     pub(crate) type_map: &'a TypeMap,
     pub(super) machine_plans: Option<&'a MachinePlanMap>,
+    // This gets threaded through now so later hosted-machine lowering can
+    // consume the elaborated linear machine plans without widening
+    // constructor/call-site signatures again.
+    #[allow(dead_code)]
+    pub(super) linear_machine_plans: Option<&'a LinearMachinePlanMap>,
     pub(super) ret_ty: Type,
     pub(super) builder: FunctionBuilder,
     /// Maps definition IDs to their current SSA values (mutable during lowering).
@@ -175,6 +180,7 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
         type_map: &'a TypeMap,
         lowering_plans: &'a LoweringPlanMap,
         machine_plans: Option<&'a MachinePlanMap>,
+        linear_machine_plans: Option<&'a LinearMachinePlanMap>,
         drop_glue: &'g mut DropGlueRegistry,
         globals: &'g mut GlobalArena,
         trace_drops: bool,
@@ -243,6 +249,7 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
             def_table,
             type_map,
             machine_plans,
+            linear_machine_plans,
             type_lowerer,
             ret_ty: (*ret_ty).clone(),
             builder,
@@ -272,6 +279,7 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
         type_map: &'a TypeMap,
         lowering_plans: &'a LoweringPlanMap,
         machine_plans: Option<&'a MachinePlanMap>,
+        linear_machine_plans: Option<&'a LinearMachinePlanMap>,
         drop_glue: &'g mut DropGlueRegistry,
         globals: &'g mut GlobalArena,
         trace_drops: bool,
@@ -370,6 +378,7 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
             def_table,
             type_map,
             machine_plans,
+            linear_machine_plans,
             type_lowerer,
             ret_ty: ret_ty.clone(),
             builder,
@@ -412,6 +421,7 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
             def_table,
             type_map,
             machine_plans: None,
+            linear_machine_plans: None,
             type_lowerer,
             ret_ty: Type::Unit,
             builder,

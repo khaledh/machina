@@ -153,6 +153,7 @@ fn test_lower_module_typestate_machine_plans_materialize_artifacts() {
         &ctx.drop_plans,
         &LowerOpts {
             machine_plans: Some(&ctx.machine_plans),
+            linear_machine_plans: Some(&ctx.linear_machine_plans),
             ..Default::default()
         },
     )
