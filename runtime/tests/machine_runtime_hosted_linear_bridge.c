@@ -78,9 +78,33 @@ int main(void) {
         return 9;
     }
 
-    if (__mc_hosted_linear_resume_state_u64(rt_handle, machine_id, key + 1) != 0) {
+    if (__mc_hosted_linear_deliver_u64(rt_handle, machine_id, key, 1, 2) !=
+        MC_HOSTED_UPDATE_OK) {
         __mc_machine_runtime_free(rt_handle);
         return 10;
+    }
+
+    resumed_tag = __mc_hosted_linear_resume_state_u64(rt_handle, machine_id, key);
+    if (resumed_tag != 2) {
+        __mc_machine_runtime_free(rt_handle);
+        return 11;
+    }
+
+    if (__mc_hosted_linear_deliver_u64(rt_handle, machine_id, key, 1, 3) !=
+        MC_HOSTED_UPDATE_STALE) {
+        __mc_machine_runtime_free(rt_handle);
+        return 12;
+    }
+
+    if (__mc_hosted_linear_deliver_u64(rt_handle, machine_id, key + 1, 2, 3) !=
+        MC_HOSTED_UPDATE_NOT_FOUND) {
+        __mc_machine_runtime_free(rt_handle);
+        return 13;
+    }
+
+    if (__mc_hosted_linear_resume_state_u64(rt_handle, machine_id, key + 1) != 0) {
+        __mc_machine_runtime_free(rt_handle);
+        return 14;
     }
 
     __mc_machine_runtime_free(rt_handle);

@@ -281,6 +281,44 @@ uint64_t __mc_hosted_linear_resume_state_u64(
     return state_tag;
 }
 
+uint64_t __mc_hosted_linear_deliver_u64(
+    uint64_t runtime,
+    uint64_t machine_id,
+    uint64_t key,
+    uint64_t expected_state_tag,
+    uint64_t new_state_tag
+) {
+    mc_machine_runtime_t *rt = mc_runtime_from_handle(runtime);
+    mc_machine_id_t id = 0;
+    if (!rt || !mc_machine_id_from_u64(machine_id, &id) || key == 0 ||
+        expected_state_tag == 0 || new_state_tag == 0) {
+        return MC_HOSTED_UPDATE_NOT_FOUND;
+    }
+
+    mc_machine_slot_t *slot = mc_get_slot(rt, id);
+    if (!slot) {
+        return MC_HOSTED_UPDATE_NOT_FOUND;
+    }
+
+    mc_hosted_linear_machine_ctx_t *ctx =
+        (mc_hosted_linear_machine_ctx_t *)slot->dispatch_ctx;
+    if (!ctx) {
+        return MC_HOSTED_UPDATE_NOT_FOUND;
+    }
+
+    // V1 deliver only advances the stored state tag. State payload threading
+    // will come with the fuller hosted dispatch/runtime bridge.
+    uint64_t actual_tag = 0;
+    return mc_hosted_instance_table_update(
+        &ctx->instances,
+        key,
+        expected_state_tag,
+        new_state_tag,
+        0,
+        &actual_tag
+    );
+}
+
 uint64_t __mc_machine_runtime_set_state_u64(
     uint64_t runtime,
     uint64_t machine_id,

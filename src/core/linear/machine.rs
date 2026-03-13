@@ -95,6 +95,8 @@ pub(super) struct MachineDeliverInfo {
     pub handle_type_name: String,
     pub key_ty: TypeExpr,
     pub event_type_name: String,
+    pub source_state_tag: u64,
+    pub target_state_tag: u64,
     pub fn_name: String,
 }
 
@@ -161,7 +163,10 @@ const MANAGED_RUNTIME_CURRENT_FN: &str = "__mc_machine_runtime_managed_current_u
 const HOSTED_LINEAR_SPAWN_FN: &str = "__mc_hosted_linear_spawn_u64";
 const HOSTED_LINEAR_CREATE_FN: &str = "__mc_hosted_linear_create_u64";
 const HOSTED_LINEAR_RESUME_STATE_FN: &str = "__mc_hosted_linear_resume_state_u64";
+const HOSTED_LINEAR_DELIVER_FN: &str = "__mc_hosted_linear_deliver_u64";
 const DEFAULT_MACHINE_MAILBOX_CAP: u64 = 64;
+const HOSTED_UPDATE_OK: u64 = 0;
+const HOSTED_UPDATE_STALE: u64 = 1;
 
 // ── Collection ──────────────────────────────────────────────────────
 
@@ -339,14 +344,26 @@ pub(super) fn collect_machine_deliver_infos(module: &Module) -> Vec<MachineDeliv
                 return Vec::new();
             };
             let handle_type_name = machine_handle_type_name(&machine_def.name);
+            let state_tags = linear
+                .states
+                .iter()
+                .enumerate()
+                .map(|(index, state)| (state.name.clone(), (index + 1) as u64))
+                .collect::<HashMap<_, _>>();
             linear
                 .triggers
                 .iter()
-                .map(|trigger| MachineDeliverInfo {
-                    handle_type_name: handle_type_name.clone(),
-                    key_ty: key_field.ty.clone(),
-                    event_type_name: trigger.name.clone(),
-                    fn_name: machine_deliver_fn_name(&machine_def.name, &trigger.name),
+                .filter_map(|trigger| {
+                    let source_state_tag = *state_tags.get(&trigger.source_state)?;
+                    let target_state_tag = *state_tags.get(&trigger.target_state)?;
+                    Some(MachineDeliverInfo {
+                        handle_type_name: handle_type_name.clone(),
+                        key_ty: key_field.ty.clone(),
+                        event_type_name: trigger.name.clone(),
+                        source_state_tag,
+                        target_state_tag,
+                        fn_name: machine_deliver_fn_name(&machine_def.name, &trigger.name),
+                    })
                 })
                 .collect::<Vec<_>>()
         })
@@ -523,6 +540,16 @@ pub(super) fn ensure_hosted_runtime_intrinsics(module: &mut Module, node_id_gen:
                 ("runtime", u64_type_expr(node_id_gen, span)),
                 ("machine_id", u64_type_expr(node_id_gen, span)),
                 ("key", u64_type_expr(node_id_gen, span)),
+            ],
+        ),
+        (
+            HOSTED_LINEAR_DELIVER_FN,
+            vec![
+                ("runtime", u64_type_expr(node_id_gen, span)),
+                ("machine_id", u64_type_expr(node_id_gen, span)),
+                ("key", u64_type_expr(node_id_gen, span)),
+                ("expected_state_tag", u64_type_expr(node_id_gen, span)),
+                ("new_state_tag", u64_type_expr(node_id_gen, span)),
             ],
         ),
     ];
@@ -1245,22 +1272,45 @@ fn build_machine_deliver_func(info: &MachineDeliverInfo, node_id_gen: &mut NodeI
             },
             span,
         },
-        // Placeholder body: the typed surface exists now, but instance-backed
-        // delivery semantics will land with the runtime work.
         body: Expr {
             id: node_id_gen.new_id(),
             kind: ExprKind::Block {
-                items: Vec::new(),
-                tail: Some(Box::new(Expr {
-                    id: node_id_gen.new_id(),
-                    kind: ExprKind::EnumVariant {
-                        enum_name: "DeliverResult".to_string(),
-                        variant: "Delivered".to_string(),
-                        type_args: Vec::new(),
-                        payload: Vec::new(),
-                    },
-                    span,
-                })),
+                items: vec![
+                    BlockItem::Stmt(let_bind_stmt(
+                        "__mc_rt",
+                        call_expr(MANAGED_RUNTIME_CURRENT_FN, Vec::new(), node_id_gen, span),
+                        node_id_gen,
+                        span,
+                    )),
+                    BlockItem::Expr(return_enum_error_if_zero(
+                        "__mc_rt",
+                        "DeliverResult",
+                        "InstanceNotFound",
+                        node_id_gen,
+                        span,
+                    )),
+                    BlockItem::Stmt(let_bind_stmt(
+                        "__mc_result",
+                        call_expr(
+                            HOSTED_LINEAR_DELIVER_FN,
+                            vec![
+                                var_expr("__mc_rt", node_id_gen, span),
+                                self_field_expr("_id", node_id_gen, span),
+                                var_expr("key", node_id_gen, span),
+                                int_expr(info.source_state_tag, node_id_gen, span),
+                                int_expr(info.target_state_tag, node_id_gen, span),
+                            ],
+                            node_id_gen,
+                            span,
+                        ),
+                        node_id_gen,
+                        span,
+                    )),
+                ],
+                tail: Some(Box::new(build_machine_deliver_result_expr(
+                    "__mc_result",
+                    node_id_gen,
+                ))),
             },
             span,
         },
@@ -1584,6 +1634,74 @@ fn build_machine_resume_state_expr(
     }
 
     expr
+}
+
+fn build_machine_deliver_result_expr(result_var_name: &str, node_id_gen: &mut NodeIdGen) -> Expr {
+    let span = Span::default();
+    let delivered = Expr {
+        id: node_id_gen.new_id(),
+        kind: ExprKind::EnumVariant {
+            enum_name: "DeliverResult".to_string(),
+            variant: "Delivered".to_string(),
+            type_args: Vec::new(),
+            payload: Vec::new(),
+        },
+        span,
+    };
+    let invalid_state = Expr {
+        id: node_id_gen.new_id(),
+        kind: ExprKind::EnumVariant {
+            enum_name: "DeliverResult".to_string(),
+            variant: "InvalidState".to_string(),
+            type_args: Vec::new(),
+            payload: Vec::new(),
+        },
+        span,
+    };
+    let instance_not_found = Expr {
+        id: node_id_gen.new_id(),
+        kind: ExprKind::EnumVariant {
+            enum_name: "DeliverResult".to_string(),
+            variant: "InstanceNotFound".to_string(),
+            type_args: Vec::new(),
+            payload: Vec::new(),
+        },
+        span,
+    };
+
+    Expr {
+        id: node_id_gen.new_id(),
+        kind: ExprKind::If {
+            cond: Box::new(Expr {
+                id: node_id_gen.new_id(),
+                kind: ExprKind::BinOp {
+                    left: Box::new(var_expr(result_var_name, node_id_gen, span)),
+                    op: crate::core::ast::BinaryOp::Eq,
+                    right: Box::new(int_expr(HOSTED_UPDATE_OK, node_id_gen, span)),
+                },
+                span,
+            }),
+            then_body: Box::new(delivered),
+            else_body: Box::new(Expr {
+                id: node_id_gen.new_id(),
+                kind: ExprKind::If {
+                    cond: Box::new(Expr {
+                        id: node_id_gen.new_id(),
+                        kind: ExprKind::BinOp {
+                            left: Box::new(var_expr(result_var_name, node_id_gen, span)),
+                            op: crate::core::ast::BinaryOp::Eq,
+                            right: Box::new(int_expr(HOSTED_UPDATE_STALE, node_id_gen, span)),
+                        },
+                        span,
+                    }),
+                    then_body: Box::new(invalid_state),
+                    else_body: Box::new(instance_not_found),
+                },
+                span,
+            }),
+        },
+        span,
+    }
 }
 
 fn placeholder_expr_for_type(ty: &TypeExpr, node_id_gen: &mut NodeIdGen) -> Expr {

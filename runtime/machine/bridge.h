@@ -120,5 +120,12 @@ uint64_t __mc_hosted_linear_resume_state_u64(
     uint64_t machine_id,
     uint64_t key
 );
+uint64_t __mc_hosted_linear_deliver_u64(
+    uint64_t runtime,
+    uint64_t machine_id,
+    uint64_t key,
+    uint64_t expected_state_tag,
+    uint64_t new_state_tag
+);
 
 #endif
