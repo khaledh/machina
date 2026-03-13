@@ -71,6 +71,18 @@ int main(void) {
         return 8;
     }
 
+    uint64_t resumed_tag =
+        __mc_hosted_linear_resume_state_u64(rt_handle, machine_id, key);
+    if (resumed_tag != 1) {
+        __mc_machine_runtime_free(rt_handle);
+        return 9;
+    }
+
+    if (__mc_hosted_linear_resume_state_u64(rt_handle, machine_id, key + 1) != 0) {
+        __mc_machine_runtime_free(rt_handle);
+        return 10;
+    }
+
     __mc_machine_runtime_free(rt_handle);
     return 0;
 }

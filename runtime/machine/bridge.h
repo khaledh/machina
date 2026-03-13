@@ -115,5 +115,10 @@ uint64_t __mc_hosted_linear_create_u64(
     uint64_t initial_state_tag,
     uintptr_t initial_payload
 );
+uint64_t __mc_hosted_linear_resume_state_u64(
+    uint64_t runtime,
+    uint64_t machine_id,
+    uint64_t key
+);
 
 #endif

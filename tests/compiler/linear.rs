@@ -651,6 +651,70 @@ fn linear_type_hosted_resume_returns_state_union() {
 }
 
 #[test]
+fn linear_type_hosted_resume_reads_runtime_backed_state() {
+    let run = run_program(
+        "linear_type_hosted_resume_runtime_state",
+        r#"
+            @linear
+            type PullRequest = {
+                id: u64,
+
+                states {
+                    Draft,
+                    Review,
+                    @final Merged,
+                }
+
+                actions {
+                    submit: Draft -> Review,
+                    merge: Review -> Merged,
+                }
+
+                roles {
+                    Author { submit, merge }
+                }
+            }
+
+            PullRequest :: {
+                fn submit(self) -> Review {
+                    Review {}
+                }
+
+                fn merge(self) -> Merged {
+                    Merged {}
+                }
+            }
+
+            machine PRService hosts PullRequest(key: id) {
+                fn new() -> Self {
+                    Self {}
+                }
+            }
+
+            @machines
+            fn main() -> () | MachineError | SessionError {
+                let service = PRService::spawn()?;
+                let draft = service.create(PullRequest as Author)?;
+                let resumed = service.resume(PullRequest as Author, draft.id)?;
+
+                match resumed {
+                    PullRequest::Draft(id) => if id > 0 { println("ok") } else { println("bad") },
+                    PullRequest::Review(id) => if id > 0 { println("ok") } else { println("bad") },
+                    PullRequest::Merged(id) => if id > 0 { println("ok") } else { println("bad") },
+                }
+            }
+        "#,
+    );
+
+    assert_eq!(run.status.code(), Some(0));
+    let stdout = String::from_utf8_lossy(&run.stdout);
+    assert_eq!(
+        stdout, "ok\n",
+        "resume should preserve the runtime-assigned key"
+    );
+}
+
+#[test]
 fn linear_type_hosted_wait_typechecks_for_trigger_driven_state() {
     let source = r#"
         type CIPassed = {}

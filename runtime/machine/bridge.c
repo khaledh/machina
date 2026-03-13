@@ -246,6 +246,41 @@ uint64_t __mc_hosted_linear_create_u64(
     );
 }
 
+uint64_t __mc_hosted_linear_resume_state_u64(
+    uint64_t runtime,
+    uint64_t machine_id,
+    uint64_t key
+) {
+    mc_machine_runtime_t *rt = mc_runtime_from_handle(runtime);
+    mc_machine_id_t id = 0;
+    if (!rt || !mc_machine_id_from_u64(machine_id, &id) || key == 0) {
+        return 0;
+    }
+
+    mc_machine_slot_t *slot = mc_get_slot(rt, id);
+    if (!slot) {
+        return 0;
+    }
+
+    mc_hosted_linear_machine_ctx_t *ctx =
+        (mc_hosted_linear_machine_ctx_t *)slot->dispatch_ctx;
+    if (!ctx) {
+        return 0;
+    }
+
+    uint64_t state_tag = 0;
+    if (!mc_hosted_instance_table_lookup(
+            &ctx->instances,
+            key,
+            &state_tag,
+            NULL
+        )) {
+        return 0;
+    }
+
+    return state_tag;
+}
+
 uint64_t __mc_machine_runtime_set_state_u64(
     uint64_t runtime,
     uint64_t machine_id,

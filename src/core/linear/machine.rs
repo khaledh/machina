@@ -52,6 +52,7 @@ pub(super) struct MachineSpawnInfo {
     pub machine_name: String,
     pub hosted_type_name: String,
     pub initial_state: Option<String>,
+    pub state_names: Vec<String>,
     pub role_names: Vec<String>,
     pub key_field_name: String,
     pub shared_fields: Vec<(String, TypeExpr)>,
@@ -159,6 +160,7 @@ pub(crate) fn machine_wait_fn_name(
 const MANAGED_RUNTIME_CURRENT_FN: &str = "__mc_machine_runtime_managed_current_u64";
 const HOSTED_LINEAR_SPAWN_FN: &str = "__mc_hosted_linear_spawn_u64";
 const HOSTED_LINEAR_CREATE_FN: &str = "__mc_hosted_linear_create_u64";
+const HOSTED_LINEAR_RESUME_STATE_FN: &str = "__mc_hosted_linear_resume_state_u64";
 const DEFAULT_MACHINE_MAILBOX_CAP: u64 = 64;
 
 // ── Collection ──────────────────────────────────────────────────────
@@ -181,6 +183,11 @@ pub(super) fn collect_machine_spawn_infos(module: &Module) -> Vec<MachineSpawnIn
                 machine_name: machine_def.name.clone(),
                 hosted_type_name: machine_def.host.type_name.clone(),
                 initial_state: linear.states.first().map(|state| state.name.clone()),
+                state_names: linear
+                    .states
+                    .iter()
+                    .map(|state| state.name.clone())
+                    .collect(),
                 role_names: linear.roles.iter().map(|role| role.name.clone()).collect(),
                 key_field_name: machine_def.host.key_field.clone(),
                 shared_fields: linear
@@ -508,6 +515,14 @@ pub(super) fn ensure_hosted_runtime_intrinsics(module: &mut Module, node_id_gen:
                 ("machine_id", u64_type_expr(node_id_gen, span)),
                 ("initial_state_tag", u64_type_expr(node_id_gen, span)),
                 ("initial_payload", u64_type_expr(node_id_gen, span)),
+            ],
+        ),
+        (
+            HOSTED_LINEAR_RESUME_STATE_FN,
+            vec![
+                ("runtime", u64_type_expr(node_id_gen, span)),
+                ("machine_id", u64_type_expr(node_id_gen, span)),
+                ("key", u64_type_expr(node_id_gen, span)),
             ],
         ),
     ];
@@ -902,10 +917,6 @@ fn build_machine_resume_func(
     node_id_gen: &mut NodeIdGen,
 ) -> FuncDef {
     let span = Span::default();
-    let fallback_state = info
-        .initial_state
-        .as_ref()
-        .expect("hosted linear types must have an initial state");
     FuncDef {
         id: node_id_gen.new_id(),
         attrs: Vec::new(),
@@ -961,26 +972,55 @@ fn build_machine_resume_func(
             },
             span,
         },
-        // Placeholder body: resume semantics are not runtime-backed yet, so we
-        // return a deterministic state shape to keep the generated surface
-        // valid. Shared fields use the same placeholder seeding as create.
+        // Resume now consults the hosted runtime bridge for the current
+        // instance state tag, then reconstructs the matching state variant with
+        // the resumed key threaded into the shared-field payload.
         body: Expr {
             id: node_id_gen.new_id(),
             kind: ExprKind::Block {
-                items: Vec::new(),
-                tail: Some(Box::new(Expr {
-                    id: node_id_gen.new_id(),
-                    kind: ExprKind::EnumVariant {
-                        enum_name: info.hosted_type_name.clone(),
-                        variant: fallback_state.clone(),
-                        type_args: Vec::new(),
-                        payload: placeholder_shared_field_payload(
-                            info.shared_fields.iter().map(|(_, ty)| ty),
+                items: vec![
+                    BlockItem::Stmt(let_bind_stmt(
+                        "__mc_rt",
+                        call_expr(MANAGED_RUNTIME_CURRENT_FN, Vec::new(), node_id_gen, span),
+                        node_id_gen,
+                        span,
+                    )),
+                    BlockItem::Expr(return_enum_error_if_zero(
+                        "__mc_rt",
+                        "SessionError",
+                        "InstanceNotFound",
+                        node_id_gen,
+                        span,
+                    )),
+                    BlockItem::Stmt(let_bind_stmt(
+                        "__mc_state_tag",
+                        call_expr(
+                            HOSTED_LINEAR_RESUME_STATE_FN,
+                            vec![
+                                var_expr("__mc_rt", node_id_gen, span),
+                                self_field_expr("_id", node_id_gen, span),
+                                var_expr("key", node_id_gen, span),
+                            ],
                             node_id_gen,
+                            span,
                         ),
-                    },
-                    span,
-                })),
+                        node_id_gen,
+                        span,
+                    )),
+                    BlockItem::Expr(return_enum_error_if_zero(
+                        "__mc_state_tag",
+                        "SessionError",
+                        "InstanceNotFound",
+                        node_id_gen,
+                        span,
+                    )),
+                ],
+                tail: Some(Box::new(build_machine_resume_state_expr(
+                    info,
+                    "__mc_state_tag",
+                    "key",
+                    node_id_gen,
+                ))),
             },
             span,
         },
@@ -1468,17 +1508,82 @@ fn placeholder_shared_field_payload_with_key(
     key_field_name: &str,
     node_id_gen: &mut NodeIdGen,
 ) -> Vec<Expr> {
+    placeholder_shared_field_payload_with_key_var(fields, key_field_name, "__mc_key", node_id_gen)
+}
+
+fn placeholder_shared_field_payload_with_key_var(
+    fields: &[(String, TypeExpr)],
+    key_field_name: &str,
+    key_var_name: &str,
+    node_id_gen: &mut NodeIdGen,
+) -> Vec<Expr> {
     let span = Span::default();
     fields
         .iter()
         .map(|(name, ty)| {
             if name == key_field_name {
-                var_expr("__mc_key", node_id_gen, span)
+                var_expr(key_var_name, node_id_gen, span)
             } else {
                 placeholder_expr_for_type(ty, node_id_gen)
             }
         })
         .collect()
+}
+
+fn build_machine_resume_state_expr(
+    info: &MachineSpawnInfo,
+    tag_var_name: &str,
+    key_var_name: &str,
+    node_id_gen: &mut NodeIdGen,
+) -> Expr {
+    let span = Span::default();
+    let mut expr = Expr {
+        id: node_id_gen.new_id(),
+        kind: ExprKind::EnumVariant {
+            enum_name: "SessionError".to_string(),
+            variant: "InstanceNotFound".to_string(),
+            type_args: Vec::new(),
+            payload: Vec::new(),
+        },
+        span,
+    };
+
+    for (index, state_name) in info.state_names.iter().enumerate().rev() {
+        let state_expr = Expr {
+            id: node_id_gen.new_id(),
+            kind: ExprKind::EnumVariant {
+                enum_name: info.hosted_type_name.clone(),
+                variant: state_name.clone(),
+                type_args: Vec::new(),
+                payload: placeholder_shared_field_payload_with_key_var(
+                    &info.shared_fields,
+                    &info.key_field_name,
+                    key_var_name,
+                    node_id_gen,
+                ),
+            },
+            span,
+        };
+        expr = Expr {
+            id: node_id_gen.new_id(),
+            kind: ExprKind::If {
+                cond: Box::new(Expr {
+                    id: node_id_gen.new_id(),
+                    kind: ExprKind::BinOp {
+                        left: Box::new(var_expr(tag_var_name, node_id_gen, span)),
+                        op: crate::core::ast::BinaryOp::Eq,
+                        right: Box::new(int_expr((index + 1) as u64, node_id_gen, span)),
+                    },
+                    span,
+                }),
+                then_body: Box::new(state_expr),
+                else_body: Box::new(expr),
+            },
+            span,
+        };
+    }
+
+    expr
 }
 
 fn placeholder_expr_for_type(ty: &TypeExpr, node_id_gen: &mut NodeIdGen) -> Expr {
