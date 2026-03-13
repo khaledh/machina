@@ -165,6 +165,7 @@ static uint8_t mc_machine_ensure_cap(mc_machine_runtime_t *rt, uint32_t min_cap)
         new_slots[i].descriptor = NULL;
         new_slots[i].dispatch = NULL;
         new_slots[i].dispatch_ctx = NULL;
+        new_slots[i].dispatch_ctx_drop = NULL;
         new_slots[i].mailbox.items = NULL;
         new_slots[i].mailbox.cap = 0;
         new_slots[i].mailbox.len = 0;
@@ -338,7 +339,11 @@ static void mc_stop_machine_and_cleanup_slot(
     slot->state_tag = 0;
     slot->descriptor = NULL;
     slot->dispatch = NULL;
+    if (slot->dispatch_ctx && slot->dispatch_ctx_drop) {
+        slot->dispatch_ctx_drop(slot->dispatch_ctx);
+    }
     slot->dispatch_ctx = NULL;
+    slot->dispatch_ctx_drop = NULL;
 
     rt->stopped_cleanup_count += 1;
 }
@@ -770,6 +775,9 @@ void __mc_machine_runtime_drop(mc_machine_runtime_t *rt) {
         }
         __mc_free(rt->machines[i].mailbox.items);
         rt->machines[i].mailbox.items = NULL;
+        if (rt->machines[i].dispatch_ctx && rt->machines[i].dispatch_ctx_drop) {
+            rt->machines[i].dispatch_ctx_drop(rt->machines[i].dispatch_ctx);
+        }
     }
     for (uint32_t i = 0; i < rt->pending.len; i++) {
         mc_pending_release_request_payload(&rt->pending.entries[i]);
@@ -859,6 +867,7 @@ uint8_t __mc_machine_runtime_spawn(
     slot->descriptor = NULL;
     slot->dispatch = NULL;
     slot->dispatch_ctx = NULL;
+    slot->dispatch_ctx_drop = NULL;
 
     rt->machine_len += 1;
     if (out_id) {

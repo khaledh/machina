@@ -1,4 +1,5 @@
 #include "bridge.h"
+#include "hosted_instance.h"
 #include "internal.h"
 
 #include <stdlib.h>
@@ -56,6 +57,33 @@ static void mc_machine_runtime_managed_atexit_cleanup(void) {
     uint64_t runtime = g_managed_runtime_handle;
     g_managed_runtime_handle = 0;
     __mc_machine_runtime_free(runtime);
+}
+
+typedef struct mc_hosted_linear_machine_ctx {
+    mc_hosted_instance_table_t instances;
+} mc_hosted_linear_machine_ctx_t;
+
+static mc_hosted_linear_machine_ctx_t *mc_hosted_linear_ctx_new(void) {
+    mc_hosted_linear_machine_ctx_t *ctx =
+        (mc_hosted_linear_machine_ctx_t *)__mc_alloc(
+            sizeof(mc_hosted_linear_machine_ctx_t),
+            _Alignof(mc_hosted_linear_machine_ctx_t)
+        );
+    if (!ctx) {
+        return NULL;
+    }
+    mc_hosted_instance_table_init(&ctx->instances);
+    return ctx;
+}
+
+static void mc_hosted_linear_ctx_drop(void *dispatch_ctx) {
+    mc_hosted_linear_machine_ctx_t *ctx =
+        (mc_hosted_linear_machine_ctx_t *)dispatch_ctx;
+    if (!ctx) {
+        return;
+    }
+    mc_hosted_instance_table_drop(&ctx->instances);
+    __mc_free(ctx);
 }
 
 // ---------------------------------------------------------------------------
@@ -151,6 +179,71 @@ uint64_t __mc_machine_runtime_spawn_u64(uint64_t runtime, uint64_t mailbox_cap) 
         return 0;
     }
     return (uint64_t)id;
+}
+
+uint64_t __mc_hosted_linear_spawn_u64(uint64_t runtime, uint64_t mailbox_cap) {
+    mc_machine_runtime_t *rt = mc_runtime_from_handle(runtime);
+    if (!rt || mailbox_cap > UINT32_MAX) {
+        return 0;
+    }
+
+    mc_machine_id_t id = 0;
+    if (!__mc_machine_runtime_spawn(rt, (uint32_t)mailbox_cap, &id)) {
+        return 0;
+    }
+
+    mc_hosted_linear_machine_ctx_t *ctx = mc_hosted_linear_ctx_new();
+    if (!ctx) {
+        (void)__mc_machine_runtime_stop(rt, id);
+        return 0;
+    }
+
+    mc_machine_slot_t *slot = mc_get_slot(rt, id);
+    if (!slot) {
+        mc_hosted_linear_ctx_drop(ctx);
+        (void)__mc_machine_runtime_stop(rt, id);
+        return 0;
+    }
+
+    slot->dispatch_ctx = ctx;
+    slot->dispatch_ctx_drop = mc_hosted_linear_ctx_drop;
+
+    if (!__mc_machine_runtime_start(rt, id)) {
+        (void)__mc_machine_runtime_stop(rt, id);
+        return 0;
+    }
+
+    return (uint64_t)id;
+}
+
+uint64_t __mc_hosted_linear_create_u64(
+    uint64_t runtime,
+    uint64_t machine_id,
+    uint64_t initial_state_tag,
+    uintptr_t initial_payload
+) {
+    mc_machine_runtime_t *rt = mc_runtime_from_handle(runtime);
+    mc_machine_id_t id = 0;
+    if (!rt || !mc_machine_id_from_u64(machine_id, &id) || initial_state_tag == 0) {
+        return 0;
+    }
+
+    mc_machine_slot_t *slot = mc_get_slot(rt, id);
+    if (!slot) {
+        return 0;
+    }
+
+    mc_hosted_linear_machine_ctx_t *ctx =
+        (mc_hosted_linear_machine_ctx_t *)slot->dispatch_ctx;
+    if (!ctx) {
+        return 0;
+    }
+
+    return mc_hosted_instance_table_create(
+        &ctx->instances,
+        initial_state_tag,
+        initial_payload
+    );
 }
 
 uint64_t __mc_machine_runtime_set_state_u64(

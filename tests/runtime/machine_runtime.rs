@@ -105,6 +105,11 @@ fn test_machine_runtime_hosted_instance_table() {
 }
 
 #[test]
+fn test_machine_runtime_hosted_linear_bridge() {
+    assert_runtime_c_fixture_ok("machine_runtime_hosted_linear_bridge");
+}
+
+#[test]
 fn test_std_machine_module_bridge_compiles_and_runs() {
     let source = r#"
 requires {

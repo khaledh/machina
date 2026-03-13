@@ -104,4 +104,16 @@ uint64_t __mc_machine_runtime_bind_descriptor_u64(
 // Returns `mc_machine_step_status_t` value.
 uint64_t __mc_machine_runtime_step_u64(uint64_t runtime);
 
+// Hosted linear machine bridge wrappers.
+//
+// These helpers bundle the machine runtime and hosted-instance storage setup
+// needed by generated hosted linear machine helpers.
+uint64_t __mc_hosted_linear_spawn_u64(uint64_t runtime, uint64_t mailbox_cap);
+uint64_t __mc_hosted_linear_create_u64(
+    uint64_t runtime,
+    uint64_t machine_id,
+    uint64_t initial_state_tag,
+    uintptr_t initial_payload
+);
+
 #endif

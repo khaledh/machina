@@ -251,6 +251,9 @@ typedef mc_dispatch_result_t (*mc_machine_dispatch_txn_fn)(
     uint64_t *fault_code
 );
 
+// Optional cleanup callback for one machine-local dispatch context pointer.
+typedef void (*mc_machine_dispatch_ctx_drop_fn)(void *dispatch_ctx);
+
 // Drop callback for one boxed payload layout id.
 // Runtime passes the payload box address as opaque pointer.
 typedef void (*mc_payload_drop_fn)(void *payload_addr);
@@ -285,6 +288,8 @@ typedef struct mc_machine_slot {
     mc_machine_dispatch_txn_fn dispatch;
     // Opaque context pointer paired with `dispatch`.
     void *dispatch_ctx;
+    // Optional cleanup callback for `dispatch_ctx`.
+    mc_machine_dispatch_ctx_drop_fn dispatch_ctx_drop;
     // Bounded FIFO for this machine.
     mc_machine_mailbox_t mailbox;
 } mc_machine_slot_t;
