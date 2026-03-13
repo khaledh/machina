@@ -341,6 +341,14 @@ fn runtime_call_spec(runtime: &RuntimeFn) -> RuntimeCallSpec {
             args: &[Ptr, Int],
             ret: RetInt,
         },
+        RuntimeFn::HostedLinearSpawn => RuntimeCallSpec {
+            args: &[Int, Int],
+            ret: RetInt,
+        },
+        RuntimeFn::HostedLinearCreate => RuntimeCallSpec {
+            args: &[Int, Int, Int, Int],
+            ret: RetInt,
+        },
         RuntimeFn::Alloc => RuntimeCallSpec {
             args: &[Int, Int],
             ret: RetPtr,
