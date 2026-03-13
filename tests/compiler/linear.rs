@@ -421,6 +421,62 @@ fn linear_type_hosted_create_returns_initial_state() {
 }
 
 #[test]
+fn linear_type_hosted_create_assigns_runtime_backed_key() {
+    let run = run_program(
+        "linear_type_hosted_create_runtime_key",
+        r#"
+            @linear
+            type PullRequest = {
+                id: u64,
+
+                states {
+                    Draft,
+                    Review,
+                }
+
+                actions {
+                    submit: Draft -> Review,
+                }
+
+                roles {
+                    Author { submit }
+                }
+            }
+
+            PullRequest :: {
+                fn submit(self) -> Review {
+                    Review {}
+                }
+            }
+
+            machine PRService hosts PullRequest(key: id) {
+                fn new() -> Self {
+                    Self {}
+                }
+            }
+
+            @machines
+            fn main() -> () | MachineError | SessionError {
+                let service = PRService::spawn()?;
+                let draft = service.create(PullRequest as Author)?;
+                println(draft.id);
+            }
+        "#,
+    );
+
+    assert_eq!(run.status.code(), Some(0));
+    let stdout = String::from_utf8_lossy(&run.stdout);
+    let key = stdout
+        .trim()
+        .parse::<u64>()
+        .expect("hosted create should print a numeric key");
+    assert!(
+        key > 0,
+        "expected a nonzero runtime-assigned key, got {key}"
+    );
+}
+
+#[test]
 fn linear_type_hosted_action_uses_machine_override_when_present() {
     let run = run_program(
         "linear_type_hosted_action_override_dispatch",
@@ -583,9 +639,9 @@ fn linear_type_hosted_resume_returns_state_union() {
             let session = service.resume(PullRequest as Author, 42)?;
 
             match session {
-                PullRequest::Draft => {}
-                PullRequest::Review => {}
-                PullRequest::Merged => {}
+                PullRequest::Draft(_) => {}
+                PullRequest::Review(_) => {}
+                PullRequest::Merged(_) => {}
             }
         }
     "#;
@@ -658,8 +714,8 @@ fn linear_type_hosted_wait_typechecks_for_trigger_driven_state() {
             // are reachable from `PendingCI`. We can tighten this once the
             // type system grows a way to represent state subsets explicitly.
             match next {
-                PullRequest::Draft => {}
-                PullRequest::Review => {}
+                PullRequest::Draft(_) => {}
+                PullRequest::Review(_) => {}
                 _ => {}
             }
         }

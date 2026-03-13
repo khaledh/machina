@@ -76,6 +76,7 @@ pub fn desugar_module(
     // exist before resolve sees them.
     if !machine_infos.is_empty() {
         machine::ensure_hosted_support_types(module, node_id_gen);
+        machine::ensure_hosted_runtime_intrinsics(module, node_id_gen);
         machine::append_machine_spawn_support(
             module,
             &machine_infos,

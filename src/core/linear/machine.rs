@@ -39,8 +39,9 @@ use std::collections::HashMap;
 
 use crate::core::ast::visit_mut::{self, VisitorMut};
 use crate::core::ast::{
-    EnumDefVariant, Expr, ExprKind, FuncDef, MachineDef, MachineItem, Module, NodeIdGen, Param,
-    ParamMode, TopLevelItem, TypeDef, TypeDefKind, TypeExpr, TypeExprKind,
+    BindPattern, BindPatternKind, BlockItem, CallArg, CallArgMode, EnumDefVariant, Expr, ExprKind,
+    FuncDecl, FuncDef, FunctionSig, MachineDef, MachineItem, Module, NodeIdGen, Param, ParamMode,
+    StmtExpr, StmtExprKind, TopLevelItem, TypeDef, TypeDefKind, TypeExpr, TypeExprKind,
 };
 use crate::core::diag::Span;
 
@@ -52,6 +53,7 @@ pub(super) struct MachineSpawnInfo {
     pub hosted_type_name: String,
     pub initial_state: Option<String>,
     pub role_names: Vec<String>,
+    pub key_field_name: String,
     pub shared_fields: Vec<(String, TypeExpr)>,
     pub key_ty: TypeExpr,
     pub handle_type_name: String,
@@ -154,6 +156,11 @@ pub(crate) fn machine_wait_fn_name(
     format!("__mc_machine_wait_{machine_name}_{type_name}_{source_state}")
 }
 
+const MANAGED_RUNTIME_CURRENT_FN: &str = "__mc_machine_runtime_managed_current_u64";
+const HOSTED_LINEAR_SPAWN_FN: &str = "__mc_hosted_linear_spawn_u64";
+const HOSTED_LINEAR_CREATE_FN: &str = "__mc_hosted_linear_create_u64";
+const DEFAULT_MACHINE_MAILBOX_CAP: u64 = 64;
+
 // ── Collection ──────────────────────────────────────────────────────
 
 pub(super) fn collect_machine_spawn_infos(module: &Module) -> Vec<MachineSpawnInfo> {
@@ -175,6 +182,7 @@ pub(super) fn collect_machine_spawn_infos(module: &Module) -> Vec<MachineSpawnIn
                 hosted_type_name: machine_def.host.type_name.clone(),
                 initial_state: linear.states.first().map(|state| state.name.clone()),
                 role_names: linear.roles.iter().map(|role| role.name.clone()).collect(),
+                key_field_name: machine_def.host.key_field.clone(),
                 shared_fields: linear
                     .fields
                     .iter()
@@ -467,6 +475,80 @@ pub(super) fn ensure_hosted_support_types(module: &mut Module, node_id_gen: &mut
     );
 }
 
+/// Declare the small hosted runtime bridge used by generated `spawn`/`create`
+/// helpers. Keeping these as ordinary callable declarations lets the existing
+/// frontend and backend treat them like any other runtime bridge call.
+pub(super) fn ensure_hosted_runtime_intrinsics(module: &mut Module, node_id_gen: &mut NodeIdGen) {
+    let existing_callables: HashMap<String, ()> = module
+        .top_level_items
+        .iter()
+        .filter_map(|item| match item {
+            TopLevelItem::FuncDecl(decl) => Some((decl.sig.name.clone(), ())),
+            TopLevelItem::FuncDef(def) => Some((def.sig.name.clone(), ())),
+            _ => None,
+        })
+        .collect();
+
+    let span = Span::default();
+    let mut decls = Vec::new();
+
+    let intrinsics = [
+        (MANAGED_RUNTIME_CURRENT_FN, Vec::new()),
+        (
+            HOSTED_LINEAR_SPAWN_FN,
+            vec![
+                ("runtime", u64_type_expr(node_id_gen, span)),
+                ("mailbox_cap", u64_type_expr(node_id_gen, span)),
+            ],
+        ),
+        (
+            HOSTED_LINEAR_CREATE_FN,
+            vec![
+                ("runtime", u64_type_expr(node_id_gen, span)),
+                ("machine_id", u64_type_expr(node_id_gen, span)),
+                ("initial_state_tag", u64_type_expr(node_id_gen, span)),
+                ("initial_payload", u64_type_expr(node_id_gen, span)),
+            ],
+        ),
+    ];
+
+    for (name, params) in intrinsics {
+        if existing_callables.contains_key(name) {
+            continue;
+        }
+        let params = if params.is_empty() {
+            Vec::new()
+        } else {
+            params
+                .into_iter()
+                .map(|(param_name, typ)| Param {
+                    id: node_id_gen.new_id(),
+                    ident: param_name.to_string(),
+                    typ,
+                    mode: ParamMode::In,
+                    span,
+                })
+                .collect()
+        };
+        decls.push(TopLevelItem::FuncDecl(FuncDecl {
+            id: node_id_gen.new_id(),
+            attrs: Vec::new(),
+            sig: FunctionSig {
+                name: name.to_string(),
+                type_params: Vec::new(),
+                params,
+                ret_ty_expr: u64_type_expr(node_id_gen, span),
+                span,
+            },
+            span,
+        }));
+    }
+
+    if !decls.is_empty() {
+        module.top_level_items.splice(0..0, decls);
+    }
+}
+
 fn ensure_type_def(module: &mut Module, type_name: &str, item: TopLevelItem) {
     let already_exists = module
         .top_level_items
@@ -633,7 +715,42 @@ fn build_machine_spawn_func(info: &MachineSpawnInfo, node_id_gen: &mut NodeIdGen
         body: Expr {
             id: node_id_gen.new_id(),
             kind: ExprKind::Block {
-                items: Vec::new(),
+                items: vec![
+                    BlockItem::Stmt(let_bind_stmt(
+                        "__mc_rt",
+                        call_expr(MANAGED_RUNTIME_CURRENT_FN, Vec::new(), node_id_gen, span),
+                        node_id_gen,
+                        span,
+                    )),
+                    BlockItem::Expr(return_enum_error_if_zero(
+                        "__mc_rt",
+                        "MachineError",
+                        "SpawnFailed",
+                        node_id_gen,
+                        span,
+                    )),
+                    BlockItem::Stmt(let_bind_stmt(
+                        "__mc_machine_id",
+                        call_expr(
+                            HOSTED_LINEAR_SPAWN_FN,
+                            vec![
+                                var_expr("__mc_rt", node_id_gen, span),
+                                int_expr(DEFAULT_MACHINE_MAILBOX_CAP, node_id_gen, span),
+                            ],
+                            node_id_gen,
+                            span,
+                        ),
+                        node_id_gen,
+                        span,
+                    )),
+                    BlockItem::Expr(return_enum_error_if_zero(
+                        "__mc_machine_id",
+                        "MachineError",
+                        "SpawnFailed",
+                        node_id_gen,
+                        span,
+                    )),
+                ],
                 tail: Some(Box::new(Expr {
                     id: node_id_gen.new_id(),
                     kind: ExprKind::StructLit {
@@ -642,11 +759,7 @@ fn build_machine_spawn_func(info: &MachineSpawnInfo, node_id_gen: &mut NodeIdGen
                         fields: vec![crate::core::ast::StructLitField {
                             id: node_id_gen.new_id(),
                             name: "_id".to_string(),
-                            value: Expr {
-                                id: node_id_gen.new_id(),
-                                kind: ExprKind::IntLit(1),
-                                span,
-                            },
+                            value: var_expr("__mc_machine_id", node_id_gen, span),
                             span,
                         }],
                     },
@@ -716,21 +829,60 @@ fn build_machine_create_func(
             },
             span,
         },
-        // Placeholder body: returns the initial state variant directly. Until
-        // runtime-backed create lands, seed shared fields with placeholder
-        // values so generated helpers remain well-typed.
+        // Hosted create now allocates a real instance in the machine-backed
+        // instance table and threads the assigned key into the returned state's
+        // shared key field. Other shared fields still use placeholder values
+        // until fuller runtime-backed construction lands.
         body: Expr {
             id: node_id_gen.new_id(),
             kind: ExprKind::Block {
-                items: Vec::new(),
+                items: vec![
+                    BlockItem::Stmt(let_bind_stmt(
+                        "__mc_rt",
+                        call_expr(MANAGED_RUNTIME_CURRENT_FN, Vec::new(), node_id_gen, span),
+                        node_id_gen,
+                        span,
+                    )),
+                    BlockItem::Expr(return_enum_error_if_zero(
+                        "__mc_rt",
+                        "SessionError",
+                        "InstanceNotFound",
+                        node_id_gen,
+                        span,
+                    )),
+                    BlockItem::Stmt(let_bind_stmt(
+                        "__mc_key",
+                        call_expr(
+                            HOSTED_LINEAR_CREATE_FN,
+                            vec![
+                                var_expr("__mc_rt", node_id_gen, span),
+                                self_field_expr("_id", node_id_gen, span),
+                                int_expr(1, node_id_gen, span),
+                                int_expr(0, node_id_gen, span),
+                            ],
+                            node_id_gen,
+                            span,
+                        ),
+                        node_id_gen,
+                        span,
+                    )),
+                    BlockItem::Expr(return_enum_error_if_zero(
+                        "__mc_key",
+                        "SessionError",
+                        "InstanceNotFound",
+                        node_id_gen,
+                        span,
+                    )),
+                ],
                 tail: Some(Box::new(Expr {
                     id: node_id_gen.new_id(),
                     kind: ExprKind::EnumVariant {
                         enum_name: info.hosted_type_name.clone(),
                         variant: initial_state.clone(),
                         type_args: Vec::new(),
-                        payload: placeholder_shared_field_payload(
-                            info.shared_fields.iter().map(|(_, ty)| ty),
+                        payload: placeholder_shared_field_payload_with_key(
+                            &info.shared_fields,
+                            &info.key_field_name,
                             node_id_gen,
                         ),
                     },
@@ -1170,12 +1322,162 @@ fn build_machine_wait_func(info: &MachineWaitInfo, node_id_gen: &mut NodeIdGen) 
     }
 }
 
+fn u64_type_expr(node_id_gen: &mut NodeIdGen, span: Span) -> TypeExpr {
+    TypeExpr {
+        id: node_id_gen.new_id(),
+        kind: TypeExprKind::Named {
+            ident: "u64".to_string(),
+            type_args: Vec::new(),
+        },
+        span,
+    }
+}
+
+fn var_expr(name: &str, node_id_gen: &mut NodeIdGen, span: Span) -> Expr {
+    Expr {
+        id: node_id_gen.new_id(),
+        kind: ExprKind::Var {
+            ident: name.to_string(),
+        },
+        span,
+    }
+}
+
+fn int_expr(value: u64, node_id_gen: &mut NodeIdGen, span: Span) -> Expr {
+    Expr {
+        id: node_id_gen.new_id(),
+        kind: ExprKind::IntLit(value),
+        span,
+    }
+}
+
+fn self_field_expr(field: &str, node_id_gen: &mut NodeIdGen, span: Span) -> Expr {
+    Expr {
+        id: node_id_gen.new_id(),
+        kind: ExprKind::StructField {
+            target: Box::new(var_expr("self", node_id_gen, span)),
+            field: field.to_string(),
+        },
+        span,
+    }
+}
+
+fn call_expr(callee_name: &str, args: Vec<Expr>, node_id_gen: &mut NodeIdGen, span: Span) -> Expr {
+    Expr {
+        id: node_id_gen.new_id(),
+        kind: ExprKind::Call {
+            callee: Box::new(var_expr(callee_name, node_id_gen, span)),
+            args: args
+                .into_iter()
+                .map(|expr| CallArg {
+                    mode: CallArgMode::Default,
+                    expr,
+                    init: crate::core::ast::InitInfo::default(),
+                    span,
+                })
+                .collect(),
+        },
+        span,
+    }
+}
+
+fn let_bind_stmt(ident: &str, value: Expr, node_id_gen: &mut NodeIdGen, span: Span) -> StmtExpr {
+    StmtExpr {
+        id: node_id_gen.new_id(),
+        kind: StmtExprKind::LetBind {
+            pattern: BindPattern {
+                id: node_id_gen.new_id(),
+                kind: BindPatternKind::Name {
+                    ident: ident.to_string(),
+                },
+                span,
+            },
+            decl_ty: None,
+            value: Box::new(value),
+        },
+        span,
+    }
+}
+
+fn return_enum_error_if_zero(
+    value_var: &str,
+    enum_name: &str,
+    variant: &str,
+    node_id_gen: &mut NodeIdGen,
+    span: Span,
+) -> Expr {
+    Expr {
+        id: node_id_gen.new_id(),
+        kind: ExprKind::If {
+            cond: Box::new(Expr {
+                id: node_id_gen.new_id(),
+                kind: ExprKind::BinOp {
+                    left: Box::new(var_expr(value_var, node_id_gen, span)),
+                    op: crate::core::ast::BinaryOp::Eq,
+                    right: Box::new(int_expr(0, node_id_gen, span)),
+                },
+                span,
+            }),
+            then_body: Box::new(Expr {
+                id: node_id_gen.new_id(),
+                kind: ExprKind::Block {
+                    items: vec![BlockItem::Stmt(StmtExpr {
+                        id: node_id_gen.new_id(),
+                        kind: StmtExprKind::Return {
+                            value: Some(Box::new(Expr {
+                                id: node_id_gen.new_id(),
+                                kind: ExprKind::EnumVariant {
+                                    enum_name: enum_name.to_string(),
+                                    type_args: Vec::new(),
+                                    variant: variant.to_string(),
+                                    payload: Vec::new(),
+                                },
+                                span,
+                            })),
+                        },
+                        span,
+                    })],
+                    tail: None,
+                },
+                span,
+            }),
+            else_body: Box::new(Expr {
+                id: node_id_gen.new_id(),
+                kind: ExprKind::Block {
+                    items: Vec::new(),
+                    tail: None,
+                },
+                span,
+            }),
+        },
+        span,
+    }
+}
+
 fn placeholder_shared_field_payload<'a>(
     tys: impl IntoIterator<Item = &'a TypeExpr>,
     node_id_gen: &mut NodeIdGen,
 ) -> Vec<Expr> {
     tys.into_iter()
         .map(|ty| placeholder_expr_for_type(ty, node_id_gen))
+        .collect()
+}
+
+fn placeholder_shared_field_payload_with_key(
+    fields: &[(String, TypeExpr)],
+    key_field_name: &str,
+    node_id_gen: &mut NodeIdGen,
+) -> Vec<Expr> {
+    let span = Span::default();
+    fields
+        .iter()
+        .map(|(name, ty)| {
+            if name == key_field_name {
+                var_expr("__mc_key", node_id_gen, span)
+            } else {
+                placeholder_expr_for_type(ty, node_id_gen)
+            }
+        })
         .collect()
 }
 
