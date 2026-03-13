@@ -100,6 +100,11 @@ fn test_machine_runtime_descriptor_dispatch_selection() {
 }
 
 #[test]
+fn test_machine_runtime_hosted_instance_table() {
+    assert_runtime_c_fixture_ok("hosted_instance_basic");
+}
+
+#[test]
 fn test_std_machine_module_bridge_compiles_and_runs() {
     let source = r#"
 requires {

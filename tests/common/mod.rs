@@ -139,6 +139,10 @@ fn runtime_sources(repo_root: &Path) -> Vec<PathBuf> {
             .join("runtime")
             .join("machine")
             .join("descriptor.c"),
+        repo_root
+            .join("runtime")
+            .join("machine")
+            .join("hosted_instance.c"),
         repo_root.join("runtime").join("machine").join("pending.c"),
         repo_root.join("runtime").join("machine").join("emit.c"),
         repo_root.join("runtime").join("set.c"),
