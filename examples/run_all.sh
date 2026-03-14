@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Runs all runnable examples as a fast smoke test.
+# Runs runnable examples as a fast smoke test.
 # A runnable example is any `.mc` file under `examples/` containing `fn main(...)`.
 #
 # Behavior:
@@ -8,6 +8,8 @@
 # - Suppresses normal example output.
 # - Prints one progress dot per completed example.
 # - Prints full logs only for failures.
+# - Excludes legacy `examples/typestate/*` by default. Set
+#   `MACHINA_INCLUDE_LEGACY_TYPESTATE=1` to include them.
 set -euo pipefail
 
 script_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
@@ -33,6 +35,9 @@ detect_jobs() {
 
 declare -a runnable_examples=()
 while IFS= read -r -d '' file; do
+  if [[ "$file" == "$script_dir"/typestate/* ]] && [[ "${MACHINA_INCLUDE_LEGACY_TYPESTATE:-0}" != "1" ]]; then
+    continue
+  fi
   # Treat files with a main entrypoint as runnable programs.
   if grep -Eq '^[[:space:]]*fn[[:space:]]+main[[:space:]]*\(' "$file"; then
     runnable_examples+=("${file#$repo_root/}")
