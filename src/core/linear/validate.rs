@@ -16,8 +16,8 @@ use crate::core::ast::ExprKind;
 use crate::core::ast::visit::{self, Visitor};
 use crate::core::ast::{
     LinearRoleDecl, LinearStateVariant, LinearTransitionDecl, MachineDef, MachineItem,
-    MachineTransitionHandler, MethodBlock, MethodDef, MethodItem, Module, TopLevelItem, TypeDef,
-    TypeDefKind, TypeExpr, TypeExprKind,
+    MachineOnHandler, MachineTransitionHandler, MethodBlock, MethodDef, MethodItem, Module,
+    TopLevelItem, TypeDef, TypeDefKind, TypeExpr, TypeExprKind,
 };
 use crate::core::resolve::{REK, ResolveError};
 
@@ -449,12 +449,13 @@ fn validate_machine_def(
         );
     }
 
-    validate_machine_handlers(machine_def, linear, errors);
+    validate_machine_handlers(machine_def, linear, type_defs, errors);
 }
 
 fn validate_machine_handlers(
     machine_def: &MachineDef,
     linear: &crate::core::ast::LinearTypeDef,
+    type_defs: &HashMap<String, &TypeDef>,
     errors: &mut Vec<ResolveError>,
 ) {
     let actions_by_name: HashMap<&str, &LinearTransitionDecl> = linear
@@ -515,6 +516,9 @@ fn validate_machine_handlers(
                     errors,
                 );
             }
+            MachineItem::On(handler) => {
+                validate_hosted_on_handler_payload_usage(machine_def, handler, type_defs, errors);
+            }
             _ => {}
         }
     }
@@ -540,6 +544,32 @@ fn validate_hosted_action_emit_usage(
                 .at(span),
         );
     }
+}
+
+fn validate_hosted_on_handler_payload_usage(
+    machine_def: &MachineDef,
+    handler: &MachineOnHandler,
+    type_defs: &HashMap<String, &TypeDef>,
+    errors: &mut Vec<ResolveError>,
+) {
+    if handler.provenance.is_some() {
+        return;
+    }
+
+    let Some(selector_type_name) = named_type_name(&handler.selector_ty) else {
+        return;
+    };
+    let Some(type_def) = type_defs.get(&selector_type_name) else {
+        return;
+    };
+    if hosted_on_payload_shape_supported(type_def) {
+        return;
+    }
+
+    errors.push(
+        REK::MachineHostedOnPayloadUnsupported(machine_def.name.clone(), selector_type_name)
+            .at(handler.selector_ty.span),
+    );
 }
 
 fn validate_machine_transition_handler(
@@ -626,6 +656,25 @@ fn named_type_name(ty_expr: &TypeExpr) -> Option<String> {
         TypeExprKind::Named { ident, type_args } if type_args.is_empty() => Some(ident.clone()),
         _ => None,
     }
+}
+
+fn hosted_on_payload_shape_supported(type_def: &TypeDef) -> bool {
+    let TypeDefKind::Struct { fields } = &type_def.kind else {
+        return false;
+    };
+    match fields.as_slice() {
+        [] => true,
+        [field0] => is_u64_named_type(&field0.ty),
+        [field0, field1] => is_u64_named_type(&field0.ty) && is_u64_named_type(&field1.ty),
+        _ => false,
+    }
+}
+
+fn is_u64_named_type(ty_expr: &TypeExpr) -> bool {
+    matches!(
+        &ty_expr.kind,
+        TypeExprKind::Named { ident, type_args } if ident == "u64" && type_args.is_empty()
+    )
 }
 
 fn collect_emit_spans(expr: &crate::core::ast::Expr) -> Vec<crate::core::diag::Span> {

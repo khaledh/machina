@@ -661,6 +661,17 @@ pub(super) fn from_resolve_error(error: &ResolveError) -> Diagnostic {
             );
             "MC-MACHINE-HOSTED-ACTION-EMIT-UNSUPPORTED"
         }
+        ResolveErrorKind::MachineHostedOnPayloadUnsupported(machine, selector) => {
+            metadata.insert(
+                "machine".to_string(),
+                DiagnosticValue::String(machine.clone()),
+            );
+            metadata.insert(
+                "selector".to_string(),
+                DiagnosticValue::String(selector.clone()),
+            );
+            "MC-MACHINE-HOSTED-ON-PAYLOAD-UNSUPPORTED"
+        }
     };
     Diagnostic {
         phase: DiagnosticPhase::Resolve,

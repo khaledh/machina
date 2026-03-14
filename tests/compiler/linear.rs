@@ -1558,6 +1558,50 @@ fn linear_type_hosted_action_override_rejects_emit() {
 }
 
 #[test]
+fn linear_type_hosted_on_handler_rejects_unsupported_payload_shape() {
+    let source = r#"
+        type TooWide = {
+            id: u64,
+            build: u64,
+            attempt: u64,
+        }
+
+        @linear
+        type PullRequest = {
+            id: u64,
+
+            states {
+                Draft,
+            }
+
+            actions {}
+        }
+
+        machine PRService hosts PullRequest(key: id) {
+            fn new() -> Self {
+                Self {}
+            }
+
+            on TooWide(_event) {}
+        }
+    "#;
+
+    let errors = compile_linear_source(
+        source,
+        "tests/fixtures/linear/hosted_on_payload_unsupported.mc",
+    )
+    .expect_err("unsupported hosted on payload shapes should be diagnosed");
+    let rendered = format!("{errors:#?}");
+    assert!(
+        rendered.contains("MC-MACHINE-HOSTED-ON-PAYLOAD-UNSUPPORTED")
+            || rendered.contains("MachineHostedOnPayloadUnsupported")
+            || rendered.contains("not supported by hosted mailbox ingress")
+            || rendered.contains("supported payloads are"),
+        "expected hosted on payload diagnostic, got: {rendered}"
+    );
+}
+
+#[test]
 fn linear_type_hosted_create_rejects_unknown_role() {
     let source = r#"
         @linear

@@ -263,6 +263,11 @@ pub enum ResolveErrorKind {
         "Machine `{0}` action override `{1}` cannot use `emit`; hosted `emit` is currently supported only in `on` and `trigger` handlers"
     )]
     MachineHostedActionEmitUnsupported(String, String),
+
+    #[error(
+        "Machine `{0}` on-handler payload `{1}` is not supported by hosted mailbox ingress; supported payloads are `struct {{}}`, `struct {{ field: u64 }}`, or `struct {{ a: u64, b: u64 }}`"
+    )]
+    MachineHostedOnPayloadUnsupported(String, String),
 }
 
 pub type ResolveError = SpannedError<ResolveErrorKind>;
