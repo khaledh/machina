@@ -19,7 +19,7 @@ use crate::services::analysis::syntax_index::{
 };
 
 use super::callable_signature::format_source_callable_signature;
-use super::definition::typestate_role_def_at_span;
+use super::definition::{machine_handle_def_at_span, typestate_role_def_at_span};
 use super::{TypestateNameDemangler, identifier_token_at_span, resolved_binding_type_for_def};
 
 pub(crate) fn hover_at_span_in_file(
@@ -53,6 +53,15 @@ pub(crate) fn hover_at_span_in_file(
                 try_typestate_role_hover(state, normalized_query_span, query_ident.as_deref())
             })
             .or_else(|| {
+                try_machine_handle_hover(
+                    state,
+                    normalized_query_span,
+                    current_file_path,
+                    source_text,
+                    query_ident.as_deref(),
+                )
+            })
+            .or_else(|| {
                 try_def_table_hover(
                     state,
                     normalized_query_span,
@@ -73,6 +82,7 @@ pub(crate) fn hover_at_span_in_file(
             state,
             normalized_query_span,
             current_file_path,
+            source_text,
             query_ident.as_deref(),
         )
     }
@@ -329,6 +339,41 @@ fn try_def_table_hover(
     )
 }
 
+fn try_machine_handle_hover(
+    state: &LookupState,
+    query_span: Span,
+    current_file_path: Option<&Path>,
+    source_text: Option<&str>,
+    query_ident: Option<&str>,
+) -> Option<HoverInfo> {
+    let resolved = state.resolved.as_ref()?;
+    let def_id =
+        machine_handle_def_at_span(&resolved.def_table, query_span, source_text, query_ident)?;
+    if should_skip_runtime_hover_def(&resolved.def_table, def_id, current_file_path) {
+        return None;
+    }
+    let def = resolved.def_table.lookup_def(def_id)?;
+    Some(HoverInfo {
+        node_id: resolved
+            .def_table
+            .lookup_def_node_id(def_id)
+            .unwrap_or(crate::core::ast::NodeId(0)),
+        span: query_span,
+        def_id: Some(def_id),
+        symbol_id: resolved.symbol_ids.lookup_symbol_id(def_id).cloned(),
+        def_name: Some(def.name.clone()),
+        ty: None,
+        display: format_hover_label(
+            Some(&def.name),
+            None,
+            Some(def_id),
+            None,
+            None,
+            &resolved.def_table,
+        ),
+    })
+}
+
 /// Try hover from source-text syntactic field patterns (e.g. `name: Type`).
 fn try_syntactic_field_hover(
     query_span: Span,
@@ -356,6 +401,7 @@ fn try_resolved_hover(
     state: &LookupState,
     query_span: Span,
     current_file_path: Option<&Path>,
+    source_text: Option<&str>,
     query_ident: Option<&str>,
 ) -> Option<HoverInfo> {
     let resolved = state.resolved.as_ref()?;
@@ -373,6 +419,9 @@ fn try_resolved_hover(
                 &resolved.def_table,
                 query_span,
             )
+        })
+        .or_else(|| {
+            machine_handle_def_at_span(&resolved.def_table, query_span, source_text, query_ident)
         })?;
     if should_skip_runtime_hover_def(&resolved.def_table, def_id, current_file_path) {
         return None;

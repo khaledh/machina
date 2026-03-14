@@ -198,6 +198,234 @@ fn hover_over_typestate_fields_block_returns_field_hover() {
 }
 
 #[test]
+fn hover_over_linear_machine_handle_type_returns_machine_hover() {
+    let mut session = AnalysisSession::new();
+    let source = r#"@linear
+type Payment = {
+    id: u64,
+
+    states {
+        Draft,
+        Approved,
+    }
+
+    actions {
+        approve: Draft -> Approved,
+    }
+
+    roles {
+        Reviewer { approve }
+    }
+}
+
+Payment :: {
+    fn approve(self) -> Approved { Approved {} }
+}
+
+machine PaymentService hosts Payment(key: id) {
+    fn new() -> Self { Self {} }
+}
+
+fn helper(service: Machine<PaymentService>) -> Machine<PaymentService> {
+    service
+}
+"#;
+    let (line, character) =
+        lsp_position_for_substring(source, "Machine<PaymentService>", "Machine<".len());
+    let _ = handle_message(
+        &mut session,
+        json!({
+            "jsonrpc": "2.0",
+            "method": "textDocument/didOpen",
+            "params": {
+                "textDocument": {
+                    "uri": "file:///tmp/lsp-linear-machine-hover.mc",
+                    "version": 1,
+                    "languageId": "machina",
+                    "text": source
+                }
+            }
+        }),
+    );
+
+    let (_action, response) = handle_message(
+        &mut session,
+        json!({
+            "jsonrpc": "2.0",
+            "id": 141,
+            "method": "textDocument/hover",
+            "params": {
+                "textDocument": { "uri": "file:///tmp/lsp-linear-machine-hover.mc" },
+                "position": { "line": line, "character": character },
+                "mcDocVersion": 1
+            }
+        }),
+    );
+    let response = response.expect("expected hover response");
+    let value = response["result"]["contents"]["value"]
+        .as_str()
+        .expect("hover markdown value should be a string");
+    assert!(
+        value.contains("PaymentService"),
+        "expected machine hover, got: {value}"
+    );
+}
+
+#[test]
+fn definition_request_resolves_linear_machine_handle_type() {
+    let mut session = AnalysisSession::new();
+    let source = r#"@linear
+type Payment = {
+    id: u64,
+
+    states {
+        Draft,
+        Approved,
+    }
+
+    actions {
+        approve: Draft -> Approved,
+    }
+
+    roles {
+        Reviewer { approve }
+    }
+}
+
+Payment :: {
+    fn approve(self) -> Approved { Approved {} }
+}
+
+machine PaymentService hosts Payment(key: id) {
+    fn new() -> Self { Self {} }
+}
+
+fn helper(service: Machine<PaymentService>) -> Machine<PaymentService> {
+    service
+}
+"#;
+    let (line, character) =
+        lsp_position_for_substring(source, "Machine<PaymentService>", "Machine<".len());
+    let _ = handle_message(
+        &mut session,
+        json!({
+            "jsonrpc": "2.0",
+            "method": "textDocument/didOpen",
+            "params": {
+                "textDocument": {
+                    "uri": "file:///tmp/lsp-linear-machine-definition.mc",
+                    "version": 1,
+                    "languageId": "machina",
+                    "text": source
+                }
+            }
+        }),
+    );
+
+    let (_action, response) = handle_message(
+        &mut session,
+        json!({
+            "jsonrpc": "2.0",
+            "id": 142,
+            "method": "textDocument/definition",
+            "params": {
+                "textDocument": { "uri": "file:///tmp/lsp-linear-machine-definition.mc" },
+                "position": { "line": line, "character": character },
+                "mcDocVersion": 1
+            }
+        }),
+    );
+
+    let response = response.expect("expected definition response");
+    let locations = response["result"]
+        .as_array()
+        .expect("expected location array");
+    assert_eq!(
+        locations.len(),
+        1,
+        "expected one machine definition location"
+    );
+    assert_eq!(
+        locations[0]["uri"],
+        "file:///tmp/lsp-linear-machine-definition.mc"
+    );
+}
+
+#[test]
+fn completion_request_includes_linear_machine_defs_for_handle_annotations() {
+    let mut session = AnalysisSession::new();
+    let source = r#"@linear
+type Payment = {
+    id: u64,
+
+    states {
+        Draft,
+        Approved,
+    }
+
+    actions {
+        approve: Draft -> Approved,
+    }
+
+    roles {
+        Reviewer { approve }
+    }
+}
+
+Payment :: {
+    fn approve(self) -> Approved { Approved {} }
+}
+
+machine PaymentService hosts Payment(key: id) {
+    fn new() -> Self { Self {} }
+}
+
+fn helper(service: Machine<Pay>) -> u64 {
+    0
+}
+"#;
+    let (line, character) = lsp_position_for_substring(source, "Pay", 1);
+    let _ = handle_message(
+        &mut session,
+        json!({
+            "jsonrpc": "2.0",
+            "method": "textDocument/didOpen",
+            "params": {
+                "textDocument": {
+                    "uri": "file:///tmp/lsp-linear-machine-completion.mc",
+                    "version": 1,
+                    "languageId": "machina",
+                    "text": source
+                }
+            }
+        }),
+    );
+
+    let (_action, response) = handle_message(
+        &mut session,
+        json!({
+            "jsonrpc": "2.0",
+            "id": 143,
+            "method": "textDocument/completion",
+            "params": {
+                "textDocument": { "uri": "file:///tmp/lsp-linear-machine-completion.mc" },
+                "position": { "line": line, "character": character },
+                "mcDocVersion": 1
+            }
+        }),
+    );
+
+    let response = response.expect("expected completion response");
+    let items = response["result"]["items"]
+        .as_array()
+        .expect("expected completion items");
+    assert!(
+        items.iter().any(|item| item["label"] == "PaymentService"),
+        "expected machine completion for `PaymentService`"
+    );
+}
+
+#[test]
 fn unknown_method_returns_method_not_found() {
     let mut session = AnalysisSession::new();
     let (action, response) = handle_message(
@@ -1331,4 +1559,22 @@ fn main() {
         .as_str()
         .expect("expected generated wildcard edit text");
     assert!(edit_text.contains("_ => {"));
+}
+
+fn lsp_position_for_substring(source: &str, needle: &str, char_offset: usize) -> (usize, usize) {
+    let start = source
+        .find(needle)
+        .expect("needle should exist in source for LSP test helper");
+    let offset = start + char_offset;
+    let mut line0 = 0usize;
+    let mut col0 = 0usize;
+    for ch in source[..offset].chars() {
+        if ch == '\n' {
+            line0 += 1;
+            col0 = 0;
+        } else {
+            col0 += 1;
+        }
+    }
+    (line0, col0)
 }

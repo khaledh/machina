@@ -2674,6 +2674,168 @@ typestate Gateway : Auth::Client {
 }
 
 #[test]
+fn def_location_at_program_file_points_linear_machine_handle_reference_to_machine_def() {
+    let mut db = AnalysisDb::new();
+    let source = r#"
+@linear
+type Payment = {
+    id: u64,
+
+    states {
+        Draft,
+        Approved,
+    }
+
+    actions {
+        approve: Draft -> Approved,
+    }
+
+    roles {
+        Reviewer { approve }
+    }
+}
+
+Payment :: {
+    fn approve(self) -> Approved { Approved {} }
+}
+
+machine PaymentService hosts Payment(key: id) {
+    fn new() -> Self { Self {} }
+}
+
+fn helper(service: Machine<PaymentService>) -> Machine<PaymentService> {
+    service
+}
+"#;
+    let file_id = db.upsert_disk_text(
+        Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("examples/analysis_linear_machine_handle_defloc.mc"),
+        source,
+    );
+
+    let handle_use = span_for_substring(source, "Machine<PaymentService>");
+    let mut query_span = handle_use;
+    query_span.start = position_at(source, handle_use.start.offset + "Machine<".len());
+    query_span.end = position_at(source, query_span.start.offset + "PaymentService".len());
+
+    let machine_decl = span_for_substring(source, "machine PaymentService");
+    let location = db
+        .def_location_at_program_file(file_id, query_span)
+        .expect("definition location query should succeed")
+        .expect("expected definition location for machine handle type");
+
+    assert_eq!(location.file_id, file_id);
+    assert_eq!(location.span.start, machine_decl.start);
+}
+
+#[test]
+fn hover_at_program_file_resolves_linear_machine_handle_reference() {
+    let mut db = AnalysisDb::new();
+    let source = r#"
+@linear
+type Payment = {
+    id: u64,
+
+    states {
+        Draft,
+        Approved,
+    }
+
+    actions {
+        approve: Draft -> Approved,
+    }
+
+    roles {
+        Reviewer { approve }
+    }
+}
+
+Payment :: {
+    fn approve(self) -> Approved { Approved {} }
+}
+
+machine PaymentService hosts Payment(key: id) {
+    fn new() -> Self { Self {} }
+}
+
+fn helper(service: Machine<PaymentService>) -> Machine<PaymentService> {
+    service
+}
+"#;
+    let file_id = db.upsert_disk_text(
+        Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("examples/analysis_linear_machine_handle_hover.mc"),
+        source,
+    );
+
+    let handle_use = span_for_substring(source, "Machine<PaymentService>");
+    let mut query_span = handle_use;
+    query_span.start = position_at(source, handle_use.start.offset + "Machine<".len());
+    query_span.end = position_at(source, query_span.start.offset + "PaymentService".len());
+
+    let hover = db
+        .hover_at_program_file(file_id, query_span)
+        .expect("hover query should succeed")
+        .expect("expected hover information for machine handle type");
+
+    assert!(
+        hover.display.contains("PaymentService"),
+        "expected machine hover label to mention the machine name, got: {}",
+        hover.display
+    );
+}
+
+#[test]
+fn completions_at_program_file_include_machine_defs_for_linear_machine_handles() {
+    let mut db = AnalysisDb::new();
+    let source = r#"
+@linear
+type Payment = {
+    id: u64,
+
+    states {
+        Draft,
+        Approved,
+    }
+
+    actions {
+        approve: Draft -> Approved,
+    }
+
+    roles {
+        Reviewer { approve }
+    }
+}
+
+Payment :: {
+    fn approve(self) -> Approved { Approved {} }
+}
+
+machine PaymentService hosts Payment(key: id) {
+    fn new() -> Self { Self {} }
+}
+
+fn helper(service: Machine<Pay>) -> u64 {
+    0
+}
+"#;
+    let file_id = db.upsert_disk_text(
+        Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("examples/analysis_linear_machine_handle_completion.mc"),
+        source,
+    );
+    let query_span = span_for_substring(source, "Pay");
+    let completions = db
+        .completions_at_program_file(file_id, query_span)
+        .expect("completions query should succeed");
+
+    assert!(
+        completions.iter().any(|c| c.label == "PaymentService"),
+        "expected machine completion for `PaymentService`"
+    );
+}
+
+#[test]
 fn completions_at_file_include_protocol_roles_for_typestate_binding_paths() {
     let mut db = AnalysisDb::new();
     db.set_experimental_typestate(true);

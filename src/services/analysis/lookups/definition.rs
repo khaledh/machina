@@ -36,6 +36,14 @@ pub(crate) fn def_at_span(
     ) {
         return Some(def_id);
     }
+    if let Some(def_id) = machine_handle_def_at_span(
+        &resolved.def_table,
+        query_span,
+        source,
+        token.as_ref().map(|t| t.ident.as_str()),
+    ) {
+        return Some(def_id);
+    }
     best_def_use_at_span(
         &resolved.module,
         &resolved.def_table,
@@ -69,6 +77,13 @@ pub(crate) fn def_location_at_span(
         &resolved.typestate_role_impls,
         &resolved.def_table,
         query_span,
+    ) {
+        def_id
+    } else if let Some(def_id) = machine_handle_def_at_span(
+        &resolved.def_table,
+        query_span,
+        source.as_deref(),
+        token.as_ref().map(|t| t.ident.as_str()),
     ) {
         def_id
     } else if let Some((_, def_id)) = best_def_use_at_span(
@@ -209,4 +224,58 @@ pub(super) fn typestate_role_def_at_span(
         }
     }
     best.map(|(_, _, def_id)| def_id)
+}
+
+pub(super) fn machine_handle_def_at_span(
+    def_table: &DefTable,
+    query_span: Span,
+    source: Option<&str>,
+    query_ident: Option<&str>,
+) -> Option<DefId> {
+    let ident = query_ident?;
+    if !is_machine_handle_target(source?, query_span) {
+        return None;
+    }
+    def_table
+        .defs()
+        .iter()
+        .find(|def| {
+            matches!(def.kind, crate::core::resolve::DefKind::MachineDef) && def.name == ident
+        })
+        .map(|def| def.id)
+}
+
+fn is_machine_handle_target(source: &str, query_span: Span) -> bool {
+    let start = query_span.start.offset;
+    let end = query_span.end.offset;
+    let bytes = source.as_bytes();
+
+    let mut left = start;
+    while left > 0 && bytes[left - 1].is_ascii_whitespace() {
+        left -= 1;
+    }
+    if left == 0 || bytes[left - 1] != b'<' {
+        return false;
+    }
+    left -= 1;
+    while left > 0 && bytes[left - 1].is_ascii_whitespace() {
+        left -= 1;
+    }
+
+    let ident_end = left;
+    let mut ident_start = ident_end;
+    while ident_start > 0
+        && (bytes[ident_start - 1].is_ascii_alphanumeric() || bytes[ident_start - 1] == b'_')
+    {
+        ident_start -= 1;
+    }
+    if &source[ident_start..ident_end] != "Machine" {
+        return false;
+    }
+
+    let mut right = end;
+    while right < bytes.len() && bytes[right].is_ascii_whitespace() {
+        right += 1;
+    }
+    right < bytes.len() && bytes[right] == b'>'
 }

@@ -83,7 +83,7 @@ pub(super) fn completion_kind_for_def(kind: &DefKind) -> Option<CompletionKind> 
         DefKind::FuncDef { .. } | DefKind::FuncDecl { .. } => Some(CompletionKind::Function),
         DefKind::TypeDef { .. } => Some(CompletionKind::Type),
         DefKind::TraitDef { .. } => Some(CompletionKind::Trait),
-        DefKind::MachineDef => None,
+        DefKind::MachineDef => Some(CompletionKind::Type),
         DefKind::LocalVar { .. } => Some(CompletionKind::Variable),
         DefKind::Param { .. } => Some(CompletionKind::Parameter),
         DefKind::TypeParam => Some(CompletionKind::TypeParameter),
