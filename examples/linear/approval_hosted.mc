@@ -36,7 +36,6 @@ machine ApprovalService hosts Approval(key: id) {
     }
 }
 
-@machines
 fn main() -> () | MachineError | SessionError {
     let service = ApprovalService::spawn()?;
     let review = service.create(Approval as Reviewer)?;

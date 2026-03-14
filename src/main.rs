@@ -609,6 +609,7 @@ const RUNTIME_SOURCE_FILES: &[&str] = &[
     "machine/runtime.c",
     "machine/bridge.c",
     "machine/descriptor.c",
+    "machine/hosted_instance.c",
     "machine/pending.c",
     "machine/emit.c",
     "mem.c",
