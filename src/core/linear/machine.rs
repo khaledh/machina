@@ -966,12 +966,6 @@ pub(super) fn append_machine_spawn_support(
             .top_level_items
             .push(TopLevelItem::FuncDef(build_machine_spawn_func(
                 info,
-                on_handler_infos.iter().any(|handler| {
-                    handler.machine_name == info.machine_name && handler.payload_shape.is_some()
-                }),
-                trigger_handler_infos.iter().any(|handler| {
-                    handler.machine_name == info.machine_name && handler.payload_shape.is_some()
-                }),
                 node_id_gen,
             )));
         // Generate a create helper for each role the hosted type declares.
@@ -1608,14 +1602,9 @@ fn build_hosted_linear_trigger_dispatch_func(
 }
 
 /// Generate: `fn __mc_machine_spawn_X() -> HandleType | MachineError { HandleType { _id: 1 } }`
-fn build_machine_spawn_func(
-    info: &MachineSpawnInfo,
-    has_on_dispatch: bool,
-    has_trigger_dispatch: bool,
-    node_id_gen: &mut NodeIdGen,
-) -> FuncDef {
+fn build_machine_spawn_func(info: &MachineSpawnInfo, node_id_gen: &mut NodeIdGen) -> FuncDef {
     let span = Span::default();
-    let mut items = vec![
+    let items = vec![
         BlockItem::Stmt(let_bind_stmt(
             "__mc_rt",
             call_expr(MANAGED_RUNTIME_CURRENT_FN, Vec::new(), node_id_gen, span),
@@ -1652,36 +1641,6 @@ fn build_machine_spawn_func(
             span,
         )),
     ];
-    if has_on_dispatch {
-        items.push(BlockItem::Expr(call_expr(
-            HOSTED_LINEAR_ON_DISPATCH_FN,
-            vec![
-                int_expr(0, node_id_gen, span),
-                int_expr(0, node_id_gen, span),
-                int_expr(0, node_id_gen, span),
-                int_expr(0, node_id_gen, span),
-                int_expr(0, node_id_gen, span),
-            ],
-            node_id_gen,
-            span,
-        )));
-    }
-    if has_trigger_dispatch {
-        items.push(BlockItem::Expr(call_expr(
-            HOSTED_LINEAR_TRIGGER_DISPATCH_FN,
-            vec![
-                int_expr(0, node_id_gen, span),
-                int_expr(0, node_id_gen, span),
-                int_expr(0, node_id_gen, span),
-                int_expr(0, node_id_gen, span),
-                int_expr(0, node_id_gen, span),
-                int_expr(0, node_id_gen, span),
-                int_expr(0, node_id_gen, span),
-            ],
-            node_id_gen,
-            span,
-        )));
-    }
 
     FuncDef {
         id: node_id_gen.new_id(),

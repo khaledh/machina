@@ -21,8 +21,13 @@ pub fn reachable_def_ids(funcs: &[Function]) -> HashSet<DefId> {
 
     let mut worklist = VecDeque::new();
     for func in funcs {
+        // Hosted linear dispatch hooks are entered from the runtime by symbol
+        // name, so keep them as roots even when no Machina function takes
+        // their address directly.
         if func.name == "main"
             || func.name == "__mc_machine_bootstrap"
+            || func.name == "__mc_hosted_linear_on_dispatch_u64"
+            || func.name == "__mc_hosted_linear_trigger_dispatch_u64"
             || func.name == "__mc_entry_main_wrapper"
         {
             worklist.push_back(func.def_id);
