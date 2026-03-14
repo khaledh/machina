@@ -154,7 +154,6 @@ machine PRService hosts PullRequest(key: id) {
 ### Client — Long-Lived Session
 
 ```mc
-@machines
 fn main() -> () | MachineError | SessionError {
     let service = PRService::spawn(ci_service)?;
 

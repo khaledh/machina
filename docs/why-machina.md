@@ -176,7 +176,6 @@ machine PaymentService hosts Payment(key: id) {
     fn new() -> Self { Self {} }
 }
 
-@machines
 fn main() -> () | MachineError | SessionError {
     let service = PaymentService::spawn()?;
     let payment = service.create(Payment as Compliance)?;
@@ -234,7 +233,6 @@ machine PaymentService hosts Payment(key: id) {
     fn new() -> Self { Self {} }
 }
 
-@machines
 fn main() -> () | MachineError | SessionError {
     let service = PaymentService::spawn()?;
     let created = service.create(Payment as Merchant)?;
@@ -325,7 +323,6 @@ machine PaymentService hosts Payment(key: id) {
     }
 }
 
-@machines
 fn main() -> () | MachineError | SessionError {
     let service = PaymentService::spawn()?;
 

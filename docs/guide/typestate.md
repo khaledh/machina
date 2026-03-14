@@ -119,12 +119,11 @@ See `/examples/typestate/` for runnable examples.
 Machina also supports managed typestate machines with event handlers and
 protocol/role flow declarations.
 
-Tier 1 managed entrypoint model:
-- mark binary entrypoint with `@machines`,
+The machine runtime is always available — no annotation needed:
 - spawn managed machines through `Typestate::spawn(...)`,
 - use typed handles (`Machine<Typestate>`) with method-style ops
   (`handle.send(...)`, `handle.request(...)`),
-- let the compiler-managed runtime auto-drive dispatch after `main` returns.
+- the compiler-managed runtime auto-drives dispatch after `main` returns.
 
 ```mc
 type OpenPressed = { id: u64 }
@@ -171,7 +170,6 @@ typestate DoorController {
     state Open {}
 }
 
-@machines
 fn main() -> () | MachineError {
     let actuator = DoorActuator::spawn()?;
     let controller = DoorController::spawn(actuator)?;
@@ -189,7 +187,8 @@ Key ideas:
   inflight requests; handlers match them with `for RequestType:label(binding)`.
 - `Pending<...>`/`ReplyCap<...>` remain available as explicit advanced forms.
 - `cap.reply(value)` consumes `ReplyCap<...>` and enforces response-set safety.
-- `@machines` is required to use `Typestate::spawn(...)` in binaries.
+- The machine runtime is always linked; use `--no-runtime` to exclude it for
+  minimal binaries that don't use machines.
 
 ### Final states and stop behavior
 

@@ -343,7 +343,6 @@ typestate AuthService : Auth::Server {
 ### Destination Role Compatibility
 
 ```mc
-@machines
 fn main() -> () | MachineError {
     let c = Client::spawn()?;
     let s = Server::spawn()?;

@@ -165,3 +165,37 @@ Options:
 
 Recommendation: open. The second option is more pragmatic but adds a
 conditional rule to the model.
+
+### 12. User-Facing Machine Handle Type
+
+The design docs use `Machine<PRService>` as the handle type for passing machine
+references to functions. The current implementation generates internal handle
+types (`__mc_machine_handle_PRService`) that are not user-accessible.
+
+For machine operations to work naturally in helper functions, the handle type
+must be user-facing:
+
+```mc
+fn handle_submit(service: Machine<PRService>, pr_id: u64) -> HttpResponse {
+    let session = service.resume(PullRequest as Author, pr_id)?;
+    match session {
+        draft: Draft => {
+            let _pending = draft.submit()?;
+            HttpResponse { status: 200 }
+        }
+        _ => {
+            HttpResponse { status: 409, message: "PR is not in Draft state" }
+        }
+    }
+}
+```
+
+This is critical for realistic multi-actor workflows where different functions
+represent different service entrypoints receiving the same machine handle.
+
+The handle type should be copyable (not linear) — a handle is a reference to a
+machine, not an owned resource. Multiple functions can hold the same handle
+concurrently.
+
+Recommendation: expose `Machine<T>` (or `{MachineName}Handle`) as a user-facing
+type. This is a V1 requirement, not a future extension.

@@ -421,8 +421,8 @@ __mc_machine_runtime_spawn_u64(runtime_handle, mailbox_cap);
 //                              rt pointer cast to u64
 ```
 
-There is also a **managed runtime** — a process-global singleton so `@machines`
-entrypoints don't need to thread a runtime handle manually:
+There is also a **managed runtime** — a process-global singleton so programs
+don't need to thread a runtime handle manually:
 
 ```
 __mc_machine_runtime_managed_bootstrap_u64()  -> creates or returns global
@@ -446,7 +446,7 @@ __mc_machine_runtime_managed_shutdown_u64()   -> drops global
     ...                └──────────┬────────────┘
   }                               │
                        ┌──────────▼────────────┐
-  @machines            │  Elaborate            │
+                       │  Elaborate            │
   fn main() {          │  Build machine plans: │
     ...                │  state tags, event    │
   }                    │  kinds, dispatch rows │
@@ -601,10 +601,11 @@ __mc_machine_emit_request(target_id, 5, payload_ptr, layout_id, 0xA3B2...);
 __mc_machine_emit_reply(cap_id, 7, payload_ptr, layout_id);
 ```
 
-### Step 6: The `@machines` Entrypoint
+### Step 6: Runtime Lifecycle Wrapping
 
-The `@machines` attribute wraps the user's `main()` with runtime lifecycle. See
-`machine-surface-design.md` for the source-level view.
+The compiler automatically wraps `main()` with runtime bootstrap and shutdown.
+See `machine-surface-design.md` for the source-level view. Programs compiled
+with `--no-runtime` skip this wrapping.
 
 ---
 

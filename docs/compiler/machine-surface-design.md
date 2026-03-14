@@ -13,7 +13,8 @@ internals, see `machine-runtime-design.md`. For protocol contracts, see
 
 ## Implementation Status
 
-- `@machines` managed entrypoint opt-in: implemented.
+- Always-on machine runtime: **not yet implemented** (currently behind
+  `@machines` opt-in on `main()` only — to be removed).
 - `Typestate::spawn(...) -> Machine<T> | ...`: implemented.
 - Typed handle methods: `send(payload)` and `request(dst, payload)`: implemented.
 - Typed request destinations: `u64` or `Machine<...>` handles: implemented.
@@ -65,7 +66,6 @@ typestate Client {
     }
 }
 
-@machines
 fn main() -> () | MachineError {
     let client = Client::spawn()?;
     client.send(Connect { token: "secret" })?;
@@ -73,25 +73,27 @@ fn main() -> () | MachineError {
 }
 ```
 
-Key property: app code does not create or pass a runtime object.
+Key property: app code does not create or pass a runtime object. No annotation
+is needed — the machine runtime is always available.
 
 ---
 
 ## Surface API
 
-### 1) `@machines` Entrypoint
+### 1) Always-On Machine Runtime
 
-Managed execution is visible at the entrypoint:
+The machine runtime is always linked and bootstrapped. No annotation or opt-in
+is needed — machine operations (`spawn`, `send`, `create`, `resume`, `lookup`)
+work in any function:
 
 ```mc
-@machines
 fn main() -> () | MachineError {
     let client = Client::spawn()?;
     client.send(Ping { id: 1 })?;
 }
 ```
 
-The `@machines` attribute wraps the user's `main()` with runtime lifecycle:
+The compiler wraps `main()` with runtime lifecycle automatically:
 
 1. Bootstrap runtime (triggers `__mc_machine_bootstrap`).
 2. Run user code (spawns machines, sends initial messages).
@@ -101,10 +103,14 @@ The `@machines` attribute wraps the user's `main()` with runtime lifecycle:
 Design intent:
 - No explicit runtime object in app code.
 - No callback-wrapper ceremony.
-- Runtime model is still visible (not hidden compiler magic).
+- No annotation gate — machines are a core language feature, not an opt-in.
+
+Opt-out: the compiler flag `--no-runtime` excludes the machine runtime for
+minimal binaries that do not use machines (e.g., embedded, CLI tools). Programs
+compiled with `--no-runtime` that attempt machine operations get a link error.
 
 Runtime ownership rules:
-- Binaries own runtime bootstrap/shutdown when opted in.
+- Binaries own runtime bootstrap/shutdown automatically.
 - Libraries never auto-bootstrap runtime.
 
 Execution policy (V1):
@@ -372,7 +378,7 @@ Candidate quick fixes:
 - Handler payload shorthand (`on Ping(p)`, `on Ping`).
 - Command sugar (`send/request/reply` in handlers).
 - Explicit same-state marker (`-> stay`) with clear semantics.
-- Explicit runtime opt-in entrypoint (`@machines`).
+- Always-on machine runtime (opt-out via `--no-runtime`).
 
 ### Tier 2 (After Runtime/Metadata Hardening)
 
