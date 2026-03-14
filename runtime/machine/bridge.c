@@ -66,10 +66,6 @@ typedef struct mc_hosted_linear_machine_ctx {
     uint64_t completed_delivery_result;
 } mc_hosted_linear_machine_ctx_t;
 
-enum {
-    MC_HOSTED_LINEAR_KIND_DELIVER = 1,
-};
-
 static mc_hosted_linear_machine_ctx_t *mc_hosted_linear_ctx_new(void) {
     mc_hosted_linear_machine_ctx_t *ctx =
         (mc_hosted_linear_machine_ctx_t *)__mc_alloc(
@@ -94,6 +90,32 @@ static void mc_hosted_linear_ctx_drop(void *dispatch_ctx) {
     }
     mc_hosted_instance_table_drop(&ctx->instances);
     __mc_free(ctx);
+}
+
+static mc_hosted_linear_machine_ctx_t *mc_hosted_linear_ctx_for_machine(
+    mc_machine_runtime_t *rt,
+    mc_machine_id_t id
+) {
+    mc_machine_slot_t *slot = mc_get_slot(rt, id);
+    if (!slot) {
+        return NULL;
+    }
+    return (mc_hosted_linear_machine_ctx_t *)slot->dispatch_ctx;
+}
+
+static uint64_t mc_hosted_linear_lookup_state_tag(
+    mc_hosted_linear_machine_ctx_t *ctx,
+    uint64_t key
+) {
+    if (!ctx || key == 0) {
+        return 0;
+    }
+
+    uint64_t state_tag = 0;
+    if (!mc_hosted_instance_table_lookup(&ctx->instances, key, &state_tag, NULL)) {
+        return 0;
+    }
+    return state_tag;
 }
 
 static mc_dispatch_result_t mc_hosted_linear_dispatch(
@@ -318,23 +340,10 @@ uint64_t __mc_hosted_linear_resume_state_u64(
         return 0;
     }
 
-    mc_hosted_linear_machine_ctx_t *ctx =
-        (mc_hosted_linear_machine_ctx_t *)slot->dispatch_ctx;
-    if (!ctx) {
-        return 0;
-    }
-
-    uint64_t state_tag = 0;
-    if (!mc_hosted_instance_table_lookup(
-            &ctx->instances,
-            key,
-            &state_tag,
-            NULL
-        )) {
-        return 0;
-    }
-
-    return state_tag;
+    return mc_hosted_linear_lookup_state_tag(
+        (mc_hosted_linear_machine_ctx_t *)slot->dispatch_ctx,
+        key
+    );
 }
 
 uint64_t __mc_hosted_linear_deliver_u64(
@@ -351,13 +360,7 @@ uint64_t __mc_hosted_linear_deliver_u64(
         return MC_HOSTED_UPDATE_NOT_FOUND;
     }
 
-    mc_machine_slot_t *slot = mc_get_slot(rt, id);
-    if (!slot) {
-        return MC_HOSTED_UPDATE_NOT_FOUND;
-    }
-
-    mc_hosted_linear_machine_ctx_t *ctx =
-        (mc_hosted_linear_machine_ctx_t *)slot->dispatch_ctx;
+    mc_hosted_linear_machine_ctx_t *ctx = mc_hosted_linear_ctx_for_machine(rt, id);
     if (!ctx) {
         return MC_HOSTED_UPDATE_NOT_FOUND;
     }
@@ -388,6 +391,47 @@ uint64_t __mc_hosted_linear_deliver_u64(
         uint64_t step = __mc_machine_runtime_step_u64(runtime);
         if (step == (uint64_t)MC_STEP_IDLE || step == (uint64_t)MC_STEP_FAULTED) {
             return MC_HOSTED_UPDATE_NOT_FOUND;
+        }
+    }
+}
+
+uint64_t __mc_hosted_linear_wait_state_u64(
+    uint64_t runtime,
+    uint64_t machine_id,
+    uint64_t key,
+    uint64_t expected_state_tag
+) {
+    mc_machine_runtime_t *rt = mc_runtime_from_handle(runtime);
+    mc_machine_id_t id = 0;
+    if (!rt || !mc_machine_id_from_u64(machine_id, &id) || key == 0 ||
+        expected_state_tag == 0) {
+        return 0;
+    }
+
+    mc_hosted_linear_machine_ctx_t *ctx = mc_hosted_linear_ctx_for_machine(rt, id);
+    if (!ctx) {
+        return 0;
+    }
+
+    uint64_t state_tag = mc_hosted_linear_lookup_state_tag(ctx, key);
+    if (state_tag == 0) {
+        return 0;
+    }
+    if (state_tag != expected_state_tag) {
+        return state_tag;
+    }
+
+    for (;;) {
+        uint64_t step = __mc_machine_runtime_step_u64(runtime);
+        state_tag = mc_hosted_linear_lookup_state_tag(ctx, key);
+        if (state_tag == 0) {
+            return 0;
+        }
+        if (state_tag != expected_state_tag) {
+            return state_tag;
+        }
+        if (step == (uint64_t)MC_STEP_IDLE || step == (uint64_t)MC_STEP_FAULTED) {
+            return 0;
         }
     }
 }

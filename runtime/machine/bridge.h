@@ -108,6 +108,8 @@ uint64_t __mc_machine_runtime_step_u64(uint64_t runtime);
 //
 // These helpers bundle the machine runtime and hosted-instance storage setup
 // needed by generated hosted linear machine helpers.
+#define MC_HOSTED_LINEAR_KIND_DELIVER 1u
+
 uint64_t __mc_hosted_linear_spawn_u64(uint64_t runtime, uint64_t mailbox_cap);
 uint64_t __mc_hosted_linear_create_u64(
     uint64_t runtime,
@@ -126,6 +128,12 @@ uint64_t __mc_hosted_linear_deliver_u64(
     uint64_t key,
     uint64_t expected_state_tag,
     uint64_t new_state_tag
+);
+uint64_t __mc_hosted_linear_wait_state_u64(
+    uint64_t runtime,
+    uint64_t machine_id,
+    uint64_t key,
+    uint64_t expected_state_tag
 );
 
 #endif

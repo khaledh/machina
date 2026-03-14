@@ -25,8 +25,9 @@
 //!   `DeliverResult` until instance-backed delivery lands.
 //!
 //! - **Wait helpers**: a per-machine-per-state function used as the typed
-//!   surface for hosted `session.wait()`. These currently return a placeholder
-//!   next state until runtime-backed waiter registration lands.
+//!   surface for hosted `session.wait()`. These drive the managed runtime until
+//!   the hosted instance leaves the expected source state, then reconstruct the
+//!   resumed linear value from the observed runtime state tag.
 //!
 //! - **Self-type rewriting**: `Self` references in machine constructor bodies are
 //!   rewritten to the generated handle type, so `Self {}` returns the right struct.
@@ -35,7 +36,7 @@
 //! values. Real runtime-backed implementations will replace these bodies when
 //! machine execution lands.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use crate::core::ast::visit_mut::{self, VisitorMut};
 use crate::core::ast::{
@@ -118,8 +119,10 @@ pub(super) struct MachineDeliverInfo {
 pub(super) struct MachineWaitInfo {
     pub hosted_type_name: String,
     pub handle_type_name: String,
-    pub shared_field_tys: Vec<TypeExpr>,
-    pub placeholder_target_state: String,
+    pub key_field_name: String,
+    pub shared_fields: Vec<(String, TypeExpr)>,
+    pub source_state_tag: u64,
+    pub state_names: Vec<String>,
     pub fn_name: String,
 }
 
@@ -186,6 +189,7 @@ const HOSTED_LINEAR_SPAWN_FN: &str = "__mc_hosted_linear_spawn_u64";
 const HOSTED_LINEAR_CREATE_FN: &str = "__mc_hosted_linear_create_u64";
 const HOSTED_LINEAR_RESUME_STATE_FN: &str = "__mc_hosted_linear_resume_state_u64";
 const HOSTED_LINEAR_DELIVER_FN: &str = "__mc_hosted_linear_deliver_u64";
+const HOSTED_LINEAR_WAIT_STATE_FN: &str = "__mc_hosted_linear_wait_state_u64";
 const DEFAULT_MACHINE_MAILBOX_CAP: u64 = 64;
 const HOSTED_UPDATE_OK: u64 = 0;
 const HOSTED_UPDATE_STALE: u64 = 1;
@@ -509,24 +513,43 @@ pub(super) fn collect_machine_wait_infos(module: &Module) -> Vec<MachineWaitInfo
                 return Vec::new();
             };
             let handle_type_name = machine_handle_type_name(&machine_def.name);
-            let shared_field_tys = linear
+            let shared_fields = linear
                 .fields
                 .iter()
-                .map(|field| field.ty.clone())
+                .map(|field| (field.name.clone(), field.ty.clone()))
+                .collect::<Vec<_>>();
+            let state_tags = linear
+                .states
+                .iter()
+                .enumerate()
+                .map(|(index, state)| (state.name.clone(), (index + 1) as u64))
+                .collect::<HashMap<_, _>>();
+            let state_names = linear
+                .states
+                .iter()
+                .map(|state| state.name.clone())
                 .collect::<Vec<_>>();
             let mut waits = Vec::new();
-            let mut seen_states = HashMap::<String, String>::new();
+            let mut seen_states = HashSet::<String>::new();
             for trigger in &linear.triggers {
-                seen_states
-                    .entry(trigger.source_state.clone())
-                    .or_insert_with(|| trigger.target_state.clone());
+                seen_states.insert(trigger.source_state.clone());
             }
-            for (source_state, fallback_target_state) in seen_states {
+            for source_state in linear
+                .states
+                .iter()
+                .map(|state| state.name.clone())
+                .filter(|state| seen_states.contains(state))
+            {
+                let Some(source_state_tag) = state_tags.get(&source_state).copied() else {
+                    continue;
+                };
                 waits.push(MachineWaitInfo {
                     hosted_type_name: machine_def.host.type_name.clone(),
                     handle_type_name: handle_type_name.clone(),
-                    shared_field_tys: shared_field_tys.clone(),
-                    placeholder_target_state: fallback_target_state,
+                    key_field_name: machine_def.host.key_field.clone(),
+                    shared_fields: shared_fields.clone(),
+                    source_state_tag,
+                    state_names: state_names.clone(),
                     fn_name: machine_wait_fn_name(
                         &machine_def.name,
                         &machine_def.host.type_name,
@@ -676,6 +699,15 @@ pub(super) fn ensure_hosted_runtime_intrinsics(module: &mut Module, node_id_gen:
                 ("key", u64_type_expr(node_id_gen, span)),
                 ("expected_state_tag", u64_type_expr(node_id_gen, span)),
                 ("new_state_tag", u64_type_expr(node_id_gen, span)),
+            ],
+        ),
+        (
+            HOSTED_LINEAR_WAIT_STATE_FN,
+            vec![
+                ("runtime", u64_type_expr(node_id_gen, span)),
+                ("machine_id", u64_type_expr(node_id_gen, span)),
+                ("key", u64_type_expr(node_id_gen, span)),
+                ("expected_state_tag", u64_type_expr(node_id_gen, span)),
             ],
         ),
     ];
@@ -1669,27 +1701,73 @@ fn build_machine_wait_func(info: &MachineWaitInfo, node_id_gen: &mut NodeIdGen) 
             },
             span,
         },
-        // Placeholder body: waiter registration and wakeups are a later
-        // runtime slice, so for now we return one valid trigger target shape.
-        // Shared fields use placeholder seeding so the helper remains
-        // well-typed for linear types with carried fields like `id`.
         body: Expr {
             id: node_id_gen.new_id(),
             kind: ExprKind::Block {
-                items: Vec::new(),
-                tail: Some(Box::new(Expr {
-                    id: node_id_gen.new_id(),
-                    kind: ExprKind::EnumVariant {
-                        enum_name: info.hosted_type_name.clone(),
-                        variant: info.placeholder_target_state.clone(),
-                        type_args: Vec::new(),
-                        payload: placeholder_shared_field_payload(
-                            info.shared_field_tys.iter(),
+                items: vec![
+                    BlockItem::Stmt(let_bind_stmt(
+                        "__mc_runtime",
+                        call_expr(MANAGED_RUNTIME_CURRENT_FN, Vec::new(), node_id_gen, span),
+                        node_id_gen,
+                        span,
+                    )),
+                    BlockItem::Expr(return_enum_error_if_zero(
+                        "__mc_runtime",
+                        "SessionError",
+                        "InstanceNotFound",
+                        node_id_gen,
+                        span,
+                    )),
+                    BlockItem::Stmt(let_bind_stmt(
+                        "__mc_key",
+                        Expr {
+                            id: node_id_gen.new_id(),
+                            kind: ExprKind::StructField {
+                                target: Box::new(var_expr("instance", node_id_gen, span)),
+                                field: info.key_field_name.clone(),
+                            },
+                            span,
+                        },
+                        node_id_gen,
+                        span,
+                    )),
+                    BlockItem::Stmt(let_bind_stmt(
+                        "__mc_tag",
+                        call_expr(
+                            HOSTED_LINEAR_WAIT_STATE_FN,
+                            vec![
+                                var_expr("__mc_runtime", node_id_gen, span),
+                                Expr {
+                                    id: node_id_gen.new_id(),
+                                    kind: ExprKind::StructField {
+                                        target: Box::new(var_expr("self", node_id_gen, span)),
+                                        field: "_id".to_string(),
+                                    },
+                                    span,
+                                },
+                                var_expr("__mc_key", node_id_gen, span),
+                                int_expr(info.source_state_tag, node_id_gen, span),
+                            ],
                             node_id_gen,
+                            span,
                         ),
-                    },
-                    span,
-                })),
+                        node_id_gen,
+                        span,
+                    )),
+                    BlockItem::Expr(return_enum_error_if_zero(
+                        "__mc_tag",
+                        "SessionError",
+                        "InstanceNotFound",
+                        node_id_gen,
+                        span,
+                    )),
+                ],
+                tail: Some(Box::new(build_machine_wait_state_expr(
+                    info,
+                    "__mc_tag",
+                    "__mc_key",
+                    node_id_gen,
+                ))),
             },
             span,
         },
@@ -1957,15 +2035,6 @@ fn return_enum_error_if_eq(
     }
 }
 
-fn placeholder_shared_field_payload<'a>(
-    tys: impl IntoIterator<Item = &'a TypeExpr>,
-    node_id_gen: &mut NodeIdGen,
-) -> Vec<Expr> {
-    tys.into_iter()
-        .map(|ty| placeholder_expr_for_type(ty, node_id_gen))
-        .collect()
-}
-
 fn placeholder_shared_field_payload_with_key(
     fields: &[(String, TypeExpr)],
     key_field_name: &str,
@@ -1995,6 +2064,62 @@ fn placeholder_shared_field_payload_with_key_var(
 
 fn build_machine_resume_state_expr(
     info: &MachineSpawnInfo,
+    tag_var_name: &str,
+    key_var_name: &str,
+    node_id_gen: &mut NodeIdGen,
+) -> Expr {
+    let span = Span::default();
+    let mut expr = Expr {
+        id: node_id_gen.new_id(),
+        kind: ExprKind::EnumVariant {
+            enum_name: "SessionError".to_string(),
+            variant: "InstanceNotFound".to_string(),
+            type_args: Vec::new(),
+            payload: Vec::new(),
+        },
+        span,
+    };
+
+    for (index, state_name) in info.state_names.iter().enumerate().rev() {
+        let state_expr = Expr {
+            id: node_id_gen.new_id(),
+            kind: ExprKind::EnumVariant {
+                enum_name: info.hosted_type_name.clone(),
+                variant: state_name.clone(),
+                type_args: Vec::new(),
+                payload: placeholder_shared_field_payload_with_key_var(
+                    &info.shared_fields,
+                    &info.key_field_name,
+                    key_var_name,
+                    node_id_gen,
+                ),
+            },
+            span,
+        };
+        expr = Expr {
+            id: node_id_gen.new_id(),
+            kind: ExprKind::If {
+                cond: Box::new(Expr {
+                    id: node_id_gen.new_id(),
+                    kind: ExprKind::BinOp {
+                        left: Box::new(var_expr(tag_var_name, node_id_gen, span)),
+                        op: crate::core::ast::BinaryOp::Eq,
+                        right: Box::new(int_expr((index + 1) as u64, node_id_gen, span)),
+                    },
+                    span,
+                }),
+                then_body: Box::new(state_expr),
+                else_body: Box::new(expr),
+            },
+            span,
+        };
+    }
+
+    expr
+}
+
+fn build_machine_wait_state_expr(
+    info: &MachineWaitInfo,
     tag_var_name: &str,
     key_var_name: &str,
     node_id_gen: &mut NodeIdGen,

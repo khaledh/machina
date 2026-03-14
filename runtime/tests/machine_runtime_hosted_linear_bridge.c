@@ -113,6 +113,47 @@ int main(void) {
         return 15;
     }
 
+    uint64_t wait_key = __mc_hosted_linear_create_u64(
+        rt_handle,
+        machine_id,
+        1,
+        (uintptr_t)0xCAFE
+    );
+    if (wait_key == 0) {
+        __mc_machine_runtime_free(rt_handle);
+        return 16;
+    }
+
+    mc_machine_envelope_t env = {
+        .kind = MC_HOSTED_LINEAR_KIND_DELIVER,
+        .src = 0,
+        .reply_cap_id = 777,
+        .pending_id = 2,
+        .payload0 = wait_key,
+        .payload1 = 1,
+        .origin_payload0 = 0,
+        .origin_payload1 = 0,
+        .origin_request_site_key = 0,
+    };
+    if (__mc_machine_runtime_enqueue(rt, (mc_machine_id_t)machine_id, &env) !=
+        MC_MAILBOX_ENQUEUE_OK) {
+        __mc_machine_runtime_free(rt_handle);
+        return 17;
+    }
+
+    resumed_tag =
+        __mc_hosted_linear_wait_state_u64(rt_handle, machine_id, wait_key, 1);
+    if (resumed_tag != 2) {
+        __mc_machine_runtime_free(rt_handle);
+        return 18;
+    }
+
+    if (__mc_machine_runtime_mailbox_len(rt, (mc_machine_id_t)machine_id) != 0 ||
+        __mc_machine_runtime_ready_len(rt) != 0) {
+        __mc_machine_runtime_free(rt_handle);
+        return 19;
+    }
+
     __mc_machine_runtime_free(rt_handle);
     return 0;
 }
