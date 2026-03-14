@@ -61,7 +61,14 @@ static void mc_machine_runtime_managed_atexit_cleanup(void) {
 
 typedef struct mc_hosted_linear_machine_ctx {
     mc_hosted_instance_table_t instances;
+    uint64_t next_delivery_ticket;
+    uint64_t completed_delivery_ticket;
+    uint64_t completed_delivery_result;
 } mc_hosted_linear_machine_ctx_t;
+
+enum {
+    MC_HOSTED_LINEAR_KIND_DELIVER = 1,
+};
 
 static mc_hosted_linear_machine_ctx_t *mc_hosted_linear_ctx_new(void) {
     mc_hosted_linear_machine_ctx_t *ctx =
@@ -73,6 +80,9 @@ static mc_hosted_linear_machine_ctx_t *mc_hosted_linear_ctx_new(void) {
         return NULL;
     }
     mc_hosted_instance_table_init(&ctx->instances);
+    ctx->next_delivery_ticket = 1;
+    ctx->completed_delivery_ticket = 0;
+    ctx->completed_delivery_result = MC_HOSTED_UPDATE_NOT_FOUND;
     return ctx;
 }
 
@@ -84,6 +94,51 @@ static void mc_hosted_linear_ctx_drop(void *dispatch_ctx) {
     }
     mc_hosted_instance_table_drop(&ctx->instances);
     __mc_free(ctx);
+}
+
+static mc_dispatch_result_t mc_hosted_linear_dispatch(
+    void *ctx_ptr,
+    mc_machine_id_t machine_id,
+    uint64_t current_state,
+    const mc_machine_envelope_t *env,
+    mc_machine_dispatch_txn_t *txn,
+    uint64_t *fault_code
+) {
+    (void)machine_id;
+    (void)current_state;
+    (void)txn;
+    mc_hosted_linear_machine_ctx_t *ctx =
+        (mc_hosted_linear_machine_ctx_t *)ctx_ptr;
+    if (!ctx || !env) {
+        if (fault_code) {
+            *fault_code = 1;
+        }
+        return MC_DISPATCH_FAULT;
+    }
+
+    if (env->kind != MC_HOSTED_LINEAR_KIND_DELIVER) {
+        if (fault_code) {
+            *fault_code = 2;
+        }
+        return MC_DISPATCH_FAULT;
+    }
+
+    // Hosted-linear deliver envelopes repurpose the generic runtime payload:
+    // - reply_cap_id: per-delivery completion ticket
+    // - pending_id: target state tag
+    // - payload0: instance key
+    // - payload1: expected source state tag
+    uint64_t actual_tag = 0;
+    ctx->completed_delivery_ticket = env->reply_cap_id;
+    ctx->completed_delivery_result = mc_hosted_instance_table_update(
+        &ctx->instances,
+        env->payload0,
+        env->payload1,
+        env->pending_id,
+        0,
+        &actual_tag
+    );
+    return MC_DISPATCH_OK;
 }
 
 // ---------------------------------------------------------------------------
@@ -207,6 +262,7 @@ uint64_t __mc_hosted_linear_spawn_u64(uint64_t runtime, uint64_t mailbox_cap) {
 
     slot->dispatch_ctx = ctx;
     slot->dispatch_ctx_drop = mc_hosted_linear_ctx_drop;
+    __mc_machine_runtime_bind_dispatch(rt, id, mc_hosted_linear_dispatch, ctx);
 
     if (!__mc_machine_runtime_start(rt, id)) {
         (void)__mc_machine_runtime_stop(rt, id);
@@ -305,18 +361,35 @@ uint64_t __mc_hosted_linear_deliver_u64(
     if (!ctx) {
         return MC_HOSTED_UPDATE_NOT_FOUND;
     }
+    mc_machine_envelope_t env = {
+        .kind = MC_HOSTED_LINEAR_KIND_DELIVER,
+        .src = 0,
+        .reply_cap_id = ctx->next_delivery_ticket++,
+        .pending_id = new_state_tag,
+        .payload0 = key,
+        .payload1 = expected_state_tag,
+        .origin_payload0 = 0,
+        .origin_payload1 = 0,
+        .origin_request_site_key = 0,
+    };
 
-    // V1 deliver only advances the stored state tag. State payload threading
-    // will come with the fuller hosted dispatch/runtime bridge.
-    uint64_t actual_tag = 0;
-    return mc_hosted_instance_table_update(
-        &ctx->instances,
-        key,
-        expected_state_tag,
-        new_state_tag,
-        0,
-        &actual_tag
-    );
+    mc_mailbox_enqueue_result_t enqueue = __mc_machine_runtime_enqueue(rt, id, &env);
+    if (enqueue != MC_MAILBOX_ENQUEUE_OK) {
+        // V1 hosted deliver only reports per-instance outcomes. Transport
+        // failures collapse to "not found" until DeliverResult grows a more
+        // precise machine-level error surface.
+        return MC_HOSTED_UPDATE_NOT_FOUND;
+    }
+
+    for (;;) {
+        if (ctx->completed_delivery_ticket == env.reply_cap_id) {
+            return ctx->completed_delivery_result;
+        }
+        uint64_t step = __mc_machine_runtime_step_u64(runtime);
+        if (step == (uint64_t)MC_STEP_IDLE || step == (uint64_t)MC_STEP_FAULTED) {
+            return MC_HOSTED_UPDATE_NOT_FOUND;
+        }
+    }
 }
 
 uint64_t __mc_machine_runtime_set_state_u64(

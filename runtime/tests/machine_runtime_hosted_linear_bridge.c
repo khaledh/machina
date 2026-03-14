@@ -26,7 +26,7 @@ int main(void) {
     }
 
     mc_machine_slot_t *slot = mc_get_slot(rt, (mc_machine_id_t)machine_id);
-    if (!slot || !slot->dispatch_ctx || !slot->dispatch_ctx_drop) {
+    if (!slot || !slot->dispatch_ctx || !slot->dispatch_ctx_drop || !slot->dispatch) {
         __mc_machine_runtime_free(rt_handle);
         return 3;
     }
@@ -84,27 +84,33 @@ int main(void) {
         return 10;
     }
 
+    if (__mc_machine_runtime_mailbox_len(rt, (mc_machine_id_t)machine_id) != 0 ||
+        __mc_machine_runtime_ready_len(rt) != 0) {
+        __mc_machine_runtime_free(rt_handle);
+        return 11;
+    }
+
     resumed_tag = __mc_hosted_linear_resume_state_u64(rt_handle, machine_id, key);
     if (resumed_tag != 2) {
         __mc_machine_runtime_free(rt_handle);
-        return 11;
+        return 12;
     }
 
     if (__mc_hosted_linear_deliver_u64(rt_handle, machine_id, key, 1, 3) !=
         MC_HOSTED_UPDATE_STALE) {
         __mc_machine_runtime_free(rt_handle);
-        return 12;
+        return 13;
     }
 
     if (__mc_hosted_linear_deliver_u64(rt_handle, machine_id, key + 1, 2, 3) !=
         MC_HOSTED_UPDATE_NOT_FOUND) {
         __mc_machine_runtime_free(rt_handle);
-        return 13;
+        return 14;
     }
 
     if (__mc_hosted_linear_resume_state_u64(rt_handle, machine_id, key + 1) != 0) {
         __mc_machine_runtime_free(rt_handle);
-        return 14;
+        return 15;
     }
 
     __mc_machine_runtime_free(rt_handle);
