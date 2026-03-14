@@ -551,6 +551,39 @@ impl<'a> ConstraintCollector<'a> {
                         });
                     return expr_ty;
                 }
+                if method_name == "lookup"
+                    && args.len() == 2
+                    && let ExprKind::Var { ident: type_name } = &args[0].expr.kind
+                {
+                    let key_term = self.collect_expr(&args[1].expr, None);
+                    let expected_key_ty = self
+                        .ctx
+                        .linear_index
+                        .machine_hosts
+                        .values()
+                        .find(|host| host.hosted_type_name == *type_name)
+                        .map(|host| {
+                            self.resolve_type_in_scope(&host.key_ty).unwrap_or_else(|err| {
+                                panic!(
+                                    "compiler bug: failed to resolve hosted linear key type for {}: {err:?}",
+                                    type_name,
+                                )
+                            })
+                        })
+                        .unwrap_or(Type::Unknown);
+                    self.out
+                        .expr_obligations
+                        .push(ExprObligation::LinearMachineLookup {
+                            expr_id: expr.id,
+                            receiver: receiver_ty,
+                            type_name: type_name.clone(),
+                            key_term,
+                            expected_key_ty,
+                            result: expr_ty.clone(),
+                            span: expr.span,
+                        });
+                    return expr_ty;
+                }
                 if method_name == "deliver" && args.len() == 2 {
                     let key_term = self.collect_expr(&args[0].expr, None);
                     let event_term = self.collect_expr(&args[1].expr, None);

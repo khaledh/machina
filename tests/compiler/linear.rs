@@ -853,6 +853,100 @@ fn linear_type_hosted_resume_reads_runtime_backed_state() {
 }
 
 #[test]
+fn linear_type_hosted_lookup_reads_current_instance_state() {
+    let run = run_program(
+        "linear_type_hosted_lookup_reads_state",
+        r#"
+            @linear
+            type PullRequest = {
+                id: u64,
+
+                states {
+                    Draft,
+                    Review,
+                }
+
+                actions {}
+
+                roles {
+                    Author {}
+                }
+            }
+
+            machine PRService hosts PullRequest(key: id) {
+                fn new() -> Self {
+                    Self {}
+                }
+            }
+
+            @machines
+            fn main() -> () | MachineError | SessionError {
+                let service = PRService::spawn()?;
+                let draft = service.create(PullRequest as Author)?;
+                let current = service.lookup(PullRequest, draft.id)?;
+                match current {
+                    PullRequest::Draft(id) => println(id),
+                    PullRequest::Review(id) => println(id),
+                };
+                ()
+            }
+        "#,
+    );
+
+    assert_eq!(run.status.code(), Some(0));
+    let stdout = String::from_utf8_lossy(&run.stdout);
+    assert_eq!(stdout, "1\n", "unexpected stdout: {stdout}");
+}
+
+#[test]
+fn linear_type_hosted_lookup_reports_missing_instance() {
+    let run = run_program(
+        "linear_type_hosted_lookup_missing",
+        r#"
+            @linear
+            type PullRequest = {
+                id: u64,
+
+                states {
+                    Draft,
+                }
+
+                actions {}
+
+                roles {
+                    Author {}
+                }
+            }
+
+            machine PRService hosts PullRequest(key: id) {
+                fn new() -> Self {
+                    Self {}
+                }
+            }
+
+            @machines
+            fn main() -> () | MachineError | SessionError {
+                let service = PRService::spawn()?;
+                match service.lookup(PullRequest, 42) {
+                    pr: PullRequest => match pr {
+                        PullRequest::Draft(id) => println(id),
+                    },
+                    err: SessionError => match err {
+                        InvalidState => println("invalid"),
+                        InstanceNotFound => println("missing"),
+                    },
+                };
+                ()
+            }
+        "#,
+    );
+
+    assert_eq!(run.status.code(), Some(0));
+    let stdout = String::from_utf8_lossy(&run.stdout);
+    assert_eq!(stdout, "missing\n", "unexpected stdout: {stdout}");
+}
+
+#[test]
 fn linear_type_hosted_wait_typechecks_for_trigger_driven_state() {
     let source = r#"
         type CIPassed = {}

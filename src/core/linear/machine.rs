@@ -15,6 +15,11 @@
 //!   returns `HostedType | SessionError`. `service.create(PullRequest as Author)`
 //!   is rewritten to call this.
 //!
+//! - **Lookup function**: a per-machine-per-hosted-type function that takes a
+//!   handle and key and returns `HostedType | SessionError` without opening a
+//!   session. `service.lookup(PullRequest, key)` is rewritten during typecheck
+//!   finalize to call this helper.
+//!
 //! - **On-handler helpers**: a per-machine-per-handler function that carries the
 //!   body of each `on` handler through ordinary resolve/typecheck. Machine bodies
 //!   are still parse-only overall, so generated helpers are the narrowest way to
@@ -176,6 +181,10 @@ pub(crate) fn machine_resume_fn_name(
     role_name: &str,
 ) -> String {
     format!("__mc_machine_resume_{machine_name}_{type_name}_{role_name}")
+}
+
+pub(crate) fn machine_lookup_fn_name(machine_name: &str, type_name: &str) -> String {
+    format!("__mc_machine_lookup_{machine_name}_{type_name}")
 }
 
 pub(crate) fn machine_action_override_fn_name(machine_name: &str, action_name: &str) -> String {
@@ -982,6 +991,12 @@ pub(super) fn append_machine_spawn_support(
                     node_id_gen,
                 )));
         }
+        module
+            .top_level_items
+            .push(TopLevelItem::FuncDef(build_machine_lookup_func(
+                info,
+                node_id_gen,
+            )));
     }
 
     for override_info in action_override_infos {
@@ -1911,6 +1926,116 @@ fn build_machine_resume_func(
         // Resume now consults the hosted runtime bridge for the current
         // instance state tag, then reconstructs the matching state variant with
         // the resumed key threaded into the shared-field payload.
+        body: Expr {
+            id: node_id_gen.new_id(),
+            kind: ExprKind::Block {
+                items: vec![
+                    BlockItem::Stmt(let_bind_stmt(
+                        "__mc_rt",
+                        call_expr(MANAGED_RUNTIME_CURRENT_FN, Vec::new(), node_id_gen, span),
+                        node_id_gen,
+                        span,
+                    )),
+                    BlockItem::Expr(return_enum_error_if_zero(
+                        "__mc_rt",
+                        "SessionError",
+                        "InstanceNotFound",
+                        node_id_gen,
+                        span,
+                    )),
+                    BlockItem::Stmt(let_bind_stmt(
+                        "__mc_state_tag",
+                        call_expr(
+                            HOSTED_LINEAR_RESUME_STATE_FN,
+                            vec![
+                                var_expr("__mc_rt", node_id_gen, span),
+                                self_field_expr("_id", node_id_gen, span),
+                                var_expr("key", node_id_gen, span),
+                            ],
+                            node_id_gen,
+                            span,
+                        ),
+                        node_id_gen,
+                        span,
+                    )),
+                    BlockItem::Expr(return_enum_error_if_zero(
+                        "__mc_state_tag",
+                        "SessionError",
+                        "InstanceNotFound",
+                        node_id_gen,
+                        span,
+                    )),
+                ],
+                tail: Some(Box::new(build_machine_resume_state_expr(
+                    info,
+                    "__mc_state_tag",
+                    "key",
+                    node_id_gen,
+                ))),
+            },
+            span,
+        },
+        span,
+    }
+}
+
+fn build_machine_lookup_func(info: &MachineSpawnInfo, node_id_gen: &mut NodeIdGen) -> FuncDef {
+    let span = Span::default();
+    FuncDef {
+        id: node_id_gen.new_id(),
+        attrs: Vec::new(),
+        sig: crate::core::ast::FunctionSig {
+            name: machine_lookup_fn_name(&info.machine_name, &info.hosted_type_name),
+            type_params: Vec::new(),
+            params: vec![
+                Param {
+                    id: node_id_gen.new_id(),
+                    ident: "self".to_string(),
+                    mode: ParamMode::In,
+                    typ: TypeExpr {
+                        id: node_id_gen.new_id(),
+                        kind: TypeExprKind::Named {
+                            ident: info.handle_type_name.clone(),
+                            type_args: Vec::new(),
+                        },
+                        span,
+                    },
+                    span,
+                },
+                Param {
+                    id: node_id_gen.new_id(),
+                    ident: "key".to_string(),
+                    mode: ParamMode::In,
+                    typ: info.key_ty.clone(),
+                    span,
+                },
+            ],
+            ret_ty_expr: TypeExpr {
+                id: node_id_gen.new_id(),
+                kind: TypeExprKind::Union {
+                    variants: vec![
+                        TypeExpr {
+                            id: node_id_gen.new_id(),
+                            kind: TypeExprKind::Named {
+                                ident: info.hosted_type_name.clone(),
+                                type_args: Vec::new(),
+                            },
+                            span,
+                        },
+                        TypeExpr {
+                            id: node_id_gen.new_id(),
+                            kind: TypeExprKind::Named {
+                                ident: "SessionError".to_string(),
+                                type_args: Vec::new(),
+                            },
+                            span,
+                        },
+                    ],
+                },
+                span,
+            },
+            span,
+        },
         body: Expr {
             id: node_id_gen.new_id(),
             kind: ExprKind::Block {

@@ -29,7 +29,7 @@ use crate::core::diag::Span;
 use crate::core::resolve::{REK, ResolveError};
 
 use super::index::{HostedActionExprInfo, LinearIndex};
-use super::machine::machine_spawn_fn_name;
+use super::machine::{machine_lookup_fn_name, machine_spawn_fn_name};
 
 // -- Internal data structures ----------------------------------------
 
@@ -788,6 +788,42 @@ fn rewrite_expr_in_scope(
                 }
                 // `wait()` resumes as one of several possible states, so we
                 // intentionally stop tracking a single concrete linear state.
+                return None;
+            }
+
+            if method_name == "lookup"
+                && args.len() == 2
+                && let ExprKind::Var { ident: type_name } = &args[0].expr.kind
+                && let Some(machine_ident) = callee_source_ident.clone()
+                && let Some(machine_binding) = machine_env.get(&machine_ident)
+                && let Some(host_info) = linear_index
+                    .machine_hosts
+                    .get(&machine_binding.machine_name)
+                && host_info.hosted_type_name == *type_name
+            {
+                let helper_name = machine_lookup_fn_name(&machine_binding.machine_name, type_name);
+                let key_expr = args[1].expr.clone();
+                expr.kind = ExprKind::Call {
+                    callee: Box::new(Expr {
+                        id: node_id_gen.new_id(),
+                        kind: ExprKind::Var { ident: helper_name },
+                        span: expr.span,
+                    }),
+                    args: vec![
+                        crate::core::ast::CallArg {
+                            mode: crate::core::ast::CallArgMode::Default,
+                            expr: (**callee).clone(),
+                            init: crate::core::ast::InitInfo::default(),
+                            span: expr.span,
+                        },
+                        crate::core::ast::CallArg {
+                            mode: crate::core::ast::CallArgMode::Default,
+                            expr: key_expr,
+                            init: crate::core::ast::InitInfo::default(),
+                            span: expr.span,
+                        },
+                    ],
+                };
                 return None;
             }
 

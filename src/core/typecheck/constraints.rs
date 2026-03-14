@@ -218,6 +218,15 @@ pub(crate) enum ExprObligation {
         result: Type,
         span: Span,
     },
+    LinearMachineLookup {
+        expr_id: NodeId,
+        receiver: Type,
+        type_name: String,
+        key_term: Type,
+        expected_key_ty: Type,
+        result: Type,
+        span: Span,
+    },
     LinearMachineDeliver {
         expr_id: NodeId,
         receiver: Type,

@@ -339,6 +339,9 @@ pub enum TypeCheckErrorKind {
     #[error("Machine {0} hosting linear type {1} expects key type {2} for deliver, found {3}")]
     LinearMachineDeliverKeyTypeMismatch(String, String, String, String),
 
+    #[error("Machine {0} hosting linear type {1} expects key type {2} for lookup, found {3}")]
+    LinearMachineLookupKeyTypeMismatch(String, String, String, String),
+
     #[error("Cannot access private callable: {0}")]
     CallableNotAccessible(String),
 

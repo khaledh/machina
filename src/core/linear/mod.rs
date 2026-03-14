@@ -27,6 +27,7 @@ use crate::core::resolve::ResolveError;
 
 pub use index::*;
 pub(crate) use machine::machine_create_fn_name;
+pub(crate) use machine::machine_lookup_fn_name;
 pub(crate) use machine::machine_resume_fn_name;
 pub(crate) use machine::machine_spawn_fn_name;
 pub(crate) use machine::machine_trigger_handler_fn_name;

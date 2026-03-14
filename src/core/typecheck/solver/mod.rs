@@ -541,6 +541,7 @@ fn check_expr_obligations(
                 unreachable!("nominal obligations are handled by solve::nominal");
             }
             ExprObligation::LinearMachineCreate { .. }
+            | ExprObligation::LinearMachineLookup { .. }
             | ExprObligation::LinearMachineResume { .. }
             | ExprObligation::LinearSessionAction { .. }
             | ExprObligation::LinearMachineDeliver { .. } => {
@@ -652,6 +653,19 @@ fn should_retry_post_call_expr_obligation(
             let receiver_ty = term_utils::resolve_term(receiver, unifier);
             let result_ty = term_utils::resolve_term(result, unifier);
             term_utils::is_unresolved(&receiver_ty) || term_utils::is_unresolved(&result_ty)
+        }
+        ExprObligation::LinearMachineLookup {
+            receiver,
+            key_term,
+            result,
+            ..
+        } => {
+            let receiver_ty = term_utils::resolve_term(receiver, unifier);
+            let key_ty = term_utils::resolve_term(key_term, unifier);
+            let result_ty = term_utils::resolve_term(result, unifier);
+            term_utils::is_unresolved(&receiver_ty)
+                || term_utils::is_unresolved(&key_ty)
+                || term_utils::is_unresolved(&result_ty)
         }
         ExprObligation::LinearMachineResume {
             receiver,
