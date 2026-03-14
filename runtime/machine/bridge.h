@@ -145,4 +145,13 @@ uint64_t __mc_hosted_linear_wait_state_u64(
     uint64_t expected_state_tag
 );
 
+uint64_t __mc_hosted_action_emit_begin_u64(
+    uint64_t runtime,
+    uint64_t machine_id
+);
+
+uint64_t __mc_hosted_action_emit_commit_u64(uint64_t scope);
+
+uint64_t __mc_hosted_action_emit_abort_u64(uint64_t scope);
+
 #endif

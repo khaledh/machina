@@ -100,6 +100,10 @@ typedef struct mc_hosted_linear_machine_ctx {
     uint64_t completed_delivery_result;
 } mc_hosted_linear_machine_ctx_t;
 
+typedef struct mc_hosted_action_emit_scope {
+    mc_emit_staging_ctx_t emit_ctx;
+} mc_hosted_action_emit_scope_t;
+
 static mc_hosted_linear_machine_ctx_t *mc_hosted_linear_ctx_new(void) {
     mc_hosted_linear_machine_ctx_t *ctx =
         (mc_hosted_linear_machine_ctx_t *)__mc_alloc(
@@ -557,6 +561,58 @@ uint64_t __mc_hosted_linear_wait_state_u64(
             return 0;
         }
     }
+}
+
+uint64_t __mc_hosted_action_emit_begin_u64(uint64_t runtime, uint64_t machine_id) {
+    mc_machine_runtime_t *rt = mc_runtime_from_handle(runtime);
+    mc_machine_id_t id = 0;
+    if (!rt || !mc_machine_id_from_u64(machine_id, &id) || !mc_get_slot(rt, id)) {
+        return 0;
+    }
+
+    mc_hosted_action_emit_scope_t *scope = (mc_hosted_action_emit_scope_t *)__mc_alloc(
+        sizeof(mc_hosted_action_emit_scope_t),
+        _Alignof(mc_hosted_action_emit_scope_t)
+    );
+    if (!scope) {
+        return 0;
+    }
+
+    mc_emit_staging_begin(&scope->emit_ctx, rt, id);
+    return (uint64_t)(uintptr_t)scope;
+}
+
+uint64_t __mc_hosted_action_emit_commit_u64(uint64_t scope_handle) {
+    mc_hosted_action_emit_scope_t *scope =
+        (mc_hosted_action_emit_scope_t *)(uintptr_t)scope_handle;
+    if (!scope) {
+        return 0;
+    }
+
+    mc_machine_runtime_t *rt = scope->emit_ctx.rt;
+    for (uint32_t i = 0; i < scope->emit_ctx.outbox_len; i++) {
+        (void)__mc_machine_runtime_enqueue(
+            rt,
+            scope->emit_ctx.outbox[i].dst,
+            &scope->emit_ctx.outbox[i].env
+        );
+    }
+
+    mc_emit_staging_end(&scope->emit_ctx);
+    __mc_free(scope);
+    return 1;
+}
+
+uint64_t __mc_hosted_action_emit_abort_u64(uint64_t scope_handle) {
+    mc_hosted_action_emit_scope_t *scope =
+        (mc_hosted_action_emit_scope_t *)(uintptr_t)scope_handle;
+    if (!scope) {
+        return 0;
+    }
+
+    mc_emit_staging_end(&scope->emit_ctx);
+    __mc_free(scope);
+    return 1;
 }
 
 uint64_t __mc_machine_runtime_set_state_u64(

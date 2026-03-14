@@ -1572,9 +1572,83 @@ fn linear_type_direct_mode_rejects_wait() {
 }
 
 #[test]
-fn linear_type_hosted_action_override_rejects_emit() {
+fn linear_type_hosted_action_override_can_emit_send() {
+    let run = run_program(
+        "linear_type_hosted_action_emit_send",
+        r#"
+            type Start = {}
+            type Note = {}
+
+            @linear
+            type PullRequest = {
+                id: u64,
+
+                states {
+                    Draft,
+                    Review,
+                }
+
+                actions {
+                    submit: Draft -> Review,
+                }
+
+                roles {
+                    Author { submit }
+                }
+            }
+
+            PullRequest :: {
+                fn submit(self) -> Review {
+                    Review {}
+                }
+            }
+
+            machine PRService hosts PullRequest(key: id) {
+                fn new() -> Self {
+                    Self {}
+                }
+
+                on Start(_event) {
+                    println("start");
+                }
+
+                on Note(_event) {
+                    println("note");
+                }
+
+                action submit(draft) -> Review {
+                    draft;
+                    emit Send(to: self, Note {});
+                    Review {}
+                }
+            }
+
+            @machines
+            fn main() -> () | MachineError | SessionError {
+                let service = PRService::spawn()?;
+                service.send(Start {})?;
+                __mc_machine_runtime_step_u64(__mc_machine_runtime_managed_current_u64());
+                let draft = service.create(PullRequest as Author)?;
+                let _review = draft.submit()?;
+                __mc_machine_runtime_step_u64(__mc_machine_runtime_managed_current_u64());
+                ()
+            }
+        "#,
+    );
+
+    assert_eq!(run.status.code(), Some(0));
+    let stdout = String::from_utf8_lossy(&run.stdout);
+    assert_eq!(
+        stdout, "start\nnote\n",
+        "hosted action overrides should be able to stage send effects and commit them after success"
+    );
+}
+
+#[test]
+fn linear_type_hosted_action_override_rejects_emit_request() {
     let source = r#"
         type Note = {}
+        type Ack = {}
 
         @linear
         type PullRequest = {
@@ -1609,7 +1683,7 @@ fn linear_type_hosted_action_override_rejects_emit() {
 
             action submit(draft) -> Review {
                 draft;
-                emit Send(to: self, Note {});
+                let _pending = emit Request(to: self, Note {});
                 Review {}
             }
         }
@@ -1617,16 +1691,16 @@ fn linear_type_hosted_action_override_rejects_emit() {
 
     let errors = compile_linear_source(
         source,
-        "tests/fixtures/linear/hosted_action_emit_rejected.mc",
+        "tests/fixtures/linear/hosted_action_emit_request_rejected.mc",
     )
-    .expect_err("hosted action overrides should not silently accept emit outside dispatch");
+    .expect_err("hosted action overrides should still reject unsupported emit kinds");
     let rendered = format!("{errors:#?}");
     assert!(
         rendered.contains("MC-MACHINE-HOSTED-ACTION-EMIT-UNSUPPORTED")
             || rendered.contains("MachineHostedActionEmitUnsupported")
-            || rendered.contains("cannot use `emit`")
-            || rendered.contains("supported only in `on` and `trigger` handlers"),
-        "expected hosted action emit diagnostic, got: {rendered}"
+            || rendered.contains("emit request")
+            || rendered.contains("only `emit Send(...)`"),
+        "expected hosted action emit-request diagnostic, got: {rendered}"
     );
 }
 
@@ -1671,6 +1745,84 @@ fn linear_type_hosted_on_handler_rejects_unsupported_payload_shape() {
             || rendered.contains("not supported by hosted mailbox ingress")
             || rendered.contains("supported payloads are"),
         "expected hosted on payload diagnostic, got: {rendered}"
+    );
+}
+
+#[test]
+fn linear_type_hosted_fallible_action_does_not_commit_emitted_send_on_error() {
+    let run = run_program(
+        "linear_type_hosted_action_emit_send_aborts_on_error",
+        r#"
+            type Note = {}
+
+            @linear
+            type PullRequest = {
+                id: u64,
+
+                states {
+                    Draft,
+                    Review,
+                }
+
+                actions {
+                    submit: Draft -> Review | SessionError,
+                }
+
+                roles {
+                    Author { submit }
+                }
+            }
+
+            PullRequest :: {
+                fn submit(self) -> Review | SessionError {
+                    SessionError::InvalidState
+                }
+            }
+
+            machine PRService hosts PullRequest(key: id) {
+                fn new() -> Self {
+                    Self {}
+                }
+
+                on Note(_event) {
+                    println("note");
+                }
+
+                action submit(draft) -> Review | SessionError {
+                    draft;
+                    emit Send(to: self, Note {});
+                    if true {
+                        SessionError::InvalidState
+                    } else {
+                        Review {}
+                    }
+                }
+            }
+
+            @machines
+            fn main() -> () | MachineError | SessionError {
+                let service = PRService::spawn()?;
+                let draft = service.create(PullRequest as Author)?;
+                match draft.submit() {
+                    _ok: PullRequest => println("ok"),
+                    _err: SessionError => println("err"),
+                };
+                __mc_machine_runtime_step_u64(__mc_machine_runtime_managed_current_u64());
+                let looked_up = service.lookup(PullRequest, 1)?;
+                match looked_up {
+                    PullRequest::Draft(_) => println("draft"),
+                    PullRequest::Review(_) => println("review"),
+                };
+                ()
+            }
+        "#,
+    );
+
+    assert_eq!(run.status.code(), Some(0));
+    let stdout = String::from_utf8_lossy(&run.stdout);
+    assert_eq!(
+        stdout, "err\ndraft\n",
+        "failed hosted action overrides should discard staged sends and leave state unchanged"
     );
 }
 

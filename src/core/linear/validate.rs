@@ -538,7 +538,7 @@ fn validate_hosted_action_emit_usage(
     handler: &MachineTransitionHandler,
     errors: &mut Vec<ResolveError>,
 ) {
-    for span in collect_emit_spans(&handler.body) {
+    for span in collect_hosted_action_emit_unsupported_spans(&handler.body) {
         errors.push(
             REK::MachineHostedActionEmitUnsupported(machine_def.name.clone(), handler.name.clone())
                 .at(span),
@@ -677,15 +677,23 @@ fn is_u64_named_type(ty_expr: &TypeExpr) -> bool {
     )
 }
 
-fn collect_emit_spans(expr: &crate::core::ast::Expr) -> Vec<crate::core::diag::Span> {
+fn collect_hosted_action_emit_unsupported_spans(
+    expr: &crate::core::ast::Expr,
+) -> Vec<crate::core::diag::Span> {
     struct EmitCollector {
         spans: Vec<crate::core::diag::Span>,
     }
 
     impl Visitor for EmitCollector {
         fn visit_expr(&mut self, expr: &crate::core::ast::Expr) {
-            if matches!(expr.kind, ExprKind::Emit { .. }) {
-                self.spans.push(expr.span);
+            match &expr.kind {
+                ExprKind::Emit {
+                    kind: crate::core::ast::EmitKind::Request { .. },
+                }
+                | ExprKind::Reply { .. } => {
+                    self.spans.push(expr.span);
+                }
+                _ => {}
             }
             visit::walk_expr(self, expr);
         }

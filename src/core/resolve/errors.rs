@@ -260,7 +260,7 @@ pub enum ResolveErrorKind {
     MachineOverrideErrorSubset(String, String),
 
     #[error(
-        "Machine `{0}` action override `{1}` cannot use `emit`; hosted `emit` is currently supported only in `on` and `trigger` handlers"
+        "Machine `{0}` action override `{1}` cannot use `emit request` or `reply`; hosted action overrides currently support only `emit Send(...)`"
     )]
     MachineHostedActionEmitUnsupported(String, String),
 
