@@ -479,26 +479,11 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
 
     fn hosted_machine_payload_event_kind(&self, payload_ty: &Type) -> Option<u64> {
         let payload_name = semantic_named_type_name(payload_ty)?;
-        let current_name = &self.def(self.current_def_id).name;
-
-        if let Some(info) = self.linear_index.trigger_handler_fns.get(current_name) {
-            let host = self.linear_index.machine_hosts.get(&info.machine_name)?;
-            return host.on_event_kinds.get(payload_name).copied();
-        }
-
-        let machine_name =
-            self.linear_index
-                .machine_hosts
-                .iter()
-                .find_map(|(machine_name, host)| {
-                    if host.on_event_kinds.contains_key(payload_name)
-                        && current_name.starts_with(&format!("__mc_machine_on_{machine_name}_"))
-                    {
-                        Some(machine_name.as_str())
-                    } else {
-                        None
-                    }
-                })?;
+        let current_node_id = self.def_table.lookup_def_node_id(self.current_def_id)?;
+        let machine_name = self
+            .linear_index
+            .hosted_dispatch_handler_machines
+            .get(&current_node_id)?;
         self.linear_index
             .machine_hosts
             .get(machine_name)?

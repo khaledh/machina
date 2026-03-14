@@ -52,6 +52,8 @@ use crate::core::ast::{
 };
 use crate::core::diag::Span;
 
+use super::LinearIndex;
+
 // ── Internal data structures ────────────────────────────────────────
 
 #[derive(Clone, Debug)]
@@ -940,6 +942,7 @@ fn ensure_type_def(module: &mut Module, type_name: &str, item: TopLevelItem) {
 /// Generate handle struct types and spawn/create functions for each machine.
 pub(super) fn append_machine_spawn_support(
     module: &mut Module,
+    linear_index: &mut LinearIndex,
     machine_infos: &[MachineSpawnInfo],
     action_override_infos: &[MachineActionOverrideInfo],
     action_session_infos: &[MachineActionSessionInfo],
@@ -1018,12 +1021,13 @@ pub(super) fn append_machine_spawn_support(
     }
 
     for trigger_info in trigger_handler_infos {
+        let trigger_func = build_machine_trigger_handler_func(trigger_info, node_id_gen);
+        linear_index
+            .hosted_dispatch_handler_machines
+            .insert(trigger_func.id, trigger_info.machine_name.clone());
         module
             .top_level_items
-            .push(TopLevelItem::FuncDef(build_machine_trigger_handler_func(
-                trigger_info,
-                node_id_gen,
-            )));
+            .push(TopLevelItem::FuncDef(trigger_func));
         if trigger_info.payload_shape.is_some() {
             module.top_level_items.push(TopLevelItem::FuncDef(
                 build_machine_trigger_dispatch_wrapper_func(trigger_info, node_id_gen),
@@ -1032,12 +1036,11 @@ pub(super) fn append_machine_spawn_support(
     }
 
     for on_info in on_handler_infos {
-        module
-            .top_level_items
-            .push(TopLevelItem::FuncDef(build_machine_on_handler_func(
-                on_info,
-                node_id_gen,
-            )));
+        let on_func = build_machine_on_handler_func(on_info, node_id_gen);
+        linear_index
+            .hosted_dispatch_handler_machines
+            .insert(on_func.id, on_info.machine_name.clone());
+        module.top_level_items.push(TopLevelItem::FuncDef(on_func));
         if on_info.payload_shape.is_some() {
             module.top_level_items.push(TopLevelItem::FuncDef(
                 build_machine_on_dispatch_wrapper_func(on_info, node_id_gen),

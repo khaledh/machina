@@ -1296,6 +1296,79 @@ fn linear_type_hosted_on_handler_can_emit_send() {
 }
 
 #[test]
+fn linear_type_hosted_on_handler_emit_uses_enclosing_machine_routing() {
+    let run = run_program(
+        "linear_type_hosted_on_handler_emit_overlapping_machine_names",
+        r#"
+            type Start = {}
+            type Ack = {}
+            type Noise = {}
+
+            @linear
+            type PullRequest = {
+                id: u64,
+
+                states {
+                    Draft,
+                }
+
+                actions {}
+
+                roles {
+                    Author {}
+                }
+            }
+
+            machine PR hosts PullRequest(key: id) {
+                fn new() -> Self {
+                    Self {}
+                }
+
+                on Noise(_event) {}
+
+                on Start(_event) {
+                    emit Send(to: self, Ack {});
+                }
+
+                on Ack(_event) {
+                    println("pr-ack");
+                }
+            }
+
+            machine PR_Service hosts PullRequest(key: id) {
+                fn new() -> Self {
+                    Self {}
+                }
+
+                on Start(_event) {
+                    emit Send(to: self, Ack {});
+                }
+
+                on Ack(_event) {
+                    println("service-ack");
+                }
+            }
+
+            @machines
+            fn main() -> () | MachineError {
+                let service = PR_Service::spawn()?;
+                service.send(Start {})?;
+                __mc_machine_runtime_step_u64(__mc_machine_runtime_managed_current_u64());
+                __mc_machine_runtime_step_u64(__mc_machine_runtime_managed_current_u64());
+                ()
+            }
+        "#,
+    );
+
+    assert_eq!(run.status.code(), Some(0));
+    let stdout = String::from_utf8_lossy(&run.stdout);
+    assert_eq!(
+        stdout, "service-ack\n",
+        "hosted emit routing should use the enclosing machine's handler metadata even when machine names overlap"
+    );
+}
+
+#[test]
 fn linear_type_hosted_trigger_handler_body_runs_during_delivery() {
     let run = run_program(
         "linear_type_hosted_trigger_body_runs",

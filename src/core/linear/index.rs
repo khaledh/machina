@@ -38,6 +38,12 @@ pub struct LinearIndex {
     /// helpers are synthesized before resolve so their bodies can typecheck as
     /// ordinary functions, but they still need linear source-state seeding.
     pub trigger_handler_fns: HashMap<String, GeneratedTriggerHandlerInfo>,
+    /// Generated hosted `on`/`trigger` helper defs keyed by the helper's node
+    /// id. This is filled during desugaring after the helpers are generated,
+    /// then consumed later through `DefId -> NodeId` lookup in backend
+    /// lowering so hosted event-kind routing does not need function-name
+    /// heuristics.
+    pub hosted_dispatch_handler_machines: HashMap<NodeId, String>,
     /// Expression IDs of method calls on hosted bindings. Populated by the
     /// direct-mode rewriter when it encounters an action call on a binding
     /// that originated from `create(...)`. The type checker uses these to
@@ -335,6 +341,7 @@ pub fn build_linear_index(module: &Module) -> LinearIndex {
         action_override_fns,
         action_session_fns,
         trigger_handler_fns,
+        hosted_dispatch_handler_machines: HashMap::new(),
         hosted_action_exprs: HashMap::new(),
     }
 }

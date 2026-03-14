@@ -81,6 +81,7 @@ pub fn desugar_module(
         machine::ensure_hosted_runtime_intrinsics(module, node_id_gen);
         machine::append_machine_spawn_support(
             module,
+            linear_index,
             &machine_infos,
             &action_override_infos,
             &action_session_infos,
