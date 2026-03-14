@@ -153,11 +153,43 @@ requires {
 
 Imported symbols are used directly (`println`, `Config`, `load_config`).
 
-## Typestate (Experimental)
+## Linear Types and Hosted Machines
 
-Machina includes an experimental typestate model for lifecycle-safe APIs.
-Enable it through the compiler/LSP experimental feature settings.
-See [Typestate](guide/typestate.md) for details.
+Machina's primary stateful-modeling surface is `@linear type`.
+
+Without roles or triggers, a linear type behaves like direct typestate:
+
+```mc
+@linear
+type Door = {
+    states {
+        Closed,
+        Open,
+    }
+
+    actions {
+        open: Closed -> Open,
+        close: Open -> Closed,
+    }
+}
+
+Door :: {
+    fn open(self) -> Open {
+        Open {}
+    }
+
+    fn close(self) -> Closed {
+        Closed {}
+    }
+}
+```
+
+Add roles and a hosting machine, and the same model becomes a long-lived hosted
+workflow with `create(...)`, `resume(...)`, `send(...)`, `wait()`, and
+`lookup(...)`.
+
+See [Linear Types](guide/linear-types.md) for the practical guide, and
+[Why Machina](why-machina.md) for the full payment workflow story.
 
 ## Next
 

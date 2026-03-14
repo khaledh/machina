@@ -6,7 +6,7 @@ question:
 **Can the language make large stateful systems easier to design and safer to evolve, without becoming heavyweight?**
 
 It combines explicit ownership and value semantics with a roadmap toward
-first-class state-machine and typestate modeling.
+first-class workflow and state-machine modeling.
 
 ## Why Machina
 
@@ -19,7 +19,7 @@ Machina aims for a middle path:
 
 - **Explicit by default**: ownership transfer and mutation are visible in code
 - **Composable abstractions**: traits, methods, properties, algebraic data types
-- **Design-level safety direction**: typestate and state-machine-oriented features
+- **Design-level safety direction**: linear workflow types and hosted machines
 
 ## Current Status
 
@@ -28,6 +28,7 @@ Machina is being actively developed and not stable yet.
 - Compiler pipeline + ARM64 codegen
 - Module/capsule model with `requires { ... }`
 - Traits, properties, generics, unions for error handling, collections
+- `@linear type` for direct typestate-style values and hosted workflows
 - IDE/LSP support in progress
 
 Current compiler target: **ARM64**.
@@ -35,72 +36,52 @@ Current compiler target: **ARM64**.
 ## Example
 
 ```mc
-requires {
-    std::io::println
-}
+@linear
+type Approval = {
+    id: u64,
 
-type OpenPressed = { id: u64 }
-type OpenCmd = {}
-type Opened = {}
-
-typestate DoorActuator {
-    fn new() -> Ready {
-        Ready {}
+    states {
+        Review,
+        Approved,
     }
 
-    state Ready {
-        on OpenCmd(_cmd: OpenCmd, cap: ReplyCap<Opened>) -> stay {
-            cap.reply(Opened {});
-        }
+    actions {
+        approve: Review -> Approved,
+    }
+
+    roles {
+        Reviewer { approve }
     }
 }
 
-typestate DoorController {
-    fields {
-        door: Machine<DoorActuator>,
+Approval :: {
+    fn approve(self) -> Approved {
+        println("approved");
+        Approved {}
     }
-
-    fn new(door: Machine<DoorActuator>) -> Closed {
-        Closed { door: door }
-    }
-
-    state Closed {
-        on OpenPressed(evt) -> Waiting {
-            println(f"open event {evt.id}");
-            let _pending: Pending<Opened> = request(self.door, OpenCmd {});
-            Waiting
-        }
-    }
-
-    state Waiting {
-        on Opened(_evt) for OpenCmd(_origin) -> Open {
-            println("door transitioned: Closed -> Waiting -> Open");
-            Open
-        }
-    }
-
-    @final
-    state Open {}
 }
 
-@machines
-fn main() -> () | MachineError {
-    let actuator = DoorActuator::spawn()?;
-    let controller = DoorController::spawn(actuator)?;
+machine ApprovalService hosts Approval(key: id) {
+    fn new() -> Self { Self {} }
+}
 
-    controller.send(OpenPressed { id: 1 })?;
+fn main() -> () | MachineError | SessionError {
+    let service = ApprovalService::spawn()?;
+    let review = service.create(Approval as Reviewer)?;
+    let _approved = review.approve()?;
 }
 ```
 
 Try it:
 
 ```sh
-cargo mcc run --experimental typestate examples/typestate/managed_state_transitions.mc
+cargo mcc run examples/linear/approval_hosted.mc
 ```
 
-Typestate in managed mode lets us model interacting machines directly in code:
-typed handles, typed messages, state transitions, and request/reply correlation
-without manual ids.
+That example is intentionally small. For the more complete story — async events,
+multiple actors over time, and resuming a long-lived entity by key — see
+[`docs/why-machina.md`](docs/why-machina.md) and
+`examples/linear/payment_lifecycle.mc`.
 
 ## Also Nice Today
 
@@ -121,6 +102,7 @@ cargo mcc run examples/quickstart/hello.mc
 ## Documentation
 
 - [Getting started](docs/getting-started.md)
+- [Why Machina](docs/why-machina.md)
 - [Language tour](docs/tour.md)
 - [Guide](docs/guide/)
 - [Language reference](docs/reference/)
@@ -140,7 +122,8 @@ cargo mcc run examples/quickstart/hello.mc
 
 Machina is being built as a long-horizon language project. The near-term goal is
 solid core ergonomics and tooling; the long-term differentiator is first-class
-support for modeling and verifying stateful protocols in code.
+support for modeling long-lived workflows, stateful services, and typed machine
+interactions in code.
 
 ## License
 

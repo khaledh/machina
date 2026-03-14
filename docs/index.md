@@ -21,7 +21,7 @@ memory behavior without hidden aliasing.
   - [Functions](guide/functions.md) — Signatures, parameter modes, overloading
   - [Structs and Enums](guide/structs-enums.md) — User-defined data types
   - [Methods](guide/methods.md) — Method blocks, `self`, and properties
-  - [Typestate](guide/typestate.md) — State-aware APIs encoded in types
+  - [Linear Types](guide/linear-types.md) — Direct typestate-style values and hosted workflows
   - [Closures](guide/closures.md) — Anonymous functions and captures
   - [Arrays and Slices](guide/arrays-slices.md) — Fixed arrays, slices, and dynamic arrays
   - [Strings](guide/strings.md) — String literals, formatting, mutation
