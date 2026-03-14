@@ -268,8 +268,9 @@ Machina handles all three. The key is `resume(...)`: the point where an actor
 coming back from a database row, queue message, or webhook payload re-enters the
 typed workflow.
 
-Here is the full program. Each stage uses only the payment key to resume the
-payment — simulating separate actors arriving at different times.
+Here is the full program. Each stage is a separate helper function that takes a
+`Machine<PaymentService>` handle plus a payment key — the shape we wanted from
+the start for checkout, gateway, fraud, and merchant code paths.
 
 ```machina
 type FraudAlert = {
@@ -323,43 +324,57 @@ machine PaymentService hosts Payment(key: id) {
     }
 }
 
-fn main() -> () | MachineError | SessionError {
-    let service = PaymentService::spawn()?;
-
-    // Stage 1: checkout creates the payment.
+fn checkout(service: Machine<PaymentService>) -> u64 | MachineError | SessionError {
     let created = service.create(Payment as Merchant)?;
-    let payment_id = created.id;
-    println("checkout: payment created");
+    println("checkout");
+    created.id
+}
 
-    // Stage 2: gateway authorizes it.
-    // Only the payment key crosses the boundary.
+fn gateway_authorize(
+    service: Machine<PaymentService>,
+    payment_id: u64,
+) -> () | MachineError | SessionError {
     let payment = service.resume(Payment as Merchant, payment_id)?;
     match payment {
         Payment::Created(_) => {
             let _authorized = payment.authorize()?;
-            println("gateway: authorized");
-        },
-        _ => println("gateway: unexpected state"),
+            println("gateway");
+        }
+        _ => println("gateway-unexpected"),
     };
+    ()
+}
 
-    // Stage 3: fraud service sends an alert (arrives asynchronously).
+fn fraud_service(
+    service: Machine<PaymentService>,
+    payment_id: u64,
+) -> () | MachineError {
     service.send(FraudAlert { payment_id })?;
     // Process the mailbox so the on handler and trigger run before the next stage.
     __mc_machine_runtime_step_u64(__mc_machine_runtime_managed_current_u64());
-    println("fraud: alert sent");
+    println("fraud");
+    ()
+}
 
-    // Stage 4: merchant tries to capture — but the fraud alert already
-    // moved the payment to Declined.
+fn merchant_capture(
+    service: Machine<PaymentService>,
+    payment_id: u64,
+) -> () | MachineError | SessionError {
     let payment = service.resume(Payment as Merchant, payment_id)?;
     match payment {
-        Payment::Authorized(_) => {
-            let _captured = payment.capture()?;
-            println("merchant: captured");
-        },
-        Payment::Declined(_) => println("merchant: cannot capture, payment was declined"),
-        _ => println("merchant: unexpected state"),
+        Payment::Declined(_) => println("declined"),
+        Payment::Authorized(_) => println("authorized"),
+        _ => println("unexpected"),
     };
+    ()
+}
 
+fn main() -> () | MachineError | SessionError {
+    let service = PaymentService::spawn()?;
+    let payment_id = checkout(service)?;
+    gateway_authorize(service, payment_id)?;
+    fraud_service(service, payment_id)?;
+    merchant_capture(service, payment_id)?;
     ()
 }
 ```
@@ -367,16 +382,17 @@ fn main() -> () | MachineError | SessionError {
 Output:
 
 ```text
-checkout: payment created
-gateway: authorized
-fraud: alert sent
-merchant: cannot capture, payment was declined
+checkout
+gateway
+fraud
+declined
 ```
 
-Each stage uses only the payment key. It resumes the payment, enters the typed
-world through `match`, and either acts or discovers that reality has changed.
-The merchant's capture attempt does not crash or silently succeed — the type
-system and runtime together ensure it sees `Declined` and handles it.
+Each stage uses only the payment key plus a typed `Machine<PaymentService>`
+handle. It resumes the payment, enters the typed world through `match`, and
+either acts or discovers that reality has changed. The merchant path does not
+crash or silently succeed — the type system and runtime together ensure it sees
+`Declined` and handles it.
 
 In a real system, these stages happen at different times — checkout during an
 order, authorization from a gateway callback, fraud detection from a background
