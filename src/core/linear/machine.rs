@@ -41,8 +41,9 @@ use std::collections::{HashMap, HashSet};
 use crate::core::ast::visit_mut::{self, VisitorMut};
 use crate::core::ast::{
     BindPattern, BindPatternKind, BlockItem, CallArg, CallArgMode, EnumDefVariant, Expr, ExprKind,
-    FuncDecl, FuncDef, FunctionSig, MachineDef, MachineItem, Module, NodeIdGen, Param, ParamMode,
-    StmtExpr, StmtExprKind, TopLevelItem, TypeDef, TypeDefKind, TypeExpr, TypeExprKind,
+    FuncDecl, FuncDef, FunctionSig, MachineDef, MachineItem, MethodBlock, MethodDef, MethodItem,
+    MethodSig, Module, NodeIdGen, Param, ParamMode, SelfParam, StmtExpr, StmtExprKind,
+    StructLitField, TopLevelItem, TypeDef, TypeDefKind, TypeExpr, TypeExprKind,
 };
 use crate::core::diag::Span;
 
@@ -51,6 +52,7 @@ use crate::core::diag::Span;
 #[derive(Clone, Debug)]
 pub(super) struct MachineSpawnInfo {
     pub machine_name: String,
+    pub machine_kind: u64,
     pub hosted_type_name: String,
     pub initial_state: Option<String>,
     pub state_names: Vec<String>,
@@ -99,10 +101,23 @@ pub(super) struct MachineTriggerHandlerInfo {
 
 #[derive(Clone, Debug)]
 pub(super) struct MachineOnHandlerInfo {
+    pub machine_name: String,
+    pub machine_kind: u64,
     pub handle_type_name: String,
+    pub selector_type_name: String,
+    pub event_kind: u64,
+    pub payload_shape: Option<HostedOnPayloadShape>,
     pub params: Vec<Param>,
     pub body: Expr,
     pub fn_name: String,
+    pub dispatch_wrapper_fn_name: String,
+}
+
+#[derive(Clone, Debug)]
+pub(super) enum HostedOnPayloadShape {
+    Empty,
+    OneU64 { field0: String },
+    TwoU64 { field0: String, field1: String },
 }
 
 #[derive(Clone, Debug)]
@@ -172,6 +187,13 @@ pub(crate) fn machine_on_handler_fn_name(machine_name: &str, handler_index: usiz
     format!("__mc_machine_on_{machine_name}_{handler_index}")
 }
 
+pub(crate) fn machine_on_dispatch_wrapper_fn_name(
+    machine_name: &str,
+    handler_index: usize,
+) -> String {
+    format!("__mc_machine_on_dispatch_{machine_name}_{handler_index}")
+}
+
 pub(crate) fn machine_deliver_fn_name(machine_name: &str, event_type_name: &str) -> String {
     format!("__mc_machine_deliver_{machine_name}_{event_type_name}")
 }
@@ -185,14 +207,17 @@ pub(crate) fn machine_wait_fn_name(
 }
 
 const MANAGED_RUNTIME_CURRENT_FN: &str = "__mc_machine_runtime_managed_current_u64";
+const MACHINE_RUNTIME_SEND_FN: &str = "__mc_machine_runtime_send_u64";
 const HOSTED_LINEAR_SPAWN_FN: &str = "__mc_hosted_linear_spawn_u64";
 const HOSTED_LINEAR_CREATE_FN: &str = "__mc_hosted_linear_create_u64";
 const HOSTED_LINEAR_RESUME_STATE_FN: &str = "__mc_hosted_linear_resume_state_u64";
 const HOSTED_LINEAR_DELIVER_FN: &str = "__mc_hosted_linear_deliver_u64";
 const HOSTED_LINEAR_WAIT_STATE_FN: &str = "__mc_hosted_linear_wait_state_u64";
+const HOSTED_LINEAR_ON_DISPATCH_FN: &str = "__mc_hosted_linear_on_dispatch_u64";
 const DEFAULT_MACHINE_MAILBOX_CAP: u64 = 64;
 const HOSTED_UPDATE_OK: u64 = 0;
 const HOSTED_UPDATE_STALE: u64 = 1;
+const HOSTED_LINEAR_ON_KIND_BASE: u64 = 1024;
 
 // ── Collection ──────────────────────────────────────────────────────
 
@@ -201,7 +226,8 @@ pub(super) fn collect_machine_spawn_infos(module: &Module) -> Vec<MachineSpawnIn
     module
         .machine_defs()
         .into_iter()
-        .filter_map(|machine_def| {
+        .enumerate()
+        .filter_map(|(machine_index, machine_def)| {
             let type_def = type_defs.get(&machine_def.host.type_name)?;
             let TypeDefKind::Linear { linear } = &type_def.kind else {
                 return None;
@@ -212,6 +238,7 @@ pub(super) fn collect_machine_spawn_infos(module: &Module) -> Vec<MachineSpawnIn
                 .find(|field| field.name == machine_def.host.key_field)?;
             Some(MachineSpawnInfo {
                 machine_name: machine_def.name.clone(),
+                machine_kind: machine_index as u64 + 1,
                 hosted_type_name: machine_def.host.type_name.clone(),
                 initial_state: linear.states.first().map(|state| state.name.clone()),
                 state_names: linear
@@ -425,10 +452,12 @@ pub(super) fn collect_machine_trigger_handler_infos(
 }
 
 pub(super) fn collect_machine_on_handler_infos(module: &Module) -> Vec<MachineOnHandlerInfo> {
+    let type_defs = super::type_defs_by_name(module);
     module
         .machine_defs()
         .into_iter()
-        .flat_map(|machine_def| {
+        .enumerate()
+        .flat_map(|(machine_index, machine_def)| {
             let handle_type_name = machine_handle_type_name(&machine_def.name);
             machine_def
                 .items
@@ -442,16 +471,66 @@ pub(super) fn collect_machine_on_handler_infos(module: &Module) -> Vec<MachineOn
                     if let Some(provenance) = &handler.provenance {
                         params.push(provenance.param.clone());
                     }
+                    let selector_type_name = named_type_name(&handler.selector_ty)?;
                     Some(MachineOnHandlerInfo {
+                        machine_name: machine_def.name.clone(),
+                        machine_kind: machine_index as u64 + 1,
                         handle_type_name: handle_type_name.clone(),
+                        selector_type_name: selector_type_name.clone(),
+                        event_kind: HOSTED_LINEAR_ON_KIND_BASE + index as u64 + 1,
+                        payload_shape: collect_supported_on_payload_shape(
+                            type_defs.get(&selector_type_name),
+                        )
+                        .filter(|_| handler.provenance.is_none()),
                         params,
                         body: handler.body.clone(),
                         fn_name: machine_on_handler_fn_name(&machine_def.name, index),
+                        dispatch_wrapper_fn_name: machine_on_dispatch_wrapper_fn_name(
+                            &machine_def.name,
+                            index,
+                        ),
                     })
                 })
                 .collect::<Vec<_>>()
         })
         .collect()
+}
+
+fn named_type_name(ty: &TypeExpr) -> Option<String> {
+    let TypeExprKind::Named { ident, type_args } = &ty.kind else {
+        return None;
+    };
+    if !type_args.is_empty() {
+        return None;
+    }
+    Some(ident.clone())
+}
+
+fn collect_supported_on_payload_shape(type_def: Option<&&TypeDef>) -> Option<HostedOnPayloadShape> {
+    let type_def = type_def?;
+    let TypeDefKind::Struct { fields } = &type_def.kind else {
+        return None;
+    };
+    match fields.as_slice() {
+        [] => Some(HostedOnPayloadShape::Empty),
+        [field0] if is_u64_named_type(&field0.ty) => Some(HostedOnPayloadShape::OneU64 {
+            field0: field0.name.clone(),
+        }),
+        [field0, field1] if is_u64_named_type(&field0.ty) && is_u64_named_type(&field1.ty) => {
+            Some(HostedOnPayloadShape::TwoU64 {
+                field0: field0.name.clone(),
+                field1: field1.name.clone(),
+            })
+        }
+        _ => None,
+    }
+}
+
+fn is_u64_named_type(ty: &TypeExpr) -> bool {
+    matches!(
+        &ty.kind,
+        TypeExprKind::Named { ident, type_args } if ident == "u64" && type_args.is_empty()
+    )
 }
 
 pub(super) fn collect_machine_deliver_infos(module: &Module) -> Vec<MachineDeliverInfo> {
@@ -576,12 +655,24 @@ pub(super) fn ensure_hosted_support_types(module: &mut Module, node_id_gen: &mut
             name: "MachineError".to_string(),
             type_params: Vec::new(),
             kind: TypeDefKind::Enum {
-                variants: vec![EnumDefVariant {
+                variants: vec![
+                    "SpawnFailed",
+                    "BindFailed",
+                    "StartFailed",
+                    "RuntimeUnavailable",
+                    "Unknown",
+                    "NotRunning",
+                    "MailboxFull",
+                    "RequestFailed",
+                ]
+                .into_iter()
+                .map(|name| EnumDefVariant {
                     id: node_id_gen.new_id(),
-                    name: "SpawnFailed".to_string(),
+                    name: name.to_string(),
                     payload: Vec::new(),
                     span: Span::default(),
-                }],
+                })
+                .collect(),
             },
             span: Span::default(),
         }),
@@ -672,6 +763,17 @@ pub(super) fn ensure_hosted_runtime_intrinsics(module: &mut Module, node_id_gen:
             vec![
                 ("runtime", u64_type_expr(node_id_gen, span)),
                 ("mailbox_cap", u64_type_expr(node_id_gen, span)),
+                ("machine_kind", u64_type_expr(node_id_gen, span)),
+            ],
+        ),
+        (
+            MACHINE_RUNTIME_SEND_FN,
+            vec![
+                ("runtime", u64_type_expr(node_id_gen, span)),
+                ("dst", u64_type_expr(node_id_gen, span)),
+                ("kind", u64_type_expr(node_id_gen, span)),
+                ("payload0", u64_type_expr(node_id_gen, span)),
+                ("payload1", u64_type_expr(node_id_gen, span)),
             ],
         ),
         (
@@ -778,10 +880,18 @@ pub(super) fn append_machine_spawn_support(
             &info.handle_type_name,
             node_id_gen,
         ));
+        if let Some(method_block) =
+            build_machine_handle_send_method_block(info, on_handler_infos, node_id_gen)
+        {
+            module.top_level_items.push(method_block);
+        }
         module
             .top_level_items
             .push(TopLevelItem::FuncDef(build_machine_spawn_func(
                 info,
+                on_handler_infos.iter().any(|handler| {
+                    handler.machine_name == info.machine_name && handler.payload_shape.is_some()
+                }),
                 node_id_gen,
             )));
         // Generate a create helper for each role the hosted type declares.
@@ -840,6 +950,23 @@ pub(super) fn append_machine_spawn_support(
                 on_info,
                 node_id_gen,
             )));
+        if on_info.payload_shape.is_some() {
+            module.top_level_items.push(TopLevelItem::FuncDef(
+                build_machine_on_dispatch_wrapper_func(on_info, node_id_gen),
+            ));
+        }
+    }
+
+    if on_handler_infos
+        .iter()
+        .any(|info| info.payload_shape.is_some())
+    {
+        module
+            .top_level_items
+            .push(TopLevelItem::FuncDef(build_hosted_linear_on_dispatch_func(
+                on_handler_infos,
+                node_id_gen,
+            )));
     }
 
     for deliver_info in deliver_infos {
@@ -886,9 +1013,348 @@ fn build_machine_handle_type_def(type_name: &str, node_id_gen: &mut NodeIdGen) -
     })
 }
 
-/// Generate: `fn __mc_machine_spawn_X() -> HandleType | MachineError { HandleType { _id: 1 } }`
-fn build_machine_spawn_func(info: &MachineSpawnInfo, node_id_gen: &mut NodeIdGen) -> FuncDef {
+fn build_machine_handle_send_method_block(
+    info: &MachineSpawnInfo,
+    on_handler_infos: &[MachineOnHandlerInfo],
+    node_id_gen: &mut NodeIdGen,
+) -> Option<TopLevelItem> {
+    let mut seen_selector_types = HashSet::<String>::new();
+    let mut method_items = Vec::new();
+    for handler in on_handler_infos.iter().filter(|handler| {
+        handler.machine_name == info.machine_name && handler.payload_shape.is_some()
+    }) {
+        if seen_selector_types.insert(handler.selector_type_name.clone()) {
+            method_items.push(MethodItem::Def(build_machine_handle_send_method(
+                handler,
+                node_id_gen,
+            )));
+        }
+    }
+
+    if method_items.is_empty() {
+        return None;
+    }
+
+    Some(TopLevelItem::MethodBlock(MethodBlock {
+        id: node_id_gen.new_id(),
+        type_name: info.handle_type_name.clone(),
+        trait_name: None,
+        method_items,
+        span: Span::default(),
+    }))
+}
+
+fn build_machine_handle_send_method(
+    info: &MachineOnHandlerInfo,
+    node_id_gen: &mut NodeIdGen,
+) -> MethodDef {
     let span = Span::default();
+    let Some(payload_shape) = info.payload_shape.as_ref() else {
+        panic!("compiler bug: hosted send method requires supported payload shape");
+    };
+    let payload_ty = TypeExpr {
+        id: node_id_gen.new_id(),
+        kind: TypeExprKind::Named {
+            ident: info.selector_type_name.clone(),
+            type_args: Vec::new(),
+        },
+        span,
+    };
+
+    MethodDef {
+        id: node_id_gen.new_id(),
+        attrs: Vec::new(),
+        sig: MethodSig {
+            name: "send".to_string(),
+            type_params: Vec::new(),
+            self_param: SelfParam {
+                id: node_id_gen.new_id(),
+                mode: ParamMode::In,
+                receiver_ty_expr: None,
+                span,
+            },
+            params: vec![Param {
+                id: node_id_gen.new_id(),
+                ident: "payload".to_string(),
+                typ: payload_ty,
+                mode: ParamMode::In,
+                span,
+            }],
+            ret_ty_expr: machine_send_result_union_type(node_id_gen, span),
+            span,
+        },
+        body: Expr {
+            id: node_id_gen.new_id(),
+            kind: ExprKind::Block {
+                items: vec![
+                    BlockItem::Stmt(let_bind_stmt(
+                        "__mc_rt",
+                        call_expr(MANAGED_RUNTIME_CURRENT_FN, Vec::new(), node_id_gen, span),
+                        node_id_gen,
+                        span,
+                    )),
+                    BlockItem::Expr(return_enum_error_if_zero(
+                        "__mc_rt",
+                        "MachineError",
+                        "RuntimeUnavailable",
+                        node_id_gen,
+                        span,
+                    )),
+                    BlockItem::Stmt(let_bind_stmt(
+                        "__mc_status",
+                        call_expr(
+                            MACHINE_RUNTIME_SEND_FN,
+                            vec![
+                                var_expr("__mc_rt", node_id_gen, span),
+                                self_field_expr("_id", node_id_gen, span),
+                                int_expr(info.event_kind, node_id_gen, span),
+                                payload_word_expr(payload_shape, 0, node_id_gen, span),
+                                payload_word_expr(payload_shape, 1, node_id_gen, span),
+                            ],
+                            node_id_gen,
+                            span,
+                        ),
+                        node_id_gen,
+                        span,
+                    )),
+                    BlockItem::Expr(return_enum_error_if_eq(
+                        "__mc_status",
+                        1,
+                        "MachineError",
+                        "Unknown",
+                        node_id_gen,
+                        span,
+                    )),
+                    BlockItem::Expr(return_enum_error_if_eq(
+                        "__mc_status",
+                        2,
+                        "MachineError",
+                        "NotRunning",
+                        node_id_gen,
+                        span,
+                    )),
+                    BlockItem::Expr(return_enum_error_if_eq(
+                        "__mc_status",
+                        3,
+                        "MachineError",
+                        "MailboxFull",
+                        node_id_gen,
+                        span,
+                    )),
+                ],
+                tail: Some(Box::new(unit_expr(node_id_gen, span))),
+            },
+            span,
+        },
+        span,
+    }
+}
+
+fn build_machine_on_dispatch_wrapper_func(
+    info: &MachineOnHandlerInfo,
+    node_id_gen: &mut NodeIdGen,
+) -> FuncDef {
+    let span = Span::default();
+    let Some(payload_shape) = info.payload_shape.as_ref() else {
+        panic!("compiler bug: hosted on-dispatch wrapper requires supported payload shape");
+    };
+    let mut call_args = vec![var_expr("__mc_self", node_id_gen, span)];
+    if !info.params.is_empty() {
+        call_args.push(var_expr("__mc_event", node_id_gen, span));
+    }
+    FuncDef {
+        id: node_id_gen.new_id(),
+        attrs: Vec::new(),
+        sig: FunctionSig {
+            name: info.dispatch_wrapper_fn_name.clone(),
+            type_params: Vec::new(),
+            params: vec![
+                u64_param("machine_id", node_id_gen, span),
+                u64_param("payload0", node_id_gen, span),
+                u64_param("payload1", node_id_gen, span),
+            ],
+            ret_ty_expr: u64_type_expr(node_id_gen, span),
+            span,
+        },
+        body: Expr {
+            id: node_id_gen.new_id(),
+            kind: ExprKind::Block {
+                items: vec![
+                    BlockItem::Stmt(let_bind_stmt(
+                        "__mc_self",
+                        Expr {
+                            id: node_id_gen.new_id(),
+                            kind: ExprKind::StructLit {
+                                name: info.handle_type_name.clone(),
+                                type_args: Vec::new(),
+                                fields: vec![StructLitField {
+                                    id: node_id_gen.new_id(),
+                                    name: "_id".to_string(),
+                                    value: var_expr("machine_id", node_id_gen, span),
+                                    span,
+                                }],
+                            },
+                            span,
+                        },
+                        node_id_gen,
+                        span,
+                    )),
+                    BlockItem::Stmt(let_bind_stmt(
+                        "__mc_event",
+                        build_on_payload_expr(
+                            &info.selector_type_name,
+                            payload_shape,
+                            node_id_gen,
+                            span,
+                        ),
+                        node_id_gen,
+                        span,
+                    )),
+                    BlockItem::Expr(call_expr(&info.fn_name, call_args, node_id_gen, span)),
+                ],
+                tail: Some(Box::new(int_expr(1, node_id_gen, span))),
+            },
+            span,
+        },
+        span,
+    }
+}
+
+fn build_hosted_linear_on_dispatch_func(
+    on_handler_infos: &[MachineOnHandlerInfo],
+    node_id_gen: &mut NodeIdGen,
+) -> FuncDef {
+    let span = Span::default();
+    let mut items = Vec::new();
+    for info in on_handler_infos
+        .iter()
+        .filter(|info| info.payload_shape.is_some())
+    {
+        items.push(BlockItem::Expr(Expr {
+            id: node_id_gen.new_id(),
+            kind: ExprKind::If {
+                cond: Box::new(and_expr(
+                    eq_var_to_int("machine_kind", info.machine_kind, node_id_gen, span),
+                    eq_var_to_int("kind", info.event_kind, node_id_gen, span),
+                    node_id_gen,
+                    span,
+                )),
+                then_body: Box::new(Expr {
+                    id: node_id_gen.new_id(),
+                    kind: ExprKind::Block {
+                        items: vec![BlockItem::Stmt(StmtExpr {
+                            id: node_id_gen.new_id(),
+                            kind: StmtExprKind::Return {
+                                value: Some(Box::new(call_expr(
+                                    &info.dispatch_wrapper_fn_name,
+                                    vec![
+                                        var_expr("machine_id", node_id_gen, span),
+                                        var_expr("payload0", node_id_gen, span),
+                                        var_expr("payload1", node_id_gen, span),
+                                    ],
+                                    node_id_gen,
+                                    span,
+                                ))),
+                            },
+                            span,
+                        })],
+                        tail: None,
+                    },
+                    span,
+                }),
+                else_body: Box::new(empty_block_expr(node_id_gen, span)),
+            },
+            span,
+        }));
+    }
+
+    FuncDef {
+        id: node_id_gen.new_id(),
+        attrs: Vec::new(),
+        sig: FunctionSig {
+            name: HOSTED_LINEAR_ON_DISPATCH_FN.to_string(),
+            type_params: Vec::new(),
+            params: vec![
+                u64_param("machine_kind", node_id_gen, span),
+                u64_param("machine_id", node_id_gen, span),
+                u64_param("kind", node_id_gen, span),
+                u64_param("payload0", node_id_gen, span),
+                u64_param("payload1", node_id_gen, span),
+            ],
+            ret_ty_expr: u64_type_expr(node_id_gen, span),
+            span,
+        },
+        body: Expr {
+            id: node_id_gen.new_id(),
+            kind: ExprKind::Block {
+                items,
+                tail: Some(Box::new(int_expr(0, node_id_gen, span))),
+            },
+            span,
+        },
+        span,
+    }
+}
+
+/// Generate: `fn __mc_machine_spawn_X() -> HandleType | MachineError { HandleType { _id: 1 } }`
+fn build_machine_spawn_func(
+    info: &MachineSpawnInfo,
+    has_on_dispatch: bool,
+    node_id_gen: &mut NodeIdGen,
+) -> FuncDef {
+    let span = Span::default();
+    let mut items = vec![
+        BlockItem::Stmt(let_bind_stmt(
+            "__mc_rt",
+            call_expr(MANAGED_RUNTIME_CURRENT_FN, Vec::new(), node_id_gen, span),
+            node_id_gen,
+            span,
+        )),
+        BlockItem::Expr(return_enum_error_if_zero(
+            "__mc_rt",
+            "MachineError",
+            "RuntimeUnavailable",
+            node_id_gen,
+            span,
+        )),
+        BlockItem::Stmt(let_bind_stmt(
+            "__mc_machine_id",
+            call_expr(
+                HOSTED_LINEAR_SPAWN_FN,
+                vec![
+                    var_expr("__mc_rt", node_id_gen, span),
+                    int_expr(DEFAULT_MACHINE_MAILBOX_CAP, node_id_gen, span),
+                    int_expr(info.machine_kind, node_id_gen, span),
+                ],
+                node_id_gen,
+                span,
+            ),
+            node_id_gen,
+            span,
+        )),
+        BlockItem::Expr(return_enum_error_if_zero(
+            "__mc_machine_id",
+            "MachineError",
+            "SpawnFailed",
+            node_id_gen,
+            span,
+        )),
+    ];
+    if has_on_dispatch {
+        items.push(BlockItem::Expr(call_expr(
+            HOSTED_LINEAR_ON_DISPATCH_FN,
+            vec![
+                int_expr(0, node_id_gen, span),
+                int_expr(0, node_id_gen, span),
+                int_expr(0, node_id_gen, span),
+                int_expr(0, node_id_gen, span),
+                int_expr(0, node_id_gen, span),
+            ],
+            node_id_gen,
+            span,
+        )));
+    }
+
     FuncDef {
         id: node_id_gen.new_id(),
         attrs: Vec::new(),
@@ -925,42 +1391,7 @@ fn build_machine_spawn_func(info: &MachineSpawnInfo, node_id_gen: &mut NodeIdGen
         body: Expr {
             id: node_id_gen.new_id(),
             kind: ExprKind::Block {
-                items: vec![
-                    BlockItem::Stmt(let_bind_stmt(
-                        "__mc_rt",
-                        call_expr(MANAGED_RUNTIME_CURRENT_FN, Vec::new(), node_id_gen, span),
-                        node_id_gen,
-                        span,
-                    )),
-                    BlockItem::Expr(return_enum_error_if_zero(
-                        "__mc_rt",
-                        "MachineError",
-                        "SpawnFailed",
-                        node_id_gen,
-                        span,
-                    )),
-                    BlockItem::Stmt(let_bind_stmt(
-                        "__mc_machine_id",
-                        call_expr(
-                            HOSTED_LINEAR_SPAWN_FN,
-                            vec![
-                                var_expr("__mc_rt", node_id_gen, span),
-                                int_expr(DEFAULT_MACHINE_MAILBOX_CAP, node_id_gen, span),
-                            ],
-                            node_id_gen,
-                            span,
-                        ),
-                        node_id_gen,
-                        span,
-                    )),
-                    BlockItem::Expr(return_enum_error_if_zero(
-                        "__mc_machine_id",
-                        "MachineError",
-                        "SpawnFailed",
-                        node_id_gen,
-                        span,
-                    )),
-                ],
+                items,
                 tail: Some(Box::new(Expr {
                     id: node_id_gen.new_id(),
                     kind: ExprKind::StructLit {
@@ -1752,6 +2183,48 @@ fn u64_type_expr(node_id_gen: &mut NodeIdGen, span: Span) -> TypeExpr {
     }
 }
 
+fn u64_param(name: &str, node_id_gen: &mut NodeIdGen, span: Span) -> Param {
+    Param {
+        id: node_id_gen.new_id(),
+        ident: name.to_string(),
+        typ: u64_type_expr(node_id_gen, span),
+        mode: ParamMode::In,
+        span,
+    }
+}
+
+fn machine_send_result_union_type(node_id_gen: &mut NodeIdGen, span: Span) -> TypeExpr {
+    TypeExpr {
+        id: node_id_gen.new_id(),
+        kind: TypeExprKind::Union {
+            variants: vec![
+                named_type_expr("()", node_id_gen, span),
+                named_type_expr("MachineError", node_id_gen, span),
+            ],
+        },
+        span,
+    }
+}
+
+fn named_type_expr(name: &str, node_id_gen: &mut NodeIdGen, span: Span) -> TypeExpr {
+    TypeExpr {
+        id: node_id_gen.new_id(),
+        kind: TypeExprKind::Named {
+            ident: name.to_string(),
+            type_args: Vec::new(),
+        },
+        span,
+    }
+}
+
+fn unit_expr(node_id_gen: &mut NodeIdGen, span: Span) -> Expr {
+    Expr {
+        id: node_id_gen.new_id(),
+        kind: ExprKind::UnitLit,
+        span,
+    }
+}
+
 fn var_expr(name: &str, node_id_gen: &mut NodeIdGen, span: Span) -> Expr {
     Expr {
         id: node_id_gen.new_id(),
@@ -1811,6 +2284,104 @@ fn call_expr(callee_name: &str, args: Vec<Expr>, node_id_gen: &mut NodeIdGen, sp
                     span,
                 })
                 .collect(),
+        },
+        span,
+    }
+}
+
+fn payload_word_expr(
+    payload_shape: &HostedOnPayloadShape,
+    word_index: usize,
+    node_id_gen: &mut NodeIdGen,
+    span: Span,
+) -> Expr {
+    match (payload_shape, word_index) {
+        (HostedOnPayloadShape::Empty, _) => int_expr(0, node_id_gen, span),
+        (HostedOnPayloadShape::OneU64 { field0 }, 0) => {
+            struct_field_expr("payload", field0, node_id_gen, span)
+        }
+        (HostedOnPayloadShape::OneU64 { .. }, _) => int_expr(0, node_id_gen, span),
+        (HostedOnPayloadShape::TwoU64 { field0, .. }, 0) => {
+            struct_field_expr("payload", field0, node_id_gen, span)
+        }
+        (HostedOnPayloadShape::TwoU64 { field1, .. }, 1) => {
+            struct_field_expr("payload", field1, node_id_gen, span)
+        }
+        (HostedOnPayloadShape::TwoU64 { .. }, _) => int_expr(0, node_id_gen, span),
+    }
+}
+
+fn build_on_payload_expr(
+    selector_type_name: &str,
+    payload_shape: &HostedOnPayloadShape,
+    node_id_gen: &mut NodeIdGen,
+    span: Span,
+) -> Expr {
+    let mut fields = Vec::new();
+    match payload_shape {
+        HostedOnPayloadShape::Empty => {}
+        HostedOnPayloadShape::OneU64 { field0 } => fields.push(StructLitField {
+            id: node_id_gen.new_id(),
+            name: field0.clone(),
+            value: var_expr("payload0", node_id_gen, span),
+            span,
+        }),
+        HostedOnPayloadShape::TwoU64 { field0, field1 } => {
+            fields.push(StructLitField {
+                id: node_id_gen.new_id(),
+                name: field0.clone(),
+                value: var_expr("payload0", node_id_gen, span),
+                span,
+            });
+            fields.push(StructLitField {
+                id: node_id_gen.new_id(),
+                name: field1.clone(),
+                value: var_expr("payload1", node_id_gen, span),
+                span,
+            });
+        }
+    }
+    Expr {
+        id: node_id_gen.new_id(),
+        kind: ExprKind::StructLit {
+            name: selector_type_name.to_string(),
+            type_args: Vec::new(),
+            fields,
+        },
+        span,
+    }
+}
+
+fn eq_var_to_int(name: &str, value: u64, node_id_gen: &mut NodeIdGen, span: Span) -> Expr {
+    Expr {
+        id: node_id_gen.new_id(),
+        kind: ExprKind::BinOp {
+            left: Box::new(var_expr(name, node_id_gen, span)),
+            op: crate::core::ast::BinaryOp::Eq,
+            right: Box::new(int_expr(value, node_id_gen, span)),
+        },
+        span,
+    }
+}
+
+fn and_expr(left: Expr, right: Expr, node_id_gen: &mut NodeIdGen, span: Span) -> Expr {
+    Expr {
+        id: node_id_gen.new_id(),
+        kind: ExprKind::BinOp {
+            left: Box::new(left),
+            op: crate::core::ast::BinaryOp::LogicalAnd,
+            right: Box::new(right),
+        },
+        span,
+    }
+}
+
+fn empty_block_expr(node_id_gen: &mut NodeIdGen, span: Span) -> Expr {
+    Expr {
+        id: node_id_gen.new_id(),
+        kind: ExprKind::Block {
+            items: Vec::new(),
+            tail: None,
         },
         span,
     }

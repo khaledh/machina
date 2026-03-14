@@ -1,4 +1,5 @@
 #include "bridge.h"
+#include "emit.h"
 #include "hosted_instance.h"
 #include "internal.h"
 
@@ -13,6 +14,20 @@
 // Optional process-level bootstrap hook emitted by compiler artifacts.
 // Runtime calls this once lazily on first `__mc_machine_runtime_new()`.
 MC_WEAK void __mc_machine_bootstrap(void) {}
+MC_WEAK uint64_t __mc_hosted_linear_on_dispatch_u64(
+    uint64_t machine_kind,
+    uint64_t machine_id,
+    uint64_t kind,
+    uint64_t payload0,
+    uint64_t payload1
+) {
+    (void)machine_kind;
+    (void)machine_id;
+    (void)kind;
+    (void)payload0;
+    (void)payload1;
+    return 0;
+}
 
 // Optional process-global managed runtime used by `@machines` entrypoint
 // bootstrap. This keeps runtime ownership explicit at source level while
@@ -61,6 +76,7 @@ static void mc_machine_runtime_managed_atexit_cleanup(void) {
 
 typedef struct mc_hosted_linear_machine_ctx {
     mc_hosted_instance_table_t instances;
+    uint64_t machine_kind;
     uint64_t next_delivery_ticket;
     uint64_t completed_delivery_ticket;
     uint64_t completed_delivery_result;
@@ -76,6 +92,7 @@ static mc_hosted_linear_machine_ctx_t *mc_hosted_linear_ctx_new(void) {
         return NULL;
     }
     mc_hosted_instance_table_init(&ctx->instances);
+    ctx->machine_kind = 0;
     ctx->next_delivery_ticket = 1;
     ctx->completed_delivery_ticket = 0;
     ctx->completed_delivery_result = MC_HOSTED_UPDATE_NOT_FOUND;
@@ -139,6 +156,15 @@ static mc_dispatch_result_t mc_hosted_linear_dispatch(
     }
 
     if (env->kind != MC_HOSTED_LINEAR_KIND_DELIVER) {
+        if (__mc_hosted_linear_on_dispatch_u64(
+                ctx->machine_kind,
+                (uint64_t)machine_id,
+                env->kind,
+                env->payload0,
+                env->payload1
+            )) {
+            return MC_DISPATCH_OK;
+        }
         if (fault_code) {
             *fault_code = 2;
         }
@@ -258,7 +284,11 @@ uint64_t __mc_machine_runtime_spawn_u64(uint64_t runtime, uint64_t mailbox_cap) 
     return (uint64_t)id;
 }
 
-uint64_t __mc_hosted_linear_spawn_u64(uint64_t runtime, uint64_t mailbox_cap) {
+uint64_t __mc_hosted_linear_spawn_u64(
+    uint64_t runtime,
+    uint64_t mailbox_cap,
+    uint64_t machine_kind
+) {
     mc_machine_runtime_t *rt = mc_runtime_from_handle(runtime);
     if (!rt || mailbox_cap > UINT32_MAX) {
         return 0;
@@ -284,6 +314,7 @@ uint64_t __mc_hosted_linear_spawn_u64(uint64_t runtime, uint64_t mailbox_cap) {
 
     slot->dispatch_ctx = ctx;
     slot->dispatch_ctx_drop = mc_hosted_linear_ctx_drop;
+    ctx->machine_kind = machine_kind;
     __mc_machine_runtime_bind_dispatch(rt, id, mc_hosted_linear_dispatch, ctx);
 
     if (!__mc_machine_runtime_start(rt, id)) {
@@ -363,6 +394,18 @@ uint64_t __mc_hosted_linear_deliver_u64(
     mc_hosted_linear_machine_ctx_t *ctx = mc_hosted_linear_ctx_for_machine(rt, id);
     if (!ctx) {
         return MC_HOSTED_UPDATE_NOT_FOUND;
+    }
+    mc_emit_staging_ctx_t *emit_ctx = mc_emit_staging_current();
+    if (emit_ctx && emit_ctx->rt == rt && emit_ctx->machine_id == id) {
+        uint64_t actual_tag = 0;
+        return mc_hosted_instance_table_update(
+            &ctx->instances,
+            key,
+            expected_state_tag,
+            new_state_tag,
+            0,
+            &actual_tag
+        );
     }
     mc_machine_envelope_t env = {
         .kind = MC_HOSTED_LINEAR_KIND_DELIVER,

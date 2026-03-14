@@ -7,6 +7,10 @@
 // Single active context pointer (acts like a tiny dispatch-local stack).
 static mc_emit_staging_ctx_t *g_emit_staging_ctx = NULL;
 
+mc_emit_staging_ctx_t *mc_emit_staging_current(void) {
+    return g_emit_staging_ctx;
+}
+
 void mc_emit_staging_begin(
     mc_emit_staging_ctx_t *ctx,
     mc_machine_runtime_t *rt,

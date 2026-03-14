@@ -6,6 +6,7 @@
 
 typedef struct mc_test_hosted_linear_ctx {
     mc_hosted_instance_table_t instances;
+    uint64_t machine_kind;
 } mc_test_hosted_linear_ctx_t;
 
 // Validates the first hosted-linear runtime bridge surface:
@@ -19,7 +20,7 @@ int main(void) {
 
     mc_machine_runtime_t *rt = (mc_machine_runtime_t *)(uintptr_t)rt_handle;
 
-    uint64_t machine_id = __mc_hosted_linear_spawn_u64(rt_handle, 4);
+    uint64_t machine_id = __mc_hosted_linear_spawn_u64(rt_handle, 4, 1);
     if (machine_id == 0) {
         __mc_machine_runtime_free(rt_handle);
         return 2;

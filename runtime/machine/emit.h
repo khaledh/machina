@@ -40,6 +40,7 @@ void mc_emit_staging_begin(
     mc_machine_id_t machine_id
 );
 void mc_emit_staging_end(mc_emit_staging_ctx_t *ctx);
+mc_emit_staging_ctx_t *mc_emit_staging_current(void);
 
 // Merge staged effects into transaction.
 uint8_t mc_emit_merge_into_txn(
