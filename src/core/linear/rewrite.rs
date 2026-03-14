@@ -346,6 +346,7 @@ pub(super) fn rewrite_linear_exprs(
                     .action_override_fns
                     .get(&func.sig.name)
                     .cloned();
+                let session_info = linear_index.action_session_fns.get(&func.sig.name).cloned();
                 let trigger_info = linear_index
                     .trigger_handler_fns
                     .get(&func.sig.name)
@@ -357,6 +358,18 @@ pub(super) fn rewrite_linear_exprs(
                             value_state: LinearValueState {
                                 type_name: override_info.hosted_type_name.clone(),
                                 state_name: override_info.source_state.clone(),
+                            },
+                            consumed: false,
+                            hosted: None,
+                        },
+                    )]
+                } else if let Some(session_info) = &session_info {
+                    vec![(
+                        session_info.instance_param_name.clone(),
+                        LinearBindingState {
+                            value_state: LinearValueState {
+                                type_name: session_info.hosted_type_name.clone(),
+                                state_name: session_info.source_state.clone(),
                             },
                             consumed: false,
                             hosted: None,
@@ -381,6 +394,11 @@ pub(super) fn rewrite_linear_exprs(
                     .as_ref()
                     .map(|override_info| override_info.hosted_type_name.as_str())
                     .or_else(|| {
+                        session_info
+                            .as_ref()
+                            .map(|session_info| session_info.hosted_type_name.as_str())
+                    })
+                    .or_else(|| {
                         trigger_info
                             .as_ref()
                             .map(|trigger_info| trigger_info.hosted_type_name.as_str())
@@ -392,6 +410,10 @@ pub(super) fn rewrite_linear_exprs(
                     current_linear_type,
                     if override_info.is_some() {
                         override_info
+                            .as_ref()
+                            .map(|info| info.instance_param_name.as_str())
+                    } else if session_info.is_some() {
+                        session_info
                             .as_ref()
                             .map(|info| info.instance_param_name.as_str())
                     } else {
@@ -684,6 +706,36 @@ fn rewrite_expr_in_scope(
                 });
             }
 
+            // Hosted `resume(Type as Role, key)` seeds hosted provenance even
+            // though the exact state is only known later at runtime. We use an
+            // empty state name as an "unknown until refined" marker so direct
+            // action dispatch still fails unless control flow narrows the value
+            // (for example via a `match` arm).
+            if method_name == "resume"
+                && args.len() == 2
+                && let ExprKind::RoleProjection {
+                    type_name,
+                    role_name,
+                } = &args[0].expr.kind
+                && let Some(info) = infos.get(type_name)
+                && info.role_names.contains(role_name)
+                && let Some(machine_ident) = callee_source_ident.clone()
+                && let Some(machine_binding) = machine_env.get(&machine_ident)
+            {
+                return Some(LinearBindingState {
+                    value_state: LinearValueState {
+                        type_name: type_name.clone(),
+                        state_name: String::new(),
+                    },
+                    consumed: false,
+                    hosted: Some(HostedProvenance {
+                        machine_name: machine_binding.machine_name.clone(),
+                        handle_binding: machine_ident,
+                        role_name: role_name.clone(),
+                    }),
+                });
+            }
+
             // Hosted `wait()` lowers to a generated helper tied to the source
             // machine. We only expose it on hosted bindings in states that
             // actually have trigger-driven successors; all other cases should
@@ -763,10 +815,13 @@ fn rewrite_expr_in_scope(
 
             if let Some(hosted) = &callee_state.hosted
                 && let Some(host_info) = linear_index.machine_hosts.get(&hosted.machine_name)
-                && let Some(override_fn_name) = host_info.action_overrides.get(&action_name)
+                && let Some(helper_fn_name) = host_info.action_helpers.get(&(
+                    callee_state.value_state.state_name.clone(),
+                    action_name.clone(),
+                ))
             {
-                let mut override_args = Vec::with_capacity(args.len() + 2);
-                override_args.push(crate::core::ast::CallArg {
+                let mut helper_args = Vec::with_capacity(args.len() + 2);
+                helper_args.push(crate::core::ast::CallArg {
                     mode: crate::core::ast::CallArgMode::Default,
                     expr: Expr {
                         id: node_id_gen.new_id(),
@@ -778,22 +833,22 @@ fn rewrite_expr_in_scope(
                     init: crate::core::ast::InitInfo::default(),
                     span: expr.span,
                 });
-                override_args.push(crate::core::ast::CallArg {
+                helper_args.push(crate::core::ast::CallArg {
                     mode: crate::core::ast::CallArgMode::Default,
                     expr: (**callee).clone(),
                     init: crate::core::ast::InitInfo::default(),
                     span: expr.span,
                 });
-                override_args.extend(args.iter().cloned());
+                helper_args.extend(args.iter().cloned());
                 expr.kind = ExprKind::Call {
                     callee: Box::new(Expr {
                         id: node_id_gen.new_id(),
                         kind: ExprKind::Var {
-                            ident: override_fn_name.clone(),
+                            ident: helper_fn_name.clone(),
                         },
                         span: expr.span,
                     }),
-                    args: override_args,
+                    args: helper_args,
                 };
                 linear_index.hosted_action_exprs.insert(
                     expr.id,
@@ -806,8 +861,6 @@ fn rewrite_expr_in_scope(
                     },
                 );
             } else if let Some(hosted) = &callee_state.hosted {
-                // Hosted bindings without overrides still use the existing
-                // fallible session-action typing path.
                 linear_index.hosted_action_exprs.insert(
                     expr.id,
                     HostedActionExprInfo {
@@ -1027,7 +1080,11 @@ fn rewrite_expr_in_scope(
         }
         ExprKind::RoleProjection { .. } => None,
         ExprKind::Match { scrutinee, arms } => {
-            let _ = rewrite_expr_in_scope(
+            let scrutinee_ident = match &scrutinee.kind {
+                ExprKind::Var { ident } => Some(ident.clone()),
+                _ => None,
+            };
+            let scrutinee_state = rewrite_expr_in_scope(
                 scrutinee,
                 infos,
                 linear_index,
@@ -1040,6 +1097,17 @@ fn rewrite_expr_in_scope(
             for arm in arms {
                 let mut arm_env = env.clone();
                 let mut arm_machine_env = machine_env.clone();
+                if let (Some(scrutinee_ident), Some(scrutinee_state)) =
+                    (scrutinee_ident.as_ref(), scrutinee_state.as_ref())
+                {
+                    refine_match_scrutinee_binding(
+                        &arm.pattern,
+                        scrutinee_ident,
+                        scrutinee_state,
+                        infos,
+                        &mut arm_env,
+                    );
+                }
                 let _ = rewrite_expr_in_scope(
                     &mut arm.body,
                     infos,
@@ -1785,6 +1853,45 @@ fn build_linear_carried_field_expr(
         },
         span,
     }
+}
+
+fn refine_match_scrutinee_binding(
+    pattern: &crate::core::ast::MatchPattern,
+    binding_name: &str,
+    scrutinee_state: &LinearBindingState,
+    infos: &HashMap<String, DirectLinearInfo>,
+    env: &mut HashMap<String, LinearBindingState>,
+) {
+    let crate::core::ast::MatchPattern::EnumVariant {
+        enum_name,
+        variant_name,
+        ..
+    } = pattern
+    else {
+        return;
+    };
+
+    let type_name = enum_name
+        .as_deref()
+        .unwrap_or(scrutinee_state.value_state.type_name.as_str());
+    let Some(info) = infos.get(type_name) else {
+        return;
+    };
+    if !info.state_names.contains(variant_name) {
+        return;
+    }
+
+    env.insert(
+        binding_name.to_string(),
+        LinearBindingState {
+            value_state: LinearValueState {
+                type_name: type_name.to_string(),
+                state_name: variant_name.clone(),
+            },
+            consumed: false,
+            hosted: scrutinee_state.hosted.clone(),
+        },
+    );
 }
 
 fn machine_spawn_machine_name(expr: &Expr, linear_index: &LinearIndex) -> Option<String> {

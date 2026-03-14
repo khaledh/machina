@@ -533,6 +533,76 @@ fn linear_type_hosted_action_uses_machine_override_when_present() {
 }
 
 #[test]
+fn linear_type_hosted_action_rejects_stale_session_at_runtime() {
+    let run = run_program(
+        "linear_type_hosted_action_rejects_stale_session_at_runtime",
+        r#"
+            @linear
+            type PullRequest = {
+                id: u64,
+
+                states {
+                    Draft,
+                    Review,
+                }
+
+                actions {
+                    submit: Draft -> Review,
+                }
+
+                roles {
+                    Author { submit }
+                }
+            }
+
+            PullRequest :: {
+                fn submit(self) -> Review {
+                    Review {}
+                }
+            }
+
+            machine PRService hosts PullRequest(key: id) {
+                fn new() -> Self {
+                    Self {}
+                }
+            }
+
+            @machines
+            fn main() -> () | MachineError | SessionError {
+                let service = PRService::spawn()?;
+                let draft1 = service.create(PullRequest as Author)?;
+                let resumed = service.resume(PullRequest as Author, draft1.id)?;
+                let _review = draft1.submit()?;
+
+                match resumed {
+                    PullRequest::Draft(_) => match resumed.submit() {
+                        review: PullRequest => match review {
+                            PullRequest::Review(_) => println("fresh"),
+                            PullRequest::Draft(_) => println("fresh"),
+                        },
+                        err: SessionError => match err {
+                            InvalidState => println("stale"),
+                            InstanceNotFound => println("missing"),
+                        },
+                    },
+                    PullRequest::Review(id) => {
+                        println(id);
+                        return ();
+                    },
+                }
+            }
+        "#,
+    );
+
+    assert_eq!(run.status.code(), Some(0));
+    let stdout = String::from_utf8_lossy(&run.stdout);
+    assert_eq!(
+        stdout, "stale\n",
+        "hosted actions should reject stale sessions with InvalidState"
+    );
+}
+
+#[test]
 fn linear_type_hosted_action_rejects_role_disallowed() {
     let source = r#"
         @linear

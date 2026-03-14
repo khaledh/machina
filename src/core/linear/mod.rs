@@ -66,6 +66,7 @@ pub fn desugar_module(
     let infos = rewrite::collect_direct_linear_infos(module);
     let machine_infos = machine::collect_machine_spawn_infos(module);
     let action_override_infos = machine::collect_machine_action_override_infos(module);
+    let action_session_infos = machine::collect_machine_action_session_infos(module);
     let trigger_handler_infos = machine::collect_machine_trigger_handler_infos(module);
     let on_handler_infos = machine::collect_machine_on_handler_infos(module);
     let deliver_infos = machine::collect_machine_deliver_infos(module);
@@ -81,6 +82,7 @@ pub fn desugar_module(
             module,
             &machine_infos,
             &action_override_infos,
+            &action_session_infos,
             &trigger_handler_infos,
             &on_handler_infos,
             &deliver_infos,

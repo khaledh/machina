@@ -14,8 +14,8 @@ use std::collections::HashMap;
 use crate::core::ast::{Module, NodeId, TypeDefKind, TypeExpr};
 
 use super::machine::{
-    machine_action_override_fn_name, machine_deliver_fn_name, machine_handle_type_name,
-    machine_trigger_handler_fn_name, machine_wait_fn_name,
+    machine_action_override_fn_name, machine_action_session_fn_name, machine_deliver_fn_name,
+    machine_handle_type_name, machine_trigger_handler_fn_name, machine_wait_fn_name,
 };
 
 /// Metadata index for linear types, built after parsing and threaded through
@@ -30,6 +30,10 @@ pub struct LinearIndex {
     /// rewriter uses this to seed the source-state binding when rewriting the
     /// cloned helper bodies.
     pub action_override_fns: HashMap<String, GeneratedActionOverrideInfo>,
+    /// Generated hosted session action helpers keyed by function name. Like
+    /// override helpers, these bodies are synthesized before resolve and need
+    /// seeded source-state bindings when linear expressions are rewritten.
+    pub action_session_fns: HashMap<String, GeneratedActionSessionInfo>,
     /// Generated machine trigger helpers keyed by function name. Trigger
     /// helpers are synthesized before resolve so their bodies can typecheck as
     /// ordinary functions, but they still need linear source-state seeding.
@@ -77,6 +81,9 @@ pub struct LinearHostInfo {
     /// hosted action calls dispatch through these helpers instead of the base
     /// linear action implementation.
     pub action_overrides: HashMap<String, String>,
+    /// Generated hosted session helpers keyed by (source_state, action_name).
+    /// These are the runtime-backed entry points used by hosted action calls.
+    pub action_helpers: HashMap<(String, String), String>,
     /// Generated deliver helpers keyed by trigger event type name.
     pub deliver_helpers: HashMap<String, String>,
     /// Generated wait helpers keyed by source state name. Only states with at
@@ -87,6 +94,13 @@ pub struct LinearHostInfo {
 
 #[derive(Clone, Debug)]
 pub struct GeneratedActionOverrideInfo {
+    pub hosted_type_name: String,
+    pub source_state: String,
+    pub instance_param_name: String,
+}
+
+#[derive(Clone, Debug)]
+pub struct GeneratedActionSessionInfo {
     pub hosted_type_name: String,
     pub source_state: String,
     pub instance_param_name: String,
@@ -214,6 +228,7 @@ pub fn build_linear_index(module: &Module) -> LinearIndex {
 
     let mut machine_hosts = HashMap::new();
     let mut action_override_fns = HashMap::new();
+    let mut action_session_fns = HashMap::new();
     let mut trigger_handler_fns = HashMap::new();
     for machine_def in module.machine_defs() {
         // The index is built even for invalid source so early validation can
@@ -234,6 +249,43 @@ pub fn build_linear_index(module: &Module) -> LinearIndex {
         };
         let action_overrides =
             collect_machine_action_overrides(machine_def, linear, &mut action_override_fns);
+        let action_handler_params = machine_def
+            .items
+            .iter()
+            .filter_map(|item| {
+                let crate::core::ast::MachineItem::Action(handler) = item else {
+                    return None;
+                };
+                Some((handler.name.as_str(), handler.instance_param.as_str()))
+            })
+            .collect::<HashMap<_, _>>();
+        let action_helpers = linear
+            .actions
+            .iter()
+            .map(|action| {
+                let helper_name = machine_action_session_fn_name(
+                    &machine_def.name,
+                    &action.source_state,
+                    &action.name,
+                );
+                action_session_fns.insert(
+                    helper_name.clone(),
+                    GeneratedActionSessionInfo {
+                        hosted_type_name: machine_def.host.type_name.clone(),
+                        source_state: action.source_state.clone(),
+                        instance_param_name: action_handler_params
+                            .get(action.name.as_str())
+                            .copied()
+                            .unwrap_or("instance")
+                            .to_string(),
+                    },
+                );
+                (
+                    (action.source_state.clone(), action.name.clone()),
+                    helper_name,
+                )
+            })
+            .collect();
         collect_machine_trigger_handlers(machine_def, linear, &mut trigger_handler_fns);
         let deliver_helpers = linear
             .triggers
@@ -266,6 +318,7 @@ pub fn build_linear_index(module: &Module) -> LinearIndex {
                 key_ty: key_field.ty.clone(),
                 handle_type_name: machine_handle_type_name(&machine_def.name),
                 action_overrides,
+                action_helpers,
                 deliver_helpers,
                 wait_helpers,
             },
@@ -276,6 +329,7 @@ pub fn build_linear_index(module: &Module) -> LinearIndex {
         types,
         machine_hosts,
         action_override_fns,
+        action_session_fns,
         trigger_handler_fns,
         hosted_action_exprs: HashMap::new(),
     }

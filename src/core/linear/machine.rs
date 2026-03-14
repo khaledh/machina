@@ -73,6 +73,20 @@ pub(super) struct MachineActionOverrideInfo {
 }
 
 #[derive(Clone, Debug)]
+pub(super) struct MachineActionSessionInfo {
+    pub hosted_type_name: String,
+    pub handle_type_name: String,
+    pub key_field_name: String,
+    pub source_state_tag: u64,
+    pub target_state_tag: u64,
+    pub instance_param_name: String,
+    pub params: Vec<Param>,
+    pub ret_ty_expr: TypeExpr,
+    pub body: Expr,
+    pub fn_name: String,
+}
+
+#[derive(Clone, Debug)]
 pub(super) struct MachineTriggerHandlerInfo {
     pub hosted_type_name: String,
     pub handle_type_name: String,
@@ -137,6 +151,14 @@ pub(crate) fn machine_resume_fn_name(
 
 pub(crate) fn machine_action_override_fn_name(machine_name: &str, action_name: &str) -> String {
     format!("__mc_machine_action_{machine_name}_{action_name}")
+}
+
+pub(crate) fn machine_action_session_fn_name(
+    machine_name: &str,
+    source_state: &str,
+    action_name: &str,
+) -> String {
+    format!("__mc_machine_session_action_{machine_name}_{source_state}_{action_name}")
 }
 
 pub(crate) fn machine_trigger_handler_fn_name(machine_name: &str, trigger_name: &str) -> String {
@@ -245,6 +267,110 @@ pub(super) fn collect_machine_action_override_infos(
                         ret_ty_expr,
                         body: handler.body.clone(),
                         fn_name: machine_action_override_fn_name(&machine_def.name, &handler.name),
+                    })
+                })
+                .collect::<Vec<_>>()
+        })
+        .collect()
+}
+
+pub(super) fn collect_machine_action_session_infos(
+    module: &Module,
+) -> Vec<MachineActionSessionInfo> {
+    let type_defs = super::type_defs_by_name(module);
+    let base_action_impls = collect_base_action_impls(module);
+    module
+        .machine_defs()
+        .into_iter()
+        .flat_map(|machine_def| {
+            let Some(type_def) = type_defs.get(&machine_def.host.type_name) else {
+                return Vec::new();
+            };
+            let TypeDefKind::Linear { linear } = &type_def.kind else {
+                return Vec::new();
+            };
+            let Some(key_field) = linear
+                .fields
+                .iter()
+                .find(|field| field.name == machine_def.host.key_field)
+            else {
+                return Vec::new();
+            };
+            let handle_type_name = machine_handle_type_name(&machine_def.name);
+            let state_tags = linear
+                .states
+                .iter()
+                .enumerate()
+                .map(|(index, state)| (state.name.as_str(), (index + 1) as u64))
+                .collect::<HashMap<_, _>>();
+            let override_handlers = machine_def
+                .items
+                .iter()
+                .filter_map(|item| {
+                    let MachineItem::Action(handler) = item else {
+                        return None;
+                    };
+                    Some((handler.name.as_str(), handler))
+                })
+                .collect::<HashMap<_, _>>();
+
+            linear
+                .actions
+                .iter()
+                .filter_map(|action| {
+                    let source_state_tag = *state_tags.get(action.source_state.as_str())?;
+                    let target_state_tag = *state_tags.get(action.target_state.as_str())?;
+                    let (instance_param_name, params, ret_ty_expr, body) = if let Some(handler) =
+                        override_handlers.get(action.name.as_str()).copied()
+                    {
+                        (
+                            handler.instance_param.clone(),
+                            handler.params.clone(),
+                            handler.ret_ty_expr.clone()?,
+                            handler.body.clone(),
+                        )
+                    } else {
+                        let (ret_ty_expr, body) = base_action_impls
+                            .get(&(
+                                machine_def.host.type_name.clone(),
+                                action.source_state.clone(),
+                                action.name.clone(),
+                            ))?
+                            .clone();
+                        let params = action
+                            .params
+                            .iter()
+                            .map(|param| Param {
+                                id: param.id,
+                                ident: param.name.clone(),
+                                typ: param.ty.clone(),
+                                mode: ParamMode::In,
+                                span: param.span,
+                            })
+                            .collect::<Vec<_>>();
+                        (
+                            "instance".to_string(),
+                            params,
+                            ret_ty_expr,
+                            rename_var_in_expr(body, "self", "instance"),
+                        )
+                    };
+
+                    Some(MachineActionSessionInfo {
+                        hosted_type_name: machine_def.host.type_name.clone(),
+                        handle_type_name: handle_type_name.clone(),
+                        key_field_name: key_field.name.clone(),
+                        source_state_tag,
+                        target_state_tag,
+                        instance_param_name,
+                        params,
+                        ret_ty_expr,
+                        body,
+                        fn_name: machine_action_session_fn_name(
+                            &machine_def.name,
+                            &action.source_state,
+                            &action.name,
+                        ),
                     })
                 })
                 .collect::<Vec<_>>()
@@ -608,6 +734,7 @@ pub(super) fn append_machine_spawn_support(
     module: &mut Module,
     machine_infos: &[MachineSpawnInfo],
     action_override_infos: &[MachineActionOverrideInfo],
+    action_session_infos: &[MachineActionSessionInfo],
     trigger_handler_infos: &[MachineTriggerHandlerInfo],
     on_handler_infos: &[MachineOnHandlerInfo],
     deliver_infos: &[MachineDeliverInfo],
@@ -652,6 +779,15 @@ pub(super) fn append_machine_spawn_support(
             .top_level_items
             .push(TopLevelItem::FuncDef(build_machine_action_override_func(
                 override_info,
+                node_id_gen,
+            )));
+    }
+
+    for action_info in action_session_infos {
+        module
+            .top_level_items
+            .push(TopLevelItem::FuncDef(build_machine_action_session_func(
+                action_info,
                 node_id_gen,
             )));
     }
@@ -1115,6 +1251,155 @@ fn build_machine_action_override_func(
     }
 }
 
+fn build_machine_action_session_func(
+    info: &MachineActionSessionInfo,
+    node_id_gen: &mut NodeIdGen,
+) -> FuncDef {
+    let span = Span::default();
+    let session_params = freshen_params(&info.params, node_id_gen);
+    let action_body = freshen_expr_ids(info.body.clone(), node_id_gen);
+    FuncDef {
+        id: node_id_gen.new_id(),
+        attrs: Vec::new(),
+        sig: crate::core::ast::FunctionSig {
+            name: info.fn_name.clone(),
+            type_params: Vec::new(),
+            params: std::iter::once(Param {
+                id: node_id_gen.new_id(),
+                ident: "self".to_string(),
+                mode: ParamMode::In,
+                typ: TypeExpr {
+                    id: node_id_gen.new_id(),
+                    kind: TypeExprKind::Named {
+                        ident: info.handle_type_name.clone(),
+                        type_args: Vec::new(),
+                    },
+                    span,
+                },
+                span,
+            })
+            .chain(std::iter::once(Param {
+                id: node_id_gen.new_id(),
+                ident: info.instance_param_name.clone(),
+                mode: ParamMode::In,
+                typ: TypeExpr {
+                    id: node_id_gen.new_id(),
+                    kind: TypeExprKind::Named {
+                        ident: info.hosted_type_name.clone(),
+                        type_args: Vec::new(),
+                    },
+                    span,
+                },
+                span,
+            }))
+            .chain(session_params)
+            .collect(),
+            ret_ty_expr: widen_machine_override_return_type(
+                &info.ret_ty_expr,
+                &info.hosted_type_name,
+                node_id_gen,
+            ),
+            span,
+        },
+        body: Expr {
+            id: node_id_gen.new_id(),
+            kind: ExprKind::Block {
+                items: vec![
+                    BlockItem::Stmt(let_bind_stmt(
+                        "__mc_rt",
+                        call_expr(MANAGED_RUNTIME_CURRENT_FN, Vec::new(), node_id_gen, span),
+                        node_id_gen,
+                        span,
+                    )),
+                    BlockItem::Expr(return_enum_error_if_zero(
+                        "__mc_rt",
+                        "SessionError",
+                        "InstanceNotFound",
+                        node_id_gen,
+                        span,
+                    )),
+                    BlockItem::Stmt(let_bind_stmt(
+                        "__mc_state_tag",
+                        call_expr(
+                            HOSTED_LINEAR_RESUME_STATE_FN,
+                            vec![
+                                var_expr("__mc_rt", node_id_gen, span),
+                                self_field_expr("_id", node_id_gen, span),
+                                struct_field_expr(
+                                    &info.instance_param_name,
+                                    &info.key_field_name,
+                                    node_id_gen,
+                                    span,
+                                ),
+                            ],
+                            node_id_gen,
+                            span,
+                        ),
+                        node_id_gen,
+                        span,
+                    )),
+                    BlockItem::Expr(return_enum_error_if_zero(
+                        "__mc_state_tag",
+                        "SessionError",
+                        "InstanceNotFound",
+                        node_id_gen,
+                        span,
+                    )),
+                    BlockItem::Expr(return_enum_error_if_ne(
+                        "__mc_state_tag",
+                        info.source_state_tag,
+                        "SessionError",
+                        "InvalidState",
+                        node_id_gen,
+                        span,
+                    )),
+                    BlockItem::Stmt(let_bind_stmt(
+                        "__mc_result",
+                        call_expr(
+                            HOSTED_LINEAR_DELIVER_FN,
+                            vec![
+                                var_expr("__mc_rt", node_id_gen, span),
+                                self_field_expr("_id", node_id_gen, span),
+                                struct_field_expr(
+                                    &info.instance_param_name,
+                                    &info.key_field_name,
+                                    node_id_gen,
+                                    span,
+                                ),
+                                int_expr(info.source_state_tag, node_id_gen, span),
+                                int_expr(info.target_state_tag, node_id_gen, span),
+                            ],
+                            node_id_gen,
+                            span,
+                        ),
+                        node_id_gen,
+                        span,
+                    )),
+                    BlockItem::Expr(return_enum_error_if_eq(
+                        "__mc_result",
+                        HOSTED_UPDATE_STALE,
+                        "SessionError",
+                        "InvalidState",
+                        node_id_gen,
+                        span,
+                    )),
+                    BlockItem::Expr(return_enum_error_if_ne(
+                        "__mc_result",
+                        HOSTED_UPDATE_OK,
+                        "SessionError",
+                        "InstanceNotFound",
+                        node_id_gen,
+                        span,
+                    )),
+                ],
+                tail: Some(Box::new(action_body)),
+            },
+            span,
+        },
+        span,
+    }
+}
+
 fn build_machine_trigger_handler_func(
     info: &MachineTriggerHandlerInfo,
     node_id_gen: &mut NodeIdGen,
@@ -1452,6 +1737,22 @@ fn self_field_expr(field: &str, node_id_gen: &mut NodeIdGen, span: Span) -> Expr
     }
 }
 
+fn struct_field_expr(
+    target_name: &str,
+    field: &str,
+    node_id_gen: &mut NodeIdGen,
+    span: Span,
+) -> Expr {
+    Expr {
+        id: node_id_gen.new_id(),
+        kind: ExprKind::StructField {
+            target: Box::new(var_expr(target_name, node_id_gen, span)),
+            field: field.to_string(),
+        },
+        span,
+    }
+}
+
 fn call_expr(callee_name: &str, args: Vec<Expr>, node_id_gen: &mut NodeIdGen, span: Span) -> Expr {
     Expr {
         id: node_id_gen.new_id(),
@@ -1505,6 +1806,118 @@ fn return_enum_error_if_zero(
                     left: Box::new(var_expr(value_var, node_id_gen, span)),
                     op: crate::core::ast::BinaryOp::Eq,
                     right: Box::new(int_expr(0, node_id_gen, span)),
+                },
+                span,
+            }),
+            then_body: Box::new(Expr {
+                id: node_id_gen.new_id(),
+                kind: ExprKind::Block {
+                    items: vec![BlockItem::Stmt(StmtExpr {
+                        id: node_id_gen.new_id(),
+                        kind: StmtExprKind::Return {
+                            value: Some(Box::new(Expr {
+                                id: node_id_gen.new_id(),
+                                kind: ExprKind::EnumVariant {
+                                    enum_name: enum_name.to_string(),
+                                    type_args: Vec::new(),
+                                    variant: variant.to_string(),
+                                    payload: Vec::new(),
+                                },
+                                span,
+                            })),
+                        },
+                        span,
+                    })],
+                    tail: None,
+                },
+                span,
+            }),
+            else_body: Box::new(Expr {
+                id: node_id_gen.new_id(),
+                kind: ExprKind::Block {
+                    items: Vec::new(),
+                    tail: None,
+                },
+                span,
+            }),
+        },
+        span,
+    }
+}
+
+fn return_enum_error_if_ne(
+    value_var: &str,
+    expected_value: u64,
+    enum_name: &str,
+    variant: &str,
+    node_id_gen: &mut NodeIdGen,
+    span: Span,
+) -> Expr {
+    Expr {
+        id: node_id_gen.new_id(),
+        kind: ExprKind::If {
+            cond: Box::new(Expr {
+                id: node_id_gen.new_id(),
+                kind: ExprKind::BinOp {
+                    left: Box::new(var_expr(value_var, node_id_gen, span)),
+                    op: crate::core::ast::BinaryOp::Ne,
+                    right: Box::new(int_expr(expected_value, node_id_gen, span)),
+                },
+                span,
+            }),
+            then_body: Box::new(Expr {
+                id: node_id_gen.new_id(),
+                kind: ExprKind::Block {
+                    items: vec![BlockItem::Stmt(StmtExpr {
+                        id: node_id_gen.new_id(),
+                        kind: StmtExprKind::Return {
+                            value: Some(Box::new(Expr {
+                                id: node_id_gen.new_id(),
+                                kind: ExprKind::EnumVariant {
+                                    enum_name: enum_name.to_string(),
+                                    type_args: Vec::new(),
+                                    variant: variant.to_string(),
+                                    payload: Vec::new(),
+                                },
+                                span,
+                            })),
+                        },
+                        span,
+                    })],
+                    tail: None,
+                },
+                span,
+            }),
+            else_body: Box::new(Expr {
+                id: node_id_gen.new_id(),
+                kind: ExprKind::Block {
+                    items: Vec::new(),
+                    tail: None,
+                },
+                span,
+            }),
+        },
+        span,
+    }
+}
+
+fn return_enum_error_if_eq(
+    value_var: &str,
+    expected_value: u64,
+    enum_name: &str,
+    variant: &str,
+    node_id_gen: &mut NodeIdGen,
+    span: Span,
+) -> Expr {
+    Expr {
+        id: node_id_gen.new_id(),
+        kind: ExprKind::If {
+            cond: Box::new(Expr {
+                id: node_id_gen.new_id(),
+                kind: ExprKind::BinOp {
+                    left: Box::new(var_expr(value_var, node_id_gen, span)),
+                    op: crate::core::ast::BinaryOp::Eq,
+                    right: Box::new(int_expr(expected_value, node_id_gen, span)),
                 },
                 span,
             }),
@@ -1702,6 +2115,174 @@ fn build_machine_deliver_result_expr(result_var_name: &str, node_id_gen: &mut No
         },
         span,
     }
+}
+
+fn collect_base_action_impls(
+    module: &Module,
+) -> HashMap<(String, String, String), (TypeExpr, Expr)> {
+    let type_defs = super::type_defs_by_name(module);
+    let mut result = HashMap::new();
+    for method_block in module.method_blocks() {
+        let Some(type_def) = type_defs.get(&method_block.type_name) else {
+            continue;
+        };
+        let TypeDefKind::Linear { linear } = &type_def.kind else {
+            continue;
+        };
+        let mut action_counts = HashMap::<&str, usize>::new();
+        for action in &linear.actions {
+            *action_counts.entry(action.name.as_str()).or_default() += 1;
+        }
+
+        for item in &method_block.method_items {
+            let crate::core::ast::MethodItem::Def(method) = item else {
+                continue;
+            };
+            let source_state = if let Some(receiver_ty) = &method.sig.self_param.receiver_ty_expr {
+                match &receiver_ty.kind {
+                    TypeExprKind::Named { ident, type_args } if type_args.is_empty() => {
+                        Some(ident.clone())
+                    }
+                    _ => None,
+                }
+            } else if action_counts
+                .get(method.sig.name.as_str())
+                .copied()
+                .unwrap_or_default()
+                == 1
+            {
+                linear
+                    .actions
+                    .iter()
+                    .find(|action| action.name == method.sig.name)
+                    .map(|action| action.source_state.clone())
+            } else {
+                None
+            };
+            let Some(source_state) = source_state else {
+                continue;
+            };
+            result.insert(
+                (
+                    method_block.type_name.clone(),
+                    source_state,
+                    method.sig.name.clone(),
+                ),
+                (method.sig.ret_ty_expr.clone(), method.body.clone()),
+            );
+        }
+    }
+    result
+}
+
+fn rename_var_in_expr(mut expr: Expr, from: &str, to: &str) -> Expr {
+    struct Renamer<'a> {
+        from: &'a str,
+        to: &'a str,
+    }
+
+    impl VisitorMut for Renamer<'_> {
+        fn visit_expr(&mut self, expr: &mut Expr) {
+            if let ExprKind::Var { ident } = &mut expr.kind
+                && ident == self.from
+            {
+                *ident = self.to.to_string();
+            }
+            visit_mut::walk_expr(self, expr);
+        }
+    }
+
+    let mut renamer = Renamer { from, to };
+    renamer.visit_expr(&mut expr);
+    expr
+}
+
+fn freshen_params(params: &[Param], node_id_gen: &mut NodeIdGen) -> Vec<Param> {
+    params
+        .iter()
+        .cloned()
+        .map(|mut param| {
+            param.id = node_id_gen.new_id();
+            param.typ = freshen_type_expr_ids(param.typ, node_id_gen);
+            param
+        })
+        .collect()
+}
+
+fn freshen_expr_ids(mut expr: Expr, node_id_gen: &mut NodeIdGen) -> Expr {
+    struct Freshener<'a> {
+        node_id_gen: &'a mut NodeIdGen,
+    }
+
+    impl VisitorMut for Freshener<'_> {
+        fn visit_expr(&mut self, expr: &mut Expr) {
+            expr.id = self.node_id_gen.new_id();
+            visit_mut::walk_expr(self, expr);
+        }
+
+        fn visit_stmt_expr(&mut self, stmt: &mut StmtExpr) {
+            stmt.id = self.node_id_gen.new_id();
+            visit_mut::walk_stmt_expr(self, stmt);
+        }
+
+        fn visit_bind_pattern(&mut self, pattern: &mut BindPattern) {
+            pattern.id = self.node_id_gen.new_id();
+            visit_mut::walk_bind_pattern(self, pattern);
+        }
+
+        fn visit_match_arm(&mut self, arm: &mut crate::core::ast::MatchArm) {
+            arm.id = self.node_id_gen.new_id();
+            visit_mut::walk_match_arm(self, arm);
+        }
+
+        fn visit_match_pattern(&mut self, pattern: &mut crate::core::ast::MatchPattern) {
+            match pattern {
+                crate::core::ast::MatchPattern::Binding { id, .. }
+                | crate::core::ast::MatchPattern::TypedBinding { id, .. }
+                | crate::core::ast::MatchPattern::EnumVariant { id, .. } => {
+                    *id = self.node_id_gen.new_id();
+                }
+                _ => {}
+            }
+            visit_mut::walk_match_pattern(self, pattern);
+        }
+
+        fn visit_match_pattern_binding(
+            &mut self,
+            binding: &mut crate::core::ast::MatchPatternBinding,
+        ) {
+            if let crate::core::ast::MatchPatternBinding::Named { id, .. } = binding {
+                *id = self.node_id_gen.new_id();
+            }
+            visit_mut::walk_match_pattern_binding(self, binding);
+        }
+
+        fn visit_type_expr(&mut self, ty_expr: &mut TypeExpr) {
+            ty_expr.id = self.node_id_gen.new_id();
+            visit_mut::walk_type_expr(self, ty_expr);
+        }
+    }
+
+    let mut freshener = Freshener { node_id_gen };
+    freshener.visit_expr(&mut expr);
+    expr
+}
+
+fn freshen_type_expr_ids(mut ty_expr: TypeExpr, node_id_gen: &mut NodeIdGen) -> TypeExpr {
+    struct TypeFreshener<'a> {
+        node_id_gen: &'a mut NodeIdGen,
+    }
+
+    impl VisitorMut for TypeFreshener<'_> {
+        fn visit_type_expr(&mut self, ty_expr: &mut TypeExpr) {
+            ty_expr.id = self.node_id_gen.new_id();
+            visit_mut::walk_type_expr(self, ty_expr);
+        }
+    }
+
+    let mut freshener = TypeFreshener { node_id_gen };
+    freshener.visit_type_expr(&mut ty_expr);
+    ty_expr
 }
 
 fn placeholder_expr_for_type(ty: &TypeExpr, node_id_gen: &mut NodeIdGen) -> Expr {
