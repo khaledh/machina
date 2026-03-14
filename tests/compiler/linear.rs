@@ -2394,3 +2394,115 @@ fn linear_type_machine_rejects_override_error_subset() {
         "expected machine override error-subset diagnostic, got: {rendered}"
     );
 }
+
+#[test]
+fn linear_type_hosted_multi_actor_payment_lifecycle() {
+    let run = run_program(
+        "linear_type_hosted_multi_actor_payment",
+        r#"
+            type FraudAlert = {
+                payment_id: u64,
+            }
+
+            @linear
+            type Payment = {
+                id: u64,
+
+                states {
+                    Created,
+                    Authorized,
+                    Captured,
+                    Declined,
+                    Refunded,
+                }
+
+                actions {
+                    authorize: Created -> Authorized,
+                    capture: Authorized -> Captured,
+                    refund: Captured -> Refunded,
+                }
+
+                triggers {
+                    FraudAlert: Authorized -> Declined,
+                }
+
+                roles {
+                    Merchant { authorize, capture }
+                    Compliance { refund }
+                }
+            }
+
+            Payment :: {
+                fn authorize(self) -> Authorized { Authorized {} }
+                fn capture(self) -> Captured { Captured {} }
+                fn refund(self) -> Refunded { Refunded {} }
+            }
+
+            machine PaymentService hosts Payment(key: id) {
+                fn new() -> Self { Self {} }
+
+                trigger FraudAlert(payment) {
+                    payment;
+                    Declined {}
+                }
+
+                on FraudAlert(event) {
+                    let _result = self.deliver(event.payment_id, event);
+                }
+            }
+
+            @machines
+            fn main() -> () | MachineError | SessionError {
+                let service = PaymentService::spawn()?;
+
+                // Stage 1: checkout creates the payment.
+                let created = service.create(Payment as Merchant)?;
+                let payment_id = created.id;
+                println("checkout: payment created");
+
+                // Stage 2: gateway authorizes it.
+                let payment = service.resume(Payment as Merchant, payment_id)?;
+                match payment {
+                    Payment::Created(_) => {
+                        let _authorized = payment.authorize()?;
+                        println("gateway: authorized");
+                    },
+                    _ => println("gateway: unexpected state"),
+                };
+
+                // Stage 3: fraud service sends an alert.
+                service.send(FraudAlert { payment_id })?;
+                // Process the mailbox so the on handler + trigger fires.
+                __mc_machine_runtime_step_u64(__mc_machine_runtime_managed_current_u64());
+                println("fraud: alert sent");
+
+                // Stage 4: merchant tries to capture — but the fraud alert
+                // already moved the payment to Declined.
+                let payment = service.resume(Payment as Merchant, payment_id)?;
+                match payment {
+                    Payment::Authorized(_) => {
+                        let _captured = payment.capture()?;
+                        println("merchant: captured");
+                    },
+                    Payment::Declined(_) => println("merchant: cannot capture, payment was declined"),
+                    _ => println("merchant: unexpected state"),
+                };
+
+                ()
+            }
+        "#,
+    );
+
+    assert_eq!(
+        run.status.code(),
+        Some(0),
+        "multi-actor payment lifecycle should compile and run, stderr: {}",
+        String::from_utf8_lossy(&run.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&run.stdout);
+    assert_eq!(
+        stdout,
+        "checkout: payment created\ngateway: authorized\nfraud: alert sent\nmerchant: cannot capture, payment was declined\n",
+        "multi-actor payment lifecycle output mismatch"
+    );
+}
