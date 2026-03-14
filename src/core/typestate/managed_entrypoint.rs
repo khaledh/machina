@@ -3,25 +3,29 @@ use super::*;
 
 pub(super) fn rewrite_machines_entrypoint(
     module: &mut Module,
+    runtime_requested: bool,
     node_id_gen: &mut NodeIdGen,
 ) -> bool {
-    let mut opted_in = false;
     for item in &mut module.top_level_items {
         let TopLevelItem::FuncDef(func) = item else {
             continue;
         };
-        let has_machines_attr = func
-            .attrs
-            .iter()
-            .any(|attr| attr.name == "machines" && attr.args.is_empty());
-        if !has_machines_attr || func.sig.name != "main" {
+        if func.sig.name != "main" {
             continue;
         }
 
-        opted_in = true;
+        let has_legacy_machines_attr = func
+            .attrs
+            .iter()
+            .any(|attr| attr.name == "machines" && attr.args.is_empty());
+        if !runtime_requested && !has_legacy_machines_attr {
+            return false;
+        }
+
         wrap_main_with_managed_runtime(func, node_id_gen);
+        return true;
     }
-    opted_in
+    false
 }
 
 fn wrap_main_with_managed_runtime(main: &mut FuncDef, node_id_gen: &mut NodeIdGen) {
@@ -60,7 +64,7 @@ fn wrap_main_with_managed_runtime(main: &mut FuncDef, node_id_gen: &mut NodeIdGe
         },
         span,
     };
-    // Auto-drive policy for `@machines`:
+    // Auto-drive policy for managed binaries:
     // keep stepping while runtime reports "did work", and stop once it reaches
     // idle or faulted. We still return the user's main result.
     let auto_drive_if = Expr {

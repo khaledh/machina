@@ -1127,18 +1127,10 @@ fn test_resolve_attr_machines_allowed_on_main() {
 }
 
 #[test]
-fn test_resolve_attr_machines_requires_main() {
+fn test_resolve_attr_machines_is_tolerated_off_main_for_compatibility() {
     let source = "@machines fn foo() {}";
     let result = resolve_source(source);
-    assert!(result.is_err());
-
-    if let Err(errors) = result {
-        assert!(
-            errors
-                .iter()
-                .any(|e| matches!(e.kind(), ResolveErrorKind::AttrMachinesRequiresMain))
-        );
-    }
+    assert!(result.is_ok());
 }
 
 #[test]

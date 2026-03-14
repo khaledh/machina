@@ -1608,16 +1608,65 @@ fn main() {}
 }
 
 #[test]
-fn compile_without_machines_opt_in_does_not_inject_managed_runtime_bootstrap() {
+fn compile_machines_attr_remains_compatible_but_not_required() {
     let source = r#"
+@machines
 fn main() {}
 "#;
 
     let out = compile(source, &typestate_emit_ir_compile_opts())
-        .expect("plain entrypoint should compile");
+        .expect("@machines entrypoint should still compile for compatibility");
     let ir = out.ir.expect("emit_ir should include SSA dump");
     assert!(
-        !ir.contains("__mc_machine_runtime_managed_bootstrap_u64"),
-        "did not expect managed bootstrap call without @machines opt-in"
+        ir.contains("__mc_machine_runtime_managed_bootstrap_u64"),
+        "expected managed bootstrap call even when legacy @machines is present"
+    );
+}
+
+#[test]
+fn compile_linear_machine_program_injects_runtime_without_machines_attr() {
+    let source = r#"
+@linear
+type Approval = {
+    id: u64,
+
+    states {
+        Review,
+        Approved,
+    }
+
+    actions {
+        approve: Review -> Approved,
+    }
+
+    roles {
+        Author { approve }
+    }
+}
+
+Approval :: {
+    fn approve(self) -> Approved {
+        Approved {}
+    }
+}
+
+machine ApprovalService hosts Approval(key: id) {
+    fn new() -> Self { Self {} }
+}
+
+fn main() -> () | MachineError | SessionError {
+    let service = ApprovalService::spawn()?;
+    let review = service.create(Approval as Author)?;
+    let _approved = review.approve()?;
+    ()
+}
+"#;
+
+    let out = compile(source, &typestate_emit_ir_compile_opts())
+        .expect("linear machine entrypoint should compile without @machines");
+    let ir = out.ir.expect("emit_ir should include SSA dump");
+    assert!(
+        ir.contains("__mc_machine_runtime_managed_bootstrap_u64"),
+        "expected managed bootstrap call in linear machine main without @machines"
     );
 }

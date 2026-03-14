@@ -1005,7 +1005,7 @@ impl SymbolResolver {
 
     fn populate_callable(&mut self, callable: &CallableRef) {
         let def_id = self.def_id_gen.new_id();
-        let mut func_attrs = match callable {
+        let func_attrs = match callable {
             CallableRef::FuncDecl(func_decl) => self.resolve_func_attrs(&func_decl.attrs),
             CallableRef::FuncDef(func_def) => self.resolve_func_attrs(&func_def.attrs),
             CallableRef::MethodDecl { method_decl, .. } => {
@@ -1014,17 +1014,6 @@ impl SymbolResolver {
             CallableRef::MethodDef { method_def, .. } => self.resolve_func_attrs(&method_def.attrs),
             CallableRef::ClosureDef(_) => FuncAttrs::default(),
         };
-        if func_attrs.machines {
-            let valid_entrypoint = matches!(
-                callable,
-                CallableRef::FuncDef(func_def) if func_def.sig.name == "main"
-            );
-            if !valid_entrypoint {
-                self.err(callable.span(), REK::AttrMachinesRequiresMain);
-                // Keep downstream def attrs coherent with resolver diagnostics.
-                func_attrs.machines = false;
-            }
-        }
         self.callable_attrs
             .insert(callable.id(), func_attrs.clone());
         let def = Def {

@@ -154,6 +154,62 @@ fn linear_type_direct_mode_supports_shared_field_access() {
 }
 
 #[test]
+fn linear_type_hosted_runtime_is_available_without_machines_attr() {
+    let run = run_program(
+        "linear_type_hosted_without_machines_attr",
+        r#"
+            @linear
+            type Approval = {
+                id: u64,
+
+                states {
+                    Review,
+                    Approved,
+                }
+
+                actions {
+                    approve: Review -> Approved,
+                }
+
+                roles {
+                    Author { approve }
+                }
+            }
+
+            Approval :: {
+                fn approve(self) -> Approved {
+                    Approved {}
+                }
+            }
+
+            machine ApprovalService hosts Approval(key: id) {
+                fn new() -> Self { Self {} }
+            }
+
+            fn main() -> () | MachineError | SessionError {
+                let service = ApprovalService::spawn()?;
+                let review = service.create(Approval as Author)?;
+                let approved = review.approve()?;
+                match approved {
+                    Approval::Approved(_) => println("approved"),
+                    _ => println("unexpected"),
+                };
+                ()
+            }
+        "#,
+    );
+
+    assert_eq!(
+        run.status.code(),
+        Some(0),
+        "hosted linear program without @machines should run, stderr: {}",
+        String::from_utf8_lossy(&run.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&run.stdout);
+    assert_eq!(stdout, "approved\n", "unexpected stdout: {stdout}");
+}
+
+#[test]
 fn linear_type_direct_mode_preserves_shared_fields_across_transitions() {
     let run = run_program(
         "linear_type_shared_field_preservation",

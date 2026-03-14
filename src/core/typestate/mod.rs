@@ -152,11 +152,12 @@ pub fn desugar_module(module: &mut Module, node_id_gen: &mut NodeIdGen) -> Vec<R
     }
 
     module.top_level_items = out;
-    let machines_opted_in = rewrite_machines_entrypoint(module, node_id_gen);
+    let has_machine_defs = !module.machine_defs().is_empty();
+    let managed_main_wrapped = rewrite_machines_entrypoint(module, has_machine_defs, node_id_gen);
     if saw_typestate {
         ensure_machine_support_types(module, node_id_gen);
     }
-    if saw_typestate || machines_opted_in {
+    if saw_typestate || managed_main_wrapped {
         ensure_machine_runtime_intrinsics(module, node_id_gen);
     }
     // Rewrite `Typestate::new(...)` enum-variant syntax into generated ctor calls.
@@ -173,7 +174,7 @@ pub fn desugar_module(module: &mut Module, node_id_gen: &mut NodeIdGen) -> Vec<R
     // first request argument to a numeric machine id.
     rewrite_machine_request_method_destinations(module, node_id_gen);
     if let Some(span) = first_spawn_call_span
-        && !machines_opted_in
+        && !managed_main_wrapped
     {
         errors.push(REK::TypestateSpawnRequiresMachinesOptIn.at(span));
     }
