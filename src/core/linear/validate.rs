@@ -12,6 +12,8 @@
 
 use std::collections::{HashMap, HashSet};
 
+use crate::core::ast::ExprKind;
+use crate::core::ast::visit::{self, Visitor};
 use crate::core::ast::{
     LinearRoleDecl, LinearStateVariant, LinearTransitionDecl, MachineDef, MachineItem,
     MachineTransitionHandler, MethodBlock, MethodDef, MethodItem, Module, TopLevelItem, TypeDef,
@@ -489,6 +491,7 @@ fn validate_machine_handlers(
                     true,
                     errors,
                 );
+                validate_hosted_action_emit_usage(machine_def, handler, errors);
             }
             MachineItem::Trigger(handler) => {
                 let Some(trigger) = triggers_by_name.get(handler.name.as_str()).copied() else {
@@ -523,6 +526,19 @@ fn validate_machine_handlers(
                     .at(machine_def.host.span),
             );
         }
+    }
+}
+
+fn validate_hosted_action_emit_usage(
+    machine_def: &MachineDef,
+    handler: &MachineTransitionHandler,
+    errors: &mut Vec<ResolveError>,
+) {
+    for span in collect_emit_spans(&handler.body) {
+        errors.push(
+            REK::MachineHostedActionEmitUnsupported(machine_def.name.clone(), handler.name.clone())
+                .at(span),
+        );
     }
 }
 
@@ -610,6 +626,25 @@ fn named_type_name(ty_expr: &TypeExpr) -> Option<String> {
         TypeExprKind::Named { ident, type_args } if type_args.is_empty() => Some(ident.clone()),
         _ => None,
     }
+}
+
+fn collect_emit_spans(expr: &crate::core::ast::Expr) -> Vec<crate::core::diag::Span> {
+    struct EmitCollector {
+        spans: Vec<crate::core::diag::Span>,
+    }
+
+    impl Visitor for EmitCollector {
+        fn visit_expr(&mut self, expr: &crate::core::ast::Expr) {
+            if matches!(expr.kind, ExprKind::Emit { .. }) {
+                self.spans.push(expr.span);
+            }
+            visit::walk_expr(self, expr);
+        }
+    }
+
+    let mut collector = EmitCollector { spans: Vec::new() };
+    collector.visit_expr(expr);
+    collector.spans
 }
 
 fn params_match(

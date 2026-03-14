@@ -650,6 +650,17 @@ pub(super) fn from_resolve_error(error: &ResolveError) -> Diagnostic {
             );
             "MC-MACHINE-OVERRIDE-ERROR-SUBSET"
         }
+        ResolveErrorKind::MachineHostedActionEmitUnsupported(machine, action) => {
+            metadata.insert(
+                "machine".to_string(),
+                DiagnosticValue::String(machine.clone()),
+            );
+            metadata.insert(
+                "action".to_string(),
+                DiagnosticValue::String(action.clone()),
+            );
+            "MC-MACHINE-HOSTED-ACTION-EMIT-UNSUPPORTED"
+        }
     };
     Diagnostic {
         phase: DiagnosticPhase::Resolve,

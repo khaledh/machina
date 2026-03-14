@@ -258,6 +258,11 @@ pub enum ResolveErrorKind {
 
     #[error("Machine `{0}` action override `{1}` must preserve the base action's error cases")]
     MachineOverrideErrorSubset(String, String),
+
+    #[error(
+        "Machine `{0}` action override `{1}` cannot use `emit`; hosted `emit` is currently supported only in `on` and `trigger` handlers"
+    )]
+    MachineHostedActionEmitUnsupported(String, String),
 }
 
 pub type ResolveError = SpannedError<ResolveErrorKind>;

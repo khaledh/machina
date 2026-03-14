@@ -77,6 +77,8 @@ pub struct LinearHostInfo {
     pub key_ty: TypeExpr,
     /// Name of the generated struct type that represents a handle to this machine.
     pub handle_type_name: String,
+    /// Hosted mailbox ingress kinds keyed by selector type name.
+    pub on_event_kinds: HashMap<String, u64>,
     /// Generated override helper functions keyed by action name. When present,
     /// hosted action calls dispatch through these helpers instead of the base
     /// linear action implementation.
@@ -287,6 +289,7 @@ pub fn build_linear_index(module: &Module) -> LinearIndex {
             })
             .collect();
         collect_machine_trigger_handlers(machine_def, linear, &mut trigger_handler_fns);
+        let on_event_kinds = collect_machine_on_event_kinds(machine_def);
         let deliver_helpers = linear
             .triggers
             .iter()
@@ -317,6 +320,7 @@ pub fn build_linear_index(module: &Module) -> LinearIndex {
                 key_field: machine_def.host.key_field.clone(),
                 key_ty: key_field.ty.clone(),
                 handle_type_name: machine_handle_type_name(&machine_def.name),
+                on_event_kinds,
                 action_overrides,
                 action_helpers,
                 deliver_helpers,
@@ -333,6 +337,30 @@ pub fn build_linear_index(module: &Module) -> LinearIndex {
         trigger_handler_fns,
         hosted_action_exprs: HashMap::new(),
     }
+}
+
+fn collect_machine_on_event_kinds(
+    machine_def: &crate::core::ast::MachineDef,
+) -> HashMap<String, u64> {
+    machine_def
+        .items
+        .iter()
+        .enumerate()
+        .filter_map(|(index, item)| {
+            let crate::core::ast::MachineItem::On(handler) = item else {
+                return None;
+            };
+            let crate::core::ast::TypeExprKind::Named { ident, type_args } =
+                &handler.selector_ty.kind
+            else {
+                return None;
+            };
+            if !type_args.is_empty() {
+                return None;
+            }
+            Some((ident.clone(), 1024u64 + index as u64 + 1))
+        })
+        .collect()
 }
 
 fn collect_machine_action_overrides(

@@ -1389,6 +1389,12 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
             return Ok(BranchResult::Return);
         };
         let u64_ty = self.type_lowerer.lower_type(&Type::uint(64));
+        let dst_ty = self
+            .type_map
+            .type_table()
+            .get(self.type_map.type_of(to.id))
+            .clone();
+        let dst = self.emit_target_machine_id(dst, &dst_ty);
         let payload_ty = self
             .type_map
             .type_table()
@@ -1425,6 +1431,12 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
             return Ok(BranchResult::Return);
         };
         let u64_ty = self.type_lowerer.lower_type(&Type::uint(64));
+        let dst_ty = self
+            .type_map
+            .type_table()
+            .get(self.type_map.type_of(to.id))
+            .clone();
+        let dst = self.emit_target_machine_id(dst, &dst_ty);
         let payload_ty = self
             .type_map
             .type_table()
@@ -1447,6 +1459,25 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
             pending_ty,
         );
         Ok(pending.into())
+    }
+
+    fn emit_target_machine_id(&mut self, dst: ValueId, dst_ty: &Type) -> ValueId {
+        let Some(handle_name) = self.hosted_machine_handle_type_name(dst_ty) else {
+            return dst;
+        };
+        let handle_ir_ty = self.type_lowerer.lower_type(dst_ty);
+        let handle_slot = self.materialize_value_slot(dst, handle_ir_ty);
+        let host = self
+            .linear_index
+            .machine_hosts
+            .values()
+            .find(|host| host.handle_type_name == handle_name)
+            .unwrap_or_else(|| {
+                panic!("backend missing hosted machine handle metadata for {handle_name}")
+            });
+        let (field_index, _field_ty, field_ir_ty) = self.struct_field_from_type(dst_ty, "_id");
+        debug_assert_eq!(host.handle_type_name, handle_name);
+        self.load_field(handle_slot.addr, field_index, field_ir_ty)
     }
 
     fn lower_reply_expr(

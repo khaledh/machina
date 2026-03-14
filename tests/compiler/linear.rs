@@ -1145,6 +1145,63 @@ fn linear_type_hosted_on_handler_dispatches_from_mailbox() {
 }
 
 #[test]
+fn linear_type_hosted_on_handler_can_emit_send() {
+    let run = run_program(
+        "linear_type_hosted_on_handler_emit_send",
+        r#"
+            type Start = {}
+            type Note = {}
+
+            @linear
+            type PullRequest = {
+                id: u64,
+
+                states {
+                    Draft,
+                }
+
+                actions {}
+
+                roles {
+                    Author {}
+                }
+            }
+
+            machine PRService hosts PullRequest(key: id) {
+                fn new() -> Self {
+                    Self {}
+                }
+
+                on Start(_event) {
+                    println("start");
+                    emit Send(to: self, Note {});
+                }
+
+                on Note(_event) {
+                    println("note");
+                }
+            }
+
+            @machines
+            fn main() -> () | MachineError {
+                let service = PRService::spawn()?;
+                service.send(Start {})?;
+                __mc_machine_runtime_step_u64(__mc_machine_runtime_managed_current_u64());
+                __mc_machine_runtime_step_u64(__mc_machine_runtime_managed_current_u64());
+                ()
+            }
+        "#,
+    );
+
+    assert_eq!(run.status.code(), Some(0));
+    let stdout = String::from_utf8_lossy(&run.stdout);
+    assert_eq!(
+        stdout, "start\nnote\n",
+        "hosted on handlers should be able to stage emitted sends during dispatch"
+    );
+}
+
+#[test]
 fn linear_type_hosted_trigger_handler_body_runs_during_delivery() {
     let run = run_program(
         "linear_type_hosted_trigger_body_runs",
@@ -1225,6 +1282,95 @@ fn linear_type_hosted_trigger_handler_body_runs_during_delivery() {
 }
 
 #[test]
+fn linear_type_hosted_trigger_handler_can_emit_send() {
+    let run = run_program(
+        "linear_type_hosted_trigger_handler_emit_send",
+        r#"
+            type CIPassed = {
+                pr_id: u64,
+            }
+
+            type Note = {}
+
+            @linear
+            type PullRequest = {
+                id: u64,
+
+                states {
+                    Draft,
+                    PendingCI,
+                    Review,
+                }
+
+                actions {
+                    submit: Draft -> PendingCI,
+                }
+
+                triggers {
+                    CIPassed: PendingCI -> Review,
+                }
+
+                roles {
+                    Author { submit }
+                }
+            }
+
+            PullRequest :: {
+                fn submit(self) -> PendingCI {
+                    PendingCI {}
+                }
+            }
+
+            machine PRService hosts PullRequest(key: id) {
+                fn new() -> Self {
+                    Self {}
+                }
+
+                trigger CIPassed(pending) {
+                    pending;
+                    println("trigger-body");
+                    emit Send(to: self, Note {});
+                    Review {}
+                }
+
+                on CIPassed(event) {
+                    let _result = self.deliver(event.pr_id, event);
+                }
+
+                on Note(_event) {
+                    println("note");
+                }
+            }
+
+            @machines
+            fn main() -> () | MachineError | SessionError {
+                let service = PRService::spawn()?;
+                let draft = service.create(PullRequest as Author)?;
+                let pending = draft.submit()?;
+                service.send(CIPassed { pr_id: pending.id })?;
+
+                let next = pending.wait()?;
+                match next {
+                    PullRequest::Review(_) => println("wait-review"),
+                    PullRequest::PendingCI(_) => println("wait-pending"),
+                    PullRequest::Draft(_) => println("wait-draft"),
+                };
+
+                __mc_machine_runtime_step_u64(__mc_machine_runtime_managed_current_u64());
+                ()
+            }
+        "#,
+    );
+
+    assert_eq!(run.status.code(), Some(0));
+    let stdout = String::from_utf8_lossy(&run.stdout);
+    assert_eq!(
+        stdout, "trigger-body\nwait-review\nnote\n",
+        "hosted trigger handlers should be able to stage emitted sends before commit"
+    );
+}
+
+#[test]
 fn linear_type_direct_mode_rejects_wait() {
     let source = r#"
         type CIPassed = {}
@@ -1255,6 +1401,65 @@ fn linear_type_direct_mode_rejects_wait() {
             || rendered.contains("wait")
             || rendered.contains("MC-TYPECHECK-OVERLOAD-NO-MATCH"),
         "expected direct-mode wait rejection, got: {rendered}"
+    );
+}
+
+#[test]
+fn linear_type_hosted_action_override_rejects_emit() {
+    let source = r#"
+        type Note = {}
+
+        @linear
+        type PullRequest = {
+            id: u64,
+
+            states {
+                Draft,
+                Review,
+            }
+
+            actions {
+                submit: Draft -> Review,
+            }
+
+            roles {
+                Author { submit }
+            }
+        }
+
+        PullRequest :: {
+            fn submit(self) -> Review {
+                Review {}
+            }
+        }
+
+        machine PRService hosts PullRequest(key: id) {
+            fn new() -> Self {
+                Self {}
+            }
+
+            on Note(_event) {}
+
+            action submit(draft) -> Review {
+                draft;
+                emit Send(to: self, Note {});
+                Review {}
+            }
+        }
+    "#;
+
+    let errors = compile_linear_source(
+        source,
+        "tests/fixtures/linear/hosted_action_emit_rejected.mc",
+    )
+    .expect_err("hosted action overrides should not silently accept emit outside dispatch");
+    let rendered = format!("{errors:#?}");
+    assert!(
+        rendered.contains("MC-MACHINE-HOSTED-ACTION-EMIT-UNSUPPORTED")
+            || rendered.contains("MachineHostedActionEmitUnsupported")
+            || rendered.contains("cannot use `emit`")
+            || rendered.contains("supported only in `on` and `trigger` handlers"),
+        "expected hosted action emit diagnostic, got: {rendered}"
     );
 }
 

@@ -225,6 +225,7 @@ pub(crate) fn machine_wait_fn_name(
 }
 
 const MANAGED_RUNTIME_CURRENT_FN: &str = "__mc_machine_runtime_managed_current_u64";
+const MANAGED_RUNTIME_STEP_FN: &str = "__mc_machine_runtime_step_u64";
 const MACHINE_RUNTIME_SEND_FN: &str = "__mc_machine_runtime_send_u64";
 const HOSTED_LINEAR_SPAWN_FN: &str = "__mc_hosted_linear_spawn_u64";
 const HOSTED_LINEAR_CREATE_FN: &str = "__mc_hosted_linear_create_u64";
@@ -815,6 +816,10 @@ pub(super) fn ensure_hosted_runtime_intrinsics(module: &mut Module, node_id_gen:
 
     let intrinsics = [
         (MANAGED_RUNTIME_CURRENT_FN, Vec::new()),
+        (
+            MANAGED_RUNTIME_STEP_FN,
+            vec![("runtime", u64_type_expr(node_id_gen, span))],
+        ),
         (
             HOSTED_LINEAR_SPAWN_FN,
             vec![

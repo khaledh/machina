@@ -67,6 +67,7 @@ pub(super) struct LoopContext {
 /// - Expression plans from semantic analysis (linear vs branching)
 pub(super) struct FuncLowerer<'a, 'g> {
     pub(crate) def_table: &'a DefTable,
+    pub(super) current_def_id: DefId,
     pub(super) type_lowerer: TypeLowerer<'a>,
     pub(crate) type_map: &'a TypeMap,
     pub(super) linear_index: &'a LinearIndex,
@@ -250,6 +251,7 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
         let builder = FunctionBuilder::new(func_def_id, func.sig.name.clone(), sig);
         Self {
             def_table,
+            current_def_id: func_def_id,
             type_map,
             linear_index,
             machine_plans,
@@ -381,6 +383,7 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
         let builder = FunctionBuilder::new(def_table.def_id(method_def.id), name, sig);
         Self {
             def_table,
+            current_def_id: def_table.def_id(method_def.id),
             type_map,
             linear_index,
             machine_plans,
@@ -426,6 +429,7 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
 
         Self {
             def_table,
+            current_def_id: def_id,
             type_map,
             linear_index,
             machine_plans: None,
@@ -452,6 +456,9 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
     /// is considered ambiguous if the same payload type maps to different kinds
     /// across descriptors.
     pub(super) fn machine_payload_event_kind(&self, payload_ty: &Type) -> Option<u64> {
+        if let Some(kind) = self.hosted_machine_payload_event_kind(payload_ty) {
+            return Some(kind);
+        }
         let plans = self.machine_plans?;
         let mut selected = None;
         for descriptor in plans.descriptors.values() {
@@ -468,6 +475,45 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
             }
         }
         selected
+    }
+
+    fn hosted_machine_payload_event_kind(&self, payload_ty: &Type) -> Option<u64> {
+        let payload_name = semantic_named_type_name(payload_ty)?;
+        let current_name = &self.def(self.current_def_id).name;
+
+        if let Some(info) = self.linear_index.trigger_handler_fns.get(current_name) {
+            let host = self.linear_index.machine_hosts.get(&info.machine_name)?;
+            return host.on_event_kinds.get(payload_name).copied();
+        }
+
+        let machine_name =
+            self.linear_index
+                .machine_hosts
+                .iter()
+                .find_map(|(machine_name, host)| {
+                    if host.on_event_kinds.contains_key(payload_name)
+                        && current_name.starts_with(&format!("__mc_machine_on_{machine_name}_"))
+                    {
+                        Some(machine_name.as_str())
+                    } else {
+                        None
+                    }
+                })?;
+        self.linear_index
+            .machine_hosts
+            .get(machine_name)?
+            .on_event_kinds
+            .get(payload_name)
+            .copied()
+    }
+
+    pub(super) fn hosted_machine_handle_type_name<'b>(&self, ty: &'b Type) -> Option<&'b str> {
+        let handle_name = semantic_named_type_name(ty)?;
+        self.linear_index
+            .machine_hosts
+            .values()
+            .any(|host| host.handle_type_name == handle_name)
+            .then_some(handle_name)
     }
 
     /// Resolves a deterministic payload layout-id for boxed machine payload
@@ -615,5 +661,12 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
             BranchResult::Value(value) => Ok(Some(value)),
             BranchResult::Return => Ok(None),
         }
+    }
+}
+
+fn semantic_named_type_name(ty: &Type) -> Option<&str> {
+    match ty {
+        Type::Struct { name, .. } | Type::Enum { name, .. } => Some(name.as_str()),
+        _ => None,
     }
 }
