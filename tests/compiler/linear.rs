@@ -928,6 +928,116 @@ fn linear_type_hosted_wait_typechecks_for_trigger_driven_state() {
 }
 
 #[test]
+fn linear_type_hosted_full_lifecycle_runs_end_to_end() {
+    let run = run_program(
+        "linear_type_hosted_full_lifecycle",
+        r#"
+            type CIPassed = {}
+
+            @linear
+            type PullRequest = {
+                id: u64,
+
+                states {
+                    Draft,
+                    PendingCI,
+                    Review,
+                }
+
+                actions {
+                    submit: Draft -> PendingCI,
+                    retry: PendingCI -> PendingCI,
+                }
+
+                triggers {
+                    CIPassed: PendingCI -> Review,
+                }
+
+                roles {
+                    Author { submit, retry }
+                }
+            }
+
+            PullRequest :: {
+                fn submit(self) -> PendingCI {
+                    PendingCI {}
+                }
+
+                fn retry(self) -> PendingCI {
+                    PendingCI {}
+                }
+            }
+
+            machine PRService hosts PullRequest(key: id) {
+                fn new() -> Self {
+                    Self {}
+                }
+
+                trigger CIPassed(pending) {
+                    pending;
+                    Review {}
+                }
+            }
+
+            @machines
+            fn main() -> () | MachineError | SessionError {
+                let service = PRService::spawn()?;
+                let draft = service.create(PullRequest as Author)?;
+                let pending = draft.submit()?;
+                let pending_id = pending.id;
+                let resumed = service.resume(PullRequest as Author, pending.id)?;
+
+                let rt = __mc_machine_runtime_managed_current_u64();
+                let deliver = __mc_hosted_linear_deliver_u64(rt, service._id, pending_id, 2, 3);
+                if deliver == 0 {
+                    println("delivered");
+                } else {
+                    println("deliver-failed");
+                };
+
+                let next = pending.wait()?;
+                match next {
+                    PullRequest::Review(_) => println("wait-review"),
+                    PullRequest::PendingCI(_) => println("wait-pending"),
+                    PullRequest::Draft(_) => println("wait-draft"),
+                };
+
+                let fresh = service.resume(PullRequest as Author, pending_id)?;
+                match fresh {
+                    PullRequest::Review(_) => println("resume-review"),
+                    PullRequest::PendingCI(_) => println("resume-pending"),
+                    PullRequest::Draft(_) => println("resume-draft"),
+                };
+
+                match resumed {
+                    PullRequest::PendingCI(_) => match resumed.retry() {
+                        next_state: PullRequest => match next_state {
+                            PullRequest::Review(_) => println("unexpected-fresh-review"),
+                            PullRequest::PendingCI(_) => println("unexpected-fresh-pending"),
+                            PullRequest::Draft(_) => println("unexpected-fresh-draft"),
+                        },
+                        err: SessionError => match err {
+                            InvalidState => println("stale"),
+                            InstanceNotFound => println("missing"),
+                        },
+                    },
+                    PullRequest::Review(_) => println("resumed-review"),
+                    PullRequest::Draft(_) => println("resumed-draft"),
+                };
+                ()
+            }
+        "#,
+    );
+
+    assert_eq!(run.status.code(), Some(0));
+    let stdout = String::from_utf8_lossy(&run.stdout);
+    assert_eq!(
+        stdout, "delivered\nwait-review\nresume-review\nstale\n",
+        "hosted full lifecycle should stay coherent end-to-end"
+    );
+}
+
+#[test]
 fn linear_type_direct_mode_rejects_wait() {
     let source = r#"
         type CIPassed = {}
