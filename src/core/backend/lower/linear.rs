@@ -197,20 +197,36 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
             ExprKind::Len { expr: place } => self.lower_len_expr(expr, place),
 
             ExprKind::Move { expr: place } | ExprKind::ImplicitMove { expr: place } => {
-                match &place.kind {
+                let value = match &place.kind {
                     ExprKind::Var { .. } => {
                         let def_id = self.def_table.def_id(place.id);
                         self.set_drop_flag_for_def(def_id, false);
-                        Ok(self.load_local_value(def_id).into())
+                        self.load_local_value(def_id)
                     }
                     _ => {
                         let place_addr = self.lower_place_addr(place)?;
-                        Ok(self
-                            .builder
-                            .load(place_addr.addr, place_addr.value_ty)
-                            .into())
+                        let value = self.builder.load(place_addr.addr, place_addr.value_ty);
+                        let expr_sem_ty = self
+                            .type_map
+                            .type_table()
+                            .get(self.type_map.type_of(expr.id))
+                            .clone();
+                        return Ok(self
+                            .coerce_value(value, &place_addr.sem_ty, &expr_sem_ty)
+                            .into());
                     }
-                }
+                };
+                let place_sem_ty = self
+                    .type_map
+                    .type_table()
+                    .get(self.type_map.type_of(place.id))
+                    .clone();
+                let expr_sem_ty = self
+                    .type_map
+                    .type_table()
+                    .get(self.type_map.type_of(expr.id))
+                    .clone();
+                Ok(self.coerce_value(value, &place_sem_ty, &expr_sem_ty).into())
             }
 
             ExprKind::Coerce { kind, expr: inner } => self.lower_coerce_expr(expr, *kind, inner),
@@ -219,7 +235,18 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
                 ExprKind::Var { .. } => {
                     let def_id = self.def_table.def_id(place.id);
                     if self.locals.get(def_id).is_some() {
-                        Ok(self.load_local_value(def_id).into())
+                        let value = self.load_local_value(def_id);
+                        let place_sem_ty = self
+                            .type_map
+                            .type_table()
+                            .get(self.type_map.type_of(place.id))
+                            .clone();
+                        let expr_sem_ty = self
+                            .type_map
+                            .type_table()
+                            .get(self.type_map.type_of(expr.id))
+                            .clone();
+                        Ok(self.coerce_value(value, &place_sem_ty, &expr_sem_ty).into())
                     } else {
                         let def = self.def(def_id);
                         match def.kind {
@@ -238,9 +265,14 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
                 }
                 _ => {
                     let place_addr = self.lower_place_addr(place)?;
+                    let value = self.builder.load(place_addr.addr, place_addr.value_ty);
+                    let expr_sem_ty = self
+                        .type_map
+                        .type_table()
+                        .get(self.type_map.type_of(expr.id))
+                        .clone();
                     Ok(self
-                        .builder
-                        .load(place_addr.addr, place_addr.value_ty)
+                        .coerce_value(value, &place_addr.sem_ty, &expr_sem_ty)
                         .into())
                 }
             },
@@ -494,9 +526,19 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
 
             if let Some(tail) = tail {
                 lowerer.annotate_expr(tail);
-                return lowerer
-                    .lower_linear_value_expr(tail)
-                    .map(Into::into);
+                let tail_value = lowerer.lower_linear_value_expr(tail)?;
+                let tail_sem_ty = lowerer
+                    .type_map
+                    .type_table()
+                    .get(lowerer.type_map.type_of(tail.id))
+                    .clone();
+                let block_sem_ty = lowerer
+                    .type_map
+                    .type_table()
+                    .get(lowerer.type_map.type_of(expr.id))
+                    .clone();
+                let coerced = lowerer.coerce_value(tail_value, &tail_sem_ty, &block_sem_ty);
+                return Ok(coerced.into());
             }
 
             let ty = lowerer.type_lowerer.lower_type_id(lowerer.type_map.type_of(expr.id));

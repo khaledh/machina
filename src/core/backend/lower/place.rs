@@ -12,6 +12,7 @@ use super::FuncLowerer;
 pub(super) struct PlaceAddr {
     pub(super) addr: ValueId,
     pub(super) value_ty: IrTypeId,
+    pub(super) sem_ty: Type,
 }
 
 impl<'a, 'g> FuncLowerer<'a, 'g> {
@@ -20,26 +21,37 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
         match &place.kind {
             ExprKind::Var { .. } => {
                 let def_id = self.def_table.def_id(place.id);
-                let value_ty = self
-                    .type_lowerer
-                    .lower_type_id(self.type_map.type_of(place.id));
+                let sem_ty = self.def_type(def_id);
+                let value_ty = self.type_lowerer.lower_type(&sem_ty);
                 let addr = self.ensure_local_addr(def_id, value_ty);
-                Ok(PlaceAddr { addr, value_ty })
+                Ok(PlaceAddr {
+                    addr,
+                    value_ty,
+                    sem_ty,
+                })
             }
             ExprKind::Deref { expr } => {
                 let addr = self.lower_linear_value_expr(expr)?;
-                let value_ty = self
-                    .type_lowerer
-                    .lower_type_id(self.type_map.type_of(place.id));
-                Ok(PlaceAddr { addr, value_ty })
+                let sem_ty = self
+                    .type_map
+                    .type_table()
+                    .get(self.type_map.type_of(place.id))
+                    .clone();
+                let value_ty = self.type_lowerer.lower_type(&sem_ty);
+                Ok(PlaceAddr {
+                    addr,
+                    value_ty,
+                    sem_ty,
+                })
             }
             ExprKind::TupleField { target, index } => {
                 let (base_addr, base_ty) = self.lower_place_deref_base(target)?;
-                let (_field_ty, field_ir_ty) = self.tuple_field_from_type(&base_ty, *index);
+                let (field_ty, field_ir_ty) = self.tuple_field_from_type(&base_ty, *index);
                 let addr = self.field_addr_typed(base_addr, *index, field_ir_ty);
                 Ok(PlaceAddr {
                     addr,
                     value_ty: field_ir_ty,
+                    sem_ty: field_ty,
                 })
             }
             ExprKind::StructField { target, field } => {
@@ -52,7 +64,7 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
                 ) {
                     return Ok(place_addr);
                 }
-                if let Some((_field_ty, field_ir_ty, field_offset)) =
+                if let Some((field_ty, field_ir_ty, field_offset)) =
                     self.linear_shared_field_from_type(&base_ty, field)
                 {
                     let enum_layout = self.type_lowerer.enum_layout_for_type(&base_ty);
@@ -65,14 +77,16 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
                     return Ok(PlaceAddr {
                         addr,
                         value_ty: field_ir_ty,
+                        sem_ty: field_ty,
                     });
                 }
-                let (field_index, _field_ty, field_ir_ty) =
+                let (field_index, field_ty, field_ir_ty) =
                     self.struct_field_from_type(&base_ty, field);
                 let addr = self.field_addr_typed(base_addr, field_index, field_ir_ty);
                 Ok(PlaceAddr {
                     addr,
                     value_ty: field_ir_ty,
+                    sem_ty: field_ty,
                 })
             }
             ExprKind::ArrayIndex { target, indices } => {
@@ -109,6 +123,7 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
                             value_ty: self
                                 .type_lowerer
                                 .lower_type_id(self.type_map.type_of(place.id)),
+                            sem_ty: curr_ty,
                         })
                     }
                     IndexBaseKind::Slice { deref_count } => {
@@ -130,6 +145,7 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
                         Ok(PlaceAddr {
                             addr,
                             value_ty: elem_ir_ty,
+                            sem_ty: (*elem_ty).clone(),
                         })
                     }
                     IndexBaseKind::String { deref_count } => {
@@ -151,6 +167,7 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
                         Ok(PlaceAddr {
                             addr,
                             value_ty: u8_ty,
+                            sem_ty: Type::uint(8),
                         })
                     }
                     IndexBaseKind::DynArray { deref_count } => {
@@ -174,6 +191,7 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
                         Ok(PlaceAddr {
                             addr,
                             value_ty: elem_ir_ty,
+                            sem_ty: (*elem_ty).clone(),
                         })
                     }
                 }
@@ -208,6 +226,7 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
         place_ty: crate::core::types::TypeId,
     ) -> Option<PlaceAddr> {
         let target_ir_ty = self.type_lowerer.lower_type_id(place_ty);
+        let target_sem_ty = self.type_map.type_table().get(place_ty).clone();
         let value = match field {
             "len" => match base_ty {
                 Type::Array { dims, .. } => {
@@ -303,6 +322,7 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
         Some(PlaceAddr {
             addr,
             value_ty: target_ir_ty,
+            sem_ty: target_sem_ty,
         })
     }
 

@@ -250,6 +250,7 @@ pub(super) fn rewrite_linear_method_blocks(
                     Some("self"),
                     Some(&source_state),
                     &[],
+                    &[],
                     node_id_gen,
                 );
             } else {
@@ -260,6 +261,7 @@ pub(super) fn rewrite_linear_method_blocks(
                     Some(&info.type_name),
                     None,
                     None,
+                    &[],
                     &[],
                     node_id_gen,
                 );
@@ -390,6 +392,8 @@ pub(super) fn rewrite_linear_exprs(
                 } else {
                     Vec::new()
                 };
+                let seeded_machine_bindings =
+                    collect_machine_param_bindings(&func.sig.params, linear_index);
                 let current_linear_type = override_info
                     .as_ref()
                     .map(|override_info| override_info.hosted_type_name.as_str())
@@ -423,6 +427,7 @@ pub(super) fn rewrite_linear_exprs(
                     },
                     None,
                     &seeded_bindings,
+                    &seeded_machine_bindings,
                     node_id_gen,
                 );
                 errors.extend(rewrite_errors);
@@ -454,6 +459,7 @@ pub(super) fn rewrite_linear_exprs(
                             None,
                             None,
                             &[],
+                            &collect_machine_param_bindings(&method.sig.params, linear_index),
                             node_id_gen,
                         );
                         errors.extend(rewrite_errors);
@@ -492,6 +498,7 @@ pub(super) fn rewrite_linear_exprs(
                                         hosted: None,
                                     },
                                 )],
+                                &[],
                                 node_id_gen,
                             );
                             errors.extend(rewrite_errors);
@@ -519,6 +526,7 @@ pub(super) fn rewrite_linear_exprs(
                                         hosted: None,
                                     },
                                 )],
+                                &[],
                                 node_id_gen,
                             );
                             errors.extend(rewrite_errors);
@@ -546,6 +554,32 @@ pub(super) fn rewrite_linear_exprs(
     errors
 }
 
+fn collect_machine_param_bindings(
+    params: &[crate::core::ast::Param],
+    linear_index: &LinearIndex,
+) -> Vec<(String, MachineBindingState)> {
+    params
+        .iter()
+        .filter_map(|param| {
+            named_type_name(&param.typ).and_then(|ty_name| {
+                linear_index
+                    .machine_hosts
+                    .iter()
+                    .find_map(|(machine_name, host)| {
+                        (host.handle_type_name == ty_name).then(|| {
+                            (
+                                param.ident.clone(),
+                                MachineBindingState {
+                                    machine_name: machine_name.clone(),
+                                },
+                            )
+                        })
+                    })
+            })
+        })
+        .collect()
+}
+
 /// Set up the binding environment and rewrite a single expression tree.
 fn rewrite_expr_with_linear_env(
     expr: &mut Expr,
@@ -555,6 +589,7 @@ fn rewrite_expr_with_linear_env(
     carry_binding_name: Option<&str>,
     self_state: Option<&str>,
     seeded_bindings: &[(String, LinearBindingState)],
+    seeded_machine_bindings: &[(String, MachineBindingState)],
     node_id_gen: &mut NodeIdGen,
 ) -> (Vec<ResolveError>, Option<LinearBindingState>) {
     let mut env = HashMap::new();
@@ -577,6 +612,9 @@ fn rewrite_expr_with_linear_env(
     }
     for (name, binding_state) in seeded_bindings {
         env.insert(name.clone(), binding_state.clone());
+    }
+    for (name, machine_state) in seeded_machine_bindings {
+        machine_env.insert(name.clone(), machine_state.clone());
     }
     let result_state = rewrite_expr_in_scope(
         expr,

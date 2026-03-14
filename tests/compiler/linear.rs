@@ -308,6 +308,299 @@ fn linear_type_hosted_machine_handle_is_user_facing_in_helper_functions() {
 }
 
 #[test]
+fn linear_type_hosted_machine_handle_runtime_helper_can_create_and_act() {
+    let run = run_program(
+        "linear_type_hosted_machine_handle_runtime_helper_create",
+        r#"
+            @linear
+            type Approval = {
+                id: u64,
+
+                states {
+                    Review,
+                    Approved,
+                }
+
+                actions {
+                    approve: Review -> Approved,
+                }
+
+                roles {
+                    Author { approve }
+                }
+            }
+
+            Approval :: {
+                fn approve(self) -> Approved {
+                    Approved {}
+                }
+            }
+
+            machine ApprovalService hosts Approval(key: id) {
+                fn new() -> Self { Self {} }
+            }
+
+            fn process(service: Machine<ApprovalService>) -> () | MachineError | SessionError {
+                let review = service.create(Approval as Author)?;
+                let approved = review.approve()?;
+                match approved {
+                    Approval::Approved(_) => println("approved"),
+                    _ => println("unexpected"),
+                };
+                ()
+            }
+
+            fn main() -> () | MachineError | SessionError {
+                let service = ApprovalService::spawn()?;
+                process(service)?;
+                ()
+            }
+        "#,
+    );
+
+    assert_eq!(
+        run.status.code(),
+        Some(0),
+        "helper create/act program should run, stderr: {}",
+        String::from_utf8_lossy(&run.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&run.stdout);
+    assert_eq!(stdout, "approved\n", "unexpected stdout: {stdout}");
+}
+
+#[test]
+fn linear_type_hosted_machine_handle_runtime_helper_can_return_created_key() {
+    let run = run_program(
+        "linear_type_hosted_machine_handle_runtime_helper_key",
+        r#"
+            @linear
+            type Approval = {
+                id: u64,
+
+                states {
+                    Review,
+                }
+
+                actions {}
+
+                roles {
+                    Author {}
+                }
+            }
+
+            machine ApprovalService hosts Approval(key: id) {
+                fn new() -> Self { Self {} }
+            }
+
+            fn create_review(service: Machine<ApprovalService>) -> u64 | SessionError {
+                let review = service.create(Approval as Author)?;
+                review.id
+            }
+
+            fn main() -> () | MachineError | SessionError {
+                let service = ApprovalService::spawn()?;
+                let review_id = create_review(service)?;
+                println(review_id);
+                ()
+            }
+        "#,
+    );
+
+    assert_eq!(
+        run.status.code(),
+        Some(0),
+        "helper returning created key should run, stderr: {}",
+        String::from_utf8_lossy(&run.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&run.stdout);
+    assert_eq!(stdout, "1\n", "unexpected stdout: {stdout}");
+}
+
+#[test]
+fn linear_type_hosted_machine_handle_runtime_helper_can_send() {
+    let run = run_program(
+        "linear_type_hosted_machine_handle_runtime_helper_send",
+        r#"
+            type Start = {}
+
+            @linear
+            type Approval = {
+                id: u64,
+
+                states {
+                    Review,
+                    Approved,
+                }
+
+                actions {}
+
+                triggers {
+                    Start: Review -> Approved,
+                }
+
+                roles {
+                    Author {}
+                }
+            }
+
+            machine ApprovalService hosts Approval(key: id) {
+                fn new() -> Self { Self {} }
+
+                trigger Start(review) {
+                    review;
+                    Approved {}
+                }
+
+                on Start(event) {
+                    event;
+                    println("handled");
+                }
+            }
+
+            fn push(service: Machine<ApprovalService>) -> () | MachineError {
+                service.send(Start {})?;
+                __mc_machine_runtime_step_u64(__mc_machine_runtime_managed_current_u64());
+                ()
+            }
+
+            fn main() -> () | MachineError {
+                let service = ApprovalService::spawn()?;
+                push(service)?;
+                ()
+            }
+        "#,
+    );
+
+    assert_eq!(
+        run.status.code(),
+        Some(0),
+        "helper send program should run, stderr: {}",
+        String::from_utf8_lossy(&run.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&run.stdout);
+    assert_eq!(stdout, "handled\n", "unexpected stdout: {stdout}");
+}
+
+#[test]
+fn linear_type_hosted_multi_actor_payment_lifecycle_through_helper_functions() {
+    let run = run_program(
+        "linear_type_hosted_multi_actor_payment_helpers",
+        r#"
+            type FraudAlert = {
+                payment_id: u64,
+            }
+
+            @linear
+            type Payment = {
+                id: u64,
+
+                states {
+                    Created,
+                    Authorized,
+                    Declined,
+                }
+
+                actions {
+                    authorize: Created -> Authorized,
+                }
+
+                triggers {
+                    FraudAlert: Authorized -> Declined,
+                }
+
+                roles {
+                    Merchant { authorize }
+                }
+            }
+
+            Payment :: {
+                fn authorize(self) -> Authorized {
+                    Authorized {}
+                }
+            }
+
+            machine PaymentService hosts Payment(key: id) {
+                fn new() -> Self { Self {} }
+
+                trigger FraudAlert(payment) {
+                    payment;
+                    Declined {}
+                }
+
+                on FraudAlert(event) {
+                    let _result = self.deliver(event.payment_id, event);
+                }
+            }
+
+            fn checkout(service: Machine<PaymentService>) -> u64 | MachineError | SessionError {
+                let created = service.create(Payment as Merchant)?;
+                println("checkout");
+                created.id
+            }
+
+            fn gateway_authorize(
+                service: Machine<PaymentService>,
+                payment_id: u64,
+            ) -> () | MachineError | SessionError {
+                let payment = service.resume(Payment as Merchant, payment_id)?;
+                match payment {
+                    Payment::Created(_) => {
+                        let _authorized = payment.authorize()?;
+                        println("gateway");
+                    }
+                    _ => println("gateway-unexpected"),
+                };
+                ()
+            }
+
+            fn fraud_service(
+                service: Machine<PaymentService>,
+                payment_id: u64,
+            ) -> () | MachineError {
+                service.send(FraudAlert { payment_id })?;
+                __mc_machine_runtime_step_u64(__mc_machine_runtime_managed_current_u64());
+                println("fraud");
+                ()
+            }
+
+            fn merchant_capture(
+                service: Machine<PaymentService>,
+                payment_id: u64,
+            ) -> () | MachineError | SessionError {
+                let payment = service.resume(Payment as Merchant, payment_id)?;
+                match payment {
+                    Payment::Declined(_) => println("declined"),
+                    Payment::Authorized(_) => println("authorized"),
+                    _ => println("unexpected"),
+                };
+                ()
+            }
+
+            fn main() -> () | MachineError | SessionError {
+                let service = PaymentService::spawn()?;
+                let payment_id = checkout(service)?;
+                gateway_authorize(service, payment_id)?;
+                fraud_service(service, payment_id)?;
+                merchant_capture(service, payment_id)?;
+                ()
+            }
+        "#,
+    );
+
+    assert_eq!(
+        run.status.code(),
+        Some(0),
+        "multi-actor helper payment flow should run, stderr: {}",
+        String::from_utf8_lossy(&run.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&run.stdout);
+    assert_eq!(
+        stdout, "checkout\ngateway\nfraud\ndeclined\n",
+        "unexpected stdout: {stdout}"
+    );
+}
+
+#[test]
 fn linear_type_direct_mode_preserves_shared_fields_across_transitions() {
     let run = run_program(
         "linear_type_shared_field_preservation",

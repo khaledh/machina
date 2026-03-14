@@ -107,7 +107,21 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
                     if let Some(tail) = tail {
                         lowerer.annotate_expr(tail);
                         return match lowerer.lower_value_expr(tail)? {
-                            BranchResult::Value(value) => Ok(BranchResult::Value(value)),
+                            BranchResult::Value(value) => {
+                                let tail_sem_ty = lowerer
+                                    .type_map
+                                    .type_table()
+                                    .get(lowerer.type_map.type_of(tail.id))
+                                    .clone();
+                                let block_sem_ty = lowerer
+                                    .type_map
+                                    .type_table()
+                                    .get(lowerer.type_map.type_of(expr.id))
+                                    .clone();
+                                let coerced =
+                                    lowerer.coerce_value(value, &tail_sem_ty, &block_sem_ty);
+                                Ok(BranchResult::Value(coerced))
+                            }
                             BranchResult::Return => Ok(BranchResult::Return),
                         };
                     }
