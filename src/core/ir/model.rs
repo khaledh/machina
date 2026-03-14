@@ -177,8 +177,6 @@ pub enum RuntimeFn {
     MachineRegisterThunkWithTag,
     MachineRegisterPayloadDrop,
     MachineRegisterDescriptor,
-    HostedLinearSpawn,
-    HostedLinearCreate,
     Alloc,
     Realloc,
     Free,
@@ -231,8 +229,6 @@ impl RuntimeFn {
                 "__mc_machine_runtime_register_payload_drop_u64"
             }
             RuntimeFn::MachineRegisterDescriptor => "__mc_machine_runtime_register_descriptor_u64",
-            RuntimeFn::HostedLinearSpawn => "__mc_hosted_linear_spawn_u64",
-            RuntimeFn::HostedLinearCreate => "__mc_hosted_linear_create_u64",
             RuntimeFn::Alloc => "__rt_alloc",
             RuntimeFn::Realloc => "__rt_realloc",
             RuntimeFn::Free => "__rt_free",
