@@ -852,6 +852,166 @@ fn main() -> u64 {
 }
 
 #[test]
+fn member_completions_include_hosted_machine_operations() {
+    let mut db = AnalysisDb::new();
+    let source = r#"
+type FraudAlert = {
+    payment_id: u64,
+}
+
+@linear
+type Payment = {
+    id: u64,
+
+    states {
+        Created,
+        Authorized,
+        Declined,
+    }
+
+    actions {
+        authorize: Created -> Authorized,
+    }
+
+    triggers {
+        FraudAlert: Authorized -> Declined,
+    }
+
+    roles {
+        Merchant { authorize }
+    }
+}
+
+Payment :: {
+    fn authorize(self) -> Authorized { Authorized {} }
+}
+
+machine PaymentService hosts Payment(key: id) {
+    fn new() -> Self { Self {} }
+
+    trigger FraudAlert(payment) {
+        payment;
+        Declined {}
+    }
+
+    on FraudAlert(event) {
+        self.deliver(event.payment_id, event);
+    }
+}
+
+fn helper(service: Machine<PaymentService>) -> u64 {
+    let probe = service.;
+    0
+}
+"#;
+    let file_id = db.upsert_disk_text(
+        Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("examples/completions_linear_machine_members.mc"),
+        source,
+    );
+    let query_span = span_for_substring(source, "service.");
+    let completions = db
+        .completions_at_program_file(file_id, query_span)
+        .expect("completions query should succeed");
+
+    assert!(
+        completions.iter().any(|c| c.label == "create"),
+        "expected hosted create completion"
+    );
+    assert!(
+        completions.iter().any(|c| c.label == "resume"),
+        "expected hosted resume completion"
+    );
+    assert!(
+        completions.iter().any(|c| c.label == "lookup"),
+        "expected hosted lookup completion"
+    );
+    assert!(
+        completions.iter().any(|c| c.label == "send"),
+        "expected hosted send completion"
+    );
+    assert!(
+        !completions.iter().any(|c| c.label == "_id"),
+        "did not expect raw handle storage fields in user-facing completions"
+    );
+}
+
+#[test]
+fn member_completions_include_wait_for_hosted_sessions() {
+    let mut db = AnalysisDb::new();
+    let source = r#"
+type FraudAlert = {
+    payment_id: u64,
+}
+
+@linear
+type Payment = {
+    id: u64,
+
+    states {
+        Created,
+        Authorized,
+        Declined,
+    }
+
+    actions {
+        authorize: Created -> Authorized,
+    }
+
+    triggers {
+        FraudAlert: Authorized -> Declined,
+    }
+
+    roles {
+        Merchant { authorize }
+    }
+}
+
+Payment :: {
+    fn authorize(self) -> Authorized { Authorized {} }
+}
+
+machine PaymentService hosts Payment(key: id) {
+    fn new() -> Self { Self {} }
+
+    trigger FraudAlert(payment) {
+        payment;
+        Declined {}
+    }
+
+    on FraudAlert(event) {
+        self.deliver(event.payment_id, event);
+    }
+}
+
+fn helper(service: Machine<PaymentService>) -> u64 | SessionError {
+    let created = service.create(Payment as Merchant)?;
+    let authorized = created.authorize()?;
+    let probe = authorized.;
+    0
+}
+"#;
+    let file_id = db.upsert_disk_text(
+        Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("examples/completions_linear_hosted_session_members.mc"),
+        source,
+    );
+    let query_span = span_for_substring(source, "authorized.");
+    let completions = db
+        .completions_at_program_file(file_id, query_span)
+        .expect("completions query should succeed");
+
+    assert!(
+        completions.iter().any(|c| c.label == "wait"),
+        "expected hosted wait completion on trigger-driven state"
+    );
+    assert!(
+        !completions.iter().any(|c| c.label == "create"),
+        "did not expect machine-handle operations in hosted session completions"
+    );
+}
+
+#[test]
 fn member_completions_work_when_cursor_is_after_dot_in_incomplete_member_expr() {
     let mut db = AnalysisDb::new();
     let source = r#"

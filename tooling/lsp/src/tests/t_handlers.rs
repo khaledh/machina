@@ -426,6 +426,193 @@ fn helper(service: Machine<Pay>) -> u64 {
 }
 
 #[test]
+fn completion_request_includes_hosted_machine_member_operations() {
+    let mut session = AnalysisSession::new();
+    let source = r#"type FraudAlert = {
+    payment_id: u64,
+}
+
+@linear
+type Payment = {
+    id: u64,
+
+    states {
+        Created,
+        Authorized,
+        Declined,
+    }
+
+    actions {
+        authorize: Created -> Authorized,
+    }
+
+    triggers {
+        FraudAlert: Authorized -> Declined,
+    }
+
+    roles {
+        Merchant { authorize }
+    }
+}
+
+Payment :: {
+    fn authorize(self) -> Authorized { Authorized {} }
+}
+
+machine PaymentService hosts Payment(key: id) {
+    fn new() -> Self { Self {} }
+
+    trigger FraudAlert(payment) {
+        payment;
+        Declined {}
+    }
+
+    on FraudAlert(event) {
+        self.deliver(event.payment_id, event);
+    }
+}
+
+fn helper(service: Machine<PaymentService>) -> u64 {
+    let probe = service.;
+    0
+}
+"#;
+    let (line, character) = lsp_position_for_substring(source, "service.", "service.".len());
+    let _ = handle_message(
+        &mut session,
+        json!({
+            "jsonrpc": "2.0",
+            "method": "textDocument/didOpen",
+            "params": {
+                "textDocument": {
+                    "uri": "file:///tmp/lsp-linear-machine-members.mc",
+                    "version": 1,
+                    "languageId": "machina",
+                    "text": source
+                }
+            }
+        }),
+    );
+
+    let (_action, response) = handle_message(
+        &mut session,
+        json!({
+            "jsonrpc": "2.0",
+            "id": 144,
+            "method": "textDocument/completion",
+            "params": {
+                "textDocument": { "uri": "file:///tmp/lsp-linear-machine-members.mc" },
+                "position": { "line": line, "character": character },
+                "mcDocVersion": 1
+            }
+        }),
+    );
+
+    let response = response.expect("expected completion response");
+    let items = response["result"]["items"]
+        .as_array()
+        .expect("expected completion items");
+    assert!(items.iter().any(|item| item["label"] == "create"));
+    assert!(items.iter().any(|item| item["label"] == "resume"));
+    assert!(items.iter().any(|item| item["label"] == "lookup"));
+    assert!(items.iter().any(|item| item["label"] == "send"));
+    assert!(!items.iter().any(|item| item["label"] == "_id"));
+}
+
+#[test]
+fn completion_request_includes_wait_for_hosted_session_values() {
+    let mut session = AnalysisSession::new();
+    let source = r#"type FraudAlert = {
+    payment_id: u64,
+}
+
+@linear
+type Payment = {
+    id: u64,
+
+    states {
+        Created,
+        Authorized,
+        Declined,
+    }
+
+    actions {
+        authorize: Created -> Authorized,
+    }
+
+    triggers {
+        FraudAlert: Authorized -> Declined,
+    }
+
+    roles {
+        Merchant { authorize }
+    }
+}
+
+Payment :: {
+    fn authorize(self) -> Authorized { Authorized {} }
+}
+
+machine PaymentService hosts Payment(key: id) {
+    fn new() -> Self { Self {} }
+
+    trigger FraudAlert(payment) {
+        payment;
+        Declined {}
+    }
+
+    on FraudAlert(event) {
+        self.deliver(event.payment_id, event);
+    }
+}
+
+fn helper(service: Machine<PaymentService>) -> u64 | SessionError {
+    let created = service.create(Payment as Merchant)?;
+    let authorized = created.authorize()?;
+    let probe = authorized.;
+    0
+}
+"#;
+    let (line, character) = lsp_position_for_substring(source, "authorized.", "authorized.".len());
+    let _ = handle_message(
+        &mut session,
+        json!({
+            "jsonrpc": "2.0",
+            "method": "textDocument/didOpen",
+            "params": {
+                "textDocument": {
+                    "uri": "file:///tmp/lsp-linear-session-members.mc",
+                    "version": 1,
+                    "languageId": "machina",
+                    "text": source
+                }
+            }
+        }),
+    );
+
+    let (_action, response) = handle_message(
+        &mut session,
+        json!({
+            "jsonrpc": "2.0",
+            "id": 145,
+            "method": "textDocument/completion",
+            "params": {
+                "textDocument": { "uri": "file:///tmp/lsp-linear-session-members.mc" },
+                "position": { "line": line, "character": character },
+                "mcDocVersion": 1
+            }
+        }),
+    );
+
+    let response = response.expect("expected completion response");
+    let items = response["result"]["items"]
+        .as_array()
+        .expect("expected completion items");
+    assert!(items.iter().any(|item| item["label"] == "wait"));
+    assert!(!items.iter().any(|item| item["label"] == "create"));
+}
+
+#[test]
 fn unknown_method_returns_method_not_found() {
     let mut session = AnalysisSession::new();
     let (action, response) = handle_message(

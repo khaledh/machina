@@ -18,8 +18,11 @@ pub(super) fn member_completions(
 ) -> Vec<CompletionItem> {
     let mut out = Vec::new();
     let owner = receiver_ty.peel_heap();
+    let hosted_machine = hosted_machine_for_owner(resolved, &owner);
+    let hide_raw_fields = hosted_machine.is_some();
 
     if let Type::Struct { name, fields } = &owner
+        && !hide_raw_fields
         && struct_fields_accessible(resolved, name, caller_def_id)
     {
         for field in fields {
@@ -32,6 +35,14 @@ pub(super) fn member_completions(
         }
     }
 
+    if let Some((machine_name, host_info)) = hosted_machine {
+        out.extend(hosted_machine_member_completions(
+            resolved,
+            machine_name,
+            host_info,
+        ));
+    }
+    out.extend(hosted_wait_member_completions(resolved, &owner));
     out.extend(builtin_member_completions(&owner));
     out.extend(nominal_method_completions(resolved, &owner, caller_def_id));
     out
@@ -124,6 +135,83 @@ fn builtin_member_completions(owner: &Type) -> Vec<CompletionItem> {
         _ => {}
     }
     out
+}
+
+fn hosted_machine_for_owner<'a>(
+    resolved: &'a ResolvedContext,
+    owner: &Type,
+) -> Option<(&'a str, &'a crate::core::linear::LinearHostInfo)> {
+    let owner_name = match owner {
+        Type::Struct { name, .. } | Type::Enum { name, .. } => name.as_str(),
+        _ => return None,
+    };
+    resolved
+        .linear_index
+        .machine_hosts
+        .iter()
+        .find(|(_, host)| host.handle_type_name == owner_name)
+        .map(|(machine_name, host)| (machine_name.as_str(), host))
+}
+
+fn hosted_machine_member_completions(
+    resolved: &ResolvedContext,
+    machine_name: &str,
+    host_info: &crate::core::linear::LinearHostInfo,
+) -> Vec<CompletionItem> {
+    let mut out = Vec::new();
+    let roles = resolved
+        .linear_index
+        .types
+        .get(&host_info.hosted_type_name)
+        .map(|ty| ty.roles.keys().cloned().collect::<Vec<_>>())
+        .unwrap_or_default();
+    let role_list = if roles.is_empty() {
+        "Role".to_string()
+    } else {
+        roles.join(" | ")
+    };
+    out.push(synthetic_function_completion(
+        "create",
+        &format!("create({} as {role_list})", host_info.hosted_type_name),
+    ));
+    out.push(synthetic_function_completion(
+        "resume",
+        &format!("resume({} as {role_list}, key)", host_info.hosted_type_name),
+    ));
+    out.push(synthetic_function_completion(
+        "lookup",
+        &format!("lookup({}, key)", host_info.hosted_type_name),
+    ));
+
+    // `send` is a real generated method, but some hosted machines may not
+    // currently expose one if they have no supported `on` payloads. Keep the
+    // more informative machine-surface operations available regardless.
+    let _ = machine_name;
+    out
+}
+
+fn hosted_wait_member_completions(resolved: &ResolvedContext, owner: &Type) -> Vec<CompletionItem> {
+    let owner_name = match owner {
+        Type::Struct { name, .. } | Type::Enum { name, .. } => name.as_str(),
+        _ => return Vec::new(),
+    };
+
+    if resolved.linear_index.machine_hosts.values().any(|host| {
+        host.wait_helpers.contains_key(owner_name) || host.hosted_type_name == owner_name
+    }) {
+        vec![synthetic_function_completion("wait", "wait()")]
+    } else {
+        Vec::new()
+    }
+}
+
+fn synthetic_function_completion(label: &str, detail: &str) -> CompletionItem {
+    CompletionItem {
+        label: label.to_string(),
+        kind: CompletionKind::Function,
+        def_id: UNKNOWN_DEF_ID,
+        detail: Some(detail.to_string()),
+    }
 }
 
 fn push_builtin_prop(out: &mut Vec<CompletionItem>, label: &str, detail: &str) {
