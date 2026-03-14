@@ -8,6 +8,8 @@ memory behavior without hidden aliasing.
 
 - [Getting Started](getting-started.md) — Clone the repo, build, and run your
   first program
+- [Why Machina](why-machina.md) — What linear types and hosted machines make
+  possible
 
 ## Learning Machina
 
