@@ -1385,46 +1385,12 @@ fn build_machine_action_session_func(
                         node_id_gen,
                         span,
                     )),
-                    BlockItem::Stmt(let_bind_stmt(
-                        "__mc_result",
-                        call_expr(
-                            HOSTED_LINEAR_DELIVER_FN,
-                            vec![
-                                var_expr("__mc_rt", node_id_gen, span),
-                                self_field_expr("_id", node_id_gen, span),
-                                struct_field_expr(
-                                    &info.instance_param_name,
-                                    &info.key_field_name,
-                                    node_id_gen,
-                                    span,
-                                ),
-                                int_expr(info.source_state_tag, node_id_gen, span),
-                                int_expr(info.target_state_tag, node_id_gen, span),
-                            ],
-                            node_id_gen,
-                            span,
-                        ),
-                        node_id_gen,
-                        span,
-                    )),
-                    BlockItem::Expr(return_enum_error_if_eq(
-                        "__mc_result",
-                        HOSTED_UPDATE_STALE,
-                        "SessionError",
-                        "InvalidState",
-                        node_id_gen,
-                        span,
-                    )),
-                    BlockItem::Expr(return_enum_error_if_ne(
-                        "__mc_result",
-                        HOSTED_UPDATE_OK,
-                        "SessionError",
-                        "InstanceNotFound",
-                        node_id_gen,
-                        span,
-                    )),
                 ],
-                tail: Some(Box::new(action_body)),
+                tail: Some(Box::new(build_machine_action_commit_expr(
+                    info,
+                    action_body,
+                    node_id_gen,
+                ))),
             },
             span,
         },
@@ -2174,6 +2140,98 @@ fn build_machine_wait_state_expr(
     expr
 }
 
+fn build_machine_action_commit_expr(
+    info: &MachineActionSessionInfo,
+    action_body: Expr,
+    node_id_gen: &mut NodeIdGen,
+) -> Expr {
+    let span = Span::default();
+    let ok_value = if matches!(&info.ret_ty_expr.kind, TypeExprKind::Union { .. }) {
+        Expr {
+            id: node_id_gen.new_id(),
+            kind: ExprKind::Try {
+                fallible_expr: Box::new(action_body),
+                on_error: None,
+            },
+            span,
+        }
+    } else {
+        action_body
+    };
+    Expr {
+        id: node_id_gen.new_id(),
+        kind: ExprKind::Block {
+            items: vec![BlockItem::Stmt(let_bind_stmt(
+                "__mc_ok",
+                ok_value,
+                node_id_gen,
+                span,
+            ))],
+            tail: Some(Box::new(build_machine_action_deliver_then_return(
+                info,
+                "__mc_ok",
+                node_id_gen,
+            ))),
+        },
+        span,
+    }
+}
+
+fn build_machine_action_deliver_then_return(
+    info: &MachineActionSessionInfo,
+    ok_var_name: &str,
+    node_id_gen: &mut NodeIdGen,
+) -> Expr {
+    let span = Span::default();
+    Expr {
+        id: node_id_gen.new_id(),
+        kind: ExprKind::Block {
+            items: vec![
+                BlockItem::Stmt(let_bind_stmt(
+                    "__mc_result",
+                    call_expr(
+                        HOSTED_LINEAR_DELIVER_FN,
+                        vec![
+                            var_expr("__mc_rt", node_id_gen, span),
+                            self_field_expr("_id", node_id_gen, span),
+                            struct_field_expr(
+                                &info.instance_param_name,
+                                &info.key_field_name,
+                                node_id_gen,
+                                span,
+                            ),
+                            int_expr(info.source_state_tag, node_id_gen, span),
+                            int_expr(info.target_state_tag, node_id_gen, span),
+                        ],
+                        node_id_gen,
+                        span,
+                    ),
+                    node_id_gen,
+                    span,
+                )),
+                BlockItem::Expr(return_enum_error_if_eq(
+                    "__mc_result",
+                    HOSTED_UPDATE_STALE,
+                    "SessionError",
+                    "InvalidState",
+                    node_id_gen,
+                    span,
+                )),
+                BlockItem::Expr(return_enum_error_if_ne(
+                    "__mc_result",
+                    HOSTED_UPDATE_OK,
+                    "SessionError",
+                    "InstanceNotFound",
+                    node_id_gen,
+                    span,
+                )),
+            ],
+            tail: Some(Box::new(var_expr(ok_var_name, node_id_gen, span))),
+        },
+        span,
+    }
+}
+
 fn build_machine_deliver_result_expr(result_var_name: &str, node_id_gen: &mut NodeIdGen) -> Expr {
     let span = Span::default();
     let delivered = Expr {
@@ -2484,14 +2542,16 @@ fn widen_machine_override_return_type(
                 span,
             });
             widened.extend(variants.iter().skip(1).cloned());
-            widened.push(TypeExpr {
-                id: node_id_gen.new_id(),
-                kind: TypeExprKind::Named {
-                    ident: "SessionError".to_string(),
-                    type_args: Vec::new(),
-                },
-                span,
-            });
+            if !union_contains_named_type(variants, "SessionError") {
+                widened.push(TypeExpr {
+                    id: node_id_gen.new_id(),
+                    kind: TypeExprKind::Named {
+                        ident: "SessionError".to_string(),
+                        type_args: Vec::new(),
+                    },
+                    span,
+                });
+            }
             TypeExpr {
                 id: node_id_gen.new_id(),
                 kind: TypeExprKind::Union { variants: widened },
@@ -2500,6 +2560,15 @@ fn widen_machine_override_return_type(
         }
         _ => ret_ty_expr.clone(),
     }
+}
+
+fn union_contains_named_type(variants: &[TypeExpr], name: &str) -> bool {
+    variants.iter().any(|variant| {
+        matches!(
+            &variant.kind,
+            TypeExprKind::Named { ident, type_args } if ident == name && type_args.is_empty()
+        )
+    })
 }
 
 // ── Call rewriting ──────────────────────────────────────────────────

@@ -665,6 +665,74 @@ fn linear_type_hosted_action_rejects_role_disallowed() {
 }
 
 #[test]
+fn linear_type_hosted_fallible_action_does_not_advance_state_on_error() {
+    let run = run_program(
+        "linear_type_hosted_action_error_keeps_state",
+        r#"
+            @linear
+            type PullRequest = {
+                id: u64,
+
+                states {
+                    Draft,
+                    Review,
+                }
+
+                actions {
+                    submit: Draft -> Review | SessionError,
+                }
+
+                roles {
+                    Author { submit }
+                }
+            }
+
+            PullRequest :: {
+                fn submit(self) -> Review | SessionError {
+                    always_fail()
+                }
+            }
+
+            fn always_fail() -> PullRequest | SessionError {
+                SessionError::InvalidState
+            }
+
+            machine PRService hosts PullRequest(key: id) {
+                fn new() -> Self {
+                    Self {}
+                }
+            }
+
+            @machines
+            fn main() -> () | MachineError | SessionError {
+                let service = PRService::spawn()?;
+                let draft = service.create(PullRequest as Author)?;
+                let draft_id = draft.id;
+
+                match draft.submit() {
+                    _ok: PullRequest => {}
+                    _err: SessionError => {}
+                };
+
+                let resumed = service.resume(PullRequest as Author, draft_id)?;
+                match resumed {
+                    PullRequest::Draft(_) => println("draft"),
+                    PullRequest::Review(_) => println("review"),
+                };
+                ()
+            }
+        "#,
+    );
+
+    assert_eq!(run.status.code(), Some(0));
+    let stdout = String::from_utf8_lossy(&run.stdout);
+    assert_eq!(
+        stdout, "draft\n",
+        "failed hosted actions should leave runtime state unchanged"
+    );
+}
+
+#[test]
 fn linear_type_hosted_resume_returns_state_union() {
     let source = r#"
         @linear
