@@ -92,6 +92,7 @@ pub fn desugar_module(
             node_id_gen,
         );
         machine::rewrite_machine_constructor_self_types(module, &machine_infos);
+        machine::rewrite_public_machine_handle_types(module, &machine_infos);
     }
 
     if infos.is_empty() {

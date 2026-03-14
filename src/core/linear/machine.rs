@@ -3830,6 +3830,22 @@ pub(super) fn rewrite_machine_constructor_self_types(
     rewriter.visit_module(module);
 }
 
+/// Rewrite source-level `Machine<HostedMachine>` handle annotations to the
+/// generated concrete handle structs used by hosted linear lowering.
+pub(super) fn rewrite_public_machine_handle_types(
+    module: &mut Module,
+    machine_infos: &[MachineSpawnInfo],
+) {
+    let handle_types = machine_infos
+        .iter()
+        .map(|info| (info.machine_name.clone(), info.handle_type_name.clone()))
+        .collect::<HashMap<_, _>>();
+    let mut rewriter = PublicMachineHandleRewriter {
+        handle_types: &handle_types,
+    };
+    rewriter.visit_module(module);
+}
+
 struct MachineConstructorSelfRewriter<'a> {
     handle_types: &'a HashMap<String, String>,
     current_handle_type: Option<String>,
@@ -3891,6 +3907,68 @@ impl VisitorMut for MachineConstructorSelfRewriter<'_> {
                     span: expr.span,
                 });
             }
+        }
+        visit_mut::walk_expr(self, expr);
+    }
+}
+
+struct PublicMachineHandleRewriter<'a> {
+    handle_types: &'a HashMap<String, String>,
+}
+
+impl VisitorMut for PublicMachineHandleRewriter<'_> {
+    fn visit_stmt_expr(&mut self, stmt: &mut StmtExpr) {
+        match &mut stmt.kind {
+            StmtExprKind::LetBind {
+                decl_ty: Some(decl_ty),
+                ..
+            }
+            | StmtExprKind::VarBind {
+                decl_ty: Some(decl_ty),
+                ..
+            } => self.visit_type_expr(decl_ty),
+            StmtExprKind::VarDecl { decl_ty, .. } => self.visit_type_expr(decl_ty),
+            _ => {}
+        }
+        visit_mut::walk_stmt_expr(self, stmt);
+    }
+
+    fn visit_type_expr(&mut self, type_expr: &mut TypeExpr) {
+        if let TypeExprKind::Named { ident, type_args } = &mut type_expr.kind
+            && ident == "Machine"
+            && type_args.len() == 1
+            && let Some(type_arg) = type_args.first()
+            && let TypeExprKind::Named {
+                ident: machine_name,
+                type_args: machine_args,
+            } = &type_arg.kind
+            && machine_args.is_empty()
+            && let Some(handle_type) = self.handle_types.get(machine_name)
+        {
+            *ident = handle_type.clone();
+            type_args.clear();
+            return;
+        }
+        visit_mut::walk_type_expr(self, type_expr);
+    }
+
+    fn visit_expr(&mut self, expr: &mut Expr) {
+        if let ExprKind::StructLit {
+            name, type_args, ..
+        } = &mut expr.kind
+            && name == "Machine"
+            && type_args.len() == 1
+            && let Some(type_arg) = type_args.first()
+            && let TypeExprKind::Named {
+                ident: machine_name,
+                type_args: machine_args,
+            } = &type_arg.kind
+            && machine_args.is_empty()
+            && let Some(handle_type) = self.handle_types.get(machine_name)
+        {
+            *name = handle_type.clone();
+            type_args.clear();
+            return;
         }
         visit_mut::walk_expr(self, expr);
     }

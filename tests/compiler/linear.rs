@@ -210,6 +210,104 @@ fn linear_type_hosted_runtime_is_available_without_machines_attr() {
 }
 
 #[test]
+fn linear_type_hosted_machine_handle_is_user_facing_in_helper_functions() {
+    let source = r#"
+            type FraudAlert = {
+                payment_id: u64,
+            }
+
+            @linear
+            type Payment = {
+                id: u64,
+
+                states {
+                    Created,
+                    Authorized,
+                    Declined,
+                }
+
+                actions {
+                    authorize: Created -> Authorized,
+                }
+
+                triggers {
+                    FraudAlert: Authorized -> Declined,
+                }
+
+                roles {
+                    Merchant { authorize }
+                }
+            }
+
+            Payment :: {
+                fn authorize(self) -> Authorized {
+                    Authorized {}
+                }
+            }
+
+            machine PaymentService hosts Payment(key: id) {
+                fn new() -> Self { Self {} }
+
+                trigger FraudAlert(payment) {
+                    payment;
+                    Declined {}
+                }
+
+                on FraudAlert(event) {
+                    let _result = self.deliver(event.payment_id, event);
+                }
+            }
+
+            fn checkout(service: Machine<PaymentService>) -> u64 | MachineError | SessionError {
+                let created = service.create(Payment as Merchant)?;
+                created.id
+            }
+
+            fn fraud_service(
+                service: Machine<PaymentService>,
+                payment_id: u64,
+            ) -> () | MachineError {
+                service.send(FraudAlert { payment_id })?;
+                ()
+            }
+
+            fn merchant_check(
+                service: Machine<PaymentService>,
+                payment_id: u64,
+            ) -> () | MachineError | SessionError {
+                let payment = service.resume(Payment as Merchant, payment_id)?;
+                match payment {
+                    Payment::Declined(_) => println("declined"),
+                    Payment::Authorized(_) => println("authorized"),
+                    _ => println("unexpected"),
+                };
+                ()
+            }
+
+            fn main() -> () | MachineError | SessionError {
+                let service = PaymentService::spawn()?;
+                let payment_id = checkout(service)?;
+                let payment = service.resume(Payment as Merchant, payment_id)?;
+                match payment {
+                    Payment::Created(_) => {
+                        let _authorized = payment.authorize()?;
+                    }
+                    _ => println("gateway-unexpected"),
+                };
+                fraud_service(service, payment_id)?;
+                merchant_check(service, payment_id)?;
+                ()
+            }
+        "#;
+
+    compile_linear_source(
+        source,
+        "tests/fixtures/linear/hosted_machine_handle_user_facing.mc",
+    )
+    .expect("hosted helper functions should accept Machine<HostedMachine> handles");
+}
+
+#[test]
 fn linear_type_direct_mode_preserves_shared_fields_across_transitions() {
     let run = run_program(
         "linear_type_shared_field_preservation",
