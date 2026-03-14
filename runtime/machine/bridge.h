@@ -110,6 +110,7 @@ uint64_t __mc_machine_runtime_step_u64(uint64_t runtime);
 // needed by generated hosted linear machine helpers.
 #define MC_HOSTED_LINEAR_KIND_DELIVER 1u
 #define MC_HOSTED_LINEAR_KIND_ON_BASE 1024u
+#define MC_HOSTED_LINEAR_KIND_TRIGGER_BASE 2048u
 
 uint64_t __mc_hosted_linear_spawn_u64(
     uint64_t runtime,
@@ -132,7 +133,10 @@ uint64_t __mc_hosted_linear_deliver_u64(
     uint64_t machine_id,
     uint64_t key,
     uint64_t expected_state_tag,
-    uint64_t new_state_tag
+    uint64_t target_state_tag,
+    uint64_t trigger_kind,
+    uint64_t payload0,
+    uint64_t payload1
 );
 uint64_t __mc_hosted_linear_wait_state_u64(
     uint64_t runtime,

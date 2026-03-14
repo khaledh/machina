@@ -28,6 +28,24 @@ MC_WEAK uint64_t __mc_hosted_linear_on_dispatch_u64(
     (void)payload1;
     return 0;
 }
+MC_WEAK uint64_t __mc_hosted_linear_trigger_dispatch_u64(
+    uint64_t machine_kind,
+    uint64_t machine_id,
+    uint64_t kind,
+    uint64_t current_state_tag,
+    uint64_t key,
+    uint64_t payload0,
+    uint64_t payload1
+) {
+    (void)machine_kind;
+    (void)machine_id;
+    (void)kind;
+    (void)current_state_tag;
+    (void)key;
+    (void)payload0;
+    (void)payload1;
+    return 0;
+}
 
 // Optional process-global managed runtime used by `@machines` entrypoint
 // bootstrap. This keeps runtime ownership explicit at source level while
@@ -135,6 +153,54 @@ static uint64_t mc_hosted_linear_lookup_state_tag(
     return state_tag;
 }
 
+static uint64_t mc_hosted_linear_process_deliver(
+    mc_hosted_linear_machine_ctx_t *ctx,
+    mc_machine_id_t machine_id,
+    uint64_t trigger_kind,
+    uint64_t key,
+    uint64_t expected_state_tag,
+    uint64_t target_state_tag,
+    uint64_t payload0,
+    uint64_t payload1,
+    uint64_t *fault_code
+) {
+    uint64_t actual_tag = 0;
+    if (!mc_hosted_instance_table_lookup(&ctx->instances, key, &actual_tag, NULL)) {
+        return MC_HOSTED_UPDATE_NOT_FOUND;
+    }
+    if (actual_tag != expected_state_tag) {
+        return MC_HOSTED_UPDATE_STALE;
+    }
+
+    uint64_t next_state_tag = target_state_tag;
+    if (trigger_kind != 0) {
+        next_state_tag = __mc_hosted_linear_trigger_dispatch_u64(
+            ctx->machine_kind,
+            (uint64_t)machine_id,
+            trigger_kind,
+            actual_tag,
+            key,
+            payload0,
+            payload1
+        );
+        if (next_state_tag == 0) {
+            if (fault_code) {
+                *fault_code = 3;
+            }
+            return MC_HOSTED_UPDATE_NOT_FOUND;
+        }
+    }
+
+    return mc_hosted_instance_table_update(
+        &ctx->instances,
+        key,
+        expected_state_tag,
+        next_state_tag,
+        0,
+        &actual_tag
+    );
+}
+
 static mc_dispatch_result_t mc_hosted_linear_dispatch(
     void *ctx_ptr,
     mc_machine_id_t machine_id,
@@ -173,19 +239,28 @@ static mc_dispatch_result_t mc_hosted_linear_dispatch(
 
     // Hosted-linear deliver envelopes repurpose the generic runtime payload:
     // - reply_cap_id: per-delivery completion ticket
-    // - pending_id: target state tag
+    // - pending_id: expected source state tag
     // - payload0: instance key
-    // - payload1: expected source state tag
-    uint64_t actual_tag = 0;
+    // - payload1: trigger payload word 0
+    // - origin_payload0: trigger payload word 1
+    // - origin_payload1: trigger kind (0 => static target-tag transition)
+    // - origin_request_site_key: static target state tag fallback
     ctx->completed_delivery_ticket = env->reply_cap_id;
-    ctx->completed_delivery_result = mc_hosted_instance_table_update(
-        &ctx->instances,
+    ctx->completed_delivery_result = mc_hosted_linear_process_deliver(
+        ctx,
+        machine_id,
+        env->origin_payload1,
         env->payload0,
-        env->payload1,
         env->pending_id,
-        0,
-        &actual_tag
+        env->origin_request_site_key,
+        env->payload1,
+        env->origin_payload0,
+        fault_code
     );
+    if (ctx->completed_delivery_result == MC_HOSTED_UPDATE_NOT_FOUND && fault_code &&
+        *fault_code != 0) {
+        return MC_DISPATCH_FAULT;
+    }
     return MC_DISPATCH_OK;
 }
 
@@ -382,12 +457,15 @@ uint64_t __mc_hosted_linear_deliver_u64(
     uint64_t machine_id,
     uint64_t key,
     uint64_t expected_state_tag,
-    uint64_t new_state_tag
+    uint64_t target_state_tag,
+    uint64_t trigger_kind,
+    uint64_t payload0,
+    uint64_t payload1
 ) {
     mc_machine_runtime_t *rt = mc_runtime_from_handle(runtime);
     mc_machine_id_t id = 0;
     if (!rt || !mc_machine_id_from_u64(machine_id, &id) || key == 0 ||
-        expected_state_tag == 0 || new_state_tag == 0) {
+        expected_state_tag == 0 || target_state_tag == 0) {
         return MC_HOSTED_UPDATE_NOT_FOUND;
     }
 
@@ -397,26 +475,28 @@ uint64_t __mc_hosted_linear_deliver_u64(
     }
     mc_emit_staging_ctx_t *emit_ctx = mc_emit_staging_current();
     if (emit_ctx && emit_ctx->rt == rt && emit_ctx->machine_id == id) {
-        uint64_t actual_tag = 0;
-        return mc_hosted_instance_table_update(
-            &ctx->instances,
+        return mc_hosted_linear_process_deliver(
+            ctx,
+            id,
+            trigger_kind,
             key,
             expected_state_tag,
-            new_state_tag,
-            0,
-            &actual_tag
+            target_state_tag,
+            payload0,
+            payload1,
+            NULL
         );
     }
     mc_machine_envelope_t env = {
         .kind = MC_HOSTED_LINEAR_KIND_DELIVER,
         .src = 0,
         .reply_cap_id = ctx->next_delivery_ticket++,
-        .pending_id = new_state_tag,
+        .pending_id = expected_state_tag,
         .payload0 = key,
-        .payload1 = expected_state_tag,
-        .origin_payload0 = 0,
-        .origin_payload1 = 0,
-        .origin_request_site_key = 0,
+        .payload1 = payload0,
+        .origin_payload0 = payload1,
+        .origin_payload1 = trigger_kind,
+        .origin_request_site_key = target_state_tag,
     };
 
     mc_mailbox_enqueue_result_t enqueue = __mc_machine_runtime_enqueue(rt, id, &env);

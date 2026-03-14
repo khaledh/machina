@@ -91,12 +91,21 @@ pub(super) struct MachineActionSessionInfo {
 
 #[derive(Clone, Debug)]
 pub(super) struct MachineTriggerHandlerInfo {
+    pub machine_name: String,
+    pub machine_kind: u64,
     pub hosted_type_name: String,
     pub handle_type_name: String,
+    pub key_field_name: String,
+    pub shared_fields: Vec<(String, TypeExpr)>,
+    pub state_names: Vec<String>,
+    pub event_type_name: String,
+    pub event_kind: u64,
+    pub payload_shape: Option<HostedOnPayloadShape>,
     pub instance_param_name: String,
     pub params: Vec<Param>,
     pub body: Expr,
     pub fn_name: String,
+    pub dispatch_wrapper_fn_name: String,
 }
 
 #[derive(Clone, Debug)]
@@ -127,6 +136,8 @@ pub(super) struct MachineDeliverInfo {
     pub event_type_name: String,
     pub source_state_tag: u64,
     pub target_state_tag: u64,
+    pub event_kind: u64,
+    pub payload_shape: Option<HostedOnPayloadShape>,
     pub fn_name: String,
 }
 
@@ -183,6 +194,13 @@ pub(crate) fn machine_trigger_handler_fn_name(machine_name: &str, trigger_name: 
     format!("__mc_machine_trigger_{machine_name}_{trigger_name}")
 }
 
+pub(crate) fn machine_trigger_dispatch_wrapper_fn_name(
+    machine_name: &str,
+    trigger_name: &str,
+) -> String {
+    format!("__mc_machine_trigger_dispatch_{machine_name}_{trigger_name}")
+}
+
 pub(crate) fn machine_on_handler_fn_name(machine_name: &str, handler_index: usize) -> String {
     format!("__mc_machine_on_{machine_name}_{handler_index}")
 }
@@ -214,10 +232,12 @@ const HOSTED_LINEAR_RESUME_STATE_FN: &str = "__mc_hosted_linear_resume_state_u64
 const HOSTED_LINEAR_DELIVER_FN: &str = "__mc_hosted_linear_deliver_u64";
 const HOSTED_LINEAR_WAIT_STATE_FN: &str = "__mc_hosted_linear_wait_state_u64";
 const HOSTED_LINEAR_ON_DISPATCH_FN: &str = "__mc_hosted_linear_on_dispatch_u64";
+const HOSTED_LINEAR_TRIGGER_DISPATCH_FN: &str = "__mc_hosted_linear_trigger_dispatch_u64";
 const DEFAULT_MACHINE_MAILBOX_CAP: u64 = 64;
 const HOSTED_UPDATE_OK: u64 = 0;
 const HOSTED_UPDATE_STALE: u64 = 1;
 const HOSTED_LINEAR_ON_KIND_BASE: u64 = 1024;
+const HOSTED_LINEAR_TRIGGER_KIND_BASE: u64 = 2048;
 
 // ── Collection ──────────────────────────────────────────────────────
 
@@ -416,7 +436,8 @@ pub(super) fn collect_machine_trigger_handler_infos(
     module
         .machine_defs()
         .into_iter()
-        .flat_map(|machine_def| {
+        .enumerate()
+        .flat_map(|(machine_index, machine_def)| {
             let Some(type_def) = type_defs.get(&machine_def.host.type_name) else {
                 return Vec::new();
             };
@@ -429,6 +450,16 @@ pub(super) fn collect_machine_trigger_handler_infos(
                 .map(|trigger| (trigger.name.as_str(), trigger))
                 .collect::<HashMap<_, _>>();
             let handle_type_name = machine_handle_type_name(&machine_def.name);
+            let shared_fields = linear
+                .fields
+                .iter()
+                .map(|field| (field.name.clone(), field.ty.clone()))
+                .collect::<Vec<_>>();
+            let state_names = linear
+                .states
+                .iter()
+                .map(|state| state.name.clone())
+                .collect::<Vec<_>>();
             machine_def
                 .items
                 .iter()
@@ -436,14 +467,35 @@ pub(super) fn collect_machine_trigger_handler_infos(
                     let MachineItem::Trigger(handler) = item else {
                         return None;
                     };
-                    let _ = triggers_by_name.get(handler.name.as_str())?;
+                    let trigger = triggers_by_name.get(handler.name.as_str())?;
+                    let event_type_name = trigger.name.clone();
                     Some(MachineTriggerHandlerInfo {
+                        machine_name: machine_def.name.clone(),
+                        machine_kind: machine_index as u64 + 1,
                         hosted_type_name: machine_def.host.type_name.clone(),
                         handle_type_name: handle_type_name.clone(),
+                        key_field_name: machine_def.host.key_field.clone(),
+                        shared_fields: shared_fields.clone(),
+                        state_names: state_names.clone(),
+                        event_type_name: event_type_name.clone(),
+                        event_kind: HOSTED_LINEAR_TRIGGER_KIND_BASE
+                            + linear
+                                .triggers
+                                .iter()
+                                .position(|candidate| candidate.name == event_type_name)
+                                .unwrap_or(0) as u64
+                            + 1,
+                        payload_shape: collect_supported_on_payload_shape(
+                            type_defs.get(&event_type_name),
+                        ),
                         instance_param_name: handler.instance_param.clone(),
                         params: handler.params.clone(),
                         body: handler.body.clone(),
                         fn_name: machine_trigger_handler_fn_name(&machine_def.name, &handler.name),
+                        dispatch_wrapper_fn_name: machine_trigger_dispatch_wrapper_fn_name(
+                            &machine_def.name,
+                            &handler.name,
+                        ),
                     })
                 })
                 .collect::<Vec<_>>()
@@ -562,7 +614,8 @@ pub(super) fn collect_machine_deliver_infos(module: &Module) -> Vec<MachineDeliv
             linear
                 .triggers
                 .iter()
-                .filter_map(|trigger| {
+                .enumerate()
+                .filter_map(|(trigger_index, trigger)| {
                     let source_state_tag = *state_tags.get(&trigger.source_state)?;
                     let target_state_tag = *state_tags.get(&trigger.target_state)?;
                     Some(MachineDeliverInfo {
@@ -571,6 +624,10 @@ pub(super) fn collect_machine_deliver_infos(module: &Module) -> Vec<MachineDeliv
                         event_type_name: trigger.name.clone(),
                         source_state_tag,
                         target_state_tag,
+                        event_kind: HOSTED_LINEAR_TRIGGER_KIND_BASE + trigger_index as u64 + 1,
+                        payload_shape: collect_supported_on_payload_shape(
+                            type_defs.get(&trigger.name),
+                        ),
                         fn_name: machine_deliver_fn_name(&machine_def.name, &trigger.name),
                     })
                 })
@@ -800,7 +857,10 @@ pub(super) fn ensure_hosted_runtime_intrinsics(module: &mut Module, node_id_gen:
                 ("machine_id", u64_type_expr(node_id_gen, span)),
                 ("key", u64_type_expr(node_id_gen, span)),
                 ("expected_state_tag", u64_type_expr(node_id_gen, span)),
-                ("new_state_tag", u64_type_expr(node_id_gen, span)),
+                ("target_state_tag", u64_type_expr(node_id_gen, span)),
+                ("trigger_kind", u64_type_expr(node_id_gen, span)),
+                ("payload0", u64_type_expr(node_id_gen, span)),
+                ("payload1", u64_type_expr(node_id_gen, span)),
             ],
         ),
         (
@@ -892,6 +952,9 @@ pub(super) fn append_machine_spawn_support(
                 on_handler_infos.iter().any(|handler| {
                     handler.machine_name == info.machine_name && handler.payload_shape.is_some()
                 }),
+                trigger_handler_infos.iter().any(|handler| {
+                    handler.machine_name == info.machine_name && handler.payload_shape.is_some()
+                }),
                 node_id_gen,
             )));
         // Generate a create helper for each role the hosted type declares.
@@ -941,6 +1004,11 @@ pub(super) fn append_machine_spawn_support(
                 trigger_info,
                 node_id_gen,
             )));
+        if trigger_info.payload_shape.is_some() {
+            module.top_level_items.push(TopLevelItem::FuncDef(
+                build_machine_trigger_dispatch_wrapper_func(trigger_info, node_id_gen),
+            ));
+        }
     }
 
     for on_info in on_handler_infos {
@@ -967,6 +1035,15 @@ pub(super) fn append_machine_spawn_support(
                 on_handler_infos,
                 node_id_gen,
             )));
+    }
+
+    if trigger_handler_infos
+        .iter()
+        .any(|info| info.payload_shape.is_some())
+    {
+        module.top_level_items.push(TopLevelItem::FuncDef(
+            build_hosted_linear_trigger_dispatch_func(trigger_handler_infos, node_id_gen),
+        ));
     }
 
     for deliver_info in deliver_infos {
@@ -1108,8 +1185,8 @@ fn build_machine_handle_send_method(
                                 var_expr("__mc_rt", node_id_gen, span),
                                 self_field_expr("_id", node_id_gen, span),
                                 int_expr(info.event_kind, node_id_gen, span),
-                                payload_word_expr(payload_shape, 0, node_id_gen, span),
-                                payload_word_expr(payload_shape, 1, node_id_gen, span),
+                                payload_word_expr(payload_shape, "payload", 0, node_id_gen, span),
+                                payload_word_expr(payload_shape, "payload", 1, node_id_gen, span),
                             ],
                             node_id_gen,
                             span,
@@ -1296,10 +1373,222 @@ fn build_hosted_linear_on_dispatch_func(
     }
 }
 
+fn build_machine_trigger_dispatch_wrapper_func(
+    info: &MachineTriggerHandlerInfo,
+    node_id_gen: &mut NodeIdGen,
+) -> FuncDef {
+    let span = Span::default();
+    let Some(payload_shape) = info.payload_shape.as_ref() else {
+        panic!("compiler bug: hosted trigger dispatch wrapper requires supported payload shape");
+    };
+    let mut next_state_expr = int_expr(0, node_id_gen, span);
+    for (index, state_name) in info.state_names.iter().enumerate().rev() {
+        let mut call_args = vec![
+            var_expr("__mc_self", node_id_gen, span),
+            var_expr("__mc_instance", node_id_gen, span),
+        ];
+        if !info.params.is_empty() {
+            call_args.push(var_expr("__mc_event", node_id_gen, span));
+        }
+        let state_expr = Expr {
+            id: node_id_gen.new_id(),
+            kind: ExprKind::EnumVariant {
+                enum_name: info.hosted_type_name.clone(),
+                variant: state_name.clone(),
+                type_args: Vec::new(),
+                payload: placeholder_shared_field_payload_with_key_var(
+                    &info.shared_fields,
+                    &info.key_field_name,
+                    "key",
+                    node_id_gen,
+                ),
+            },
+            span,
+        };
+        next_state_expr = Expr {
+            id: node_id_gen.new_id(),
+            kind: ExprKind::If {
+                cond: Box::new(eq_var_to_int(
+                    "current_state_tag",
+                    (index + 1) as u64,
+                    node_id_gen,
+                    span,
+                )),
+                then_body: Box::new(Expr {
+                    id: node_id_gen.new_id(),
+                    kind: ExprKind::Block {
+                        items: vec![
+                            BlockItem::Stmt(let_bind_stmt(
+                                "__mc_instance",
+                                state_expr,
+                                node_id_gen,
+                                span,
+                            )),
+                            BlockItem::Stmt(let_bind_stmt(
+                                "__mc_next",
+                                call_expr(&info.fn_name, call_args, node_id_gen, span),
+                                node_id_gen,
+                                span,
+                            )),
+                        ],
+                        tail: Some(Box::new(build_machine_state_tag_expr(
+                            &info.hosted_type_name,
+                            &info.state_names,
+                            "__mc_next",
+                            node_id_gen,
+                        ))),
+                    },
+                    span,
+                }),
+                else_body: Box::new(next_state_expr),
+            },
+            span,
+        };
+    }
+    FuncDef {
+        id: node_id_gen.new_id(),
+        attrs: Vec::new(),
+        sig: FunctionSig {
+            name: info.dispatch_wrapper_fn_name.clone(),
+            type_params: Vec::new(),
+            params: vec![
+                u64_param("machine_id", node_id_gen, span),
+                u64_param("current_state_tag", node_id_gen, span),
+                u64_param("key", node_id_gen, span),
+                u64_param("payload0", node_id_gen, span),
+                u64_param("payload1", node_id_gen, span),
+            ],
+            ret_ty_expr: u64_type_expr(node_id_gen, span),
+            span,
+        },
+        body: Expr {
+            id: node_id_gen.new_id(),
+            kind: ExprKind::Block {
+                items: vec![
+                    BlockItem::Stmt(let_bind_stmt(
+                        "__mc_self",
+                        Expr {
+                            id: node_id_gen.new_id(),
+                            kind: ExprKind::StructLit {
+                                name: info.handle_type_name.clone(),
+                                type_args: Vec::new(),
+                                fields: vec![StructLitField {
+                                    id: node_id_gen.new_id(),
+                                    name: "_id".to_string(),
+                                    value: var_expr("machine_id", node_id_gen, span),
+                                    span,
+                                }],
+                            },
+                            span,
+                        },
+                        node_id_gen,
+                        span,
+                    )),
+                    BlockItem::Stmt(let_bind_stmt(
+                        "__mc_event",
+                        build_on_payload_expr(
+                            &info.event_type_name,
+                            payload_shape,
+                            node_id_gen,
+                            span,
+                        ),
+                        node_id_gen,
+                        span,
+                    )),
+                ],
+                tail: Some(Box::new(next_state_expr)),
+            },
+            span,
+        },
+        span,
+    }
+}
+
+fn build_hosted_linear_trigger_dispatch_func(
+    trigger_handler_infos: &[MachineTriggerHandlerInfo],
+    node_id_gen: &mut NodeIdGen,
+) -> FuncDef {
+    let span = Span::default();
+    let mut items = Vec::new();
+    for info in trigger_handler_infos
+        .iter()
+        .filter(|info| info.payload_shape.is_some())
+    {
+        items.push(BlockItem::Expr(Expr {
+            id: node_id_gen.new_id(),
+            kind: ExprKind::If {
+                cond: Box::new(and_expr(
+                    eq_var_to_int("machine_kind", info.machine_kind, node_id_gen, span),
+                    eq_var_to_int("kind", info.event_kind, node_id_gen, span),
+                    node_id_gen,
+                    span,
+                )),
+                then_body: Box::new(Expr {
+                    id: node_id_gen.new_id(),
+                    kind: ExprKind::Block {
+                        items: vec![BlockItem::Stmt(StmtExpr {
+                            id: node_id_gen.new_id(),
+                            kind: StmtExprKind::Return {
+                                value: Some(Box::new(call_expr(
+                                    &info.dispatch_wrapper_fn_name,
+                                    vec![
+                                        var_expr("machine_id", node_id_gen, span),
+                                        var_expr("current_state_tag", node_id_gen, span),
+                                        var_expr("key", node_id_gen, span),
+                                        var_expr("payload0", node_id_gen, span),
+                                        var_expr("payload1", node_id_gen, span),
+                                    ],
+                                    node_id_gen,
+                                    span,
+                                ))),
+                            },
+                            span,
+                        })],
+                        tail: None,
+                    },
+                    span,
+                }),
+                else_body: Box::new(empty_block_expr(node_id_gen, span)),
+            },
+            span,
+        }));
+    }
+
+    FuncDef {
+        id: node_id_gen.new_id(),
+        attrs: Vec::new(),
+        sig: FunctionSig {
+            name: HOSTED_LINEAR_TRIGGER_DISPATCH_FN.to_string(),
+            type_params: Vec::new(),
+            params: vec![
+                u64_param("machine_kind", node_id_gen, span),
+                u64_param("machine_id", node_id_gen, span),
+                u64_param("kind", node_id_gen, span),
+                u64_param("current_state_tag", node_id_gen, span),
+                u64_param("key", node_id_gen, span),
+                u64_param("payload0", node_id_gen, span),
+                u64_param("payload1", node_id_gen, span),
+            ],
+            ret_ty_expr: u64_type_expr(node_id_gen, span),
+            span,
+        },
+        body: Expr {
+            id: node_id_gen.new_id(),
+            kind: ExprKind::Block {
+                items,
+                tail: Some(Box::new(int_expr(0, node_id_gen, span))),
+            },
+            span,
+        },
+        span,
+    }
+}
+
 /// Generate: `fn __mc_machine_spawn_X() -> HandleType | MachineError { HandleType { _id: 1 } }`
 fn build_machine_spawn_func(
     info: &MachineSpawnInfo,
     has_on_dispatch: bool,
+    has_trigger_dispatch: bool,
     node_id_gen: &mut NodeIdGen,
 ) -> FuncDef {
     let span = Span::default();
@@ -1344,6 +1633,22 @@ fn build_machine_spawn_func(
         items.push(BlockItem::Expr(call_expr(
             HOSTED_LINEAR_ON_DISPATCH_FN,
             vec![
+                int_expr(0, node_id_gen, span),
+                int_expr(0, node_id_gen, span),
+                int_expr(0, node_id_gen, span),
+                int_expr(0, node_id_gen, span),
+                int_expr(0, node_id_gen, span),
+            ],
+            node_id_gen,
+            span,
+        )));
+    }
+    if has_trigger_dispatch {
+        items.push(BlockItem::Expr(call_expr(
+            HOSTED_LINEAR_TRIGGER_DISPATCH_FN,
+            vec![
+                int_expr(0, node_id_gen, span),
+                int_expr(0, node_id_gen, span),
                 int_expr(0, node_id_gen, span),
                 int_expr(0, node_id_gen, span),
                 int_expr(0, node_id_gen, span),
@@ -1933,6 +2238,16 @@ fn build_machine_on_handler_func(
 
 fn build_machine_deliver_func(info: &MachineDeliverInfo, node_id_gen: &mut NodeIdGen) -> FuncDef {
     let span = Span::default();
+    let payload0_expr = info
+        .payload_shape
+        .as_ref()
+        .map(|shape| payload_word_expr(shape, "event", 0, node_id_gen, span))
+        .unwrap_or_else(|| int_expr(0, node_id_gen, span));
+    let payload1_expr = info
+        .payload_shape
+        .as_ref()
+        .map(|shape| payload_word_expr(shape, "event", 1, node_id_gen, span))
+        .unwrap_or_else(|| int_expr(0, node_id_gen, span));
     FuncDef {
         id: node_id_gen.new_id(),
         attrs: Vec::new(),
@@ -2013,6 +2328,9 @@ fn build_machine_deliver_func(info: &MachineDeliverInfo, node_id_gen: &mut NodeI
                                 var_expr("key", node_id_gen, span),
                                 int_expr(info.source_state_tag, node_id_gen, span),
                                 int_expr(info.target_state_tag, node_id_gen, span),
+                                int_expr(info.event_kind, node_id_gen, span),
+                                payload0_expr.clone(),
+                                payload1_expr.clone(),
                             ],
                             node_id_gen,
                             span,
@@ -2291,6 +2609,7 @@ fn call_expr(callee_name: &str, args: Vec<Expr>, node_id_gen: &mut NodeIdGen, sp
 
 fn payload_word_expr(
     payload_shape: &HostedOnPayloadShape,
+    source_var_name: &str,
     word_index: usize,
     node_id_gen: &mut NodeIdGen,
     span: Span,
@@ -2298,14 +2617,14 @@ fn payload_word_expr(
     match (payload_shape, word_index) {
         (HostedOnPayloadShape::Empty, _) => int_expr(0, node_id_gen, span),
         (HostedOnPayloadShape::OneU64 { field0 }, 0) => {
-            struct_field_expr("payload", field0, node_id_gen, span)
+            struct_field_expr(source_var_name, field0, node_id_gen, span)
         }
         (HostedOnPayloadShape::OneU64 { .. }, _) => int_expr(0, node_id_gen, span),
         (HostedOnPayloadShape::TwoU64 { field0, .. }, 0) => {
-            struct_field_expr("payload", field0, node_id_gen, span)
+            struct_field_expr(source_var_name, field0, node_id_gen, span)
         }
         (HostedOnPayloadShape::TwoU64 { field1, .. }, 1) => {
-            struct_field_expr("payload", field1, node_id_gen, span)
+            struct_field_expr(source_var_name, field1, node_id_gen, span)
         }
         (HostedOnPayloadShape::TwoU64 { .. }, _) => int_expr(0, node_id_gen, span),
     }
@@ -2655,6 +2974,39 @@ fn build_machine_resume_state_expr(
     expr
 }
 
+fn build_machine_state_tag_expr(
+    enum_name: &str,
+    state_names: &[String],
+    state_var_name: &str,
+    node_id_gen: &mut NodeIdGen,
+) -> Expr {
+    let span = Span::default();
+    Expr {
+        id: node_id_gen.new_id(),
+        kind: ExprKind::Match {
+            scrutinee: Box::new(var_expr(state_var_name, node_id_gen, span)),
+            arms: state_names
+                .iter()
+                .enumerate()
+                .map(|(index, state_name)| crate::core::ast::MatchArm {
+                    id: node_id_gen.new_id(),
+                    pattern: crate::core::ast::MatchPattern::EnumVariant {
+                        id: node_id_gen.new_id(),
+                        enum_name: Some(enum_name.to_string()),
+                        type_args: Vec::new(),
+                        variant_name: state_name.clone(),
+                        bindings: vec![crate::core::ast::MatchPatternBinding::Wildcard { span }],
+                        span,
+                    },
+                    body: int_expr((index + 1) as u64, node_id_gen, span),
+                    span,
+                })
+                .collect(),
+        },
+        span,
+    }
+}
+
 fn build_machine_wait_state_expr(
     info: &MachineWaitInfo,
     tag_var_name: &str,
@@ -2773,6 +3125,9 @@ fn build_machine_action_deliver_then_return(
                             ),
                             int_expr(info.source_state_tag, node_id_gen, span),
                             int_expr(info.target_state_tag, node_id_gen, span),
+                            int_expr(0, node_id_gen, span),
+                            int_expr(0, node_id_gen, span),
+                            int_expr(0, node_id_gen, span),
                         ],
                         node_id_gen,
                         span,

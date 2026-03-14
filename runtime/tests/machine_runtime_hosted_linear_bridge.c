@@ -9,6 +9,26 @@ typedef struct mc_test_hosted_linear_ctx {
     uint64_t machine_kind;
 } mc_test_hosted_linear_ctx_t;
 
+uint64_t __mc_hosted_linear_trigger_dispatch_u64(
+    uint64_t machine_kind,
+    uint64_t machine_id,
+    uint64_t kind,
+    uint64_t current_state_tag,
+    uint64_t key,
+    uint64_t payload0,
+    uint64_t payload1
+) {
+    (void)machine_id;
+    (void)key;
+    (void)payload0;
+    (void)payload1;
+    if (machine_kind == 1 && kind == MC_HOSTED_LINEAR_KIND_TRIGGER_BASE + 1 &&
+        current_state_tag == 1) {
+        return 2;
+    }
+    return 0;
+}
+
 // Validates the first hosted-linear runtime bridge surface:
 // - spawn allocates a real machine slot with hosted instance storage
 // - create allocates an instance with a monotonic key and initial state tag
@@ -79,7 +99,16 @@ int main(void) {
         return 9;
     }
 
-    if (__mc_hosted_linear_deliver_u64(rt_handle, machine_id, key, 1, 2) !=
+    if (__mc_hosted_linear_deliver_u64(
+            rt_handle,
+            machine_id,
+            key,
+            1,
+            2,
+            MC_HOSTED_LINEAR_KIND_TRIGGER_BASE + 1,
+            0,
+            0
+        ) !=
         MC_HOSTED_UPDATE_OK) {
         __mc_machine_runtime_free(rt_handle);
         return 10;
@@ -97,13 +126,31 @@ int main(void) {
         return 12;
     }
 
-    if (__mc_hosted_linear_deliver_u64(rt_handle, machine_id, key, 1, 3) !=
+    if (__mc_hosted_linear_deliver_u64(
+            rt_handle,
+            machine_id,
+            key,
+            1,
+            3,
+            MC_HOSTED_LINEAR_KIND_TRIGGER_BASE + 1,
+            0,
+            0
+        ) !=
         MC_HOSTED_UPDATE_STALE) {
         __mc_machine_runtime_free(rt_handle);
         return 13;
     }
 
-    if (__mc_hosted_linear_deliver_u64(rt_handle, machine_id, key + 1, 2, 3) !=
+    if (__mc_hosted_linear_deliver_u64(
+            rt_handle,
+            machine_id,
+            key + 1,
+            2,
+            3,
+            MC_HOSTED_LINEAR_KIND_TRIGGER_BASE + 1,
+            0,
+            0
+        ) !=
         MC_HOSTED_UPDATE_NOT_FOUND) {
         __mc_machine_runtime_free(rt_handle);
         return 14;
@@ -129,12 +176,12 @@ int main(void) {
         .kind = MC_HOSTED_LINEAR_KIND_DELIVER,
         .src = 0,
         .reply_cap_id = 777,
-        .pending_id = 2,
+        .pending_id = 1,
         .payload0 = wait_key,
-        .payload1 = 1,
+        .payload1 = 0,
         .origin_payload0 = 0,
-        .origin_payload1 = 0,
-        .origin_request_site_key = 0,
+        .origin_payload1 = MC_HOSTED_LINEAR_KIND_TRIGGER_BASE + 1,
+        .origin_request_site_key = 2,
     };
     if (__mc_machine_runtime_enqueue(rt, (mc_machine_id_t)machine_id, &env) !=
         MC_MAILBOX_ENQUEUE_OK) {
