@@ -8,7 +8,7 @@ use std::collections::{HashMap, HashSet};
 use crate::core::ast::{Module, ProtocolDef};
 use crate::core::context::TypestateRoleImplBinding;
 use crate::core::diag::Span;
-use crate::core::resolve::{DefId, DefTable};
+use crate::core::resolve::DefTable;
 use crate::core::typecheck::type_map::resolve_type_expr;
 use crate::core::types::Type;
 
@@ -93,7 +93,6 @@ pub struct TypestateProtocolBindingFact {
     pub protocol_name: String,
     pub role_name: String,
     pub role_label: String,
-    pub role_def_id: Option<DefId>,
     pub peer_role_bindings: Vec<TypestateProtocolPeerBindingFact>,
     pub span: Span,
 }
@@ -103,7 +102,6 @@ pub struct TypestateProtocolPeerBindingFact {
     pub node_id: crate::core::ast::NodeId,
     pub field_name: String,
     pub role_name: String,
-    pub role_def_id: Option<DefId>,
     pub span: Span,
 }
 
@@ -135,7 +133,6 @@ pub fn build_protocol_index(
                 protocol_name,
                 role_name,
                 role_label: binding.path.join("::"),
-                role_def_id: binding.role_def_id,
                 peer_role_bindings: binding
                     .peer_role_bindings
                     .iter()
@@ -143,7 +140,6 @@ pub fn build_protocol_index(
                         node_id: peer.node_id,
                         field_name: peer.field_name.clone(),
                         role_name: peer.role_name.clone(),
-                        role_def_id: peer.role_def_id,
                         span: peer.span,
                     })
                     .collect(),

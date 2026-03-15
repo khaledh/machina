@@ -379,7 +379,6 @@ fn attach_role_impls(
         let typestate = builders.entry(binding.typestate_name.clone()).or_default();
         typestate.role_impls.push(MachineRoleImplPlan {
             path: binding.path.clone(),
-            role_def_id: binding.role_def_id,
             span: binding.span,
         });
     }

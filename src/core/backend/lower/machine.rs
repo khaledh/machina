@@ -791,10 +791,7 @@ fn serialize_descriptor(
     role_impls.sort_by(|a, b| a.path.join("::").cmp(&b.path.join("::")));
     for role in &role_impls {
         push_string(&mut bytes, &role.path.join("::"));
-        push_u64(
-            &mut bytes,
-            role.role_def_id.map(|id| id.0 as u64).unwrap_or(0),
-        );
+        push_u64(&mut bytes, 0);
     }
 
     bytes

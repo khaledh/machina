@@ -86,7 +86,6 @@ pub struct MachineDispatchEntryPlan {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct MachineRoleImplPlan {
     pub path: Vec<String>,
-    pub role_def_id: Option<DefId>,
     pub span: Span,
 }
 

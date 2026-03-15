@@ -76,7 +76,6 @@ pub(super) fn global_scope(resolved: &ResolvedContext) -> HashMap<String, Comple
 
 pub(super) fn completion_kind_for_def(kind: &DefKind) -> Option<CompletionKind> {
     match kind {
-        DefKind::ProtocolRole => None,
         DefKind::FuncDef { .. } | DefKind::FuncDecl { .. } => Some(CompletionKind::Function),
         DefKind::TypeDef { .. } => Some(CompletionKind::Type),
         DefKind::TraitDef { .. } => Some(CompletionKind::Trait),

@@ -39,7 +39,6 @@ pub(crate) fn semantic_tokens(state: &LookupState) -> Vec<SemanticToken> {
 
 fn semantic_token_kind_for_def(kind: &DefKind) -> Option<SemanticTokenKind> {
     match kind {
-        DefKind::ProtocolRole => None,
         DefKind::MachineDef => Some(SemanticTokenKind::Type),
         DefKind::TypeDef { .. } => Some(SemanticTokenKind::Type),
         DefKind::TraitDef { .. } => Some(SemanticTokenKind::Trait),

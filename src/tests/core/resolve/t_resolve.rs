@@ -436,25 +436,18 @@ fn test_resolve_typestate_role_impl_binds_protocol_role() {
     let resolved = result
         .context
         .expect("strict resolve should return context on success");
-    let role_def_id = resolved
-        .def_table
-        .lookup_node_def_id(role_impl_node_id)
-        .expect("role impl should resolve to protocol role def");
-    let role_def = resolved
-        .def_table
-        .lookup_def(role_def_id)
-        .expect("resolved role def should exist");
-    assert_eq!(role_def.name, "Auth::Client");
-    assert!(matches!(role_def.kind, DefKind::ProtocolRole));
+    assert!(
+        resolved
+            .def_table
+            .lookup_node_def_id(role_impl_node_id)
+            .is_none(),
+        "typestate role impls should no longer manufacture protocol role defs"
+    );
     assert_eq!(resolved.typestate_role_impls.len(), 1);
     assert_eq!(resolved.typestate_role_impls[0].typestate_name, "Gateway");
     assert_eq!(
         resolved.typestate_role_impls[0].path.join("::"),
         "Auth::Client"
-    );
-    assert_eq!(
-        resolved.typestate_role_impls[0].role_def_id,
-        Some(role_def_id)
     );
 }
 
@@ -562,15 +555,13 @@ fn test_resolve_typestate_role_binding_binds_protocol_role() {
     let peer_binding = &role_impl.peer_role_bindings[0];
     assert_eq!(peer_binding.field_name, "server");
     assert_eq!(peer_binding.role_name, "Server");
-    let role_def_id = peer_binding
-        .role_def_id
-        .expect("expected peer role binding to resolve");
-    let role_def = resolved
-        .def_table
-        .lookup_def(role_def_id)
-        .expect("resolved peer role def should exist");
-    assert_eq!(role_def.name, "Auth::Server");
-    assert!(matches!(role_def.kind, DefKind::ProtocolRole));
+    assert!(
+        resolved
+            .def_table
+            .lookup_node_def_id(peer_binding.node_id)
+            .is_none(),
+        "peer role bindings should no longer manufacture protocol role defs"
+    );
 }
 
 #[test]

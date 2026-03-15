@@ -315,7 +315,7 @@ pub fn resolve_stage_with_policy(
 }
 
 fn build_typestate_role_impl_bindings(
-    resolved: &TypecheckStageInput,
+    _resolved: &TypecheckStageInput,
     refs: &[TypestateRoleImplRef],
 ) -> Vec<crate::core::context::TypestateRoleImplBinding> {
     refs.iter()
@@ -323,7 +323,6 @@ fn build_typestate_role_impl_bindings(
             node_id: role_impl.id,
             typestate_name: role_impl.typestate_name.clone(),
             path: role_impl.path.clone(),
-            role_def_id: resolved.def_table.lookup_node_def_id(role_impl.id),
             peer_role_bindings: role_impl
                 .peer_role_bindings
                 .iter()
@@ -331,7 +330,6 @@ fn build_typestate_role_impl_bindings(
                     node_id: binding.id,
                     field_name: binding.field_name.clone(),
                     role_name: binding.role_name.clone(),
-                    role_def_id: resolved.def_table.lookup_node_def_id(binding.id),
                     field_ty: binding.field_ty.clone(),
                     span: binding.span,
                 })

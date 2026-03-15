@@ -465,7 +465,6 @@ impl SymbolResolver {
 
     fn map_symbol_kind_to_def_kind(kind: &SymbolKind) -> DefKind {
         match kind {
-            SymbolKind::ProtocolRole { .. } => DefKind::ProtocolRole,
             SymbolKind::MachineDef { .. } => DefKind::MachineDef,
             SymbolKind::TraitDef { .. } => DefKind::TraitDef {
                 attrs: TraitAttrs::default(),
@@ -728,9 +727,7 @@ impl SymbolResolver {
     fn populate_decls(&mut self, module: &Module) {
         // Retired standalone `protocol` surface no longer participates in
         // normal declaration population unless legacy typestate bindings still need it.
-        if !self.typestate_role_impls.is_empty() {
-            self.populate_protocol_roles(&module.protocol_defs());
-        }
+        if !self.typestate_role_impls.is_empty() {}
 
         // Populate trait definitions
         self.populate_trait_defs(&module.trait_defs());
@@ -747,32 +744,6 @@ impl SymbolResolver {
         // Populate imported symbol aliases so resolve can bind unqualified uses
         // (e.g. `requires { std::io::println }` then `println(...)`).
         self.populate_imported_symbol_aliases();
-    }
-
-    fn populate_protocol_roles(&mut self, protocol_defs: &[&ProtocolDef]) {
-        for &protocol_def in protocol_defs {
-            for role in &protocol_def.roles {
-                let role_def_id = self.def_id_gen.new_id();
-                let qualified_role_name = format!("{}::{}", protocol_def.name, role.name);
-                let role_def = Def {
-                    id: role_def_id,
-                    name: qualified_role_name.clone(),
-                    kind: DefKind::ProtocolRole,
-                };
-                self.def_table_builder
-                    .record_def(role_def, role.id, role.span);
-                self.insert_symbol(
-                    &qualified_role_name,
-                    Symbol {
-                        name: qualified_role_name.clone(),
-                        kind: SymbolKind::ProtocolRole {
-                            def_id: role_def_id,
-                        },
-                    },
-                    role.span,
-                );
-            }
-        }
     }
 
     fn populate_imported_symbol_aliases(&mut self) {
@@ -1131,35 +1102,32 @@ impl SymbolResolver {
                 continue;
             }
 
-            match self.lookup_symbol(&joined_path) {
-                Some(symbol) => match &symbol.kind {
-                    SymbolKind::ProtocolRole { .. } => {
-                        self.def_table_builder
-                            .record_use(role_impl.id, symbol.def_id());
-                    }
-                    other => self.errors.push(
-                        REK::TypestateRoleImplExpectedRole(
-                            role_impl.typestate_name.clone(),
-                            joined_path,
-                            other.clone(),
-                        )
-                        .at(role_impl.span),
-                    ),
-                },
-                None => self.errors.push(
+            let protocol_name = &role_impl.path[0];
+            let role_name = &role_impl.path[1];
+            let Some(protocol_def) = protocol_by_name.get(protocol_name.as_str()) else {
+                self.errors.push(
                     REK::TypestateRoleImplRoleUndefined(
                         role_impl.typestate_name.clone(),
                         joined_path,
                     )
                     .at(role_impl.span),
-                ),
-            }
-
-            let protocol_name = &role_impl.path[0];
-            let role_name = &role_impl.path[1];
-            let Some(protocol_def) = protocol_by_name.get(protocol_name.as_str()) else {
+                );
                 continue;
             };
+            if !protocol_def
+                .roles
+                .iter()
+                .any(|role| role.name == *role_name)
+            {
+                self.errors.push(
+                    REK::TypestateRoleImplRoleUndefined(
+                        role_impl.typestate_name.clone(),
+                        joined_path,
+                    )
+                    .at(role_impl.span),
+                );
+                continue;
+            }
 
             // Validate `field: Machine<...> as Role` bindings declared in the
             // typestate `fields` block and connect them to protocol-role defs.
@@ -1176,24 +1144,12 @@ impl SymbolResolver {
                     );
                 }
 
-                let qualified_binding_role = format!("{protocol_name}::{}", binding.role_name);
-                match self.lookup_symbol(&qualified_binding_role) {
-                    Some(symbol) => match symbol.kind {
-                        SymbolKind::ProtocolRole { .. } => {
-                            self.def_table_builder
-                                .record_use(binding.id, symbol.def_id());
-                        }
-                        _ => Self::push_err(
-                            &mut self.errors,
-                            binding.span,
-                            REK::TypestateRoleBindingRoleUndefined(
-                                role_impl.typestate_name.clone(),
-                                binding.field_name.clone(),
-                                binding.role_name.clone(),
-                            ),
-                        ),
-                    },
-                    None => Self::push_err(
+                let binding_role_exists = protocol_def
+                    .roles
+                    .iter()
+                    .any(|role| role.name == binding.role_name);
+                if !binding_role_exists {
+                    Self::push_err(
                         &mut self.errors,
                         binding.span,
                         REK::TypestateRoleBindingRoleUndefined(
@@ -1201,7 +1157,7 @@ impl SymbolResolver {
                             binding.field_name.clone(),
                             binding.role_name.clone(),
                         ),
-                    ),
+                    );
                 }
 
                 if !bound_roles.insert(binding.role_name.clone()) {
