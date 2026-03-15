@@ -194,6 +194,8 @@ macro_rules! with_typecheck_variants {
             LinearSessionActionNotAllowed,
             LinearMachineDeliverUnknownTrigger,
             LinearMachineDeliverKeyTypeMismatch,
+            LinearMachineSendInvalidTarget,
+            LinearMachineSendUnknownMessage,
             LinearMachineLookupKeyTypeMismatch,
             CallableNotAccessible,
             PropertyNotAccessible,

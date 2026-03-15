@@ -235,6 +235,13 @@ pub(crate) enum ExprObligation {
         result: Type,
         span: Span,
     },
+    LinearMachineSend {
+        expr_id: NodeId,
+        target: Type,
+        payload_term: Type,
+        result: Type,
+        span: Span,
+    },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

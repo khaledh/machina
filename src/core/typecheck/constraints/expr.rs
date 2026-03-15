@@ -614,8 +614,17 @@ impl<'a> ConstraintCollector<'a> {
             }
             ExprKind::Emit { kind } => match kind {
                 EmitKind::Send { to, payload } => {
-                    self.collect_expr(to, None);
-                    self.collect_expr(payload, None);
+                    let target_ty = self.collect_expr(to, None);
+                    let payload_ty = self.collect_expr(payload, None);
+                    self.out
+                        .expr_obligations
+                        .push(ExprObligation::LinearMachineSend {
+                            expr_id: expr.id,
+                            target: target_ty,
+                            payload_term: payload_ty,
+                            result: expr_ty.clone(),
+                            span: expr.span,
+                        });
                     self.push_eq(
                         expr_ty.clone(),
                         Type::Unit,

@@ -544,7 +544,8 @@ fn check_expr_obligations(
             | ExprObligation::LinearMachineLookup { .. }
             | ExprObligation::LinearMachineResume { .. }
             | ExprObligation::LinearSessionAction { .. }
-            | ExprObligation::LinearMachineDeliver { .. } => {
+            | ExprObligation::LinearMachineDeliver { .. }
+            | ExprObligation::LinearMachineSend { .. } => {
                 unreachable!("linear obligations are handled by solve::linear");
             }
         }
@@ -694,6 +695,19 @@ fn should_retry_post_call_expr_obligation(
             term_utils::is_unresolved(&receiver_ty)
                 || term_utils::is_unresolved(&key_ty)
                 || term_utils::is_unresolved(&event_ty)
+                || term_utils::is_unresolved(&result_ty)
+        }
+        ExprObligation::LinearMachineSend {
+            target,
+            payload_term,
+            result,
+            ..
+        } => {
+            let target_ty = term_utils::resolve_term(target, unifier);
+            let payload_ty = term_utils::resolve_term(payload_term, unifier);
+            let result_ty = term_utils::resolve_term(result, unifier);
+            term_utils::is_unresolved(&target_ty)
+                || term_utils::is_unresolved(&payload_ty)
                 || term_utils::is_unresolved(&result_ty)
         }
         ExprObligation::LinearSessionAction { .. } => false,

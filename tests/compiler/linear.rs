@@ -1883,6 +1883,128 @@ fn linear_type_hosted_action_override_send_statement_targets_other_machine() {
 }
 
 #[test]
+fn linear_type_hosted_action_override_send_requires_machine_target() {
+    let source = r#"
+        type Note = {}
+
+        @linear
+        type PullRequest = {
+            id: u64,
+
+            states {
+                Draft,
+                Review,
+            }
+
+            actions {
+                submit: Draft -> Review,
+            }
+
+            roles {
+                Author { submit }
+            }
+        }
+
+        PullRequest :: {
+            fn submit(self) -> Review {
+                Review {}
+            }
+        }
+
+        machine PRService hosts PullRequest(key: id) {
+            fn new() -> Self {
+                Self {}
+            }
+
+            action submit(draft) -> Review {
+                send(1, Note {});
+                draft;
+                Review {}
+            }
+        }
+    "#;
+
+    let errors = compile_linear_source(
+        source,
+        "tests/fixtures/linear/hosted_send_requires_machine_target.mc",
+    )
+    .expect_err("send(...) should reject non-machine targets");
+    let rendered = format!("{errors:#?}");
+    assert!(
+        rendered.contains("LinearMachineSendInvalidTarget")
+            || rendered.contains("send target must be Machine<T>"),
+        "expected machine send target diagnostic, got: {rendered}"
+    );
+}
+
+#[test]
+fn linear_type_hosted_action_override_send_requires_matching_on_handler() {
+    let source = r#"
+        type Note = {}
+
+        @linear
+        type PullRequest = {
+            id: u64,
+
+            states {
+                Draft,
+                Review,
+            }
+
+            actions {
+                submit: Draft -> Review,
+            }
+
+            roles {
+                Author { submit }
+            }
+        }
+
+        PullRequest :: {
+            fn submit(self) -> Review {
+                Review {}
+            }
+        }
+
+        machine Receiver hosts PullRequest(key: id) {
+            fn new() -> Self {
+                Self {}
+            }
+        }
+
+        machine Sender hosts PullRequest(key: id) {
+            fields {
+                receiver: Machine<Receiver>,
+            }
+
+            fn new(receiver: Machine<Receiver>) -> Self {
+                Self { receiver: receiver }
+            }
+
+            action submit(draft) -> Review {
+                send(self.receiver, Note {});
+                draft;
+                Review {}
+            }
+        }
+    "#;
+
+    let errors = compile_linear_source(
+        source,
+        "tests/fixtures/linear/hosted_send_requires_matching_on_handler.mc",
+    )
+    .expect_err(
+        "send(...) should require the target machine to define an on-handler for the payload",
+    );
+    let rendered = format!("{errors:#?}");
+    assert!(
+        rendered.contains("LinearMachineSendUnknownMessage")
+            || rendered.contains("does not define an `on` handler"),
+        "expected machine send payload diagnostic, got: {rendered}"
+    );
+}
+
+#[test]
 fn linear_type_hosted_on_handler_emit_uses_enclosing_machine_routing() {
     let run = run_program(
         "linear_type_hosted_on_handler_emit_overlapping_machine_names",

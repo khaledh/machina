@@ -132,6 +132,27 @@ pub(super) fn try_check_expr_obligation_linear(
         );
     }
 
+    if let ExprObligation::LinearMachineSend {
+        expr_id,
+        target,
+        payload_term,
+        result,
+        span,
+    } = obligation
+    {
+        return check_linear_machine_send(
+            *expr_id,
+            target,
+            payload_term,
+            result,
+            *span,
+            unifier,
+            linear_index,
+            errors,
+            covered_exprs,
+        );
+    }
+
     let ExprObligation::LinearMachineCreate {
         expr_id,
         receiver,
@@ -319,6 +340,65 @@ fn check_linear_machine_deliver(
         &term_utils::canonicalize_type(deliver_result_ty),
     ) {
         errors.push(super::constraint_checks::unify_error_to_diag(err, span));
+    }
+
+    covered_exprs.insert(expr_id);
+    true
+}
+
+fn check_linear_machine_send(
+    expr_id: NodeId,
+    target: &Type,
+    payload_term: &Type,
+    result: &Type,
+    span: crate::core::diag::Span,
+    unifier: &mut TcUnifier,
+    linear_index: &LinearIndex,
+    errors: &mut Vec<TypeCheckError>,
+    covered_exprs: &mut HashSet<NodeId>,
+) -> bool {
+    let target_ty = term_utils::resolve_term(target, unifier);
+    let target_ty_for_diag = term_utils::resolve_term_for_diagnostics(target, unifier);
+    let payload_ty = term_utils::resolve_term(payload_term, unifier);
+    let result_ty = term_utils::resolve_term(result, unifier);
+
+    if term_utils::is_unresolved(&target_ty) && term_utils::is_unresolved(&target_ty_for_diag)
+        || term_utils::is_unresolved(&payload_ty)
+        || term_utils::is_unresolved(&result_ty)
+    {
+        return true;
+    }
+
+    let Some((machine_name, host_info)) =
+        machine_host_for_receiver(&target_ty_for_diag, linear_index)
+    else {
+        crate::core::typecheck::tc_push_error!(
+            errors,
+            span,
+            TEK::LinearMachineSendInvalidTarget(format!("{target_ty_for_diag}"))
+        );
+        covered_exprs.insert(expr_id);
+        return true;
+    };
+
+    let Some(payload_name) = named_type_name(&payload_ty) else {
+        crate::core::typecheck::tc_push_error!(
+            errors,
+            span,
+            TEK::LinearMachineSendUnknownMessage(machine_name.to_string(), format!("{payload_ty}"))
+        );
+        covered_exprs.insert(expr_id);
+        return true;
+    };
+
+    if !host_info.on_event_kinds.contains_key(&payload_name) {
+        crate::core::typecheck::tc_push_error!(
+            errors,
+            span,
+            TEK::LinearMachineSendUnknownMessage(machine_name.to_string(), payload_name)
+        );
+        covered_exprs.insert(expr_id);
+        return true;
     }
 
     covered_exprs.insert(expr_id);

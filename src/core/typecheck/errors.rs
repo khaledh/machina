@@ -339,6 +339,12 @@ pub enum TypeCheckErrorKind {
     #[error("Machine {0} hosting linear type {1} expects key type {2} for deliver, found {3}")]
     LinearMachineDeliverKeyTypeMismatch(String, String, String, String),
 
+    #[error("send target must be Machine<T>, found {0}")]
+    LinearMachineSendInvalidTarget(String),
+
+    #[error("Machine {0} does not define an `on` handler for {1}")]
+    LinearMachineSendUnknownMessage(String, String),
+
     #[error("Machine {0} hosting linear type {1} expects key type {2} for lookup, found {3}")]
     LinearMachineLookupKeyTypeMismatch(String, String, String, String),
 
