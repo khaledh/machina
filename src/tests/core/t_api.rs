@@ -324,53 +324,7 @@ fn elaborate_linear_semantic(source: &str) -> crate::core::context::SemanticCont
 }
 
 #[test]
-fn semcheck_linear_program_keeps_protocol_progression_empty() {
-    let parsed = parsed_context(
-        r#"
-        @linear
-        type Door = {
-            states { Closed, Open }
-            actions { open: Closed -> Open }
-        }
-
-        Door :: {
-            fn open(self) -> Open {
-                Open {}
-            }
-        }
-        "#,
-    );
-    let resolved =
-        resolve_stage_with_policy(parsed, ResolveInputs::default(), FrontendPolicy::Strict);
-    let resolved_ctx = resolved
-        .context
-        .expect("resolve should succeed for linear semcheck test");
-    let typed = typecheck_stage_with_policy(
-        resolved_ctx,
-        resolved.imported_facts,
-        FrontendPolicy::Strict,
-    )
-    .context
-    .expect("typecheck should succeed for linear semcheck test");
-    let sem_checked =
-        semcheck_stage(typed).expect("semcheck should succeed for linear semcheck test");
-
-    assert!(
-        sem_checked.protocol_progression.handlers.is_empty(),
-        "pure linear programs should not build legacy protocol progression facts"
-    );
-    assert!(
-        sem_checked.protocol_progression.by_handler_def.is_empty(),
-        "pure linear programs should not index legacy protocol handlers"
-    );
-    assert!(
-        sem_checked.protocol_progression.by_state.is_empty(),
-        "pure linear programs should not index legacy protocol states"
-    );
-}
-
-#[test]
-fn elaborate_linear_program_keeps_legacy_machine_plans_empty() {
+fn elaborate_linear_program_produces_linear_machine_plans() {
     let semantic = elaborate_linear_semantic(
         r#"
         @linear
@@ -397,15 +351,7 @@ fn elaborate_linear_program_keeps_legacy_machine_plans_empty() {
     );
 
     assert!(
-        semantic.machine_plans.descriptors.is_empty(),
-        "pure linear programs should not materialize legacy typestate machine descriptors"
-    );
-    assert!(
-        semantic.machine_plans.thunks.is_empty(),
-        "pure linear programs should not materialize legacy typestate dispatch thunks"
-    );
-    assert!(
         !semantic.linear_machine_plans.machines.is_empty(),
-        "linear machine plans should still be produced for hosted linear machines"
+        "linear machine plans should be produced for hosted linear machines"
     );
 }

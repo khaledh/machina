@@ -244,14 +244,14 @@ impl<'a> Parser<'a> {
         let selector_ty = self.parse_type_expr()?;
         let params = if self.curr_token.kind == TK::LParen {
             self.consume(&TK::LParen)?;
-            let params = self.parse_typestate_on_handler_params(&selector_ty)?;
+            let params = self.parse_on_handler_params(&selector_ty)?;
             self.consume(&TK::RParen)?;
             params
         } else {
             Vec::new()
         };
         let provenance = if self.curr_token.kind == TK::KwFor {
-            Some(self.parse_typestate_on_handler_provenance()?)
+            Some(self.parse_on_handler_provenance()?)
         } else {
             None
         };
@@ -345,7 +345,7 @@ impl<'a> Parser<'a> {
         })
     }
 
-    fn parse_typestate_on_handler_provenance(
+    fn parse_on_handler_provenance(
         &mut self,
     ) -> Result<TypestateHandlerProvenance, ParseError> {
         let marker = self.mark();
@@ -374,7 +374,7 @@ impl<'a> Parser<'a> {
         })
     }
 
-    fn parse_typestate_on_handler_params(
+    fn parse_on_handler_params(
         &mut self,
         selector_ty: &TypeExpr,
     ) -> Result<Vec<Param>, ParseError> {
@@ -422,11 +422,11 @@ impl<'a> Parser<'a> {
         }
 
         self.parse_list(TK::Comma, TK::RParen, |parser| {
-            parser.parse_typestate_handler_param(selector_ty)
+            parser.parse_on_handler_param(selector_ty)
         })
     }
 
-    fn parse_typestate_handler_param(
+    fn parse_on_handler_param(
         &mut self,
         selector_ty: &TypeExpr,
     ) -> Result<Param, ParseError> {

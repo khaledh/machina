@@ -74,26 +74,6 @@ fn semcheck_code(error: &SemCheckError) -> &'static str {
         SemCheckErrorKind::ClosureEscapeReturn => "MC-SEMCK-ClosureEscapeReturn",
         SemCheckErrorKind::ClosureEscapeStore => "MC-SEMCK-ClosureEscapeStore",
         SemCheckErrorKind::ClosureEscapeArg => "MC-SEMCK-ClosureEscapeArg",
-        SemCheckErrorKind::TypestateOverlappingOnHandlers(..) => {
-            "MC-SEMCK-TypestateOverlappingOnHandlers"
-        }
-        SemCheckErrorKind::TypestateAmbiguousResponseProvenance(..) => {
-            "MC-SEMCK-TypestateAmbiguousResponseProvenance"
-        }
-        SemCheckErrorKind::TypestateRequestMissingResponseHandler(..) => {
-            "MC-SEMCK-TypestateRequestMissingResponseHandler"
-        }
-        SemCheckErrorKind::TypestateHandlerUnsupportedResponseVariant(..) => {
-            "MC-SEMCK-TypestateHandlerUnsupportedResponseVariant"
-        }
-        SemCheckErrorKind::ReplyOutsideHandler => "MC-SEMCK-ReplyOutsideHandler",
-        SemCheckErrorKind::ReplyCapExpected(..) => "MC-SEMCK-ReplyCapExpected",
-        SemCheckErrorKind::ReplyPayloadNotAllowed(..) => "MC-SEMCK-ReplyPayloadNotAllowed",
-        SemCheckErrorKind::ReplyCapMustBeConsumed(..) => "MC-SEMCK-ReplyCapMustBeConsumed",
-        SemCheckErrorKind::ReplyCapConsumedMultipleTimes(..) => {
-            "MC-SEMCK-ReplyCapConsumedMultipleTimes"
-        }
-        SemCheckErrorKind::ReplyCapParamRequired => "MC-SEMCK-ReplyCapParamRequired",
     }
 }
 
@@ -140,70 +120,6 @@ fn populate_semcheck_metadata(error: &SemCheckError, metadata: &mut DiagnosticMe
                 "missing".to_string(),
                 DiagnosticValue::StringList(missing.clone()),
             );
-        }
-        SemCheckErrorKind::TypestateOverlappingOnHandlers(typestate, state, selector, overlap)
-        | SemCheckErrorKind::TypestateAmbiguousResponseProvenance(
-            typestate,
-            state,
-            selector,
-            overlap,
-        ) => {
-            metadata.insert(
-                "typestate".to_string(),
-                DiagnosticValue::String(typestate.clone()),
-            );
-            metadata.insert("state".to_string(), DiagnosticValue::String(state.clone()));
-            metadata.insert(
-                "selector".to_string(),
-                DiagnosticValue::String(selector.to_string()),
-            );
-            metadata.insert(
-                "overlap".to_string(),
-                DiagnosticValue::StringList(overlap.iter().map(ToString::to_string).collect()),
-            );
-        }
-        SemCheckErrorKind::TypestateRequestMissingResponseHandler(
-            typestate,
-            request,
-            label,
-            response,
-        )
-        | SemCheckErrorKind::TypestateHandlerUnsupportedResponseVariant(
-            typestate,
-            request,
-            label,
-            response,
-        ) => {
-            metadata.insert(
-                "typestate".to_string(),
-                DiagnosticValue::String(typestate.clone()),
-            );
-            metadata.insert(
-                "request".to_string(),
-                DiagnosticValue::String(request.to_string()),
-            );
-            metadata.insert("label".to_string(), DiagnosticValue::String(label.clone()));
-            metadata.insert(
-                "response".to_string(),
-                DiagnosticValue::String(response.to_string()),
-            );
-        }
-        SemCheckErrorKind::ReplyCapExpected(ty) => {
-            metadata.insert("type".to_string(), DiagnosticValue::String(ty.to_string()));
-        }
-        SemCheckErrorKind::ReplyPayloadNotAllowed(payload, allowed) => {
-            metadata.insert(
-                "payload".to_string(),
-                DiagnosticValue::String(payload.to_string()),
-            );
-            metadata.insert(
-                "allowed".to_string(),
-                DiagnosticValue::StringList(allowed.iter().map(ToString::to_string).collect()),
-            );
-        }
-        SemCheckErrorKind::ReplyCapMustBeConsumed(name)
-        | SemCheckErrorKind::ReplyCapConsumedMultipleTimes(name) => {
-            metadata.insert("name".to_string(), DiagnosticValue::String(name.clone()));
         }
         _ => {}
     }

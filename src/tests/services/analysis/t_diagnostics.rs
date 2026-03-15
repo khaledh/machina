@@ -150,23 +150,6 @@ fn typecheck_stable_code_exists_for_newer_variants() {
         .into();
     let diag = Diagnostic::from_typecheck_error(&err);
     assert_eq!(diag.code, "MC-TYPECHECK-StringFmtExprUnsupportedType");
-
-    let err: SemCheckError = SEK::TypestateOverlappingOnHandlers(
-        "Connection".to_string(),
-        "AwaitAuth".to_string(),
-        Type::Struct {
-            name: "Response".to_string(),
-            fields: Vec::new(),
-        },
-        vec![Type::Struct {
-            name: "AuthApproved".to_string(),
-            fields: Vec::new(),
-        }],
-    )
-    .at(Span::default())
-    .into();
-    let diag = Diagnostic::from_semcheck_error(&err);
-    assert_eq!(diag.code, "MC-SEMCK-TypestateOverlappingOnHandlers");
 }
 
 #[test]

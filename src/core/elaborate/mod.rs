@@ -37,7 +37,6 @@ mod elaborator;
 mod index_plan;
 mod linear_machine_plan;
 mod lowering_plan;
-mod machine_plan;
 mod match_plan;
 mod pipeline;
 mod place;
@@ -50,7 +49,6 @@ use crate::core::elaborate::drop_plan::build_drop_plans;
 use crate::core::elaborate::elaborator::Elaborator;
 use crate::core::elaborate::linear_machine_plan::build_linear_machine_plans;
 use crate::core::elaborate::lowering_plan::build_lowering_plans;
-use crate::core::elaborate::machine_plan::build_machine_plans;
 
 /// Elaborate the AST: enrich it with plan side tables using the results from
 /// semantic analysis.
@@ -65,7 +63,6 @@ pub fn elaborate(ctx: ElaborateStageInput) -> ElaborateStageOutput {
         init_assigns,
         full_init_assigns,
         closure_captures,
-        protocol_progression: _,
     } = payload;
     let crate::core::context::TypedTables {
         resolved,
@@ -109,7 +106,6 @@ pub fn elaborate(ctx: ElaborateStageInput) -> ElaborateStageOutput {
         string_fmt_plans,
     );
     let drop_plans = build_drop_plans(&module, &def_table, &type_map);
-    let machine_plans = build_machine_plans(&module, &def_table, &type_map);
     let linear_machine_plans =
         build_linear_machine_plans(&module, &def_table, &type_map, &linear_index);
 
@@ -135,7 +131,6 @@ pub fn elaborate(ctx: ElaborateStageInput) -> ElaborateStageOutput {
             },
             lowering_plans,
             drop_plans,
-            machine_plans,
             linear_machine_plans,
         },
     }

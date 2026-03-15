@@ -2,14 +2,11 @@ mod ast_liveness;
 pub(crate) mod closure;
 mod def_init;
 mod errors;
-mod generated_state_scan;
 mod liveness_util;
 mod lvalue_overlap;
 mod match_check;
 mod move_check;
 mod normalize;
-mod protocol_shape;
-mod reply_cap;
 mod slice_borrow;
 mod slice_escape;
 mod structural;
@@ -66,7 +63,6 @@ fn sem_check_partial_normalized(
                 HashSet::new(),
                 HashSet::new(),
                 HashMap::new(),
-                crate::core::context::ProtocolProgressionFacts::default(),
             ),
             errors: Vec::new(),
             poisoned_nodes: upstream_poisoned_nodes.clone(),
@@ -78,7 +74,6 @@ fn sem_check_partial_normalized(
     let def_init_result = def_init::check(&ctx);
     let capture_result = closure::capture::check(&ctx);
     let closure_borrow_errors = closure::borrow::check(&ctx, &capture_result.captures);
-    let progression_facts = crate::core::context::ProtocolProgressionFacts::default();
 
     errors.extend(value::check(&ctx));
     errors.extend(structural::check(&ctx));
@@ -89,9 +84,6 @@ fn sem_check_partial_normalized(
     errors.extend(closure_borrow_errors);
     errors.extend(move_result.errors);
     errors.extend(slice_escape::check(&ctx));
-    errors.extend(protocol_shape::check_typestate_handler_overlap(&ctx));
-    errors.extend(protocol_shape::check_typestate_request_response_shape(&ctx));
-    errors.extend(reply_cap::check_reply_cap_usage(&ctx));
 
     let mut poisoned_nodes = upstream_poisoned_nodes.clone();
     if !errors.is_empty() {
@@ -104,7 +96,6 @@ fn sem_check_partial_normalized(
             def_init_result.init_assigns,
             def_init_result.full_init_assigns,
             capture_result.captures,
-            progression_facts,
         ),
         errors,
         poisoned_nodes,

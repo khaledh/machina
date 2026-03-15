@@ -5,14 +5,12 @@ use std::path::PathBuf;
 use crate::core::ast::{Module, NodeId, NodeIdGen};
 use crate::core::capsule::{ModuleId, ModulePath};
 use crate::core::codegen_names::CodegenNameTable;
-use crate::core::diag::Span;
 use crate::core::linear::LinearIndex;
-use crate::core::plans::{DropPlanMap, LinearMachinePlanMap, LoweringPlanMap, MachinePlanMap};
+use crate::core::plans::{DropPlanMap, LinearMachinePlanMap, LoweringPlanMap};
 use crate::core::resolve::{DefId, DefTable};
 use crate::core::semck::closure::capture::ClosureCapture;
 use crate::core::symbol_id::SymbolIdTable;
 use crate::core::typecheck::type_map::{CallSigMap, GenericInstMap, TypeMap};
-use crate::core::types::Type;
 
 #[derive(Debug, Clone)]
 pub struct ResolvedTables {
@@ -53,7 +51,6 @@ pub struct SemFacts {
     pub init_assigns: HashSet<NodeId>,
     pub full_init_assigns: HashSet<NodeId>,
     pub closure_captures: HashMap<DefId, Vec<ClosureCapture>>,
-    pub protocol_progression: ProtocolProgressionFacts,
 }
 
 #[derive(Debug, Clone)]
@@ -63,7 +60,6 @@ pub struct SemCheckedPayload {
     pub init_assigns: HashSet<NodeId>,
     pub full_init_assigns: HashSet<NodeId>,
     pub closure_captures: HashMap<DefId, Vec<ClosureCapture>>,
-    pub protocol_progression: ProtocolProgressionFacts,
 }
 
 impl SemCheckedPayload {
@@ -73,75 +69,8 @@ impl SemCheckedPayload {
             init_assigns: self.init_assigns.clone(),
             full_init_assigns: self.full_init_assigns.clone(),
             closure_captures: self.closure_captures.clone(),
-            protocol_progression: self.protocol_progression.clone(),
         }
     }
-}
-
-/// Canonical semck facts for protocol/typestate progression analysis.
-///
-/// This table is produced once in semck and reused by progression validators,
-/// so checkers do not need to repeatedly re-scan handlers or rebuild CFG facts.
-#[derive(Debug, Clone, Default)]
-pub struct ProtocolProgressionFacts {
-    pub handlers: Vec<ProtocolHandlerProgressionFact>,
-    pub by_handler_def: HashMap<DefId, Vec<usize>>,
-    pub by_state: HashMap<ProtocolProgressionStateKey, Vec<usize>>,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
-pub struct ProtocolProgressionStateKey {
-    pub typestate_name: String,
-    pub protocol_name: String,
-    pub role_name: String,
-    pub state_name: String,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
-pub struct ProtocolProgressionState {
-    pub protocol_name: String,
-    pub role_name: String,
-    pub state_name: String,
-}
-
-#[derive(Debug, Clone)]
-pub struct ProtocolHandlerProgressionFact {
-    pub handler_def_id: DefId,
-    pub typestate_name: String,
-    pub entry_state: ProtocolProgressionState,
-    pub selector_ty: Type,
-    pub cfg: ProtocolProgressionCfg,
-    pub span: Span,
-}
-
-#[derive(Debug, Clone, Default)]
-pub struct ProtocolProgressionCfg {
-    pub entry_block: usize,
-    pub succs: Vec<Vec<usize>>,
-    pub exit_blocks: Vec<usize>,
-    pub node_events: HashMap<usize, Vec<ProtocolProgressionEvent>>,
-}
-
-#[derive(Debug, Clone)]
-pub enum ProtocolProgressionEvent {
-    Emit(ProtocolProgressionEmit),
-    ReturnState(ProtocolProgressionReturnState),
-}
-
-#[derive(Debug, Clone)]
-pub struct ProtocolProgressionEmit {
-    pub payload_ty: Type,
-    pub to_field_name: Option<String>,
-    pub to_role_name: Option<String>,
-    pub is_request: bool,
-    pub request_response_tys: Vec<Type>,
-    pub span: Span,
-}
-
-#[derive(Debug, Clone)]
-pub struct ProtocolProgressionReturnState {
-    pub to_state_name: Option<String>,
-    pub span: Span,
 }
 
 impl Deref for SemCheckedPayload {
@@ -162,7 +91,6 @@ impl DerefMut for SemCheckedPayload {
 pub struct SemanticPlans {
     pub lowering_plans: LoweringPlanMap,
     pub drop_plans: DropPlanMap,
-    pub machine_plans: MachinePlanMap,
     pub linear_machine_plans: LinearMachinePlanMap,
 }
 
@@ -171,7 +99,6 @@ pub struct SemanticPayload {
     pub typed: TypedTables,
     pub lowering_plans: LoweringPlanMap,
     pub drop_plans: DropPlanMap,
-    pub machine_plans: MachinePlanMap,
     pub linear_machine_plans: LinearMachinePlanMap,
 }
 
@@ -180,7 +107,6 @@ impl SemanticPayload {
         SemanticPlans {
             lowering_plans: self.lowering_plans.clone(),
             drop_plans: self.drop_plans.clone(),
-            machine_plans: self.machine_plans.clone(),
             linear_machine_plans: self.linear_machine_plans.clone(),
         }
     }
@@ -359,7 +285,6 @@ impl NormalizedContext {
         init_assigns: HashSet<NodeId>,
         full_init_assigns: HashSet<NodeId>,
         closure_captures: HashMap<DefId, Vec<ClosureCapture>>,
-        protocol_progression: ProtocolProgressionFacts,
     ) -> SemanticCheckedContext {
         SemanticCheckedContext {
             module: self.module,
@@ -369,7 +294,6 @@ impl NormalizedContext {
                 init_assigns,
                 full_init_assigns,
                 closure_captures,
-                protocol_progression,
             },
         }
     }

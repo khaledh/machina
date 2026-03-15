@@ -167,40 +167,6 @@ pub enum SemCheckErrorKind {
 
     #[error("Captured closure cannot be passed as an argument")]
     ClosureEscapeArg,
-
-    #[error(
-        "Typestate {0} state {1} has overlapping `on` handlers for selector {2} on response variants {3:?}"
-    )]
-    TypestateOverlappingOnHandlers(String, String, Type, Vec<Type>),
-
-    #[error(
-        "Typestate {0} state {1} has ambiguous response provenance for selector {2} on variants {3:?}; use request-site labels (for RequestType:label(...)) to disambiguate"
-    )]
-    TypestateAmbiguousResponseProvenance(String, String, Type, Vec<Type>),
-
-    #[error("Typestate {0} request {1}{2} has no handler for expected response variant {3}")]
-    TypestateRequestMissingResponseHandler(String, Type, String, Type),
-
-    #[error("Typestate {0} handler for request {1}{2} uses unsupported response variant {3}")]
-    TypestateHandlerUnsupportedResponseVariant(String, Type, String, Type),
-
-    #[error("`reply` can only be used inside typestate `on` handlers")]
-    ReplyOutsideHandler,
-
-    #[error("`reply` expects a ReplyCap as its first argument, found {0}")]
-    ReplyCapExpected(Type),
-
-    #[error("`reply` payload type {0} is not in reply capability response set {1:?}")]
-    ReplyPayloadNotAllowed(Type, Vec<Type>),
-
-    #[error("reply capability must be consumed exactly once on all paths: {0}")]
-    ReplyCapMustBeConsumed(String),
-
-    #[error("reply capability consumed multiple times: {0}")]
-    ReplyCapConsumedMultipleTimes(String),
-
-    #[error("`reply` capability argument must be a handler ReplyCap parameter")]
-    ReplyCapParamRequired,
 }
 
 pub type SemCheckError = SpannedError<SemCheckErrorKind>;

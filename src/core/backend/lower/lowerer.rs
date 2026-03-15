@@ -9,14 +9,12 @@ use crate::core::backend::lower::drop_glue::DropGlueRegistry;
 use crate::core::backend::lower::drops::DropManager;
 use crate::core::backend::lower::globals::GlobalArena;
 use crate::core::backend::lower::locals::{LocalMap, LocalValue};
-use crate::core::backend::lower::machine_layout::{build_payload_layout_ids, payload_layout_key};
 use crate::core::backend::lower::types::TypeLowerer;
 use crate::core::ir::builder::FunctionBuilder;
 use crate::core::ir::{BlockId, Function, FunctionSig, GlobalId, IrTypeCache, IrTypeId, ValueId};
 use crate::core::linear::LinearIndex;
 use crate::core::plans::{
-    CallPlan, IndexPlan, LinearMachinePlanMap, LoweringPlan, LoweringPlanMap, MachineEventKeyPlan,
-    MachinePlanMap, MatchPlan, SlicePlan,
+    CallPlan, IndexPlan, LinearMachinePlanMap, LoweringPlan, LoweringPlanMap, MatchPlan, SlicePlan,
 };
 use crate::core::resolve::{Def, DefId, DefTable};
 use crate::core::typecheck::type_map::TypeMap;
@@ -71,10 +69,8 @@ pub(super) struct FuncLowerer<'a, 'g> {
     pub(super) type_lowerer: TypeLowerer<'a>,
     pub(crate) type_map: &'a TypeMap,
     pub(super) linear_index: &'a LinearIndex,
-    pub(super) machine_plans: Option<&'a MachinePlanMap>,
-    // This gets threaded through now so later hosted-machine lowering can
-    // consume the elaborated linear machine plans without widening
-    // constructor/call-site signatures again.
+    // Threaded through so hosted-machine lowering can consume the elaborated
+    // linear machine plans without widening constructor/call-site signatures.
     #[allow(dead_code)]
     pub(super) linear_machine_plans: Option<&'a LinearMachinePlanMap>,
     pub(super) ret_ty: Type,
@@ -183,7 +179,6 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
         linear_index: &'a LinearIndex,
         type_map: &'a TypeMap,
         lowering_plans: &'a LoweringPlanMap,
-        machine_plans: Option<&'a MachinePlanMap>,
         linear_machine_plans: Option<&'a LinearMachinePlanMap>,
         drop_glue: &'g mut DropGlueRegistry,
         globals: &'g mut GlobalArena,
@@ -254,7 +249,6 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
             current_def_id: func_def_id,
             type_map,
             linear_index,
-            machine_plans,
             linear_machine_plans,
             type_lowerer,
             ret_ty: (*ret_ty).clone(),
@@ -285,7 +279,6 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
         linear_index: &'a LinearIndex,
         type_map: &'a TypeMap,
         lowering_plans: &'a LoweringPlanMap,
-        machine_plans: Option<&'a MachinePlanMap>,
         linear_machine_plans: Option<&'a LinearMachinePlanMap>,
         drop_glue: &'g mut DropGlueRegistry,
         globals: &'g mut GlobalArena,
@@ -386,7 +379,6 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
             current_def_id: def_table.def_id(method_def.id),
             type_map,
             linear_index,
-            machine_plans,
             linear_machine_plans,
             type_lowerer,
             ret_ty: ret_ty.clone(),
@@ -432,7 +424,6 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
             current_def_id: def_id,
             type_map,
             linear_index,
-            machine_plans: None,
             linear_machine_plans: None,
             type_lowerer,
             ret_ty: Type::Unit,
@@ -455,29 +446,8 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
     /// This is a best-effort bridge for managed runtime execution. The lookup
     /// is considered ambiguous if the same payload type maps to different kinds
     /// across descriptors.
+    /// Resolves an event kind for payload-based send/request emits.
     pub(super) fn machine_payload_event_kind(&self, payload_ty: &Type) -> Option<u64> {
-        if let Some(kind) = self.hosted_machine_payload_event_kind(payload_ty) {
-            return Some(kind);
-        }
-        let plans = self.machine_plans?;
-        let mut selected = None;
-        for descriptor in plans.descriptors.values() {
-            for event in &descriptor.event_kinds {
-                if let MachineEventKeyPlan::Payload { payload_ty: ty } = &event.key
-                    && ty == payload_ty
-                {
-                    match selected {
-                        None => selected = Some(event.kind),
-                        Some(existing) if existing == event.kind => {}
-                        Some(_) => return None,
-                    }
-                }
-            }
-        }
-        selected
-    }
-
-    fn hosted_machine_payload_event_kind(&self, payload_ty: &Type) -> Option<u64> {
         let payload_name = semantic_named_type_name(payload_ty)?;
         let current_node_id = self.def_table.lookup_def_node_id(self.current_def_id)?;
         let machine_name = self
@@ -502,44 +472,17 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
     }
 
     /// Resolves a deterministic payload layout-id for boxed machine payload
-    /// transport.
-    ///
-    /// Layout ids are assigned from a stable sort of payload type keys across
-    /// all machine descriptors in the module. This keeps emitted assembly
-    /// reproducible across process runs.
-    pub(super) fn machine_payload_layout_id(&self, payload_ty: &Type) -> Option<u64> {
-        let plans = self.machine_plans?;
-        let payload_layout_ids = build_payload_layout_ids(plans);
-        payload_layout_ids
-            .get(&payload_layout_key(payload_ty))
-            .copied()
+    /// transport. Currently unused (legacy typestate path removed); returns
+    /// `None` so callers fall back to `0`.
+    pub(super) fn machine_payload_layout_id(&self, _payload_ty: &Type) -> Option<u64> {
+        None
     }
 
-    /// Resolves an event kind for response reply emits.
-    ///
-    /// Response emits only carry the concrete response payload, so this lookup
-    /// matches all `Response(selector, response)` keys by response payload type.
-    /// Ambiguous mappings across descriptors are rejected.
-    pub(super) fn machine_response_event_kind(&self, response_ty: &Type) -> Option<u64> {
-        let plans = self.machine_plans?;
-        let mut selected = None;
-        for descriptor in plans.descriptors.values() {
-            for event in &descriptor.event_kinds {
-                if let MachineEventKeyPlan::Response {
-                    selector_ty: _,
-                    response_ty: ty,
-                } = &event.key
-                    && ty == response_ty
-                {
-                    match selected {
-                        None => selected = Some(event.kind),
-                        Some(existing) if existing == event.kind => {}
-                        Some(_) => return None,
-                    }
-                }
-            }
-        }
-        selected
+    /// Resolves an event kind for response reply emits. Currently unused
+    /// (legacy typestate path removed); returns `None` so callers fall back
+    /// to `0`.
+    pub(super) fn machine_response_event_kind(&self, _response_ty: &Type) -> Option<u64> {
+        None
     }
 
     /// Initializes locals for parameters using their declared modes.

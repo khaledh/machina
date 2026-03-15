@@ -1,4 +1,4 @@
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 use std::path::Path;
 
 use crate::core::api::{
@@ -122,7 +122,7 @@ pub fn compile_with_path(
     dump_nrvo_stage(&analyzed, dump);
 
     let lowered = run_lower_stage(&analyzed, opts)?;
-    let lowered = run_optimize_stage(lowered, &analyzed);
+    let lowered = run_optimize_stage(lowered);
 
     verify_ir_stage(&lowered, opts.verify_ir)?;
 
@@ -254,7 +254,6 @@ fn run_lower_stage(
         &analyzed.drop_plans,
         &backend::lower::LowerOpts {
             linear_index: Some(&analyzed.linear_index),
-            machine_plans: Some(&analyzed.machine_plans),
             linear_machine_plans: Some(&analyzed.linear_machine_plans),
             trace_alloc: opts.trace_alloc,
             trace_drops: opts.trace_drops,
@@ -266,7 +265,6 @@ fn run_lower_stage(
 
 fn run_optimize_stage(
     lowered: backend::lower::LoweredModule,
-    analyzed: &AnalyzedContext,
 ) -> backend::lower::LoweredModule {
     let mut funcs: Vec<_> = lowered.funcs.iter().map(|f| f.func.clone()).collect();
     let skip_opt = std::env::var("MACHINA_DISABLE_SSA_OPT").ok().is_some();
@@ -279,7 +277,6 @@ fn run_optimize_stage(
         Some(backend::opt::module_dce::reachable_def_ids(&funcs))
     };
 
-    let machine_handler_defs: HashSet<_> = analyzed.machine_plans.thunks.keys().copied().collect();
     let mut optimized_funcs = Vec::with_capacity(lowered.funcs.len());
 
     for (func, lowered_func) in funcs.into_iter().zip(lowered.funcs.iter()) {
@@ -287,14 +284,8 @@ fn run_optimize_stage(
             .as_ref()
             .map(|defs| defs.contains(&func.def_id))
             .unwrap_or(true);
-        // Keep managed dispatch thunks alive even when not yet reachable from
-        // `main`; runtime bootstrap consumes them via descriptor tables.
-        let machine_thunk_keep = func.name.starts_with("__mc_machine_dispatch_thunk_");
-        // Keep generated typestate handler defs because dispatch thunks invoke
-        // them indirectly via function-address constants.
-        let machine_handler_keep = machine_handler_defs.contains(&func.def_id);
 
-        if reachable_keep || machine_thunk_keep || machine_handler_keep {
+        if reachable_keep {
             optimized_funcs.push(backend::lower::LoweredFunction {
                 func,
                 types: lowered_func.types.clone(),

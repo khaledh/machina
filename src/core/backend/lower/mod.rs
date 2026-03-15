@@ -17,8 +17,6 @@ mod join;
 mod linear;
 mod locals;
 mod lowerer;
-mod machine;
-mod machine_layout;
 mod mapping;
 mod r#match;
 mod place;
@@ -34,7 +32,7 @@ use crate::core::backend::lower::lowerer::BranchResult;
 use crate::core::ir::IrTypeCache;
 use crate::core::ir::{Function, GlobalData};
 use crate::core::linear::LinearIndex;
-use crate::core::plans::{DropPlanMap, LinearMachinePlanMap, LoweringPlanMap, MachinePlanMap};
+use crate::core::plans::{DropPlanMap, LinearMachinePlanMap, LoweringPlanMap};
 use crate::core::resolve::DefTable;
 use crate::core::typecheck::type_map::TypeMap;
 use crate::core::types::Type;
@@ -55,7 +53,6 @@ pub struct LoweredModule {
 #[derive(Clone, Default)]
 pub struct LowerOpts<'a> {
     pub linear_index: Option<&'a LinearIndex>,
-    pub machine_plans: Option<&'a MachinePlanMap>,
     pub linear_machine_plans: Option<&'a LinearMachinePlanMap>,
     pub trace_alloc: bool,
     pub trace_drops: bool,
@@ -82,7 +79,6 @@ pub fn lower_func(
     let mut globals = GlobalArena::new();
     let mut drop_glue = DropGlueRegistry::new(def_table);
     let empty_linear_index = LinearIndex::default();
-    let empty_machine_plans = MachinePlanMap::default();
     let empty_linear_machine_plans = LinearMachinePlanMap::default();
     lower_func_with_globals(
         func,
@@ -91,7 +87,6 @@ pub fn lower_func(
         &empty_linear_index,
         type_map,
         lowering_plans,
-        &empty_machine_plans,
         &empty_linear_machine_plans,
         drop_plans,
         false,
@@ -129,10 +124,8 @@ pub fn lower_module_with_opts(
     opts: &LowerOpts<'_>,
 ) -> Result<LoweredModule, LowerToIrError> {
     let default_linear_index = LinearIndex::default();
-    let default_machine_plans = MachinePlanMap::default();
     let default_linear_machine_plans = LinearMachinePlanMap::default();
     let linear_index = opts.linear_index.unwrap_or(&default_linear_index);
-    let machine_plans = opts.machine_plans.unwrap_or(&default_machine_plans);
     let linear_machine_plans = opts
         .linear_machine_plans
         .unwrap_or(&default_linear_machine_plans);
@@ -143,7 +136,6 @@ pub fn lower_module_with_opts(
         type_map,
         lowering_plans,
         drop_plans,
-        machine_plans,
         linear_machine_plans,
         opts.trace_alloc,
         opts.trace_drops,
@@ -159,7 +151,6 @@ fn lower_module_impl(
     type_map: &TypeMap,
     lowering_plans: &LoweringPlanMap,
     drop_plans: &DropPlanMap,
-    machine_plans: &MachinePlanMap,
     linear_machine_plans: &LinearMachinePlanMap,
     trace_alloc: bool,
     trace_drops: bool,
@@ -168,11 +159,6 @@ fn lower_module_impl(
     let mut globals = GlobalArena::new();
     let mut funcs = Vec::new();
     let mut drop_glue = DropGlueRegistry::from_module(def_table, module);
-    let payload_drop_regs = machine::collect_machine_payload_drop_registrations(
-        machine_plans,
-        type_map,
-        &mut drop_glue,
-    );
 
     for func_def in module.func_defs() {
         let lowered = lower_func_with_globals(
@@ -182,7 +168,6 @@ fn lower_module_impl(
             linear_index,
             type_map,
             lowering_plans,
-            machine_plans,
             linear_machine_plans,
             drop_plans,
             trace_alloc,
@@ -206,7 +191,6 @@ fn lower_module_impl(
                 linear_index,
                 type_map,
                 lowering_plans,
-                machine_plans,
                 linear_machine_plans,
                 drop_plans,
                 trace_alloc,
@@ -221,17 +205,6 @@ fn lower_module_impl(
     let mut glue_funcs =
         drop_glue.take_glue_functions(def_table, type_map, &mut globals, trace_drops)?;
     funcs.append(&mut glue_funcs);
-
-    // Materialize managed machine descriptors + thunk placeholders as backend
-    // artifacts. Full runtime bootstrap wiring will consume these.
-    machine::append_machine_runtime_artifacts(
-        machine_plans,
-        &payload_drop_regs,
-        def_table,
-        type_map,
-        &mut funcs,
-        &mut globals,
-    );
 
     if inject_entry_wrapper {
         entry_wrapper::append_executable_entry_wrapper(
@@ -257,7 +230,6 @@ fn lower_func_with_globals(
     linear_index: &LinearIndex,
     type_map: &TypeMap,
     lowering_plans: &LoweringPlanMap,
-    machine_plans: &MachinePlanMap,
     linear_machine_plans: &LinearMachinePlanMap,
     drop_plans: &DropPlanMap,
     trace_alloc: bool,
@@ -290,7 +262,6 @@ fn lower_func_with_globals(
         linear_index,
         type_map,
         lowering_plans,
-        Some(machine_plans),
         Some(linear_machine_plans),
         drop_glue,
         globals,
@@ -346,7 +317,6 @@ fn lower_method_def_with_globals(
     linear_index: &LinearIndex,
     type_map: &TypeMap,
     lowering_plans: &LoweringPlanMap,
-    machine_plans: &MachinePlanMap,
     linear_machine_plans: &LinearMachinePlanMap,
     drop_plans: &DropPlanMap,
     trace_alloc: bool,
@@ -373,7 +343,6 @@ fn lower_method_def_with_globals(
         linear_index,
         type_map,
         lowering_plans,
-        Some(machine_plans),
         Some(linear_machine_plans),
         drop_glue,
         globals,
