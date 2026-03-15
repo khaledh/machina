@@ -142,8 +142,8 @@ See [11-auth-check-v1.md](11-auth-check-v1.md) for the full worked example.
 ### The scenario
 
 1. Machine A (e.g., `OrderService`) needs authorization before proceeding
-2. Machine A emits `AuthCheck { order_id, user_id }`
-3. Machine B (`AuthService`) handles it, decides, emits `AuthApproved { order_id }` or `AuthDenied { order_id, reason }`
+2. Machine A sends `AuthCheck { order_id, user_id }` to Machine B via `send(self.auth_service, ...)`
+3. Machine B (`AuthService`) handles it, decides, sends `AuthApproved { order_id }` or `AuthDenied { order_id, reason }` back via `send(self.order_service, ...)`
 4. Machine A receives the reply in an `on` handler
 5. Machine A must correlate `order_id` back to the waiting entity
 6. Machine A transitions the entity based on the result

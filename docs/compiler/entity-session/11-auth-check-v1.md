@@ -1,7 +1,7 @@
-# Auth Check: V1 Event-Only Flow
+# Auth Check: V1 Flow
 
 > This document walks through a cross-machine auth-check scenario using only
-> V1 primitives (`emit`, `on`, `self.deliver()`, manual correlation). The goal
+> V1 primitives (`send`, `on`, `self.deliver()`, manual correlation). The goal
 > is to surface the exact pain points that a V2 interaction model should
 > address.
 
@@ -140,6 +140,9 @@ machine AuthService {
 
 ```mc
 fn main() -> () | MachineError | SessionError {
+    // NOTE: circular dependency — AuthService needs OrderService's handle and
+    // vice versa. This is shown schematically; a real V1 program would need
+    // deferred handle injection or a coordinator. See Pain Point #5 below.
     let auth = AuthService::spawn(order_service)?;
     let service = OrderService::spawn(auth)?;
 
