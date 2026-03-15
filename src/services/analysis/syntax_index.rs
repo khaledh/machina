@@ -153,6 +153,11 @@ impl Visitor for DocumentSymbolNodeCollector {
         visit::walk_type_def(self, type_def);
     }
 
+    fn visit_machine_def(&mut self, machine_def: &MachineDef) {
+        self.nodes.push((machine_def.id, DocumentSymbolKind::Type));
+        visit::walk_machine_def(self, machine_def);
+    }
+
     fn visit_trait_def(&mut self, trait_def: &TraitDef) {
         self.nodes.push((trait_def.id, DocumentSymbolKind::Trait));
         visit::walk_trait_def(self, trait_def);
@@ -206,6 +211,11 @@ impl Visitor for NodeSpanCollector {
     fn visit_type_def(&mut self, type_def: &TypeDef) {
         self.record(type_def.id, type_def.span);
         visit::walk_type_def(self, type_def);
+    }
+
+    fn visit_machine_def(&mut self, machine_def: &MachineDef) {
+        self.record(machine_def.id, machine_def.span);
+        visit::walk_machine_def(self, machine_def);
     }
 
     fn visit_trait_def(&mut self, trait_def: &TraitDef) {

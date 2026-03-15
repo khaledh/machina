@@ -43,6 +43,12 @@ struct DidCloseParams {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
+struct TextDocumentRequestParams {
+    uri: String,
+    version: Option<i32>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
 struct ReadRequestParams {
     uri: String,
     line0: usize,
@@ -91,8 +97,14 @@ pub fn handle_message(
                             "triggerCharacters": ["(", ","],
                             "retriggerCharacters": signature_retrigger_characters
                         },
-                        "semanticTokensProvider": Value::Null,
-                        "documentSymbolProvider": false,
+                        "semanticTokensProvider": {
+                            "legend": {
+                                "tokenTypes": semantic_token_legend_types(),
+                                "tokenModifiers": []
+                            },
+                            "full": true
+                        },
+                        "documentSymbolProvider": true,
                         "codeActionProvider": true
                     },
                     "serverInfo": {
@@ -158,6 +170,44 @@ pub fn handle_message(
         }
         Some("textDocument/signatureHelp") => {
             dispatch_read_request(session, params, id, signature_help_response)
+        }
+        Some("textDocument/documentSymbol") => {
+            let Some(params) = params.and_then(parse_text_document_request_params) else {
+                return (HandlerAction::Continue, invalid_params_response(id));
+            };
+            let Some(id) = id else {
+                return (HandlerAction::Continue, None);
+            };
+            let version = match text_document_request_version(session, &params) {
+                Ok(version) => version,
+                Err(error) => {
+                    return (
+                        HandlerAction::Continue,
+                        Some(session_error_response(id, &error)),
+                    );
+                }
+            };
+            let response = document_symbol_response(session, id, &params.uri, version);
+            (HandlerAction::Continue, Some(response))
+        }
+        Some("textDocument/semanticTokens/full") => {
+            let Some(params) = params.and_then(parse_text_document_request_params) else {
+                return (HandlerAction::Continue, invalid_params_response(id));
+            };
+            let Some(id) = id else {
+                return (HandlerAction::Continue, None);
+            };
+            let version = match text_document_request_version(session, &params) {
+                Ok(version) => version,
+                Err(error) => {
+                    return (
+                        HandlerAction::Continue,
+                        Some(session_error_response(id, &error)),
+                    );
+                }
+            };
+            let response = semantic_tokens_response(session, id, &params.uri, version);
+            (HandlerAction::Continue, Some(response))
         }
         Some("textDocument/codeAction") => {
             let Some(params) = params.and_then(parse_code_action_request_params) else {
@@ -315,6 +365,16 @@ fn parse_read_request_params(params: &Value) -> Option<ReadRequestParams> {
     })
 }
 
+fn parse_text_document_request_params(params: &Value) -> Option<TextDocumentRequestParams> {
+    let text_doc = params.get("textDocument")?;
+    let uri = text_doc.get("uri")?.as_str()?.to_string();
+    let version = params
+        .get("mcDocVersion")
+        .and_then(Value::as_i64)
+        .and_then(|v| i32::try_from(v).ok());
+    Some(TextDocumentRequestParams { uri, version })
+}
+
 fn parse_code_action_request_params(params: &Value) -> Option<CodeActionRequestParams> {
     let text_doc = params.get("textDocument")?;
     let uri = text_doc.get("uri")?.as_str()?.to_string();
@@ -358,6 +418,16 @@ fn parse_code_action_request_params(params: &Value) -> Option<CodeActionRequestP
 fn read_request_version(
     session: &AnalysisSession,
     params: &ReadRequestParams,
+) -> Result<i32, SessionError> {
+    if let Some(version) = params.version {
+        return Ok(version);
+    }
+    Ok(session.lookup_document(&params.uri)?.version)
+}
+
+fn text_document_request_version(
+    session: &AnalysisSession,
+    params: &TextDocumentRequestParams,
 ) -> Result<i32, SessionError> {
     if let Some(version) = params.version {
         return Ok(version);
@@ -677,6 +747,160 @@ fn signature_help_response(
         }
         None => success_response(id, Value::Null),
     }
+}
+
+fn document_symbol_response(
+    session: &mut AnalysisSession,
+    id: Value,
+    uri: &str,
+    version: i32,
+) -> Value {
+    let file_id = match resolve_versioned_file(session, &id, uri, version) {
+        Ok(fid) => fid,
+        Err(r) => return r,
+    };
+    let symbols = match version_guarded_query(session, &id, uri, version, |db| {
+        db.document_symbols_at_file(file_id)
+    }) {
+        Ok(r) => r,
+        Err(r) => return r,
+    };
+    let items: Vec<Value> = symbols
+        .into_iter()
+        .map(|symbol| {
+            json!({
+                "name": symbol.name,
+                "detail": symbol.detail,
+                "kind": lsp_document_symbol_kind(symbol.kind),
+                "range": {
+                    "start": {
+                        "line": symbol.span.start.line.saturating_sub(1),
+                        "character": symbol.span.start.column.saturating_sub(1)
+                    },
+                    "end": {
+                        "line": symbol.span.end.line.saturating_sub(1),
+                        "character": symbol.span.end.column.saturating_sub(1)
+                    }
+                },
+                "selectionRange": {
+                    "start": {
+                        "line": symbol.span.start.line.saturating_sub(1),
+                        "character": symbol.span.start.column.saturating_sub(1)
+                    },
+                    "end": {
+                        "line": symbol.span.end.line.saturating_sub(1),
+                        "character": symbol.span.end.column.saturating_sub(1)
+                    }
+                },
+                "children": []
+            })
+        })
+        .collect();
+    success_response(id, json!(items))
+}
+
+fn lsp_document_symbol_kind(kind: machina::services::analysis::results::DocumentSymbolKind) -> u32 {
+    match kind {
+        machina::services::analysis::results::DocumentSymbolKind::Type => 5,
+        machina::services::analysis::results::DocumentSymbolKind::Trait => 11,
+        machina::services::analysis::results::DocumentSymbolKind::Function => 12,
+        machina::services::analysis::results::DocumentSymbolKind::Method => 6,
+        machina::services::analysis::results::DocumentSymbolKind::Property => 7,
+    }
+}
+
+fn semantic_tokens_response(
+    session: &mut AnalysisSession,
+    id: Value,
+    uri: &str,
+    version: i32,
+) -> Value {
+    let file_id = match resolve_versioned_file(session, &id, uri, version) {
+        Ok(fid) => fid,
+        Err(r) => return r,
+    };
+    let tokens = match version_guarded_query(session, &id, uri, version, |db| {
+        db.semantic_tokens_at_file(file_id)
+    }) {
+        Ok(r) => r,
+        Err(r) => return r,
+    };
+    success_response(
+        id,
+        json!({
+            "data": encode_semantic_tokens(tokens)
+        }),
+    )
+}
+
+fn semantic_token_legend_types() -> Vec<&'static str> {
+    vec![
+        "type",
+        "class",
+        "function",
+        "method",
+        "property",
+        "variable",
+        "parameter",
+        "typeParameter",
+        "enumMember",
+    ]
+}
+
+fn semantic_token_kind_index(kind: machina::services::analysis::results::SemanticTokenKind) -> u32 {
+    match kind {
+        machina::services::analysis::results::SemanticTokenKind::Type => 0,
+        machina::services::analysis::results::SemanticTokenKind::Trait => 1,
+        machina::services::analysis::results::SemanticTokenKind::Function => 2,
+        machina::services::analysis::results::SemanticTokenKind::Method => 3,
+        machina::services::analysis::results::SemanticTokenKind::Property => 4,
+        machina::services::analysis::results::SemanticTokenKind::Variable => 5,
+        machina::services::analysis::results::SemanticTokenKind::Parameter => 6,
+        machina::services::analysis::results::SemanticTokenKind::TypeParameter => 7,
+        machina::services::analysis::results::SemanticTokenKind::EnumVariant => 8,
+    }
+}
+
+fn encode_semantic_tokens(
+    tokens: Vec<machina::services::analysis::results::SemanticToken>,
+) -> Vec<u32> {
+    let mut out = Vec::with_capacity(tokens.len() * 5);
+    let mut prev_line0 = 0usize;
+    let mut prev_col0 = 0usize;
+    let mut first = true;
+    for token in tokens {
+        let line0 = token.span.start.line.saturating_sub(1);
+        let col0 = token.span.start.column.saturating_sub(1);
+        let delta_line = if first {
+            line0
+        } else {
+            line0.saturating_sub(prev_line0)
+        };
+        let delta_start = if first || delta_line > 0 {
+            col0
+        } else {
+            col0.saturating_sub(prev_col0)
+        };
+        let length = if token.span.start.line == token.span.end.line {
+            token
+                .span
+                .end
+                .column
+                .saturating_sub(token.span.start.column)
+                .max(1)
+        } else {
+            1
+        };
+        out.push(delta_line as u32);
+        out.push(delta_start as u32);
+        out.push(length as u32);
+        out.push(semantic_token_kind_index(token.kind));
+        out.push(0);
+        prev_line0 = line0;
+        prev_col0 = col0;
+        first = false;
+    }
+    out
 }
 
 fn code_action_response(

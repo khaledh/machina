@@ -1748,6 +1748,40 @@ fn ping() -> u64 { 1 }
 }
 
 #[test]
+fn document_symbols_include_linear_machine_defs() {
+    let mut db = AnalysisDb::new();
+    let source = r#"
+@linear
+type Payment = {
+    id: u64,
+    states { Draft, Approved }
+    actions { approve: Draft -> Approved }
+    roles { Reviewer { approve } }
+}
+
+Payment :: {
+    fn approve(self) -> Approved { Approved {} }
+}
+
+machine PaymentService hosts Payment(key: id) {
+    fn new() -> Self { Self {} }
+}
+"#;
+    let file_id = db.upsert_disk_text(
+        Path::new(env!("CARGO_MANIFEST_DIR")).join("examples/document_symbols_linear_machine.mc"),
+        source,
+    );
+    let symbols = db
+        .document_symbols_at_file(file_id)
+        .expect("document symbol query should succeed");
+
+    assert!(
+        symbols.iter().any(|s| s.name == "PaymentService"),
+        "expected machine symbol in outline, got: {symbols:#?}"
+    );
+}
+
+#[test]
 fn semantic_tokens_are_stable_for_same_snapshot() {
     let mut db = AnalysisDb::new();
     let source = r#"
@@ -1768,6 +1802,45 @@ fn main() -> u64 { id(1) + id(2) }
 
     assert_eq!(tokens_a, tokens_b, "token query should be deterministic");
     assert!(!tokens_a.is_empty(), "expected at least one semantic token");
+}
+
+#[test]
+fn semantic_tokens_include_linear_machine_defs() {
+    let mut db = AnalysisDb::new();
+    let source = r#"
+@linear
+type Payment = {
+    id: u64,
+    states { Draft, Approved }
+    actions { approve: Draft -> Approved }
+    roles { Reviewer { approve } }
+}
+
+Payment :: {
+    fn approve(self) -> Approved { Approved {} }
+}
+
+machine PaymentService hosts Payment(key: id) {
+    fn new() -> Self { Self {} }
+}
+"#;
+    let file_id = db.upsert_disk_text(
+        Path::new(env!("CARGO_MANIFEST_DIR")).join("examples/semantic_tokens_linear_machine.mc"),
+        source,
+    );
+    let tokens = db
+        .semantic_tokens_at_file(file_id)
+        .expect("semantic token query should succeed");
+    let machine_decl = span_for_substring(source, "machine PaymentService");
+
+    assert!(
+        tokens.iter().any(|tok| {
+            tok.kind == crate::services::analysis::results::SemanticTokenKind::Type
+                && tok.span.start.line == machine_decl.start.line
+                && tok.span.start.column == machine_decl.start.column
+        }),
+        "expected semantic token covering PaymentService machine def, got: {tokens:#?}"
+    );
 }
 
 #[test]

@@ -16,6 +16,20 @@ fn initialize_returns_capabilities() {
     let response = response.expect("expected initialize response");
     assert_eq!(response["id"], 1);
     assert_eq!(response["result"]["serverInfo"]["name"], "machina-lsp");
+    assert_eq!(
+        response["result"]["capabilities"]["documentSymbolProvider"],
+        true
+    );
+    assert_eq!(
+        response["result"]["capabilities"]["semanticTokensProvider"]["full"],
+        true
+    );
+    assert!(
+        response["result"]["capabilities"]["semanticTokensProvider"]["legend"]["tokenTypes"]
+            .as_array()
+            .is_some_and(|types| !types.is_empty()),
+        "expected semantic token legend types"
+    );
 }
 
 #[test]
@@ -736,6 +750,138 @@ Payment :: {
     assert!(
         value.contains("action Payment::authorize: Created -> Authorized"),
         "expected linear action hover, got: {value}"
+    );
+}
+
+#[test]
+fn document_symbol_request_includes_linear_machine_defs() {
+    let mut session = AnalysisSession::new();
+    let source = r#"@linear
+type Payment = {
+    id: u64,
+
+    states {
+        Draft,
+        Approved,
+    }
+
+    actions {
+        approve: Draft -> Approved,
+    }
+
+    roles {
+        Reviewer { approve }
+    }
+}
+
+Payment :: {
+    fn approve(self) -> Approved { Approved {} }
+}
+
+machine PaymentService hosts Payment(key: id) {
+    fn new() -> Self { Self {} }
+}
+"#;
+    let _ = handle_message(
+        &mut session,
+        json!({
+            "jsonrpc": "2.0",
+            "method": "textDocument/didOpen",
+            "params": {
+                "textDocument": {
+                    "uri": "file:///tmp/lsp-linear-document-symbols.mc",
+                    "version": 1,
+                    "languageId": "machina",
+                    "text": source
+                }
+            }
+        }),
+    );
+
+    let (_action, response) = handle_message(
+        &mut session,
+        json!({
+            "jsonrpc": "2.0",
+            "id": 301,
+            "method": "textDocument/documentSymbol",
+            "params": {
+                "textDocument": { "uri": "file:///tmp/lsp-linear-document-symbols.mc" }
+            }
+        }),
+    );
+    let response = response.expect("expected document symbol response");
+    let symbols = response["result"]
+        .as_array()
+        .expect("document symbols should be an array");
+    assert!(
+        symbols.iter().any(|sym| sym["name"] == "PaymentService"),
+        "expected PaymentService in document symbols, got: {symbols:#?}"
+    );
+}
+
+#[test]
+fn semantic_tokens_request_includes_linear_machine_tokens() {
+    let mut session = AnalysisSession::new();
+    let source = r#"@linear
+type Payment = {
+    id: u64,
+
+    states {
+        Draft,
+        Approved,
+    }
+
+    actions {
+        approve: Draft -> Approved,
+    }
+
+    roles {
+        Reviewer { approve }
+    }
+}
+
+Payment :: {
+    fn approve(self) -> Approved { Approved {} }
+}
+
+machine PaymentService hosts Payment(key: id) {
+    fn new() -> Self { Self {} }
+}
+"#;
+    let _ = handle_message(
+        &mut session,
+        json!({
+            "jsonrpc": "2.0",
+            "method": "textDocument/didOpen",
+            "params": {
+                "textDocument": {
+                    "uri": "file:///tmp/lsp-linear-semantic-tokens.mc",
+                    "version": 1,
+                    "languageId": "machina",
+                    "text": source
+                }
+            }
+        }),
+    );
+
+    let (_action, response) = handle_message(
+        &mut session,
+        json!({
+            "jsonrpc": "2.0",
+            "id": 302,
+            "method": "textDocument/semanticTokens/full",
+            "params": {
+                "textDocument": { "uri": "file:///tmp/lsp-linear-semantic-tokens.mc" }
+            }
+        }),
+    );
+    let response = response.expect("expected semantic tokens response");
+    let data = response["result"]["data"]
+        .as_array()
+        .expect("semantic token data should be an array");
+    assert!(
+        !data.is_empty(),
+        "expected semantic token data for linear machine source"
     );
 }
 
