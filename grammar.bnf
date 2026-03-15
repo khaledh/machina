@@ -6,8 +6,7 @@ Module             ::= RequiresBlock? TopLevelItem*
 
 TopLevelItem       ::= (AttributeList (TypeDef | TraitDef | FuncDecl | FuncDef))
                      | MethodBlock
-                     | TypestateDef
-                     | ProtocolDef
+                     | MachineDef
 
 RequiresBlock      ::= "requires" "{" RequireItem* "}"
 RequireItem        ::= RequirePath ("as" Identifier)? ("," | ";")?
@@ -22,6 +21,7 @@ TypeDef            ::= "type" Identifier TypeParamList? "=" TypeDefBody
 TypeDefBody        ::= TypeAliasDef
                      | StructDef
                      | EnumDef
+                     | LinearTypeDef    # requires @linear attribute
 
 TypeAliasDef       ::=  TypeExpr ";"?
 
@@ -32,55 +32,52 @@ StructField        ::= Identifier ":" TypeExpr
 EnumDef            ::= EnumVariantDef ("|" EnumVariantDef)* ";"?
 EnumVariantDef     ::= Identifier ( "(" TypeExprList ")" )?
 
+# Linear Types (@linear type Name = { ... })
+LinearTypeDef      ::= "{" LinearTypeItem* "}"
+LinearTypeItem     ::= StructField
+                     | LinearStatesBlock
+                     | LinearActionsBlock
+                     | LinearTriggersBlock
+                     | LinearRolesBlock
+
+LinearStatesBlock  ::= "states" "{" LinearStateVariant ("," LinearStateVariant)* ","? "}"
+LinearStateVariant ::= AttributeList Identifier ( "(" TypeExprList ")" )?
+
+LinearActionsBlock ::= "actions" "{" LinearTransitionDecl ("," LinearTransitionDecl)* ","? "}"
+LinearTriggersBlock ::= "triggers" "{" LinearTransitionDecl ("," LinearTransitionDecl)* ","? "}"
+LinearTransitionDecl ::= Identifier LinearTransitionParams? ":" Identifier "->" Identifier ( "|" TypeExpr )?
+LinearTransitionParams ::= "(" LinearTransitionParam ("," LinearTransitionParam)* ","? ")"
+LinearTransitionParam ::= Identifier ":" TypeExpr
+
+LinearRolesBlock   ::= "roles" "{" LinearRoleDecl ("," LinearRoleDecl)* ","? "}"
+LinearRoleDecl     ::= Identifier "{" Identifier ("," Identifier)* ","? "}"
+
+# Machines (machine Name hosts Type(key: field) { ... })
+MachineDef         ::= "machine" Identifier "hosts" MachineHost "{" MachineItem* "}"
+MachineHost        ::= Identifier "(" "key" ":" Identifier ")"
+
+MachineItem        ::= MachineFieldsBlock
+                     | MachineActionHandler
+                     | MachineTriggerHandler
+                     | MachineOnHandler
+                     | MachineConstructor
+
+MachineFieldsBlock ::= "fields" "{" StructFieldList? "}"
+MachineActionHandler  ::= "action" Identifier "(" Identifier ("," ParamList)? ")" "->" TypeExpr Block
+MachineTriggerHandler ::= "trigger" Identifier "(" Identifier ("," ParamList)? ")" Block
+MachineOnHandler   ::= "on" TypeExpr OnHandlerParams? OnHandlerProvenance? Block
+OnHandlerParams    ::= "(" OnHandlerParamList? ")"
+OnHandlerParamList ::= OnHandlerParam ("," OnHandlerParam)* ","?
+OnHandlerParam     ::= Param | Identifier
+OnHandlerProvenance ::= "for" TypeExpr ( ":" Identifier )? "(" Identifier ")"
+MachineConstructor ::= FuncDef
+
 # Traits
 TraitDef           ::= "trait" Identifier "{" TraitMember* "}"
 TraitMember        ::= TraitMethodDecl | TraitPropertyDecl
 TraitMethodDecl    ::= MethodSig ";"
 TraitPropertyDecl  ::= "prop" Identifier ":" TypeExpr "{" TraitPropertyAccessor+ "}"
 TraitPropertyAccessor ::= "get" ";" | "set" ";"
-
-# Protocols
-ProtocolDef        ::= "protocol" Identifier "{" ProtocolItem* "}"
-ProtocolItem       ::= ProtocolMsgDecl
-                     | ProtocolReqDecl
-                     | ProtocolRoleDecl
-                     | ProtocolFlowDecl
-ProtocolMsgDecl    ::= "msg" Identifier ( "=" TypeExpr )? ";"?
-ProtocolReqDecl    ::= "req" Identifier "->" Identifier ":" TypeExpr "=>" TypeExpr ";"?
-ProtocolRoleDecl   ::= "role" Identifier ( ";" | ProtocolRoleBlock )
-ProtocolRoleBlock  ::= "{" ProtocolStateDecl* "}"
-ProtocolStateDecl  ::= "state" Identifier ( ";" | "{" ProtocolTransition* "}" )
-ProtocolTransition ::= "on" ProtocolTrigger "->" Identifier ProtocolTransitionBody
-ProtocolTrigger    ::= TypeExpr ( "@" Identifier )?
-ProtocolTransitionBody ::= ";" | "{" ProtocolTransitionItem* "}"
-ProtocolTransitionItem ::= ProtocolEffectsDecl
-ProtocolEffectsDecl ::= "effects" ":" "[" ProtocolEffectList? "]" ("," | ";")?
-ProtocolEffectList ::= ProtocolEffect ( "," ProtocolEffect )* ","?
-ProtocolEffect     ::= TypeExpr "~" ">" Identifier
-ProtocolFlowDecl   ::= "flow" Identifier "->" Identifier ":" TypeExpr ( "->" TypeExpr )? ";"
-
-# Typestates
-TypestateDef       ::= "typestate" Identifier TypestateRoleImplList? "{" TypestateItem* "}"
-TypestateRoleImplList ::= ":" TypestateRolePath ("," TypestateRolePath)*
-TypestateRolePath  ::= Identifier ("::" Identifier)+
-TypestateItem      ::= TypestateFields
-                     | TypestateNew
-                     | TypestateOnHandler
-                     | (AttributeList TypestateState)
-TypestateFields    ::= "fields" "{" TypestateFieldList? "}"
-TypestateFieldList ::= TypestateField ("," TypestateField)* ","?
-TypestateField     ::= StructField ( "as" Identifier )?
-TypestateNew       ::= "fn" "new" TypeParamList? "(" ParamList? ")" ( "->" TypeExpr )? Block
-TypestateOnHandler ::= "on" TypeExpr TypestateHandlerParams? TypestateHandlerProvenance? TypestateHandlerReturn? Block
-TypestateHandlerParams ::= "(" TypestateHandlerParamList? ")"
-TypestateHandlerParamList ::= TypestateHandlerParam ("," TypestateHandlerParam)* ","?
-TypestateHandlerParam ::= Param | Identifier
-TypestateHandlerProvenance ::= "for" TypeExpr ( ":" Identifier )? "(" Identifier ")"
-TypestateHandlerReturn ::= "->" (TypeExpr | "stay")
-TypestateState     ::= "state" Identifier "{" TypestateStateItem* "}"
-TypestateStateItem ::= TypestateStateFields | TypestateStateMethod | TypestateOnHandler
-TypestateStateFields ::= "fields" "{" StructFieldList? "}"
-TypestateStateMethod ::= Func
 
 # Type Expressions
 TypeExpr           ::= TypeExprTerm ( "|" TypeExprTerm )*
