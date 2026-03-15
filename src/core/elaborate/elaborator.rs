@@ -191,12 +191,6 @@ impl<'a> Elaborator<'a> {
 
     fn elab_top_level_item(&mut self, item: &TopLevelItem) -> Option<TopLevelItem> {
         match item {
-            TopLevelItem::ProtocolDef(_) => {
-                // Protocol definitions are frontend-only conformance metadata.
-                // They do not participate in semantic IR/codegen, so elaborate
-                // drops them instead of treating them as an internal error.
-                None
-            }
             TopLevelItem::TraitDef(def) => Some(TopLevelItem::TraitDef(def.clone())),
             TopLevelItem::TypeDef(def) => Some(TopLevelItem::TypeDef(def.clone())),
             TopLevelItem::TypestateDef(_) => {

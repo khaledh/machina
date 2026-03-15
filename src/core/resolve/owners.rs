@@ -32,7 +32,6 @@ pub fn attach_def_owners(
         let mut collector =
             DefOwnerCollector::new(*owner, &resolved_context.def_table, &mut def_owners);
         match item {
-            TopLevelItem::ProtocolDef(protocol_def) => collector.visit_protocol_def(protocol_def),
             TopLevelItem::TraitDef(trait_def) => collector.visit_trait_def(trait_def),
             TopLevelItem::TypeDef(type_def) => collector.visit_type_def(type_def),
             TopLevelItem::TypestateDef(typestate_def) => {
@@ -51,7 +50,6 @@ pub fn attach_def_owners(
 
 fn top_level_item_id(item: &TopLevelItem) -> NodeId {
     match item {
-        TopLevelItem::ProtocolDef(protocol_def) => protocol_def.id,
         TopLevelItem::TraitDef(trait_def) => trait_def.id,
         TopLevelItem::TypeDef(type_def) => type_def.id,
         TopLevelItem::TypestateDef(typestate_def) => typestate_def.id,
@@ -94,15 +92,6 @@ impl<'a> DefOwnerCollector<'a> {
 }
 
 impl Visitor for DefOwnerCollector<'_> {
-    fn visit_protocol_def(&mut self, protocol_def: &ProtocolDef) {
-        self.record_node(protocol_def.id);
-        visit::walk_protocol_def(self, protocol_def);
-    }
-
-    fn visit_protocol_role(&mut self, role: &ProtocolRole) {
-        self.record_node(role.id);
-    }
-
     fn visit_trait_def(&mut self, trait_def: &TraitDef) {
         self.record_node(trait_def.id);
         visit::walk_trait_def(self, trait_def);

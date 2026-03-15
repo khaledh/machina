@@ -35,26 +35,10 @@ pub struct Require {
 }
 
 impl Module {
-    pub fn has_protocol_defs(&self) -> bool {
-        self.top_level_items
-            .iter()
-            .any(|item| matches!(item, TopLevelItem::ProtocolDef(_)))
-    }
-
     pub fn has_typestate_defs(&self) -> bool {
         self.top_level_items
             .iter()
             .any(|item| matches!(item, TopLevelItem::TypestateDef(_)))
-    }
-
-    pub fn protocol_defs(&self) -> Vec<&ProtocolDef> {
-        self.top_level_items
-            .iter()
-            .filter_map(|item| match item {
-                TopLevelItem::ProtocolDef(protocol_def) => Some(protocol_def),
-                _ => None,
-            })
-            .collect()
     }
 
     pub fn typestate_defs(&self) -> Vec<&TypestateDef> {
@@ -173,8 +157,7 @@ impl Module {
                 TopLevelItem::ClosureDef(closure_decl) => {
                     vec![CallableRef::ClosureDef(closure_decl)]
                 }
-                TopLevelItem::ProtocolDef(_)
-                | TopLevelItem::TypeDef(_)
+                TopLevelItem::TypeDef(_)
                 | TopLevelItem::TraitDef(_)
                 | TopLevelItem::TypestateDef(_)
                 | TopLevelItem::MachineDef(_) => vec![],
@@ -187,7 +170,6 @@ impl Module {
 
 #[derive(Clone, Debug)]
 pub enum TopLevelItem {
-    ProtocolDef(ProtocolDef),
     TraitDef(TraitDef),
     TypeDef(TypeDef),
     TypestateDef(TypestateDef),
@@ -325,72 +307,6 @@ pub struct TypestateHandlerProvenance {
     pub param: Param,
     /// Optional request-site label from `for RequestType:label(binding)`.
     pub request_site_label: Option<String>,
-}
-
-#[derive(Clone, Debug)]
-pub struct ProtocolDef {
-    pub id: NodeId,
-    pub name: String,
-    pub messages: Vec<ProtocolMessage>,
-    pub request_contracts: Vec<ProtocolRequestContract>,
-    pub roles: Vec<ProtocolRole>,
-    pub span: Span,
-}
-
-#[derive(Clone, Debug)]
-pub struct ProtocolMessage {
-    pub id: NodeId,
-    pub name: String,
-    pub ty: TypeExpr,
-    pub span: Span,
-}
-
-#[derive(Clone, Debug)]
-pub struct ProtocolRequestContract {
-    pub id: NodeId,
-    pub from_role: String,
-    pub to_role: String,
-    pub request_ty: TypeExpr,
-    pub response_tys: Vec<TypeExpr>,
-    pub span: Span,
-}
-
-#[derive(Clone, Debug)]
-pub struct ProtocolRole {
-    pub id: NodeId,
-    pub name: String,
-    pub states: Vec<ProtocolState>,
-    pub span: Span,
-}
-
-#[derive(Clone, Debug)]
-pub struct ProtocolState {
-    pub id: NodeId,
-    pub name: String,
-    pub transitions: Vec<ProtocolTransition>,
-    pub span: Span,
-}
-
-#[derive(Clone, Debug)]
-pub struct ProtocolTransition {
-    pub id: NodeId,
-    pub trigger: ProtocolTrigger,
-    pub next_state: String,
-    pub effects: Vec<ProtocolEffect>,
-    pub span: Span,
-}
-
-#[derive(Clone, Debug)]
-pub struct ProtocolTrigger {
-    pub selector_ty: TypeExpr,
-    pub from_role: Option<String>,
-}
-
-#[derive(Clone, Debug)]
-pub struct ProtocolEffect {
-    pub payload_ty: TypeExpr,
-    pub to_role: String,
-    pub span: Span,
 }
 
 #[derive(Clone, Debug)]

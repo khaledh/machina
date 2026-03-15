@@ -302,7 +302,6 @@ pub(crate) fn flatten_capsule_module(
 
 fn top_level_item_id(item: &TopLevelItem) -> NodeId {
     match item {
-        TopLevelItem::ProtocolDef(protocol_def) => protocol_def.id,
         TopLevelItem::TraitDef(trait_def) => trait_def.id,
         TopLevelItem::TypeDef(type_def) => type_def.id,
         TopLevelItem::TypestateDef(typestate_def) => typestate_def.id,

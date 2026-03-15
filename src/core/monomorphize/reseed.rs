@@ -85,7 +85,6 @@ pub(super) fn replay_node_def_mappings(
 pub(super) fn collect_node_ids_in_top_level_item(item: &TopLevelItem) -> Vec<NodeId> {
     let mut collector = NodeIdCollector { ids: Vec::new() };
     match item {
-        TopLevelItem::ProtocolDef(protocol_def) => collector.visit_protocol_def(protocol_def),
         TopLevelItem::TraitDef(trait_def) => collector.visit_trait_def(trait_def),
         TopLevelItem::TypeDef(type_def) => collector.visit_type_def(type_def),
         TopLevelItem::TypestateDef(typestate_def) => collector.visit_typestate_def(typestate_def),
@@ -113,12 +112,6 @@ struct NodeIdCollector {
 
 impl Visitor for NodeIdCollector {
     collect_id_and_walk! {
-        fn visit_protocol_def(ProtocolDef) => walk_protocol_def;
-        fn visit_protocol_role(ProtocolRole) => walk_protocol_role;
-        fn visit_protocol_message(ProtocolMessage) => walk_protocol_message;
-        fn visit_protocol_request_contract(ProtocolRequestContract) => walk_protocol_request_contract;
-        fn visit_protocol_state(ProtocolState) => walk_protocol_state;
-        fn visit_protocol_transition(ProtocolTransition) => walk_protocol_transition;
         fn visit_trait_def(TraitDef) => walk_trait_def;
         fn visit_trait_method(TraitMethod) => walk_trait_method;
         fn visit_trait_property(TraitProperty) => walk_trait_property;
@@ -142,14 +135,6 @@ impl Visitor for NodeIdCollector {
         fn visit_closure_def(ClosureDef) => walk_closure_def;
         fn visit_bind_pattern(BindPattern) => walk_bind_pattern;
         fn visit_match_arm(MatchArm) => walk_match_arm;
-    }
-
-    fn visit_protocol_trigger(&mut self, trigger: &ProtocolTrigger) {
-        visit::walk_protocol_trigger(self, trigger);
-    }
-
-    fn visit_protocol_effect(&mut self, effect: &ProtocolEffect) {
-        visit::walk_protocol_effect(self, effect);
     }
 
     fn visit_stmt_expr(&mut self, stmt: &StmtExpr) {
@@ -201,8 +186,7 @@ pub(super) fn rewrite_calls_in_item(
         TopLevelItem::FuncDecl(func_decl) => rewriter.visit_func_decl(func_decl),
         TopLevelItem::MethodBlock(method_block) => rewriter.visit_method_block(method_block),
         TopLevelItem::ClosureDef(closure_def) => rewriter.visit_closure_def(closure_def),
-        TopLevelItem::ProtocolDef(_)
-        | TopLevelItem::TypeDef(_)
+        TopLevelItem::TypeDef(_)
         | TopLevelItem::TraitDef(_)
         | TopLevelItem::TypestateDef(_)
         | TopLevelItem::MachineDef(_) => {}
@@ -286,7 +270,6 @@ fn remap_local_defs_for_nodes(def_table: &mut DefTable, node_ids: &[NodeId]) {
 pub(super) fn reseed_ids_in_item(item: &mut TopLevelItem, node_id_gen: &mut NodeIdGen) {
     let mut reseeder = NodeIdReseeder { node_id_gen };
     match item {
-        TopLevelItem::ProtocolDef(protocol_def) => reseeder.visit_protocol_def(protocol_def),
         TopLevelItem::TraitDef(trait_def) => reseeder.visit_trait_def(trait_def),
         TopLevelItem::TypeDef(type_def) => reseeder.visit_type_def(type_def),
         TopLevelItem::TypestateDef(typestate_def) => reseeder.visit_typestate_def(typestate_def),
@@ -318,12 +301,6 @@ impl NodeIdReseeder<'_> {
 
 impl VisitorMut for NodeIdReseeder<'_> {
     reseed_id_and_walk! {
-        fn visit_protocol_def(ProtocolDef) => walk_protocol_def;
-        fn visit_protocol_role(ProtocolRole) => walk_protocol_role;
-        fn visit_protocol_message(ProtocolMessage) => walk_protocol_message;
-        fn visit_protocol_request_contract(ProtocolRequestContract) => walk_protocol_request_contract;
-        fn visit_protocol_state(ProtocolState) => walk_protocol_state;
-        fn visit_protocol_transition(ProtocolTransition) => walk_protocol_transition;
         fn visit_trait_def(TraitDef) => walk_trait_def;
         fn visit_trait_method(TraitMethod) => walk_trait_method;
         fn visit_trait_property(TraitProperty) => walk_trait_property;

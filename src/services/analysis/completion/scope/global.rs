@@ -14,7 +14,6 @@ pub(super) fn global_scope(resolved: &ResolvedContext) -> HashMap<String, Comple
     let mut allowed_nodes = HashSet::new();
     for item in &resolved.module.top_level_items {
         match item {
-            TopLevelItem::ProtocolDef(_) => {}
             TopLevelItem::TraitDef(trait_def) => {
                 allowed_nodes.insert(trait_def.id);
             }

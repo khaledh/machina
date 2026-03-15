@@ -31,38 +31,6 @@ pub trait Visitor {
         walk_type_def(self, type_def)
     }
 
-    fn visit_protocol_def(&mut self, protocol_def: &ProtocolDef) {
-        walk_protocol_def(self, protocol_def)
-    }
-
-    fn visit_protocol_role(&mut self, role: &ProtocolRole) {
-        walk_protocol_role(self, role)
-    }
-
-    fn visit_protocol_message(&mut self, message: &ProtocolMessage) {
-        walk_protocol_message(self, message)
-    }
-
-    fn visit_protocol_request_contract(&mut self, contract: &ProtocolRequestContract) {
-        walk_protocol_request_contract(self, contract)
-    }
-
-    fn visit_protocol_state(&mut self, state: &ProtocolState) {
-        walk_protocol_state(self, state)
-    }
-
-    fn visit_protocol_transition(&mut self, transition: &ProtocolTransition) {
-        walk_protocol_transition(self, transition)
-    }
-
-    fn visit_protocol_trigger(&mut self, trigger: &ProtocolTrigger) {
-        walk_protocol_trigger(self, trigger)
-    }
-
-    fn visit_protocol_effect(&mut self, effect: &ProtocolEffect) {
-        walk_protocol_effect(self, effect)
-    }
-
     fn visit_trait_def(&mut self, trait_def: &TraitDef) {
         walk_trait_def(self, trait_def)
     }
@@ -271,7 +239,6 @@ pub trait Visitor {
 pub fn walk_module<V: Visitor + ?Sized>(v: &mut V, module: &Module) {
     for item in &module.top_level_items {
         match item {
-            TopLevelItem::ProtocolDef(protocol_def) => v.visit_protocol_def(protocol_def),
             TopLevelItem::TraitDef(trait_def) => v.visit_trait_def(trait_def),
             TopLevelItem::TypeDef(type_def) => v.visit_type_def(type_def),
             TopLevelItem::TypestateDef(typestate_def) => v.visit_typestate_def(typestate_def),
@@ -285,59 +252,6 @@ pub fn walk_module<V: Visitor + ?Sized>(v: &mut V, module: &Module) {
 }
 
 // --- Type Definitions ---
-
-pub fn walk_protocol_def<V: Visitor + ?Sized>(v: &mut V, protocol_def: &ProtocolDef) {
-    for message in &protocol_def.messages {
-        v.visit_protocol_message(message);
-    }
-    for contract in &protocol_def.request_contracts {
-        v.visit_protocol_request_contract(contract);
-    }
-    for role in &protocol_def.roles {
-        v.visit_protocol_role(role);
-    }
-}
-
-pub fn walk_protocol_role<V: Visitor + ?Sized>(v: &mut V, role: &ProtocolRole) {
-    for state in &role.states {
-        v.visit_protocol_state(state);
-    }
-}
-
-pub fn walk_protocol_message<V: Visitor + ?Sized>(v: &mut V, message: &ProtocolMessage) {
-    v.visit_type_expr(&message.ty);
-}
-
-pub fn walk_protocol_request_contract<V: Visitor + ?Sized>(
-    v: &mut V,
-    contract: &ProtocolRequestContract,
-) {
-    v.visit_type_expr(&contract.request_ty);
-    for response_ty in &contract.response_tys {
-        v.visit_type_expr(response_ty);
-    }
-}
-
-pub fn walk_protocol_state<V: Visitor + ?Sized>(v: &mut V, state: &ProtocolState) {
-    for transition in &state.transitions {
-        v.visit_protocol_transition(transition);
-    }
-}
-
-pub fn walk_protocol_transition<V: Visitor + ?Sized>(v: &mut V, transition: &ProtocolTransition) {
-    v.visit_protocol_trigger(&transition.trigger);
-    for effect in &transition.effects {
-        v.visit_protocol_effect(effect);
-    }
-}
-
-pub fn walk_protocol_trigger<V: Visitor + ?Sized>(v: &mut V, trigger: &ProtocolTrigger) {
-    v.visit_type_expr(&trigger.selector_ty);
-}
-
-pub fn walk_protocol_effect<V: Visitor + ?Sized>(v: &mut V, effect: &ProtocolEffect) {
-    v.visit_type_expr(&effect.payload_ty);
-}
 
 pub fn walk_trait_def<V: Visitor + ?Sized>(v: &mut V, trait_def: &TraitDef) {
     for method in &trait_def.methods {

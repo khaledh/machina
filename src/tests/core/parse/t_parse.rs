@@ -1,6 +1,6 @@
 use super::*;
 use crate::core::ast::RefinementKind;
-use crate::core::lexer::{LexError, Lexer, Token, TokenKind as TK};
+use crate::core::lexer::{LexError, Lexer, Token};
 use crate::core::parse::{ParseErrorKind, ParserOptions};
 
 fn parse_module(source: &str) -> Result<Module, ParseError> {
@@ -2575,97 +2575,6 @@ fn test_parse_protocol_is_retired_by_default() {
         ParseErrorKind::FeatureRetired {
             feature: "typestate"
         }
-    ));
-}
-
-#[test]
-fn test_parse_protocol_transition_syntax_with_experimental_flag() {
-    let source = r#"
-        protocol Auth {
-            msg Start;
-            msg AuthorizeReq;
-            msg AuthApproved;
-            msg AuthDenied;
-            msg SessionRevoked;
-
-            req Client -> Server: AuthorizeReq => AuthApproved | AuthDenied;
-
-            role Client {
-                state Idle {
-                    on Start -> Awaiting {
-                        effects: [ AuthorizeReq ~> Server ]
-                    }
-                }
-
-                state Awaiting {
-                    on AuthApproved@Server -> Idle;
-                    on AuthDenied@Server -> Idle;
-                }
-            }
-
-            role Server {
-                state Ready {
-                    on AuthorizeReq@Client -> Ready {
-                        effects: [ SessionRevoked ~> Client ]
-                    }
-                }
-            }
-        }
-    "#;
-
-    let module = parse_module_with_options(
-        source,
-        ParserOptions {
-            experimental_typestate: true,
-        },
-    )
-    .expect("protocol should parse when experimental flag is enabled");
-
-    assert_eq!(module.top_level_items.len(), 1);
-    let protocol = match &module.top_level_items[0] {
-        TopLevelItem::ProtocolDef(def) => def,
-        _ => panic!("expected protocol top-level item"),
-    };
-
-    assert_eq!(protocol.name, "Auth");
-    assert_eq!(protocol.messages.len(), 5);
-    assert_eq!(protocol.request_contracts.len(), 1);
-    assert_eq!(protocol.roles.len(), 2);
-    assert_eq!(protocol.roles[0].name, "Client");
-    assert_eq!(protocol.roles[1].name, "Server");
-    assert_eq!(protocol.roles[0].states.len(), 2);
-    assert_eq!(protocol.roles[1].states.len(), 1);
-    assert_eq!(protocol.roles[0].states[0].transitions.len(), 1);
-    assert_eq!(protocol.roles[0].states[1].transitions.len(), 2);
-    assert_eq!(protocol.roles[1].states[0].transitions.len(), 1);
-    assert_eq!(protocol.request_contracts[0].from_role, "Client");
-    assert_eq!(protocol.request_contracts[0].to_role, "Server");
-    assert_eq!(protocol.request_contracts[0].response_tys.len(), 2);
-}
-
-#[test]
-fn test_parse_protocol_non_start_trigger_requires_explicit_source_role() {
-    let source = r#"
-        protocol Auth {
-            role Client {
-                state Idle {
-                    on Ping -> Idle;
-                }
-            }
-        }
-    "#;
-
-    let err = parse_module_with_options(
-        source,
-        ParserOptions {
-            experimental_typestate: true,
-        },
-    )
-    .expect_err("non-start trigger without source role should fail");
-
-    assert!(matches!(
-        err.kind(),
-        ParseErrorKind::ExpectedToken(TK::At, _)
     ));
 }
 

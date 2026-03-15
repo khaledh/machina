@@ -215,7 +215,6 @@ impl SymbolIdTable {
 
         for item in &module.top_level_items {
             match item {
-                TopLevelItem::ProtocolDef(_) => {}
                 TopLevelItem::TraitDef(trait_def) => {
                     table.record(
                         def_table.lookup_node_def_id(trait_def.id),

@@ -78,50 +78,6 @@ pub enum ResolveErrorKind {
     #[error("Module `{0}` has no member `{1}`")]
     ModuleMemberUndefined(String, String),
 
-    #[error("Undefined protocol role: {0}")]
-    ProtocolRoleUndefined(String),
-
-    #[error("Expected '{0}' to be a protocol role, found {1}")]
-    ExpectedProtocolRole(String, SymbolKind),
-
-    #[error("Undefined protocol role `{1}` in request contract of protocol `{0}`")]
-    ProtocolRequestContractRoleUndefined(String, String),
-
-    #[error(
-        "Undefined trigger source role `{3}` in protocol `{0}` role `{1}` state `{2}` transition"
-    )]
-    ProtocolTransitionSourceRoleUndefined(String, String, String, String),
-
-    #[error("Undefined effect destination role `{3}` in protocol `{0}` role `{1}` state `{2}`")]
-    ProtocolTransitionEffectRoleUndefined(String, String, String, String),
-
-    #[error("Undefined next state `{3}` in protocol `{0}` role `{1}` state `{2}` transition")]
-    ProtocolTransitionNextStateUndefined(String, String, String, String),
-
-    #[error("Ambiguous transition trigger `{3}@{4}` in protocol `{0}` role `{1}` state `{2}`")]
-    ProtocolTransitionTriggerConflict(String, String, String, String, String),
-
-    #[error("Typestate `{0}` role implementation path must be `<Protocol>::<Role>`, found `{1}`")]
-    TypestateRoleImplMalformedPath(String, String),
-
-    #[error("Typestate `{0}` references undefined protocol role `{1}`")]
-    TypestateRoleImplRoleUndefined(String, String),
-
-    #[error("Typestate `{0}` expected `{1}` to resolve to a protocol role, found {2}")]
-    TypestateRoleImplExpectedRole(String, String, SymbolKind),
-
-    #[error("Typestate `{0}` field `{1}` role binding must use `Machine<...>` type")]
-    TypestateRoleBindingInvalidType(String, String),
-
-    #[error("Typestate `{0}` field `{1}` binds undefined protocol role `{2}`")]
-    TypestateRoleBindingRoleUndefined(String, String, String),
-
-    #[error("Typestate `{0}` binds protocol role `{1}` more than once")]
-    TypestateRoleBindingDuplicateRole(String, String),
-
-    #[error("Typestate `{0}` is missing protocol peer-role binding for `{1}`")]
-    TypestateRoleBindingMissing(String, String),
-
     #[error("Typestate `{0}` must declare at least one state")]
     TypestateMissingState(String),
 

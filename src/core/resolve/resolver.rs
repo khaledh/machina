@@ -1373,119 +1373,6 @@ impl SymbolResolver {
 }
 
 impl Visitor for SymbolResolver {
-    fn visit_protocol_def(&mut self, protocol_def: &ProtocolDef) {
-        let mut local_roles = HashSet::new();
-        for role in &protocol_def.roles {
-            local_roles.insert(role.name.as_str());
-        }
-
-        for message in &protocol_def.messages {
-            self.visit_type_expr(&message.ty);
-        }
-
-        for contract in &protocol_def.request_contracts {
-            if !local_roles.contains(contract.from_role.as_str()) {
-                self.err(
-                    contract.span,
-                    REK::ProtocolRequestContractRoleUndefined(
-                        protocol_def.name.clone(),
-                        contract.from_role.clone(),
-                    ),
-                );
-            }
-            if !local_roles.contains(contract.to_role.as_str()) {
-                self.err(
-                    contract.span,
-                    REK::ProtocolRequestContractRoleUndefined(
-                        protocol_def.name.clone(),
-                        contract.to_role.clone(),
-                    ),
-                );
-            }
-            self.visit_type_expr(&contract.request_ty);
-            for response_ty in &contract.response_tys {
-                self.visit_type_expr(response_ty);
-            }
-        }
-
-        for role in &protocol_def.roles {
-            let local_states: HashSet<&str> = role
-                .states
-                .iter()
-                .map(|state| state.name.as_str())
-                .collect();
-            for state in &role.states {
-                let mut seen_triggers = HashSet::new();
-                for transition in &state.transitions {
-                    self.visit_type_expr(&transition.trigger.selector_ty);
-                    if let Some(from_role) = &transition.trigger.from_role
-                        && !local_roles.contains(from_role.as_str())
-                    {
-                        self.err(
-                            transition.span,
-                            REK::ProtocolTransitionSourceRoleUndefined(
-                                protocol_def.name.clone(),
-                                role.name.clone(),
-                                state.name.clone(),
-                                from_role.clone(),
-                            ),
-                        );
-                    }
-
-                    let trigger_key = (
-                        format!("{:?}", transition.trigger.selector_ty.kind),
-                        transition.trigger.from_role.clone().unwrap_or_default(),
-                    );
-                    if !seen_triggers.insert(trigger_key.clone()) {
-                        let trigger_label = transition.trigger.selector_ty.to_string();
-                        let source_role = transition
-                            .trigger
-                            .from_role
-                            .clone()
-                            .unwrap_or_else(|| "Start".to_string());
-                        self.err(
-                            transition.span,
-                            REK::ProtocolTransitionTriggerConflict(
-                                protocol_def.name.clone(),
-                                role.name.clone(),
-                                state.name.clone(),
-                                trigger_label,
-                                source_role,
-                            ),
-                        );
-                    }
-
-                    if !local_states.contains(transition.next_state.as_str()) {
-                        self.err(
-                            transition.span,
-                            REK::ProtocolTransitionNextStateUndefined(
-                                protocol_def.name.clone(),
-                                role.name.clone(),
-                                state.name.clone(),
-                                transition.next_state.clone(),
-                            ),
-                        );
-                    }
-
-                    for effect in &transition.effects {
-                        if !local_roles.contains(effect.to_role.as_str()) {
-                            self.err(
-                                effect.span,
-                                REK::ProtocolTransitionEffectRoleUndefined(
-                                    protocol_def.name.clone(),
-                                    role.name.clone(),
-                                    state.name.clone(),
-                                    effect.to_role.clone(),
-                                ),
-                            );
-                        }
-                        self.visit_type_expr(&effect.payload_ty);
-                    }
-                }
-            }
-        }
-    }
-
     fn visit_type_def(&mut self, type_def: &TypeDef) {
         self.with_scope(|resolver| {
             for type_param in &type_def.type_params {
@@ -2226,7 +2113,6 @@ pub fn resolve_program(
 
 fn top_level_item_id(item: &TopLevelItem) -> NodeId {
     match item {
-        TopLevelItem::ProtocolDef(protocol_def) => protocol_def.id,
         TopLevelItem::TraitDef(trait_def) => trait_def.id,
         TopLevelItem::TypeDef(type_def) => type_def.id,
         TopLevelItem::TypestateDef(typestate_def) => typestate_def.id,

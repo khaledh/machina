@@ -28,7 +28,6 @@ impl fmt::Display for Module {
 
         for (i, item) in self.top_level_items.iter().enumerate() {
             match item {
-                TopLevelItem::ProtocolDef(protocol_def) => protocol_def.fmt_with_indent(f, 0)?,
                 TopLevelItem::TraitDef(trait_def) => trait_def.fmt_with_indent(f, 0)?,
                 TopLevelItem::TypeDef(type_def) => type_def.fmt_with_indent(f, 0)?,
                 TopLevelItem::TypestateDef(typestate_def) => typestate_def.fmt_with_indent(f, 0)?,
@@ -90,123 +89,6 @@ impl TraitProperty {
             self.name,
             self.ty,
             accessors.join(", ")
-        )
-    }
-}
-
-impl ProtocolDef {
-    fn fmt_with_indent(&self, f: &mut fmt::Formatter<'_>, level: usize) -> fmt::Result {
-        let pad = indent(level);
-        writeln!(f, "{}ProtocolDef [{}]", pad, self.id)?;
-        let pad1 = indent(level + 1);
-        writeln!(f, "{}Name: {}", pad1, self.name)?;
-        writeln!(f, "{}Messages:", pad1)?;
-        for message in &self.messages {
-            message.fmt_with_indent(f, level + 2)?;
-        }
-        writeln!(f, "{}RequestContracts:", pad1)?;
-        for contract in &self.request_contracts {
-            contract.fmt_with_indent(f, level + 2)?;
-        }
-        writeln!(f, "{}Roles:", pad1)?;
-        for role in &self.roles {
-            role.fmt_with_indent(f, level + 2)?;
-        }
-        Ok(())
-    }
-}
-
-impl ProtocolMessage {
-    fn fmt_with_indent(&self, f: &mut fmt::Formatter<'_>, level: usize) -> fmt::Result {
-        writeln!(
-            f,
-            "{}Msg {} [{}]: {}",
-            indent(level),
-            self.name,
-            self.id,
-            self.ty
-        )
-    }
-}
-
-impl ProtocolRequestContract {
-    fn fmt_with_indent(&self, f: &mut fmt::Formatter<'_>, level: usize) -> fmt::Result {
-        writeln!(
-            f,
-            "{}Req {} -> {} [{}]",
-            indent(level),
-            self.from_role,
-            self.to_role,
-            self.id
-        )?;
-        writeln!(f, "{}Request: {}", indent(level + 1), self.request_ty)?;
-        if self.response_tys.is_empty() {
-            writeln!(f, "{}Responses: <none>", indent(level + 1))
-        } else {
-            writeln!(f, "{}Responses:", indent(level + 1))?;
-            for ty in &self.response_tys {
-                writeln!(f, "{}{}", indent(level + 2), ty)?;
-            }
-            Ok(())
-        }
-    }
-}
-
-impl ProtocolRole {
-    fn fmt_with_indent(&self, f: &mut fmt::Formatter<'_>, level: usize) -> fmt::Result {
-        writeln!(f, "{}Role {} [{}]", indent(level), self.name, self.id)?;
-        for state in &self.states {
-            state.fmt_with_indent(f, level + 1)?;
-        }
-        Ok(())
-    }
-}
-
-impl ProtocolState {
-    fn fmt_with_indent(&self, f: &mut fmt::Formatter<'_>, level: usize) -> fmt::Result {
-        writeln!(f, "{}State {} [{}]", indent(level), self.name, self.id)?;
-        for transition in &self.transitions {
-            transition.fmt_with_indent(f, level + 1)?;
-        }
-        Ok(())
-    }
-}
-
-impl ProtocolTransition {
-    fn fmt_with_indent(&self, f: &mut fmt::Formatter<'_>, level: usize) -> fmt::Result {
-        writeln!(f, "{}Transition [{}]", indent(level), self.id)?;
-        self.trigger.fmt_with_indent(f, level + 1)?;
-        writeln!(f, "{}Next: {}", indent(level + 1), self.next_state)?;
-        for effect in &self.effects {
-            effect.fmt_with_indent(f, level + 1)?;
-        }
-        Ok(())
-    }
-}
-
-impl ProtocolTrigger {
-    fn fmt_with_indent(&self, f: &mut fmt::Formatter<'_>, level: usize) -> fmt::Result {
-        match &self.from_role {
-            Some(from_role) => writeln!(
-                f,
-                "{}Trigger: {} @ {}",
-                indent(level),
-                self.selector_ty,
-                from_role
-            ),
-            None => writeln!(f, "{}Trigger: {}", indent(level), self.selector_ty),
-        }
-    }
-}
-
-impl ProtocolEffect {
-    fn fmt_with_indent(&self, f: &mut fmt::Formatter<'_>, level: usize) -> fmt::Result {
-        writeln!(
-            f,
-            "{}Effect: {} ~> {}",
-            indent(level),
-            self.payload_ty,
-            self.to_role
         )
     }
 }
