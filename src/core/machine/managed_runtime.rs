@@ -10,9 +10,24 @@ use crate::core::ast::{
 };
 use crate::core::diag::Span;
 
+const MANAGED_RUNTIME_CURRENT_FN: &str = "__mc_machine_runtime_managed_current_u64";
+
 const MANAGED_RUNTIME_BOOTSTRAP_FN: &str = "__mc_machine_runtime_managed_bootstrap_u64";
 const MANAGED_RUNTIME_SHUTDOWN_FN: &str = "__mc_machine_runtime_managed_shutdown_u64";
 const MANAGED_RUNTIME_STEP_FN: &str = "__mc_machine_runtime_step_u64";
+
+pub(crate) fn ensure_managed_runtime_intrinsics(module: &mut Module, node_id_gen: &mut NodeIdGen) {
+    crate::core::machine::runtime_intrinsics::ensure_u64_runtime_intrinsics(
+        module,
+        node_id_gen,
+        &[
+            (MANAGED_RUNTIME_BOOTSTRAP_FN, &[]),
+            (MANAGED_RUNTIME_CURRENT_FN, &[]),
+            (MANAGED_RUNTIME_SHUTDOWN_FN, &[]),
+            (MANAGED_RUNTIME_STEP_FN, &["runtime"]),
+        ],
+    );
+}
 
 pub(crate) fn rewrite_machines_entrypoint(
     module: &mut Module,

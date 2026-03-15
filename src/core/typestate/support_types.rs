@@ -73,9 +73,6 @@ pub(super) fn ensure_machine_support_types(module: &mut Module, node_id_gen: &mu
 // Runtime intrinsic declarations: (name, param_names, ret_type_is_u64).
 // All use u64 param/return types.
 const INTRINSICS: &[(&str, &[&str])] = &[
-    (MANAGED_RUNTIME_BOOTSTRAP_FN, &[]),
-    (MANAGED_RUNTIME_CURRENT_FN, &[]),
-    (MANAGED_RUNTIME_SHUTDOWN_FN, &[]),
     (
         "__mc_machine_runtime_spawn_u64",
         &["runtime", "mailbox_cap"],
@@ -106,6 +103,7 @@ const INTRINSICS: &[(&str, &[&str])] = &[
 ];
 
 pub(super) fn ensure_machine_runtime_intrinsics(module: &mut Module, node_id_gen: &mut NodeIdGen) {
+    crate::core::machine::managed_runtime::ensure_managed_runtime_intrinsics(module, node_id_gen);
     crate::core::machine::runtime_intrinsics::ensure_u64_runtime_intrinsics(
         module,
         node_id_gen,

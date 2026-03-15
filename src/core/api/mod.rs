@@ -241,14 +241,33 @@ pub fn resolve_stage_with_policy(
     inputs: ResolveInputs,
     policy: FrontendPolicy,
 ) -> ResolveStageResult {
-    let has_legacy_typestate_surface =
-        input.module.has_typestate_defs() || input.module.has_protocol_defs();
-    let typestate_role_impls = if input.module.has_typestate_defs() {
+    let has_typestate_defs = input.module.has_typestate_defs();
+    let has_legacy_typestate_surface = has_typestate_defs || input.module.has_protocol_defs();
+    let typestate_role_impls = if has_typestate_defs {
         typestate::collect_role_impl_refs(&input.module)
     } else {
         Vec::new()
     };
-    let mut frontend_errors = typestate::desugar_module(&mut input.module, &mut input.node_id_gen);
+    if !has_typestate_defs {
+        let has_machine_defs = !input.module.machine_defs().is_empty();
+        let managed_main_wrapped =
+            crate::core::machine::managed_runtime::rewrite_machines_entrypoint(
+                &mut input.module,
+                has_machine_defs,
+                &mut input.node_id_gen,
+            );
+        if managed_main_wrapped {
+            crate::core::machine::managed_runtime::ensure_managed_runtime_intrinsics(
+                &mut input.module,
+                &mut input.node_id_gen,
+            );
+        }
+    }
+    let mut frontend_errors = if has_typestate_defs {
+        typestate::desugar_module(&mut input.module, &mut input.node_id_gen)
+    } else {
+        Vec::new()
+    };
     frontend_errors.extend(crate::core::linear::validate_module(&input.module));
     input.linear_index = crate::core::linear::build_linear_index(&input.module);
     if policy == FrontendPolicy::Strict && !frontend_errors.is_empty() {
