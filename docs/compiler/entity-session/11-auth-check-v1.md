@@ -73,16 +73,20 @@ Order :: {
 
 ```mc
 machine OrderService hosts Order(key: id) {
-    fn new() -> Self {
-        Self {}
+    fields {
+        auth_service: Machine<AuthService>,
     }
 
-    // Override submit to emit an auth check request
+    fn new(auth_service: Machine<AuthService>) -> Self {
+        Self { auth_service: auth_service }
+    }
+
+    // Override submit to send an auth check
     action submit(draft) -> PendingAuth {
-        emit AuthCheck {
+        send(self.auth_service, AuthCheck {
             order_id: draft.id,
             user_id: draft.user_id,
-        };
+        });
         draft.submit()
     }
 
@@ -110,19 +114,23 @@ machine OrderService hosts Order(key: id) {
 
 ```mc
 machine AuthService {
-    fn new() -> Self {
-        Self {}
+    fields {
+        order_service: Machine<OrderService>,
+    }
+
+    fn new(order_service: Machine<OrderService>) -> Self {
+        Self { order_service: order_service }
     }
 
     on AuthCheck(check) {
         // Business logic: check user permissions, fraud rules, etc.
         if self.is_authorized(check.user_id, check.order_id) {
-            emit AuthApproved { order_id: check.order_id };
+            send(self.order_service, AuthApproved { order_id: check.order_id });
         } else {
-            emit AuthDenied {
+            send(self.order_service, AuthDenied {
                 order_id: check.order_id,
                 reason: "insufficient funds",
-            };
+            });
         }
     }
 }
@@ -132,7 +140,8 @@ machine AuthService {
 
 ```mc
 fn main() -> () | MachineError | SessionError {
-    let service = OrderService::spawn()?;
+    let auth = AuthService::spawn(order_service)?;
+    let service = OrderService::spawn(auth)?;
 
     let buyer = service.create(Order as Buyer)?;
     let pending = buyer.submit()?;
@@ -154,27 +163,26 @@ fn main() -> () | MachineError | SessionError {
 ## The Flow
 
 ```
-Client                  OrderService              Runtime              AuthService
-  |                          |                        |                      |
-  |-- submit() ------------>|                        |                      |
-  |                          |-- emit AuthCheck ---->|                      |
-  |                          |<-- PendingAuth -------|                      |
-  |<-- PendingAuth ---------|                        |                      |
-  |                          |                        |-- AuthCheck ------->|
-  |   (waiting)              |                        |                      |
-  |                          |                        |                      |-- decide
-  |                          |                        |<-- emit AuthApproved|
-  |                          |<-- AuthApproved ------|                      |
-  |                          |-- self.deliver() ---->|                      |
-  |                          |   (trigger handler)   |                      |
-  |                          |<-- Confirmed ---------|                      |
-  |<-- Confirmed ------------|                        |                      |
+Client                  OrderService                          AuthService
+  |                          |                                      |
+  |-- submit() ------------>|                                      |
+  |                          |-- send(auth, AuthCheck) ----------->|
+  |                          |                                      |
+  |<-- PendingAuth ---------|                                      |
+  |                          |                                      |-- decide
+  |   (waiting)              |                                      |
+  |                          |<-- send(order, AuthApproved) -------|
+  |                          |                                      |
+  |                          |-- on handler                        |
+  |                          |-- self.deliver(order_id, ...)       |
+  |                          |-- trigger handler -> Confirmed      |
+  |                          |                                      |
+  |<-- Confirmed ------------|                                      |
 ```
 
-The runtime sits between machines and handles event routing. In V1, routing
-policy is a runtime/deployment concern — the language does not specify how
-`emit AuthCheck` reaches `AuthService` or how `emit AuthApproved` reaches
-`OrderService`.
+Routing is explicit — `send` specifies the destination machine via a
+`Machine<T>` handle. Each machine holds a handle to the machine it
+needs to communicate with.
 
 ## Pain Points
 
@@ -183,7 +191,7 @@ policy is a runtime/deployment concern — the language does not specify how
 The `order_id` field appears in every event type — `AuthCheck`, `AuthApproved`,
 `AuthDenied`. The developer must:
 - Include the correlation key in every event struct
-- Copy it correctly at every emit site
+- Copy it correctly at every send site
 - Match on it in every `on` handler
 
 The compiler cannot verify that `AuthApproved.order_id` refers to a valid
@@ -239,7 +247,7 @@ semantics?
 ### 4. No Reply Completeness Check
 
 The compiler cannot verify that `AuthService` handles all possible reply
-types. If the developer forgets to emit `AuthDenied` in the failure branch,
+types. If the developer forgets to send `AuthDenied` in the failure branch,
 the order silently hangs in `PendingAuth`. There is no compile-time contract
 saying "an `AuthCheck` must eventually produce either `AuthApproved` or
 `AuthDenied`."
@@ -247,19 +255,18 @@ saying "an `AuthCheck` must eventually produce either `AuthApproved` or
 **V2 question**: Should interaction types declare their valid reply set,
 enabling the compiler to check completeness?
 
-### 5. Routing is Opaque
+### 5. Circular Handle Dependencies
 
-The `emit AuthCheck { ... }` call gives no indication of where the event
-goes. The developer must know (from documentation or convention) that
-`AuthService` handles `AuthCheck` events. If a second machine also declares
-`on AuthCheck(...)`, the behavior is undefined — the runtime picks one, both,
-or neither, depending on deployment configuration.
+`OrderService` needs a `Machine<AuthService>` to send auth checks.
+`AuthService` needs a `Machine<OrderService>` to send replies. This creates
+a circular dependency at spawn time — which machine is spawned first?
 
-This is intentional in V1 (routing is a runtime concern), but it means the
-developer cannot reason about event flow from the source code alone.
+Workarounds exist (deferred handle injection, a shared coordinator), but
+the language doesn't help here. The circular dependency is an artifact of
+point-to-point `send` requiring both sides to hold handles to each other.
 
-**V2 question**: Should channels or subscriptions make routing explicit and
-compiler-checkable?
+**V2 question**: Should interaction tokens or channels eliminate the need for
+bidirectional handle wiring?
 
 ### 6. Verbosity vs Business Logic
 
@@ -286,17 +293,18 @@ that a V2 interaction model could eliminate.
 | Linear consumption (no double-submit) | Full — compile-time checked |
 | Session state tracking (wait after submit) | Full — compile-time checked |
 | Correlation (order_id matches) | None — manual |
-| Reply completeness (all branches emit) | None — manual |
+| Reply completeness (all branches send) | None — manual |
 | Timeout (PendingAuth doesn't hang) | None — external infrastructure |
 | Duplicate protection (at-most-once reply) | Partial — InvalidState at runtime |
-| Routing (AuthCheck reaches AuthService) | None — runtime concern |
+| Routing (AuthCheck reaches AuthService) | Explicit — `send(target, value)` |
+| Handle wiring (circular dependencies) | None — manual at spawn time |
 
 ## V2 Requirements Derived from This Example
 
 If V2 introduces interaction semantics, this example suggests the following
 requirements:
 
-1. **Typed correlation**: connecting an outgoing event to its expected replies
+1. **Typed correlation**: connecting an outgoing send to its expected replies
    without manual field threading.
 2. **Reply contract**: declaring the valid reply set for an interaction
    (e.g., `AuthCheck -> AuthApproved | AuthDenied`) with compiler-checked
@@ -305,8 +313,9 @@ requirements:
    automatic state transition.
 4. **At-most-once delivery**: interaction tokens that prevent duplicate
    replies at the language level.
-5. **Explicit routing**: making event destinations visible in source code,
-   either via channels or typed subscriptions.
+5. **Handle wiring**: eliminating circular machine handle dependencies for
+   request/reply patterns (interaction tokens or channels could carry the
+   return address implicitly).
 
 These map naturally to the "interactions as linear types" direction outlined
 in [10-inter-machine-communication.md](10-inter-machine-communication.md):

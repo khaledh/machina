@@ -9,14 +9,18 @@ type CIPassed = { commit_sha: string }
 type CIFailed = { reason: string }
 
 machine PRService hosts PullRequest(key: id) {
-    fn new() -> Self {
-        Self {}
+    fields {
+        ci_service: Machine<CIService>,
+    }
+
+    fn new(ci_service: Machine<CIService>) -> Self {
+        Self { ci_service: ci_service }
     }
 
     // --- Action override (only for actions needing infrastructure) ---
 
     action submit(draft) -> PendingCI {
-        emit RunCI { pr_id: draft.id };   // runtime collects for routing
+        send(self.ci_service, RunCI { pr_id: draft.id });   // point-to-point
         draft.submit()   // calls base implementation from method block
     }
 
@@ -62,8 +66,8 @@ directly.
 ## `fields { ... }`
 
 Machine-level fields, persisted across all dispatches. These are the machine's
-own state, not part of any instance. Machine fields typically hold
-configuration, counters, database connections, etc.
+own state, not part of any instance. Machine fields typically hold handles to
+other machines, configuration, counters, database connections, etc.
 
 ## `fn new() -> Self`
 
@@ -83,7 +87,7 @@ infrastructure work and then calls the base implementation:
 
 ```mc
 action submit(draft) -> PendingCI {
-    emit RunCI { pr_id: draft.id };   // runtime collects for routing
+    send(self.ci_service, RunCI { pr_id: draft.id });   // point-to-point
     draft.submit()   // delegates to base implementation
 }
 ```
@@ -131,7 +135,8 @@ Inside the handler:
 - The first parameter provides access to the type's fields (e.g.,
   `draft.reviewers`, `draft.id`) and state-specific fields (payloads).
 - `self` refers to the machine, providing access to machine fields (e.g.,
-  `self.config`) and machine operations (e.g., `self.deliver()`).
+  `self.ci_service`) and machine operations (e.g., `self.deliver()`,
+  `send()`).
 
 This separation is clear and unambiguous: the instance parameter is the domain
 object; `self` is the infrastructure.
@@ -176,6 +181,39 @@ unification: one machine emits an event; another machine's `on` handler may
 receive it and deliver it as a trigger via `self.deliver()`.
 
 A handler can emit zero or many values. The final expression is the new state.
+
+## `send` Statement
+
+`send(target, value)` delivers a typed value to a specific machine's mailbox.
+Unlike `emit`, which is undirected, `send` has an explicit destination:
+
+```mc
+action submit(draft) -> PendingCI {
+    send(self.ci_service, RunCI { pr_id: draft.id });
+    draft.submit()
+}
+```
+
+The target is a `Machine<T>` handle — typically a machine field. The value is
+any typed value. The target machine receives it via an `on` handler.
+
+`send` is fire-and-forget: it delivers the value to the target's mailbox and
+returns immediately. There is no reply, no acknowledgment, and no correlation
+with future inbound events. If a reply is needed, it arrives as a separate
+event in the sender's mailbox, handled by the sender's own `on` handler with
+manual correlation.
+
+### `emit` vs `send`
+
+| | `emit value` | `send(target, value)` |
+|---|---|---|
+| Destination | None (undirected) | Explicit machine handle |
+| Routing | Runtime concern | Point-to-point |
+| Use case | Auditing, logging, channel routing (V2) | Cross-machine coordination |
+| Reply semantics | None | None (replies are separate inbound events) |
+
+Use `emit` when producing a value without a specific recipient — the runtime
+decides what to do with it. Use `send` when delivering to a known machine.
 
 ## Handler Execution Model
 

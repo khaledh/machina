@@ -12,16 +12,19 @@ for a single entity's lifecycle:
 - **Sessions** provide typed client-to-machine interaction (create/resume)
 - **Persistence** is the machine's responsibility, keyed by identity field
 
-For inter-machine communication, V1 provides the **primitives** for
-fire-and-forget event flow:
+For inter-machine communication, V1 provides **fire-and-forget primitives**:
 
-- A handler calls `emit` with a typed value; the runtime collects it
-- A machine's `on` handler receives external events from its mailbox
-- The `on` handler can call `self.deliver()` to trigger state transitions
+- `send(target, value)` — point-to-point delivery to a specific machine's
+  mailbox via a `Machine<T>` handle
+- `emit value` — undirected event production (runtime-collected, no
+  specific destination)
+- `on` handlers — receive events from the machine's mailbox
+- `self.deliver(key, event)` — route mailbox events to hosted instance
+  triggers
 
-How emitted values reach other machines' mailboxes is a runtime/deployment
-concern in V1 — the language does not define routing policy. In V2, channels
-formalize this with explicit routing.
+`send` makes routing explicit in source code. `emit` is for undirected
+production (auditing, logging, channel routing in V2). Replies to a `send`
+arrive as separate inbound events — correlation is manual.
 
 These primitives are sufficient for:
 - Notifications and auditing
@@ -161,7 +164,8 @@ The answers will determine what V2 correlation support should look like.
 |---|---|---|
 | Entity lifecycle | Fully supported | Same |
 | Client-to-machine | Sessions (create/resume) | Same |
-| Machine-to-machine | Fire-and-forget events | Interaction lifecycles |
+| Machine-to-machine | `send` (point-to-point) + `emit` (undirected) | Interaction lifecycles |
+| Routing | Explicit via `send(target, value)` | + channels for fan-out |
 | Request/reply | Not supported | Async with typed correlation |
-| Correlation | Manual (if needed) | Language-supported |
+| Correlation | Manual | Language-supported |
 | Blocking semantics | Direct mode only | No cross-machine blocking |

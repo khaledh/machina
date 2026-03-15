@@ -103,9 +103,13 @@ PullRequest :: {
 
 ```mc
 machine PRService hosts PullRequest(key: id) {
+    fields {
+        ci_service: Machine<CIService>,
+    }
+
     // Override only the action that needs infrastructure
     action submit(draft) -> PendingCI {
-        emit RunCI { pr_id: draft.id };   // runtime collects for routing
+        send(self.ci_service, RunCI { pr_id: draft.id });  // point-to-point
         draft.submit()   // calls base implementation
     }
 
@@ -124,7 +128,7 @@ role. It gives clients the same state progression as direct mode, but over
 a hosted machine with blocking, persistence, and concurrency:
 
 ```mc
-let service = PRService::spawn()?;
+let service = PRService::spawn(ci_service)?;
 let author = service.create(PullRequest as Author)?;
 // author: PullRequest::Draft
 
@@ -475,8 +479,10 @@ The V1 core is **`@linear type` + machine + session**.
 - `machine ... hosts Type(key: field)` with action overrides, `trigger`, and
   `on` handlers.
 - `self.deliver(key, event)` for routing events as triggers to instances.
-- Inter-machine communication via fire-and-forget events (`emit` + `on`
-  handlers). See [10-inter-machine-communication.md](10-inter-machine-communication.md).
+- `send(target, value)` for point-to-point delivery to another machine's
+  mailbox.
+- `emit` for undirected event production (runtime-collected).
+- See [10-inter-machine-communication.md](10-inter-machine-communication.md).
 - Machine-owned persistence (API shape open, architectural role fixed).
 - Identity key designated at machine hosting site.
 
@@ -488,7 +494,8 @@ The V1 core is **`@linear type` + machine + session**.
 
 ### Secondary features
 
-- `emit` — handler side-effect primitive for typed value emission.
+- `send(target, value)` — point-to-point delivery to another machine.
+- `emit` — undirected event production (runtime-collected).
 - `lookup` — advisory field inspection (not authoritative).
 
 ---

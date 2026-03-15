@@ -2,14 +2,16 @@
 
 ## V1: Event-Based Coordination
 
-In V1, inter-machine communication uses two primitives:
+In V1, inter-machine communication uses three primitives:
 
-- **`emit`** — a handler stages a typed value for the runtime to collect.
-  The runtime decides how to route it (see [02-machine.md](02-machine.md)
-  for `emit` semantics). Routing policy is a runtime concern in V1;
-  channels formalize it in V2.
-- **`on` handlers** — a machine receives external events from its mailbox.
-  Messages arrive from other machines, external systems, timers, etc.
+- **`send(target, value)`** — delivers a typed value to a specific machine's
+  mailbox. The target is a `Machine<T>` handle, typically held as a machine
+  field. Point-to-point, fire-and-forget.
+- **`emit value`** — stages a typed value for runtime collection. Undirected
+  — no specific destination. Used for auditing, logging, and channel routing
+  (V2).
+- **`on` handlers** — a machine receives events from its mailbox. Messages
+  arrive via `send` from other machines, external systems, timers, etc.
   The `on` handler decides how to process them, including routing to
   instances as triggers via `self.deliver()`.
 
@@ -18,30 +20,36 @@ semantics.
 
 ### Example: CI Integration
 
-The PR service emits a value when a PR is submitted. The runtime routes it
-(how is a deployment concern in V1). Later, a CI result arrives at the
-machine's mailbox as an external event:
+The PR service sends a value to the CI service when a PR is submitted. Later,
+a CI result arrives at the PR service's mailbox:
 
 ```mc
-// PRService action override — emit signals CI should run
-action submit(draft) -> PendingCI {
-    emit RunCI { pr_id: draft.id };   // runtime collects for routing
-    draft.submit()
-}
+machine PRService hosts PullRequest(key: id) {
+    fields {
+        ci_service: Machine<CIService>,
+    }
 
-// PRService on handler — receives CI result from mailbox
-on CIResult(result) {
-    if result.success {
-        self.deliver(result.pr_id, CIPassed { commit_sha: result.sha });
-    } else {
-        self.deliver(result.pr_id, CIFailed { reason: result.reason });
+    // Action override — send to CI service
+    action submit(draft) -> PendingCI {
+        send(self.ci_service, RunCI { pr_id: draft.id });
+        draft.submit()
+    }
+
+    // on handler — receives CI result from mailbox
+    on CIResult(result) {
+        if result.success {
+            self.deliver(result.pr_id, CIPassed { commit_sha: result.sha });
+        } else {
+            self.deliver(result.pr_id, CIFailed { reason: result.reason });
+        }
     }
 }
 ```
 
-The outbound side (`emit`) and inbound side (`on`) are decoupled — the
-machine does not hold a handle to the CI service or specify a destination.
-The runtime infrastructure handles delivery in both directions.
+The outbound side (`send`) specifies the destination explicitly. The inbound
+side (`on`) processes events from the mailbox. Correlation between the
+outbound `RunCI` and the inbound `CIResult` is manual — the `pr_id` field
+serves as the correlation key.
 
 This model covers:
 - Notifications and auditing
@@ -54,9 +62,8 @@ This model covers:
 V1 does not support:
 - Blocking cross-machine session calls inside handlers
 - First-class request/reply contracts between machines
-- Typed correlation between outgoing events and incoming replies
+- Typed correlation between outgoing sends and incoming replies
 - Protocol-level sequencing across machine boundaries
-- Guaranteed routing policy (V2 channels address this)
 
 These are intentionally out of scope. The mechanical problems they introduce
 (deadlock under mailbox serialization, cross-machine atomicity, session
@@ -81,7 +88,7 @@ state-dispatch logic between direct and hosted modes.
 ### `on` Handlers
 
 `on` handlers are machine-level message handlers. They process events from
-the machine's general mailbox — external events from other machines, timers,
+the machine's general mailbox — events from `send`, external systems, timers,
 administrative commands, etc.
 
 `action` and `trigger` handlers are instance-level handlers that operate on

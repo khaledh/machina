@@ -58,7 +58,7 @@ distinguishes role syntax from state syntax (which uses `::`):
 For a new instance whose initial state is known at compile time:
 
 ```mc
-let service = PRService::spawn()?;
+let service = PRService::spawn(ci_service)?;
 let author = service.create(PullRequest as Author)?;
 // author: PullRequest::Draft  -- statically known, role is Author (implicit)
 ```
