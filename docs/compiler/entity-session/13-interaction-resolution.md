@@ -135,11 +135,12 @@ Those are all downstream decisions.
 
 ## Next Step
 
-The next useful design move is to choose the policy for replies that fail to
-resolve any active interaction:
-- unmatched reply
-- duplicate reply
-- wrong reply type for the active interaction
+The next useful design move is to choose the representation of correlation
+identity itself:
+- opaque runtime identity
+- typed token surfaced to user code
+- compiler-synthesized link
 
-That is the point where the design has to decide what should be observable to
-user code versus treated as runtime/diagnostic behavior.
+That choice should come before policy decisions like unmatched or duplicate
+reply handling, because it determines what the language and runtime can even
+observe. See [14-correlation-identity.md](14-correlation-identity.md).

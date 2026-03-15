@@ -17,17 +17,19 @@ This design has been split into focused documents under
 7. [Auth Check V1 Flow](11-auth-check-v1.md) — Concrete use case exposing V1 pain points, V2 requirements
 8. [Interaction Handle Concept](12-interaction-handle.md) — Narrow first step for V2 interaction semantics
 9. [Pending Interaction Resolution](13-interaction-resolution.md) — How inbound replies resolve active interactions
+10. [Correlation Identity Options](14-correlation-identity.md) — Where pending-interaction identity should live
+11. [Interaction Handle as a Value](15-interaction-handle-value.md) — Binding proposal for ownership, storage, and consumption
 
 **Cross-cutting:**
 
-10. [Composition](05-composition.md) — Cross-machine composition, event-based coordination, usage tiers
-11. [Internals](06-internals.md) — Instance storage, session-machine interaction, lowering, runtime impact
-12. [Validation](07-validation.md) — Validation rules, diagnostics
+12. [Composition](05-composition.md) — Cross-machine composition, event-based coordination, usage tiers
+13. [Internals](06-internals.md) — Instance storage, session-machine interaction, lowering, runtime impact
+14. [Validation](07-validation.md) — Validation rules, diagnostics
 
 **Reference:**
 
-13. [Examples](08-examples.md) — Core example (V1) and channel extension example (V2)
-14. [Open Questions](09-open-questions.md) — Unsettled design decisions
+15. [Examples](08-examples.md) — Core example (V1) and channel extension example (V2)
+16. [Open Questions](09-open-questions.md) — Unsettled design decisions
 
 This document set supersedes `machine-session-design.md` and
 `machine-session-server-design.md`.
