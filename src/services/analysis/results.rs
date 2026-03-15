@@ -38,7 +38,6 @@ impl ParsedModuleResult {
 #[derive(Clone)]
 struct LegacyResolvedResultPayload {
     typestate_role_impls: Vec<crate::core::context::TypestateRoleImplBinding>,
-    protocol_index: crate::core::protocol::ProtocolIndex,
 }
 
 #[derive(Clone)]
@@ -70,7 +69,6 @@ impl ResolvedModuleResult {
             node_id_gen,
             typestate_role_impls,
             linear_index,
-            protocol_index,
         } = tables;
         Self {
             module_id,
@@ -84,7 +82,6 @@ impl ResolvedModuleResult {
             linear_index,
             legacy: LegacyResolvedResultPayload {
                 typestate_role_impls,
-                protocol_index,
             },
         }
     }
@@ -101,7 +98,6 @@ impl ResolvedModuleResult {
                 node_id_gen: self.node_id_gen,
                 typestate_role_impls: self.legacy.typestate_role_impls,
                 linear_index: self.linear_index,
-                protocol_index: self.legacy.protocol_index,
             },
         }
     }
@@ -110,7 +106,6 @@ impl ResolvedModuleResult {
 #[derive(Clone)]
 struct LegacyTypedResultPayload {
     typestate_role_impls: Vec<crate::core::context::TypestateRoleImplBinding>,
-    protocol_index: crate::core::protocol::ProtocolIndex,
 }
 
 #[derive(Clone)]
@@ -291,7 +286,6 @@ impl TypedModuleResult {
             node_id_gen,
             typestate_role_impls,
             linear_index,
-            protocol_index,
         } = resolved;
         Self {
             module_id,
@@ -308,7 +302,6 @@ impl TypedModuleResult {
             linear_index,
             legacy: LegacyTypedResultPayload {
                 typestate_role_impls,
-                protocol_index,
             },
         }
     }
@@ -326,7 +319,6 @@ impl TypedModuleResult {
                     node_id_gen: self.node_id_gen,
                     typestate_role_impls: self.legacy.typestate_role_impls,
                     linear_index: self.linear_index,
-                    protocol_index: self.legacy.protocol_index,
                 },
                 type_map: self.type_map,
                 call_sigs: self.call_sigs,

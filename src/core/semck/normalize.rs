@@ -31,7 +31,6 @@ pub fn normalize(ctx: SemCheckStageInput) -> SemCheckNormalizedContext {
         node_id_gen,
         typestate_role_impls,
         linear_index,
-        protocol_index,
     } = resolved;
     // `typed::Module` and `normalized::Module` currently share the same
     // underlying representation (`ast::model::Module`), so
@@ -60,7 +59,6 @@ pub fn normalize(ctx: SemCheckStageInput) -> SemCheckNormalizedContext {
                 node_id_gen,
                 typestate_role_impls,
                 linear_index,
-                protocol_index,
             },
             type_map: type_map.into_inner(),
             call_sigs,

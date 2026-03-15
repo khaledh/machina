@@ -8,7 +8,6 @@ use crate::core::codegen_names::CodegenNameTable;
 use crate::core::diag::Span;
 use crate::core::linear::LinearIndex;
 use crate::core::plans::{DropPlanMap, LinearMachinePlanMap, LoweringPlanMap, MachinePlanMap};
-use crate::core::protocol::ProtocolIndex;
 use crate::core::resolve::{DefId, DefTable};
 use crate::core::semck::closure::capture::ClosureCapture;
 use crate::core::symbol_id::SymbolIdTable;
@@ -25,9 +24,6 @@ pub struct ResolvedTables {
     pub node_id_gen: NodeIdGen,
     pub typestate_role_impls: Vec<TypestateRoleImplBinding>,
     pub linear_index: LinearIndex,
-    /// Canonical protocol facts extracted from resolved protocol definitions
-    /// and typestate role bindings.
-    pub protocol_index: ProtocolIndex,
 }
 
 #[derive(Debug, Clone)]
@@ -286,7 +282,6 @@ impl ParsedContext {
                 node_id_gen,
                 typestate_role_impls: Vec::new(),
                 linear_index,
-                protocol_index: ProtocolIndex::default(),
             },
         }
     }

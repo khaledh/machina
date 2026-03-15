@@ -141,8 +141,6 @@ fn linear_result_roundtrip_keeps_legacy_protocol_tables_empty() {
     let result = ResolvedModuleResult::from_context(ModuleId(77), resolved.clone());
     let roundtrip = result.into_context();
     assert!(roundtrip.typestate_role_impls.is_empty());
-    assert!(roundtrip.protocol_index.protocols.is_empty());
-    assert!(roundtrip.protocol_index.typestate_bindings.is_empty());
 }
 
 #[test]

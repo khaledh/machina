@@ -17,7 +17,6 @@ pub mod monomorphize;
 pub mod nrvo;
 pub mod parse;
 pub mod plans;
-pub mod protocol;
 pub mod resolve;
 pub mod semck;
 pub mod symbol_id;

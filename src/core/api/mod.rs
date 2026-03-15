@@ -242,7 +242,6 @@ pub fn resolve_stage_with_policy(
     policy: FrontendPolicy,
 ) -> ResolveStageResult {
     let has_typestate_defs = input.module.has_typestate_defs();
-    let has_legacy_typestate_surface = has_typestate_defs;
     let typestate_role_impls = if has_typestate_defs {
         typestate::collect_role_impl_refs(&input.module)
     } else {
@@ -289,14 +288,9 @@ pub fn resolve_stage_with_policy(
         typestate_role_impls.clone(),
     );
     let mut context = output.context;
-    if has_legacy_typestate_surface {
+    if has_typestate_defs {
         context.payload.typestate_role_impls =
             build_typestate_role_impl_bindings(&context, &typestate_role_impls);
-        context.payload.protocol_index = crate::core::protocol::build_protocol_index(
-            &context.module,
-            &context.def_table,
-            &context.typestate_role_impls,
-        );
     }
     frontend_errors.extend(output.errors);
     let errors = frontend_errors;
