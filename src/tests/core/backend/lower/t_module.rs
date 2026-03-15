@@ -1,7 +1,5 @@
-use super::{analyze, analyze_typestate, assert_ir_eq, format_func, indoc, lower_module};
+use super::{analyze, assert_ir_eq, format_func, indoc, lower_module};
 use crate::core::ast::MethodItem;
-use crate::core::backend::lower::{LowerOpts, lower_module_with_opts};
-use crate::core::ir::IrTypeKind;
 use std::collections::HashMap;
 
 #[test]
@@ -126,94 +124,4 @@ fn test_lower_module_method_defs() {
         }
     "};
     assert_ir_eq(sum_text, expected_sum);
-}
-
-#[test]
-fn test_lower_module_typestate_machine_plans_materialize_artifacts() {
-    let ctx = analyze_typestate(indoc! {"
-        type Ping = {}
-
-        typestate M {
-            fn new() -> Ready { Ready {} }
-
-            state Ready {
-                on Ping(e: Ping) -> Ready {
-                    e;
-                    Ready {}
-                }
-            }
-        }
-    "});
-
-    let lowered = lower_module_with_opts(
-        &ctx.module,
-        &ctx.def_table,
-        &ctx.type_map,
-        &ctx.lowering_plans,
-        &ctx.drop_plans,
-        &LowerOpts {
-            linear_index: Some(&ctx.linear_index),
-            machine_plans: Some(&ctx.machine_plans),
-            linear_machine_plans: Some(&ctx.linear_machine_plans),
-            ..Default::default()
-        },
-    )
-    .expect("failed to lower typestate machine artifacts");
-
-    // Machine plans should already be concretized enough for backend materialization.
-    for plan in ctx.machine_plans.thunks.values() {
-        let state_ty = ctx.type_map.type_table().get(plan.state_layout_ty);
-        let payload_ty = ctx.type_map.type_table().get(plan.payload_layout_ty);
-        let next_ty = ctx.type_map.type_table().get(plan.next_state_layout_ty);
-        assert!(
-            !state_ty.contains_unresolved()
-                && !payload_ty.contains_unresolved()
-                && !next_ty.contains_unresolved(),
-            "expected concrete machine plan layout types, got state={state_ty:?} payload={payload_ty:?} next={next_ty:?}"
-        );
-    }
-
-    let thunk = lowered
-        .funcs
-        .iter()
-        .find(|func| func.func.name.starts_with("__mc_machine_dispatch_thunk_"))
-        .expect("expected synthetic machine dispatch thunk in lowered module");
-    assert_eq!(
-        thunk.func.sig.params.len(),
-        6,
-        "expected dispatch thunk ABI arity of 6 params"
-    );
-    assert!(
-        matches!(
-            thunk.types.kind(thunk.func.sig.ret),
-            IrTypeKind::Int {
-                signed: false,
-                bits: 8
-            }
-        ),
-        "expected dispatch thunk return type to be u8 dispatch result"
-    );
-    let thunk_text = format_func(&thunk.func, &thunk.types);
-    assert!(
-        thunk_text
-            .contains("fn(ptr<__ts_M_Ready>, ptr<Ping>, ptr<Ping>) -> __ts_M_Ready = const @"),
-        "expected dispatch thunk to reference concrete handler signature, got: {thunk_text}"
-    );
-    assert!(
-        thunk_text.lines().any(|line| {
-            let trimmed = line.trim();
-            trimmed.contains("call %v") && trimmed.contains("(")
-        }),
-        "expected dispatch thunk to contain an indirect call, got: {thunk_text}"
-    );
-    assert!(
-        thunk_text.contains("__rt_alloc"),
-        "expected dispatch thunk to allocate next-state token, got: {thunk_text}"
-    );
-
-    let has_descriptor_magic = lowered.globals.iter().any(|g| g.bytes.starts_with(b"MCHD"));
-    assert!(
-        has_descriptor_magic,
-        "expected serialized machine descriptor blob in lowered globals"
-    );
 }

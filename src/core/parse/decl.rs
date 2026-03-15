@@ -23,13 +23,10 @@ impl<'a> Parser<'a> {
                 }
             }
             TK::KwTypestate => {
-                if !self.options.experimental_typestate {
-                    return self.err_here(PEK::FeatureRetired {
-                        feature: "typestate",
-                    });
-                }
                 if attrs.is_empty() {
-                    self.parse_typestate_def().map(TopLevelItem::TypestateDef)
+                    self.err_here(PEK::FeatureRetired {
+                        feature: "typestate",
+                    })
                 } else {
                     Err(PEK::AttributeNotAllowed.at(attrs[0].span))
                 }

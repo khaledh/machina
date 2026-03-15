@@ -22,4 +22,3 @@ pub mod semck;
 pub mod symbol_id;
 pub mod typecheck;
 pub mod types;
-pub mod typestate;

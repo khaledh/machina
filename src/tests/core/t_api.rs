@@ -1,7 +1,6 @@
 use crate::core::api::{
-    FrontendPolicy, ParseModuleOptions, ResolveInputs, elaborate_stage, parse_module_with_id_gen,
-    parse_module_with_id_gen_and_options, resolve_stage_with_policy,
-    resolve_typecheck_pipeline_with_policy, semcheck_stage, typecheck_stage_with_policy,
+    FrontendPolicy, ResolveInputs, elaborate_stage, parse_module_with_id_gen,
+    resolve_stage_with_policy, semcheck_stage, typecheck_stage_with_policy,
 };
 use crate::core::ast::*;
 use crate::core::context::ParsedContext;
@@ -14,18 +13,6 @@ fn parsed_context(source: &str) -> ParsedContext {
     ParsedContext::new(module, id_gen)
 }
 
-fn parsed_context_typestate(source: &str) -> ParsedContext {
-    let id_gen = NodeIdGen::new();
-    let (module, id_gen) = parse_module_with_id_gen_and_options(
-        source,
-        id_gen,
-        ParseModuleOptions {
-            experimental_typestate: true,
-        },
-    )
-    .expect("parse should succeed for typestate test source");
-    ParsedContext::new(module, id_gen)
-}
 fn resolve_errors(source: &str) -> Vec<crate::core::resolve::ResolveError> {
     let parsed = parsed_context(source);
     let out = resolve_stage_with_policy(parsed, ResolveInputs::default(), FrontendPolicy::Strict);
@@ -57,21 +44,6 @@ fn main() -> u64 {
         resolve_stage_with_policy(parsed, ResolveInputs::default(), FrontendPolicy::Partial);
     assert!(partial.has_errors());
     assert!(partial.context.is_some());
-}
-
-#[test]
-fn typestate_missing_new_reports_targeted_error() {
-    let source = r#"
-typestate Connection {
-    state Disconnected {}
-}
-"#;
-    let parsed = parsed_context_typestate(source);
-    let out = resolve_stage_with_policy(parsed, ResolveInputs::default(), FrontendPolicy::Strict);
-    assert!(out.context.is_none());
-    assert!(out.errors.iter().any(
-        |err| matches!(err.kind(), ResolveErrorKind::TypestateMissingNew(name) if name == "Connection")
-    ));
 }
 
 #[test]
@@ -331,193 +303,6 @@ fn machine_host_facts_are_recorded_in_resolved_context() {
     assert_eq!(linear_ty.initial_state.as_deref(), Some("Draft"));
     assert_eq!(linear_ty.state_names, vec!["Draft", "Review"]);
     assert!(linear_ty.roles.contains_key("Author"));
-}
-
-#[test]
-fn typestate_duplicate_state_and_invalid_transition_return_report_errors() {
-    let source = r#"
-typestate Connection {
-    fn new() -> Disconnected {
-        Disconnected {}
-    }
-
-    state Disconnected {
-        fn connect() -> UnknownState {
-            UnknownState {}
-        }
-    }
-
-    state Disconnected {}
-}
-"#;
-    let parsed = parsed_context_typestate(source);
-    let out = resolve_stage_with_policy(parsed, ResolveInputs::default(), FrontendPolicy::Strict);
-    assert!(out.context.is_none());
-    assert!(out.errors.iter().any(
-        |err| matches!(err.kind(), ResolveErrorKind::TypestateDuplicateState(ts, state) if ts == "Connection" && state == "Disconnected")
-    ));
-    assert!(out.errors.iter().any(|err| {
-        matches!(err.kind(), ResolveErrorKind::TypestateInvalidTransitionReturn(ts, state, method)
-                if ts == "Connection" && state == "Disconnected" && method == "connect"
-        )
-    }));
-}
-
-#[test]
-fn typestate_field_constraints_report_errors() {
-    let source = r#"
-typestate Connection {
-    fields { id: u64 }
-    fields { retries: u64 }
-
-    fn new() -> Disconnected {
-        Disconnected { id: 0, retries: 0 }
-    }
-
-    state Disconnected {
-        fields { id: u64 }
-        fields { fd: u64 }
-    }
-}
-"#;
-    let parsed = parsed_context_typestate(source);
-    let out = resolve_stage_with_policy(parsed, ResolveInputs::default(), FrontendPolicy::Strict);
-    assert!(out.context.is_none());
-    assert!(out.errors.iter().any(
-        |err| matches!(err.kind(), ResolveErrorKind::TypestateDuplicateFieldsBlock(name) if name == "Connection")
-    ));
-    assert!(out.errors.iter().any(|err| {
-        matches!(err.kind(), ResolveErrorKind::TypestateDuplicateStateFieldsBlock(ts, state)
-                if ts == "Connection" && state == "Disconnected"
-        )
-    }));
-    assert!(out.errors.iter().any(|err| {
-        matches!(err.kind(), ResolveErrorKind::TypestateStateFieldShadowsCarriedField(ts, state, field)
-                if ts == "Connection" && state == "Disconnected" && field == "id"
-        )
-    }));
-}
-
-#[test]
-fn typestate_duplicate_transition_and_invalid_new_return_report_errors() {
-    let source = r#"
-typestate Connection {
-    fn new() -> UnknownState {
-        UnknownState {}
-    }
-
-    state Disconnected {
-        fn connect(x: u64) -> Disconnected {
-            Disconnected {}
-        }
-
-        fn connect() -> Disconnected {
-            Disconnected {}
-        }
-    }
-}
-"#;
-    let parsed = parsed_context_typestate(source);
-    let out = resolve_stage_with_policy(parsed, ResolveInputs::default(), FrontendPolicy::Strict);
-    assert!(out.context.is_none());
-    assert!(out.errors.iter().any(
-        |err| matches!(err.kind(), ResolveErrorKind::TypestateInvalidNewReturn(name) if name == "Connection")
-    ));
-    assert!(out.errors.iter().any(|err| {
-        matches!(err.kind(), ResolveErrorKind::TypestateDuplicateTransition(ts, state, method)
-                if ts == "Connection" && state == "Disconnected" && method == "connect"
-        )
-    }));
-}
-
-#[test]
-fn typestate_external_state_literal_reports_targeted_error() {
-    let source = r#"
-typestate Connection {
-    fields { retries: u64 }
-
-    fn new() -> Disconnected {
-        Disconnected { retries: 0 }
-    }
-
-    state Disconnected {}
-}
-
-fn main() -> u64 {
-    let bad = Disconnected { retries: 1 };
-    bad.retries
-}
-"#;
-    let parsed = parsed_context_typestate(source);
-    let out = resolve_stage_with_policy(parsed, ResolveInputs::default(), FrontendPolicy::Strict);
-    assert!(out.context.is_none());
-    assert!(out.errors.iter().any(|err| {
-        matches!(err.kind(), ResolveErrorKind::TypestateStateLiteralOutsideTypestate(state)
-                if state == "Disconnected"
-        )
-    }));
-}
-
-#[test]
-fn typestate_invalid_on_handler_return_reports_targeted_error() {
-    let source = r#"
-type Ping = {}
-
-typestate Connection {
-    fn new() -> Disconnected {
-        Disconnected {}
-    }
-
-    state Disconnected {
-        on Ping() -> u64 {
-            0
-        }
-    }
-}
-"#;
-    let parsed = parsed_context_typestate(source);
-    let out = resolve_stage_with_policy(parsed, ResolveInputs::default(), FrontendPolicy::Strict);
-    assert!(out.context.is_none());
-    assert!(out.errors.iter().any(|err| {
-        matches!(err.kind(), ResolveErrorKind::TypestateInvalidStateOnHandlerReturn(ts, state)
-                if ts == "Connection" && state == "Disconnected"
-        )
-    }));
-}
-
-#[test]
-fn typestate_on_handler_stay_union_return_is_accepted() {
-    let source = r#"
-type Ping = {}
-type Recoverable = {}
-
-typestate Connection {
-    fn new() -> Disconnected {
-        Disconnected {}
-    }
-
-    state Disconnected {
-        on Ping() -> stay | Recoverable {
-            if true {
-                return Recoverable {};
-            };
-        }
-    }
-}
-"#;
-    let parsed = parsed_context_typestate(source);
-    let out = resolve_typecheck_pipeline_with_policy(
-        parsed,
-        ResolveInputs::default(),
-        None,
-        FrontendPolicy::Strict,
-    );
-    assert!(
-        !out.has_errors(),
-        "expected `on` handler `stay | Error` return shape to pass, got resolve={:?}, type={:?}",
-        out.resolve_errors,
-        out.type_errors
-    );
 }
 
 fn elaborate_linear_semantic(source: &str) -> crate::core::context::SemanticContext {

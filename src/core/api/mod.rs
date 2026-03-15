@@ -27,7 +27,6 @@ use crate::core::typecheck::{
     TypeCheckError, TypecheckOutput, type_check_partial_with_imported_facts,
     type_check_with_imported_facts,
 };
-use crate::core::typestate;
 
 pub(crate) use strict_frontend::{
     StrictFrontendOptions, build_strict_frontend_input, run_strict_frontend,
@@ -241,27 +240,19 @@ pub fn resolve_stage_with_policy(
     inputs: ResolveInputs,
     policy: FrontendPolicy,
 ) -> ResolveStageResult {
-    let has_typestate_defs = input.module.has_typestate_defs();
-    if !has_typestate_defs {
-        let has_machine_defs = !input.module.machine_defs().is_empty();
-        let managed_main_wrapped =
-            crate::core::machine::managed_runtime::rewrite_machines_entrypoint(
-                &mut input.module,
-                has_machine_defs,
-                &mut input.node_id_gen,
-            );
-        if managed_main_wrapped {
-            crate::core::machine::managed_runtime::ensure_managed_runtime_intrinsics(
-                &mut input.module,
-                &mut input.node_id_gen,
-            );
-        }
+    let has_machine_defs = !input.module.machine_defs().is_empty();
+    let managed_main_wrapped = crate::core::machine::managed_runtime::rewrite_machines_entrypoint(
+        &mut input.module,
+        has_machine_defs,
+        &mut input.node_id_gen,
+    );
+    if managed_main_wrapped {
+        crate::core::machine::managed_runtime::ensure_managed_runtime_intrinsics(
+            &mut input.module,
+            &mut input.node_id_gen,
+        );
     }
-    let mut frontend_errors = if has_typestate_defs {
-        typestate::desugar_module(&mut input.module, &mut input.node_id_gen)
-    } else {
-        Vec::new()
-    };
+    let mut frontend_errors = Vec::new();
     frontend_errors.extend(crate::core::linear::validate_module(&input.module));
     input.linear_index = crate::core::linear::build_linear_index(&input.module);
     if policy == FrontendPolicy::Strict && !frontend_errors.is_empty() {
