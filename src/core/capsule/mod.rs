@@ -19,7 +19,7 @@ use std::sync::OnceLock;
 use crate::core::ast::{Module, NodeIdGen, Require};
 use crate::core::diag::Span;
 use crate::core::lexer::{LexError, Lexer, Token};
-use crate::core::parse::{ParseError, Parser, ParserOptions};
+use crate::core::parse::{ParseError, Parser};
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct ModulePath {
@@ -102,7 +102,6 @@ pub struct ParsedModule {
 
 #[derive(Debug, Clone, Copy)]
 pub struct CapsuleParseOptions {
-    pub experimental_typestate: bool,
     /// When true, auto-import symbols listed in `std/prelude_requires.mc`
     /// into every non-std module.
     pub inject_prelude_requires: bool,
@@ -111,7 +110,6 @@ pub struct CapsuleParseOptions {
 impl Default for CapsuleParseOptions {
     fn default() -> Self {
         Self {
-            experimental_typestate: false,
             inject_prelude_requires: true,
         }
     }
@@ -391,7 +389,7 @@ pub fn discover_and_parse_capsule_with_loader_and_options(
     let mut id_gen = NodeIdGen::new();
     let mut next_module_id = 0u32;
 
-    let entry_module = parse_module(entry_source, entry_file, id_gen, options)?;
+    let entry_module = parse_module(entry_source, entry_file, id_gen)?;
     id_gen = entry_module.1;
     let mut entry_requires = collect_requires(&entry_path, &entry_module.0)?;
     if options.inject_prelude_requires {
@@ -438,8 +436,7 @@ pub fn discover_and_parse_capsule_with_loader_and_options(
                 *existing
             } else {
                 let (dep_file, dep_source) = loader.load(&req.module_path)?;
-                let (dep_module, next_id_gen) =
-                    parse_module(&dep_source, &dep_file, id_gen, options)?;
+                let (dep_module, next_id_gen) = parse_module(&dep_source, &dep_file, id_gen)?;
                 id_gen = next_id_gen;
                 let mut dep_requires = collect_requires(&req.module_path, &dep_module)?;
                 if options.inject_prelude_requires {
@@ -558,7 +555,6 @@ fn parse_module(
     source: &str,
     path: &Path,
     id_gen: NodeIdGen,
-    options: CapsuleParseOptions,
 ) -> Result<(Module, NodeIdGen), CapsuleError> {
     let lexer = Lexer::new(source);
     let tokens = lexer
@@ -569,13 +565,7 @@ fn parse_module(
             error,
         })?;
 
-    let mut parser = Parser::new_with_id_gen_and_options(
-        &tokens,
-        id_gen,
-        ParserOptions {
-            experimental_typestate: options.experimental_typestate,
-        },
-    );
+    let mut parser = Parser::new_with_id_gen(&tokens, id_gen);
     let module = parser.parse().map_err(|error| CapsuleError::Parse {
         path: path.to_path_buf(),
         error,

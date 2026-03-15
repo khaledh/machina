@@ -329,13 +329,12 @@ fn typecheck_with_modules(
             trace_alloc: false,
             trace_drops: false,
             inject_prelude: false,
-            experimental_typestate: false,
         },
     )
 }
 
 fn check_with_modules(entry_path: &Path, entry_source: &str) -> Result<(), Vec<CompileError>> {
-    check_with_path(entry_source, entry_path, true, false)
+    check_with_path(entry_source, entry_path, true)
 }
 
 #[test]

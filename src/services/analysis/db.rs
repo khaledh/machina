@@ -36,7 +36,6 @@ pub struct AnalysisDb {
     runtime: QueryRuntime,
     sources: SourceStore,
     module_graph: ModuleGraph,
-    experimental_typestate: bool,
 }
 
 impl AnalysisDb {
@@ -65,14 +64,6 @@ impl AnalysisDb {
 
     pub fn module_graph(&self) -> &ModuleGraph {
         &self.module_graph
-    }
-
-    pub fn set_experimental_typestate(&mut self, enabled: bool) {
-        self.experimental_typestate = enabled;
-    }
-
-    pub fn experimental_typestate(&self) -> bool {
-        self.experimental_typestate
     }
 
     pub fn upsert_disk_text<S>(&mut self, path: PathBuf, text: S) -> FileId
@@ -122,8 +113,7 @@ impl AnalysisDb {
         };
         let revision = snapshot.revision();
         let module_id = ModuleId(file_id.0);
-        let experimental_typestate = self.experimental_typestate;
-        let query_input = if experimental_typestate { 1 } else { 0 };
+        let query_input = 0;
 
         let diagnostics_key = QueryKey::with_input(
             crate::services::analysis::query::QueryKind::Diagnostics,
@@ -139,7 +129,6 @@ impl AnalysisDb {
                 revision,
                 source_for_pipeline,
                 query_input,
-                experimental_typestate,
             )?;
             Ok(collect_sorted_diagnostics(&state))
         })

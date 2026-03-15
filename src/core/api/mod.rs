@@ -17,7 +17,7 @@ use crate::core::context::{
 };
 use crate::core::elaborate;
 use crate::core::lexer::{LexError, Lexer, Token};
-use crate::core::parse::{ParseError, Parser, ParserOptions};
+use crate::core::parse::{ParseError, Parser};
 use crate::core::resolve::{
     ImportedFacts, ImportedModule, ImportedSymbol, ResolveError, ResolveOutput, attach_def_owners,
     resolve_with_imports_and_symbols_and_typestate_roles_partial,
@@ -39,11 +39,6 @@ pub enum ParseModuleError {
     Lex(#[from] LexError),
     #[error(transparent)]
     Parse(#[from] ParseError),
-}
-
-#[derive(Debug, Clone, Copy, Default)]
-pub struct ParseModuleOptions {
-    pub experimental_typestate: bool,
 }
 
 /// Frontend semantic execution mode.
@@ -153,23 +148,9 @@ pub fn parse_module_with_id_gen(
     source: &str,
     id_gen: NodeIdGen,
 ) -> Result<(Module, NodeIdGen), ParseModuleError> {
-    parse_module_with_id_gen_and_options(source, id_gen, ParseModuleOptions::default())
-}
-
-pub fn parse_module_with_id_gen_and_options(
-    source: &str,
-    id_gen: NodeIdGen,
-    options: ParseModuleOptions,
-) -> Result<(Module, NodeIdGen), ParseModuleError> {
     let lexer = Lexer::new(source);
     let tokens = lexer.tokenize().collect::<Result<Vec<Token>, LexError>>()?;
-    let mut parser = Parser::new_with_id_gen_and_options(
-        &tokens,
-        id_gen,
-        ParserOptions {
-            experimental_typestate: options.experimental_typestate,
-        },
-    );
+    let mut parser = Parser::new_with_id_gen(&tokens, id_gen);
     let module = parser.parse()?;
     Ok((module, parser.into_id_gen()))
 }

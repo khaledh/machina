@@ -130,14 +130,8 @@ pub(crate) fn strict_frontend_lookup_state_with_path(
     source: &str,
     source_path: &Path,
     inject_prelude: bool,
-    experimental_typestate: bool,
 ) -> Result<LookupState, Vec<CompileError>> {
-    let (resolved, typed) = lookup_strict_frontend_with_path(
-        source,
-        source_path,
-        inject_prelude,
-        experimental_typestate,
-    )?;
+    let (resolved, typed) = lookup_strict_frontend_with_path(source, source_path, inject_prelude)?;
     Ok(LookupState {
         resolved: Some(resolved),
         typed: Some(typed),

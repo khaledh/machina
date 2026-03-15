@@ -1,4 +1,4 @@
-use crate::core::api::{ParseModuleOptions, parse_module_with_id_gen_and_options};
+use crate::core::api::parse_module_with_id_gen;
 use crate::core::ast::NodeIdGen;
 use crate::core::ast::TopLevelItem;
 use crate::core::capsule::ModulePath;
@@ -10,14 +10,7 @@ use crate::core::symbol_id::{SymbolNs, SymbolPath};
 
 fn resolved_with_module_path(source: &str, module_path: &str) -> ResolvedContext {
     let id_gen = NodeIdGen::new();
-    let (module, id_gen) = parse_module_with_id_gen_and_options(
-        source,
-        id_gen,
-        ParseModuleOptions {
-            experimental_typestate: true,
-        },
-    )
-    .expect("parse should succeed");
+    let (module, id_gen) = parse_module_with_id_gen(source, id_gen).expect("parse should succeed");
     let parsed = ParsedContext::new(module, id_gen).with_module_path(
         ModulePath::new(module_path.split("::").map(|s| s.to_string()).collect()).unwrap(),
     );

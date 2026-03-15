@@ -23,7 +23,6 @@ pub struct CompileOptions {
     pub trace_alloc: bool,
     pub trace_drops: bool,
     pub inject_prelude: bool,
-    pub experimental_typestate: bool,
 }
 
 pub struct CompileOutput {
@@ -74,15 +73,11 @@ pub fn check_with_path(
     source: &str,
     source_path: &Path,
     inject_prelude: bool,
-    experimental_typestate: bool,
 ) -> Result<(), Vec<CompileError>> {
     let parsed = build_strict_frontend_input(
         source,
         Some(source_path),
-        StrictFrontendOptions {
-            inject_prelude,
-            experimental_typestate,
-        },
+        StrictFrontendOptions { inject_prelude },
     )?;
     let (_resolved, typed) = run_strict_frontend(parsed)?;
     semcheck_stage(typed)
@@ -108,7 +103,6 @@ pub fn compile_with_path(
         source_path,
         StrictFrontendOptions {
             inject_prelude: opts.inject_prelude,
-            experimental_typestate: opts.experimental_typestate,
         },
     )?;
 

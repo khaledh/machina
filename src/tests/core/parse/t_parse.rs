@@ -1,20 +1,16 @@
 use super::*;
 use crate::core::ast::RefinementKind;
 use crate::core::lexer::{LexError, Lexer, Token};
-use crate::core::parse::{ParseErrorKind, ParserOptions};
+use crate::core::parse::ParseErrorKind;
 
 fn parse_module(source: &str) -> Result<Module, ParseError> {
-    parse_module_with_options(source, ParserOptions::default())
-}
-
-fn parse_module_with_options(source: &str, options: ParserOptions) -> Result<Module, ParseError> {
     let lexer = Lexer::new(source);
     let tokens = lexer
         .tokenize()
         .collect::<Result<Vec<Token>, LexError>>()
         .expect("Failed to tokenize");
 
-    let mut parser = Parser::new_with_id_gen_and_options(&tokens, NodeIdGen::new(), options);
+    let mut parser = Parser::new_with_id_gen(&tokens, NodeIdGen::new());
     parser.parse()
 }
 

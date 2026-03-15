@@ -9,9 +9,8 @@ use std::hash::{Hash, Hasher};
 use std::sync::Arc;
 
 use crate::core::api::{
-    FrontendPolicy, ParseModuleError, ParseModuleOptions, ResolveInputs,
-    parse_module_with_id_gen_and_options, resolve_stage_with_policy, semcheck_stage_with_policy,
-    typecheck_stage_with_policy,
+    FrontendPolicy, ParseModuleError, ResolveInputs, parse_module_with_id_gen,
+    resolve_stage_with_policy, semcheck_stage_with_policy, typecheck_stage_with_policy,
 };
 use crate::core::ast::NodeId;
 use crate::core::ast::NodeIdGen;
@@ -75,7 +74,6 @@ pub(crate) struct ModulePipelineInputs {
     pub imported_modules: HashMap<String, ImportedModule>,
     pub imported_symbols: HashMap<String, ImportedSymbol>,
     pub skip_typecheck: bool,
-    pub experimental_typestate: bool,
 }
 
 #[cfg(test)]
@@ -85,7 +83,7 @@ pub(crate) fn run_module_pipeline(
     revision: u64,
     source: Arc<str>,
 ) -> QueryResult<ModulePipelineState> {
-    run_module_pipeline_with_query_input(rt, module_id, revision, source, 0, false)
+    run_module_pipeline_with_query_input(rt, module_id, revision, source, 0)
 }
 
 pub(crate) fn run_module_pipeline_with_query_input(
@@ -94,12 +92,8 @@ pub(crate) fn run_module_pipeline_with_query_input(
     revision: u64,
     source: Arc<str>,
     query_input: u64,
-    experimental_typestate: bool,
 ) -> QueryResult<ModulePipelineState> {
-    let inputs = ModulePipelineInputs {
-        experimental_typestate,
-        ..ModulePipelineInputs::default()
-    };
+    let inputs = ModulePipelineInputs::default();
     run_module_pipeline_with_inputs(rt, module_id, revision, source, query_input, inputs)
 }
 
@@ -113,7 +107,6 @@ pub(crate) fn run_module_pipeline_with_parsed_and_imports(
     imported_modules: HashMap<String, ImportedModule>,
     imported_symbols: HashMap<String, ImportedSymbol>,
     skip_typecheck: bool,
-    experimental_typestate: bool,
 ) -> QueryResult<ModulePipelineState> {
     run_module_pipeline_with_parsed_and_imports_with_query_input(
         rt,
@@ -125,7 +118,6 @@ pub(crate) fn run_module_pipeline_with_parsed_and_imports(
         imported_modules,
         imported_symbols,
         skip_typecheck,
-        experimental_typestate,
     )
 }
 
@@ -140,14 +132,12 @@ pub(crate) fn run_module_pipeline_with_parsed_and_imports_with_query_input(
     imported_modules: HashMap<String, ImportedModule>,
     imported_symbols: HashMap<String, ImportedSymbol>,
     skip_typecheck: bool,
-    experimental_typestate: bool,
 ) -> QueryResult<ModulePipelineState> {
     let inputs = ModulePipelineInputs {
         parsed_override,
         imported_modules,
         imported_symbols,
         skip_typecheck,
-        experimental_typestate,
     };
     run_module_pipeline_with_inputs(rt, module_id, revision, source, query_input, inputs)
 }
@@ -171,7 +161,6 @@ fn run_module_pipeline_with_inputs(
         imported_modules,
         imported_symbols,
         skip_typecheck,
-        experimental_typestate,
     } = inputs;
 
     let semantic_fingerprint = semantic_input_fingerprint(
@@ -179,7 +168,6 @@ fn run_module_pipeline_with_inputs(
         &imported_modules,
         &imported_symbols,
         skip_typecheck,
-        experimental_typestate,
     );
     let query_revision = revision ^ semantic_fingerprint;
 
@@ -198,13 +186,7 @@ fn run_module_pipeline_with_inputs(
             return Ok(state);
         }
 
-        match parse_module_with_id_gen_and_options(
-            &source_for_parse,
-            NodeIdGen::new(),
-            ParseModuleOptions {
-                experimental_typestate,
-            },
-        ) {
+        match parse_module_with_id_gen(&source_for_parse, NodeIdGen::new()) {
             Ok((module, id_gen)) => {
                 state.product = Some(ParsedContext::new(module, id_gen));
             }
@@ -343,13 +325,11 @@ fn semantic_input_fingerprint(
     imported_modules: &HashMap<String, ImportedModule>,
     imported_symbols: &HashMap<String, ImportedSymbol>,
     skip_typecheck: bool,
-    experimental_typestate: bool,
 ) -> u64 {
     let mut hasher = std::collections::hash_map::DefaultHasher::new();
     // Keep file-local and program-mode pipelines disjoint in cache identity.
     parsed_override.is_some().hash(&mut hasher);
     skip_typecheck.hash(&mut hasher);
-    experimental_typestate.hash(&mut hasher);
     hash_imported_modules(&mut hasher, imported_modules);
     hash_imported_symbols(&mut hasher, imported_symbols);
     hasher.finish()

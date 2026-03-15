@@ -783,7 +783,6 @@ fn deterministic_compile_opts() -> CompileOptions {
         trace_alloc: false,
         trace_drops: false,
         inject_prelude: true,
-        experimental_typestate: false,
     }
 }
 

@@ -81,20 +81,13 @@ impl super::AnalysisDb {
         };
         let revision = snapshot.revision();
         let module_id = ModuleId(file_id.0);
-        let experimental_typestate = self.experimental_typestate;
-        let query_input = if experimental_typestate { 1 } else { 0 };
+        let query_input = 0;
 
         let lookup_key =
             QueryKey::with_input(QueryKind::LookupState, module_id, revision, query_input);
         self.execute_query(lookup_key, move |rt| {
-            let state = run_module_pipeline_with_query_input(
-                rt,
-                module_id,
-                revision,
-                source,
-                query_input,
-                experimental_typestate,
-            )?;
+            let state =
+                run_module_pipeline_with_query_input(rt, module_id, revision, source, query_input)?;
             Ok(to_lookup_state(&state))
         })
     }
@@ -111,7 +104,6 @@ impl super::AnalysisDb {
 
         let revision = snapshot.revision();
         let query_input = stable_source_revision(&source).wrapping_add(1);
-        let query_input = query_input.wrapping_add(if self.experimental_typestate { 1 } else { 0 });
         let module_id = ModuleId(file_id.0);
         let pipeline = run_module_pipeline_with_query_input(
             &mut self.runtime,
@@ -119,7 +111,6 @@ impl super::AnalysisDb {
             revision,
             Arc::<str>::from(source),
             query_input,
-            self.experimental_typestate,
         )?;
         Ok(Some(to_lookup_state(&pipeline)))
     }
@@ -148,25 +139,16 @@ impl super::AnalysisDb {
 
         let revision = snapshot.revision();
         let module_id = ModuleId(file_id.0);
-        let query_input = if self.experimental_typestate { 1 } else { 0 };
+        let query_input = 0;
         let key = QueryKey::with_input(
             QueryKind::StrictLookupState,
             module_id,
             revision,
             query_input,
         );
-        let experimental_typestate = self.experimental_typestate;
 
         self.execute_query(key, move |_rt| {
-            Ok(
-                strict_frontend_lookup_state_with_path(
-                    &source,
-                    &path,
-                    true,
-                    experimental_typestate,
-                )
-                .ok(),
-            )
+            Ok(strict_frontend_lookup_state_with_path(&source, &path, true).ok())
         })
     }
 
@@ -175,12 +157,7 @@ impl super::AnalysisDb {
         file_id: FileId,
     ) -> QueryResult<ProgramPipelineResult> {
         let snapshot = self.snapshot();
-        run_program_pipeline_for_file_with_options(
-            &mut self.runtime,
-            snapshot,
-            file_id,
-            self.experimental_typestate,
-        )
+        run_program_pipeline_for_file_with_options(&mut self.runtime, snapshot, file_id)
     }
 
     pub(crate) fn def_target_for_symbol_id_in_program(

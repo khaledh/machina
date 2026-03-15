@@ -180,9 +180,7 @@ pub(super) fn rewrite_calls_in_item(
         TopLevelItem::FuncDecl(func_decl) => rewriter.visit_func_decl(func_decl),
         TopLevelItem::MethodBlock(method_block) => rewriter.visit_method_block(method_block),
         TopLevelItem::ClosureDef(closure_def) => rewriter.visit_closure_def(closure_def),
-        TopLevelItem::TypeDef(_)
-        | TopLevelItem::TraitDef(_)
-        | TopLevelItem::MachineDef(_) => {}
+        TopLevelItem::TypeDef(_) | TopLevelItem::TraitDef(_) | TopLevelItem::MachineDef(_) => {}
     }
 }
 

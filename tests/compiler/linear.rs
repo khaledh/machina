@@ -15,7 +15,6 @@ fn linear_opts() -> CompileOptions {
         trace_alloc: false,
         trace_drops: false,
         inject_prelude: true,
-        experimental_typestate: false,
     }
 }
 
@@ -29,7 +28,7 @@ fn compile_linear_source(source: &str, virtual_path: &str) -> Result<(), Vec<Com
 }
 
 fn check_linear_source(source: &str, virtual_path: &str) -> Result<(), Vec<CompileError>> {
-    check_with_path(source, &repo_root().join(virtual_path), true, false)
+    check_with_path(source, &repo_root().join(virtual_path), true)
 }
 
 #[test]

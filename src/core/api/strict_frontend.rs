@@ -20,14 +20,13 @@ use crate::core::monomorphize;
 use std::fs;
 
 use super::{
-    FrontendPolicy, ParseModuleError, ParseModuleOptions, ResolveInputs,
-    parse_module_with_id_gen_and_options, resolve_typecheck_pipeline_with_policy,
+    FrontendPolicy, ParseModuleError, ResolveInputs, parse_module_with_id_gen,
+    resolve_typecheck_pipeline_with_policy,
 };
 
 #[derive(Debug, Clone, Copy)]
 pub(crate) struct StrictFrontendOptions {
     pub inject_prelude: bool,
-    pub experimental_typestate: bool,
 }
 
 pub(crate) struct StrictFrontendParsed {
@@ -40,15 +39,11 @@ pub fn check_strict_frontend_with_path(
     source: &str,
     source_path: &Path,
     inject_prelude: bool,
-    experimental_typestate: bool,
 ) -> Result<(), Vec<CompileError>> {
     let parsed = build_strict_frontend_input(
         source,
         Some(source_path),
-        StrictFrontendOptions {
-            inject_prelude,
-            experimental_typestate,
-        },
+        StrictFrontendOptions { inject_prelude },
     )?;
     let _ = run_strict_frontend(parsed)?;
     Ok(())
@@ -58,15 +53,11 @@ pub fn lookup_strict_frontend_with_path(
     source: &str,
     source_path: &Path,
     inject_prelude: bool,
-    experimental_typestate: bool,
 ) -> Result<(ResolvedContext, TypeCheckedContext), Vec<CompileError>> {
     let parsed = build_strict_frontend_input(
         source,
         Some(source_path),
-        StrictFrontendOptions {
-            inject_prelude,
-            experimental_typestate,
-        },
+        StrictFrontendOptions { inject_prelude },
     )?;
     run_strict_frontend(parsed)
 }
@@ -81,7 +72,6 @@ pub(crate) fn build_strict_frontend_input(
             source,
             path,
             capsule::CapsuleParseOptions {
-                experimental_typestate: opts.experimental_typestate,
                 inject_prelude_requires: opts.inject_prelude,
             },
         )
@@ -96,12 +86,12 @@ pub(crate) fn build_strict_frontend_input(
         )
     } else {
         let id_gen = NodeIdGen::new();
-        let (module, id_gen) = parse_with_id_gen(source, id_gen, opts.experimental_typestate)?;
+        let (module, id_gen) = parse_with_id_gen(source, id_gen)?;
         (module, id_gen, HashMap::new())
     };
 
     let (module, id_gen) = if opts.inject_prelude {
-        inject_prelude_module(user_module, id_gen, opts.experimental_typestate)?
+        inject_prelude_module(user_module, id_gen)?
     } else {
         (user_module, id_gen)
     };
@@ -123,16 +113,8 @@ pub(crate) fn run_strict_frontend(
 fn parse_with_id_gen(
     source: &str,
     id_gen: NodeIdGen,
-    experimental_typestate: bool,
 ) -> Result<(Module, NodeIdGen), Vec<CompileError>> {
-    parse_module_with_id_gen_and_options(
-        source,
-        id_gen,
-        ParseModuleOptions {
-            experimental_typestate,
-        },
-    )
-    .map_err(|e| match e {
+    parse_module_with_id_gen(source, id_gen).map_err(|e| match e {
         ParseModuleError::Lex(err) => vec![err.into()],
         ParseModuleError::Parse(err) => vec![err.into()],
     })
@@ -141,14 +123,13 @@ fn parse_with_id_gen(
 fn inject_prelude_module(
     user_module: Module,
     id_gen: NodeIdGen,
-    experimental_typestate: bool,
 ) -> Result<(Module, NodeIdGen), Vec<CompileError>> {
     let prelude_path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
         .join("std")
         .join("prelude_decl.mc");
     let prelude_src = fs::read_to_string(&prelude_path)
         .map_err(|e| vec![CompileError::Io(prelude_path.clone(), e)])?;
-    let (prelude_module, id_gen) = parse_with_id_gen(&prelude_src, id_gen, experimental_typestate)?;
+    let (prelude_module, id_gen) = parse_with_id_gen(&prelude_src, id_gen)?;
     Ok((merge_modules(&prelude_module, &user_module), id_gen))
 }
 

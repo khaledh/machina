@@ -98,7 +98,6 @@ impl Visitor for DefOwnerCollector<'_> {
         visit::walk_type_def(self, type_def);
     }
 
-
     fn visit_func_decl(&mut self, func_decl: &FuncDecl) {
         self.record_node(func_decl.id);
         visit::walk_func_decl(self, func_decl);

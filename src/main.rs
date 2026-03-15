@@ -183,7 +183,7 @@ fn main() {
         },
         Command::Check { input } => {
             let input_path = PathBuf::from(input);
-            match run_check(&input_path, false) {
+            match run_check(&input_path) {
                 Ok(0) => {}
                 Ok(_) => std::process::exit(1),
                 Err(message) => {
@@ -228,7 +228,6 @@ fn main() {
         trace_alloc,
         trace_drops,
         inject_prelude: true,
-        experimental_typestate: false,
     };
     let output = compile_with_path(&source, Some(input_path), &opts);
 
@@ -377,10 +376,10 @@ fn main() {
     }
 }
 
-fn run_check(input_path: &Path, experimental_typestate: bool) -> Result<usize, String> {
+fn run_check(input_path: &Path) -> Result<usize, String> {
     let source = fs::read_to_string(input_path)
         .map_err(|e| format!("failed to read {}: {e}", input_path.display()))?;
-    match check_with_path(&source, input_path, true, experimental_typestate) {
+    match check_with_path(&source, input_path, true) {
         Ok(()) => {
             println!("[OK] no diagnostics");
             Ok(0)
@@ -548,7 +547,6 @@ fn compile_prelude_impl_object(
         trace_alloc: opts.trace_alloc,
         trace_drops: opts.trace_drops,
         inject_prelude: true,
-        experimental_typestate: opts.experimental_typestate,
     };
 
     let output =
