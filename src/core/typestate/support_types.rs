@@ -106,6 +106,12 @@ const INTRINSICS: &[(&str, &[&str])] = &[
 ];
 
 pub(super) fn ensure_machine_runtime_intrinsics(module: &mut Module, node_id_gen: &mut NodeIdGen) {
+    crate::core::machine::runtime_intrinsics::ensure_u64_runtime_intrinsics(
+        module,
+        node_id_gen,
+        INTRINSICS,
+    );
+
     let existing_callables: HashSet<String> = module
         .top_level_items
         .iter()
@@ -115,36 +121,8 @@ pub(super) fn ensure_machine_runtime_intrinsics(module: &mut Module, node_id_gen
             _ => None,
         })
         .collect();
-
     let span = Span::default();
     let mut append = Vec::new();
-
-    for &(name, param_names) in INTRINSICS {
-        if existing_callables.contains(name) {
-            continue;
-        }
-        append.push(TopLevelItem::FuncDecl(FuncDecl {
-            id: node_id_gen.new_id(),
-            attrs: Vec::new(),
-            sig: FunctionSig {
-                name: name.to_string(),
-                type_params: Vec::new(),
-                params: param_names
-                    .iter()
-                    .map(|param_name| Param {
-                        id: node_id_gen.new_id(),
-                        ident: (*param_name).to_string(),
-                        typ: u64_type_expr(node_id_gen, span),
-                        mode: ParamMode::In,
-                        span,
-                    })
-                    .collect(),
-                ret_ty_expr: u64_type_expr(node_id_gen, span),
-                span,
-            },
-            span,
-        }));
-    }
 
     if !existing_callables.contains("__mc_machine_payload_pack") {
         append.push(TopLevelItem::FuncDecl(FuncDecl {

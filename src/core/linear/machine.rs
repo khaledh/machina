@@ -46,8 +46,8 @@ use std::collections::{HashMap, HashSet};
 use crate::core::ast::visit_mut::{self, VisitorMut};
 use crate::core::ast::{
     BindPattern, BindPatternKind, BlockItem, CallArg, CallArgMode, EnumDefVariant, Expr, ExprKind,
-    FuncDecl, FuncDef, FunctionSig, MachineDef, MachineItem, MatchArm, MethodBlock, MethodDef,
-    MethodItem, MethodSig, Module, NodeIdGen, Param, ParamMode, SelfParam, StmtExpr, StmtExprKind,
+    FuncDef, FunctionSig, MachineDef, MachineItem, MatchArm, MethodBlock, MethodDef, MethodItem,
+    MethodSig, Module, NodeIdGen, Param, ParamMode, SelfParam, StmtExpr, StmtExprKind,
     StructLitField, TopLevelItem, TypeDef, TypeDefKind, TypeExpr, TypeExprKind,
 };
 use crate::core::diag::Span;
@@ -817,134 +817,57 @@ pub(super) fn ensure_hosted_support_types(module: &mut Module, node_id_gen: &mut
 /// helpers. Keeping these as ordinary callable declarations lets the existing
 /// frontend and backend treat them like any other runtime bridge call.
 pub(super) fn ensure_hosted_runtime_intrinsics(module: &mut Module, node_id_gen: &mut NodeIdGen) {
-    let existing_callables: HashMap<String, ()> = module
-        .top_level_items
-        .iter()
-        .filter_map(|item| match item {
-            TopLevelItem::FuncDecl(decl) => Some((decl.sig.name.clone(), ())),
-            TopLevelItem::FuncDef(def) => Some((def.sig.name.clone(), ())),
-            _ => None,
-        })
-        .collect();
-
-    let span = Span::default();
-    let mut decls = Vec::new();
-
-    let intrinsics = [
-        (MANAGED_RUNTIME_CURRENT_FN, Vec::new()),
-        (
-            MANAGED_RUNTIME_STEP_FN,
-            vec![("runtime", u64_type_expr(node_id_gen, span))],
-        ),
+    let intrinsics: &[(&str, &[&str])] = &[
+        (MANAGED_RUNTIME_CURRENT_FN, &[]),
+        (MANAGED_RUNTIME_STEP_FN, &["runtime"]),
         (
             HOSTED_LINEAR_SPAWN_FN,
-            vec![
-                ("runtime", u64_type_expr(node_id_gen, span)),
-                ("mailbox_cap", u64_type_expr(node_id_gen, span)),
-                ("machine_kind", u64_type_expr(node_id_gen, span)),
-            ],
+            &["runtime", "mailbox_cap", "machine_kind"],
         ),
         (
             MACHINE_RUNTIME_SEND_FN,
-            vec![
-                ("runtime", u64_type_expr(node_id_gen, span)),
-                ("dst", u64_type_expr(node_id_gen, span)),
-                ("kind", u64_type_expr(node_id_gen, span)),
-                ("payload0", u64_type_expr(node_id_gen, span)),
-                ("payload1", u64_type_expr(node_id_gen, span)),
-            ],
+            &["runtime", "dst", "kind", "payload0", "payload1"],
         ),
         (
             HOSTED_LINEAR_CREATE_FN,
-            vec![
-                ("runtime", u64_type_expr(node_id_gen, span)),
-                ("machine_id", u64_type_expr(node_id_gen, span)),
-                ("initial_state_tag", u64_type_expr(node_id_gen, span)),
-                ("initial_payload", u64_type_expr(node_id_gen, span)),
+            &[
+                "runtime",
+                "machine_id",
+                "initial_state_tag",
+                "initial_payload",
             ],
         ),
         (
             HOSTED_LINEAR_RESUME_STATE_FN,
-            vec![
-                ("runtime", u64_type_expr(node_id_gen, span)),
-                ("machine_id", u64_type_expr(node_id_gen, span)),
-                ("key", u64_type_expr(node_id_gen, span)),
-            ],
+            &["runtime", "machine_id", "key"],
         ),
         (
             HOSTED_LINEAR_DELIVER_FN,
-            vec![
-                ("runtime", u64_type_expr(node_id_gen, span)),
-                ("machine_id", u64_type_expr(node_id_gen, span)),
-                ("key", u64_type_expr(node_id_gen, span)),
-                ("expected_state_tag", u64_type_expr(node_id_gen, span)),
-                ("target_state_tag", u64_type_expr(node_id_gen, span)),
-                ("trigger_kind", u64_type_expr(node_id_gen, span)),
-                ("payload0", u64_type_expr(node_id_gen, span)),
-                ("payload1", u64_type_expr(node_id_gen, span)),
+            &[
+                "runtime",
+                "machine_id",
+                "key",
+                "expected_state_tag",
+                "target_state_tag",
+                "trigger_kind",
+                "payload0",
+                "payload1",
             ],
         ),
         (
             HOSTED_LINEAR_WAIT_STATE_FN,
-            vec![
-                ("runtime", u64_type_expr(node_id_gen, span)),
-                ("machine_id", u64_type_expr(node_id_gen, span)),
-                ("key", u64_type_expr(node_id_gen, span)),
-                ("expected_state_tag", u64_type_expr(node_id_gen, span)),
-            ],
+            &["runtime", "machine_id", "key", "expected_state_tag"],
         ),
-        (
-            HOSTED_ACTION_EMIT_BEGIN_FN,
-            vec![
-                ("runtime", u64_type_expr(node_id_gen, span)),
-                ("machine_id", u64_type_expr(node_id_gen, span)),
-            ],
-        ),
-        (
-            HOSTED_ACTION_EMIT_COMMIT_FN,
-            vec![("scope", u64_type_expr(node_id_gen, span))],
-        ),
-        (
-            HOSTED_ACTION_EMIT_ABORT_FN,
-            vec![("scope", u64_type_expr(node_id_gen, span))],
-        ),
+        (HOSTED_ACTION_EMIT_BEGIN_FN, &["runtime", "machine_id"]),
+        (HOSTED_ACTION_EMIT_COMMIT_FN, &["scope"]),
+        (HOSTED_ACTION_EMIT_ABORT_FN, &["scope"]),
     ];
 
-    for (name, params) in intrinsics {
-        if existing_callables.contains_key(name) {
-            continue;
-        }
-        let params = if params.is_empty() {
-            Vec::new()
-        } else {
-            params
-                .into_iter()
-                .map(|(param_name, typ)| Param {
-                    id: node_id_gen.new_id(),
-                    ident: param_name.to_string(),
-                    typ,
-                    mode: ParamMode::In,
-                    span,
-                })
-                .collect()
-        };
-        decls.push(TopLevelItem::FuncDecl(FuncDecl {
-            id: node_id_gen.new_id(),
-            attrs: Vec::new(),
-            sig: FunctionSig {
-                name: name.to_string(),
-                type_params: Vec::new(),
-                params,
-                ret_ty_expr: u64_type_expr(node_id_gen, span),
-                span,
-            },
-            span,
-        }));
-    }
-
-    if !decls.is_empty() {
-        module.top_level_items.splice(0..0, decls);
-    }
+    crate::core::machine::runtime_intrinsics::ensure_u64_runtime_intrinsics(
+        module,
+        node_id_gen,
+        intrinsics,
+    );
 }
 
 fn ensure_type_def(module: &mut Module, type_name: &str, item: TopLevelItem) {
