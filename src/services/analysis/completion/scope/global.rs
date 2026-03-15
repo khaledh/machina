@@ -14,9 +14,7 @@ pub(super) fn global_scope(resolved: &ResolvedContext) -> HashMap<String, Comple
     let mut allowed_nodes = HashSet::new();
     for item in &resolved.module.top_level_items {
         match item {
-            TopLevelItem::ProtocolDef(protocol_def) => {
-                allowed_nodes.insert(protocol_def.id);
-            }
+            TopLevelItem::ProtocolDef(_) => {}
             TopLevelItem::TraitDef(trait_def) => {
                 allowed_nodes.insert(trait_def.id);
             }
@@ -78,8 +76,7 @@ pub(super) fn global_scope(resolved: &ResolvedContext) -> HashMap<String, Comple
 
 pub(super) fn completion_kind_for_def(kind: &DefKind) -> Option<CompletionKind> {
     match kind {
-        DefKind::ProtocolDef => Some(CompletionKind::Type),
-        DefKind::ProtocolRole => Some(CompletionKind::EnumVariant),
+        DefKind::ProtocolDef | DefKind::ProtocolRole => None,
         DefKind::FuncDef { .. } | DefKind::FuncDecl { .. } => Some(CompletionKind::Function),
         DefKind::TypeDef { .. } => Some(CompletionKind::Type),
         DefKind::TraitDef { .. } => Some(CompletionKind::Trait),

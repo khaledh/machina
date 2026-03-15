@@ -52,8 +52,8 @@ pub(super) fn qualified_path_completions(
     resolved: &ResolvedContext,
     path_segments: &[String],
 ) -> Vec<CompletionItem> {
-    // V1 scope: resolve first-segment nominal paths (`Protocol::Role`,
-    // `Enum::Variant`) that appear in typestate/protocol surface syntax.
+    // Current supported surface: resolve first-segment enum nominal paths
+    // (`Enum::Variant`) for source-level completions.
     if path_segments.len() != 1 {
         return Vec::new();
     }
@@ -63,21 +63,6 @@ pub(super) fn qualified_path_completions(
 
     for item in &resolved.module.top_level_items {
         match item {
-            TopLevelItem::ProtocolDef(protocol_def) if protocol_def.name == *owner_name => {
-                return protocol_def
-                    .roles
-                    .iter()
-                    .map(|role| CompletionItem {
-                        label: role.name.clone(),
-                        kind: CompletionKind::EnumVariant,
-                        def_id: resolved
-                            .def_table
-                            .lookup_node_def_id(role.id)
-                            .unwrap_or(UNKNOWN_DEF_ID),
-                        detail: Some("protocol role".to_string()),
-                    })
-                    .collect();
-            }
             TopLevelItem::TypeDef(type_def) if type_def.name == *owner_name => {
                 if let TypeDefKind::Enum { variants } = &type_def.kind {
                     return variants
