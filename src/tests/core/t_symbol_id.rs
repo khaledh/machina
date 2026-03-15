@@ -28,10 +28,6 @@ fn resolved_with_module_path(source: &str, module_path: &str) -> ResolvedContext
 fn symbol_id_table_records_top_level_and_method_paths() {
     let resolved = resolved_with_module_path(
         r#"
-protocol Auth {
-    role Client;
-}
-
 type Conn = {}
 
 Conn :: {
@@ -43,15 +39,11 @@ fn run() {}
         "app::main",
     );
 
-    let protocol_id = match &resolved.module.top_level_items[0] {
-        TopLevelItem::ProtocolDef(def) => resolved.def_table.lookup_node_def_id(def.id).unwrap(),
-        _ => unreachable!(),
-    };
-    let type_id = match &resolved.module.top_level_items[1] {
+    let type_id = match &resolved.module.top_level_items[0] {
         TopLevelItem::TypeDef(def) => resolved.def_table.lookup_node_def_id(def.id).unwrap(),
         _ => unreachable!(),
     };
-    let method_id = match &resolved.module.top_level_items[2] {
+    let method_id = match &resolved.module.top_level_items[1] {
         TopLevelItem::MethodBlock(block) => match &block.method_items[0] {
             crate::core::ast::MethodItem::Def(def) => {
                 resolved.def_table.lookup_node_def_id(def.id).unwrap()
@@ -60,10 +52,6 @@ fn run() {}
         },
         _ => unreachable!(),
     };
-
-    let protocol_symbol = resolved.symbol_ids.lookup_symbol_id(protocol_id).unwrap();
-    assert_eq!(protocol_symbol.ns, SymbolNs::Protocol);
-    assert_eq!(protocol_symbol.path, SymbolPath::from_names(["Auth"]));
 
     let type_symbol = resolved.symbol_ids.lookup_symbol_id(type_id).unwrap();
     assert_eq!(type_symbol.ns, SymbolNs::Type);

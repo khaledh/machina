@@ -253,7 +253,3 @@ fn build_protocol_fact(
         request_contracts,
     }
 }
-
-#[cfg(test)]
-#[path = "../../tests/core/protocol/t_index.rs"]
-mod tests;

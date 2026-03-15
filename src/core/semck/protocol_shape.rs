@@ -1,243 +1,23 @@
-//! Protocol/typestate shape validation that depends on solved types.
+//! Remaining typestate-only semantic checks after protocol retirement.
 //!
-//! These checks are semantic rather than inferential: they validate that a
-//! typestate implementation's handlers, emits, and request/response patterns
-//! line up with the protocol facts extracted earlier in the frontend.
+//! The old protocol conformance machinery has been removed, but a few
+//! typestate-local checks still matter until typestate support itself is
+//! deleted. In particular we still diagnose overlapping response handlers and
+//! mismatched request/response shapes.
 
-use std::collections::{HashMap, HashSet};
+use std::collections::HashSet;
 
 use crate::core::ast::visit::{self, Visitor};
-use crate::core::ast::{EmitKind, Expr, ExprKind, MethodBlock, MethodItem, Module};
+use crate::core::ast::{EmitKind, Expr, ExprKind, MethodBlock, MethodItem};
 use crate::core::context::SemCheckNormalizedContext;
 use crate::core::machine::naming::{
     is_generated_handler_name, parse_generated_handler_site_label, parse_generated_state_name,
 };
-use crate::core::protocol::event_extract::extract_emit_from_expr;
 use crate::core::resolve::DefTable;
 use crate::core::semck::typestate_scan::collect_generated_typestate_handlers;
 use crate::core::semck::{SEK, SemCheckError, push_error};
 use crate::core::typecheck::type_map::resolve_type_expr;
 use crate::core::types::Type;
-
-pub(super) fn check_protocol_shape_conformance(
-    ctx: &SemCheckNormalizedContext,
-) -> Vec<SemCheckError> {
-    let resolved = ctx;
-    if resolved.typestate_role_impls.is_empty() {
-        return Vec::new();
-    }
-
-    let typestate_names: HashSet<String> = resolved
-        .typestate_role_impls
-        .iter()
-        .map(|binding| binding.typestate_name.clone())
-        .collect();
-    let handler_payloads_by_state =
-        collect_typestate_handler_payloads_by_state(ctx, &typestate_names);
-    let outgoing_emits_by_state =
-        collect_typestate_outgoing_payloads_by_state(ctx, &typestate_names);
-
-    let mut errors = Vec::new();
-    for binding in &resolved.typestate_role_impls {
-        if binding.path.len() < 2 || binding.role_def_id.is_none() {
-            continue;
-        }
-
-        let protocol_name = &binding.path[0];
-        let role_name = &binding.path[1];
-        let role_label = binding.path.join("::");
-        let Some(protocol_fact) = resolved.protocol_index.protocols.get(protocol_name) else {
-            continue;
-        };
-        let Some(role_fact) = protocol_fact.roles.get(role_name) else {
-            continue;
-        };
-        let peer_role_by_field: HashMap<&str, &str> = binding
-            .peer_role_bindings
-            .iter()
-            .map(|peer| (peer.field_name.as_str(), peer.role_name.as_str()))
-            .collect();
-
-        let ctx = EmitCheckCtx {
-            typestate_name: &binding.typestate_name,
-            role_label: &role_label,
-            role_name,
-            protocol_fact,
-            peer_role_by_field: &peer_role_by_field,
-        };
-
-        for state_fact in role_fact.states.values() {
-            let key = TypestateStateKey {
-                typestate_name: binding.typestate_name.clone(),
-                state_name: state_fact.name.clone(),
-            };
-            let seen_handlers = handler_payloads_by_state
-                .get(&key)
-                .cloned()
-                .unwrap_or_default();
-            for required in &state_fact.shape.required_incoming {
-                if !seen_handlers.contains(required) {
-                    push_error(
-                        &mut errors,
-                        binding.span,
-                        SEK::ProtocolStateHandlerMissing(
-                            binding.typestate_name.clone(),
-                            role_label.clone(),
-                            state_fact.name.clone(),
-                            required.clone(),
-                        ),
-                    );
-                }
-            }
-
-            if let Some(emits) = outgoing_emits_by_state.get(&key) {
-                for emit in emits {
-                    check_emit_conformance(&ctx, state_fact, emit, &mut errors);
-                }
-            }
-        }
-    }
-
-    errors
-}
-
-struct EmitCheckCtx<'a> {
-    typestate_name: &'a str,
-    role_label: &'a str,
-    role_name: &'a str,
-    protocol_fact: &'a crate::core::protocol::ProtocolFact,
-    peer_role_by_field: &'a HashMap<&'a str, &'a str>,
-}
-
-fn check_emit_conformance(
-    ctx: &EmitCheckCtx<'_>,
-    state_fact: &crate::core::protocol::ProtocolStateFact,
-    emit: &EmitPayload,
-    errors: &mut Vec<SemCheckError>,
-) {
-    if !state_fact.shape.allowed_outgoing.contains(&emit.payload_ty) {
-        push_error(
-            errors,
-            emit.span,
-            SEK::ProtocolStateOutgoingPayloadNotAllowed(
-                ctx.typestate_name.to_string(),
-                ctx.role_label.to_string(),
-                state_fact.name.clone(),
-                emit.payload_ty.clone(),
-            ),
-        );
-        return;
-    }
-
-    let mut expected_roles = state_expected_roles_for_payload(state_fact, &emit.payload_ty);
-    if emit.is_request {
-        expected_roles.extend(request_contract_to_roles_for_payload(
-            ctx.protocol_fact,
-            ctx.role_name,
-            &emit.payload_ty,
-        ));
-        expected_roles.sort();
-        expected_roles.dedup();
-    }
-    if expected_roles.is_empty() || emit.destination_implicit {
-        return;
-    }
-
-    let Some((field_name, bound_role_name)) =
-        resolve_emit_destination_role(emit, ctx.peer_role_by_field)
-    else {
-        push_error(
-            errors,
-            emit.span,
-            SEK::ProtocolStateEmitDestinationRoleUnbound(
-                ctx.typestate_name.to_string(),
-                ctx.role_label.to_string(),
-                state_fact.name.clone(),
-                emit.payload_ty.clone(),
-                expected_roles.join(" | "),
-            ),
-        );
-        return;
-    };
-    if !expected_roles.iter().any(|role| role == bound_role_name) {
-        push_error(
-            errors,
-            emit.span,
-            SEK::ProtocolStateEmitDestinationRoleMismatch(
-                ctx.typestate_name.to_string(),
-                ctx.role_label.to_string(),
-                state_fact.name.clone(),
-                emit.payload_ty.clone(),
-                expected_roles.join(" | "),
-                field_name.to_string(),
-                bound_role_name.to_string(),
-            ),
-        );
-        return;
-    }
-
-    if emit.is_request {
-        check_request_contract(ctx, state_fact, emit, bound_role_name, errors);
-    }
-}
-
-fn check_request_contract(
-    ctx: &EmitCheckCtx<'_>,
-    _state_fact: &crate::core::protocol::ProtocolStateFact,
-    emit: &EmitPayload,
-    to_role_name: &str,
-    errors: &mut Vec<SemCheckError>,
-) {
-    let matching_contracts = matching_request_contracts(
-        ctx.protocol_fact,
-        ctx.role_name,
-        to_role_name,
-        &emit.payload_ty,
-    );
-    if matching_contracts.is_empty() {
-        push_error(
-            errors,
-            emit.span,
-            SEK::ProtocolRequestContractMissing(
-                ctx.typestate_name.to_string(),
-                ctx.role_label.to_string(),
-                emit.payload_ty.clone(),
-                to_role_name.to_string(),
-            ),
-        );
-        return;
-    }
-    if matching_contracts.len() > 1 {
-        push_error(
-            errors,
-            emit.span,
-            SEK::ProtocolRequestContractAmbiguous(
-                ctx.typestate_name.to_string(),
-                ctx.role_label.to_string(),
-                emit.payload_ty.clone(),
-                to_role_name.to_string(),
-            ),
-        );
-        return;
-    }
-    let contract_responses = &matching_contracts[0].response_tys;
-    let response_tys = emit.request_response_tys.as_deref().unwrap_or_default();
-    for response_ty in response_tys {
-        if !contract_responses.contains(response_ty) {
-            push_error(
-                errors,
-                emit.span,
-                SEK::ProtocolRequestResponseNotInContract(
-                    ctx.typestate_name.to_string(),
-                    ctx.role_label.to_string(),
-                    emit.payload_ty.clone(),
-                    to_role_name.to_string(),
-                    response_ty.clone(),
-                ),
-            );
-        }
-    }
-}
 
 #[derive(Clone, Debug)]
 struct HandlerResponsePattern {
@@ -250,17 +30,13 @@ struct HandlerResponsePattern {
 pub(super) fn check_typestate_handler_overlap(
     ctx: &SemCheckNormalizedContext,
 ) -> Vec<SemCheckError> {
-    let resolved = ctx;
     let mut errors = Vec::new();
 
-    for handler in collect_generated_typestate_handlers(&resolved.module) {
+    for handler in collect_generated_typestate_handlers(&ctx.module) {
         let typestate_name = handler.typestate_name;
         let state_name = handler.state_name;
-        let patterns = collect_handler_response_patterns(
-            &resolved.def_table,
-            &resolved.module,
-            handler.method_block,
-        );
+        let patterns =
+            collect_handler_response_patterns(&ctx.def_table, &ctx.module, handler.method_block);
         for i in 0..patterns.len() {
             for j in (i + 1)..patterns.len() {
                 let left = &patterns[i];
@@ -279,8 +55,6 @@ pub(super) fn check_typestate_handler_overlap(
                     continue;
                 }
 
-                // Distinct labeled provenance handlers are deterministic:
-                // runtime picks exact request-site key first.
                 if let (Some(left_label), Some(right_label)) =
                     (&left.request_site_label, &right.request_site_label)
                     && left_label != right_label
@@ -319,7 +93,7 @@ pub(super) fn check_typestate_handler_overlap(
 
 fn collect_handler_response_patterns(
     def_table: &DefTable,
-    module: &Module,
+    module: &crate::core::ast::Module,
     method_block: &MethodBlock,
 ) -> Vec<HandlerResponsePattern> {
     let mut out = Vec::new();
@@ -330,10 +104,6 @@ fn collect_handler_response_patterns(
         if !is_generated_handler_name(&method_def.sig.name) {
             continue;
         }
-
-        // Pattern-form `on Response(pending, Variant)` lowers to:
-        //   (__event, pending: Pending<...>, __response: ...)
-        // We only consider these handlers for overlap checks.
         if method_def.sig.params.len() < 3 {
             continue;
         }
@@ -413,9 +183,7 @@ pub(super) fn check_typestate_request_response_shape(
                     return false;
                 }
                 match (&site.request_site_label, &handler.request_site_label) {
-                    // Unlabeled request sites can only route to unlabeled handlers.
                     (None, None) => true,
-                    // Labeled sites route to exact label first, then unlabeled fallback.
                     (Some(site_label), Some(handler_label)) => site_label == handler_label,
                     (Some(_), None) => true,
                     (None, Some(_)) => false,
@@ -531,8 +299,6 @@ fn collect_provenance_handler_shapes(
 ) -> Vec<ProvenanceHandlerShape> {
     let mut out = Vec::new();
     for handler in collect_generated_typestate_handlers(&ctx.module) {
-        // `for RequestType(binding)` handlers lower to:
-        //   (__event, __pending: Pending<Selector>, request_binding, ...)
         if handler.method_def.sig.params.len() < 3
             || handler.method_def.sig.params[1].ident != "__pending"
         {
@@ -573,174 +339,4 @@ fn collect_provenance_handler_shapes(
         });
     }
     out
-}
-
-#[derive(Clone, Debug, PartialEq, Eq, Hash)]
-struct TypestateStateKey {
-    typestate_name: String,
-    state_name: String,
-}
-
-fn collect_typestate_handler_payloads_by_state(
-    ctx: &SemCheckNormalizedContext,
-    typestate_names: &HashSet<String>,
-) -> HashMap<TypestateStateKey, HashSet<Type>> {
-    let mut out = HashMap::<TypestateStateKey, HashSet<Type>>::new();
-    for handler in collect_generated_typestate_handlers(&ctx.module) {
-        let typestate_name = handler.typestate_name;
-        let state_name = handler.state_name;
-        if !typestate_names.contains(&typestate_name) {
-            continue;
-        }
-        let key = TypestateStateKey {
-            typestate_name,
-            state_name,
-        };
-        let Some(event_param) = handler.method_def.sig.params.first() else {
-            continue;
-        };
-        let Ok(handler_ty) = resolve_type_expr(&ctx.def_table, &ctx.module, &event_param.typ)
-        else {
-            continue;
-        };
-        out.entry(key).or_default().insert(handler_ty);
-    }
-    out
-}
-
-#[derive(Clone, Debug)]
-struct EmitPayload {
-    payload_ty: Type,
-    to_field_name: Option<String>,
-    // Capability-based replies route implicitly to the origin role and do not
-    // expose a concrete `self.<peer>` destination field.
-    destination_implicit: bool,
-    is_request: bool,
-    request_response_tys: Option<Vec<Type>>,
-    span: crate::core::diag::Span,
-}
-
-fn collect_typestate_outgoing_payloads_by_state(
-    ctx: &SemCheckNormalizedContext,
-    typestate_names: &HashSet<String>,
-) -> HashMap<TypestateStateKey, Vec<EmitPayload>> {
-    let mut collector = TypestateEmitCollector {
-        typestate_names,
-        type_map: &ctx.type_map,
-        current_state: None,
-        emits_by_state: HashMap::new(),
-    };
-    collector.visit_module(&ctx.module);
-    collector.emits_by_state
-}
-
-struct TypestateEmitCollector<'a> {
-    typestate_names: &'a HashSet<String>,
-    type_map: &'a crate::core::typecheck::type_map::TypeMap,
-    current_state: Option<TypestateStateKey>,
-    emits_by_state: HashMap<TypestateStateKey, Vec<EmitPayload>>,
-}
-
-impl Visitor for TypestateEmitCollector<'_> {
-    fn visit_method_block(&mut self, method_block: &MethodBlock) {
-        let prev = self.current_state.clone();
-        self.current_state = parse_generated_state_name(&method_block.type_name).and_then(
-            |(typestate_name, state_name)| {
-                if self.typestate_names.contains(&typestate_name) {
-                    Some(TypestateStateKey {
-                        typestate_name,
-                        state_name,
-                    })
-                } else {
-                    None
-                }
-            },
-        );
-        visit::walk_method_block(self, method_block);
-        self.current_state = prev;
-    }
-
-    fn visit_expr(&mut self, expr: &Expr) {
-        if let Some(state_key) = &self.current_state
-            && let Some(emit) =
-                extract_emit_from_expr(expr, |node_id| self.type_map.lookup_node_type(node_id))
-        {
-            self.emits_by_state
-                .entry(state_key.clone())
-                .or_default()
-                .push(EmitPayload {
-                    payload_ty: emit.payload_ty,
-                    to_field_name: emit.to_field_name,
-                    destination_implicit: emit.destination_implicit,
-                    is_request: emit.is_request,
-                    request_response_tys: if emit.is_request {
-                        Some(emit.request_response_tys)
-                    } else {
-                        None
-                    },
-                    span: emit.span,
-                });
-        }
-        visit::walk_expr(self, expr);
-    }
-}
-
-fn state_expected_roles_for_payload(
-    state_fact: &crate::core::protocol::ProtocolStateFact,
-    payload_ty: &Type,
-) -> Vec<String> {
-    let mut roles = Vec::new();
-    for transition in &state_fact.transitions {
-        for effect in &transition.effects {
-            if effect.payload_ty.as_ref() == Some(payload_ty) && !roles.contains(&effect.to_role) {
-                roles.push(effect.to_role.clone());
-            }
-        }
-    }
-    roles.sort();
-    roles
-}
-
-fn request_contract_to_roles_for_payload(
-    protocol_fact: &crate::core::protocol::ProtocolFact,
-    from_role: &str,
-    request_ty: &Type,
-) -> Vec<String> {
-    let mut roles = Vec::new();
-    for contract in &protocol_fact.request_contracts {
-        if contract.from_role == from_role
-            && contract.request_ty.as_ref() == Some(request_ty)
-            && !roles.contains(&contract.to_role)
-        {
-            roles.push(contract.to_role.clone());
-        }
-    }
-    roles.sort();
-    roles
-}
-
-fn matching_request_contracts<'a>(
-    protocol_fact: &'a crate::core::protocol::ProtocolFact,
-    from_role: &str,
-    to_role: &str,
-    request_ty: &Type,
-) -> Vec<&'a crate::core::protocol::ProtocolRequestContractFact> {
-    protocol_fact
-        .request_contracts
-        .iter()
-        .filter(|contract| {
-            contract.from_role == from_role
-                && contract.to_role == to_role
-                && contract.request_ty.as_ref() == Some(request_ty)
-        })
-        .collect()
-}
-
-fn resolve_emit_destination_role<'a>(
-    emit: &'a EmitPayload,
-    peer_role_by_field: &'a HashMap<&str, &str>,
-) -> Option<(&'a str, &'a str)> {
-    let field_name = emit.to_field_name.as_deref()?;
-    let role_name = peer_role_by_field.get(field_name).copied()?;
-    Some((field_name, role_name))
 }

@@ -7,8 +7,6 @@ mod lvalue_overlap;
 mod match_check;
 mod move_check;
 mod normalize;
-mod protocol_progression;
-mod protocol_progression_check;
 mod protocol_shape;
 mod reply_cap;
 mod slice_borrow;
@@ -76,20 +74,11 @@ fn sem_check_partial_normalized(
     }
 
     let mut errors = Vec::new();
-    // Retired standalone protocol defs no longer build protocol facts on the
-    // normal frontend path. Legacy protocol semcheck only remains meaningful
-    // when a retained typestate role implementation is present.
-    let has_legacy_protocol_facts = !ctx.typestate_role_impls.is_empty();
-
     let move_result = move_check::check(&ctx);
     let def_init_result = def_init::check(&ctx);
     let capture_result = closure::capture::check(&ctx);
     let closure_borrow_errors = closure::borrow::check(&ctx, &capture_result.captures);
-    let progression_facts = if has_legacy_protocol_facts {
-        protocol_progression::extract(&ctx)
-    } else {
-        crate::core::context::ProtocolProgressionFacts::default()
-    };
+    let progression_facts = crate::core::context::ProtocolProgressionFacts::default();
 
     errors.extend(value::check(&ctx));
     errors.extend(structural::check(&ctx));
@@ -100,15 +89,9 @@ fn sem_check_partial_normalized(
     errors.extend(closure_borrow_errors);
     errors.extend(move_result.errors);
     errors.extend(slice_escape::check(&ctx));
-    if has_legacy_protocol_facts {
-        errors.extend(protocol_shape::check_protocol_shape_conformance(&ctx));
-    }
     errors.extend(protocol_shape::check_typestate_handler_overlap(&ctx));
     errors.extend(protocol_shape::check_typestate_request_response_shape(&ctx));
     errors.extend(reply_cap::check_reply_cap_usage(&ctx));
-    if has_legacy_protocol_facts {
-        errors.extend(protocol_progression_check::check(&ctx, &progression_facts));
-    }
 
     let mut poisoned_nodes = upstream_poisoned_nodes.clone();
     if !errors.is_empty() {
@@ -146,7 +129,3 @@ mod move_tests;
 #[cfg(test)]
 #[path = "../../tests/core/semck/t_partial.rs"]
 mod partial_tests;
-
-#[cfg(test)]
-#[path = "../../tests/core/semck/t_protocol_progression.rs"]
-mod protocol_progression_tests;

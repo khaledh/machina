@@ -4,7 +4,7 @@ use crate::core::capsule::ModuleId;
 use crate::core::context::ParsedContext;
 use crate::core::context::ResolvedContext;
 use crate::core::lexer::{LexError, Lexer};
-use crate::core::parse::{Parser, ParserOptions};
+use crate::core::parse::Parser;
 use crate::core::resolve::ResolveError;
 use crate::core::typecheck::type_check;
 use crate::services::analysis::results::{
@@ -30,33 +30,6 @@ fn resolve_source(source: &str) -> Result<ResolvedContext, Vec<ResolveError>> {
         Err(out.errors)
     }
 }
-
-fn resolve_source_with_typestate(source: &str) -> Result<ResolvedContext, Vec<ResolveError>> {
-    let id_gen = NodeIdGen::new();
-    let lexer = Lexer::new(source);
-    let tokens = lexer
-        .tokenize()
-        .collect::<Result<Vec<_>, LexError>>()
-        .expect("lexing should succeed");
-    let mut parser = Parser::new_with_id_gen_and_options(
-        &tokens,
-        id_gen,
-        ParserOptions {
-            experimental_typestate: true,
-        },
-    );
-    let module = parser.parse().expect("parsing should succeed");
-    let parsed = ParsedContext::new(module, parser.into_id_gen());
-    let out = resolve_stage_with_policy(parsed, ResolveInputs::default(), FrontendPolicy::Strict);
-    if out.errors.is_empty() {
-        Ok(out
-            .context
-            .expect("strict resolve should produce context on success"))
-    } else {
-        Err(out.errors)
-    }
-}
-
 #[test]
 fn symbol_lookup_matches_between_context_and_result() {
     let source = r#"
@@ -144,62 +117,6 @@ fn main() -> u64 { id(1) }
 
     let roundtrip = result.into_context();
     assert_eq!(roundtrip.lookup_node_type(call_node), context_node_ty);
-}
-
-#[test]
-fn protocol_index_roundtrip_matches_between_context_and_result() {
-    let source = r#"
-type AuthReq = {}
-type AuthOk = {}
-
-protocol Auth {
-    role Client;
-    role Server;
-    req Client -> Server: AuthReq => AuthOk;
-}
-
-typestate AuthServer {
-    fn new() -> Ready {
-        Ready {}
-    }
-
-    state Ready {}
-}
-
-typestate Gateway : Auth::Client {
-    fields {
-        server: Machine<AuthServer> as Server,
-    }
-
-    fn new(server: Machine<AuthServer>) -> Ready {
-        Ready { server: server }
-    }
-
-    state Ready {}
-}
-"#;
-
-    let resolved = resolve_source_with_typestate(source).expect("resolve should succeed");
-    let protocol_count = resolved.protocol_index.protocols.len();
-    let gateway_bindings = resolved
-        .protocol_index
-        .typestate_bindings
-        .get("Gateway")
-        .map(|v| v.len())
-        .unwrap_or(0);
-
-    let result = ResolvedModuleResult::from_context(ModuleId(9), resolved.clone());
-    let roundtrip = result.into_context();
-    assert_eq!(roundtrip.protocol_index.protocols.len(), protocol_count);
-    assert_eq!(
-        roundtrip
-            .protocol_index
-            .typestate_bindings
-            .get("Gateway")
-            .map(|v| v.len())
-            .unwrap_or(0),
-        gateway_bindings
-    );
 }
 
 #[test]
