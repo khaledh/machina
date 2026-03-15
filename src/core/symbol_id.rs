@@ -67,8 +67,6 @@ pub struct SymbolSegment {
 pub enum SymbolNs {
     /// Functions, locals, globals, and other value-level defs.
     Value,
-    /// Protocol definitions.
-    Protocol,
     /// Nominal type definitions.
     Type,
     /// Trait definitions.
@@ -83,8 +81,6 @@ pub enum SymbolNs {
     Property,
     /// Typestate states.
     State,
-    /// Protocol roles.
-    Role,
     /// Generated or source-level machine/event handlers.
     Handler,
 }
@@ -219,29 +215,7 @@ impl SymbolIdTable {
 
         for item in &module.top_level_items {
             match item {
-                TopLevelItem::ProtocolDef(protocol_def) => {
-                    table.record(
-                        def_table.lookup_node_def_id(protocol_def.id),
-                        SymbolId::new(
-                            module_path.clone(),
-                            SymbolPath::from_names([protocol_def.name.as_str()]),
-                            SymbolNs::Protocol,
-                        ),
-                    );
-                    for role in &protocol_def.roles {
-                        table.record(
-                            def_table.lookup_node_def_id(role.id),
-                            SymbolId::new(
-                                module_path.clone(),
-                                SymbolPath::from_names([
-                                    protocol_def.name.as_str(),
-                                    role.name.as_str(),
-                                ]),
-                                SymbolNs::Role,
-                            ),
-                        );
-                    }
-                }
+                TopLevelItem::ProtocolDef(_) => {}
                 TopLevelItem::TraitDef(trait_def) => {
                     table.record(
                         def_table.lookup_node_def_id(trait_def.id),
