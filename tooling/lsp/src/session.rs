@@ -79,14 +79,6 @@ impl AnalysisSession {
         self.db.set_module_graph(graph);
     }
 
-    pub fn set_legacy_typestate_enabled(&mut self, enabled: bool) {
-        self.db.set_experimental_typestate(enabled);
-    }
-
-    pub fn legacy_typestate_enabled(&self) -> bool {
-        self.db.experimental_typestate()
-    }
-
     pub fn invalidate_changed_modules(&mut self, changed: &HashSet<ModuleId>) {
         self.db.invalidate_changed_modules(changed);
     }

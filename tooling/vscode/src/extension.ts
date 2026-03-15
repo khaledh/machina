@@ -174,14 +174,9 @@ async function ensureClientStarted(context: vscode.ExtensionContext): Promise<bo
     args,
     transport: TransportKind.stdio,
   };
-  const legacyFeatures = configuredLegacyFeatures();
-
   const clientOptions: LanguageClientOptions = {
     documentSelector: [{ scheme: "file", language: "machina" }],
     outputChannel: output,
-    initializationOptions: {
-      legacyFeatures,
-    },
     synchronize: {
       configurationSection: "machina.languageServer",
     },
@@ -369,21 +364,6 @@ function resolveServerCommand(
   }
 
   return { command: "machina-lsp", args: configuredArgs };
-}
-
-function configuredLegacyFeatures(): string[] {
-  const cfg = vscode.workspace.getConfiguration("machina.languageServer");
-  const legacyRaw = cfg.get<unknown>("legacyFeatures", []);
-  const raw = Array.isArray(legacyRaw) && legacyRaw.length > 0
-    ? legacyRaw
-    : cfg.get<unknown>("experimentalFeatures", []);
-  if (!Array.isArray(raw)) {
-    return [];
-  }
-  return raw
-    .filter((value): value is string => typeof value === "string")
-    .map((feature) => feature.trim())
-    .filter((feature) => feature.length > 0);
 }
 
 function formatError(error: unknown): string {

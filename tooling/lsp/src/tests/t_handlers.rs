@@ -33,78 +33,6 @@ fn initialize_returns_capabilities() {
 }
 
 #[test]
-fn initialize_enables_legacy_typestate_when_requested_via_compat_flag() {
-    let mut session = AnalysisSession::new();
-    let (action, response) = handle_message(
-        &mut session,
-        json!({
-            "jsonrpc": "2.0",
-            "id": 11,
-            "method": "initialize",
-            "params": {
-                "initializationOptions": {
-                    "experimentalTypestate": true
-                }
-            }
-        }),
-    );
-    assert_eq!(action, HandlerAction::Continue);
-    assert!(response.is_some(), "expected initialize response");
-    assert!(
-        session.legacy_typestate_enabled(),
-        "compat initialize option should enable legacy typestate in analysis session"
-    );
-}
-
-#[test]
-fn initialize_enables_legacy_typestate_from_legacy_features_list() {
-    let mut session = AnalysisSession::new();
-    let (action, response) = handle_message(
-        &mut session,
-        json!({
-            "jsonrpc": "2.0",
-            "id": 13,
-            "method": "initialize",
-            "params": {
-                "initializationOptions": {
-                    "legacyFeatures": ["typestate"]
-                }
-            }
-        }),
-    );
-    assert_eq!(action, HandlerAction::Continue);
-    assert!(response.is_some(), "expected initialize response");
-    assert!(
-        session.legacy_typestate_enabled(),
-        "legacyFeatures should enable legacy typestate in analysis session"
-    );
-}
-
-#[test]
-fn initialize_enables_legacy_typestate_from_experimental_features_list_for_compat() {
-    let mut session = AnalysisSession::new();
-    let (action, response) = handle_message(
-        &mut session,
-        json!({
-            "jsonrpc": "2.0",
-            "id": 14,
-            "method": "initialize",
-            "params": {
-                "initializationOptions": {
-                    "experimentalFeatures": ["typestate"]
-                }
-            }
-        }),
-    );
-    assert_eq!(action, HandlerAction::Continue);
-    assert!(response.is_some(), "expected initialize response");
-    assert!(
-        session.legacy_typestate_enabled(),
-        "experimentalFeatures should continue enabling legacy typestate for backward compatibility"
-    );
-}
-
-#[test]
 fn did_open_typestate_reports_feature_disabled_by_default() {
     let mut session = AnalysisSession::new();
     let (_action, response) = handle_message(
@@ -167,7 +95,7 @@ fn did_open_linear_source_works_without_initialize_feature_flags() {
 }
 
 #[test]
-fn did_open_typestate_parses_when_initialize_enables_legacy_feature() {
+fn did_open_typestate_remains_retired_even_when_initialize_mentions_legacy_flags() {
     let mut session = AnalysisSession::new();
     let _ = handle_message(
         &mut session,
@@ -177,7 +105,9 @@ fn did_open_typestate_parses_when_initialize_enables_legacy_feature() {
             "method": "initialize",
             "params": {
                 "initializationOptions": {
-                    "legacyFeatures": ["typestate"]
+                    "legacyFeatures": ["typestate"],
+                    "experimentalFeatures": ["typestate"],
+                    "experimentalTypestate": true
                 }
             }
         }),
@@ -190,7 +120,7 @@ fn did_open_typestate_parses_when_initialize_enables_legacy_feature() {
             "method": "textDocument/didOpen",
             "params": {
                 "textDocument": {
-                    "uri": "file:///tmp/lsp-typestate-enabled.mc",
+                    "uri": "file:///tmp/lsp-typestate-still-retired.mc",
                     "version": 1,
                     "languageId": "machina",
                     "text": "typestate Connection { fn new() -> Disconnected { Disconnected } state Disconnected {} }"
@@ -205,68 +135,9 @@ fn did_open_typestate_parses_when_initialize_enables_legacy_feature() {
     assert!(
         diagnostics
             .iter()
-            .all(|diag| diag.get("code")
-                != Some(&Value::String("MC-PARSE-FEATURE-RETIRED".to_string()))),
-        "did not expect retired-feature diagnostic after enabling typestate, got: {diagnostics:#?}"
-    );
-}
-
-#[test]
-fn hover_over_typestate_fields_block_returns_field_hover_when_legacy_feature_enabled() {
-    let mut session = AnalysisSession::new();
-    let _ = handle_message(
-        &mut session,
-        json!({
-            "jsonrpc": "2.0",
-            "id": 13,
-            "method": "initialize",
-            "params": {
-                "initializationOptions": {
-                    "legacyFeatures": ["typestate"]
-                }
-            }
-        }),
-    );
-    let _ = handle_message(
-        &mut session,
-        json!({
-            "jsonrpc": "2.0",
-            "method": "textDocument/didOpen",
-            "params": {
-                "textDocument": {
-                    "uri": "file:///tmp/lsp-typestate-hover-field.mc",
-                    "version": 1,
-                    "languageId": "machina",
-                    "text": "typestate Connection {\n    fields {\n        retries: u64,\n    }\n\n    fn new() -> Disconnected {\n        Disconnected { retries: 0 }\n    }\n\n    state Disconnected {}\n}\n"
-                }
-            }
-        }),
-    );
-
-    let (_action, response) = handle_message(
-        &mut session,
-        json!({
-            "jsonrpc": "2.0",
-            "id": 14,
-            "method": "textDocument/hover",
-            "params": {
-                "textDocument": { "uri": "file:///tmp/lsp-typestate-hover-field.mc" },
-                "position": { "line": 2, "character": 11 },
-                "mcDocVersion": 1
-            }
-        }),
-    );
-    let response = response.expect("expected hover response");
-    let value = response["result"]["contents"]["value"]
-        .as_str()
-        .expect("hover markdown value should be a string");
-    assert!(
-        value.contains("retries"),
-        "expected typestate field hover, got: {value}"
-    );
-    assert!(
-        !value.contains("__rt_print"),
-        "typestate field hover should not bind runtime intrinsics, got: {value}"
+            .any(|diag| diag.get("code")
+                == Some(&Value::String("MC-PARSE-FEATURE-RETIRED".to_string()))),
+        "typestate should stay retired even if older initialize flags are sent, got: {diagnostics:#?}"
     );
 }
 

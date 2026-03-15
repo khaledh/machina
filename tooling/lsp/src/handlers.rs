@@ -74,8 +74,6 @@ pub fn handle_message(
 
     match method {
         Some("initialize") => {
-            let init_features = parse_initialize_feature_flags(params);
-            session.set_legacy_typestate_enabled(init_features.legacy_typestate);
             let signature_retrigger_characters = signature_help_retrigger_characters();
             let response = success_response(
                 id.unwrap_or(Value::Null),
@@ -268,56 +266,6 @@ fn signature_help_retrigger_characters() -> Vec<String> {
         out.push(ch.to_string());
     }
     out
-}
-
-struct InitializeFeatureFlags {
-    legacy_typestate: bool,
-}
-
-fn parse_initialize_feature_flags(params: Option<&Value>) -> InitializeFeatureFlags {
-    let Some(init_opts) = params.and_then(|value| value.get("initializationOptions")) else {
-        return InitializeFeatureFlags {
-            legacy_typestate: false,
-        };
-    };
-
-    // Preferred shape: initializationOptions.legacyFeatures = ["typestate", ...]
-    let legacy_typestate = init_opts
-        .get("legacyFeatures")
-        .and_then(Value::as_array)
-        .map(|features| {
-            features
-                .iter()
-                .filter_map(Value::as_str)
-                .any(|feature| feature == "typestate")
-        })
-        .unwrap_or(false);
-    if legacy_typestate {
-        return InitializeFeatureFlags { legacy_typestate };
-    }
-
-    // Backward-compat: initializationOptions.experimentalFeatures = ["typestate", ...]
-    let legacy_typestate = init_opts
-        .get("experimentalFeatures")
-        .and_then(Value::as_array)
-        .map(|features| {
-            features
-                .iter()
-                .filter_map(Value::as_str)
-                .any(|feature| feature == "typestate")
-        })
-        .unwrap_or(false);
-    if legacy_typestate {
-        return InitializeFeatureFlags { legacy_typestate };
-    }
-
-    // Backward-compat: initializationOptions.experimentalTypestate = true
-    InitializeFeatureFlags {
-        legacy_typestate: init_opts
-            .get("experimentalTypestate")
-            .and_then(Value::as_bool)
-            .unwrap_or(false),
-    }
 }
 
 fn parse_did_open_params(params: &Value) -> Option<DidOpenParams> {

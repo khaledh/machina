@@ -54,8 +54,6 @@ Use `npm run package:vsix:clean` to clear previous VSIX artifacts before packagi
 
 - `machina.languageServer.path`: path to `machina-lsp` (optional)
 - `machina.languageServer.args`: extra arguments for `machina-lsp`
-- `machina.languageServer.legacyFeatures`: list of legacy features to enable in LSP (for example `["typestate"]`)
-- `machina.languageServer.experimentalFeatures`: deprecated compatibility alias for `legacyFeatures`
 
 ## Troubleshooting
 
@@ -64,6 +62,3 @@ Use `npm run package:vsix:clean` to clear previous VSIX artifacts before packagi
   A common local path is `target/debug/machina-lsp` in the Machina repo.
 - Server starts but diagnostics are missing:
   run `cargo build -p machina-lsp` and restart the language server (`Machina: Restart Language Server`).
-- Need to pass feature flags to the server:
-  set `machina.languageServer.legacyFeatures`, for example:
-  `["typestate"]`. The older `experimentalFeatures` setting still works as a compatibility alias.
