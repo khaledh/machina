@@ -27,30 +27,25 @@ trait Drawable {
 // Enum types
 type Color = Red | Green | Blue
 
-// Typestate
-typestate Connection {
-    fields {
-        addr: string,
+// Linear type
+@linear
+type Connection = {
+    addr: string,
+
+    states { Disconnected, Connected }
+    actions {
+        connect: Disconnected -> Connected,
+        disconnect: Connected -> Disconnected,
+    }
+}
+
+Connection :: {
+    fn connect(self) -> Connected {
+        Connected { addr: self.addr }
     }
 
-    fn new(addr: string) -> Disconnected {
-        Disconnected { addr: addr }
-    }
-
-    state Disconnected {
-        fn connect() -> Connected {
-            Connected { addr: self.addr }
-        }
-    }
-
-    state Connected {
-        on Ping(msg: string) -> stay {
-            println(f"Received: {msg}");
-        }
-
-        fn disconnect() -> Disconnected {
-            Disconnected { addr: self.addr }
-        }
+    fn disconnect(self) -> Disconnected {
+        Disconnected { addr: self.addr }
     }
 }
 
@@ -88,7 +83,6 @@ fn count_to_ten() {
 }
 
 // Main function
-@machines
 fn main() -> u64 {
     let p1 = Point { x: 10, y: 20 };
     let p2 = Point { x: 30, y: 40 };

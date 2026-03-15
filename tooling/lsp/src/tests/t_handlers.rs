@@ -33,38 +33,7 @@ fn initialize_returns_capabilities() {
 }
 
 #[test]
-fn did_open_typestate_reports_feature_disabled_by_default() {
-    let mut session = AnalysisSession::new();
-    let (_action, response) = handle_message(
-        &mut session,
-        json!({
-            "jsonrpc": "2.0",
-            "method": "textDocument/didOpen",
-            "params": {
-                "textDocument": {
-                    "uri": "file:///tmp/lsp-typestate-disabled.mc",
-                    "version": 1,
-                    "languageId": "machina",
-                    "text": "typestate Connection { fn new() -> Disconnected { Disconnected } state Disconnected {} }"
-                }
-            }
-        }),
-    );
-    let response = response.expect("expected diagnostics notification");
-    let diagnostics = response["params"]["diagnostics"]
-        .as_array()
-        .expect("diagnostics should be an array");
-    assert!(
-        diagnostics
-            .iter()
-            .any(|diag| diag.get("code")
-                == Some(&Value::String("MC-PARSE-FEATURE-RETIRED".to_string()))),
-        "expected retired-feature diagnostic, got: {diagnostics:#?}"
-    );
-}
-
-#[test]
-fn did_open_linear_source_works_without_initialize_feature_flags() {
+fn did_open_linear_source_parses_without_errors() {
     let mut session = AnalysisSession::new();
     let (_action, response) = handle_message(
         &mut session,
@@ -86,58 +55,8 @@ fn did_open_linear_source_works_without_initialize_feature_flags() {
         .as_array()
         .expect("diagnostics should be an array");
     assert!(
-        diagnostics
-            .iter()
-            .all(|diag| diag.get("code")
-                != Some(&Value::String("MC-PARSE-FEATURE-RETIRED".to_string()))),
-        "linear types should remain available without any initialize feature flags, got: {diagnostics:#?}"
-    );
-}
-
-#[test]
-fn did_open_typestate_remains_retired_even_when_initialize_mentions_legacy_flags() {
-    let mut session = AnalysisSession::new();
-    let _ = handle_message(
-        &mut session,
-        json!({
-            "jsonrpc": "2.0",
-            "id": 12,
-            "method": "initialize",
-            "params": {
-                "initializationOptions": {
-                    "legacyFeatures": ["typestate"],
-                    "experimentalFeatures": ["typestate"],
-                    "experimentalTypestate": true
-                }
-            }
-        }),
-    );
-
-    let (_action, response) = handle_message(
-        &mut session,
-        json!({
-            "jsonrpc": "2.0",
-            "method": "textDocument/didOpen",
-            "params": {
-                "textDocument": {
-                    "uri": "file:///tmp/lsp-typestate-still-retired.mc",
-                    "version": 1,
-                    "languageId": "machina",
-                    "text": "typestate Connection { fn new() -> Disconnected { Disconnected } state Disconnected {} }"
-                }
-            }
-        }),
-    );
-    let response = response.expect("expected diagnostics notification");
-    let diagnostics = response["params"]["diagnostics"]
-        .as_array()
-        .expect("diagnostics should be an array");
-    assert!(
-        diagnostics
-            .iter()
-            .any(|diag| diag.get("code")
-                == Some(&Value::String("MC-PARSE-FEATURE-RETIRED".to_string()))),
-        "typestate should stay retired even if older initialize flags are sent, got: {diagnostics:#?}"
+        diagnostics.is_empty(),
+        "linear type should parse without errors, got: {diagnostics:#?}"
     );
 }
 

@@ -1,3 +1,0 @@
-typestate Job {
-    state Created {}
-}
