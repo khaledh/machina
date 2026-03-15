@@ -6,7 +6,7 @@ use crate::core::ast::{Module, NodeId, NodeIdGen};
 use crate::core::capsule::{ModuleId, ModulePath};
 use crate::core::codegen_names::CodegenNameTable;
 use crate::core::linear::LinearIndex;
-use crate::core::plans::{DropPlanMap, LinearMachinePlanMap, LoweringPlanMap};
+use crate::core::plans::{DropPlanMap, LoweringPlanMap};
 use crate::core::resolve::{DefId, DefTable};
 use crate::core::semck::closure::capture::ClosureCapture;
 use crate::core::symbol_id::SymbolIdTable;
@@ -91,7 +91,6 @@ impl DerefMut for SemCheckedPayload {
 pub struct SemanticPlans {
     pub lowering_plans: LoweringPlanMap,
     pub drop_plans: DropPlanMap,
-    pub linear_machine_plans: LinearMachinePlanMap,
 }
 
 #[derive(Debug, Clone)]
@@ -99,7 +98,6 @@ pub struct SemanticPayload {
     pub typed: TypedTables,
     pub lowering_plans: LoweringPlanMap,
     pub drop_plans: DropPlanMap,
-    pub linear_machine_plans: LinearMachinePlanMap,
 }
 
 impl SemanticPayload {
@@ -107,7 +105,6 @@ impl SemanticPayload {
         SemanticPlans {
             lowering_plans: self.lowering_plans.clone(),
             drop_plans: self.drop_plans.clone(),
-            linear_machine_plans: self.linear_machine_plans.clone(),
         }
     }
 }

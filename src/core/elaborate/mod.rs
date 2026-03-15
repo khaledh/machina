@@ -35,7 +35,6 @@ mod closure;
 mod drop_plan;
 mod elaborator;
 mod index_plan;
-mod linear_machine_plan;
 mod lowering_plan;
 mod match_plan;
 mod pipeline;
@@ -47,7 +46,6 @@ mod value;
 use crate::core::elaborate::closure::register_lifted_method_symbols;
 use crate::core::elaborate::drop_plan::build_drop_plans;
 use crate::core::elaborate::elaborator::Elaborator;
-use crate::core::elaborate::linear_machine_plan::build_linear_machine_plans;
 use crate::core::elaborate::lowering_plan::build_lowering_plans;
 
 /// Elaborate the AST: enrich it with plan side tables using the results from
@@ -106,8 +104,6 @@ pub fn elaborate(ctx: ElaborateStageInput) -> ElaborateStageOutput {
         string_fmt_plans,
     );
     let drop_plans = build_drop_plans(&module, &def_table, &type_map);
-    let linear_machine_plans =
-        build_linear_machine_plans(&module, &def_table, &type_map, &linear_index);
 
     let mut symbols = symbols;
     register_lifted_method_symbols(&module, &def_table, &mut symbols);
@@ -131,7 +127,6 @@ pub fn elaborate(ctx: ElaborateStageInput) -> ElaborateStageOutput {
             },
             lowering_plans,
             drop_plans,
-            linear_machine_plans,
         },
     }
 }

@@ -32,7 +32,7 @@ use crate::core::backend::lower::lowerer::BranchResult;
 use crate::core::ir::IrTypeCache;
 use crate::core::ir::{Function, GlobalData};
 use crate::core::linear::LinearIndex;
-use crate::core::plans::{DropPlanMap, LinearMachinePlanMap, LoweringPlanMap};
+use crate::core::plans::{DropPlanMap, LoweringPlanMap};
 use crate::core::resolve::DefTable;
 use crate::core::typecheck::type_map::TypeMap;
 use crate::core::types::Type;
@@ -53,7 +53,6 @@ pub struct LoweredModule {
 #[derive(Clone, Default)]
 pub struct LowerOpts<'a> {
     pub linear_index: Option<&'a LinearIndex>,
-    pub linear_machine_plans: Option<&'a LinearMachinePlanMap>,
     pub trace_alloc: bool,
     pub trace_drops: bool,
     pub executable: bool,
@@ -79,7 +78,6 @@ pub fn lower_func(
     let mut globals = GlobalArena::new();
     let mut drop_glue = DropGlueRegistry::new(def_table);
     let empty_linear_index = LinearIndex::default();
-    let empty_linear_machine_plans = LinearMachinePlanMap::default();
     lower_func_with_globals(
         func,
         def_table,
@@ -87,7 +85,6 @@ pub fn lower_func(
         &empty_linear_index,
         type_map,
         lowering_plans,
-        &empty_linear_machine_plans,
         drop_plans,
         false,
         false,
@@ -124,11 +121,7 @@ pub fn lower_module_with_opts(
     opts: &LowerOpts<'_>,
 ) -> Result<LoweredModule, LowerToIrError> {
     let default_linear_index = LinearIndex::default();
-    let default_linear_machine_plans = LinearMachinePlanMap::default();
     let linear_index = opts.linear_index.unwrap_or(&default_linear_index);
-    let linear_machine_plans = opts
-        .linear_machine_plans
-        .unwrap_or(&default_linear_machine_plans);
     lower_module_impl(
         module,
         def_table,
@@ -136,7 +129,6 @@ pub fn lower_module_with_opts(
         type_map,
         lowering_plans,
         drop_plans,
-        linear_machine_plans,
         opts.trace_alloc,
         opts.trace_drops,
         opts.executable,
@@ -151,7 +143,6 @@ fn lower_module_impl(
     type_map: &TypeMap,
     lowering_plans: &LoweringPlanMap,
     drop_plans: &DropPlanMap,
-    linear_machine_plans: &LinearMachinePlanMap,
     trace_alloc: bool,
     trace_drops: bool,
     inject_entry_wrapper: bool,
@@ -168,7 +159,6 @@ fn lower_module_impl(
             linear_index,
             type_map,
             lowering_plans,
-            linear_machine_plans,
             drop_plans,
             trace_alloc,
             trace_drops,
@@ -191,7 +181,6 @@ fn lower_module_impl(
                 linear_index,
                 type_map,
                 lowering_plans,
-                linear_machine_plans,
                 drop_plans,
                 trace_alloc,
                 trace_drops,
@@ -230,7 +219,6 @@ fn lower_func_with_globals(
     linear_index: &LinearIndex,
     type_map: &TypeMap,
     lowering_plans: &LoweringPlanMap,
-    linear_machine_plans: &LinearMachinePlanMap,
     drop_plans: &DropPlanMap,
     trace_alloc: bool,
     trace_drops: bool,
@@ -262,7 +250,6 @@ fn lower_func_with_globals(
         linear_index,
         type_map,
         lowering_plans,
-        Some(linear_machine_plans),
         drop_glue,
         globals,
         trace_drops,
@@ -317,7 +304,6 @@ fn lower_method_def_with_globals(
     linear_index: &LinearIndex,
     type_map: &TypeMap,
     lowering_plans: &LoweringPlanMap,
-    linear_machine_plans: &LinearMachinePlanMap,
     drop_plans: &DropPlanMap,
     trace_alloc: bool,
     trace_drops: bool,
@@ -343,7 +329,6 @@ fn lower_method_def_with_globals(
         linear_index,
         type_map,
         lowering_plans,
-        Some(linear_machine_plans),
         drop_glue,
         globals,
         trace_drops,

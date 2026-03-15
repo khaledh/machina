@@ -27,7 +27,6 @@ impl NrvoAnalyzer {
             typed,
             lowering_plans,
             drop_plans,
-            linear_machine_plans,
         } = payload;
         let crate::core::context::TypedTables {
             resolved,
@@ -70,7 +69,6 @@ impl NrvoAnalyzer {
                 },
                 lowering_plans,
                 drop_plans,
-                linear_machine_plans,
             },
         }
     }

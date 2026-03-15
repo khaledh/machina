@@ -41,11 +41,7 @@ pub(crate) fn rewrite_machines_entrypoint(
             continue;
         }
 
-        let has_legacy_machines_attr = func
-            .attrs
-            .iter()
-            .any(|attr| attr.name == "machines" && attr.args.is_empty());
-        if !runtime_requested && !has_legacy_machines_attr {
+        if !runtime_requested {
             return false;
         }
 

@@ -977,42 +977,6 @@ fn untouched() -> u64 {
 }
 
 #[test]
-fn compile_machines_opt_in_injects_managed_runtime_bootstrap() {
-    let source = r#"
-@machines
-fn main() {}
-"#;
-
-    let out =
-        compile(source, &deterministic_compile_opts()).expect("opted-in entrypoint should compile");
-    let ir = out.ir.expect("emit_ir should include SSA dump");
-    assert!(
-        ir.contains("__mc_machine_runtime_managed_bootstrap_u64"),
-        "expected managed bootstrap call in opted-in main IR"
-    );
-    assert!(
-        ir.contains("__mc_machine_runtime_step_u64"),
-        "expected managed runtime auto-drive step call in opted-in main IR"
-    );
-}
-
-#[test]
-fn compile_machines_attr_remains_compatible_but_not_required() {
-    let source = r#"
-@machines
-fn main() {}
-"#;
-
-    let out = compile(source, &deterministic_compile_opts())
-        .expect("@machines entrypoint should still compile for compatibility");
-    let ir = out.ir.expect("emit_ir should include SSA dump");
-    assert!(
-        ir.contains("__mc_machine_runtime_managed_bootstrap_u64"),
-        "expected managed bootstrap call even when legacy @machines is present"
-    );
-}
-
-#[test]
 fn compile_linear_machine_program_injects_runtime_without_machines_attr() {
     let source = r#"
 @linear
