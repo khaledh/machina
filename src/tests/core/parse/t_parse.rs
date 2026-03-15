@@ -39,6 +39,40 @@ fn block_stmt_at(items: &[BlockItem], index: usize) -> &StmtExpr {
 }
 
 #[test]
+fn test_parse_send_statement_as_emit_send() {
+    let source = r#"
+        fn test(target: u64) {
+            send(target, 42);
+        }
+    "#;
+
+    let funcs = parse_source(source).expect("Failed to parse");
+    let func = &funcs[0];
+    let (items, _tail) = block_parts(&func.body);
+    let expr = match &items[0] {
+        BlockItem::Expr(expr) => expr,
+        _ => panic!("Expected block expr item"),
+    };
+
+    match &expr.kind {
+        ExprKind::Emit { kind } => match kind {
+            EmitKind::Send { to, payload } => {
+                match &to.kind {
+                    ExprKind::Var { ident } => assert_eq!(ident, "target"),
+                    _ => panic!("Expected send target var"),
+                }
+                match &payload.kind {
+                    ExprKind::IntLit(value) => assert_eq!(*value, 42),
+                    _ => panic!("Expected send payload int literal"),
+                }
+            }
+            _ => panic!("Expected EmitKind::Send"),
+        },
+        _ => panic!("Expected send statement to lower to ExprKind::Emit"),
+    }
+}
+
+#[test]
 fn test_parse_fstring_literal_folds_to_string_lit() {
     let source = r#"
         fn test() -> string {

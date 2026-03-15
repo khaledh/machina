@@ -1742,6 +1742,71 @@ fn linear_type_hosted_on_handler_can_emit_send() {
 }
 
 #[test]
+fn linear_type_hosted_action_override_send_statement_targets_self() {
+    let run = run_program(
+        "linear_type_hosted_action_send_statement",
+        r#"
+            type Note = {}
+
+            @linear
+            type PullRequest = {
+                id: u64,
+
+                states {
+                    Draft,
+                    Review,
+                }
+
+                actions {
+                    submit: Draft -> Review,
+                }
+
+                roles {
+                    Author { submit }
+                }
+            }
+
+            PullRequest :: {
+                fn submit(self) -> Review {
+                    Review {}
+                }
+            }
+
+            machine PRService hosts PullRequest(key: id) {
+                fn new() -> Self {
+                    Self {}
+                }
+
+                on Note(_event) {
+                    println("note");
+                }
+
+                action submit(draft) -> Review {
+                    draft;
+                    send(self, Note {});
+                    Review {}
+                }
+            }
+
+            fn main() -> () | MachineError | SessionError {
+                let service = PRService::spawn()?;
+                let draft = service.create(PullRequest as Author)?;
+                let _review = draft.submit()?;
+                __mc_machine_runtime_step_u64(__mc_machine_runtime_managed_current_u64());
+                ()
+            }
+        "#,
+    );
+
+    assert_eq!(run.status.code(), Some(0));
+    let stdout = String::from_utf8_lossy(&run.stdout);
+    assert_eq!(
+        stdout, "note\n",
+        "hosted action overrides should accept send(...) syntax and route via the existing mailbox send path"
+    );
+}
+
+#[test]
 fn linear_type_hosted_on_handler_emit_uses_enclosing_machine_routing() {
     let run = run_program(
         "linear_type_hosted_on_handler_emit_overlapping_machine_names",

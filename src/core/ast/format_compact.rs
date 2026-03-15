@@ -326,7 +326,7 @@ pub fn format_semantic_value_expr_compact(expr: &Expr) -> String {
         }
         ExprKind::Emit { kind } => match kind {
             EmitKind::Send { to, payload } => format!(
-                "emit Send(to: {}, payload: {})",
+                "send({}, {})",
                 format_semantic_value_expr_compact(to),
                 format_semantic_value_expr_compact(payload)
             ),

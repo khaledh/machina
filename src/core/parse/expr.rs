@@ -322,6 +322,13 @@ impl<'a> Parser<'a> {
             TK::Ident(name) => {
                 let marker = self.mark();
 
+                if name == "send"
+                    && self.peek().map(|t| &t.kind) == Some(&TK::LParen)
+                    && let Some(expr) = self.try_parse_send_expr(marker)?
+                {
+                    return Ok(expr);
+                }
+
                 if self.peek().map(|t| &t.kind) == Some(&TK::LessThan)
                     && let Some(kind) = self.peek_generic_lit_kind()
                 {
@@ -462,6 +469,31 @@ impl<'a> Parser<'a> {
             kind: ExprKind::Emit { kind },
             span: self.close(marker),
         })
+    }
+
+    fn try_parse_send_expr(&mut self, marker: Marker) -> Result<Option<Expr>, ParseError> {
+        let send_ident = self.parse_ident()?;
+        debug_assert_eq!(send_ident, "send");
+        self.consume(&TK::LParen)?;
+        let to = self.parse_expr(0)?;
+        self.consume(&TK::Comma)?;
+        let payload = self.parse_expr(0)?;
+        if self.curr_token.kind != TK::RParen {
+            self.rewind_to(marker);
+            return Ok(None);
+        }
+        self.consume(&TK::RParen)?;
+
+        Ok(Some(Expr {
+            id: self.id_gen.new_id(),
+            kind: ExprKind::Emit {
+                kind: EmitKind::Send {
+                    to: Box::new(to),
+                    payload: Box::new(payload),
+                },
+            },
+            span: self.close(marker),
+        }))
     }
 
     fn parse_reply_expr(&mut self) -> Result<Expr, ParseError> {

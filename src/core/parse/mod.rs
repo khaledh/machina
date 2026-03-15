@@ -133,6 +133,11 @@ impl<'a> Parser<'a> {
         Span::new(marker.pos, end)
     }
 
+    fn rewind_to(&mut self, marker: Marker) {
+        self.pos = marker.token_index;
+        self.curr_token = &self.tokens[self.pos];
+    }
+
     fn err_here<T>(&self, kind: PEK) -> Result<T, ParseError> {
         Err(kind.at(self.curr_token.span))
     }
