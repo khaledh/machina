@@ -5,9 +5,6 @@ use crate::core::resolve::DefId;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum SymbolKind {
-    ProtocolDef {
-        def_id: DefId,
-    },
     ProtocolRole {
         def_id: DefId,
     },
@@ -44,7 +41,6 @@ pub enum SymbolKind {
 impl std::fmt::Display for SymbolKind {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            SymbolKind::ProtocolDef { .. } => write!(f, "protocol_def"),
             SymbolKind::ProtocolRole { .. } => write!(f, "protocol_role"),
             SymbolKind::MachineDef { .. } => write!(f, "machine_def"),
             SymbolKind::Var { .. } => write!(f, "var"),
@@ -79,7 +75,6 @@ pub struct Symbol {
 impl Symbol {
     pub fn def_id(&self) -> DefId {
         match &self.kind {
-            SymbolKind::ProtocolDef { def_id } => *def_id,
             SymbolKind::ProtocolRole { def_id } => *def_id,
             SymbolKind::MachineDef { def_id } => *def_id,
             SymbolKind::Var { def_id, .. } => *def_id,

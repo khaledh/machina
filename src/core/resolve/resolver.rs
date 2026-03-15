@@ -465,7 +465,6 @@ impl SymbolResolver {
 
     fn map_symbol_kind_to_def_kind(kind: &SymbolKind) -> DefKind {
         match kind {
-            SymbolKind::ProtocolDef { .. } => DefKind::ProtocolDef,
             SymbolKind::ProtocolRole { .. } => DefKind::ProtocolRole,
             SymbolKind::MachineDef { .. } => DefKind::MachineDef,
             SymbolKind::TraitDef { .. } => DefKind::TraitDef {
@@ -730,7 +729,7 @@ impl SymbolResolver {
         // Retired standalone `protocol` surface no longer participates in
         // normal declaration population unless legacy typestate bindings still need it.
         if !self.typestate_role_impls.is_empty() {
-            self.populate_protocol_defs(&module.protocol_defs());
+            self.populate_protocol_roles(&module.protocol_defs());
         }
 
         // Populate trait definitions
@@ -750,27 +749,8 @@ impl SymbolResolver {
         self.populate_imported_symbol_aliases();
     }
 
-    fn populate_protocol_defs(&mut self, protocol_defs: &[&ProtocolDef]) {
+    fn populate_protocol_roles(&mut self, protocol_defs: &[&ProtocolDef]) {
         for &protocol_def in protocol_defs {
-            let protocol_def_id = self.def_id_gen.new_id();
-            let protocol = Def {
-                id: protocol_def_id,
-                name: protocol_def.name.clone(),
-                kind: DefKind::ProtocolDef,
-            };
-            self.def_table_builder
-                .record_def(protocol, protocol_def.id, protocol_def.span);
-            self.insert_symbol(
-                &protocol_def.name,
-                Symbol {
-                    name: protocol_def.name.clone(),
-                    kind: SymbolKind::ProtocolDef {
-                        def_id: protocol_def_id,
-                    },
-                },
-                protocol_def.span,
-            );
-
             for role in &protocol_def.roles {
                 let role_def_id = self.def_id_gen.new_id();
                 let qualified_role_name = format!("{}::{}", protocol_def.name, role.name);
