@@ -77,13 +77,22 @@
           "default": true,
           "description": "Apply default Machina token colors. Disable to rely entirely on your active color theme."
         },
+        "machina.languageServer.legacyFeatures": {
+          "type": "array",
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "description": "Legacy Machina language features to enable in the language server (for example: [\"typestate\"])."
+        },
         "machina.languageServer.experimentalFeatures": {
           "type": "array",
           "default": [],
           "items": {
             "type": "string"
           },
-          "description": "Experimental Machina language features to enable in the language server (for example: [\"typestate\"])."
+          "markdownDeprecationMessage": "Use `machina.languageServer.legacyFeatures` instead.",
+          "description": "Deprecated compatibility alias for legacy language-server feature flags."
         }
       }
     }

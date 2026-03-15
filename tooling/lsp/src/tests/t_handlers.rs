@@ -19,7 +19,7 @@ fn initialize_returns_capabilities() {
 }
 
 #[test]
-fn initialize_enables_typestate_when_requested() {
+fn initialize_enables_legacy_typestate_when_requested_via_compat_flag() {
     let mut session = AnalysisSession::new();
     let (action, response) = handle_message(
         &mut session,
@@ -37,19 +37,43 @@ fn initialize_enables_typestate_when_requested() {
     assert_eq!(action, HandlerAction::Continue);
     assert!(response.is_some(), "expected initialize response");
     assert!(
-        session.experimental_typestate(),
-        "initialize option should enable typestate in analysis session"
+        session.legacy_typestate_enabled(),
+        "compat initialize option should enable legacy typestate in analysis session"
     );
 }
 
 #[test]
-fn initialize_enables_typestate_from_experimental_features_list() {
+fn initialize_enables_legacy_typestate_from_legacy_features_list() {
     let mut session = AnalysisSession::new();
     let (action, response) = handle_message(
         &mut session,
         json!({
             "jsonrpc": "2.0",
             "id": 13,
+            "method": "initialize",
+            "params": {
+                "initializationOptions": {
+                    "legacyFeatures": ["typestate"]
+                }
+            }
+        }),
+    );
+    assert_eq!(action, HandlerAction::Continue);
+    assert!(response.is_some(), "expected initialize response");
+    assert!(
+        session.legacy_typestate_enabled(),
+        "legacyFeatures should enable legacy typestate in analysis session"
+    );
+}
+
+#[test]
+fn initialize_enables_legacy_typestate_from_experimental_features_list_for_compat() {
+    let mut session = AnalysisSession::new();
+    let (action, response) = handle_message(
+        &mut session,
+        json!({
+            "jsonrpc": "2.0",
+            "id": 14,
             "method": "initialize",
             "params": {
                 "initializationOptions": {
@@ -61,8 +85,8 @@ fn initialize_enables_typestate_from_experimental_features_list() {
     assert_eq!(action, HandlerAction::Continue);
     assert!(response.is_some(), "expected initialize response");
     assert!(
-        session.experimental_typestate(),
-        "experimentalFeatures should enable typestate in analysis session"
+        session.legacy_typestate_enabled(),
+        "experimentalFeatures should continue enabling legacy typestate for backward compatibility"
     );
 }
 
@@ -96,7 +120,36 @@ fn did_open_typestate_reports_feature_disabled_by_default() {
 }
 
 #[test]
-fn did_open_typestate_parses_when_initialize_enables_feature() {
+fn did_open_linear_source_works_without_initialize_feature_flags() {
+    let mut session = AnalysisSession::new();
+    let (_action, response) = handle_message(
+        &mut session,
+        json!({
+            "jsonrpc": "2.0",
+            "method": "textDocument/didOpen",
+            "params": {
+                "textDocument": {
+                    "uri": "file:///tmp/lsp-linear-default.mc",
+                    "version": 1,
+                    "languageId": "machina",
+                    "text": "@linear\ntype Door = {\n    states { Closed, Open }\n    actions { open: Closed -> Open }\n}\n"
+                }
+            }
+        }),
+    );
+    let response = response.expect("expected diagnostics notification");
+    let diagnostics = response["params"]["diagnostics"]
+        .as_array()
+        .expect("diagnostics should be an array");
+    assert!(
+        diagnostics.iter().all(|diag| diag.get("code")
+            != Some(&Value::String("MC-PARSE-FEATURE-DISABLED".to_string()))),
+        "linear types should remain available without any initialize feature flags, got: {diagnostics:#?}"
+    );
+}
+
+#[test]
+fn did_open_typestate_parses_when_initialize_enables_legacy_feature() {
     let mut session = AnalysisSession::new();
     let _ = handle_message(
         &mut session,
@@ -106,7 +159,7 @@ fn did_open_typestate_parses_when_initialize_enables_feature() {
             "method": "initialize",
             "params": {
                 "initializationOptions": {
-                    "experimentalFeatures": ["typestate"]
+                    "legacyFeatures": ["typestate"]
                 }
             }
         }),
@@ -139,7 +192,7 @@ fn did_open_typestate_parses_when_initialize_enables_feature() {
 }
 
 #[test]
-fn hover_over_typestate_fields_block_returns_field_hover() {
+fn hover_over_typestate_fields_block_returns_field_hover_when_legacy_feature_enabled() {
     let mut session = AnalysisSession::new();
     let _ = handle_message(
         &mut session,
@@ -149,7 +202,7 @@ fn hover_over_typestate_fields_block_returns_field_hover() {
             "method": "initialize",
             "params": {
                 "initializationOptions": {
-                    "experimentalFeatures": ["typestate"]
+                    "legacyFeatures": ["typestate"]
                 }
             }
         }),

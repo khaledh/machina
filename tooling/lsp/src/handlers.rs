@@ -68,7 +68,8 @@ pub fn handle_message(
 
     match method {
         Some("initialize") => {
-            session.set_experimental_typestate(parse_initialize_typestate_flag(params));
+            let init_features = parse_initialize_feature_flags(params);
+            session.set_legacy_typestate_enabled(init_features.legacy_typestate);
             let signature_retrigger_characters = signature_help_retrigger_characters();
             let response = success_response(
                 id.unwrap_or(Value::Null),
@@ -219,12 +220,34 @@ fn signature_help_retrigger_characters() -> Vec<String> {
     out
 }
 
-fn parse_initialize_typestate_flag(params: Option<&Value>) -> bool {
+struct InitializeFeatureFlags {
+    legacy_typestate: bool,
+}
+
+fn parse_initialize_feature_flags(params: Option<&Value>) -> InitializeFeatureFlags {
     let Some(init_opts) = params.and_then(|value| value.get("initializationOptions")) else {
-        return false;
+        return InitializeFeatureFlags {
+            legacy_typestate: false,
+        };
     };
-    // Preferred shape: initializationOptions.experimentalFeatures = ["typestate", ...]
-    let list_enabled = init_opts
+
+    // Preferred shape: initializationOptions.legacyFeatures = ["typestate", ...]
+    let legacy_typestate = init_opts
+        .get("legacyFeatures")
+        .and_then(Value::as_array)
+        .map(|features| {
+            features
+                .iter()
+                .filter_map(Value::as_str)
+                .any(|feature| feature == "typestate")
+        })
+        .unwrap_or(false);
+    if legacy_typestate {
+        return InitializeFeatureFlags { legacy_typestate };
+    }
+
+    // Backward-compat: initializationOptions.experimentalFeatures = ["typestate", ...]
+    let legacy_typestate = init_opts
         .get("experimentalFeatures")
         .and_then(Value::as_array)
         .map(|features| {
@@ -234,14 +257,17 @@ fn parse_initialize_typestate_flag(params: Option<&Value>) -> bool {
                 .any(|feature| feature == "typestate")
         })
         .unwrap_or(false);
-    if list_enabled {
-        return true;
+    if legacy_typestate {
+        return InitializeFeatureFlags { legacy_typestate };
     }
+
     // Backward-compat: initializationOptions.experimentalTypestate = true
-    init_opts
-        .get("experimentalTypestate")
-        .and_then(Value::as_bool)
-        .unwrap_or(false)
+    InitializeFeatureFlags {
+        legacy_typestate: init_opts
+            .get("experimentalTypestate")
+            .and_then(Value::as_bool)
+            .unwrap_or(false),
+    }
 }
 
 fn parse_did_open_params(params: &Value) -> Option<DidOpenParams> {

@@ -79,11 +79,11 @@ impl AnalysisSession {
         self.db.set_module_graph(graph);
     }
 
-    pub fn set_experimental_typestate(&mut self, enabled: bool) {
+    pub fn set_legacy_typestate_enabled(&mut self, enabled: bool) {
         self.db.set_experimental_typestate(enabled);
     }
 
-    pub fn experimental_typestate(&self) -> bool {
+    pub fn legacy_typestate_enabled(&self) -> bool {
         self.db.experimental_typestate()
     }
 
