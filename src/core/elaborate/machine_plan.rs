@@ -30,9 +30,19 @@ pub fn build_machine_plans(
     type_map: &TypeMapOverlay,
     typestate_role_impls: &[TypestateRoleImplBinding],
 ) -> MachinePlanMap {
+    if !has_generated_typestate_state_defs(module) {
+        return MachinePlanMap::default();
+    }
     let mut builders = collect_typestate_builders(module, def_table, type_map);
     attach_role_impls(&mut builders, typestate_role_impls);
     materialize_machine_plans(builders)
+}
+
+fn has_generated_typestate_state_defs(module: &Module) -> bool {
+    module
+        .type_defs()
+        .into_iter()
+        .any(|type_def| parse_generated_state_name(&type_def.name).is_some())
 }
 
 #[derive(Clone, Debug)]

@@ -2965,6 +2965,47 @@ fn semcheck_linear_program_keeps_protocol_progression_empty() {
     );
 }
 
+#[test]
+fn elaborate_linear_program_keeps_legacy_machine_plans_empty() {
+    let semantic = elaborate_linear_semantic(
+        r#"
+        @linear
+        type Door = {
+            id: u64,
+
+            states { Closed, Open }
+            actions { open: Closed -> Open }
+            roles { User { open } }
+        }
+
+        Door :: {
+            fn open(self) -> Open {
+                Open {}
+            }
+        }
+
+        machine DoorService hosts Door(key: id) {
+            fn new() -> Self {
+                Self {}
+            }
+        }
+        "#,
+    );
+
+    assert!(
+        semantic.machine_plans.descriptors.is_empty(),
+        "pure linear programs should not materialize legacy typestate machine descriptors"
+    );
+    assert!(
+        semantic.machine_plans.thunks.is_empty(),
+        "pure linear programs should not materialize legacy typestate dispatch thunks"
+    );
+    assert!(
+        !semantic.linear_machine_plans.machines.is_empty(),
+        "linear machine plans should still be produced for hosted linear machines"
+    );
+}
+
 fn def_name(
     def_table: &crate::core::resolve::DefTable,
     def_id: crate::core::resolve::DefId,
