@@ -169,41 +169,6 @@ pub enum SemCheckErrorKind {
     ClosureEscapeArg,
 
     #[error(
-        "Typestate {0} implementing role {1} state {2} is missing a handler for incoming payload {3}"
-    )]
-    ProtocolStateHandlerMissing(String, String, String, Type),
-
-    #[error(
-        "Typestate {0} implementing role {1} state {2} emits payload {3} which is not allowed by protocol transitions"
-    )]
-    ProtocolStateOutgoingPayloadNotAllowed(String, String, String, Type),
-
-    #[error(
-        "Typestate {0} implementing role {1} state {2} emits payload {3} to `{5}` (bound role `{6}`), expected peer role `{4}`"
-    )]
-    ProtocolStateEmitDestinationRoleMismatch(String, String, String, Type, String, String, String),
-
-    #[error(
-        "Typestate {0} implementing role {1} state {2} emits payload {3} to an unbound destination; expected peer role `{4}`"
-    )]
-    ProtocolStateEmitDestinationRoleUnbound(String, String, String, Type, String),
-
-    #[error(
-        "Typestate {0} implementing role {1} issues request payload {2} to peer role `{3}` without a matching request contract"
-    )]
-    ProtocolRequestContractMissing(String, String, Type, String),
-
-    #[error(
-        "Typestate {0} implementing role {1} issues request payload {2} to peer role `{3}` with ambiguous request contracts"
-    )]
-    ProtocolRequestContractAmbiguous(String, String, Type, String),
-
-    #[error(
-        "Typestate {0} implementing role {1} request payload {2} to peer role `{3}` expects response {4} outside contract responses"
-    )]
-    ProtocolRequestResponseNotInContract(String, String, Type, String, Type),
-
-    #[error(
         "Typestate {0} state {1} has overlapping `on` handlers for selector {2} on response variants {3:?}"
     )]
     TypestateOverlappingOnHandlers(String, String, Type, Vec<Type>),
@@ -236,21 +201,6 @@ pub enum SemCheckErrorKind {
 
     #[error("`reply` capability argument must be a handler ReplyCap parameter")]
     ReplyCapParamRequired,
-
-    #[error(
-        "Typestate {0} ({1}::{2} state {3}) has handler trigger {4} with no matching protocol transition"
-    )]
-    ProtocolProgressionMissingTriggerTransition(String, String, String, String, Type),
-
-    #[error(
-        "Typestate {0} ({1}::{2} state {3}) handler trigger {4} emits {5} to role {6}, but no protocol transition edge allows it"
-    )]
-    ProtocolProgressionImpossibleEmit(String, String, String, String, Type, Type, String),
-
-    #[error(
-        "Typestate {0} ({1}::{2} state {3}) handler trigger {4} returns state {5}, but no protocol transition allows it"
-    )]
-    ProtocolProgressionImpossibleReturnState(String, String, String, String, Type, String),
 }
 
 pub type SemCheckError = SpannedError<SemCheckErrorKind>;

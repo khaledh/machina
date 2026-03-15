@@ -13,7 +13,7 @@ use crate::core::ast::{Expr, ExprKind, MethodBlock, MethodDef, Module, NodeId, S
 use crate::core::context::SemCheckNormalizedContext;
 use crate::core::machine::naming::{is_generated_handler_name, is_generated_state_name};
 use crate::core::resolve::{DefId, DefTable};
-use crate::core::semck::typestate_scan::collect_generated_typestate_handlers;
+use crate::core::semck::generated_state_scan::collect_generated_state_handlers;
 use crate::core::semck::{SEK, SemCheckError, push_error};
 use crate::core::typecheck::type_map::resolve_type_expr;
 use crate::core::types::{Type, TypeAssignability, type_assignable};
@@ -25,7 +25,7 @@ pub(super) fn check_reply_cap_usage(ctx: &SemCheckNormalizedContext) -> Vec<SemC
     outside_collector.visit_module(&ctx.module);
     errors.extend(outside_collector.errors);
 
-    for handler in collect_generated_typestate_handlers(&ctx.module) {
+    for handler in collect_generated_state_handlers(&ctx.module) {
         let cap_params =
             collect_handler_reply_caps(&ctx.def_table, &ctx.module, handler.method_def);
         errors.extend(check_handler_reply_calls(

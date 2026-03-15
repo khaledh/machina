@@ -78,68 +78,6 @@ pub enum ResolveErrorKind {
     #[error("Module `{0}` has no member `{1}`")]
     ModuleMemberUndefined(String, String),
 
-    #[error("Typestate `{0}` must declare at least one state")]
-    TypestateMissingState(String),
-
-    #[error("Typestate `{0}` has duplicate state `{1}`")]
-    TypestateDuplicateState(String, String),
-
-    #[error("Typestate `{0}` has multiple `fields` blocks")]
-    TypestateDuplicateFieldsBlock(String),
-
-    #[error("State `{0}.{1}` has multiple `fields` blocks")]
-    TypestateDuplicateStateFieldsBlock(String, String),
-
-    #[error("State field `{2}` in `{0}.{1}` shadows a typestate field")]
-    TypestateStateFieldShadowsCarriedField(String, String, String),
-
-    #[error("Typestate `{0}` is missing required `fn new(...)` constructor")]
-    TypestateMissingNew(String),
-
-    #[error("Typestate `{0}` has duplicate `new` constructors")]
-    TypestateDuplicateNew(String),
-
-    #[error(
-        "Typestate `{0}` constructor return type must be a declared state (or `State | Error...`)"
-    )]
-    TypestateInvalidNewReturn(String),
-
-    #[error("Transition `{0}.{1}::{2}` must not declare explicit `self` parameter")]
-    TypestateExplicitSelfNotAllowed(String, String, String),
-
-    #[error(
-        "Transition `{0}.{1}::{2}` return type must be a declared state (or `State | Error...`)"
-    )]
-    TypestateInvalidTransitionReturn(String, String, String),
-
-    #[error(
-        "Typestate `{0}` `on` handler return type must be a declared state, `stay`, or `State | Error...`"
-    )]
-    TypestateInvalidOnHandlerReturn(String),
-
-    #[error(
-        "State `{0}.{1}` `on` handler return type must be a declared state, `stay`, or `State | Error...`"
-    )]
-    TypestateInvalidStateOnHandlerReturn(String, String),
-
-    #[error("State `{0}.{1}` has duplicate transition `{2}`")]
-    TypestateDuplicateTransition(String, String, String),
-
-    #[error("Unknown typestate state attribute: `{2}` on state `{0}.{1}`")]
-    TypestateUnknownStateAttribute(String, String, String),
-
-    #[error("Final state `{0}.{1}` must not declare transition methods")]
-    TypestateFinalStateHasTransition(String, String),
-
-    #[error("Final state `{0}.{1}` must not declare `on` handlers")]
-    TypestateFinalStateHasHandler(String, String),
-
-    #[error("State literal `{0}` is only allowed inside typestate constructor/transition methods")]
-    TypestateStateLiteralOutsideTypestate(String),
-
-    #[error("Managed typestate spawn requires `@machines fn main(...)` entrypoint opt-in")]
-    TypestateSpawnRequiresMachinesOptIn,
-
     #[error("Linear type `{0}` must declare at least one state")]
     LinearNoStates(String),
 

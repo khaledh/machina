@@ -10,7 +10,7 @@ use crate::services::analysis::syntax_index::{
     active_param_index, call_site_at_span, position_leq,
 };
 
-use super::TypestateNameDemangler;
+use super::GeneratedStateNameDemangler;
 use super::callable_signature::format_source_callable_signature;
 use crate::core::context::TypeCheckedContext;
 
@@ -149,7 +149,7 @@ fn source_signature_help<F>(
 where
     F: Fn(usize) -> usize,
 {
-    let demangler = TypestateNameDemangler::from_def_table(&typed.def_table);
+    let demangler = GeneratedStateNameDemangler::from_def_table(&typed.def_table);
     let rendered = format_source_callable_signature(
         render_def_id,
         Some(&typed.module),
@@ -223,7 +223,7 @@ fn nudge_span_left(span: Span) -> Option<Span> {
 }
 
 fn format_signature_label(def_table: &DefTable, name: &str, params: &[String]) -> String {
-    let demangler = TypestateNameDemangler::from_def_table(def_table);
+    let demangler = GeneratedStateNameDemangler::from_def_table(def_table);
     let label = format!("{name}({})", params.join(", "));
     demangler.demangle_text(&label)
 }

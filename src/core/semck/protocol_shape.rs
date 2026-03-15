@@ -14,7 +14,7 @@ use crate::core::machine::naming::{
     is_generated_handler_name, parse_generated_handler_site_label, parse_generated_state_name,
 };
 use crate::core::resolve::DefTable;
-use crate::core::semck::typestate_scan::collect_generated_typestate_handlers;
+use crate::core::semck::generated_state_scan::collect_generated_state_handlers;
 use crate::core::semck::{SEK, SemCheckError, push_error};
 use crate::core::typecheck::type_map::resolve_type_expr;
 use crate::core::types::Type;
@@ -32,7 +32,7 @@ pub(super) fn check_typestate_handler_overlap(
 ) -> Vec<SemCheckError> {
     let mut errors = Vec::new();
 
-    for handler in collect_generated_typestate_handlers(&ctx.module) {
+    for handler in collect_generated_state_handlers(&ctx.module) {
         let typestate_name = handler.typestate_name;
         let state_name = handler.state_name;
         let patterns =
@@ -298,7 +298,7 @@ fn collect_provenance_handler_shapes(
     ctx: &SemCheckNormalizedContext,
 ) -> Vec<ProvenanceHandlerShape> {
     let mut out = Vec::new();
-    for handler in collect_generated_typestate_handlers(&ctx.module) {
+    for handler in collect_generated_state_handlers(&ctx.module) {
         if handler.method_def.sig.params.len() < 3
             || handler.method_def.sig.params[1].ident != "__pending"
         {

@@ -2,6 +2,7 @@ mod ast_liveness;
 pub(crate) mod closure;
 mod def_init;
 mod errors;
+mod generated_state_scan;
 mod liveness_util;
 mod lvalue_overlap;
 mod match_check;
@@ -12,7 +13,6 @@ mod reply_cap;
 mod slice_borrow;
 mod slice_escape;
 mod structural;
-mod typestate_scan;
 mod value;
 
 use std::collections::HashSet;

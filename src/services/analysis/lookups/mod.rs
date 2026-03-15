@@ -314,13 +314,13 @@ fn is_keyword_ident(ident: &str) -> bool {
 /// Names are sorted longest-first so that greedy prefix matching works
 /// correctly when one typestate name is a prefix of another.
 #[derive(Default)]
-pub(super) struct TypestateNameDemangler {
-    typestate_names: Vec<String>,
+pub(super) struct GeneratedStateNameDemangler {
+    generated_state_names: Vec<String>,
 }
 
-impl TypestateNameDemangler {
+impl GeneratedStateNameDemangler {
     pub(super) fn from_def_table(def_table: &DefTable) -> Self {
-        let mut typestate_names: Vec<String> = def_table
+        let mut generated_state_names: Vec<String> = def_table
             .defs()
             .iter()
             .filter_map(|def| {
@@ -330,9 +330,11 @@ impl TypestateNameDemangler {
                     .map(ToString::to_string)
             })
             .collect();
-        typestate_names.sort_by_key(|name| std::cmp::Reverse(name.len()));
-        typestate_names.dedup();
-        Self { typestate_names }
+        generated_state_names.sort_by_key(|name| std::cmp::Reverse(name.len()));
+        generated_state_names.dedup();
+        Self {
+            generated_state_names,
+        }
     }
 
     /// Demangle all mangled tokens in a display string (e.g. a type signature).
@@ -392,7 +394,7 @@ impl TypestateNameDemangler {
 
     fn parse_state_symbol(&self, symbol: &str) -> Option<(String, String)> {
         let rest = symbol.strip_prefix("__ts_")?;
-        for ts_name in &self.typestate_names {
+        for ts_name in &self.generated_state_names {
             if let Some(after_ts) = rest.strip_prefix(ts_name)
                 && let Some(state_name) = after_ts.strip_prefix('_')
                 && !state_name.is_empty()

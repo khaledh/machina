@@ -20,7 +20,7 @@ use crate::services::analysis::syntax_index::{
 
 use super::callable_signature::format_source_callable_signature;
 use super::definition::{linear_decl_target_at_span, machine_handle_def_at_span};
-use super::{TypestateNameDemangler, identifier_token_at_span, resolved_binding_type_for_def};
+use super::{GeneratedStateNameDemangler, identifier_token_at_span, resolved_binding_type_for_def};
 
 pub(crate) fn hover_at_span_in_file(
     state: &LookupState,
@@ -190,7 +190,7 @@ fn try_node_hover(
     query_ident: Option<&str>,
 ) -> Option<HoverInfo> {
     let typed = state.typed.as_ref()?;
-    let demangler = TypestateNameDemangler::from_def_table(&typed.def_table);
+    let demangler = GeneratedStateNameDemangler::from_def_table(&typed.def_table);
     let mut candidates = Vec::new();
     for (node_id, span) in node_span_map(&typed.module) {
         if span_contains_span(span, query_span) {
@@ -416,7 +416,7 @@ fn try_resolved_hover(
     if should_skip_runtime_hover_def(&resolved.def_table, def_id, current_file_path) {
         return None;
     }
-    let demangler = TypestateNameDemangler::from_def_table(&resolved.def_table);
+    let demangler = GeneratedStateNameDemangler::from_def_table(&resolved.def_table);
     let def_name = resolved
         .def_table
         .lookup_def(def_id)
@@ -489,7 +489,7 @@ fn hover_candidate_score(
     def_name: Option<&str>,
     has_type: bool,
     query_ident: Option<&str>,
-    demangler: &TypestateNameDemangler,
+    demangler: &GeneratedStateNameDemangler,
 ) -> u8 {
     let mut score: u8 = match (def_name, has_type) {
         (Some("self"), true) => 0,
@@ -600,7 +600,7 @@ fn fallback_hover_from_def_table(
 fn def_name_matches_query(
     def_name: &str,
     query_ident: &str,
-    demangler: &TypestateNameDemangler,
+    demangler: &GeneratedStateNameDemangler,
 ) -> bool {
     if def_name == query_ident {
         return true;
@@ -683,7 +683,7 @@ fn format_hover_label(
     type_map: Option<&TypeMap>,
     def_table: &DefTable,
 ) -> String {
-    let demangler = TypestateNameDemangler::from_def_table(def_table);
+    let demangler = GeneratedStateNameDemangler::from_def_table(def_table);
     if let Some(signature) =
         format_source_callable_signature(def_id, module, type_map, def_table, &demangler)
     {
@@ -714,7 +714,7 @@ fn format_type_for_hover(
     ty: &Type,
     def_id: Option<DefId>,
     type_map: Option<&TypeMap>,
-    demangler: &TypestateNameDemangler,
+    demangler: &GeneratedStateNameDemangler,
 ) -> String {
     let type_var_names =
         def_id.and_then(|id| type_map.and_then(|map| map.lookup_def_type_param_names(id)));

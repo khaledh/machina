@@ -10,7 +10,7 @@ use crate::core::resolve::{DefId, DefKind, DefTable};
 use crate::core::typecheck::type_map::TypeMap;
 use crate::core::types::{Type, TypeRenderConfig, render_type};
 
-use super::TypestateNameDemangler;
+use super::GeneratedStateNameDemangler;
 
 pub(super) struct CallableSignature {
     pub label: String,
@@ -22,7 +22,7 @@ pub(super) fn format_source_callable_signature(
     typed_module: Option<&Module>,
     type_map: Option<&TypeMap>,
     def_table: &DefTable,
-    demangler: &TypestateNameDemangler,
+    demangler: &GeneratedStateNameDemangler,
 ) -> Option<CallableSignature> {
     let def_id = def_id?;
     let typed_module = typed_module?;
@@ -171,7 +171,7 @@ pub(super) fn format_source_callable_signature(
 
 fn format_type_expr_for_signature(
     ty_expr: &TypeExpr,
-    demangler: &TypestateNameDemangler,
+    demangler: &GeneratedStateNameDemangler,
 ) -> Option<String> {
     use TypeExprKind;
     Some(match &ty_expr.kind {

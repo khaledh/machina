@@ -74,27 +74,6 @@ fn semcheck_code(error: &SemCheckError) -> &'static str {
         SemCheckErrorKind::ClosureEscapeReturn => "MC-SEMCK-ClosureEscapeReturn",
         SemCheckErrorKind::ClosureEscapeStore => "MC-SEMCK-ClosureEscapeStore",
         SemCheckErrorKind::ClosureEscapeArg => "MC-SEMCK-ClosureEscapeArg",
-        SemCheckErrorKind::ProtocolStateHandlerMissing(..) => {
-            "MC-SEMCK-ProtocolStateHandlerMissing"
-        }
-        SemCheckErrorKind::ProtocolStateOutgoingPayloadNotAllowed(..) => {
-            "MC-SEMCK-ProtocolStateOutgoingPayloadNotAllowed"
-        }
-        SemCheckErrorKind::ProtocolStateEmitDestinationRoleMismatch(..) => {
-            "MC-SEMCK-ProtocolStateEmitDestinationRoleMismatch"
-        }
-        SemCheckErrorKind::ProtocolStateEmitDestinationRoleUnbound(..) => {
-            "MC-SEMCK-ProtocolStateEmitDestinationRoleUnbound"
-        }
-        SemCheckErrorKind::ProtocolRequestContractMissing(..) => {
-            "MC-SEMCK-ProtocolRequestContractMissing"
-        }
-        SemCheckErrorKind::ProtocolRequestContractAmbiguous(..) => {
-            "MC-SEMCK-ProtocolRequestContractAmbiguous"
-        }
-        SemCheckErrorKind::ProtocolRequestResponseNotInContract(..) => {
-            "MC-SEMCK-ProtocolRequestResponseNotInContract"
-        }
         SemCheckErrorKind::TypestateOverlappingOnHandlers(..) => {
             "MC-SEMCK-TypestateOverlappingOnHandlers"
         }
@@ -115,15 +94,6 @@ fn semcheck_code(error: &SemCheckError) -> &'static str {
             "MC-SEMCK-ReplyCapConsumedMultipleTimes"
         }
         SemCheckErrorKind::ReplyCapParamRequired => "MC-SEMCK-ReplyCapParamRequired",
-        SemCheckErrorKind::ProtocolProgressionMissingTriggerTransition(..) => {
-            "MC-SEMCK-ProtocolProgressionMissingTriggerTransition"
-        }
-        SemCheckErrorKind::ProtocolProgressionImpossibleEmit(..) => {
-            "MC-SEMCK-ProtocolProgressionImpossibleEmit"
-        }
-        SemCheckErrorKind::ProtocolProgressionImpossibleReturnState(..) => {
-            "MC-SEMCK-ProtocolProgressionImpossibleReturnState"
-        }
     }
 }
 
@@ -169,116 +139,6 @@ fn populate_semcheck_metadata(error: &SemCheckError, metadata: &mut DiagnosticMe
             metadata.insert(
                 "missing".to_string(),
                 DiagnosticValue::StringList(missing.clone()),
-            );
-        }
-        SemCheckErrorKind::ProtocolStateHandlerMissing(typestate, role, state, payload)
-        | SemCheckErrorKind::ProtocolStateOutgoingPayloadNotAllowed(
-            typestate,
-            role,
-            state,
-            payload,
-        ) => {
-            metadata.insert(
-                "typestate".to_string(),
-                DiagnosticValue::String(typestate.clone()),
-            );
-            metadata.insert("role".to_string(), DiagnosticValue::String(role.clone()));
-            metadata.insert("state".to_string(), DiagnosticValue::String(state.clone()));
-            metadata.insert(
-                "payload".to_string(),
-                DiagnosticValue::String(payload.to_string()),
-            );
-        }
-        SemCheckErrorKind::ProtocolStateEmitDestinationRoleMismatch(
-            typestate,
-            role,
-            state,
-            payload,
-            expected_role,
-            field,
-            bound_role,
-        ) => {
-            metadata.insert(
-                "typestate".to_string(),
-                DiagnosticValue::String(typestate.clone()),
-            );
-            metadata.insert("role".to_string(), DiagnosticValue::String(role.clone()));
-            metadata.insert("state".to_string(), DiagnosticValue::String(state.clone()));
-            metadata.insert(
-                "payload".to_string(),
-                DiagnosticValue::String(payload.to_string()),
-            );
-            metadata.insert(
-                "expectedRole".to_string(),
-                DiagnosticValue::String(expected_role.clone()),
-            );
-            metadata.insert("field".to_string(), DiagnosticValue::String(field.clone()));
-            metadata.insert(
-                "boundRole".to_string(),
-                DiagnosticValue::String(bound_role.clone()),
-            );
-        }
-        SemCheckErrorKind::ProtocolStateEmitDestinationRoleUnbound(
-            typestate,
-            role,
-            state,
-            payload,
-            expected_role,
-        ) => {
-            metadata.insert(
-                "typestate".to_string(),
-                DiagnosticValue::String(typestate.clone()),
-            );
-            metadata.insert("role".to_string(), DiagnosticValue::String(role.clone()));
-            metadata.insert("state".to_string(), DiagnosticValue::String(state.clone()));
-            metadata.insert(
-                "payload".to_string(),
-                DiagnosticValue::String(payload.to_string()),
-            );
-            metadata.insert(
-                "expectedRole".to_string(),
-                DiagnosticValue::String(expected_role.clone()),
-            );
-        }
-        SemCheckErrorKind::ProtocolRequestContractMissing(typestate, role, request, to_role)
-        | SemCheckErrorKind::ProtocolRequestContractAmbiguous(typestate, role, request, to_role) => {
-            metadata.insert(
-                "typestate".to_string(),
-                DiagnosticValue::String(typestate.clone()),
-            );
-            metadata.insert("role".to_string(), DiagnosticValue::String(role.clone()));
-            metadata.insert(
-                "request".to_string(),
-                DiagnosticValue::String(request.to_string()),
-            );
-            metadata.insert(
-                "toRole".to_string(),
-                DiagnosticValue::String(to_role.clone()),
-            );
-        }
-        SemCheckErrorKind::ProtocolRequestResponseNotInContract(
-            typestate,
-            role,
-            request,
-            to_role,
-            response,
-        ) => {
-            metadata.insert(
-                "typestate".to_string(),
-                DiagnosticValue::String(typestate.clone()),
-            );
-            metadata.insert("role".to_string(), DiagnosticValue::String(role.clone()));
-            metadata.insert(
-                "request".to_string(),
-                DiagnosticValue::String(request.to_string()),
-            );
-            metadata.insert(
-                "toRole".to_string(),
-                DiagnosticValue::String(to_role.clone()),
-            );
-            metadata.insert(
-                "response".to_string(),
-                DiagnosticValue::String(response.to_string()),
             );
         }
         SemCheckErrorKind::TypestateOverlappingOnHandlers(typestate, state, selector, overlap)
@@ -344,94 +204,6 @@ fn populate_semcheck_metadata(error: &SemCheckError, metadata: &mut DiagnosticMe
         SemCheckErrorKind::ReplyCapMustBeConsumed(name)
         | SemCheckErrorKind::ReplyCapConsumedMultipleTimes(name) => {
             metadata.insert("name".to_string(), DiagnosticValue::String(name.clone()));
-        }
-        SemCheckErrorKind::ProtocolProgressionMissingTriggerTransition(
-            typestate,
-            protocol,
-            role,
-            state,
-            selector,
-        ) => {
-            metadata.insert(
-                "typestate".to_string(),
-                DiagnosticValue::String(typestate.clone()),
-            );
-            metadata.insert(
-                "protocol".to_string(),
-                DiagnosticValue::String(protocol.clone()),
-            );
-            metadata.insert("role".to_string(), DiagnosticValue::String(role.clone()));
-            metadata.insert("state".to_string(), DiagnosticValue::String(state.clone()));
-            metadata.insert(
-                "selector".to_string(),
-                DiagnosticValue::String(selector.to_string()),
-            );
-        }
-        SemCheckErrorKind::ProtocolProgressionImpossibleEmit(
-            typestate,
-            protocol,
-            role,
-            state,
-            selector,
-            payload,
-            to_role,
-        ) => {
-            metadata.insert(
-                "typestate".to_string(),
-                DiagnosticValue::String(typestate.clone()),
-            );
-            metadata.insert(
-                "protocol".to_string(),
-                DiagnosticValue::String(protocol.clone()),
-            );
-            metadata.insert("role".to_string(), DiagnosticValue::String(role.clone()));
-            metadata.insert("state".to_string(), DiagnosticValue::String(state.clone()));
-            metadata.insert(
-                "selector".to_string(),
-                DiagnosticValue::String(selector.to_string()),
-            );
-            metadata.insert(
-                "payload".to_string(),
-                DiagnosticValue::String(payload.to_string()),
-            );
-            metadata.insert(
-                "to_role".to_string(),
-                DiagnosticValue::String(to_role.clone()),
-            );
-        }
-        SemCheckErrorKind::ProtocolProgressionImpossibleReturnState(
-            typestate,
-            protocol,
-            role,
-            state,
-            selector,
-            to_state,
-        ) => {
-            metadata.insert(
-                "typestate".to_string(),
-                DiagnosticValue::String(typestate.clone()),
-            );
-            metadata.insert(
-                "protocol".to_string(),
-                DiagnosticValue::String(protocol.clone()),
-            );
-            metadata.insert("role".to_string(), DiagnosticValue::String(role.clone()));
-            metadata.insert("state".to_string(), DiagnosticValue::String(state.clone()));
-            metadata.insert(
-                "selector".to_string(),
-                DiagnosticValue::String(selector.to_string()),
-            );
-            metadata.insert(
-                "to_state".to_string(),
-                DiagnosticValue::String(to_state.clone()),
-            );
-        }
-        SemCheckErrorKind::MatchTargetNotEnum(ty)
-        | SemCheckErrorKind::InvalidMatchPattern(ty)
-        | SemCheckErrorKind::InOutParamNotAggregate(ty)
-        | SemCheckErrorKind::OutParamNotAggregate(ty)
-        | SemCheckErrorKind::SinkParamNotOwned(ty) => {
-            metadata.insert("type".to_string(), DiagnosticValue::String(ty.to_string()));
         }
         _ => {}
     }
