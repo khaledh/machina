@@ -65,14 +65,21 @@ directly.
 
 ## `fields { ... }`
 
-Machine-level fields, persisted across all dispatches. These are the machine's
-own state, not part of any instance. Machine fields typically hold handles to
-other machines, configuration, counters, database connections, etc.
+Machine-level fields. These are the machine's own state, not part of any
+instance. Typical uses include handles to other machines, configuration,
+counters, database connections, etc.
+
+Current implementation note: V1 machine fields are best understood as
+**immutable machine configuration** carried in the generated `Machine<T>`
+handle. They are initialized by `spawn(...)` via `fn new(...)` and then read
+from handlers through `self`. A fuller mutable machine-owned runtime state model
+is future work.
 
 ## `fn new() -> Self`
 
-Machine constructor. Returns initial machine state. Called by
-`PRService::spawn()`.
+Machine constructor. Returns the initial machine configuration. Called by
+`PRService::spawn(...)`, which mirrors the constructor parameter list and
+forwards its arguments.
 
 ## Action Overrides and Trigger Handlers
 
@@ -137,6 +144,9 @@ Inside the handler:
 - `self` refers to the machine, providing access to machine fields (e.g.,
   `self.ci_service`) and machine operations (e.g., `self.deliver()`,
   `send()`).
+
+In the current implementation, access to machine fields through `self` is
+read-only configuration access.
 
 This separation is clear and unambiguous: the instance parameter is the domain
 object; `self` is the infrastructure.

@@ -26,6 +26,9 @@ For inter-machine communication, V1 provides **fire-and-forget primitives**:
 production (auditing, logging, channel routing in V2). Replies to a `send`
 arrive as separate inbound events — correlation is manual.
 
+In the current implementation, destination handles are usually wired through
+machine constructors and carried as immutable machine config.
+
 These primitives are sufficient for:
 - Notifications and auditing
 - Asynchronous background work

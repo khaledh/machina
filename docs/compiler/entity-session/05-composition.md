@@ -51,6 +51,10 @@ side (`on`) processes events from the mailbox. Correlation between the
 outbound `RunCI` and the inbound `CIResult` is manual — the `pr_id` field
 serves as the correlation key.
 
+In the current implementation, machine fields like `ci_service` are wired in
+through `spawn(...)`/`new(...)` and behave as immutable machine config carried
+in the `Machine<T>` handle.
+
 This model covers:
 - Notifications and auditing
 - Asynchronous background work
