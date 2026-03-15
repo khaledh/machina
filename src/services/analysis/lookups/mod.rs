@@ -251,7 +251,7 @@ pub(super) fn offset_from_position(source: &str, position: Position) -> Option<u
     None
 }
 
-fn position_at_offset(source: &str, offset: usize) -> Position {
+pub(super) fn position_at_offset(source: &str, offset: usize) -> Position {
     let mut line = 1usize;
     let mut column = 1usize;
     for ch in source[..offset].chars() {

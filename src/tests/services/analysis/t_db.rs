@@ -2996,6 +2996,165 @@ fn helper(service: Machine<Pay>) -> u64 {
 }
 
 #[test]
+fn hover_at_program_file_formats_linear_action_declaration() {
+    let mut db = AnalysisDb::new();
+    let source = r#"
+type FraudAlert = {
+    payment_id: u64,
+}
+
+@linear
+type Payment = {
+    id: u64,
+
+    states {
+        Created,
+        Authorized,
+        Declined,
+    }
+
+    actions {
+        authorize: Created -> Authorized,
+    }
+
+    triggers {
+        FraudAlert: Authorized -> Declined,
+    }
+
+    roles {
+        Merchant { authorize }
+    }
+}
+
+Payment :: {
+    fn authorize(self) -> Authorized { Authorized {} }
+}
+"#;
+    let file_id = db.upsert_disk_text(
+        Path::new(env!("CARGO_MANIFEST_DIR")).join("examples/analysis_linear_action_hover.mc"),
+        source,
+    );
+    let query_span = span_for_substring(source, "authorize:");
+    let hover = db
+        .hover_at_program_file(file_id, query_span)
+        .expect("hover query should succeed")
+        .expect("expected hover information for linear action declaration");
+
+    assert!(
+        hover
+            .display
+            .contains("action Payment::authorize: Created -> Authorized"),
+        "expected linear action hover label, got: {}",
+        hover.display
+    );
+}
+
+#[test]
+fn hover_at_program_file_formats_linear_trigger_declaration() {
+    let mut db = AnalysisDb::new();
+    let source = r#"
+type FraudAlert = {
+    payment_id: u64,
+}
+
+@linear
+type Payment = {
+    id: u64,
+
+    states {
+        Created,
+        Authorized,
+        Declined,
+    }
+
+    actions {
+        authorize: Created -> Authorized,
+    }
+
+    triggers {
+        FraudAlert: Authorized -> Declined,
+    }
+
+    roles {
+        Merchant { authorize }
+    }
+}
+
+Payment :: {
+    fn authorize(self) -> Authorized { Authorized {} }
+}
+"#;
+    let file_id = db.upsert_disk_text(
+        Path::new(env!("CARGO_MANIFEST_DIR")).join("examples/analysis_linear_trigger_hover.mc"),
+        source,
+    );
+    let query_span = span_for_substring(source, "FraudAlert:");
+    let hover = db
+        .hover_at_program_file(file_id, query_span)
+        .expect("hover query should succeed")
+        .expect("expected hover information for linear trigger declaration");
+
+    assert!(
+        hover
+            .display
+            .contains("trigger Payment::FraudAlert: Authorized -> Declined"),
+        "expected linear trigger hover label, got: {}",
+        hover.display
+    );
+}
+
+#[test]
+fn def_location_at_program_file_points_linear_trigger_name_to_trigger_decl() {
+    let mut db = AnalysisDb::new();
+    let source = r#"
+type FraudAlert = {
+    payment_id: u64,
+}
+
+@linear
+type Payment = {
+    id: u64,
+
+    states {
+        Created,
+        Authorized,
+        Declined,
+    }
+
+    actions {
+        authorize: Created -> Authorized,
+    }
+
+    triggers {
+        FraudAlert: Authorized -> Declined,
+    }
+
+    roles {
+        Merchant { authorize }
+    }
+}
+
+Payment :: {
+    fn authorize(self) -> Authorized { Authorized {} }
+}
+"#;
+    let file_id = db.upsert_disk_text(
+        Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("examples/analysis_linear_role_action_defloc.mc"),
+        source,
+    );
+    let trigger_decl = span_for_substring(source, "FraudAlert:");
+
+    let location = db
+        .def_location_at_program_file(file_id, trigger_decl)
+        .expect("definition location query should succeed")
+        .expect("expected definition location for trigger declaration");
+
+    assert_eq!(location.file_id, file_id);
+    assert_eq!(location.span.start.line, trigger_decl.start.line);
+}
+
+#[test]
 fn completions_at_file_include_protocol_roles_for_typestate_binding_paths() {
     let mut db = AnalysisDb::new();
     db.set_experimental_typestate(true);

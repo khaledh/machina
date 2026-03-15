@@ -19,7 +19,9 @@ use crate::services::analysis::syntax_index::{
 };
 
 use super::callable_signature::format_source_callable_signature;
-use super::definition::{machine_handle_def_at_span, typestate_role_def_at_span};
+use super::definition::{
+    linear_decl_target_at_span, machine_handle_def_at_span, typestate_role_def_at_span,
+};
 use super::{TypestateNameDemangler, identifier_token_at_span, resolved_binding_type_for_def};
 
 pub(crate) fn hover_at_span_in_file(
@@ -57,6 +59,14 @@ pub(crate) fn hover_at_span_in_file(
                     state,
                     normalized_query_span,
                     current_file_path,
+                    source_text,
+                    query_ident.as_deref(),
+                )
+            })
+            .or_else(|| {
+                try_linear_decl_hover(
+                    state,
+                    normalized_query_span,
                     source_text,
                     query_ident.as_deref(),
                 )
@@ -374,6 +384,26 @@ fn try_machine_handle_hover(
     })
 }
 
+fn try_linear_decl_hover(
+    state: &LookupState,
+    query_span: Span,
+    source_text: Option<&str>,
+    query_ident: Option<&str>,
+) -> Option<HoverInfo> {
+    let resolved = state.resolved.as_ref()?;
+    let target =
+        linear_decl_target_at_span(&resolved.module, query_span, source_text, query_ident)?;
+    Some(HoverInfo {
+        node_id: target.node_id,
+        span: target.span,
+        def_id: None,
+        symbol_id: None,
+        def_name: query_ident.map(str::to_string),
+        ty: None,
+        display: target.display,
+    })
+}
+
 /// Try hover from source-text syntactic field patterns (e.g. `name: Type`).
 fn try_syntactic_field_hover(
     query_span: Span,
@@ -405,6 +435,19 @@ fn try_resolved_hover(
     query_ident: Option<&str>,
 ) -> Option<HoverInfo> {
     let resolved = state.resolved.as_ref()?;
+    if let Some(target) =
+        linear_decl_target_at_span(&resolved.module, query_span, source_text, query_ident)
+    {
+        return Some(HoverInfo {
+            node_id: target.node_id,
+            span: target.span,
+            def_id: None,
+            symbol_id: None,
+            def_name: query_ident.map(str::to_string),
+            ty: None,
+            display: target.display,
+        });
+    }
     let node_id = node_at_span(&resolved.module, query_span)?;
     if state.poisoned_nodes.contains(&node_id) {
         return None;

@@ -613,6 +613,160 @@ fn helper(service: Machine<PaymentService>) -> u64 | SessionError {
 }
 
 #[test]
+fn hover_over_linear_action_declaration_returns_transition_signature() {
+    let mut session = AnalysisSession::new();
+    let source = r#"type FraudAlert = {
+    payment_id: u64,
+}
+
+@linear
+type Payment = {
+    id: u64,
+
+    states {
+        Created,
+        Authorized,
+        Declined,
+    }
+
+    actions {
+        authorize: Created -> Authorized,
+    }
+
+    triggers {
+        FraudAlert: Authorized -> Declined,
+    }
+
+    roles {
+        Merchant { authorize }
+    }
+}
+
+Payment :: {
+    fn authorize(self) -> Authorized { Authorized {} }
+}
+"#;
+    let (line, character) = lsp_position_for_substring(source, "authorize:", 1);
+    let _ = handle_message(
+        &mut session,
+        json!({
+            "jsonrpc": "2.0",
+            "method": "textDocument/didOpen",
+            "params": {
+                "textDocument": {
+                    "uri": "file:///tmp/lsp-linear-action-hover.mc",
+                    "version": 1,
+                    "languageId": "machina",
+                    "text": source
+                }
+            }
+        }),
+    );
+
+    let (_action, response) = handle_message(
+        &mut session,
+        json!({
+            "jsonrpc": "2.0",
+            "id": 146,
+            "method": "textDocument/hover",
+            "params": {
+                "textDocument": { "uri": "file:///tmp/lsp-linear-action-hover.mc" },
+                "position": { "line": line, "character": character },
+                "mcDocVersion": 1
+            }
+        }),
+    );
+    let response = response.expect("expected hover response");
+    let value = response["result"]["contents"]["value"]
+        .as_str()
+        .expect("hover markdown value should be a string");
+    assert!(
+        value.contains("action Payment::authorize: Created -> Authorized"),
+        "expected linear action hover, got: {value}"
+    );
+}
+
+#[test]
+fn definition_request_resolves_linear_trigger_declaration() {
+    let mut session = AnalysisSession::new();
+    let source = r#"type FraudAlert = {
+    payment_id: u64,
+}
+
+@linear
+type Payment = {
+    id: u64,
+
+    states {
+        Created,
+        Authorized,
+        Declined,
+    }
+
+    actions {
+        authorize: Created -> Authorized,
+    }
+
+    triggers {
+        FraudAlert: Authorized -> Declined,
+    }
+
+    roles {
+        Merchant { authorize }
+    }
+}
+
+Payment :: {
+    fn authorize(self) -> Authorized { Authorized {} }
+}
+"#;
+    let (line, character) = lsp_position_for_substring(source, "FraudAlert:", 1);
+    let _ = handle_message(
+        &mut session,
+        json!({
+            "jsonrpc": "2.0",
+            "method": "textDocument/didOpen",
+            "params": {
+                "textDocument": {
+                    "uri": "file:///tmp/lsp-linear-trigger-definition.mc",
+                    "version": 1,
+                    "languageId": "machina",
+                    "text": source
+                }
+            }
+        }),
+    );
+
+    let (_action, response) = handle_message(
+        &mut session,
+        json!({
+            "jsonrpc": "2.0",
+            "id": 147,
+            "method": "textDocument/definition",
+            "params": {
+                "textDocument": { "uri": "file:///tmp/lsp-linear-trigger-definition.mc" },
+                "position": { "line": line, "character": character },
+                "mcDocVersion": 1
+            }
+        }),
+    );
+
+    let response = response.expect("expected definition response");
+    let locations = response["result"]
+        .as_array()
+        .expect("expected location array");
+    assert_eq!(
+        locations.len(),
+        1,
+        "expected one trigger definition location"
+    );
+    assert_eq!(
+        locations[0]["uri"],
+        "file:///tmp/lsp-linear-trigger-definition.mc"
+    );
+}
+
+#[test]
 fn unknown_method_returns_method_not_found() {
     let mut session = AnalysisSession::new();
     let (action, response) = handle_message(
@@ -1752,7 +1906,10 @@ fn lsp_position_for_substring(source: &str, needle: &str, char_offset: usize) ->
     let start = source
         .find(needle)
         .expect("needle should exist in source for LSP test helper");
-    let offset = start + char_offset;
+    lsp_position_at_offset(source, start + char_offset)
+}
+
+fn lsp_position_at_offset(source: &str, offset: usize) -> (usize, usize) {
     let mut line0 = 0usize;
     let mut col0 = 0usize;
     for ch in source[..offset].chars() {
