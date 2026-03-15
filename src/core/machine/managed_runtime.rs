@@ -1,7 +1,20 @@
-use super::ast_build::{call_expr, int_expr, let_bind_stmt, var_expr};
-use super::*;
+//! Shared managed-runtime entrypoint rewriting for programs that declare machines.
+//!
+//! This helper is no longer specific to the retired typestate surface: hosted
+//! linear machines also rely on the same auto-bootstrap / auto-drive / shutdown
+//! wrapper for `main()`.
 
-pub(super) fn rewrite_machines_entrypoint(
+use crate::core::ast::{
+    BindPattern, BindPatternKind, BlockItem, Expr, ExprKind, FuncDef, Module, NodeIdGen, StmtExpr,
+    StmtExprKind, TopLevelItem,
+};
+use crate::core::diag::Span;
+
+const MANAGED_RUNTIME_BOOTSTRAP_FN: &str = "__mc_machine_runtime_managed_bootstrap_u64";
+const MANAGED_RUNTIME_SHUTDOWN_FN: &str = "__mc_machine_runtime_managed_shutdown_u64";
+const MANAGED_RUNTIME_STEP_FN: &str = "__mc_machine_runtime_step_u64";
+
+pub(crate) fn rewrite_machines_entrypoint(
     module: &mut Module,
     runtime_requested: bool,
     node_id_gen: &mut NodeIdGen,
@@ -50,7 +63,7 @@ fn wrap_main_with_managed_runtime(main: &mut FuncDef, node_id_gen: &mut NodeIdGe
         id: node_id_gen.new_id(),
         kind: ExprKind::BinOp {
             left: Box::new(var_expr("__mc_step_status", node_id_gen, span)),
-            op: BinaryOp::Eq,
+            op: crate::core::ast::BinaryOp::Eq,
             right: Box::new(int_expr(1, node_id_gen, span)),
         },
         span,
@@ -59,14 +72,11 @@ fn wrap_main_with_managed_runtime(main: &mut FuncDef, node_id_gen: &mut NodeIdGe
         id: node_id_gen.new_id(),
         kind: ExprKind::BinOp {
             left: Box::new(var_expr("__mc_rt", node_id_gen, span)),
-            op: BinaryOp::Ne,
+            op: crate::core::ast::BinaryOp::Ne,
             right: Box::new(int_expr(0, node_id_gen, span)),
         },
         span,
     };
-    // Auto-drive policy for managed binaries:
-    // keep stepping while runtime reports "did work", and stop once it reaches
-    // idle or faulted. We still return the user's main result.
     let auto_drive_if = Expr {
         id: node_id_gen.new_id(),
         kind: ExprKind::If {
@@ -171,4 +181,59 @@ fn wrap_main_with_managed_runtime(main: &mut FuncDef, node_id_gen: &mut NodeIdGe
         },
         span,
     };
+}
+
+fn var_expr(name: &str, node_id_gen: &mut NodeIdGen, span: Span) -> Expr {
+    Expr {
+        id: node_id_gen.new_id(),
+        kind: ExprKind::Var {
+            ident: name.to_string(),
+        },
+        span,
+    }
+}
+
+fn int_expr(value: u64, node_id_gen: &mut NodeIdGen, span: Span) -> Expr {
+    Expr {
+        id: node_id_gen.new_id(),
+        kind: ExprKind::IntLit(value),
+        span,
+    }
+}
+
+fn call_expr(callee_name: &str, args: Vec<Expr>, node_id_gen: &mut NodeIdGen, span: Span) -> Expr {
+    Expr {
+        id: node_id_gen.new_id(),
+        kind: ExprKind::Call {
+            callee: Box::new(var_expr(callee_name, node_id_gen, span)),
+            args: args
+                .into_iter()
+                .map(|expr| crate::core::ast::CallArg {
+                    mode: crate::core::ast::CallArgMode::Default,
+                    expr,
+                    init: crate::core::ast::InitInfo::default(),
+                    span,
+                })
+                .collect(),
+        },
+        span,
+    }
+}
+
+fn let_bind_stmt(ident: &str, value: Expr, node_id_gen: &mut NodeIdGen, span: Span) -> StmtExpr {
+    StmtExpr {
+        id: node_id_gen.new_id(),
+        kind: StmtExprKind::LetBind {
+            pattern: BindPattern {
+                id: node_id_gen.new_id(),
+                kind: BindPatternKind::Name {
+                    ident: ident.to_string(),
+                },
+                span,
+            },
+            decl_ty: None,
+            value: Box::new(value),
+        },
+        span,
+    }
 }

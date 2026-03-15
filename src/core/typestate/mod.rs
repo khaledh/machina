@@ -20,7 +20,6 @@ mod analysis;
 mod ast_build;
 mod handlers;
 mod managed_api;
-mod managed_entrypoint;
 mod names;
 mod rewrite_handles;
 mod state_lowering;
@@ -35,7 +34,6 @@ use state_lowering::{
     rewrite_state_refs_in_func,
 };
 
-use managed_entrypoint::rewrite_machines_entrypoint;
 use names::*;
 use rewrite_handles::{
     rewrite_machine_request_method_destinations, rewrite_typed_machine_handle_refs,
@@ -153,7 +151,11 @@ pub fn desugar_module(module: &mut Module, node_id_gen: &mut NodeIdGen) -> Vec<R
 
     module.top_level_items = out;
     let has_machine_defs = !module.machine_defs().is_empty();
-    let managed_main_wrapped = rewrite_machines_entrypoint(module, has_machine_defs, node_id_gen);
+    let managed_main_wrapped = crate::core::machine::managed_runtime::rewrite_machines_entrypoint(
+        module,
+        has_machine_defs,
+        node_id_gen,
+    );
     if saw_typestate {
         ensure_machine_support_types(module, node_id_gen);
     }

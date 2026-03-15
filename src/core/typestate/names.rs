@@ -20,7 +20,6 @@ pub(super) const MANAGED_RUNTIME_DEFAULT_MAILBOX_CAP: u64 = 8;
 pub(super) const MANAGED_RUNTIME_BOOTSTRAP_FN: &str = "__mc_machine_runtime_managed_bootstrap_u64";
 pub(super) const MANAGED_RUNTIME_CURRENT_FN: &str = "__mc_machine_runtime_managed_current_u64";
 pub(super) const MANAGED_RUNTIME_SHUTDOWN_FN: &str = "__mc_machine_runtime_managed_shutdown_u64";
-pub(super) const MANAGED_RUNTIME_STEP_FN: &str = "__mc_machine_runtime_step_u64";
 
 pub(super) const MACHINE_ERROR_VARIANT_SPAWN_FAILED: &str = "SpawnFailed";
 pub(super) const MACHINE_ERROR_VARIANT_BIND_FAILED: &str = "BindFailed";
