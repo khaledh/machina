@@ -8,8 +8,6 @@
 # - Suppresses normal example output.
 # - Prints one progress dot per completed example.
 # - Prints full logs only for failures.
-# - Excludes legacy `examples/typestate/*`, which remain in the repo only as
-#   retirement-era reference material.
 set -euo pipefail
 
 script_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
@@ -35,9 +33,6 @@ detect_jobs() {
 
 declare -a runnable_examples=()
 while IFS= read -r -d '' file; do
-  if [[ "$file" == "$script_dir"/typestate/* ]]; then
-    continue
-  fi
   # Treat files with a main entrypoint as runnable programs.
   if grep -Eq '^[[:space:]]*fn[[:space:]]+main[[:space:]]*\(' "$file"; then
     runnable_examples+=("${file#$repo_root/}")
