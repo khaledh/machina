@@ -2,7 +2,7 @@ use std::collections::{HashMap, HashSet};
 use std::ops::{Deref, DerefMut};
 use std::path::PathBuf;
 
-use crate::core::ast::{Module, NodeId, NodeIdGen, TypeExpr};
+use crate::core::ast::{Module, NodeId, NodeIdGen};
 use crate::core::capsule::{ModuleId, ModulePath};
 use crate::core::codegen_names::CodegenNameTable;
 use crate::core::diag::Span;
@@ -22,26 +22,7 @@ pub struct ResolvedTables {
     pub symbol_ids: SymbolIdTable,
     pub symbols: CodegenNameTable,
     pub node_id_gen: NodeIdGen,
-    pub typestate_role_impls: Vec<TypestateRoleImplBinding>,
     pub linear_index: LinearIndex,
-}
-
-#[derive(Debug, Clone)]
-pub struct TypestateRoleImplBinding {
-    pub node_id: NodeId,
-    pub typestate_name: String,
-    pub path: Vec<String>,
-    pub peer_role_bindings: Vec<TypestatePeerRoleBinding>,
-    pub span: Span,
-}
-
-#[derive(Debug, Clone)]
-pub struct TypestatePeerRoleBinding {
-    pub node_id: NodeId,
-    pub field_name: String,
-    pub role_name: String,
-    pub field_ty: TypeExpr,
-    pub span: Span,
 }
 
 #[derive(Debug, Clone)]
@@ -280,7 +261,6 @@ impl ParsedContext {
                 symbol_ids,
                 symbols,
                 node_id_gen,
-                typestate_role_impls: Vec::new(),
                 linear_index,
             },
         }

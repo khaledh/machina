@@ -17,7 +17,6 @@ use crate::core::resolve::{
 };
 use crate::core::symbol_id::SymbolId;
 use crate::core::types::{BUILTIN_TYPES, Type};
-use crate::core::typestate::TypestateRoleImplRef;
 
 #[derive(Clone, Debug)]
 pub struct ImportedModule {
@@ -277,7 +276,6 @@ pub struct SymbolResolver {
     imported_callable_sigs: HashMap<SymbolId, ImportedCallableSig>,
     imported_type_defs: HashMap<SymbolId, Type>,
     imported_trait_defs: HashMap<SymbolId, ImportedTraitSig>,
-    typestate_role_impls: Vec<TypestateRoleImplRef>,
 }
 
 #[derive(Clone)]
@@ -313,12 +311,7 @@ impl SymbolResolver {
             imported_callable_sigs: HashMap::new(),
             imported_type_defs: HashMap::new(),
             imported_trait_defs: HashMap::new(),
-            typestate_role_impls: Vec::new(),
         }
-    }
-
-    fn set_typestate_role_impls(&mut self, role_impls: Vec<TypestateRoleImplRef>) {
-        self.typestate_role_impls = role_impls;
     }
 
     fn is_enum_variant_name(&self, name: &str) -> bool {
@@ -353,10 +346,6 @@ impl SymbolResolver {
 
     fn err(&mut self, span: Span, kind: REK) {
         self.errors.push(kind.at(span));
-    }
-
-    fn push_err(errors: &mut Vec<ResolveError>, span: Span, kind: REK) {
-        errors.push(kind.at(span));
     }
 
     fn insert_symbol(&mut self, name: &str, symbol: Symbol, span: Span) {
@@ -725,10 +714,6 @@ impl SymbolResolver {
     }
 
     fn populate_decls(&mut self, module: &Module) {
-        // Retired standalone `protocol` surface no longer participates in
-        // normal declaration population unless legacy typestate bindings still need it.
-        if !self.typestate_role_impls.is_empty() {}
-
         // Populate trait definitions
         self.populate_trait_defs(&module.trait_defs());
 
@@ -1068,162 +1053,11 @@ impl SymbolResolver {
             resolver.populate_decls(module);
 
             resolver.visit_module(module);
-            if !resolver.typestate_role_impls.is_empty() && module.has_protocol_defs() {
-                resolver.bind_typestate_role_impls(module);
-            }
         });
 
         let def_table = std::mem::take(&mut self.def_table_builder).finish();
         let errors = std::mem::take(&mut self.errors);
         (def_table, errors)
-    }
-
-    fn bind_typestate_role_impls(&mut self, module: &Module) {
-        // Local protocol defs are enough for v1 role-binding validation.
-        // Cross-module protocol shape checks can be layered later once
-        // protocol facts are exported through capsule metadata.
-        let protocol_by_name: HashMap<&str, &ProtocolDef> = module
-            .protocol_defs()
-            .into_iter()
-            .map(|protocol| (protocol.name.as_str(), protocol))
-            .collect();
-
-        for role_impl in &self.typestate_role_impls {
-            let joined_path = role_impl.path.join("::");
-            if role_impl.path.len() < 2 {
-                Self::push_err(
-                    &mut self.errors,
-                    role_impl.span,
-                    REK::TypestateRoleImplMalformedPath(
-                        role_impl.typestate_name.clone(),
-                        joined_path,
-                    ),
-                );
-                continue;
-            }
-
-            let protocol_name = &role_impl.path[0];
-            let role_name = &role_impl.path[1];
-            let Some(protocol_def) = protocol_by_name.get(protocol_name.as_str()) else {
-                self.errors.push(
-                    REK::TypestateRoleImplRoleUndefined(
-                        role_impl.typestate_name.clone(),
-                        joined_path,
-                    )
-                    .at(role_impl.span),
-                );
-                continue;
-            };
-            if !protocol_def
-                .roles
-                .iter()
-                .any(|role| role.name == *role_name)
-            {
-                self.errors.push(
-                    REK::TypestateRoleImplRoleUndefined(
-                        role_impl.typestate_name.clone(),
-                        joined_path,
-                    )
-                    .at(role_impl.span),
-                );
-                continue;
-            }
-
-            // Validate `field: Machine<...> as Role` bindings declared in the
-            // typestate `fields` block and connect them to protocol-role defs.
-            let mut bound_roles = HashSet::new();
-            for binding in &role_impl.peer_role_bindings {
-                if !Self::is_machine_handle_type(&binding.field_ty) {
-                    Self::push_err(
-                        &mut self.errors,
-                        binding.span,
-                        REK::TypestateRoleBindingInvalidType(
-                            role_impl.typestate_name.clone(),
-                            binding.field_name.clone(),
-                        ),
-                    );
-                }
-
-                let binding_role_exists = protocol_def
-                    .roles
-                    .iter()
-                    .any(|role| role.name == binding.role_name);
-                if !binding_role_exists {
-                    Self::push_err(
-                        &mut self.errors,
-                        binding.span,
-                        REK::TypestateRoleBindingRoleUndefined(
-                            role_impl.typestate_name.clone(),
-                            binding.field_name.clone(),
-                            binding.role_name.clone(),
-                        ),
-                    );
-                }
-
-                if !bound_roles.insert(binding.role_name.clone()) {
-                    Self::push_err(
-                        &mut self.errors,
-                        binding.span,
-                        REK::TypestateRoleBindingDuplicateRole(
-                            role_impl.typestate_name.clone(),
-                            binding.role_name.clone(),
-                        ),
-                    );
-                }
-            }
-
-            // Enforce that every peer role referenced by protocol transitions
-            // (or request contracts) from this role is explicitly bound.
-            let required_peer_roles =
-                Self::required_peer_roles_for_protocol_role(protocol_def, role_name);
-            for peer_role in required_peer_roles {
-                if peer_role.as_str() != role_name.as_str() && !bound_roles.contains(&peer_role) {
-                    Self::push_err(
-                        &mut self.errors,
-                        role_impl.span,
-                        REK::TypestateRoleBindingMissing(
-                            role_impl.typestate_name.clone(),
-                            peer_role,
-                        ),
-                    );
-                }
-            }
-        }
-    }
-
-    fn is_machine_handle_type(ty: &TypeExpr) -> bool {
-        matches!(
-            &ty.kind,
-            TypeExprKind::Named {
-                ident,
-                type_args,
-            } if ident == "Machine" && type_args.len() == 1
-        )
-    }
-
-    fn required_peer_roles_for_protocol_role(
-        protocol: &ProtocolDef,
-        role_name: &str,
-    ) -> HashSet<String> {
-        let mut peers = HashSet::new();
-        for role in &protocol.roles {
-            if role.name != role_name {
-                continue;
-            }
-            for state in &role.states {
-                for transition in &state.transitions {
-                    for effect in &transition.effects {
-                        peers.insert(effect.to_role.clone());
-                    }
-                }
-            }
-        }
-        for contract in &protocol.request_contracts {
-            if contract.from_role == role_name {
-                peers.insert(contract.to_role.clone());
-            }
-        }
-        peers
     }
 
     fn check_lvalue_mutability(&mut self, expr: &Expr) {
@@ -2231,7 +2065,6 @@ pub fn resolve_with_imports_and_symbols(
         ast_context,
         imported_modules,
         imported_symbols,
-        Vec::new(),
     );
     if output.errors.is_empty() {
         Ok(output.context)
@@ -2256,7 +2089,6 @@ pub fn resolve_with_imports_and_symbols_partial(
         ast_context,
         imported_modules,
         imported_symbols,
-        Vec::new(),
     )
 }
 
@@ -2264,12 +2096,10 @@ pub fn resolve_with_imports_and_symbols_and_typestate_roles_partial(
     ast_context: ResolveStageInput,
     imported_modules: HashMap<String, ImportedModule>,
     imported_symbols: HashMap<String, ImportedSymbol>,
-    typestate_role_impls: Vec<TypestateRoleImplRef>,
 ) -> ResolveOutput {
     let mut resolver = SymbolResolver::new();
     resolver.imported_modules = imported_modules;
     resolver.imported_symbols = imported_symbols;
-    resolver.set_typestate_role_impls(typestate_role_impls);
     let (def_table, errors) = resolver.resolve_partial(&ast_context.module);
 
     let imported_facts = ImportedFacts {

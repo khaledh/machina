@@ -8,7 +8,6 @@ use std::collections::{BTreeMap, HashMap};
 
 use crate::core::analysis::facts::{DefTableOverlay, TypeMapOverlay};
 use crate::core::ast::{MethodDef, MethodItem, Module, TypeDef, TypeDefKind, TypeExpr};
-use crate::core::context::TypestateRoleImplBinding;
 use crate::core::machine::naming::{
     GENERATED_FINAL_STATE_MARKER, GENERATED_HANDLER_PREFIX, GENERATED_STATE_PREFIX,
     parse_generated_handler_site_label,
@@ -16,7 +15,7 @@ use crate::core::machine::naming::{
 use crate::core::machine::request_site::labeled_request_site_key;
 use crate::core::plans::{
     MachineDescriptorPlan, MachineDispatchEntryPlan, MachineDispatchThunkPlan, MachineEventKeyPlan,
-    MachineEventKindPlan, MachinePlanMap, MachineRoleImplPlan, MachineStateTagPlan,
+    MachineEventKindPlan, MachinePlanMap, MachineStateTagPlan,
 };
 use crate::core::resolve::DefId;
 use crate::core::typecheck::type_map::resolve_type_expr;
@@ -28,13 +27,11 @@ pub fn build_machine_plans(
     module: &Module,
     def_table: &DefTableOverlay,
     type_map: &TypeMapOverlay,
-    typestate_role_impls: &[TypestateRoleImplBinding],
 ) -> MachinePlanMap {
     if !has_generated_typestate_state_defs(module) {
         return MachinePlanMap::default();
     }
-    let mut builders = collect_typestate_builders(module, def_table, type_map);
-    attach_role_impls(&mut builders, typestate_role_impls);
+    let builders = collect_typestate_builders(module, def_table, type_map);
     materialize_machine_plans(builders)
 }
 
@@ -86,7 +83,6 @@ struct StatePlanSeed {
 #[derive(Clone, Debug, Default)]
 struct TypestatePlanSeed {
     states: BTreeMap<String, StatePlanSeed>,
-    role_impls: Vec<MachineRoleImplPlan>,
 }
 
 fn collect_typestate_builders(
@@ -371,19 +367,6 @@ fn resolve_type_id(
     })
 }
 
-fn attach_role_impls(
-    builders: &mut BTreeMap<String, TypestatePlanSeed>,
-    typestate_role_impls: &[TypestateRoleImplBinding],
-) {
-    for binding in typestate_role_impls {
-        let typestate = builders.entry(binding.typestate_name.clone()).or_default();
-        typestate.role_impls.push(MachineRoleImplPlan {
-            path: binding.path.clone(),
-            span: binding.span,
-        });
-    }
-}
-
 fn materialize_machine_plans(builders: BTreeMap<String, TypestatePlanSeed>) -> MachinePlanMap {
     let mut descriptors = HashMap::new();
     let mut thunks = HashMap::new();
@@ -464,7 +447,6 @@ fn materialize_machine_plans(builders: BTreeMap<String, TypestatePlanSeed>) -> M
                 state_tags,
                 event_kinds,
                 dispatch_table,
-                role_impls: typestate_seed.role_impls,
             },
         );
     }

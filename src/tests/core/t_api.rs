@@ -60,68 +60,6 @@ fn main() -> u64 {
 }
 
 #[test]
-fn resolve_protocol_only_program_keeps_legacy_protocol_tables_empty() {
-    let source = r#"
-        type Ping = {}
-
-        protocol Net {
-            role Client;
-            role Server;
-            req Client -> Server: Ping => Ping;
-        }
-    "#;
-
-    let parsed = parsed_context_typestate(source);
-    let out = resolve_stage_with_policy(parsed, ResolveInputs::default(), FrontendPolicy::Strict);
-    out.context
-        .expect("protocol-only legacy source should still resolve internally");
-}
-
-#[test]
-fn semcheck_protocol_only_program_keeps_legacy_progression_empty() {
-    let source = r#"
-        type Ping = {}
-
-        protocol Net {
-            role Client;
-            role Server;
-            req Client -> Server: Ping => Ping;
-        }
-    "#;
-
-    let parsed = parsed_context_typestate(source);
-    let out = resolve_typecheck_pipeline_with_policy(
-        parsed,
-        ResolveInputs::default(),
-        None,
-        FrontendPolicy::Strict,
-    );
-    assert!(
-        !out.has_errors(),
-        "protocol-only retired source should still typecheck internally, got resolve={:?} type={:?}",
-        out.resolve_errors,
-        out.type_errors
-    );
-    let typed = out
-        .typed_context
-        .expect("expected typed context for protocol-only semcheck retirement test");
-    let sem_checked = semcheck_stage(typed).expect("protocol-only retired source should semcheck");
-
-    assert!(
-        sem_checked.protocol_progression.handlers.is_empty(),
-        "standalone retired protocol defs should no longer build progression handlers"
-    );
-    assert!(
-        sem_checked.protocol_progression.by_handler_def.is_empty(),
-        "standalone retired protocol defs should not index protocol handlers"
-    );
-    assert!(
-        sem_checked.protocol_progression.by_state.is_empty(),
-        "standalone retired protocol defs should not index protocol states"
-    );
-}
-
-#[test]
 fn typestate_missing_new_reports_targeted_error() {
     let source = r#"
 typestate Connection {
@@ -206,14 +144,9 @@ fn linear_resolve_keeps_legacy_protocol_tables_empty() {
     );
 
     let out = resolve_stage_with_policy(parsed, ResolveInputs::default(), FrontendPolicy::Strict);
-    let resolved = out
+    let _resolved = out
         .context
         .expect("expected resolved context for linear program without legacy defs");
-
-    assert!(
-        resolved.typestate_role_impls.is_empty(),
-        "linear programs should not populate legacy typestate role bindings"
-    );
 }
 
 #[test]

@@ -36,11 +36,6 @@ impl ParsedModuleResult {
 }
 
 #[derive(Clone)]
-struct LegacyResolvedResultPayload {
-    typestate_role_impls: Vec<crate::core::context::TypestateRoleImplBinding>,
-}
-
-#[derive(Clone)]
 pub struct ResolvedModuleResult {
     pub module_id: ModuleId,
     pub module: Module,
@@ -51,7 +46,6 @@ pub struct ResolvedModuleResult {
     pub symbols: CodegenNameTable,
     pub node_id_gen: NodeIdGen,
     pub linear_index: LinearIndex,
-    legacy: LegacyResolvedResultPayload,
 }
 
 impl ResolvedModuleResult {
@@ -67,7 +61,6 @@ impl ResolvedModuleResult {
             symbol_ids,
             symbols,
             node_id_gen,
-            typestate_role_impls,
             linear_index,
         } = tables;
         Self {
@@ -80,9 +73,6 @@ impl ResolvedModuleResult {
             symbols,
             node_id_gen,
             linear_index,
-            legacy: LegacyResolvedResultPayload {
-                typestate_role_impls,
-            },
         }
     }
 
@@ -96,16 +86,10 @@ impl ResolvedModuleResult {
                 symbol_ids: self.symbol_ids,
                 symbols: self.symbols,
                 node_id_gen: self.node_id_gen,
-                typestate_role_impls: self.legacy.typestate_role_impls,
                 linear_index: self.linear_index,
             },
         }
     }
-}
-
-#[derive(Clone)]
-struct LegacyTypedResultPayload {
-    typestate_role_impls: Vec<crate::core::context::TypestateRoleImplBinding>,
 }
 
 #[derive(Clone)]
@@ -122,7 +106,6 @@ pub struct TypedModuleResult {
     pub symbols: CodegenNameTable,
     pub node_id_gen: NodeIdGen,
     pub linear_index: LinearIndex,
-    legacy: LegacyTypedResultPayload,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -284,7 +267,6 @@ impl TypedModuleResult {
             symbol_ids,
             symbols,
             node_id_gen,
-            typestate_role_impls,
             linear_index,
         } = resolved;
         Self {
@@ -300,9 +282,6 @@ impl TypedModuleResult {
             symbols,
             node_id_gen,
             linear_index,
-            legacy: LegacyTypedResultPayload {
-                typestate_role_impls,
-            },
         }
     }
 
@@ -317,7 +296,6 @@ impl TypedModuleResult {
                     symbol_ids: self.symbol_ids,
                     symbols: self.symbols,
                     node_id_gen: self.node_id_gen,
-                    typestate_role_impls: self.legacy.typestate_role_impls,
                     linear_index: self.linear_index,
                 },
                 type_map: self.type_map,

@@ -6,7 +6,6 @@
 
 use std::collections::HashMap;
 
-use crate::core::diag::Span;
 use crate::core::resolve::DefId;
 use crate::core::types::{Type, TypeId};
 
@@ -21,8 +20,6 @@ pub struct MachineDescriptorPlan {
     pub event_kinds: Vec<MachineEventKindPlan>,
     /// Per (state, event) dispatch choice with local-first fallback contract.
     pub dispatch_table: Vec<MachineDispatchEntryPlan>,
-    /// Role implementation bindings captured from source typestate declaration.
-    pub role_impls: Vec<MachineRoleImplPlan>,
 }
 
 /// State-tag assignment plus state layout reference.
@@ -80,13 +77,6 @@ pub struct MachineDispatchEntryPlan {
     pub request_site_key: Option<u64>,
     pub state_local_thunk: Option<DefId>,
     pub typestate_fallback_thunk: Option<DefId>,
-}
-
-/// One role implementation attached to a typestate.
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct MachineRoleImplPlan {
-    pub path: Vec<String>,
-    pub span: Span,
 }
 
 /// One backend thunk record for a typestate handler method.

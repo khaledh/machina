@@ -724,7 +724,7 @@ fn serialize_descriptor(
     push_u32(&mut bytes, desc.state_tags.len() as u32);
     push_u32(&mut bytes, desc.event_kinds.len() as u32);
     push_u32(&mut bytes, desc.dispatch_table.len() as u32);
-    push_u32(&mut bytes, desc.role_impls.len() as u32);
+    push_u32(&mut bytes, 0);
 
     let mut state_tags = desc.state_tags.clone();
     state_tags.sort_by_key(|s| s.tag);
@@ -786,14 +786,6 @@ fn serialize_descriptor(
                 .unwrap_or(0),
         );
     }
-
-    let mut role_impls = desc.role_impls.clone();
-    role_impls.sort_by(|a, b| a.path.join("::").cmp(&b.path.join("::")));
-    for role in &role_impls {
-        push_string(&mut bytes, &role.path.join("::"));
-        push_u64(&mut bytes, 0);
-    }
-
     bytes
 }
 

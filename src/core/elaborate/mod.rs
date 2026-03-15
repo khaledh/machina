@@ -80,7 +80,6 @@ pub fn elaborate(ctx: ElaborateStageInput) -> ElaborateStageOutput {
         symbol_ids,
         symbols,
         node_id_gen,
-        typestate_role_impls,
         linear_index,
     } = resolved;
     let mut node_id_gen = node_id_gen;
@@ -110,7 +109,7 @@ pub fn elaborate(ctx: ElaborateStageInput) -> ElaborateStageOutput {
         string_fmt_plans,
     );
     let drop_plans = build_drop_plans(&module, &def_table, &type_map);
-    let machine_plans = build_machine_plans(&module, &def_table, &type_map, &typestate_role_impls);
+    let machine_plans = build_machine_plans(&module, &def_table, &type_map);
     let linear_machine_plans =
         build_linear_machine_plans(&module, &def_table, &type_map, &linear_index);
 
@@ -128,7 +127,6 @@ pub fn elaborate(ctx: ElaborateStageInput) -> ElaborateStageOutput {
                     symbol_ids,
                     symbols,
                     node_id_gen,
-                    typestate_role_impls,
                     linear_index,
                 },
                 type_map: type_map.into_inner(),

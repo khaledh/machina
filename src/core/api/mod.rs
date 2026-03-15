@@ -27,7 +27,7 @@ use crate::core::typecheck::{
     TypeCheckError, TypecheckOutput, type_check_partial_with_imported_facts,
     type_check_with_imported_facts,
 };
-use crate::core::typestate::{self, TypestateRoleImplRef};
+use crate::core::typestate;
 
 pub(crate) use strict_frontend::{
     StrictFrontendOptions, build_strict_frontend_input, run_strict_frontend,
@@ -242,11 +242,6 @@ pub fn resolve_stage_with_policy(
     policy: FrontendPolicy,
 ) -> ResolveStageResult {
     let has_typestate_defs = input.module.has_typestate_defs();
-    let typestate_role_impls = if has_typestate_defs {
-        typestate::collect_role_impl_refs(&input.module)
-    } else {
-        Vec::new()
-    };
     if !has_typestate_defs {
         let has_machine_defs = !input.module.machine_defs().is_empty();
         let managed_main_wrapped =
@@ -285,13 +280,8 @@ pub fn resolve_stage_with_policy(
         input,
         inputs.imported_modules,
         inputs.imported_symbols,
-        typestate_role_impls.clone(),
     );
-    let mut context = output.context;
-    if has_typestate_defs {
-        context.payload.typestate_role_impls =
-            build_typestate_role_impl_bindings(&context, &typestate_role_impls);
-    }
+    let context = output.context;
     frontend_errors.extend(output.errors);
     let errors = frontend_errors;
     match policy {
@@ -306,31 +296,6 @@ pub fn resolve_stage_with_policy(
             errors,
         },
     }
-}
-
-fn build_typestate_role_impl_bindings(
-    _resolved: &TypecheckStageInput,
-    refs: &[TypestateRoleImplRef],
-) -> Vec<crate::core::context::TypestateRoleImplBinding> {
-    refs.iter()
-        .map(|role_impl| crate::core::context::TypestateRoleImplBinding {
-            node_id: role_impl.id,
-            typestate_name: role_impl.typestate_name.clone(),
-            path: role_impl.path.clone(),
-            peer_role_bindings: role_impl
-                .peer_role_bindings
-                .iter()
-                .map(|binding| crate::core::context::TypestatePeerRoleBinding {
-                    node_id: binding.id,
-                    field_name: binding.field_name.clone(),
-                    role_name: binding.role_name.clone(),
-                    field_ty: binding.field_ty.clone(),
-                    span: binding.span,
-                })
-                .collect(),
-            span: role_impl.span,
-        })
-        .collect()
 }
 
 pub fn typecheck_stage(
