@@ -36,6 +36,12 @@ impl ParsedModuleResult {
 }
 
 #[derive(Clone)]
+struct LegacyResolvedResultPayload {
+    typestate_role_impls: Vec<crate::core::context::TypestateRoleImplBinding>,
+    protocol_index: crate::core::protocol::ProtocolIndex,
+}
+
+#[derive(Clone)]
 pub struct ResolvedModuleResult {
     pub module_id: ModuleId,
     pub module: Module,
@@ -45,9 +51,8 @@ pub struct ResolvedModuleResult {
     pub symbol_ids: SymbolIdTable,
     pub symbols: CodegenNameTable,
     pub node_id_gen: NodeIdGen,
-    pub typestate_role_impls: Vec<crate::core::context::TypestateRoleImplBinding>,
     pub linear_index: LinearIndex,
-    pub protocol_index: crate::core::protocol::ProtocolIndex,
+    legacy: LegacyResolvedResultPayload,
 }
 
 impl ResolvedModuleResult {
@@ -76,9 +81,11 @@ impl ResolvedModuleResult {
             symbol_ids,
             symbols,
             node_id_gen,
-            typestate_role_impls,
             linear_index,
-            protocol_index,
+            legacy: LegacyResolvedResultPayload {
+                typestate_role_impls,
+                protocol_index,
+            },
         }
     }
 
@@ -92,12 +99,18 @@ impl ResolvedModuleResult {
                 symbol_ids: self.symbol_ids,
                 symbols: self.symbols,
                 node_id_gen: self.node_id_gen,
-                typestate_role_impls: self.typestate_role_impls,
+                typestate_role_impls: self.legacy.typestate_role_impls,
                 linear_index: self.linear_index,
-                protocol_index: self.protocol_index,
+                protocol_index: self.legacy.protocol_index,
             },
         }
     }
+}
+
+#[derive(Clone)]
+struct LegacyTypedResultPayload {
+    typestate_role_impls: Vec<crate::core::context::TypestateRoleImplBinding>,
+    protocol_index: crate::core::protocol::ProtocolIndex,
 }
 
 #[derive(Clone)]
@@ -113,9 +126,8 @@ pub struct TypedModuleResult {
     pub generic_insts: GenericInstMap,
     pub symbols: CodegenNameTable,
     pub node_id_gen: NodeIdGen,
-    pub typestate_role_impls: Vec<crate::core::context::TypestateRoleImplBinding>,
     pub linear_index: LinearIndex,
-    pub protocol_index: crate::core::protocol::ProtocolIndex,
+    legacy: LegacyTypedResultPayload,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -293,9 +305,11 @@ impl TypedModuleResult {
             generic_insts,
             symbols,
             node_id_gen,
-            typestate_role_impls,
             linear_index,
-            protocol_index,
+            legacy: LegacyTypedResultPayload {
+                typestate_role_impls,
+                protocol_index,
+            },
         }
     }
 
@@ -310,9 +324,9 @@ impl TypedModuleResult {
                     symbol_ids: self.symbol_ids,
                     symbols: self.symbols,
                     node_id_gen: self.node_id_gen,
-                    typestate_role_impls: self.typestate_role_impls,
+                    typestate_role_impls: self.legacy.typestate_role_impls,
                     linear_index: self.linear_index,
-                    protocol_index: self.protocol_index,
+                    protocol_index: self.legacy.protocol_index,
                 },
                 type_map: self.type_map,
                 call_sigs: self.call_sigs,

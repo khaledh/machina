@@ -189,17 +189,6 @@ typestate Gateway : Auth::Client {
         .unwrap_or(0);
 
     let result = ResolvedModuleResult::from_context(ModuleId(9), resolved.clone());
-    assert_eq!(result.protocol_index.protocols.len(), protocol_count);
-    assert_eq!(
-        result
-            .protocol_index
-            .typestate_bindings
-            .get("Gateway")
-            .map(|v| v.len())
-            .unwrap_or(0),
-        gateway_bindings
-    );
-
     let roundtrip = result.into_context();
     assert_eq!(roundtrip.protocol_index.protocols.len(), protocol_count);
     assert_eq!(
@@ -233,10 +222,6 @@ fn linear_result_roundtrip_keeps_legacy_protocol_tables_empty() {
     .expect("resolve should succeed for linear program");
 
     let result = ResolvedModuleResult::from_context(ModuleId(77), resolved.clone());
-    assert!(result.typestate_role_impls.is_empty());
-    assert!(result.protocol_index.protocols.is_empty());
-    assert!(result.protocol_index.typestate_bindings.is_empty());
-
     let roundtrip = result.into_context();
     assert!(roundtrip.typestate_role_impls.is_empty());
     assert!(roundtrip.protocol_index.protocols.is_empty());
