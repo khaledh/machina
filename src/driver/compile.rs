@@ -262,9 +262,7 @@ fn run_lower_stage(
     .map_err(|e| vec![e.into()])
 }
 
-fn run_optimize_stage(
-    lowered: backend::lower::LoweredModule,
-) -> backend::lower::LoweredModule {
+fn run_optimize_stage(lowered: backend::lower::LoweredModule) -> backend::lower::LoweredModule {
     let mut funcs: Vec<_> = lowered.funcs.iter().map(|f| f.func.clone()).collect();
     let skip_opt = std::env::var("MACHINA_DISABLE_SSA_OPT").ok().is_some();
 

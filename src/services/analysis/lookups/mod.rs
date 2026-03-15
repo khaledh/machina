@@ -300,4 +300,3 @@ fn is_keyword_ident(ident: &str) -> bool {
             | "self"
     )
 }
-

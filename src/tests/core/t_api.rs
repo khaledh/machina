@@ -349,5 +349,4 @@ fn elaborate_linear_program_produces_semantic_output() {
         }
         "#,
     );
-
 }

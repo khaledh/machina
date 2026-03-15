@@ -384,17 +384,19 @@ fn linear_decl_target_from_source(
             continue;
         }
 
-        if current_type.is_none() && pending_linear && trimmed.starts_with("type ")
+        if current_type.is_none()
+            && pending_linear
+            && trimmed.starts_with("type ")
             && let Some(rest) = trimmed.strip_prefix("type ")
-                && let Some((type_name, _)) = rest.split_once('=')
-            {
-                current_type = Some(type_name.trim().to_string());
-                type_brace_depth = open_braces.saturating_sub(close_braces);
-                current_section = None;
-                pending_linear = false;
-                line_start_offset += line.len() + 1;
-                continue;
-            }
+            && let Some((type_name, _)) = rest.split_once('=')
+        {
+            current_type = Some(type_name.trim().to_string());
+            type_brace_depth = open_braces.saturating_sub(close_braces);
+            current_section = None;
+            pending_linear = false;
+            line_start_offset += line.len() + 1;
+            continue;
+        }
 
         if let Some(type_name) = current_type.clone() {
             match trimmed {

@@ -433,16 +433,17 @@ pub(super) fn rewrite_linear_exprs(
                 errors.extend(rewrite_errors);
 
                 if let (Some(trigger_info), Some(result_state)) = (&trigger_info, result_state)
-                    && result_state.value_state.state_name != trigger_info.target_state {
-                        errors.push(
-                            REK::MachineHandlerTypeMismatch(
-                                trigger_info.machine_name.clone(),
-                                "trigger",
-                                func.sig.name.clone(),
-                            )
-                            .at(func.body.span),
-                        );
-                    }
+                    && result_state.value_state.state_name != trigger_info.target_state
+                {
+                    errors.push(
+                        REK::MachineHandlerTypeMismatch(
+                            trigger_info.machine_name.clone(),
+                            "trigger",
+                            func.sig.name.clone(),
+                        )
+                        .at(func.body.span),
+                    );
+                }
             }
             TopLevelItem::MethodBlock(method_block) => {
                 if infos.contains_key(&method_block.type_name) {
@@ -1995,10 +1996,11 @@ fn unique_machine_action_source_state(
     info: &DirectLinearInfo,
     action_name: &str,
 ) -> Option<String> {
-    let mut matches =
-        info.action_by_source_and_name
-            .keys()
-            .filter(|&(_, candidate_name)| candidate_name == action_name).map(|(source_state, _)| source_state.clone());
+    let mut matches = info
+        .action_by_source_and_name
+        .keys()
+        .filter(|&(_, candidate_name)| candidate_name == action_name)
+        .map(|(source_state, _)| source_state.clone());
     let first = matches.next()?;
     matches.next().is_none().then_some(first)
 }

@@ -126,19 +126,18 @@ pub(super) fn format_source_callable_signature(
             ParamMode::Out => "out ",
             ParamMode::Sink => "sink ",
         };
-        let param_ty =
-            format_type_expr_for_signature(&param_ty_expr).unwrap_or_else(|| {
-                let param_ty = params
-                    .get(idx)
-                    .map(|param| param.ty.clone())
-                    .or_else(|| {
-                        def_table
-                            .lookup_def(param_def_id)
-                            .and_then(|param_def| type_map.lookup_def_type(param_def))
-                    })
-                    .unwrap_or(Type::Unknown);
-                render(&param_ty)
-            });
+        let param_ty = format_type_expr_for_signature(&param_ty_expr).unwrap_or_else(|| {
+            let param_ty = params
+                .get(idx)
+                .map(|param| param.ty.clone())
+                .or_else(|| {
+                    def_table
+                        .lookup_def(param_def_id)
+                        .and_then(|param_def| type_map.lookup_def_type(param_def))
+                })
+                .unwrap_or(Type::Unknown);
+            render(&param_ty)
+        });
         rendered_params.push(format!("{mode_prefix}{param_name}: {param_ty}"));
     }
     let rendered_ret = render(&ret_ty);
@@ -157,9 +156,7 @@ pub(super) fn format_source_callable_signature(
     })
 }
 
-fn format_type_expr_for_signature(
-    ty_expr: &TypeExpr,
-) -> Option<String> {
+fn format_type_expr_for_signature(ty_expr: &TypeExpr) -> Option<String> {
     use TypeExprKind;
     Some(match &ty_expr.kind {
         TypeExprKind::Infer => "_".to_string(),

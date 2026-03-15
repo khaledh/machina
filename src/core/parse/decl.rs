@@ -327,9 +327,7 @@ impl<'a> Parser<'a> {
         })
     }
 
-    fn parse_on_handler_provenance(
-        &mut self,
-    ) -> Result<OnHandlerProvenance, ParseError> {
+    fn parse_on_handler_provenance(&mut self) -> Result<OnHandlerProvenance, ParseError> {
         let marker = self.mark();
         self.consume_keyword(TK::KwFor)?;
         // Parse provenance request type in a mode that leaves `:label(...)`
@@ -408,10 +406,7 @@ impl<'a> Parser<'a> {
         })
     }
 
-    fn parse_on_handler_param(
-        &mut self,
-        selector_ty: &TypeExpr,
-    ) -> Result<Param, ParseError> {
+    fn parse_on_handler_param(&mut self, selector_ty: &TypeExpr) -> Result<Param, ParseError> {
         let marker = self.mark();
         if matches!(self.curr_token.kind, TK::Ident(_))
             && self.peek().map(|t| &t.kind) != Some(&TK::Colon)

@@ -143,8 +143,7 @@ fn try_call_site_hover(
     let sig = typed.call_sigs.get(&call.node_id)?;
     let def_id = sig.def_id?;
     let def = typed.def_table.lookup_def(def_id)?;
-    if def.name != query_ident
-    {
+    if def.name != query_ident {
         return None;
     }
     let ty = resolved_binding_type_for_def(
@@ -237,8 +236,7 @@ fn try_node_hover(
         if let (Some(query_ident), Some(ty)) = (query_ident, ty.as_ref())
             && let Some(field_ty) = field_type_in_struct(ty, query_ident)
         {
-            let field_ty_display =
-                format_type_for_hover(field_ty, None, Some(&typed.type_map));
+            let field_ty_display = format_type_for_hover(field_ty, None, Some(&typed.type_map));
             let info = HoverInfo {
                 node_id,
                 span: query_span,
@@ -260,8 +258,7 @@ fn try_node_hover(
             Some(&typed.type_map),
             &typed.def_table,
         );
-        let score =
-            hover_candidate_score(def_name.as_deref(), ty.is_some(), query_ident);
+        let score = hover_candidate_score(def_name.as_deref(), ty.is_some(), query_ident);
         let info = HoverInfo {
             node_id,
             span: query_span,
@@ -475,11 +472,7 @@ fn update_best(
 ///   0 = self or no info, 1 = type only, 2 = name only, 3 = name + type.
 /// A +2 bonus is added when the def name matches the identifier under the
 /// cursor (accounting for name demangling).
-fn hover_candidate_score(
-    def_name: Option<&str>,
-    has_type: bool,
-    query_ident: Option<&str>,
-) -> u8 {
+fn hover_candidate_score(def_name: Option<&str>, has_type: bool, query_ident: Option<&str>) -> u8 {
     let mut score: u8 = match (def_name, has_type) {
         (Some("self"), true) => 0,
         (Some("self"), false) => 0,
@@ -585,10 +578,7 @@ fn fallback_hover_from_def_table(
 }
 
 /// Check if a definition name matches the user's cursor identifier.
-fn def_name_matches_query(
-    def_name: &str,
-    query_ident: &str,
-) -> bool {
+fn def_name_matches_query(def_name: &str, query_ident: &str) -> bool {
     if def_name == query_ident {
         return true;
     }
@@ -664,9 +654,7 @@ fn format_hover_label(
     type_map: Option<&TypeMap>,
     def_table: &DefTable,
 ) -> String {
-    if let Some(signature) =
-        format_source_callable_signature(def_id, module, type_map, def_table)
-    {
+    if let Some(signature) = format_source_callable_signature(def_id, module, type_map, def_table) {
         return signature.label;
     }
     let render_type = |ty: &Type| format_type_for_hover(ty, def_id, type_map);
@@ -688,11 +676,7 @@ fn format_hover_label(
     }
 }
 
-fn format_type_for_hover(
-    ty: &Type,
-    def_id: Option<DefId>,
-    type_map: Option<&TypeMap>,
-) -> String {
+fn format_type_for_hover(ty: &Type, def_id: Option<DefId>, type_map: Option<&TypeMap>) -> String {
     let type_var_names =
         def_id.and_then(|id| type_map.and_then(|map| map.lookup_def_type_param_names(id)));
     render_type(
