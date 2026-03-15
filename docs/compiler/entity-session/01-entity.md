@@ -139,10 +139,10 @@ The structure mirrors what programmers already know:
 | `triggers { }` | Transition rules | System-driven state changes (event types) |
 | `roles { }` | Access control | Who can invoke which actions |
 
-## Direct Mode (Typestate)
+## Direct Mode
 
-A linear type without roles or triggers is a plain typestate and can be used
-directly without machine hosting:
+A linear type without roles or triggers can be used directly without machine
+hosting:
 
 ```mc
 @linear

@@ -1,8 +1,8 @@
 # Examples
 
-## Direct Linear Type (Typestate)
+## Direct Linear Type
 
-A `@linear type` without roles or triggers is a plain typestate:
+A `@linear type` without roles or triggers is a direct-mode lifecycle-safe value:
 
 ```mc
 @linear

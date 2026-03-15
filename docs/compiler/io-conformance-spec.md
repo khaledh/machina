@@ -25,7 +25,7 @@ Out of scope for V1:
 
 The I/O stack has three layers:
 
-1. `std::io` (public, portable): typestate-first APIs and ergonomic helpers.
+1. `std::io` (public, portable): linear-type-first APIs and ergonomic helpers.
 2. `std::sys::io` (internal/advanced): thin low-level wrappers.
 3. runtime OS ports (`runtime/*`): platform-specific syscall bindings.
 
@@ -72,7 +72,7 @@ Keywords: **MUST**, **SHOULD**, **MAY**.
 
 - Successful `close` releases OS resources.
 - Close failure MUST be surfaced as `IoError` (not silently ignored).
-- Public typestate APIs SHOULD make double-close unrepresentable.
+- Public linear type APIs SHOULD make double-close unrepresentable.
 - Runtime ports MUST NOT blindly retry `close` on `EINTR`; descriptor reuse can
   make retries unsafe. Ports should perform a single close attempt and surface
   any resulting error code.
@@ -137,9 +137,9 @@ Conformance test suite MUST include:
 
 Tests MUST run on all supported targets in CI.
 
-## 8) Typestate API Implications
+## 8) Linear Type API Implications
 
-`std::io` typestate APIs SHOULD encode capability/lifecycle constraints:
+`std::io` linear type APIs SHOULD encode capability/lifecycle constraints:
 
 - read-only handles expose read APIs only
 - write-only handles expose write APIs only

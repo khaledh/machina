@@ -587,7 +587,7 @@ export/import metadata plus a handful of bridge APIs.
 
 Probably yes for tooling/display consistency, but this can stay provisional.
 
-### 2. Should typestate handlers/states/roles use the same path model?
+### 2. Should linear type handlers/states/roles use the same path model?
 
 Yes. They are source definitions and should participate in the same scheme.
 They may live in specialized namespaces such as `State`, `Role`, and `Handler`.

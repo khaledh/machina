@@ -8,9 +8,8 @@ inter-machine request/reply correlation — a tiny actor system embedded in
 compiled code.
 
 This document covers runtime architecture, ABI contracts, and the
-compiler→runtime integration bridge. For the source-level typestate language
-model, see `typestate-design.md`. For the user-facing API, see
-`machine-surface-design.md`.
+compiler→runtime integration bridge. For the linear type and session design,
+see `entity-session/`. For the user-facing API, see `machine-surface-design.md`.
 
 ## The Big Picture
 
@@ -279,10 +278,10 @@ Rules:
 
 ### 4. Dispatch Thunk Contract
 
-For each typestate descriptor, compiler emits one dispatch thunk that:
+For each linear type descriptor, compiler emits one dispatch thunk that:
 1. Decodes machine state token and incoming envelope.
 2. Resolves handler by `(state_tag, event_kind)`.
-3. Applies precedence: state-local handler first, typestate-level fallback
+3. Applies precedence: state-local handler first, type-level fallback
    second.
 4. Stages outputs into `mc_machine_dispatch_txn_t`.
 5. Returns `MC_DISPATCH_OK`/`FAULT`/`STOP`.
@@ -335,7 +334,7 @@ Offset  Content
 ──────  ───────
 0x00    "MCHD"              (magic bytes)
 0x04    1                   (schema version, u32)
-0x08    len + "Ping"        (typestate name, length-prefixed string)
+0x08    len + "Ping"        (linear type name, length-prefixed string)
         state_count         (u32)
         event_count         (u32)
         row_count           (u32)
@@ -440,9 +439,9 @@ __mc_machine_runtime_managed_shutdown_u64()   -> drops global
   Machina Source             Compiler Pipeline              Executable
   ──────────────             ─────────────────              ──────────
 
-  typestate Ping {     ┌─── Desugar ───────────┐
-    state Ready { }    │  Generate hidden      │
-    on Msg -> Ready    │  types + handlers     │
+  @linear             ┌─── Desugar ───────────┐
+  type Ping = {        │  Generate hidden      │
+    states { Ready }   │  types + handlers     │
     ...                └──────────┬────────────┘
   }                               │
                        ┌──────────▼────────────┐
@@ -467,17 +466,15 @@ __mc_machine_runtime_managed_shutdown_u64()   -> drops global
                                                         └──────────────┘
 ```
 
-### Step 1: Typestate Desugaring
+### Step 1: Linear Type Desugaring
 
-See `typestate-design.md` for full details. The key insight: the user writes a
-typestate declaration, but the rest of the compiler sees ordinary structs and
-functions.
+The user writes a `@linear type` declaration, but the rest of the compiler sees
+ordinary structs and functions.
 
 ### Step 2: Elaboration — Building Machine Plans
 
-The elaboration pass (`machine_plan.rs`) inspects desugared types and handlers
-to build a **machine plan** — a complete description of the typestate's runtime
-shape.
+The elaboration pass inspects desugared types and handlers to build a
+**machine plan** — a complete description of the linear type's runtime shape.
 
 **State tags** — deterministic 1-based indices:
 
@@ -505,9 +502,9 @@ Pong            3
 ┌───────────┬────────────┬──────────────────┬────────────────────┐
 │ State Tag │ Event Kind │ State-Local Thunk│ Fallback Thunk     │
 ├───────────┼────────────┼──────────────────┼────────────────────┤
-│ 1 (Ready) │ 1 (Msg)    │ __ts_on_1        │ (none)             │
-│ 1 (Ready) │ 2 (Ping)   │ (none)           │ __ts_on_2          │
-│ 2 (Wait)  │ 2 (Ping)   │ (none)           │ __ts_on_2          │
+│ 1 (Ready) │ 1 (Msg)    │ __mc_on_1        │ (none)             │
+│ 1 (Ready) │ 2 (Ping)   │ (none)           │ __mc_on_2          │
+│ 2 (Wait)  │ 2 (Ping)   │ (none)           │ __mc_on_2          │
 └───────────┴────────────┴──────────────────┴────────────────────┘
 ```
 
@@ -516,8 +513,8 @@ Pong            3
 ```
 Thunk                          Handler         Next State Tag
 ─────                          ───────         ──────────────
-__mc_machine_dispatch_thunk_42  __ts_on_1       1 (Ready)
-__mc_machine_dispatch_thunk_43  __ts_on_2       2 (Wait)
+__mc_machine_dispatch_thunk_42  __mc_on_1       1 (Ready)
+__mc_machine_dispatch_thunk_43  __mc_on_2       2 (Wait)
 ```
 
 ### Step 3: Backend Lowering — Generating Artifacts
@@ -546,11 +543,11 @@ fn __mc_machine_bootstrap():
 
 ### Step 4: Spawn — Creating a Machine
 
-When user code calls `Typestate::spawn(...)`, the compiler lowers it to a
+When user code calls `Type::spawn(...)`, the compiler lowers it to a
 generated spawn wrapper:
 
 ```
-fn __ts_spawn_Ping(arg: u64) -> __mc_machine_handle_Ping | MachineError {
+fn __mc_spawn_Ping(arg: u64) -> __mc_machine_handle_Ping | MachineError {
     let rt = __mc_machine_runtime_managed_current_u64();
     if rt == 0 { return MachineError::SpawnFailed; }
 
@@ -561,7 +558,7 @@ fn __ts_spawn_Ping(arg: u64) -> __mc_machine_handle_Ping | MachineError {
         return MachineError::BindFailed;
     }
 
-    let state = __ts_ctor_Ping(arg);
+    let state = __mc_ctor_Ping(arg);
     let boxed = heap_box(state);
 
     if __mc_machine_runtime_set_state_u64(rt, id, boxed.ptr_word) == 0 {

@@ -42,7 +42,7 @@ demands it.
   copies).
 - Provide safe indirection and interior references without lifetime annotations
   or a borrow checker.
-- Align memory isolation with the typestate machine / managed-mode architecture:
+- Align memory isolation with the linear type machine / managed-mode architecture:
   each machine owns its heap, communication transfers ownership.
 - Support a principled path to cross-process orchestration (shared memory,
   channels) without changing source-level semantics.
@@ -695,7 +695,7 @@ Regions have deliberate limitations:
 
 ### Problem
 
-Machina's managed-mode typestate machines are independent, mailbox-driven
+Machina's managed-mode machines are independent, mailbox-driven
 entities. Each machine processes one event at a time (synchronous,
 run-to-completion handlers). When machines communicate via `send`, `request`,
 and `reply`, data must cross machine boundaries safely — without shared mutable
@@ -721,7 +721,8 @@ provenance). Explicit `region` blocks override the ambient allocator for their
 scope, but the machine heap remains the default outside any region.
 
 ```
-typestate Connection {
+@linear
+type Connection = {
     // These fields live in the machine's heap for its entire lifecycle.
     var buffer: u8[*] = [];
     var peer: string = "";
@@ -1249,13 +1250,13 @@ future versions; others are inherent tradeoffs.
 
 ---
 
-## Interaction with Typestate Machines
+## Interaction with Linear Type Machines
 
-CVS is designed to align with Machina's typestate machine architecture.
+CVS is designed to align with Machina's linear type machine architecture.
 
 ### Direct mode
 
-Direct-mode typestate machines are local values. They follow standard value
+Direct-mode linear types are local values. They follow standard value
 semantics and ownership rules. No special memory management is needed — the
 machine is an owned value, its state transitions are method calls, and it is
 dropped when it goes out of scope.

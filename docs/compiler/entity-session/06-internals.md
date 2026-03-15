@@ -143,7 +143,7 @@ derivation.
 ### Machine + Hosts Lowering
 
 A `machine ... hosts Type(key: field)` declaration lowers to:
-1. A typestate-like definition for the machine, with:
+1. A linear-type-like definition for the machine, with:
    - machine fields as carried fields,
    - `on` handlers lowered as today,
    - action override and `trigger` handlers lowered to dispatch thunks.

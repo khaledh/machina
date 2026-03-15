@@ -207,7 +207,7 @@ a corner, keep these guardrails:
 
 ### VS Code / Cursor (LSP)
 
-`machina-lsp` maps protocol handlers directly to `AnalysisDb` queries:
+`machina-lsp` maps LSP request handlers directly to `AnalysisDb` queries:
 
 - diagnostics publication
 - hover, go-to-definition, references

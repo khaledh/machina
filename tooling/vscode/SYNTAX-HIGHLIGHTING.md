@@ -8,7 +8,7 @@ The TextMate grammar (`syntaxes/machina.tmLanguage.json`) provides highlighting 
 
 ### Keywords
 - **Control flow**: `if`, `else`, `match`, `while`, `for`, `break`, `continue`, `return`
-- **Declarations**: `fn`, `type`, `trait`, `protocol`, `typestate`, `let`, `var`
+- **Declarations**: `fn`, `type`, `trait`, `let`, `var`
 - **Modifiers**: `inout`, `out`, `sink`, `move`, `self`
 - **Other**: `prop`, `get`, `set`, `map`, `requires`, `role`, `flow`, `on`, `emit`, `reply`
 - **Refinements**: `range`, `bounds`, `nonzero`

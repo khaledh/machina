@@ -40,12 +40,3 @@ used as identifiers.
 
 `true` and `false` are boolean literals and are also reserved.
 
-## Retired Reserved Words
-
-These words remain reserved for compatibility, but the old surface they
-introduced has been retired in favor of `@linear type`.
-
-| Keyword | Former Meaning |
-|---------|----------------|
-| `typestate` | Legacy typestate definition |
-| `protocol` | Legacy protocol definition |

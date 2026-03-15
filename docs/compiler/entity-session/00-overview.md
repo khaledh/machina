@@ -6,10 +6,10 @@ compile-time safety.
 
 ## The Model in Three Layers
 
-### Layer 1: Linear Type as Typestate (Direct Mode)
+### Layer 1: Direct-Mode Linear Type
 
-A `@linear type` without roles or triggers is a plain typestate — a value whose
-type tracks its state at compile time:
+A `@linear type` without roles or triggers is a direct-mode lifecycle-safe
+value — a value whose type tracks its state at compile time:
 
 ```mc
 @linear
@@ -120,7 +120,7 @@ machine PRService hosts PullRequest(key: id) {
 ### Layer 3: Session — Typed Interaction with a Hosted Linear Type
 
 A session is a typed handle for interacting with one hosted instance through one
-role. It gives clients the same typestate progression as direct mode, but over
+role. It gives clients the same state progression as direct mode, but over
 a hosted machine with blocking, persistence, and concurrency:
 
 ```mc
@@ -223,8 +223,8 @@ matches on the actual state. This is clean and explicit — no silent corruption
   at runtime through assertions, not the type system.
 
 Machina combines mailbox serialization (like Erlang) with compile-time state
-tracking (like Rust typestate) and blocking semantics (like Go) — without the
-drawbacks of any.
+tracking (like Rust's linear types) and blocking semantics (like Go) — without
+the drawbacks of any.
 
 ---
 
@@ -257,7 +257,7 @@ states, states (as enum variants with optional payloads), actions (client-driven
 transitions), triggers (system-driven transitions), and roles (permission sets
 over actions).
 
-A linear type without roles or triggers is a direct-mode typestate. Add roles,
+A linear type without roles or triggers is a direct-mode linear type. Add roles,
 and it becomes hostable. This is a spectrum, not two different constructs.
 
 The identity key is a regular field — which field serves as the identity key is
@@ -329,36 +329,27 @@ validation. The distinction is in how they arrive, not in what they do.
 
 ## Construct Consolidation
 
-`@linear type` is the universal workflow primitive in Machina. It subsumes the
-roles previously played by separate `typestate` and `protocol` constructs:
+`@linear type` is the universal workflow primitive in Machina:
 
-- **`@linear type` without roles/triggers** = plain typestate (unmanaged linear
-  lifecycle, used directly without hosting).
-- **`@linear type` with roles + machine hosting** = managed workflow (replaces
-  protocol-based machine interactions).
-
-`typestate` and `protocol` are retired as separate keywords. Typestates become
-a usage pattern (linear type in direct mode). Protocol message contracts become
-linear type workflows with role-constrained actions.
+- **`@linear type` without roles/triggers** = direct-mode linear type
+  (unmanaged linear lifecycle, used directly without hosting).
+- **`@linear type` with roles + machine hosting** = managed workflow with
+  sessions.
 
 ### Why This Works
 
-1. **Typestate was already a state machine.** A linear type adds optional
-   roles on top. Strip those away and it is the same thing.
+1. **A direct linear type is already a state machine.** Adding optional roles
+   on top turns it into a managed workflow. Strip those away and it is the same
+   thing.
 
-2. **Protocols were workflow in disguise.** Send/recv sequencing encoded a state
-   machine with channel-oriented syntax. A linear type makes the state machine
-   explicit. (Some protocol use cases are more transport/message-contract
-   shaped — those are handled by machine-level request/reply.)
+2. **Roles are N-ary and flexible.** Linear type roles constrain action access
+   across any number of participants.
 
-3. **Roles generalize both sides.** Protocols had exactly two roles by
-   construction. Linear type roles are N-ary and more flexible.
-
-4. **The compiler checking is the same.** Linear ownership, exhaustive state
+3. **The compiler checking is the same.** Linear ownership, exhaustive state
    matching, action availability per state — these checks apply uniformly
    whether the type is used directly or hosted.
 
-Sessions recover the typestate programming experience for managed, hosted
+Sessions recover the direct-mode programming experience for managed, hosted
 instances. Where direct linear types give the caller a typed value that
 progresses through states directly, sessions give the caller a typed handle
 that progresses through the same states over a hosted machine — with blocking,
@@ -376,7 +367,7 @@ The compiler can check payload shapes, role conformance, request/reply
 contracts, and machine handle types. But it cannot generally check whether a
 specific message is valid for the machine's **current runtime state**.
 
-This is fundamentally different from direct typestate, where the caller owns a
+This is fundamentally different from direct-mode linear types, where the caller owns a
 concrete state value and the type system knows exactly which state it is
 operating on.
 
@@ -388,7 +379,7 @@ Sessions close this gap.
 
 - **linear type** (`@linear type`): a type with struct-like fields, enum-like
   states, transition rules, and optional roles. Values must be consumed (linear
-  ownership). Without roles/triggers, used directly as typestate. With roles,
+  ownership). Without roles/triggers, used directly. With roles,
   hostable by a machine.
 - **machine**: a long-lived runtime host that owns and mutates instances of a
   linear type, implements handlers, and manages persistence.
@@ -457,7 +448,7 @@ The V1 core is **`@linear type` + machine + session**.
 - Flat fields, states (enum variants including `@final`), actions (optionally
   fallible), triggers, roles.
 - Method blocks for action implementations.
-- Direct-mode linear types (no roles/triggers) as typestate replacement.
+- Direct-mode linear types (no roles/triggers).
 - States as enum variants with optional payloads.
 
 ### Transition model

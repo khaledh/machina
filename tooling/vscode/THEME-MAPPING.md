@@ -8,7 +8,7 @@ This document shows how Machina language constructs map to TextMate scopes, whic
 |-----------------|---------|----------------|----------------------------|
 | **Comments** | `// comment` | `comment.line.double-slash` | Green |
 | **Keywords (Control)** | `if`, `else`, `match`, `while`, `for`, `break`, `continue`, `return` | `keyword.control` | Purple/Magenta |
-| **Keywords (Other)** | `fn`, `type`, `trait`, `protocol`, `typestate`, `let`, `var` | `keyword.other` | Blue |
+| **Keywords (Other)** | `fn`, `type`, `trait`, `let`, `var` | `keyword.other` | Blue |
 | **Storage Modifiers** | `inout`, `out`, `sink`, `move` | `storage.modifier` | Blue |
 | **Booleans** | `true`, `false` | `constant.language.boolean` | Blue |
 | **Attributes** | `@public`, `@machines` | `entity.name.tag` | Yellow/Gold |

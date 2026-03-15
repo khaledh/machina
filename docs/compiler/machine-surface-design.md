@@ -5,17 +5,16 @@
 This document defines the user-facing API for managed machines — what using
 machines should feel like in day-to-day Machina code. The goal is zero-ceremony
 defaults where typical programs contain no explicit runtime setup code, while
-preserving strict compile-time typestate/protocol safety.
+preserving strict compile-time linear type safety.
 
-For the core typestate language model, see `typestate-design.md`. For runtime
-internals, see `machine-runtime-design.md`. For protocol contracts, see
-`protocol-design.md`.
+For runtime internals, see `machine-runtime-design.md`. For the linear type
+and session design, see `entity-session/`.
 
 ## Implementation Status
 
 - Always-on machine runtime: **not yet implemented** (currently behind
   `@machines` opt-in on `main()` only — to be removed).
-- `Typestate::spawn(...) -> Machine<T> | ...`: implemented.
+- `Type::spawn(...) -> Machine<T> | ...`: implemented.
 - Typed handle methods: `send(payload)` and `request(dst, payload)`: implemented.
 - Typed request destinations: `u64` or `Machine<...>` handles: implemented.
 - Handler sugar:
@@ -47,23 +46,22 @@ requires {
 type Connect = { token: string }
 type Ping = { id: u64 }
 
-typestate Client {
-    fn new() -> Disconnected {
-        Disconnected {}
+@linear
+type Client = {
+    states { Disconnected, Connected }
+
+    actions {
+        connect: Disconnected -> Connected,
     }
 
-    state Disconnected {
-        on Connect(c: Connect) -> Connected {
-            c;
-            Connected {}
-        }
+    triggers {
+        Connect: Disconnected -> Connected,
+        Ping: Connected -> Connected,
     }
+}
 
-    state Connected {
-        on Ping(p) -> stay {
-            println(f"ping {p.id}");
-        }
-    }
+Client :: {
+    fn connect(self) -> Connected { Connected {} }
 }
 
 fn main() -> () | MachineError {
@@ -119,7 +117,7 @@ Execution policy (V1):
 
 ### 2) Machine Handles
 
-`Typestate::spawn(...)` returns a typed machine handle:
+`Type::spawn(...)` returns a typed machine handle:
 
 ```mc
 let c: Machine<Client> = Client::spawn()?;
@@ -134,8 +132,8 @@ No descriptor ids, state tags, or runtime pointers are exposed.
 
 ### `new(...)` vs `spawn(...)` Contract
 
-- `new(...) -> InitialState`: typestate-level initializer logic.
-- `spawn(...) -> Machine<Typestate> | MachineError`: managed runtime
+- `new(...) -> InitialState`: type-level initializer logic.
+- `spawn(...) -> Machine<Type> | MachineError`: managed runtime
   constructor.
 
 Required contract:
@@ -167,7 +165,7 @@ These desugar to runtime ABI calls through compiler-generated metadata.
 ### 4) Fallible Managed APIs
 
 Managed spawn/send/request APIs are fallible:
-- `Typestate::spawn(...) -> Machine<T> | MachineError`
+- `Type::spawn(...) -> Machine<T> | MachineError`
 - `send(...) -> () | MachineError`
 - `request(...) -> u64 | MachineError` in default implicit-correlation form
 
@@ -299,44 +297,58 @@ type AuthCheck = { conn_id: u64, token: string }
 type AuthApproved = { user_id: u64 }
 type AuthDenied = { reason: string }
 
-typestate Connection {
-    fields = { auth: Machine<AuthService> }
+@linear
+type Connection = {
+    auth: Machine<AuthService>,
 
-    fn new(auth: Machine<AuthService>) -> Running {
-        Running {}
-    }
+    states { Running }
 
-    state Running {
-        on Open(open) {
-            request(self.auth, AuthCheck {
-                conn_id: open.conn_id,
-                token: open.token,
-            });
-        }
-
-        on AuthApproved(ok) for AuthCheck(req) {
-            println(f"conn {req.conn_id} approved user={ok.user_id}");
-        }
-
-        on AuthDenied(err) for AuthCheck(req) {
-            println(f"conn {req.conn_id} denied: {err.reason}");
-        }
+    triggers {
+        Open: Running -> Running,
+        AuthApproved: Running -> Running,
+        AuthDenied: Running -> Running,
     }
 }
 
-typestate AuthService {
-    fn new() -> Ready {
-        Ready {}
+machine ConnectionService hosts Connection(key: id) {
+    fn new(auth: Machine<AuthService>) -> Self { Self { auth } }
+
+    trigger Open(conn, open: Open) {
+        request(self.auth, AuthCheck {
+            conn_id: open.conn_id,
+            token: open.token,
+        });
+        conn
     }
 
-    state Ready {
-        on AuthCheck(req, cap: ReplyCap<AuthApproved | AuthDenied>) {
-            if req.token == "secret" {
-                cap.reply(AuthApproved { user_id: req.conn_id + 1000 });
-            } else {
-                cap.reply(AuthDenied { reason: "invalid token" });
-            }
+    on AuthApproved(ok) for AuthCheck(req) {
+        println(f"conn {req.conn_id} approved user={ok.user_id}");
+    }
+
+    on AuthDenied(err) for AuthCheck(req) {
+        println(f"conn {req.conn_id} denied: {err.reason}");
+    }
+}
+
+@linear
+type AuthService = {
+    states { Ready }
+
+    triggers {
+        AuthCheck: Ready -> Ready,
+    }
+}
+
+machine AuthMachine hosts AuthService(key: id) {
+    fn new() -> Self { Self {} }
+
+    trigger AuthCheck(svc, req: AuthCheck, cap: ReplyCap<AuthApproved | AuthDenied>) {
+        if req.token == "secret" {
+            cap.reply(AuthApproved { user_id: req.conn_id + 1000 });
+        } else {
+            cap.reply(AuthDenied { reason: "invalid token" });
         }
+        svc
     }
 }
 ```
@@ -356,7 +368,7 @@ Never leak synthetic/internal symbol names.
 
 ### Managed API Diagnostics
 
-- Sending payload not accepted by target machine/protocol role.
+- Sending payload not accepted by target machine.
 - Replying with type outside allowed response set.
 - Using a consumed or mismatched `Pending`/`ReplyCap` token.
 - Ambiguous response handlers where `for` provenance is required.
@@ -374,7 +386,7 @@ Candidate quick fixes:
 
 ### Tier 1 (Ship First)
 
-- `Machine<T>` typed handles and `Typestate::spawn(...)`.
+- `Machine<T>` typed handles and `Type::spawn(...)`.
 - Handler payload shorthand (`on Ping(p)`, `on Ping`).
 - Command sugar (`send/request/reply` in handlers).
 - Explicit same-state marker (`-> stay`) with clear semantics.
@@ -395,6 +407,6 @@ These invariants are unchanged by surface ergonomics:
 
 1. Managed handlers remain transactional.
 2. Reply capabilities remain linear.
-3. Default handler precedence remains state-local first, typestate-level
+3. Default handler precedence remains state-local first, type-level
    fallback.
-4. Shape conformance remains minimum protocol checking level for V1.
+4. Shape conformance remains minimum checking level for V1.

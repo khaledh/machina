@@ -53,7 +53,7 @@ Test-to-production ratio: **0.41** (1 line of test per 2.5 lines of production).
 | semck/       | 22    | 6,100  | Move/borrow checking, pattern exhaustiveness |
 | elaborate/   | 18    | 6,300  | Semantic tree construction, plan extraction   |
 | tree/        | 17    | 5,500  | AST definition + semantic tree + visitors     |
-| typestate/   | 11    | 3,500  | Machine/typestate protocol generation         |
+| linear/      | 11    | 3,500  | Machine/linear type generation                |
 | parse/       | 10    | 3,900  | Lexer and recursive descent parser            |
 | resolve/     | 7     | 3,100  | Name resolution, definition table             |
 | services/    | 40+   | 8,600  | IDE analysis engine                           |
@@ -90,12 +90,12 @@ Each stage produces append-only output consumed by later stages:
 data flow between stages is clean and append-only, and the separation between
 checking passes and transformation passes is correct.
 
-**The typestate desugaring strategy is the best design decision in the
-compiler.** By lowering typestates to ordinary structs + methods before resolve
-runs, ~90% of the compiler has zero knowledge of typestates. Direct-mode
-typestates become zero-cost abstractions. Managed-mode machines generate
-dispatch metadata consumed by the C runtime. The compiler-runtime boundary is
-clean.
+**The linear type desugaring strategy is the best design decision in the
+compiler.** By lowering `@linear type` declarations to ordinary structs +
+methods before resolve runs, ~90% of the compiler has zero knowledge of
+linear types. Direct-mode linear types become zero-cost abstractions.
+Managed-mode machines generate dispatch metadata consumed by the C runtime.
+The compiler-runtime boundary is clean.
 
 **No fundamental rethinking of the pipeline is needed.** The opportunities
 identified below are implementation-level simplifications within a sound
@@ -141,7 +141,7 @@ computing six plan types stored in side tables:
 | MatchPlan              | Pattern-matching decision trees            |
 | IndexPlan              | Array/slice dimension info                 |
 | DropPlan               | Scope-based cleanup sequences              |
-| MachineDescriptorPlan  | Typestate dispatch and state/event mapping |
+| MachineDescriptorPlan  | Linear type dispatch and state/event mapping |
 
 ### Analysis
 
@@ -305,11 +305,11 @@ The type checker is 13,176 lines across 42 files, organized into five phases:
 | Collect    | 1,002 | Scan module for type/function definitions       |
 | Constrain  | 2,136 | Walk AST bodies, emit type constraints          |
 | Solve      | 2,379 | Iteratively solve constraints, discharge obligations |
-| Validate   | 1,318 | Protocol shape conformance, reply cap tracking  |
+| Validate   | 1,318 | Shape conformance, reply cap tracking            |
 | Finalize   | 3,361 | Materialize TypeMap, CallSigMap from solver     |
 
-The constraint-based approach is **genuinely necessary** for Machina. Protocol/
-typestate features require tracking constraints across function boundaries,
+The constraint-based approach is **genuinely necessary** for Machina. Linear
+type features require tracking constraints across function boundaries,
 generic instantiation needs deferred resolution, and control flow creates
 branches with different type assumptions.
 
@@ -336,10 +336,9 @@ application, call signature resolution, AND nominal key inference (400 lines of
 structural template matching). The latter should be a separate pass or folded
 into constraint collection.
 
-**Protocol validation coupling.** `validate/protocol.rs` (765 lines) and reply
-capability tracking (382 lines) are language-specific semantic rules, not core
-type checking. They depend on type information but don't contribute to type
-inference.
+**Validation coupling.** Reply capability tracking (382 lines) includes
+language-specific semantic rules, not core type checking. It depends on type
+information but doesn't contribute to type inference.
 
 ### Recommendation
 
@@ -356,7 +355,7 @@ inference.
    into constraint collection. Keep finalize focused on substitution
    application and output materialization.
 
-5. **Move protocol validation out of typecheck** into a standalone analysis
+5. **Move validation passes out of typecheck** into a standalone analysis
    pass alongside `semck/`, aligning with the pattern where semantic checks
    happen post-typing.
 
@@ -613,8 +612,8 @@ Item 1 remains the highest-impact architectural simplification.
 ### What Should Not Change
 
 - **Pipeline stage ordering** — justified, well-ordered, clean data flow.
-- **Typestate desugaring strategy** — the best design decision in the compiler;
-  keeps ~90% of the compiler generic.
+- **Linear type desugaring strategy** — the best design decision in the
+  compiler; keeps ~90% of the compiler generic.
 - **Plan-based elaboration** — good separation between deciding how to lower
   and emitting IR.
 - **Ownership model** — parameter modes (in/inout/out/sink) are the right

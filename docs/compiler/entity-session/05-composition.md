@@ -36,9 +36,7 @@ patterns (undo actions, sagas) can handle failure cases where needed.
 
 ## Relationship to Request/Reply
 
-The retirement of `protocol` does not affect request/reply. Request/reply is a
-runtime mechanism, not a protocol construct — it predates protocols and
-continues to work unchanged. The existing request/reply mechanism with
+Request/reply is a runtime mechanism. The existing request/reply mechanism with
 correlated responses remains available for machine-level `on` handlers. The two
 styles are complementary:
 
@@ -53,37 +51,19 @@ styles are complementary:
 The blocking style is syntactic sugar over the same underlying request/reply
 mechanism. The runtime handles the interleaving.
 
-## Relationship to Existing Constructs
+## Relationship to Other Constructs
 
-### Typestate
+### Usage Tiers
 
-The `@linear type` replaces `typestate`. A linear type without roles or
-triggers is a direct-mode linear type — functionally identical to the former
-typestate construct. The compiler can share state-struct generation, linear
-checking, and state-dispatch logic between direct and hosted modes.
-
-Usage tiers:
-
-- **Direct linear type** (no roles): replaces typestate. Caller owns the value.
-  Method block provides action implementations; calls are direct function calls.
+- **Direct linear type** (no roles): Caller owns the value. Method block
+  provides action implementations; calls are direct function calls.
 - **Hosted linear type** (roles + machine): managed workflow with sessions.
   Method block provides base implementations; machine overrides as needed.
 - **Full linear type** (roles + triggers + machine): complete model with
   system-driven transitions.
 
-### Protocols
-
-Linear type workflows with role-constrained actions replace protocol message
-contracts. A protocol's send/recv sequencing maps to action/trigger sequencing.
-Role permissions replace protocol role conformance. Sequencing guarantees come
-from the state machine rather than channel-oriented syntax.
-
-What protocols provided and how linear types cover it:
-
-- **Message shape contracts** → action signatures.
-- **Role-based send/recv permissions** → role blocks.
-- **Sequencing guarantees** → state machine transitions.
-- **Conformance checking** → compiler validates session usage against workflow.
+The compiler shares state-struct generation, linear checking, and
+state-dispatch logic between direct and hosted modes.
 
 ### `on` Handlers
 

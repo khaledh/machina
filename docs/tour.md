@@ -157,7 +157,7 @@ Imported symbols are used directly (`println`, `Config`, `load_config`).
 
 Machina's primary stateful-modeling surface is `@linear type`.
 
-Without roles or triggers, a linear type behaves like direct typestate:
+Without roles or triggers, a linear type is a direct-mode lifecycle-safe value:
 
 ```mc
 @linear

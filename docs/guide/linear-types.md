@@ -7,7 +7,7 @@ It gives us one surface for two related jobs:
 - direct-mode lifecycle-safe values
 - hosted long-lived workflows driven through machines
 
-Without roles or triggers, a linear type behaves like direct typestate. Add
+Without roles or triggers, a linear type is a direct-mode lifecycle-safe value. Add
 roles and a hosting machine, and the same model becomes a persisted, resumable
 workflow with async events.
 
@@ -220,7 +220,3 @@ from a queue message, webhook, or database row.
 - `../compiler/entity-session/00-overview.md` for the design model
 - `../compiler/entity-session/03-session.md` for hosted session behavior
 
-## Legacy Note
-
-The older `typestate` guide is still available at `typestate.md` as a migration
-note, but `@linear type` is the primary path going forward.
