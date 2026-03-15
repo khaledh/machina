@@ -1,8 +1,7 @@
 //! Shared runtime-intrinsic declaration helpers for machine-backed features.
 //!
-//! Both the retired typestate path and the linear hosted-machine path need to
-//! declare runtime intrinsics into the module before resolve/typecheck. The
-//! specific intrinsic sets differ, but the declaration shape is the same:
+//! Linear hosted machines need to declare runtime intrinsics into the module
+//! before resolve/typecheck. The declaration shape is:
 //! `fn name(u64, u64, ...) -> u64`.
 
 use std::collections::HashSet;

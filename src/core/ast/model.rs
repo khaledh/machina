@@ -211,13 +211,13 @@ pub struct MachineOnHandler {
     pub id: NodeId,
     pub selector_ty: TypeExpr,
     pub params: Vec<Param>,
-    pub provenance: Option<TypestateHandlerProvenance>,
+    pub provenance: Option<OnHandlerProvenance>,
     pub body: Expr,
     pub span: Span,
 }
 
 #[derive(Clone, Debug)]
-pub struct TypestateHandlerProvenance {
+pub struct OnHandlerProvenance {
     pub param: Param,
     /// Optional request-site label from `for RequestType:label(binding)`.
     pub request_site_label: Option<String>,

@@ -79,7 +79,7 @@ pub enum SymbolNs {
     Method,
     /// Named properties (getter/setter surface).
     Property,
-    /// Typestate states.
+    /// Linear type states.
     State,
     /// Generated or source-level machine/event handlers.
     Handler,

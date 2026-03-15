@@ -98,7 +98,7 @@ fn linear_type_unknown_role_action_reports_targeted_error() {
 }
 
 #[test]
-fn linear_resolve_keeps_legacy_protocol_tables_empty() {
+fn linear_resolve_succeeds() {
     let parsed = parsed_context(
         r#"
         @linear

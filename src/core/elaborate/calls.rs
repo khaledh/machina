@@ -95,8 +95,8 @@ impl<'a> Elaborator<'a> {
                 .def_table
                 .lookup_def(def_id)
                 .unwrap_or_else(|| panic!("compiler bug: missing def for call {call_id:?}"));
-            // Typestate managed handles use this compiler-provided helper to
-            // lower arbitrary payload values into `(payload0_ptr, layout_id)`.
+            // Machine handles use this compiler-provided helper to lower
+            // arbitrary payload values into `(payload0_ptr, layout_id)`.
             if def.name == "__mc_machine_payload_pack" {
                 target = CallTarget::Intrinsic(IntrinsicCall::MachinePayloadPack);
             }

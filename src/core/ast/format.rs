@@ -528,7 +528,7 @@ impl fmt::Display for Param {
     }
 }
 
-impl fmt::Display for TypestateHandlerProvenance {
+impl fmt::Display for OnHandlerProvenance {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "{}", self.param)?;
         if let Some(label) = &self.request_site_label {

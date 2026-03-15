@@ -1,7 +1,6 @@
 //! Shared managed-runtime entrypoint rewriting for programs that declare machines.
 //!
-//! This helper is no longer specific to the retired typestate surface: hosted
-//! linear machines also rely on the same auto-bootstrap / auto-drive / shutdown
+//! Hosted linear machines rely on auto-bootstrap / auto-drive / shutdown
 //! wrapper for `main()`.
 
 use crate::core::ast::{

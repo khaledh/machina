@@ -1863,7 +1863,7 @@ fn linear_state_payload_from_fields(
             // Shared fields are preserved across transitions automatically.
             // If the user omits one in a returned state literal, carry it from
             // the current state value (`self` in methods, the instance param in
-            // machine handlers) just like the old typestate lowering.
+            // machine handlers).
             payload.push(build_linear_carried_field_expr(
                 binding_name,
                 &shared_field.name,

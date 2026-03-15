@@ -1,7 +1,7 @@
 //! Elaboration plans for hosted linear machines.
 //!
-//! Unlike the older typestate `MachinePlanMap`, these plans model machines
-//! that host many linear-type instances. They are metadata-only for now: the
+//! These plans model machines that host many linear-type instances. They are
+//! metadata-only for now: the
 //! backend does not consume them yet, but they give us a deterministic bridge
 //! from `LinearIndex` + resolved defs into later lowering/runtime work.
 

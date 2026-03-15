@@ -1948,7 +1948,7 @@ pub fn resolve_with_imports_and_symbols(
     imported_modules: HashMap<String, ImportedModule>,
     imported_symbols: HashMap<String, ImportedSymbol>,
 ) -> Result<ResolveStageOutput, Vec<ResolveError>> {
-    let output = resolve_with_imports_and_symbols_and_typestate_roles_partial(
+    let output = resolve_with_imports_and_symbols_partial(
         ast_context,
         imported_modules,
         imported_symbols,
@@ -1968,18 +1968,6 @@ pub fn resolve_with_imports_partial(
 }
 
 pub fn resolve_with_imports_and_symbols_partial(
-    ast_context: ResolveStageInput,
-    imported_modules: HashMap<String, ImportedModule>,
-    imported_symbols: HashMap<String, ImportedSymbol>,
-) -> ResolveOutput {
-    resolve_with_imports_and_symbols_and_typestate_roles_partial(
-        ast_context,
-        imported_modules,
-        imported_symbols,
-    )
-}
-
-pub fn resolve_with_imports_and_symbols_and_typestate_roles_partial(
     ast_context: ResolveStageInput,
     imported_modules: HashMap<String, ImportedModule>,
     imported_symbols: HashMap<String, ImportedSymbol>,

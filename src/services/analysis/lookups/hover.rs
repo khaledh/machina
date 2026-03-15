@@ -1,7 +1,7 @@
 //! Hover information lookups and formatting helpers.
 //!
 //! The main entry point, [`hover_at_span_in_file`], attempts several strategies
-//! in priority order (call-site → AST node → typestate role → def table →
+//! in priority order (call-site → AST node → linear type role → def table →
 //! syntactic field). When only name-resolution (no types) is available, a
 //! simpler resolve-only path is used instead.
 
@@ -143,15 +143,7 @@ fn try_call_site_hover(
     let sig = typed.call_sigs.get(&call.node_id)?;
     let def_id = sig.def_id?;
     let def = typed.def_table.lookup_def(def_id)?;
-    if !(def.name == query_ident
-        || def
-            .name
-            .strip_prefix("__ts_ctor_")
-            .is_some_and(|owner| owner == query_ident)
-        || def
-            .name
-            .strip_prefix("__ts_spawn_")
-            .is_some_and(|owner| owner == query_ident))
+    if def.name != query_ident
     {
         return None;
     }
@@ -484,7 +476,7 @@ fn update_best(
 /// Higher score wins. Base score from (def_name, type) presence:
 ///   0 = self or no info, 1 = type only, 2 = name only, 3 = name + type.
 /// A +2 bonus is added when the def name matches the identifier under the
-/// cursor (accounting for typestate name demangling).
+/// cursor (accounting for name demangling).
 fn hover_candidate_score(
     def_name: Option<&str>,
     has_type: bool,
@@ -595,8 +587,7 @@ fn fallback_hover_from_def_table(
     None
 }
 
-/// Check if a definition name matches the user's cursor identifier, handling
-/// mangled typestate names (e.g. `__ts_ctor_Conn` matches `Conn`).
+/// Check if a definition name matches the user's cursor identifier.
 fn def_name_matches_query(
     def_name: &str,
     query_ident: &str,
@@ -617,8 +608,8 @@ fn def_name_matches_query(
 }
 
 /// Try to extract a `name: Type` hover from the raw source line when AST-level
-/// type info isn't available (e.g. inside a typestate `fields` block before
-/// type checking completes).
+/// type info isn't available (e.g. inside a `fields` block before type
+/// checking completes).
 fn syntactic_field_hover_display(source: &str, offset: usize, ident: &str) -> Option<String> {
     let bytes = source.as_bytes();
     if offset >= bytes.len() {

@@ -472,15 +472,13 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
     }
 
     /// Resolves a deterministic payload layout-id for boxed machine payload
-    /// transport. Currently unused (legacy typestate path removed); returns
-    /// `None` so callers fall back to `0`.
+    /// transport. Returns `None` so callers fall back to `0`.
     pub(super) fn machine_payload_layout_id(&self, _payload_ty: &Type) -> Option<u64> {
         None
     }
 
-    /// Resolves an event kind for response reply emits. Currently unused
-    /// (legacy typestate path removed); returns `None` so callers fall back
-    /// to `0`.
+    /// Resolves an event kind for response reply emits. Returns `None` so
+    /// callers fall back to `0`.
     pub(super) fn machine_response_event_kind(&self, _response_ty: &Type) -> Option<u64> {
         None
     }

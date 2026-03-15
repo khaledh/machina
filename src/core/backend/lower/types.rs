@@ -217,7 +217,7 @@ impl<'a> TypeLowerer<'a> {
             }
 
             // Capability/correlation wrappers currently lower as plain u64 ids.
-            // The type arguments are compile-time protocol metadata and do not
+            // The type arguments are compile-time metadata and do not
             // change runtime representation.
             Type::Pending { .. } | Type::ReplyCap { .. } => self.lower_type(&Type::uint(64)),
 

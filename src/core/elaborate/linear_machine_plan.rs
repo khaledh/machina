@@ -1,8 +1,8 @@
 //! Build deterministic metadata plans for hosted linear machines.
 //!
-//! These plans sit beside the older typestate machine plans. They are not
-//! consumed by lowering yet; the goal of this pass is to give later runtime
-//! bridging work a stable, deterministic view of hosted machine structure.
+//! These plans are not consumed by lowering yet; the goal of this pass is to
+//! give later runtime bridging work a stable, deterministic view of hosted
+//! machine structure.
 
 use std::collections::{BTreeMap, HashMap};
 

@@ -347,7 +347,7 @@ impl<'a> Parser<'a> {
 
     fn parse_on_handler_provenance(
         &mut self,
-    ) -> Result<TypestateHandlerProvenance, ParseError> {
+    ) -> Result<OnHandlerProvenance, ParseError> {
         let marker = self.mark();
         self.consume_keyword(TK::KwFor)?;
         // Parse provenance request type in a mode that leaves `:label(...)`
@@ -362,7 +362,7 @@ impl<'a> Parser<'a> {
         self.consume(&TK::LParen)?;
         let binding = self.parse_ident()?;
         self.consume(&TK::RParen)?;
-        Ok(TypestateHandlerProvenance {
+        Ok(OnHandlerProvenance {
             param: Param {
                 id: self.id_gen.new_id(),
                 ident: binding,

@@ -1,7 +1,7 @@
 //! Deterministic request-site key encoding.
 //!
-//! Labeled typestate request sites and `for RequestType:label(...)` handlers
-//! must agree on a stable key so runtime dispatch can match correlated replies
+//! Labeled request sites and `for RequestType:label(...)` handlers must agree
+//! on a stable key so runtime dispatch can match correlated replies
 //! deterministically.
 
 /// Hashes a source request-site label to a non-zero 64-bit key.

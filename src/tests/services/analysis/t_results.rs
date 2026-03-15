@@ -120,7 +120,7 @@ fn main() -> u64 { id(1) }
 }
 
 #[test]
-fn linear_result_roundtrip_keeps_legacy_protocol_tables_empty() {
+fn linear_result_roundtrip_succeeds() {
     let resolved = resolve_source(
         r#"
         @linear

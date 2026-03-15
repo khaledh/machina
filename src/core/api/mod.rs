@@ -20,7 +20,7 @@ use crate::core::lexer::{LexError, Lexer, Token};
 use crate::core::parse::{ParseError, Parser};
 use crate::core::resolve::{
     ImportedFacts, ImportedModule, ImportedSymbol, ResolveError, ResolveOutput, attach_def_owners,
-    resolve_with_imports_and_symbols_and_typestate_roles_partial,
+    resolve_with_imports_and_symbols_partial,
 };
 use crate::core::semck::{self, SemCheckError};
 use crate::core::typecheck::{
@@ -248,7 +248,7 @@ pub fn resolve_stage_with_policy(
         &mut input.node_id_gen,
         &mut input.linear_index,
     ));
-    let output = resolve_with_imports_and_symbols_and_typestate_roles_partial(
+    let output = resolve_with_imports_and_symbols_partial(
         input,
         inputs.imported_modules,
         inputs.imported_symbols,

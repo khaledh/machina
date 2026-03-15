@@ -502,9 +502,9 @@ impl<'a> Parser<'a> {
         expr: Expr,
         marker: Marker,
     ) -> Result<Expr, ParseError> {
-        // `foo:label(args...)` sugar is currently reserved for command helpers
-        // (`request:auth(...)`). We encode this as a synthetic callee name so
-        // typestate command desugaring can lower it deterministically before
+        // `foo:label(args...)` sugar is currently reserved for labeled request
+        // sites (`request:auth(...)`). We encode this as a synthetic callee
+        // name so desugaring can lower it deterministically before
         // resolve/typecheck.
         let ExprKind::Var { ident, .. } = &expr.kind else {
             return self.expected_token(TK::LParen);

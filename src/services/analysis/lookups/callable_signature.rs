@@ -3,7 +3,7 @@
 //! This keeps one formatting path for:
 //! - source-style labels (`fn foo<T>(x: T) -> T`)
 //! - source param names/modes/types
-//! - typestate-name demangling
+//! - generated-name demangling
 
 use crate::core::ast::{CallableRef, Module, Param, ParamMode, TypeExpr, TypeExprKind, TypeParam};
 use crate::core::resolve::{DefId, DefKind, DefTable};
