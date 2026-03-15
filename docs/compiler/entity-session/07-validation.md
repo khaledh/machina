@@ -42,6 +42,9 @@
 9. The machine must not declare handlers for undeclared actions/triggers.
 10. `fn new() -> Self` is required.
 11. `emit` values must be valid typed expressions.
+12. `send(target, value)` targets must be `Machine<T>` handles.
+13. `send(target, value)` payloads must match an `on` handler on the
+    destination machine.
 
 ## Session Validation (compile-time)
 
@@ -83,6 +86,10 @@ Machine diagnostics:
 - `MC-MACHINE-HANDLER-TYPE-MISMATCH`
 - `MC-MACHINE-OVERRIDE-ERROR-SUBSET` — override drops error types from base
 - `MC-MACHINE-EXTRA-HANDLER` — handler for undeclared action/trigger
+- `MC-TYPECHECK-LinearMachineSendInvalidTarget` — `send` target is not a
+  `Machine<T>`
+- `MC-TYPECHECK-LinearMachineSendUnknownMessage` — destination machine has no
+  matching `on` handler for the payload type
 
 Session diagnostics:
 - `MC-SESSION-ACTION-NOT-ALLOWED` — includes the session's role in the message

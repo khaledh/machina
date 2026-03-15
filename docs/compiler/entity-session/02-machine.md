@@ -205,7 +205,13 @@ action submit(draft) -> PendingCI {
 ```
 
 The target is a `Machine<T>` handle — typically a machine field. The value is
-any typed value. The target machine receives it via an `on` handler.
+any typed value, but the destination machine must define a matching `on`
+handler for that value's type. In other words, `send(self.ci_service, RunCI {
+... })` is only valid if `CIService` has `on RunCI(...)`.
+
+This is checked statically in the current implementation:
+- the target must be a `Machine<T>` handle
+- the payload type must match an `on` handler on the destination machine
 
 `send` is fire-and-forget: it delivers the value to the target's mailbox and
 returns immediately. There is no reply, no acknowledgment, and no correlation

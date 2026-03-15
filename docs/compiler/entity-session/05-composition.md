@@ -51,6 +51,10 @@ side (`on`) processes events from the mailbox. Correlation between the
 outbound `RunCI` and the inbound `CIResult` is manual — the `pr_id` field
 serves as the correlation key.
 
+`send` is also checked statically:
+- the target must be a `Machine<T>` handle
+- the destination machine must define an `on` handler for the payload type
+
 In the current implementation, machine fields like `ci_service` are wired in
 through `spawn(...)`/`new(...)` and behave as immutable machine config carried
 in the `Machine<T>` handle.
