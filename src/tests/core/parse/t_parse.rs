@@ -2482,26 +2482,6 @@ fn test_parse_named_type_rejects_dot_separator() {
 }
 
 #[test]
-fn test_parse_protocol_is_retired_by_default() {
-    let source = r#"
-        protocol Auth {
-            msg Start;
-            role Client {
-                state Idle {}
-            }
-        }
-    "#;
-
-    let err = parse_module(source).expect_err("protocol should be retired by default");
-    assert!(matches!(
-        err.kind(),
-        ParseErrorKind::FeatureRetired {
-            feature: "typestate"
-        }
-    ));
-}
-
-#[test]
 fn test_parse_compound_assignment_stmt_variant() {
     let source = r#"
         fn test() -> u64 {

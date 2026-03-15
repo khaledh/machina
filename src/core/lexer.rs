@@ -41,10 +41,6 @@ pub enum TokenKind {
     KwType,
     #[display("trait")]
     KwTrait,
-    #[display("protocol")]
-    KwProtocol,
-    #[display("typestate")]
-    KwTypestate,
     #[display("range")]
     KwRange,
     #[display("bounds")]
@@ -557,8 +553,6 @@ impl<'a> Lexer<'a> {
                         "fn" => TokenKind::KwFn,
                         "type" => TokenKind::KwType,
                         "trait" => TokenKind::KwTrait,
-                        "protocol" => TokenKind::KwProtocol,
-                        "typestate" => TokenKind::KwTypestate,
                         "range" => TokenKind::KwRange,
                         "bounds" => TokenKind::KwBounds,
                         "nonzero" => TokenKind::KwNonzero,

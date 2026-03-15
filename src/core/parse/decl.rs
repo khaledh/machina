@@ -13,24 +13,6 @@ impl<'a> Parser<'a> {
                     Err(PEK::AttributeNotAllowed.at(attrs[0].span))
                 }
             }
-            TK::KwProtocol => {
-                if attrs.is_empty() {
-                    self.err_here(PEK::FeatureRetired {
-                        feature: "typestate",
-                    })
-                } else {
-                    Err(PEK::AttributeNotAllowed.at(attrs[0].span))
-                }
-            }
-            TK::KwTypestate => {
-                if attrs.is_empty() {
-                    self.err_here(PEK::FeatureRetired {
-                        feature: "typestate",
-                    })
-                } else {
-                    Err(PEK::AttributeNotAllowed.at(attrs[0].span))
-                }
-            }
             TK::KwFn => self.parse_func(attrs),
             TK::Ident(_) if self.peek().map(|t| &t.kind) == Some(&TK::DoubleColon) => {
                 if attrs.is_empty() {
