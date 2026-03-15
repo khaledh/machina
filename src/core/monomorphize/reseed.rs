@@ -116,7 +116,6 @@ impl Visitor for NodeIdCollector {
         fn visit_trait_method(TraitMethod) => walk_trait_method;
         fn visit_trait_property(TraitProperty) => walk_trait_property;
         fn visit_typestate_def(TypestateDef) => walk_typestate_def;
-        fn visit_typestate_role_impl(TypestateRoleImpl) => walk_typestate_role_impl;
         fn visit_typestate_fields(TypestateFields) => walk_typestate_fields;
         fn visit_typestate_state(TypestateState) => walk_typestate_state;
         fn visit_typestate_on_handler(TypestateOnHandler) => walk_typestate_on_handler;
@@ -305,7 +304,6 @@ impl VisitorMut for NodeIdReseeder<'_> {
         fn visit_trait_method(TraitMethod) => walk_trait_method;
         fn visit_trait_property(TraitProperty) => walk_trait_property;
         fn visit_typestate_def(TypestateDef) => walk_typestate_def;
-        fn visit_typestate_role_impl(TypestateRoleImpl) => walk_typestate_role_impl;
         fn visit_typestate_fields(TypestateFields) => walk_typestate_fields;
         fn visit_typestate_state(TypestateState) => walk_typestate_state;
         fn visit_typestate_on_handler(TypestateOnHandler) => walk_typestate_on_handler;

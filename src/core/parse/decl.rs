@@ -352,12 +352,6 @@ impl<'a> Parser<'a> {
         let marker = self.mark();
         self.consume_keyword(TK::KwTypestate)?;
         let name = self.parse_ident()?;
-        let role_impls = if self.curr_token.kind == TK::Colon {
-            self.consume(&TK::Colon)?;
-            self.parse_typestate_role_impls()?
-        } else {
-            Vec::new()
-        };
         self.consume(&TK::LBrace)?;
 
         let mut items = Vec::new();
@@ -398,25 +392,8 @@ impl<'a> Parser<'a> {
         Ok(TypestateDef {
             id: self.id_gen.new_id(),
             name,
-            role_impls,
             items,
             span: self.close(marker),
-        })
-    }
-
-    fn parse_typestate_role_impls(&mut self) -> Result<Vec<TypestateRoleImpl>, ParseError> {
-        self.parse_list(TK::Comma, TK::LBrace, |parser| {
-            let marker = parser.mark();
-            let mut path = vec![parser.parse_ident()?];
-            while parser.curr_token.kind == TK::DoubleColon {
-                parser.consume(&TK::DoubleColon)?;
-                path.push(parser.parse_ident()?);
-            }
-            Ok(TypestateRoleImpl {
-                id: parser.id_gen.new_id(),
-                path,
-                span: parser.close(marker),
-            })
         })
     }
 

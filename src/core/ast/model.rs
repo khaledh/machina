@@ -238,7 +238,6 @@ pub struct MachineOnHandler {
 pub struct TypestateDef {
     pub id: NodeId,
     pub name: String,
-    pub role_impls: Vec<TypestateRoleImpl>,
     pub items: Vec<TypestateItem>,
     pub span: Span,
 }
@@ -281,13 +280,6 @@ pub enum TypestateStateItem {
     Fields(TypestateFields),
     Method(FuncDef),
     Handler(TypestateOnHandler),
-}
-
-#[derive(Clone, Debug)]
-pub struct TypestateRoleImpl {
-    pub id: NodeId,
-    pub path: Vec<String>,
-    pub span: Span,
 }
 
 #[derive(Clone, Debug)]

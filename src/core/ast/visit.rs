@@ -71,10 +71,6 @@ pub trait Visitor {
         walk_typestate_item(self, item)
     }
 
-    fn visit_typestate_role_impl(&mut self, role_impl: &TypestateRoleImpl) {
-        walk_typestate_role_impl(self, role_impl)
-    }
-
     fn visit_typestate_fields(&mut self, fields: &TypestateFields) {
         walk_typestate_fields(self, fields)
     }
@@ -271,15 +267,10 @@ pub fn walk_trait_property<V: Visitor + ?Sized>(v: &mut V, property: &TraitPrope
 }
 
 pub fn walk_typestate_def<V: Visitor + ?Sized>(v: &mut V, typestate_def: &TypestateDef) {
-    for role_impl in &typestate_def.role_impls {
-        v.visit_typestate_role_impl(role_impl);
-    }
     for item in &typestate_def.items {
         v.visit_typestate_item(item);
     }
 }
-
-pub fn walk_typestate_role_impl<V: Visitor + ?Sized>(_v: &mut V, _role_impl: &TypestateRoleImpl) {}
 
 pub fn walk_typestate_item<V: Visitor + ?Sized>(v: &mut V, item: &TypestateItem) {
     match item {

@@ -2581,7 +2581,7 @@ fn test_parse_protocol_is_retired_by_default() {
 #[test]
 fn test_parse_typestate_role_impl_and_on_handlers() {
     let source = r#"
-        typestate Gateway : Auth::Client {
+        typestate Gateway {
             fn new() -> Ready {
                 Ready
             }
@@ -2613,9 +2613,6 @@ fn test_parse_typestate_role_impl_and_on_handlers() {
         TopLevelItem::TypestateDef(def) => def,
         _ => panic!("expected typestate top-level item"),
     };
-
-    assert_eq!(typestate.role_impls.len(), 1);
-    assert_eq!(typestate.role_impls[0].path, vec!["Auth", "Client"]);
 
     let top_handler = typestate
         .items
@@ -2693,7 +2690,7 @@ fn test_parse_typestate_role_impl_and_on_handlers() {
 #[test]
 fn test_parse_typestate_fields_with_role_binding() {
     let source = r#"
-        typestate Gateway : Auth::Client {
+        typestate Gateway {
             fields {
                 auth: Machine<AuthServer> as Server,
             }

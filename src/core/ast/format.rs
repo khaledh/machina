@@ -98,12 +98,6 @@ impl TypestateDef {
         let pad = indent(level);
         writeln!(f, "{}TypestateDef [{}]", pad, self.id)?;
         writeln!(f, "{}Name: {}", indent(level + 1), self.name)?;
-        if !self.role_impls.is_empty() {
-            writeln!(f, "{}RoleImpls:", indent(level + 1))?;
-            for role_impl in &self.role_impls {
-                role_impl.fmt_with_indent(f, level + 2)?;
-            }
-        }
         writeln!(f, "{}Items:", indent(level + 1))?;
         for item in &self.items {
             item.fmt_with_indent(f, level + 2)?;
@@ -213,18 +207,6 @@ impl TypestateItem {
             TypestateItem::Handler(handler) => handler.fmt_with_indent(f, level),
             TypestateItem::State(state) => state.fmt_with_indent(f, level),
         }
-    }
-}
-
-impl TypestateRoleImpl {
-    fn fmt_with_indent(&self, f: &mut fmt::Formatter<'_>, level: usize) -> fmt::Result {
-        writeln!(
-            f,
-            "{}RoleImpl [{}]: {}",
-            indent(level),
-            self.id,
-            self.path.join("::")
-        )
     }
 }
 
