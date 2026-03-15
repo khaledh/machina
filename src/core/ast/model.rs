@@ -35,22 +35,6 @@ pub struct Require {
 }
 
 impl Module {
-    pub fn has_typestate_defs(&self) -> bool {
-        self.top_level_items
-            .iter()
-            .any(|item| matches!(item, TopLevelItem::TypestateDef(_)))
-    }
-
-    pub fn typestate_defs(&self) -> Vec<&TypestateDef> {
-        self.top_level_items
-            .iter()
-            .filter_map(|item| match item {
-                TopLevelItem::TypestateDef(typestate_def) => Some(typestate_def),
-                _ => None,
-            })
-            .collect()
-    }
-
     pub fn machine_defs(&self) -> Vec<&MachineDef> {
         self.top_level_items
             .iter()
@@ -159,7 +143,6 @@ impl Module {
                 }
                 TopLevelItem::TypeDef(_)
                 | TopLevelItem::TraitDef(_)
-                | TopLevelItem::TypestateDef(_)
                 | TopLevelItem::MachineDef(_) => vec![],
             })
             .collect()
@@ -172,7 +155,6 @@ impl Module {
 pub enum TopLevelItem {
     TraitDef(TraitDef),
     TypeDef(TypeDef),
-    TypestateDef(TypestateDef),
     MachineDef(MachineDef),
     FuncDecl(FuncDecl),       // function declaration
     FuncDef(FuncDef),         // function definition
@@ -230,66 +212,6 @@ pub struct MachineOnHandler {
     pub selector_ty: TypeExpr,
     pub params: Vec<Param>,
     pub provenance: Option<TypestateHandlerProvenance>,
-    pub body: Expr,
-    pub span: Span,
-}
-
-#[derive(Clone, Debug)]
-pub struct TypestateDef {
-    pub id: NodeId,
-    pub name: String,
-    pub items: Vec<TypestateItem>,
-    pub span: Span,
-}
-
-#[derive(Clone, Debug)]
-pub enum TypestateItem {
-    Fields(TypestateFields),
-    Constructor(FuncDef),
-    Handler(TypestateOnHandler),
-    State(TypestateState),
-}
-
-#[derive(Clone, Debug)]
-pub struct TypestateFields {
-    pub id: NodeId,
-    pub fields: Vec<StructDefField>,
-    pub role_bindings: Vec<TypestateFieldRoleBinding>,
-    pub span: Span,
-}
-
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct TypestateFieldRoleBinding {
-    pub id: NodeId,
-    pub field_name: String,
-    pub role_name: String,
-    pub span: Span,
-}
-
-#[derive(Clone, Debug)]
-pub struct TypestateState {
-    pub id: NodeId,
-    pub attrs: Vec<Attribute>,
-    pub name: String,
-    pub items: Vec<TypestateStateItem>,
-    pub span: Span,
-}
-
-#[derive(Clone, Debug)]
-pub enum TypestateStateItem {
-    Fields(TypestateFields),
-    Method(FuncDef),
-    Handler(TypestateOnHandler),
-}
-
-#[derive(Clone, Debug)]
-pub struct TypestateOnHandler {
-    pub id: NodeId,
-    pub selector_ty: TypeExpr,
-    pub params: Vec<Param>,
-    /// Optional request provenance binding from `for RequestType(binding)`.
-    pub provenance: Option<TypestateHandlerProvenance>,
-    pub ret_ty_expr: TypeExpr,
     pub body: Expr,
     pub span: Span,
 }

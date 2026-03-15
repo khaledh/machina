@@ -87,7 +87,6 @@ pub(super) fn collect_node_ids_in_top_level_item(item: &TopLevelItem) -> Vec<Nod
     match item {
         TopLevelItem::TraitDef(trait_def) => collector.visit_trait_def(trait_def),
         TopLevelItem::TypeDef(type_def) => collector.visit_type_def(type_def),
-        TopLevelItem::TypestateDef(typestate_def) => collector.visit_typestate_def(typestate_def),
         TopLevelItem::MachineDef(machine_def) => collector.visit_machine_def(machine_def),
         TopLevelItem::FuncDecl(func_decl) => collector.visit_func_decl(func_decl),
         TopLevelItem::FuncDef(func_def) => collector.visit_func_def(func_def),
@@ -115,10 +114,6 @@ impl Visitor for NodeIdCollector {
         fn visit_trait_def(TraitDef) => walk_trait_def;
         fn visit_trait_method(TraitMethod) => walk_trait_method;
         fn visit_trait_property(TraitProperty) => walk_trait_property;
-        fn visit_typestate_def(TypestateDef) => walk_typestate_def;
-        fn visit_typestate_fields(TypestateFields) => walk_typestate_fields;
-        fn visit_typestate_state(TypestateState) => walk_typestate_state;
-        fn visit_typestate_on_handler(TypestateOnHandler) => walk_typestate_on_handler;
         fn visit_type_def(TypeDef) => walk_type_def;
         fn visit_struct_def_field(StructDefField) => walk_struct_def_field;
         fn visit_enum_def_variant(EnumDefVariant) => walk_enum_def_variant;
@@ -187,7 +182,6 @@ pub(super) fn rewrite_calls_in_item(
         TopLevelItem::ClosureDef(closure_def) => rewriter.visit_closure_def(closure_def),
         TopLevelItem::TypeDef(_)
         | TopLevelItem::TraitDef(_)
-        | TopLevelItem::TypestateDef(_)
         | TopLevelItem::MachineDef(_) => {}
     }
 }
@@ -271,7 +265,6 @@ pub(super) fn reseed_ids_in_item(item: &mut TopLevelItem, node_id_gen: &mut Node
     match item {
         TopLevelItem::TraitDef(trait_def) => reseeder.visit_trait_def(trait_def),
         TopLevelItem::TypeDef(type_def) => reseeder.visit_type_def(type_def),
-        TopLevelItem::TypestateDef(typestate_def) => reseeder.visit_typestate_def(typestate_def),
         TopLevelItem::MachineDef(machine_def) => reseeder.visit_machine_def(machine_def),
         TopLevelItem::FuncDecl(func_decl) => reseeder.visit_func_decl(func_decl),
         TopLevelItem::FuncDef(func_def) => reseeder.visit_func_def(func_def),
@@ -303,10 +296,6 @@ impl VisitorMut for NodeIdReseeder<'_> {
         fn visit_trait_def(TraitDef) => walk_trait_def;
         fn visit_trait_method(TraitMethod) => walk_trait_method;
         fn visit_trait_property(TraitProperty) => walk_trait_property;
-        fn visit_typestate_def(TypestateDef) => walk_typestate_def;
-        fn visit_typestate_fields(TypestateFields) => walk_typestate_fields;
-        fn visit_typestate_state(TypestateState) => walk_typestate_state;
-        fn visit_typestate_on_handler(TypestateOnHandler) => walk_typestate_on_handler;
         fn visit_type_def(TypeDef) => walk_type_def;
         fn visit_struct_def_field(StructDefField) => walk_struct_def_field;
         fn visit_enum_def_variant(EnumDefVariant) => walk_enum_def_variant;

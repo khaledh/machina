@@ -43,10 +43,6 @@ pub trait Visitor {
         walk_trait_property(self, property)
     }
 
-    fn visit_typestate_def(&mut self, typestate_def: &TypestateDef) {
-        walk_typestate_def(self, typestate_def)
-    }
-
     fn visit_machine_def(&mut self, machine_def: &MachineDef) {
         walk_machine_def(self, machine_def)
     }
@@ -65,26 +61,6 @@ pub trait Visitor {
 
     fn visit_machine_on_handler(&mut self, handler: &MachineOnHandler) {
         walk_machine_on_handler(self, handler)
-    }
-
-    fn visit_typestate_item(&mut self, item: &TypestateItem) {
-        walk_typestate_item(self, item)
-    }
-
-    fn visit_typestate_fields(&mut self, fields: &TypestateFields) {
-        walk_typestate_fields(self, fields)
-    }
-
-    fn visit_typestate_state(&mut self, state: &TypestateState) {
-        walk_typestate_state(self, state)
-    }
-
-    fn visit_typestate_state_item(&mut self, item: &TypestateStateItem) {
-        walk_typestate_state_item(self, item)
-    }
-
-    fn visit_typestate_on_handler(&mut self, handler: &TypestateOnHandler) {
-        walk_typestate_on_handler(self, handler)
     }
 
     fn visit_struct_def_fields(&mut self, fields: &[StructDefField]) {
@@ -237,7 +213,6 @@ pub fn walk_module<V: Visitor + ?Sized>(v: &mut V, module: &Module) {
         match item {
             TopLevelItem::TraitDef(trait_def) => v.visit_trait_def(trait_def),
             TopLevelItem::TypeDef(type_def) => v.visit_type_def(type_def),
-            TopLevelItem::TypestateDef(typestate_def) => v.visit_typestate_def(typestate_def),
             TopLevelItem::MachineDef(machine_def) => v.visit_machine_def(machine_def),
             TopLevelItem::FuncDecl(func_decl) => v.visit_func_decl(func_decl),
             TopLevelItem::FuncDef(func_def) => v.visit_func_def(func_def),
@@ -264,53 +239,6 @@ pub fn walk_trait_method<V: Visitor + ?Sized>(v: &mut V, method: &TraitMethod) {
 
 pub fn walk_trait_property<V: Visitor + ?Sized>(v: &mut V, property: &TraitProperty) {
     v.visit_type_expr(&property.ty);
-}
-
-pub fn walk_typestate_def<V: Visitor + ?Sized>(v: &mut V, typestate_def: &TypestateDef) {
-    for item in &typestate_def.items {
-        v.visit_typestate_item(item);
-    }
-}
-
-pub fn walk_typestate_item<V: Visitor + ?Sized>(v: &mut V, item: &TypestateItem) {
-    match item {
-        TypestateItem::Fields(fields) => v.visit_typestate_fields(fields),
-        TypestateItem::Constructor(constructor) => v.visit_func_def(constructor),
-        TypestateItem::Handler(handler) => v.visit_typestate_on_handler(handler),
-        TypestateItem::State(state) => v.visit_typestate_state(state),
-    }
-}
-
-pub fn walk_typestate_fields<V: Visitor + ?Sized>(v: &mut V, fields: &TypestateFields) {
-    for field in &fields.fields {
-        v.visit_struct_def_field(field);
-    }
-}
-
-pub fn walk_typestate_state<V: Visitor + ?Sized>(v: &mut V, state: &TypestateState) {
-    for item in &state.items {
-        v.visit_typestate_state_item(item);
-    }
-}
-
-pub fn walk_typestate_state_item<V: Visitor + ?Sized>(v: &mut V, item: &TypestateStateItem) {
-    match item {
-        TypestateStateItem::Fields(fields) => v.visit_typestate_fields(fields),
-        TypestateStateItem::Method(method) => v.visit_func_def(method),
-        TypestateStateItem::Handler(handler) => v.visit_typestate_on_handler(handler),
-    }
-}
-
-pub fn walk_typestate_on_handler<V: Visitor + ?Sized>(v: &mut V, handler: &TypestateOnHandler) {
-    v.visit_type_expr(&handler.selector_ty);
-    for param in &handler.params {
-        v.visit_param(param);
-    }
-    if let Some(provenance) = &handler.provenance {
-        v.visit_param(&provenance.param);
-    }
-    v.visit_type_expr(&handler.ret_ty_expr);
-    v.visit_expr(&handler.body);
 }
 
 pub fn walk_machine_def<V: Visitor + ?Sized>(v: &mut V, machine_def: &MachineDef) {

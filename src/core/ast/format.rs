@@ -30,7 +30,6 @@ impl fmt::Display for Module {
             match item {
                 TopLevelItem::TraitDef(trait_def) => trait_def.fmt_with_indent(f, 0)?,
                 TopLevelItem::TypeDef(type_def) => type_def.fmt_with_indent(f, 0)?,
-                TopLevelItem::TypestateDef(typestate_def) => typestate_def.fmt_with_indent(f, 0)?,
                 TopLevelItem::MachineDef(machine_def) => machine_def.fmt_with_indent(f, 0)?,
                 TopLevelItem::FuncDecl(func_decl) => func_decl.fmt_with_indent(f, 0)?,
                 TopLevelItem::FuncDef(func_def) => func_def.fmt_with_indent(f, 0)?,
@@ -90,19 +89,6 @@ impl TraitProperty {
             self.ty,
             accessors.join(", ")
         )
-    }
-}
-
-impl TypestateDef {
-    fn fmt_with_indent(&self, f: &mut fmt::Formatter<'_>, level: usize) -> fmt::Result {
-        let pad = indent(level);
-        writeln!(f, "{}TypestateDef [{}]", pad, self.id)?;
-        writeln!(f, "{}Name: {}", indent(level + 1), self.name)?;
-        writeln!(f, "{}Items:", indent(level + 1))?;
-        for item in &self.items {
-            item.fmt_with_indent(f, level + 2)?;
-        }
-        Ok(())
     }
 }
 
@@ -193,85 +179,6 @@ impl MachineOnHandler {
             writeln!(f, "{}Provenance: {}", indent(level + 1), provenance.param)?;
         }
         self.body.fmt_with_indent(f, level + 1)
-    }
-}
-
-impl TypestateItem {
-    fn fmt_with_indent(&self, f: &mut fmt::Formatter<'_>, level: usize) -> fmt::Result {
-        match self {
-            TypestateItem::Fields(fields) => fields.fmt_with_indent(f, level),
-            TypestateItem::Constructor(constructor) => {
-                writeln!(f, "{}Constructor:", indent(level))?;
-                constructor.fmt_with_indent(f, level + 1)
-            }
-            TypestateItem::Handler(handler) => handler.fmt_with_indent(f, level),
-            TypestateItem::State(state) => state.fmt_with_indent(f, level),
-        }
-    }
-}
-
-impl TypestateFields {
-    fn fmt_with_indent(&self, f: &mut fmt::Formatter<'_>, level: usize) -> fmt::Result {
-        writeln!(f, "{}Fields [{}]:", indent(level), self.id)?;
-        for field in &self.fields {
-            field.fmt_with_indent(f, level + 1)?;
-        }
-        if !self.role_bindings.is_empty() {
-            writeln!(f, "{}RoleBindings:", indent(level + 1))?;
-            for binding in &self.role_bindings {
-                writeln!(
-                    f,
-                    "{}{} as {} [{}]",
-                    indent(level + 2),
-                    binding.field_name,
-                    binding.role_name,
-                    binding.id
-                )?;
-            }
-        }
-        Ok(())
-    }
-}
-
-impl TypestateState {
-    fn fmt_with_indent(&self, f: &mut fmt::Formatter<'_>, level: usize) -> fmt::Result {
-        writeln!(f, "{}State {} [{}]:", indent(level), self.name, self.id)?;
-        for item in &self.items {
-            item.fmt_with_indent(f, level + 1)?;
-        }
-        Ok(())
-    }
-}
-
-impl TypestateStateItem {
-    fn fmt_with_indent(&self, f: &mut fmt::Formatter<'_>, level: usize) -> fmt::Result {
-        match self {
-            TypestateStateItem::Fields(fields) => fields.fmt_with_indent(f, level),
-            TypestateStateItem::Method(method) => method.fmt_with_indent(f, level),
-            TypestateStateItem::Handler(handler) => handler.fmt_with_indent(f, level),
-        }
-    }
-}
-
-impl TypestateOnHandler {
-    fn fmt_with_indent(&self, f: &mut fmt::Formatter<'_>, level: usize) -> fmt::Result {
-        let pad = indent(level);
-        writeln!(f, "{}OnHandler [{}]", pad, self.id)?;
-        writeln!(f, "{}Selector: {}", indent(level + 1), self.selector_ty)?;
-        if self.params.is_empty() {
-            writeln!(f, "{}Params: <none>", indent(level + 1))?;
-        } else {
-            writeln!(f, "{}Params:", indent(level + 1))?;
-            for param in &self.params {
-                writeln!(f, "{}{}", indent(level + 2), param)?;
-            }
-        }
-        if let Some(provenance) = &self.provenance {
-            writeln!(f, "{}Provenance: {}", indent(level + 1), provenance)?;
-        }
-        writeln!(f, "{}Return: {}", indent(level + 1), self.ret_ty_expr)?;
-        writeln!(f, "{}Body:", indent(level + 1))?;
-        self.body.fmt_with_indent(f, level + 2)
     }
 }
 

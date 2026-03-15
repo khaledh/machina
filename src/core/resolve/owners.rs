@@ -34,9 +34,6 @@ pub fn attach_def_owners(
         match item {
             TopLevelItem::TraitDef(trait_def) => collector.visit_trait_def(trait_def),
             TopLevelItem::TypeDef(type_def) => collector.visit_type_def(type_def),
-            TopLevelItem::TypestateDef(typestate_def) => {
-                collector.visit_typestate_def(typestate_def)
-            }
             TopLevelItem::MachineDef(machine_def) => collector.visit_machine_def(machine_def),
             TopLevelItem::FuncDecl(func_decl) => collector.visit_func_decl(func_decl),
             TopLevelItem::FuncDef(func_def) => collector.visit_func_def(func_def),
@@ -52,7 +49,6 @@ fn top_level_item_id(item: &TopLevelItem) -> NodeId {
     match item {
         TopLevelItem::TraitDef(trait_def) => trait_def.id,
         TopLevelItem::TypeDef(type_def) => type_def.id,
-        TopLevelItem::TypestateDef(typestate_def) => typestate_def.id,
         TopLevelItem::MachineDef(machine_def) => machine_def.id,
         TopLevelItem::FuncDecl(func_decl) => func_decl.id,
         TopLevelItem::FuncDef(func_def) => func_def.id,
@@ -102,10 +98,6 @@ impl Visitor for DefOwnerCollector<'_> {
         visit::walk_type_def(self, type_def);
     }
 
-    fn visit_typestate_def(&mut self, typestate_def: &TypestateDef) {
-        self.record_node(typestate_def.id);
-        visit::walk_typestate_def(self, typestate_def);
-    }
 
     fn visit_func_decl(&mut self, func_decl: &FuncDecl) {
         self.record_node(func_decl.id);

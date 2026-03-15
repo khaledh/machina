@@ -193,9 +193,6 @@ impl<'a> Elaborator<'a> {
         match item {
             TopLevelItem::TraitDef(def) => Some(TopLevelItem::TraitDef(def.clone())),
             TopLevelItem::TypeDef(def) => Some(TopLevelItem::TypeDef(def.clone())),
-            TopLevelItem::TypestateDef(_) => {
-                panic!("compiler bug: typestate defs should be desugared before elaborate")
-            }
             TopLevelItem::MachineDef(_) => None,
             TopLevelItem::FuncDecl(decl) => Some(TopLevelItem::FuncDecl(FuncDecl {
                 id: decl.id,

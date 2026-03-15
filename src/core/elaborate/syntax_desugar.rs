@@ -137,7 +137,6 @@ impl<'a, 'b> SyntaxDesugarCtx<'a, 'b> {
             TopLevelItem::TraitDef(_)
             | TopLevelItem::TypeDef(_)
             | TopLevelItem::FuncDecl(_)
-            | TopLevelItem::TypestateDef(_)
             | TopLevelItem::MachineDef(_)
             | TopLevelItem::ClosureDef(_) => {}
         }

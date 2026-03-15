@@ -25,9 +25,6 @@ pub(super) fn global_scope(resolved: &ResolvedContext) -> HashMap<String, Comple
                     }
                 }
             }
-            TopLevelItem::TypestateDef(typestate_def) => {
-                allowed_nodes.insert(typestate_def.id);
-            }
             TopLevelItem::MachineDef(machine_def) => {
                 allowed_nodes.insert(machine_def.id);
             }
