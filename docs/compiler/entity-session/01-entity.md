@@ -390,14 +390,16 @@ Events and triggers are two perspectives on the same concept:
 - A **trigger** is the role an event type plays in a linear type's transition
   table.
 
-One machine emits an event; another machine receives it. If the receiving
+One machine may produce an event indirectly via `emit`, or send one directly
+to another machine via `send(target, value)`. If the receiving
 machine's hosted linear type declares that event type as a trigger, the machine
 can deliver it to an instance to cause a state transition.
 
 This means there is no separate `events { }` block. The `triggers { }` block
-already declares which event types drive state transitions. Machines emit
-whatever types they need via `emit`; the `triggers` block on the receiving side
-determines which of those types cause transitions.
+already declares which event types drive state transitions. Machines either
+`emit` values for undirected runtime collection or `send` values directly to
+another machine; the `triggers` block on the receiving side determines which
+of those event types cause transitions.
 
 In V2, channels route emitted values between machines (see
 [04-channel.md](04-channel.md)). The `emit` primitive and channel routing work

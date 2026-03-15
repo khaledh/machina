@@ -109,7 +109,7 @@ language surface than reviving the old protocol feature.
 ### Replies as Future Events
 
 To avoid deadlock, replies should be modeled as **asynchronous events**, not
-synchronous blocking returns. Machine A emits `AuthCheck`; sometime later,
+synchronous blocking returns. Machine A sends `AuthCheck`; sometime later,
 Machine A's `on` handler receives `AuthApproved` or `AuthDenied`.
 
 This keeps the mailbox-serialized execution model clean but introduces the
@@ -160,6 +160,10 @@ See [11-auth-check-v1.md](11-auth-check-v1.md) for the full worked example.
 - What errors are possible that the compiler cannot catch?
 
 The answers will determine what V2 correlation support should look like.
+
+The next narrow design step is to define the interaction-handle concept before
+tackling the rest of the interaction model. See
+[12-interaction-handle.md](12-interaction-handle.md).
 
 ## Summary
 
