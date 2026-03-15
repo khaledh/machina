@@ -1,55 +1,68 @@
 # Cross-Machine Composition
 
-Action overrides and trigger handlers may need to coordinate with other machines
-— checking state in another service, creating instances in another service, etc.
-Sessions are the composition mechanism: the same blocking session calls used by
-external clients work inside handlers.
+## V1: Event-Based Coordination
+
+In V1, inter-machine communication uses two primitives:
+
+- **`emit`** — a handler stages a typed value for the runtime to collect.
+  The runtime decides how to route it (see [02-machine.md](02-machine.md)
+  for `emit` semantics). Routing policy is a runtime concern in V1;
+  channels formalize it in V2.
+- **`on` handlers** — a machine receives external events from its mailbox.
+  Messages arrive from other machines, external systems, timers, etc.
+  The `on` handler decides how to process them, including routing to
+  instances as triggers via `self.deliver()`.
+
+There are no blocking cross-machine calls and no first-class request/reply
+semantics.
+
+### Example: CI Integration
+
+The PR service emits a value when a PR is submitted. The runtime routes it
+(how is a deployment concern in V1). Later, a CI result arrives at the
+machine's mailbox as an external event:
 
 ```mc
-action add_reviewer(draft, reviewer: UserId) {
-    // Block on a call to another machine's hosted type
-    let session = self.user_service.resume(User as Admin, reviewer)?;
-    match session {
-        active: Active => {
-            draft.reviewers.push(reviewer);
-            draft
-        }
-        _ => error(ServiceError::ReviewerInactive)
+// PRService action override — emit signals CI should run
+action submit(draft) -> PendingCI {
+    emit RunCI { pr_id: draft.id };   // runtime collects for routing
+    draft.submit()
+}
+
+// PRService on handler — receives CI result from mailbox
+on CIResult(result) {
+    if result.success {
+        self.deliver(result.pr_id, CIPassed { commit_sha: result.sha });
+    } else {
+        self.deliver(result.pr_id, CIFailed { reason: result.reason });
     }
 }
 ```
 
-The handler blocks on `resume`, the runtime yields this machine's dispatch,
-processes the other machine's handler, returns the result, and resumes the
-original handler. Same blocking semantics as client-side session calls.
+The outbound side (`emit`) and inbound side (`on`) are decoupled — the
+machine does not hold a handle to the CI service or specify a destination.
+The runtime infrastructure handles delivery in both directions.
 
-## Transaction Boundaries
+This model covers:
+- Notifications and auditing
+- Asynchronous background work
+- External system integration (CI, auth, payments)
+- "Tell, don't ask" coordination
 
-Cross-machine session calls involve separate transactions. If the action handler
-blocks on a call to machine B, machine B commits its transaction independently.
-If the outer handler on machine A subsequently fails, machine B's commit is not
-rolled back. This is the standard behavior for any distributed system — no
-distributed transactions.
+## What V1 Does Not Cover
 
-For most use cases (human-scale workflows), this is acceptable. Compensation
-patterns (undo actions, sagas) can handle failure cases where needed.
+V1 does not support:
+- Blocking cross-machine session calls inside handlers
+- First-class request/reply contracts between machines
+- Typed correlation between outgoing events and incoming replies
+- Protocol-level sequencing across machine boundaries
+- Guaranteed routing policy (V2 channels address this)
 
-## Relationship to Request/Reply
-
-Request/reply is a runtime mechanism. The existing request/reply mechanism with
-correlated responses remains available for machine-level `on` handlers. The two
-styles are complementary:
-
-- **Blocking session calls** — sequential, inline, used in action overrides
-  for cross-machine coordination. The cross-machine interaction is invisible
-  to the type's state graph.
-- **Request/reply with `on` handlers** — asynchronous, message-driven, used at
-  the machine level for external system integration. Replies arrive as separate
-  messages in the machine's mailbox, routed to instances as triggers via
-  `self.deliver(key, event)`.
-
-The blocking style is syntactic sugar over the same underlying request/reply
-mechanism. The runtime handles the interleaving.
+These are intentionally out of scope. The mechanical problems they introduce
+(deadlock under mailbox serialization, cross-machine atomicity, session
+ownership inside machines) require a carefully designed abstraction. See
+[10-inter-machine-communication.md](10-inter-machine-communication.md) for
+the full analysis and V2 direction.
 
 ## Relationship to Other Constructs
 
@@ -67,8 +80,9 @@ state-dispatch logic between direct and hosted modes.
 
 ### `on` Handlers
 
-`on` handlers remain as machine-level message handlers. They process messages
-from the machine's general mailbox.
+`on` handlers are machine-level message handlers. They process events from
+the machine's general mailbox — external events from other machines, timers,
+administrative commands, etc.
 
 `action` and `trigger` handlers are instance-level handlers that operate on
 specific instances.

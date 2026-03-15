@@ -13,17 +13,18 @@ This design has been split into focused documents under
 **Extensions (V2):**
 
 5. [Channel](04-channel.md) — Channel declaration, event flow, pull/push consumption, subscriptions
+6. [Inter-Machine Communication](10-inter-machine-communication.md) — V1 boundary, interaction semantics gap, V2 direction
 
 **Cross-cutting:**
 
-6. [Composition](05-composition.md) — Cross-machine composition, transaction boundaries, relationship to existing constructs
-7. [Internals](06-internals.md) — Instance storage, session-machine interaction, lowering, runtime impact
-8. [Validation](07-validation.md) — Validation rules, diagnostics
+7. [Composition](05-composition.md) — Cross-machine composition, transaction boundaries, relationship to existing constructs
+8. [Internals](06-internals.md) — Instance storage, session-machine interaction, lowering, runtime impact
+9. [Validation](07-validation.md) — Validation rules, diagnostics
 
 **Reference:**
 
-9. [Examples](08-examples.md) — Core example (V1) and channel extension example (V2)
-10. [Open Questions](09-open-questions.md) — Unsettled design decisions
+10. [Examples](08-examples.md) — Core example (V1) and channel extension example (V2)
+11. [Open Questions](09-open-questions.md) — Unsettled design decisions
 
 This document set supersedes `machine-session-design.md` and
 `machine-session-server-design.md`.

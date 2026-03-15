@@ -119,17 +119,13 @@ PullRequest :: {
 
 ```mc
 machine PRService hosts PullRequest(key: id) {
-    fields {
-        ci_service: Machine<CIService>,
-    }
-
-    fn new(ci_service: Machine<CIService>) -> Self {
-        Self { ci_service: ci_service }
+    fn new() -> Self {
+        Self {}
     }
 
     // Action override — only for actions needing infrastructure
     action submit(draft) -> PendingCI {
-        request(self.ci_service, RunCI { pr_id: draft.id });
+        emit RunCI { pr_id: draft.id };   // runtime collects for routing
         draft.submit()   // calls base implementation
     }
 
@@ -140,12 +136,12 @@ machine PRService hosts PullRequest(key: id) {
     trigger CIPassed(pending) { Review {} }
     trigger CIFailed(pending) { Draft {} }
 
-    // Machine-level handler — bridges external message to trigger
-    on CIResult(result) for RunCI(req) {
+    // Machine-level handler — bridges external event to trigger
+    on CIResult(result) {
         if result.success {
-            self.deliver(req.pr_id, CIPassed { commit_sha: result.sha });
+            self.deliver(result.pr_id, CIPassed { commit_sha: result.sha });
         } else {
-            self.deliver(req.pr_id, CIFailed { reason: result.reason });
+            self.deliver(result.pr_id, CIFailed { reason: result.reason });
         }
     }
 }
@@ -155,7 +151,7 @@ machine PRService hosts PullRequest(key: id) {
 
 ```mc
 fn main() -> () | MachineError | SessionError {
-    let service = PRService::spawn(ci_service)?;
+    let service = PRService::spawn()?;
 
     let author = service.create(PullRequest as Author)?;
     // author: PullRequest::Draft

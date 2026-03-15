@@ -9,18 +9,14 @@ type CIPassed = { commit_sha: string }
 type CIFailed = { reason: string }
 
 machine PRService hosts PullRequest(key: id) {
-    fields {
-        ci_service: Machine<CIService>,
-    }
-
-    fn new(ci_service: Machine<CIService>) -> Self {
-        Self { ci_service: ci_service }
+    fn new() -> Self {
+        Self {}
     }
 
     // --- Action override (only for actions needing infrastructure) ---
 
     action submit(draft) -> PendingCI {
-        request(self.ci_service, RunCI { pr_id: draft.id });
+        emit RunCI { pr_id: draft.id };   // runtime collects for routing
         draft.submit()   // calls base implementation from method block
     }
 
@@ -40,12 +36,13 @@ machine PRService hosts PullRequest(key: id) {
     }
 
     // --- Machine-level handlers ---
+    // on handlers receive external events from the machine's mailbox.
 
-    on CIResult(result) for RunCI(req) {
+    on CIResult(result) {
         if result.success {
-            self.deliver(req.pr_id, CIPassed { commit_sha: result.sha });
+            self.deliver(result.pr_id, CIPassed { commit_sha: result.sha });
         } else {
-            self.deliver(req.pr_id, CIFailed { reason: result.reason });
+            self.deliver(result.pr_id, CIFailed { reason: result.reason });
         }
     }
 }
@@ -65,8 +62,8 @@ directly.
 ## `fields { ... }`
 
 Machine-level fields, persisted across all dispatches. These are the machine's
-own state, not part of any instance. Machine fields typically hold handles to
-other machines, database connections, configuration, etc.
+own state, not part of any instance. Machine fields typically hold
+configuration, counters, database connections, etc.
 
 ## `fn new() -> Self`
 
@@ -86,7 +83,7 @@ infrastructure work and then calls the base implementation:
 
 ```mc
 action submit(draft) -> PendingCI {
-    request(self.ci_service, RunCI { pr_id: draft.id });
+    emit RunCI { pr_id: draft.id };   // runtime collects for routing
     draft.submit()   // delegates to base implementation
 }
 ```
@@ -134,7 +131,7 @@ Inside the handler:
 - The first parameter provides access to the type's fields (e.g.,
   `draft.reviewers`, `draft.id`) and state-specific fields (payloads).
 - `self` refers to the machine, providing access to machine fields (e.g.,
-  `self.ci_service`) and machine operations (e.g., `self.deliver()`).
+  `self.config`) and machine operations (e.g., `self.deliver()`).
 
 This separation is clear and unambiguous: the instance parameter is the domain
 object; `self` is the infrastructure.
@@ -163,17 +160,20 @@ action comment(pr, text: string) {
 The runtime collects emitted values during handler execution.
 
 In V1, `emit` is a fire-and-forget side effect: emitted values are collected
-by the runtime and made available to the machine for logging, auditing, or
-internal use (e.g., writing to a log, updating a counter). They do not affect
-control flow or the session reply — the only thing that determines the next
-state is the handler's return expression. In V2, emitted values are
-additionally delivered to co-hosted channels (see
+by the runtime during handler execution. They do not affect control flow or
+the session reply — the only thing that determines the next state is the
+handler's return expression.
+
+How emitted values are routed is a runtime concern. The runtime may forward
+them to other machines' mailboxes, log them, or discard them — the language
+does not specify routing policy in V1. In V2, channels formalize this: emitted
+values are delivered to co-hosted channels with explicit routing (see
 [04-channel.md](04-channel.md)).
 
 Emitted values are ordinary types — the same types that can appear as triggers
 in another linear type's `triggers` block. This is the event/trigger
-unification: one machine emits an event; another machine receives it and
-delivers it as a trigger.
+unification: one machine emits an event; another machine's `on` handler may
+receive it and deliver it as a trigger via `self.deliver()`.
 
 A handler can emit zero or many values. The final expression is the new state.
 
@@ -194,8 +194,8 @@ co-hosted channels.
 ## `on` Handlers
 
 `on` handlers are machine-level handlers. They process messages from the
-machine's general mailbox — lifecycle messages, correlated replies from other
-machines, timers, administrative commands, etc.
+machine's general mailbox — external events from other machines, timers,
+administrative commands, etc.
 
 `on` handlers operate on the machine as a whole, not on a specific instance.
 They can route external events to instances as triggers using
@@ -221,8 +221,8 @@ machine's concern.
 ## `self.deliver(key, event)`
 
 Routes an event to a specific instance by identity key. The machine's `on`
-handler bridges between the mailbox world (correlated replies, external
-messages) and the type's state graph. The event must be a type declared in the
+handler bridges between the mailbox world (external events, timers, etc.)
+and the type's state graph. The event must be a type declared in the
 hosted linear type's `triggers` block.
 
 `self.deliver()` returns a typed result indicating what happened:
@@ -244,9 +244,9 @@ doesn't apply to the instance's current state. Both callers get a typed
 outcome and can react accordingly.
 
 ```mc
-on CIResult(result) for RunCI(req) {
+on CIResult(result) {
     if result.success {
-        match self.deliver(req.pr_id, CIPassed { commit_sha: result.sha }) {
+        match self.deliver(result.pr_id, CIPassed { commit_sha: result.sha }) {
             _: Delivered => {}
             _: InstanceNotFound => {
                 // PR was removed before CI completed
@@ -256,7 +256,7 @@ on CIResult(result) for RunCI(req) {
             }
         }
     } else {
-        self.deliver(req.pr_id, CIFailed { reason: result.reason });
+        self.deliver(result.pr_id, CIFailed { reason: result.reason });
     }
 }
 ```
@@ -265,11 +265,11 @@ When the `on` handler doesn't need to react to delivery failure, the result
 can be ignored:
 
 ```mc
-on CIResult(result) for RunCI(req) {
+on CIResult(result) {
     if result.success {
-        self.deliver(req.pr_id, CIPassed { commit_sha: result.sha });
+        self.deliver(result.pr_id, CIPassed { commit_sha: result.sha });
     } else {
-        self.deliver(req.pr_id, CIFailed { reason: result.reason });
+        self.deliver(result.pr_id, CIFailed { reason: result.reason });
     }
 }
 ```

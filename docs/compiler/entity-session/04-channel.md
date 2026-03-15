@@ -57,7 +57,7 @@ action comment(review, text: string) {
 }
 
 action submit(draft) {
-    request(self.ci_service, RunCI { pr_id: draft.id });
+    emit RunCI { pr_id: draft.id };
     PendingCI {}
     // runtime auto-emits PullRequest::PendingCI transition notification
 }

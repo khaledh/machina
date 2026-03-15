@@ -12,7 +12,7 @@ For in-memory hosting, the machine's state word holds both:
 Machine State (heap object):
 +--------------------------+
 | machine fields           |
-|   ci_service: Machine    |
+|   config: Config         |
 +--------------------------+
 | instance table           |
 |   id=1 -> Draft { }      |

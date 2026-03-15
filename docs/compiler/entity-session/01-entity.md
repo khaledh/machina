@@ -278,8 +278,8 @@ by one machine and received by another — the sender emits an event; the
 receiver handles it as a trigger.
 
 Triggers are delivered by the machine to instances via `self.deliver(key, event)`,
-caused by external systems, correlated replies from other machines, timers, or
-other asynchronous sources.
+caused by external events from other machines, timers, or other asynchronous
+sources.
 
 The distinction between actions and triggers is in how they arrive: actions are
 invoked by session holders; triggers are delivered by the machine. Both undergo

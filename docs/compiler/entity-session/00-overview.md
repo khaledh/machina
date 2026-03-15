@@ -105,7 +105,7 @@ PullRequest :: {
 machine PRService hosts PullRequest(key: id) {
     // Override only the action that needs infrastructure
     action submit(draft) -> PendingCI {
-        request(self.ci_service, RunCI { pr_id: draft.id });
+        emit RunCI { pr_id: draft.id };   // runtime collects for routing
         draft.submit()   // calls base implementation
     }
 
@@ -124,7 +124,7 @@ role. It gives clients the same state progression as direct mode, but over
 a hosted machine with blocking, persistence, and concurrency:
 
 ```mc
-let service = PRService::spawn(ci_service)?;
+let service = PRService::spawn()?;
 let author = service.create(PullRequest as Author)?;
 // author: PullRequest::Draft
 
@@ -363,9 +363,9 @@ Managed machines are runtime-owned actors. Once a machine is spawned, outside
 code holds a `Machine<T>` handle, not a value whose type reflects the machine's
 current state.
 
-The compiler can check payload shapes, role conformance, request/reply
-contracts, and machine handle types. But it cannot generally check whether a
-specific message is valid for the machine's **current runtime state**.
+The compiler can check payload shapes, role conformance, and machine handle
+types. But it cannot generally check whether a specific message is valid for
+the machine's **current runtime state**.
 
 This is fundamentally different from direct-mode linear types, where the caller owns a
 concrete state value and the type system knows exactly which state it is
@@ -475,7 +475,8 @@ The V1 core is **`@linear type` + machine + session**.
 - `machine ... hosts Type(key: field)` with action overrides, `trigger`, and
   `on` handlers.
 - `self.deliver(key, event)` for routing events as triggers to instances.
-- Cross-machine composition via blocking session calls in action handlers.
+- Inter-machine communication via fire-and-forget events (`emit` + `on`
+  handlers). See [10-inter-machine-communication.md](10-inter-machine-communication.md).
 - Machine-owned persistence (API shape open, architectural role fixed).
 - Identity key designated at machine hosting site.
 
@@ -501,6 +502,13 @@ The V1 core is **`@linear type` + machine + session**.
 - Iterator/pipe integration for channel readers.
 - `self.listen()` pull-to-push bridge for machine-to-machine subscriptions.
 - `subscribes` declarative subscription sugar.
+
+### Inter-machine interaction semantics
+
+- Interaction lifecycles modeled as linear types (conversations as
+  first-class stateful entities).
+- Async request/reply with typed correlation.
+- See [10-inter-machine-communication.md](10-inter-machine-communication.md).
 
 ### Extended features
 
