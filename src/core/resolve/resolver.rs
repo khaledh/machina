@@ -727,8 +727,11 @@ impl SymbolResolver {
     }
 
     fn populate_decls(&mut self, module: &Module) {
-        // Populate protocol definitions and role symbols.
-        self.populate_protocol_defs(&module.protocol_defs());
+        // Retired standalone `protocol` surface no longer participates in
+        // normal declaration population unless legacy typestate bindings still need it.
+        if !self.typestate_role_impls.is_empty() {
+            self.populate_protocol_defs(&module.protocol_defs());
+        }
 
         // Populate trait definitions
         self.populate_trait_defs(&module.trait_defs());
@@ -1114,7 +1117,9 @@ impl SymbolResolver {
             resolver.populate_decls(module);
 
             resolver.visit_module(module);
-            resolver.bind_typestate_role_impls(module);
+            if !resolver.typestate_role_impls.is_empty() && module.has_protocol_defs() {
+                resolver.bind_typestate_role_impls(module);
+            }
         });
 
         let def_table = std::mem::take(&mut self.def_table_builder).finish();

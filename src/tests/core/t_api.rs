@@ -80,6 +80,34 @@ fn main() -> u64 {
 }
 
 #[test]
+fn resolve_protocol_only_program_keeps_legacy_protocol_tables_empty() {
+    let source = r#"
+        type Ping = {}
+
+        protocol Net {
+            role Client;
+            role Server;
+            req Client -> Server: Ping => Ping;
+        }
+    "#;
+
+    let parsed = parsed_context_typestate(source);
+    let out = resolve_stage_with_policy(parsed, ResolveInputs::default(), FrontendPolicy::Strict);
+    let resolved = out
+        .context
+        .expect("protocol-only legacy source should still resolve internally");
+
+    assert!(
+        resolved.protocol_index.protocols.is_empty(),
+        "standalone retired protocol defs should no longer build protocol facts"
+    );
+    assert!(
+        resolved.protocol_index.typestate_bindings.is_empty(),
+        "standalone retired protocol defs should not create typestate bindings"
+    );
+}
+
+#[test]
 fn typestate_missing_new_reports_targeted_error() {
     let source = r#"
 typestate Connection {
