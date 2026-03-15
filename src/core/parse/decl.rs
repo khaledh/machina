@@ -16,7 +16,7 @@ impl<'a> Parser<'a> {
             }
             TK::KwProtocol => {
                 if !self.options.experimental_typestate {
-                    return self.err_here(PEK::FeatureDisabled {
+                    return self.err_here(PEK::FeatureRetired {
                         feature: "typestate",
                     });
                 }
@@ -28,7 +28,7 @@ impl<'a> Parser<'a> {
             }
             TK::KwTypestate => {
                 if !self.options.experimental_typestate {
-                    return self.err_here(PEK::FeatureDisabled {
+                    return self.err_here(PEK::FeatureRetired {
                         feature: "typestate",
                     });
                 }

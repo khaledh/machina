@@ -3711,8 +3711,8 @@ typestate Connection {
     assert!(
         diagnostics
             .iter()
-            .any(|d| d.code == "MC-PARSE-FEATURE-DISABLED"),
-        "expected feature-disabled diagnostic when typestate flag is off, got: {diagnostics:#?}"
+            .any(|d| d.code == "MC-PARSE-FEATURE-RETIRED"),
+        "expected retired-feature diagnostic when typestate flag is off, got: {diagnostics:#?}"
     );
 }
 
@@ -3739,8 +3739,8 @@ typestate Connection {
     assert!(
         disabled
             .iter()
-            .any(|d| d.code == "MC-PARSE-FEATURE-DISABLED"),
-        "expected feature-disabled diagnostic when typestate flag is off, got: {disabled:#?}"
+            .any(|d| d.code == "MC-PARSE-FEATURE-RETIRED"),
+        "expected retired-feature diagnostic when typestate flag is off, got: {disabled:#?}"
     );
 
     db.set_experimental_typestate(true);
@@ -3748,10 +3748,8 @@ typestate Connection {
         .diagnostics_for_file(file_id)
         .expect("diagnostics query should succeed after enabling typestate");
     assert!(
-        enabled
-            .iter()
-            .all(|d| d.code != "MC-PARSE-FEATURE-DISABLED"),
-        "did not expect feature-disabled diagnostic when typestate flag is on, got: {enabled:#?}"
+        enabled.iter().all(|d| d.code != "MC-PARSE-FEATURE-RETIRED"),
+        "did not expect retired-feature diagnostic when typestate flag is on, got: {enabled:#?}"
     );
 }
 
@@ -3782,8 +3780,8 @@ fn main() -> u64 {
     assert!(
         disabled
             .iter()
-            .any(|d| d.code == "MC-PARSE-FEATURE-DISABLED"),
-        "expected feature-disabled diagnostic when typestate flag is off, got: {disabled:#?}"
+            .any(|d| d.code == "MC-PARSE-FEATURE-RETIRED"),
+        "expected retired-feature diagnostic when typestate flag is off, got: {disabled:#?}"
     );
 
     db.set_experimental_typestate(true);
@@ -3791,10 +3789,8 @@ fn main() -> u64 {
         .diagnostics_for_program_file(file_id)
         .expect("program diagnostics query should succeed after enabling typestate");
     assert!(
-        enabled
-            .iter()
-            .all(|d| d.code != "MC-PARSE-FEATURE-DISABLED"),
-        "did not expect feature-disabled diagnostic when typestate flag is on, got: {enabled:#?}"
+        enabled.iter().all(|d| d.code != "MC-PARSE-FEATURE-RETIRED"),
+        "did not expect retired-feature diagnostic when typestate flag is on, got: {enabled:#?}"
     );
 }
 

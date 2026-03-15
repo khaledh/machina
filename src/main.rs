@@ -49,10 +49,6 @@ struct Args {
     /// Verify SSA IR invariants after SSA lowering/optimization.
     #[clap(long = "verify-ir", global = true)]
     verify_ir: bool,
-
-    /// Enable experimental language features (comma-separated).
-    #[clap(long, value_delimiter = ',', global = true)]
-    experimental: Vec<ExperimentalFeature>,
 }
 
 #[derive(clap::Subcommand)]
@@ -141,11 +137,6 @@ impl From<QueryLookupKind> for DriverQueryLookupKind {
     }
 }
 
-#[derive(clap::ValueEnum, Clone, Copy, PartialEq, Eq)]
-enum ExperimentalFeature {
-    Typestate,
-}
-
 #[derive(Copy, Clone)]
 enum DriverKind {
     Compile,
@@ -173,9 +164,7 @@ fn main() {
         trace_alloc,
         trace_drops,
         verify_ir,
-        experimental,
     } = Args::parse();
-    let experimental_typestate = experimental.contains(&ExperimentalFeature::Typestate);
     let invocation = match cmd {
         Command::Compile { input, output } => DriverInvocation {
             input_path: PathBuf::from(input),
@@ -194,7 +183,7 @@ fn main() {
         },
         Command::Check { input } => {
             let input_path = PathBuf::from(input);
-            match run_check(&input_path, experimental_typestate) {
+            match run_check(&input_path, false) {
                 Ok(0) => {}
                 Ok(_) => std::process::exit(1),
                 Err(message) => {
@@ -239,7 +228,7 @@ fn main() {
         trace_alloc,
         trace_drops,
         inject_prelude: true,
-        experimental_typestate,
+        experimental_typestate: false,
     };
     let output = compile_with_path(&source, Some(input_path), &opts);
 

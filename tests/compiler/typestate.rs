@@ -127,14 +127,14 @@ fn typestate_examples_compile_with_experimental_flag() {
 fn typestate_examples_are_rejected_without_experimental_flag() {
     for path in valid_examples() {
         let errors = compile_example(&path, false)
-            .expect_err("typestate examples should fail without experimental flag");
+            .expect_err("typestate examples should fail after retirement by default");
         assert!(errors.iter().any(|err| {
             matches!(
                 err,
                 CompileError::Parse(parse_err)
                     if matches!(
                         parse_err.kind(),
-                        ParseErrorKind::FeatureDisabled { feature } if *feature == "typestate"
+                        ParseErrorKind::FeatureRetired { feature } if *feature == "typestate"
                     )
             ) || matches!(
                 err,
@@ -143,7 +143,7 @@ fn typestate_examples_are_rejected_without_experimental_flag() {
                     ..
                 }) if matches!(
                     error.kind(),
-                    ParseErrorKind::FeatureDisabled { feature } if *feature == "typestate"
+                    ParseErrorKind::FeatureRetired { feature } if *feature == "typestate"
                 )
             )
         }));
@@ -291,14 +291,14 @@ fn main() -> () | MachineError {
 fn typestate_managed_examples_are_rejected_without_experimental_flag() {
     for path in managed_examples() {
         let errors = check_example(&path, false)
-            .expect_err("typestate managed examples should fail without experimental flag");
+            .expect_err("typestate managed examples should fail after retirement by default");
         assert!(errors.iter().any(|err| {
             matches!(
                 err,
                 CompileError::Parse(parse_err)
                     if matches!(
                         parse_err.kind(),
-                        ParseErrorKind::FeatureDisabled { feature } if *feature == "typestate"
+                        ParseErrorKind::FeatureRetired { feature } if *feature == "typestate"
                     )
             ) || matches!(
                 err,
@@ -307,7 +307,7 @@ fn typestate_managed_examples_are_rejected_without_experimental_flag() {
                     ..
                 }) if matches!(
                     error.kind(),
-                    ParseErrorKind::FeatureDisabled { feature } if *feature == "typestate"
+                    ParseErrorKind::FeatureRetired { feature } if *feature == "typestate"
                 )
             )
         }));

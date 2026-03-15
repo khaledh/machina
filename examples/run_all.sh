@@ -8,8 +8,8 @@
 # - Suppresses normal example output.
 # - Prints one progress dot per completed example.
 # - Prints full logs only for failures.
-# - Excludes legacy `examples/typestate/*` by default. Set
-#   `MACHINA_INCLUDE_LEGACY_TYPESTATE=1` to include them.
+# - Excludes legacy `examples/typestate/*`, which remain in the repo only as
+#   retirement-era reference material.
 set -euo pipefail
 
 script_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
@@ -35,7 +35,7 @@ detect_jobs() {
 
 declare -a runnable_examples=()
 while IFS= read -r -d '' file; do
-  if [[ "$file" == "$script_dir"/typestate/* ]] && [[ "${MACHINA_INCLUDE_LEGACY_TYPESTATE:-0}" != "1" ]]; then
+  if [[ "$file" == "$script_dir"/typestate/* ]]; then
     continue
   fi
   # Treat files with a main entrypoint as runnable programs.
@@ -95,12 +95,7 @@ exec 3>"$progress_fifo"
   rc="$tmp_dir/${idx}.rc"
   source_path="$repo_root/$example"
 
-  extra_args=()
-  if grep -Eq "^[[:space:]]*typestate[[:space:]]" "$source_path"; then
-    extra_args=(--experimental typestate)
-  fi
-
-  if (cd "$repo_root" && "$mcc_bin" run "${extra_args[@]}" "$example" >"$log" 2>&1); then
+  if (cd "$repo_root" && "$mcc_bin" run "$example" >"$log" 2>&1); then
     echo 0 >"$rc"
   else
     echo 1 >"$rc"

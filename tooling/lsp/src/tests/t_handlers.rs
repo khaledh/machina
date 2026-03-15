@@ -127,9 +127,11 @@ fn did_open_typestate_reports_feature_disabled_by_default() {
         .as_array()
         .expect("diagnostics should be an array");
     assert!(
-        diagnostics.iter().any(|diag| diag.get("code")
-            == Some(&Value::String("MC-PARSE-FEATURE-DISABLED".to_string()))),
-        "expected feature-disabled diagnostic, got: {diagnostics:#?}"
+        diagnostics
+            .iter()
+            .any(|diag| diag.get("code")
+                == Some(&Value::String("MC-PARSE-FEATURE-RETIRED".to_string()))),
+        "expected retired-feature diagnostic, got: {diagnostics:#?}"
     );
 }
 
@@ -156,8 +158,10 @@ fn did_open_linear_source_works_without_initialize_feature_flags() {
         .as_array()
         .expect("diagnostics should be an array");
     assert!(
-        diagnostics.iter().all(|diag| diag.get("code")
-            != Some(&Value::String("MC-PARSE-FEATURE-DISABLED".to_string()))),
+        diagnostics
+            .iter()
+            .all(|diag| diag.get("code")
+                != Some(&Value::String("MC-PARSE-FEATURE-RETIRED".to_string()))),
         "linear types should remain available without any initialize feature flags, got: {diagnostics:#?}"
     );
 }
@@ -199,9 +203,11 @@ fn did_open_typestate_parses_when_initialize_enables_legacy_feature() {
         .as_array()
         .expect("diagnostics should be an array");
     assert!(
-        diagnostics.iter().all(|diag| diag.get("code")
-            != Some(&Value::String("MC-PARSE-FEATURE-DISABLED".to_string()))),
-        "did not expect feature-disabled diagnostic after enabling typestate, got: {diagnostics:#?}"
+        diagnostics
+            .iter()
+            .all(|diag| diag.get("code")
+                != Some(&Value::String("MC-PARSE-FEATURE-RETIRED".to_string()))),
+        "did not expect retired-feature diagnostic after enabling typestate, got: {diagnostics:#?}"
     );
 }
 

@@ -60,8 +60,8 @@ pub enum ParseErrorKind {
     #[error("Attribute not allowed here")]
     AttributeNotAllowed,
 
-    #[error("Feature `{feature}` is not enabled; pass `--experimental {feature}`")]
-    FeatureDisabled { feature: &'static str },
+    #[error("Feature `{feature}` has been retired; use `@linear type` instead")]
+    FeatureRetired { feature: &'static str },
 
     #[error("Unmatched format brace")]
     UnmatchedFormatBrace,

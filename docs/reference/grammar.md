@@ -24,7 +24,7 @@ RequirePath        ::= Identifier ("::" Identifier)*
 ```bnf
 TopLevelItem       ::= (AttributeList (TypeDef | TraitDef | FuncDecl | FuncDef))
                      | MethodBlock
-                     | TypestateDef
+                     | MachineDef
 
 AttributeList      ::= ("@" Attribute)*
 Attribute          ::= Identifier ("(" StringLit ("," StringLit)* ")")?
@@ -46,13 +46,11 @@ TraitItem          ::= MethodSig ";" | TraitPropertyDecl
 TraitPropertyDecl  ::= "prop" Identifier ":" TypeExpr "{" TraitAccessorDecl* "}"
 TraitAccessorDecl  ::= "get" ";" | "set" ";"
 
-TypestateDef       ::= "typestate" Identifier "{" TypestateItem* "}"
-TypestateItem      ::= TypestateFields | TypestateNew | TypestateState
-TypestateFields    ::= "fields" "{" StructFieldList? "}"
-TypestateNew       ::= Func
-TypestateState     ::= "state" Identifier "{" TypestateStateItem* "}"
-TypestateStateItem ::= TypestateStateFields | Func
-TypestateStateFields ::= "fields" "{" StructFieldList? "}"
+MachineDef         ::= "machine" Identifier "hosts" Identifier "(" "key" ":" Identifier ")" "{" MachineItem* "}"
+MachineItem        ::= MachineFields | FuncDef | MachineTrigger | MachineOn
+MachineFields      ::= "fields" "{" StructFieldList? "}"
+MachineTrigger     ::= "trigger" Identifier "(" Identifier ")" BlockExpr
+MachineOn          ::= "on" TypeExpr "(" Identifier ")" BlockExpr
 ```
 
 ## Type Expressions

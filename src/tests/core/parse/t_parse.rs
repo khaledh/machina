@@ -2511,10 +2511,10 @@ fn test_parse_typestate_disabled_by_default() {
         }
     "#;
 
-    let err = parse_module(source).expect_err("typestate should require experimental flag");
+    let err = parse_module(source).expect_err("typestate should be retired by default");
     assert!(matches!(
         err.kind(),
-        ParseErrorKind::FeatureDisabled {
+        ParseErrorKind::FeatureRetired {
             feature: "typestate"
         }
     ));
@@ -2556,6 +2556,26 @@ fn test_parse_typestate_with_experimental_flag() {
 
     assert_eq!(typestate.name, "Connection");
     assert_eq!(typestate.items.len(), 3);
+}
+
+#[test]
+fn test_parse_protocol_is_retired_by_default() {
+    let source = r#"
+        protocol Auth {
+            msg Start;
+            role Client {
+                state Idle {}
+            }
+        }
+    "#;
+
+    let err = parse_module(source).expect_err("protocol should be retired by default");
+    assert!(matches!(
+        err.kind(),
+        ParseErrorKind::FeatureRetired {
+            feature: "typestate"
+        }
+    ));
 }
 
 #[test]

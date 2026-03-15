@@ -69,12 +69,12 @@ pub(super) fn from_parse_error(error: &ParseError) -> Diagnostic {
             "MC-PARSE-UNKNOWN-ATTRIBUTE"
         }
         ParseErrorKind::AttributeNotAllowed => "MC-PARSE-ATTRIBUTE-NOT-ALLOWED",
-        ParseErrorKind::FeatureDisabled { feature } => {
+        ParseErrorKind::FeatureRetired { feature } => {
             metadata.insert(
                 "feature".to_string(),
                 DiagnosticValue::String((*feature).to_string()),
             );
-            "MC-PARSE-FEATURE-DISABLED"
+            "MC-PARSE-FEATURE-RETIRED"
         }
         ParseErrorKind::UnmatchedFormatBrace => "MC-PARSE-UNMATCHED-FORMAT-BRACE",
         ParseErrorKind::InvalidFormatExpr => "MC-PARSE-INVALID-FORMAT-EXPR",
