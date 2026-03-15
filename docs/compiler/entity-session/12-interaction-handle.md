@@ -168,3 +168,7 @@ before it exists.
 The next useful design move is to rewrite the auth-check flow in
 [11-auth-check-v1.md](11-auth-check-v1.md) using the interaction-handle concept
 and see whether the result is actually simpler and safer.
+
+That rewrite naturally leads to the next narrower question: how an inbound
+reply resolves a pending interaction. See
+[13-interaction-resolution.md](13-interaction-resolution.md).

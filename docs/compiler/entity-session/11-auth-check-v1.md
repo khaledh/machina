@@ -468,4 +468,5 @@ This rewrite suggests that the interaction-handle model is worth continuing:
 But it also shows the next design question clearly:
 - once a pending interaction exists, **what are its resolution rules?**
 
-That should be the next focused design step after this comparison.
+That is the next focused design step. See
+[13-interaction-resolution.md](13-interaction-resolution.md).
