@@ -11,7 +11,8 @@
 
 use std::collections::HashMap;
 
-use crate::core::ast::{Module, NodeId, TypeDefKind, TypeExpr};
+use crate::core::ast::visit::{self, Visitor};
+use crate::core::ast::{EmitKind, Expr, ExprKind, Module, NodeId, TypeDefKind, TypeExpr};
 
 use super::machine::{
     machine_action_override_fn_name, machine_action_session_fn_name, machine_deliver_fn_name,
@@ -26,6 +27,11 @@ use super::machine::{
 pub struct LinearIndex {
     pub types: HashMap<String, LinearTypeInfo>,
     pub machine_hosts: HashMap<String, LinearHostInfo>,
+    /// Compiler-recognized derived interaction patterns keyed by
+    /// (`machine_name`, `action_name`). Presence here means the hosted action
+    /// matches the narrow first-version interaction shape; absence means the
+    /// action remains ordinary V1 fire-and-forget.
+    pub derived_interactions: HashMap<(String, String), DerivedInteractionInfo>,
     /// Generated machine action override helpers keyed by function name. The
     /// rewriter uses this to seed the source-state binding when rewriting the
     /// cloned helper bodies.
@@ -121,6 +127,16 @@ pub struct GeneratedTriggerHandlerInfo {
     pub source_state: String,
     pub target_state: String,
     pub instance_param_name: String,
+}
+
+#[derive(Clone, Debug)]
+pub struct DerivedInteractionInfo {
+    pub machine_name: String,
+    pub action_name: String,
+    pub hosted_type_name: String,
+    pub request_type_name: String,
+    pub waiting_state: String,
+    pub reply_types: Vec<String>,
 }
 
 #[derive(Clone, Debug)]
@@ -235,6 +251,7 @@ pub fn build_linear_index(module: &Module) -> LinearIndex {
     }
 
     let mut machine_hosts = HashMap::new();
+    let mut derived_interactions = HashMap::new();
     let mut action_override_fns = HashMap::new();
     let mut action_session_fns = HashMap::new();
     let mut trigger_handler_fns = HashMap::new();
@@ -257,6 +274,7 @@ pub fn build_linear_index(module: &Module) -> LinearIndex {
         };
         let action_overrides =
             collect_machine_action_overrides(machine_def, linear, &mut action_override_fns);
+        collect_machine_derived_interactions(machine_def, linear, &mut derived_interactions);
         let action_handler_params = machine_def
             .items
             .iter()
@@ -338,11 +356,143 @@ pub fn build_linear_index(module: &Module) -> LinearIndex {
     LinearIndex {
         types,
         machine_hosts,
+        derived_interactions,
         action_override_fns,
         action_session_fns,
         trigger_handler_fns,
         hosted_dispatch_handler_machines: HashMap::new(),
         hosted_action_exprs: HashMap::new(),
+    }
+}
+
+fn collect_machine_derived_interactions(
+    machine_def: &crate::core::ast::MachineDef,
+    linear: &crate::core::ast::LinearTypeDef,
+    derived: &mut HashMap<(String, String), DerivedInteractionInfo>,
+) {
+    let action_counts =
+        linear
+            .actions
+            .iter()
+            .fold(HashMap::<&str, usize>::new(), |mut acc, action| {
+                *acc.entry(action.name.as_str()).or_default() += 1;
+                acc
+            });
+    let action_by_name = linear
+        .actions
+        .iter()
+        .map(|action| (action.name.as_str(), action))
+        .collect::<HashMap<_, _>>();
+
+    for item in &machine_def.items {
+        let crate::core::ast::MachineItem::Action(handler) = item else {
+            continue;
+        };
+        if action_counts
+            .get(handler.name.as_str())
+            .copied()
+            .unwrap_or_default()
+            != 1
+        {
+            continue;
+        }
+        let Some(action_decl) = action_by_name.get(handler.name.as_str()).copied() else {
+            continue;
+        };
+        let Some(reply_types) =
+            trigger_only_waiting_state_reply_types(linear, &action_decl.target_state)
+        else {
+            continue;
+        };
+        let Some(request_type_name) = single_send_request_type_name(&handler.body) else {
+            continue;
+        };
+        derived.insert(
+            (machine_def.name.clone(), handler.name.clone()),
+            DerivedInteractionInfo {
+                machine_name: machine_def.name.clone(),
+                action_name: handler.name.clone(),
+                hosted_type_name: machine_def.host.type_name.clone(),
+                request_type_name,
+                waiting_state: action_decl.target_state.clone(),
+                reply_types,
+            },
+        );
+    }
+}
+
+fn trigger_only_waiting_state_reply_types(
+    linear: &crate::core::ast::LinearTypeDef,
+    waiting_state: &str,
+) -> Option<Vec<String>> {
+    if linear
+        .actions
+        .iter()
+        .any(|action| action.source_state == waiting_state)
+    {
+        return None;
+    }
+    let reply_types = linear
+        .triggers
+        .iter()
+        .filter(|trigger| trigger.source_state == waiting_state)
+        .map(|trigger| trigger.name.clone())
+        .collect::<Vec<_>>();
+    if reply_types.is_empty() {
+        None
+    } else {
+        Some(reply_types)
+    }
+}
+
+fn single_send_request_type_name(expr: &Expr) -> Option<String> {
+    let mut finder = SingleSendFinder::default();
+    finder.visit_expr(expr);
+    if finder.send_count == 1 {
+        finder.request_type_name
+    } else {
+        None
+    }
+}
+
+#[derive(Default)]
+struct SingleSendFinder {
+    send_count: usize,
+    request_type_name: Option<String>,
+}
+
+impl Visitor for SingleSendFinder {
+    fn visit_expr(&mut self, expr: &Expr) {
+        if let ExprKind::Emit {
+            kind: EmitKind::Send { payload, .. },
+        } = &expr.kind
+        {
+            self.send_count += 1;
+            if self.send_count == 1 {
+                self.request_type_name = request_type_name_from_expr(payload);
+            } else {
+                self.request_type_name = None;
+            }
+        }
+        visit::walk_expr(self, expr);
+    }
+}
+
+fn request_type_name_from_expr(expr: &Expr) -> Option<String> {
+    match &expr.kind {
+        ExprKind::StructLit { name, .. } => Some(name.clone()),
+        ExprKind::EnumVariant {
+            enum_name, variant, ..
+        } => Some(format!("{enum_name}::{variant}")),
+        ExprKind::Coerce { expr, .. }
+        | ExprKind::ImplicitMove { expr }
+        | ExprKind::Move { expr }
+        | ExprKind::HeapAlloc { expr }
+        | ExprKind::Try {
+            fallible_expr: expr,
+            ..
+        } => request_type_name_from_expr(expr),
+        _ => None,
     }
 }
 

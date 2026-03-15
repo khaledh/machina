@@ -179,12 +179,128 @@ machine PRService hosts PullRequest(key: id) {
     let resolved = resolve_source(source).expect("resolve should succeed");
     let type_count = resolved.linear_index.types.len();
     let host_count = resolved.linear_index.machine_hosts.len();
+    let derived_interaction_count = resolved.linear_index.derived_interactions.len();
 
     let result = ResolvedModuleResult::from_context(ModuleId(10), resolved.clone());
     assert_eq!(result.linear_index.types.len(), type_count);
     assert_eq!(result.linear_index.machine_hosts.len(), host_count);
+    assert_eq!(
+        result.linear_index.derived_interactions.len(),
+        derived_interaction_count
+    );
 
     let roundtrip = result.into_context();
     assert_eq!(roundtrip.linear_index.types.len(), type_count);
     assert_eq!(roundtrip.linear_index.machine_hosts.len(), host_count);
+    assert_eq!(
+        roundtrip.linear_index.derived_interactions.len(),
+        derived_interaction_count
+    );
+}
+
+#[test]
+fn derived_interaction_facts_roundtrip_between_context_and_result() {
+    let source = r#"
+type AuthCheck = {}
+type AuthApproved = { order_id: u64 }
+type AuthDenied = { order_id: u64 }
+
+@linear
+type Order = {
+    id: u64,
+
+    states {
+        Draft,
+        PendingAuth,
+        Confirmed,
+        Rejected,
+    }
+
+    actions {
+        submit: Draft -> PendingAuth,
+    }
+
+    triggers {
+        AuthApproved: PendingAuth -> Confirmed,
+        AuthDenied: PendingAuth -> Rejected,
+    }
+
+    roles {
+        Buyer { submit }
+    }
+}
+
+Order :: {
+    fn submit(self) -> PendingAuth {
+        PendingAuth {}
+    }
+}
+
+@linear
+type AuthWorker = {
+    id: u64,
+
+    states { Idle }
+    roles { System {} }
+}
+
+machine AuthService hosts AuthWorker(key: id) {
+    fn new() -> Self {
+        Self {}
+    }
+
+    on AuthCheck(_check) {}
+}
+
+machine OrderService hosts Order(key: id) {
+    fields {
+        auth_service: Machine<AuthService>,
+    }
+
+    fn new(auth_service: Machine<AuthService>) -> Self {
+        Self { auth_service: auth_service }
+    }
+
+    action submit(draft) -> PendingAuth {
+        send(self.auth_service, AuthCheck {});
+        draft.submit()
+    }
+
+    trigger AuthApproved(pending) {
+        Confirmed {}
+    }
+
+    trigger AuthDenied(pending) {
+        Rejected {}
+    }
+}
+"#;
+
+    let resolved = resolve_source(source).expect("resolve should succeed");
+    let expected = resolved
+        .linear_index
+        .derived_interactions
+        .get(&("OrderService".to_string(), "submit".to_string()))
+        .expect("expected derived interaction facts")
+        .clone();
+
+    let result = ResolvedModuleResult::from_context(ModuleId(11), resolved.clone());
+    let from_result = result
+        .linear_index
+        .derived_interactions
+        .get(&("OrderService".to_string(), "submit".to_string()))
+        .expect("expected derived interaction facts in result");
+    assert_eq!(from_result.request_type_name, expected.request_type_name);
+    assert_eq!(from_result.waiting_state, expected.waiting_state);
+    assert_eq!(from_result.reply_types, expected.reply_types);
+
+    let roundtrip = result.into_context();
+    let from_roundtrip = roundtrip
+        .linear_index
+        .derived_interactions
+        .get(&("OrderService".to_string(), "submit".to_string()))
+        .expect("expected derived interaction facts after roundtrip");
+    assert_eq!(from_roundtrip.request_type_name, expected.request_type_name);
+    assert_eq!(from_roundtrip.waiting_state, expected.waiting_state);
+    assert_eq!(from_roundtrip.reply_types, expected.reply_types);
 }

@@ -324,6 +324,348 @@ fn elaborate_linear_semantic(source: &str) -> crate::core::context::SemanticCont
 }
 
 #[test]
+fn linear_index_recognizes_derived_interaction_pattern() {
+    let source = r#"
+        type AuthCheck = {}
+        type AuthApproved = { order_id: u64 }
+        type AuthDenied = { order_id: u64 }
+
+        @linear
+        type Order = {
+            id: u64,
+
+            states {
+                Draft,
+                PendingAuth,
+                Confirmed,
+                Rejected,
+            }
+
+            actions {
+                submit: Draft -> PendingAuth,
+            }
+
+            triggers {
+                AuthApproved: PendingAuth -> Confirmed,
+                AuthDenied: PendingAuth -> Rejected,
+            }
+
+            roles {
+                Buyer { submit }
+            }
+        }
+
+        Order :: {
+            fn submit(self) -> PendingAuth {
+                PendingAuth {}
+            }
+        }
+
+        @linear
+        type AuthWorker = {
+            id: u64,
+
+            states { Idle }
+            roles { System {} }
+        }
+
+        machine AuthService hosts AuthWorker(key: id) {
+            fn new() -> Self {
+                Self {}
+            }
+
+            on AuthCheck(_check) {}
+        }
+
+        machine OrderService hosts Order(key: id) {
+            fields {
+                auth_service: Machine<AuthService>,
+            }
+
+            fn new(auth_service: Machine<AuthService>) -> Self {
+                Self { auth_service: auth_service }
+            }
+
+            action submit(draft) -> PendingAuth {
+                send(self.auth_service, AuthCheck {});
+                draft.submit()
+            }
+
+            trigger AuthApproved(pending) {
+                Confirmed {}
+            }
+
+            trigger AuthDenied(pending) {
+                Rejected {}
+            }
+        }
+    "#;
+
+    let parsed = parsed_context(source);
+    let out = resolve_stage_with_policy(parsed, ResolveInputs::default(), FrontendPolicy::Strict);
+    let resolved = out.context.expect("expected resolved context");
+
+    let interaction = resolved
+        .linear_index
+        .derived_interactions
+        .get(&("OrderService".to_string(), "submit".to_string()))
+        .expect("expected derived interaction facts");
+    assert_eq!(interaction.request_type_name, "AuthCheck");
+    assert_eq!(interaction.waiting_state, "PendingAuth");
+    assert_eq!(interaction.reply_types, vec!["AuthApproved", "AuthDenied"]);
+}
+
+#[test]
+fn linear_index_does_not_recognize_multi_send_override_as_interaction() {
+    let source = r#"
+        type Audit = {}
+        type AuthCheck = {}
+        type AuthApproved = { order_id: u64 }
+
+        @linear
+        type Order = {
+            id: u64,
+
+            states {
+                Draft,
+                PendingAuth,
+                Confirmed,
+            }
+
+            actions {
+                submit: Draft -> PendingAuth,
+            }
+
+            triggers {
+                AuthApproved: PendingAuth -> Confirmed,
+            }
+
+            roles {
+                Buyer { submit }
+            }
+        }
+
+        Order :: {
+            fn submit(self) -> PendingAuth {
+                PendingAuth {}
+            }
+        }
+
+        @linear
+        type AuthWorker = {
+            id: u64,
+
+            states { Idle }
+            roles { System {} }
+        }
+
+        machine AuthService hosts AuthWorker(key: id) {
+            fn new() -> Self {
+                Self {}
+            }
+
+            on AuthCheck(_check) {}
+            on Audit(_audit) {}
+        }
+
+        machine OrderService hosts Order(key: id) {
+            fields {
+                auth_service: Machine<AuthService>,
+            }
+
+            fn new(auth_service: Machine<AuthService>) -> Self {
+                Self { auth_service: auth_service }
+            }
+
+            action submit(draft) -> PendingAuth {
+                send(self.auth_service, AuthCheck {});
+                send(self.auth_service, Audit {});
+                draft.submit()
+            }
+
+            trigger AuthApproved(pending) {
+                Confirmed {}
+            }
+        }
+    "#;
+
+    let parsed = parsed_context(source);
+    let out = resolve_stage_with_policy(parsed, ResolveInputs::default(), FrontendPolicy::Strict);
+    let resolved = out.context.expect("expected resolved context");
+
+    assert!(
+        !resolved
+            .linear_index
+            .derived_interactions
+            .contains_key(&("OrderService".to_string(), "submit".to_string())),
+        "multi-send overrides should stay plain V1 send semantics"
+    );
+}
+
+#[test]
+fn linear_index_does_not_recognize_mixed_exit_state_as_interaction() {
+    let source = r#"
+        type AuthCheck = {}
+        type AuthApproved = { order_id: u64 }
+
+        @linear
+        type Order = {
+            id: u64,
+
+            states {
+                Draft,
+                PendingAuth,
+                Confirmed,
+            }
+
+            actions {
+                submit: Draft -> PendingAuth,
+                retry: PendingAuth -> PendingAuth,
+            }
+
+            triggers {
+                AuthApproved: PendingAuth -> Confirmed,
+            }
+
+            roles {
+                Buyer { submit, retry }
+            }
+        }
+
+        Order :: {
+            fn submit(self) -> PendingAuth {
+                PendingAuth {}
+            }
+
+            fn retry(self) -> PendingAuth {
+                PendingAuth {}
+            }
+        }
+
+        @linear
+        type AuthWorker = {
+            id: u64,
+
+            states { Idle }
+            roles { System {} }
+        }
+
+        machine AuthService hosts AuthWorker(key: id) {
+            fn new() -> Self {
+                Self {}
+            }
+
+            on AuthCheck(_check) {}
+        }
+
+        machine OrderService hosts Order(key: id) {
+            fields {
+                auth_service: Machine<AuthService>,
+            }
+
+            fn new(auth_service: Machine<AuthService>) -> Self {
+                Self { auth_service: auth_service }
+            }
+
+            action submit(draft) -> PendingAuth {
+                send(self.auth_service, AuthCheck {});
+                draft.submit()
+            }
+
+            trigger AuthApproved(pending) {
+                Confirmed {}
+            }
+        }
+    "#;
+
+    let parsed = parsed_context(source);
+    let out = resolve_stage_with_policy(parsed, ResolveInputs::default(), FrontendPolicy::Strict);
+    let resolved = out.context.expect("expected resolved context");
+
+    assert!(
+        !resolved
+            .linear_index
+            .derived_interactions
+            .contains_key(&("OrderService".to_string(), "submit".to_string())),
+        "states with both actions and triggers should stay plain V1 send semantics"
+    );
+}
+
+#[test]
+fn linear_index_does_not_recognize_no_trigger_wait_state_as_interaction() {
+    let source = r#"
+        type AuthCheck = {}
+
+        @linear
+        type Order = {
+            id: u64,
+
+            states {
+                Draft,
+                PendingAuth,
+            }
+
+            actions {
+                submit: Draft -> PendingAuth,
+            }
+
+            roles {
+                Buyer { submit }
+            }
+        }
+
+        Order :: {
+            fn submit(self) -> PendingAuth {
+                PendingAuth {}
+            }
+        }
+
+        @linear
+        type AuthWorker = {
+            id: u64,
+
+            states { Idle }
+            roles { System {} }
+        }
+
+        machine AuthService hosts AuthWorker(key: id) {
+            fn new() -> Self {
+                Self {}
+            }
+
+            on AuthCheck(_check) {}
+        }
+
+        machine OrderService hosts Order(key: id) {
+            fields {
+                auth_service: Machine<AuthService>,
+            }
+
+            fn new(auth_service: Machine<AuthService>) -> Self {
+                Self { auth_service: auth_service }
+            }
+
+            action submit(draft) -> PendingAuth {
+                send(self.auth_service, AuthCheck {});
+                draft.submit()
+            }
+        }
+    "#;
+
+    let parsed = parsed_context(source);
+    let out = resolve_stage_with_policy(parsed, ResolveInputs::default(), FrontendPolicy::Strict);
+    let resolved = out.context.expect("expected resolved context");
+
+    assert!(
+        !resolved
+            .linear_index
+            .derived_interactions
+            .contains_key(&("OrderService".to_string(), "submit".to_string())),
+        "waiting states without trigger exits should stay plain V1 send semantics"
+    );
+}
+
+#[test]
 fn elaborate_linear_program_produces_semantic_output() {
     let _semantic = elaborate_linear_semantic(
         r#"
