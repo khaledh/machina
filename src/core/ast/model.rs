@@ -35,6 +35,18 @@ pub struct Require {
 }
 
 impl Module {
+    pub fn has_protocol_defs(&self) -> bool {
+        self.top_level_items
+            .iter()
+            .any(|item| matches!(item, TopLevelItem::ProtocolDef(_)))
+    }
+
+    pub fn has_typestate_defs(&self) -> bool {
+        self.top_level_items
+            .iter()
+            .any(|item| matches!(item, TopLevelItem::TypestateDef(_)))
+    }
+
     pub fn protocol_defs(&self) -> Vec<&ProtocolDef> {
         self.top_level_items
             .iter()

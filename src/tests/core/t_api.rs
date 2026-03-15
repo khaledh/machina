@@ -146,6 +146,43 @@ fn linear_type_unknown_role_action_reports_targeted_error() {
 }
 
 #[test]
+fn linear_resolve_keeps_legacy_protocol_tables_empty() {
+    let parsed = parsed_context(
+        r#"
+        @linear
+        type Door = {
+            states { Closed, Open }
+            actions { open: Closed -> Open }
+        }
+
+        Door :: {
+            fn open(self) -> Open {
+                Open {}
+            }
+        }
+        "#,
+    );
+
+    let out = resolve_stage_with_policy(parsed, ResolveInputs::default(), FrontendPolicy::Strict);
+    let resolved = out
+        .context
+        .expect("expected resolved context for linear program without legacy defs");
+
+    assert!(
+        resolved.typestate_role_impls.is_empty(),
+        "linear programs should not populate legacy typestate role bindings"
+    );
+    assert!(
+        resolved.protocol_index.protocols.is_empty(),
+        "linear programs should not build protocol facts by default"
+    );
+    assert!(
+        resolved.protocol_index.typestate_bindings.is_empty(),
+        "linear programs should not build typestate protocol bindings by default"
+    );
+}
+
+#[test]
 fn linear_type_ambiguous_receiver_reports_targeted_error() {
     let errors = resolve_errors(
         r#"

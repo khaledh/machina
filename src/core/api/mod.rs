@@ -241,7 +241,13 @@ pub fn resolve_stage_with_policy(
     inputs: ResolveInputs,
     policy: FrontendPolicy,
 ) -> ResolveStageResult {
-    let typestate_role_impls = typestate::collect_role_impl_refs(&input.module);
+    let has_legacy_typestate_surface =
+        input.module.has_typestate_defs() || input.module.has_protocol_defs();
+    let typestate_role_impls = if input.module.has_typestate_defs() {
+        typestate::collect_role_impl_refs(&input.module)
+    } else {
+        Vec::new()
+    };
     let mut frontend_errors = typestate::desugar_module(&mut input.module, &mut input.node_id_gen);
     frontend_errors.extend(crate::core::linear::validate_module(&input.module));
     input.linear_index = crate::core::linear::build_linear_index(&input.module);
@@ -264,13 +270,15 @@ pub fn resolve_stage_with_policy(
         typestate_role_impls.clone(),
     );
     let mut context = output.context;
-    context.payload.typestate_role_impls =
-        build_typestate_role_impl_bindings(&context, &typestate_role_impls);
-    context.payload.protocol_index = crate::core::protocol::build_protocol_index(
-        &context.module,
-        &context.def_table,
-        &context.typestate_role_impls,
-    );
+    if has_legacy_typestate_surface {
+        context.payload.typestate_role_impls =
+            build_typestate_role_impl_bindings(&context, &typestate_role_impls);
+        context.payload.protocol_index = crate::core::protocol::build_protocol_index(
+            &context.module,
+            &context.def_table,
+            &context.typestate_role_impls,
+        );
+    }
     frontend_errors.extend(output.errors);
     let errors = frontend_errors;
     match policy {

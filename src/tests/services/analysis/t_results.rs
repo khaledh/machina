@@ -214,6 +214,36 @@ typestate Gateway : Auth::Client {
 }
 
 #[test]
+fn linear_result_roundtrip_keeps_legacy_protocol_tables_empty() {
+    let resolved = resolve_source(
+        r#"
+        @linear
+        type Door = {
+            states { Closed, Open }
+            actions { open: Closed -> Open }
+        }
+
+        Door :: {
+            fn open(self) -> Open {
+                Open {}
+            }
+        }
+        "#,
+    )
+    .expect("resolve should succeed for linear program");
+
+    let result = ResolvedModuleResult::from_context(ModuleId(77), resolved.clone());
+    assert!(result.typestate_role_impls.is_empty());
+    assert!(result.protocol_index.protocols.is_empty());
+    assert!(result.protocol_index.typestate_bindings.is_empty());
+
+    let roundtrip = result.into_context();
+    assert!(roundtrip.typestate_role_impls.is_empty());
+    assert!(roundtrip.protocol_index.protocols.is_empty());
+    assert!(roundtrip.protocol_index.typestate_bindings.is_empty());
+}
+
+#[test]
 fn linear_index_roundtrip_matches_between_context_and_result() {
     let source = r#"
 @linear
