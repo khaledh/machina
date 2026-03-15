@@ -5,7 +5,6 @@ use crate::core::parse::PEK;
 use crate::core::resolve::symbols::SymbolKind;
 use crate::core::resolve::{DefId, ResolveError, ResolveErrorKind};
 use crate::core::semck::SEK;
-use crate::core::semck::SemCheckError;
 use crate::core::typecheck::{TypeCheckError, TypeCheckErrorKind};
 use crate::core::types::Type;
 use crate::services::analysis::diagnostics::{

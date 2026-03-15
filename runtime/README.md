@@ -102,7 +102,7 @@
 ### Managed machine runtime core (experimental)
 
 - Header: `machine_runtime.h`
-- Purpose: foundational scheduler substrate for managed typestate machines.
+- Purpose: foundational scheduler substrate for managed machines.
 - Includes:
   - machine table with lifecycle (`Created | Running | Faulted | Stopped`)
   - bounded per-machine FIFO mailboxes

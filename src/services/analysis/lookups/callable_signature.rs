@@ -3,14 +3,11 @@
 //! This keeps one formatting path for:
 //! - source-style labels (`fn foo<T>(x: T) -> T`)
 //! - source param names/modes/types
-//! - generated-name demangling
 
 use crate::core::ast::{CallableRef, Module, Param, ParamMode, TypeExpr, TypeExprKind, TypeParam};
 use crate::core::resolve::{DefId, DefKind, DefTable};
 use crate::core::typecheck::type_map::TypeMap;
 use crate::core::types::{Type, TypeRenderConfig, render_type};
-
-use super::GeneratedStateNameDemangler;
 
 pub(super) struct CallableSignature {
     pub label: String,
@@ -22,7 +19,6 @@ pub(super) fn format_source_callable_signature(
     typed_module: Option<&Module>,
     type_map: Option<&TypeMap>,
     def_table: &DefTable,
-    demangler: &GeneratedStateNameDemangler,
 ) -> Option<CallableSignature> {
     let def_id = def_id?;
     let typed_module = typed_module?;
@@ -100,20 +96,13 @@ pub(super) fn format_source_callable_signature(
     };
 
     let type_var_names = type_map.lookup_def_type_param_names(def_id);
-    let nominal_name_map = |name: &str| {
-        if let Some(state_name) = demangler.demangle_state_qualified(name) {
-            state_name
-        } else {
-            demangler.demangle_text(name)
-        }
-    };
     let render = |ty: &Type| {
         render_type(
             ty,
             &TypeRenderConfig {
                 show_in_mode: false,
                 type_var_names,
-                nominal_name_map: Some(&nominal_name_map),
+                nominal_name_map: None,
             },
         )
     };
@@ -138,7 +127,7 @@ pub(super) fn format_source_callable_signature(
             ParamMode::Sink => "sink ",
         };
         let param_ty =
-            format_type_expr_for_signature(&param_ty_expr, demangler).unwrap_or_else(|| {
+            format_type_expr_for_signature(&param_ty_expr).unwrap_or_else(|| {
                 let param_ty = params
                     .get(idx)
                     .map(|param| param.ty.clone())
@@ -152,7 +141,6 @@ pub(super) fn format_source_callable_signature(
             });
         rendered_params.push(format!("{mode_prefix}{param_name}: {param_ty}"));
     }
-    let rendered_name = demangler.demangle_text(&name);
     let rendered_ret = render(&ret_ty);
     let rendered_tparams = if type_params.is_empty() {
         String::new()
@@ -160,7 +148,7 @@ pub(super) fn format_source_callable_signature(
         format!("<{}>", type_params.join(", "))
     };
     let label = format!(
-        "fn {rendered_name}{rendered_tparams}({}) -> {rendered_ret}",
+        "fn {name}{rendered_tparams}({}) -> {rendered_ret}",
         rendered_params.join(", ")
     );
     Some(CallableSignature {
@@ -171,7 +159,6 @@ pub(super) fn format_source_callable_signature(
 
 fn format_type_expr_for_signature(
     ty_expr: &TypeExpr,
-    demangler: &GeneratedStateNameDemangler,
 ) -> Option<String> {
     use TypeExprKind;
     Some(match &ty_expr.kind {
@@ -180,45 +167,45 @@ fn format_type_expr_for_signature(
             ident, type_args, ..
         } => {
             if type_args.is_empty() {
-                demangler.demangle_text(ident)
+                ident.clone()
             } else {
                 let args: Vec<_> = type_args
                     .iter()
-                    .filter_map(|arg| format_type_expr_for_signature(arg, demangler))
+                    .filter_map(|arg| format_type_expr_for_signature(arg))
                     .collect();
-                format!("{}<{}>", demangler.demangle_text(ident), args.join(", "))
+                format!("{ident}<{}>", args.join(", "))
             }
         }
         TypeExprKind::Array { elem_ty_expr, dims } => {
-            let mut elem = format_type_expr_for_signature(elem_ty_expr, demangler)?;
+            let mut elem = format_type_expr_for_signature(elem_ty_expr)?;
             for dim in dims {
                 elem = format!("{elem}[{dim}]");
             }
             elem
         }
         TypeExprKind::DynArray { elem_ty_expr } => {
-            let elem = format_type_expr_for_signature(elem_ty_expr, demangler)?;
+            let elem = format_type_expr_for_signature(elem_ty_expr)?;
             format!("{elem}[*]")
         }
         TypeExprKind::Slice { elem_ty_expr } => {
-            let elem = format_type_expr_for_signature(elem_ty_expr, demangler)?;
+            let elem = format_type_expr_for_signature(elem_ty_expr)?;
             format!("{elem}[]")
         }
         TypeExprKind::Heap { elem_ty_expr } => {
-            let elem = format_type_expr_for_signature(elem_ty_expr, demangler)?;
+            let elem = format_type_expr_for_signature(elem_ty_expr)?;
             format!("{elem}^")
         }
         TypeExprKind::Tuple { field_ty_exprs } => {
             let fields: Vec<_> = field_ty_exprs
                 .iter()
-                .filter_map(|field| format_type_expr_for_signature(field, demangler))
+                .filter_map(|field| format_type_expr_for_signature(field))
                 .collect();
             format!("({})", fields.join(", "))
         }
         TypeExprKind::Union { variants } => {
             let fields: Vec<_> = variants
                 .iter()
-                .filter_map(|field| format_type_expr_for_signature(field, demangler))
+                .filter_map(|field| format_type_expr_for_signature(field))
                 .collect();
             fields.join(" | ")
         }
@@ -229,7 +216,7 @@ fn format_type_expr_for_signature(
             let params: Vec<_> = params
                 .iter()
                 .filter_map(|param| {
-                    let ty = format_type_expr_for_signature(&param.ty_expr, demangler)?;
+                    let ty = format_type_expr_for_signature(&param.ty_expr)?;
                     let mode = match param.mode {
                         ParamMode::In => "",
                         ParamMode::InOut => "inout ",
@@ -239,18 +226,18 @@ fn format_type_expr_for_signature(
                     Some(format!("{mode}{ty}"))
                 })
                 .collect();
-            let ret = format_type_expr_for_signature(ret_ty_expr, demangler)?;
+            let ret = format_type_expr_for_signature(ret_ty_expr)?;
             format!("fn({}) -> {ret}", params.join(", "))
         }
         TypeExprKind::Refined {
             base_ty_expr,
             refinements: _,
-        } => format_type_expr_for_signature(base_ty_expr, demangler)?,
+        } => format_type_expr_for_signature(base_ty_expr)?,
         TypeExprKind::Ref {
             mutable,
             elem_ty_expr,
         } => {
-            let elem = format_type_expr_for_signature(elem_ty_expr, demangler)?;
+            let elem = format_type_expr_for_signature(elem_ty_expr)?;
             if *mutable {
                 format!("mut {elem}")
             } else {

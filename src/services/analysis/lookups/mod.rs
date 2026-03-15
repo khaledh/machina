@@ -301,31 +301,3 @@ fn is_keyword_ident(ident: &str) -> bool {
     )
 }
 
-/// Name demangler for compiler-generated symbols.
-///
-/// Previously handled `__ts_*` prefixed typestate names. Those names are no
-/// longer generated since typestate is retired. The struct is kept as a
-/// pass-through so call sites don't need restructuring.
-#[derive(Default)]
-pub(super) struct GeneratedStateNameDemangler;
-
-impl GeneratedStateNameDemangler {
-    pub(super) fn from_def_table(_def_table: &DefTable) -> Self {
-        Self
-    }
-
-    /// Returns the input unchanged (no mangled names exist in current programs).
-    pub(super) fn demangle_text(&self, input: &str) -> String {
-        input.to_string()
-    }
-
-    /// Always returns `None` (no mangled names exist in current programs).
-    pub(super) fn demangle_symbol(&self, _symbol: &str) -> Option<String> {
-        None
-    }
-
-    /// Always returns `None` (no mangled names exist in current programs).
-    pub(super) fn demangle_state_qualified(&self, _symbol: &str) -> Option<String> {
-        None
-    }
-}

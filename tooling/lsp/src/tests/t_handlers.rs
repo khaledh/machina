@@ -45,7 +45,7 @@ fn did_open_linear_source_parses_without_errors() {
                     "uri": "file:///tmp/lsp-linear-default.mc",
                     "version": 1,
                     "languageId": "machina",
-                    "text": "@linear\ntype Door = {\n    states { Closed, Open }\n    actions { open: Closed -> Open }\n}\n"
+                    "text": "@linear\ntype Door = {\n    states { Closed, Open }\n}\n"
                 }
             }
         }),

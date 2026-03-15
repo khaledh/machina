@@ -16,7 +16,7 @@ typedef struct mc_thunk_registry_entry {
 // Parsed machine descriptor (process-global).
 struct mc_machine_descriptor {
     uint64_t descriptor_id;
-    char *typestate_name;
+    char *linear_type_name;
     mc_machine_dispatch_row_t *rows;
     uint32_t rows_len;
 };

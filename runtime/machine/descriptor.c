@@ -264,7 +264,7 @@ mc_dispatch_result_t mc_descriptor_dispatch(
 
     uint64_t thunk_id = row->state_local_thunk_id != 0
         ? row->state_local_thunk_id
-        : row->typestate_fallback_thunk_id;
+        : row->fallback_thunk_id;
     const mc_thunk_registry_entry_t *entry = mc_lookup_thunk_entry(thunk_id);
     if (!entry || !entry->dispatch) {
         if (fault_code) {
@@ -394,9 +394,9 @@ uint64_t __mc_machine_runtime_register_descriptor(
         return 0;
     }
 
-    char *typestate_name = NULL;
+    char *linear_type_name = NULL;
     mc_machine_dispatch_row_t *rows = NULL;
-    if (!mc_desc_read_string_alloc(&c, &typestate_name)) {
+    if (!mc_desc_read_string_alloc(&c, &linear_type_name)) {
         return 0;
     }
 
@@ -406,7 +406,7 @@ uint64_t __mc_machine_runtime_register_descriptor(
     uint32_t role_count = 0;
     if (!mc_desc_read_u32(&c, &state_count) || !mc_desc_read_u32(&c, &event_count)
         || !mc_desc_read_u32(&c, &row_count) || !mc_desc_read_u32(&c, &role_count)) {
-        __mc_free(typestate_name);
+        __mc_free(linear_type_name);
         return 0;
     }
 
@@ -414,7 +414,7 @@ uint64_t __mc_machine_runtime_register_descriptor(
         uint64_t ignored = 0;
         if (!mc_desc_read_u64(&c, &ignored) || !mc_desc_read_u64(&c, &ignored)
             || !mc_desc_read_u64(&c, &ignored) || !mc_desc_skip_string(&c)) {
-            __mc_free(typestate_name);
+            __mc_free(linear_type_name);
             return 0;
         }
     }
@@ -424,21 +424,21 @@ uint64_t __mc_machine_runtime_register_descriptor(
         uint8_t key_kind = 0;
         if (!mc_desc_read_u64(&c, &ignored) || !mc_desc_read_u64(&c, &ignored)
             || !mc_desc_read_u8(&c, &key_kind)) {
-            __mc_free(typestate_name);
+            __mc_free(linear_type_name);
             return 0;
         }
         if (key_kind == 0) {
             if (!mc_desc_skip_string(&c)) {
-                __mc_free(typestate_name);
+                __mc_free(linear_type_name);
                 return 0;
             }
         } else if (key_kind == 1) {
             if (!mc_desc_skip_string(&c) || !mc_desc_skip_string(&c)) {
-                __mc_free(typestate_name);
+                __mc_free(linear_type_name);
                 return 0;
             }
         } else {
-            __mc_free(typestate_name);
+            __mc_free(linear_type_name);
             return 0;
         }
     }
@@ -449,7 +449,7 @@ uint64_t __mc_machine_runtime_register_descriptor(
             _Alignof(mc_machine_dispatch_row_t)
         );
         if (!rows) {
-            __mc_free(typestate_name);
+            __mc_free(linear_type_name);
             return 0;
         }
     }
@@ -459,9 +459,9 @@ uint64_t __mc_machine_runtime_register_descriptor(
             || !mc_desc_read_u64(&c, &rows[i].event_kind)
             || !mc_desc_read_u64(&c, &rows[i].request_site_key)
             || !mc_desc_read_u64(&c, &rows[i].state_local_thunk_id)
-            || !mc_desc_read_u64(&c, &rows[i].typestate_fallback_thunk_id)) {
+            || !mc_desc_read_u64(&c, &rows[i].fallback_thunk_id)) {
             __mc_free(rows);
-            __mc_free(typestate_name);
+            __mc_free(linear_type_name);
             return 0;
         }
     }
@@ -470,21 +470,21 @@ uint64_t __mc_machine_runtime_register_descriptor(
         uint64_t ignored = 0;
         if (!mc_desc_skip_string(&c) || !mc_desc_read_u64(&c, &ignored)) {
             __mc_free(rows);
-            __mc_free(typestate_name);
+            __mc_free(linear_type_name);
             return 0;
         }
     }
 
     if (c.off != c.len || !mc_descriptor_registry_ensure_cap(g_descriptor_registry_len + 1)) {
         __mc_free(rows);
-        __mc_free(typestate_name);
+        __mc_free(linear_type_name);
         return 0;
     }
 
     uint64_t descriptor_id = g_next_descriptor_id++;
     mc_machine_descriptor_t *dst = &g_descriptor_registry[g_descriptor_registry_len];
     dst->descriptor_id = descriptor_id;
-    dst->typestate_name = typestate_name;
+    dst->linear_type_name = linear_type_name;
     dst->rows = rows;
     dst->rows_len = row_count;
     g_descriptor_registry_len += 1;

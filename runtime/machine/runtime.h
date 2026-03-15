@@ -3,7 +3,7 @@
 
 #include <stdint.h>
 
-// Managed typestate runtime core.
+// Managed machine runtime core.
 //
 // V1 scope in this module:
 // - machine table and lifecycle state
@@ -21,7 +21,7 @@ typedef uint32_t mc_machine_id_t;
 // builder. One payload type maps to one tag within a capsule.
 typedef uint64_t mc_machine_event_kind_t;
 
-// Opaque state token owned by compiler-generated typestate code.
+// Opaque state token owned by compiler-generated linear type code.
 // V1 execution model treats this as an implementation-defined payload pointer.
 typedef uint64_t mc_machine_state_token_t;
 
@@ -101,7 +101,7 @@ typedef enum mc_dispatch_result {
 #define MC_FAULT_CODE_TXN_COMMIT_REJECTED 1u
 
 // Minimal envelope used by v1 runtime tests and scheduler plumbing.
-// Higher-level protocol routing metadata will extend this over time.
+// Higher-level routing metadata will extend this over time.
 typedef struct mc_machine_envelope {
     // Logical payload kind/type tag.
     mc_machine_event_kind_t kind;
@@ -181,7 +181,7 @@ typedef struct mc_machine_dispatch_row {
     // Optional response request-site match key. Zero means wildcard.
     uint64_t request_site_key;
     uint64_t state_local_thunk_id;
-    uint64_t typestate_fallback_thunk_id;
+    uint64_t fallback_thunk_id;
 } mc_machine_dispatch_row_t;
 
 typedef enum mc_subscription_op {
@@ -589,7 +589,7 @@ mc_machine_reply_result_t __mc_machine_runtime_reply(
     const mc_machine_envelope_t *env
 );
 
-// Managed typestate effect ABI shims used by compiler-lowered `emit`/`reply`.
+// Managed machine effect ABI shims used by compiler-lowered `emit`/`reply`.
 //
 // These APIs are valid only while a managed dispatch callback is executing via
 // `__mc_machine_runtime_dispatch_one_txn`. Calls outside dispatch return

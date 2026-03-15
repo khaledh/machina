@@ -123,7 +123,7 @@ uint8_t mc_emit_merge_into_txn(
         && mc_emit_merge_replies(ctx, txn);
 }
 
-// Managed typestate effect ABI shims.
+// Managed machine effect ABI shims.
 //
 // These shims stage effects into the active transactional dispatch context.
 // They do not enqueue directly; commit still happens only through

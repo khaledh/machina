@@ -91,7 +91,7 @@ static void build_test_descriptor(byte_buf_t *b) {
     buf_u8(b, 'D');
     buf_u32(b, 1);
 
-    // typestate name
+    // linear type name
     buf_str(b, "M");
 
     // counts: states=2, events=2, rows=2, roles=0.
