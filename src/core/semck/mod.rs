@@ -76,9 +76,10 @@ fn sem_check_partial_normalized(
     }
 
     let mut errors = Vec::new();
-    let has_legacy_protocol_facts = !ctx.typestate_role_impls.is_empty()
-        || !ctx.protocol_index.protocols.is_empty()
-        || !ctx.protocol_index.typestate_bindings.is_empty();
+    // Retired standalone protocol defs no longer build protocol facts on the
+    // normal frontend path. Legacy protocol semcheck only remains meaningful
+    // when a retained typestate role implementation is present.
+    let has_legacy_protocol_facts = !ctx.typestate_role_impls.is_empty();
 
     let move_result = move_check::check(&ctx);
     let def_init_result = def_init::check(&ctx);
