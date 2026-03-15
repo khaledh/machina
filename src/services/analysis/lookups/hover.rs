@@ -19,9 +19,7 @@ use crate::services::analysis::syntax_index::{
 };
 
 use super::callable_signature::format_source_callable_signature;
-use super::definition::{
-    linear_decl_target_at_span, machine_handle_def_at_span, typestate_role_def_at_span,
-};
+use super::definition::{linear_decl_target_at_span, machine_handle_def_at_span};
 use super::{TypestateNameDemangler, identifier_token_at_span, resolved_binding_type_for_def};
 
 pub(crate) fn hover_at_span_in_file(
@@ -50,9 +48,6 @@ pub(crate) fn hover_at_span_in_file(
                     current_file_path,
                     query_ident.as_deref(),
                 )
-            })
-            .or_else(|| {
-                try_typestate_role_hover(state, normalized_query_span, query_ident.as_deref())
             })
             .or_else(|| {
                 try_machine_handle_hover(
@@ -290,47 +285,6 @@ fn try_node_hover(
     best.map(|(_, _, _, info)| info)
 }
 
-/// Try hover for typestate role implementation bindings.
-fn try_typestate_role_hover(
-    state: &LookupState,
-    query_span: Span,
-    query_ident: Option<&str>,
-) -> Option<HoverInfo> {
-    let typed = state.typed.as_ref()?;
-    let demangler = TypestateNameDemangler::from_def_table(&typed.def_table);
-    let def_id =
-        typestate_role_def_at_span(&typed.typestate_role_impls, &typed.def_table, query_span)?;
-    let def_name = typed
-        .def_table
-        .lookup_def(def_id)
-        .map(|def| def.name.clone());
-    if let (Some(def_name), Some(query_ident)) = (def_name.as_deref(), query_ident)
-        && !def_name_matches_query(def_name, query_ident, &demangler)
-    {
-        return None;
-    }
-    let display = format_hover_label(
-        def_name.as_deref(),
-        None,
-        Some(def_id),
-        Some(&typed.module),
-        Some(&typed.type_map),
-        &typed.def_table,
-    );
-    Some(HoverInfo {
-        node_id: typed
-            .def_table
-            .lookup_def_node_id(def_id)
-            .unwrap_or(crate::core::ast::NodeId(0)),
-        span: query_span,
-        def_id: Some(def_id),
-        symbol_id: typed.symbol_ids.lookup_symbol_id(def_id).cloned(),
-        def_name,
-        ty: None,
-        display,
-    })
-}
-
 /// Try hover by scanning the def table for a matching definition name.
 fn try_def_table_hover(
     state: &LookupState,
@@ -456,13 +410,6 @@ fn try_resolved_hover(
         .def_table
         .lookup_node_def_id(node_id)
         .filter(|id| *id != UNKNOWN_DEF_ID)
-        .or_else(|| {
-            typestate_role_def_at_span(
-                &resolved.typestate_role_impls,
-                &resolved.def_table,
-                query_span,
-            )
-        })
         .or_else(|| {
             machine_handle_def_at_span(&resolved.def_table, query_span, source_text, query_ident)
         })?;

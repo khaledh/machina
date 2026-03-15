@@ -20,9 +20,7 @@ pub(super) struct LinearDeclTarget {
     pub display: String,
 }
 
-/// Resolve the definition under `query_span`. Prefers role-binding matches
-/// over AST node matches — generated typestate items may carry synthetic
-/// spans that shadow the original role reference.
+/// Resolve the definition under `query_span`.
 pub(crate) fn def_at_span(
     state: &LookupState,
     query_span: Span,
@@ -34,13 +32,6 @@ pub(crate) fn def_at_span(
     if let Some(def_id) =
         selected_callable_def_at_span(state, query_span, token.as_ref().map(|t| t.ident.as_str()))
     {
-        return Some(def_id);
-    }
-    if let Some(def_id) = typestate_role_def_at_span(
-        &resolved.typestate_role_impls,
-        &resolved.def_table,
-        query_span,
-    ) {
         return Some(def_id);
     }
     if let Some(def_id) = machine_handle_def_at_span(
@@ -84,19 +75,9 @@ pub(crate) fn def_location_at_span(
             span: target.span,
         });
     }
-    // Try role-binding lookup first — generated typestate items may carry
-    // synthetic spans that overlap with the role reference, causing
-    // `best_def_use_at_span` to match a generated node instead of the
-    // original protocol role.
     let def_id = if let Some(def_id) =
         selected_callable_def_at_span(state, query_span, token.as_ref().map(|t| t.ident.as_str()))
     {
-        def_id
-    } else if let Some(def_id) = typestate_role_def_at_span(
-        &resolved.typestate_role_impls,
-        &resolved.def_table,
-        query_span,
-    ) {
         def_id
     } else if let Some(def_id) = machine_handle_def_at_span(
         &resolved.def_table,
@@ -195,54 +176,6 @@ fn best_def_use_at_span(
         }
     }
     None
-}
-
-/// Resolve a typestate protocol-role reference under the cursor.
-///
-/// This covers:
-/// - typestate role impl paths (`typestate X : Proto::Role { ... }`)
-/// - explicit peer field bindings (`peer: Machine<Y> as Role`)
-///
-/// Uses the same narrowest-span heuristic as `best_def_use_at_span`.
-pub(super) fn typestate_role_def_at_span(
-    role_impls: &[crate::core::context::TypestateRoleImplBinding],
-    def_table: &DefTable,
-    query_span: Span,
-) -> Option<DefId> {
-    let mut best: Option<(usize, usize, DefId)> = None;
-
-    let mut consider = |span: Span, def_id: DefId| {
-        if def_id == UNKNOWN_DEF_ID {
-            return;
-        }
-        if !span_contains_span(span, query_span) {
-            return;
-        }
-        if def_table.lookup_def(def_id).is_none() {
-            return;
-        }
-
-        let width = span.end.offset.saturating_sub(span.start.offset);
-        let start = span.start.offset;
-        let replace = best.as_ref().is_none_or(|(best_width, best_start, _)| {
-            width < *best_width || (width == *best_width && start > *best_start)
-        });
-        if replace {
-            best = Some((width, start, def_id));
-        }
-    };
-
-    for role_impl in role_impls {
-        if let Some(def_id) = role_impl.role_def_id {
-            consider(role_impl.span, def_id);
-        }
-        for peer_binding in &role_impl.peer_role_bindings {
-            if let Some(def_id) = peer_binding.role_def_id {
-                consider(peer_binding.span, def_id);
-            }
-        }
-    }
-    best.map(|(_, _, def_id)| def_id)
 }
 
 pub(super) fn linear_decl_target_at_span(
