@@ -2919,6 +2919,52 @@ fn elaborate_linear_semantic(source: &str) -> crate::core::context::SemanticCont
     elaborate_stage(sem_checked)
 }
 
+#[test]
+fn semcheck_linear_program_keeps_protocol_progression_empty() {
+    let parsed = parsed_context(
+        r#"
+        @linear
+        type Door = {
+            states { Closed, Open }
+            actions { open: Closed -> Open }
+        }
+
+        Door :: {
+            fn open(self) -> Open {
+                Open {}
+            }
+        }
+        "#,
+    );
+    let resolved =
+        resolve_stage_with_policy(parsed, ResolveInputs::default(), FrontendPolicy::Strict);
+    let resolved_ctx = resolved
+        .context
+        .expect("resolve should succeed for linear semcheck test");
+    let typed = typecheck_stage_with_policy(
+        resolved_ctx,
+        resolved.imported_facts,
+        FrontendPolicy::Strict,
+    )
+    .context
+    .expect("typecheck should succeed for linear semcheck test");
+    let sem_checked =
+        semcheck_stage(typed).expect("semcheck should succeed for linear semcheck test");
+
+    assert!(
+        sem_checked.protocol_progression.handlers.is_empty(),
+        "pure linear programs should not build legacy protocol progression facts"
+    );
+    assert!(
+        sem_checked.protocol_progression.by_handler_def.is_empty(),
+        "pure linear programs should not index legacy protocol handlers"
+    );
+    assert!(
+        sem_checked.protocol_progression.by_state.is_empty(),
+        "pure linear programs should not index legacy protocol states"
+    );
+}
+
 fn def_name(
     def_table: &crate::core::resolve::DefTable,
     def_id: crate::core::resolve::DefId,

@@ -76,12 +76,19 @@ fn sem_check_partial_normalized(
     }
 
     let mut errors = Vec::new();
+    let has_legacy_protocol_facts = !ctx.typestate_role_impls.is_empty()
+        || !ctx.protocol_index.protocols.is_empty()
+        || !ctx.protocol_index.typestate_bindings.is_empty();
 
     let move_result = move_check::check(&ctx);
     let def_init_result = def_init::check(&ctx);
     let capture_result = closure::capture::check(&ctx);
     let closure_borrow_errors = closure::borrow::check(&ctx, &capture_result.captures);
-    let progression_facts = protocol_progression::extract(&ctx);
+    let progression_facts = if has_legacy_protocol_facts {
+        protocol_progression::extract(&ctx)
+    } else {
+        crate::core::context::ProtocolProgressionFacts::default()
+    };
 
     errors.extend(value::check(&ctx));
     errors.extend(structural::check(&ctx));
@@ -92,11 +99,15 @@ fn sem_check_partial_normalized(
     errors.extend(closure_borrow_errors);
     errors.extend(move_result.errors);
     errors.extend(slice_escape::check(&ctx));
-    errors.extend(protocol_shape::check_protocol_shape_conformance(&ctx));
+    if has_legacy_protocol_facts {
+        errors.extend(protocol_shape::check_protocol_shape_conformance(&ctx));
+    }
     errors.extend(protocol_shape::check_typestate_handler_overlap(&ctx));
     errors.extend(protocol_shape::check_typestate_request_response_shape(&ctx));
     errors.extend(reply_cap::check_reply_cap_usage(&ctx));
-    errors.extend(protocol_progression_check::check(&ctx, &progression_facts));
+    if has_legacy_protocol_facts {
+        errors.extend(protocol_progression_check::check(&ctx, &progression_facts));
+    }
 
     let mut poisoned_nodes = upstream_poisoned_nodes.clone();
     if !errors.is_empty() {
