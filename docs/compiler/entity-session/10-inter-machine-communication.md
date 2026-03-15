@@ -134,6 +134,7 @@ developers will rebuild protocol problems in ad-hoc user code.
 
 Before designing V2 interaction semantics, write the auth-check flow
 end-to-end using only V1 primitives. This makes the pain points concrete.
+See [11-auth-check-v1.md](11-auth-check-v1.md) for the full worked example.
 
 ### The scenario
 
