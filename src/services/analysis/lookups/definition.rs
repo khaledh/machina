@@ -66,7 +66,7 @@ pub(crate) fn def_location_at_span(
     if let Some(target) = linear_decl_target_at_span(
         &resolved.module,
         query_span,
-        source.as_deref(),
+        source,
         token.as_ref().map(|t| t.ident.as_str()),
     ) {
         return Some(Location {
@@ -82,7 +82,7 @@ pub(crate) fn def_location_at_span(
     } else if let Some(def_id) = machine_handle_def_at_span(
         &resolved.def_table,
         query_span,
-        source.as_deref(),
+        source,
         token.as_ref().map(|t| t.ident.as_str()),
     ) {
         def_id
@@ -384,8 +384,8 @@ fn linear_decl_target_from_source(
             continue;
         }
 
-        if current_type.is_none() && pending_linear && trimmed.starts_with("type ") {
-            if let Some(rest) = trimmed.strip_prefix("type ")
+        if current_type.is_none() && pending_linear && trimmed.starts_with("type ")
+            && let Some(rest) = trimmed.strip_prefix("type ")
                 && let Some((type_name, _)) = rest.split_once('=')
             {
                 current_type = Some(type_name.trim().to_string());
@@ -395,7 +395,6 @@ fn linear_decl_target_from_source(
                 line_start_offset += line.len() + 1;
                 continue;
             }
-        }
 
         if let Some(type_name) = current_type.clone() {
             match trimmed {

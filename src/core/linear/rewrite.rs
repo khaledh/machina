@@ -432,8 +432,8 @@ pub(super) fn rewrite_linear_exprs(
                 );
                 errors.extend(rewrite_errors);
 
-                if let (Some(trigger_info), Some(result_state)) = (&trigger_info, result_state) {
-                    if result_state.value_state.state_name != trigger_info.target_state {
+                if let (Some(trigger_info), Some(result_state)) = (&trigger_info, result_state)
+                    && result_state.value_state.state_name != trigger_info.target_state {
                         errors.push(
                             REK::MachineHandlerTypeMismatch(
                                 trigger_info.machine_name.clone(),
@@ -443,7 +443,6 @@ pub(super) fn rewrite_linear_exprs(
                             .at(func.body.span),
                         );
                     }
-                }
             }
             TopLevelItem::MethodBlock(method_block) => {
                 if infos.contains_key(&method_block.type_name) {
@@ -779,9 +778,7 @@ fn rewrite_expr_in_scope(
             // actually have trigger-driven successors; all other cases should
             // keep reporting `wait` as unavailable.
             if method_name == "wait" && args.is_empty() {
-                let Some(callee_state) = callee_state.as_ref() else {
-                    return None;
-                };
+                let callee_state = callee_state.as_ref()?;
                 if let Some(source_ident) = callee_source_ident.clone()
                     && let Some(binding) = env.get_mut(&source_ident)
                 {
@@ -867,19 +864,13 @@ fn rewrite_expr_in_scope(
 
             // Direct-mode action dispatch: look up the action by the callee's
             // current state and the method name.
-            let Some(callee_state) = callee_state else {
-                return None;
-            };
-            let Some(info) = infos.get(&callee_state.value_state.type_name) else {
-                return None;
-            };
+            let callee_state = callee_state?;
+            let info = infos.get(&callee_state.value_state.type_name)?;
             let action_name = method_name.clone();
-            let Some(action) = info.action_by_source_and_name.get(&(
+            let action = info.action_by_source_and_name.get(&(
                 callee_state.value_state.state_name.clone(),
                 action_name.clone(),
-            )) else {
-                return None;
-            };
+            ))?;
             *method_name = action.internal_name.clone();
             if let Some(source_ident) = callee_source_ident
                 && let Some(binding) = env.get_mut(&source_ident)
@@ -972,9 +963,7 @@ fn rewrite_expr_in_scope(
             }
             // Qualified state construction: `Door::Closed {}` → enum variant.
             if let Some((type_name, state_name)) = parse_qualified_linear_state_name(name, infos) {
-                let Some(info) = infos.get(&type_name) else {
-                    return None;
-                };
+                let info = infos.get(&type_name)?;
                 let payload = linear_state_payload_from_fields(
                     fields,
                     info,
@@ -999,12 +988,8 @@ fn rewrite_expr_in_scope(
             }
 
             // Unqualified state construction inside a method body: `Closed {}`.
-            let Some(type_name) = current_linear_type else {
-                return None;
-            };
-            let Some(info) = infos.get(type_name) else {
-                return None;
-            };
+            let type_name = current_linear_type?;
+            let info = infos.get(type_name)?;
             if info.state_names.contains(name) {
                 let state_name = name.clone();
                 let payload = linear_state_payload_from_fields(
@@ -1060,12 +1045,8 @@ fn rewrite_expr_in_scope(
                 return None;
             };
             let state_name = ident.clone();
-            let Some(type_name) = current_linear_type else {
-                return None;
-            };
-            let Some(info) = infos.get(type_name) else {
-                return None;
-            };
+            let type_name = current_linear_type?;
+            let info = infos.get(type_name)?;
             if !info.state_names.contains(&state_name) {
                 return None;
             }
@@ -1324,9 +1305,7 @@ fn rewrite_expr_in_scope(
         }
         ExprKind::Var { ident } => {
             let source_ident = ident.clone();
-            let Some(binding) = env.get(&source_ident) else {
-                return None;
-            };
+            let binding = env.get(&source_ident)?;
             if binding.consumed {
                 errors.push(REK::LinearUseAfterConsume(source_ident).at(expr.span));
             }
@@ -2019,9 +1998,7 @@ fn unique_machine_action_source_state(
     let mut matches =
         info.action_by_source_and_name
             .keys()
-            .filter_map(|(source_state, candidate_name)| {
-                (candidate_name == action_name).then(|| source_state.clone())
-            });
+            .filter(|&(_, candidate_name)| candidate_name == action_name).map(|(source_state, _)| source_state.clone());
     let first = matches.next()?;
     matches.next().is_none().then_some(first)
 }

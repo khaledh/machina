@@ -374,7 +374,6 @@ pub fn discover_and_parse_capsule_with_loader(
         loader,
         CapsuleParseOptions {
             inject_prelude_requires: false,
-            ..Default::default()
         },
     )
 }

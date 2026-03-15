@@ -729,7 +729,7 @@ fn return_type_matches(action: &LinearTransitionDecl, ret_ty_expr: &TypeExpr) ->
     let Some((ok, errs)) = variants.split_first() else {
         return false;
     };
-    if !named_type_name(ok).is_some_and(|name| name == action.target_state) {
+    if named_type_name(ok).is_none_or(|name| name != action.target_state) {
         return false;
     }
 
@@ -772,7 +772,7 @@ fn error_superset_matches(action: &LinearTransitionDecl, ret_ty_expr: &TypeExpr)
             .all(|expected| errs.iter().any(|found| same_type_expr(found, expected)))
 }
 
-fn flatten_union_variants<'a>(ty_expr: &'a TypeExpr) -> Vec<&'a TypeExpr> {
+fn flatten_union_variants(ty_expr: &TypeExpr) -> Vec<&TypeExpr> {
     match &ty_expr.kind {
         TypeExprKind::Union { variants } => variants.iter().collect(),
         _ => vec![ty_expr],

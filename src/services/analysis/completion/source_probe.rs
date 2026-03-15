@@ -88,7 +88,7 @@ pub(super) fn position_for_offset(source: &str, target_offset: usize) -> Option<
 pub(super) fn single_char_span(source: &str, offset: usize) -> Option<Span> {
     let start = position_for_offset(source, offset)?;
     let mut next_offset = source.len();
-    if let Some((idx, _)) = source[offset..].char_indices().skip(1).next() {
+    if let Some((idx, _)) = source[offset..].char_indices().nth(1) {
         next_offset = offset + idx;
     }
     if next_offset == source.len() && offset < source.len() {

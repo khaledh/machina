@@ -171,7 +171,7 @@ fn format_type_expr_for_signature(
             } else {
                 let args: Vec<_> = type_args
                     .iter()
-                    .filter_map(|arg| format_type_expr_for_signature(arg))
+                    .filter_map(format_type_expr_for_signature)
                     .collect();
                 format!("{ident}<{}>", args.join(", "))
             }
@@ -198,14 +198,14 @@ fn format_type_expr_for_signature(
         TypeExprKind::Tuple { field_ty_exprs } => {
             let fields: Vec<_> = field_ty_exprs
                 .iter()
-                .filter_map(|field| format_type_expr_for_signature(field))
+                .filter_map(format_type_expr_for_signature)
                 .collect();
             format!("({})", fields.join(", "))
         }
         TypeExprKind::Union { variants } => {
             let fields: Vec<_> = variants
                 .iter()
-                .filter_map(|field| format_type_expr_for_signature(field))
+                .filter_map(format_type_expr_for_signature)
                 .collect();
             fields.join(" | ")
         }

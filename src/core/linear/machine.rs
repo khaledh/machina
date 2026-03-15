@@ -3314,19 +3314,16 @@ fn machine_action_error_type_exprs(
         }
     };
 
-    match &info.ret_ty_expr.kind {
-        TypeExprKind::Union { variants } => {
-            for variant in variants.iter().skip(1) {
-                let TypeExprKind::Named { ident, type_args } = &variant.kind else {
-                    continue;
-                };
-                if !type_args.is_empty() {
-                    continue;
-                }
-                push_if_missing(&mut out, ident, node_id_gen);
+    if let TypeExprKind::Union { variants } = &info.ret_ty_expr.kind {
+        for variant in variants.iter().skip(1) {
+            let TypeExprKind::Named { ident, type_args } = &variant.kind else {
+                continue;
+            };
+            if !type_args.is_empty() {
+                continue;
             }
+            push_if_missing(&mut out, ident, node_id_gen);
         }
-        _ => {}
     }
 
     push_if_missing(&mut out, "SessionError", node_id_gen);

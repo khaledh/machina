@@ -463,12 +463,7 @@ impl<'a> Elaborator<'a> {
     pub(super) fn elab_call_arg_mode(&mut self, mode: ParamMode, arg: &CallArg) -> CallArg {
         match mode {
             ParamMode::In => {
-                let expr =
-                    if matches!(arg.expr.kind, ExprKind::Slice { .. }) && mode == ParamMode::In {
-                        self.elab_value(&arg.expr)
-                    } else {
-                        self.elab_value(&arg.expr)
-                    };
+                let expr = self.elab_value(&arg.expr);
                 CallArg {
                     mode: CallArgMode::Default,
                     expr,
