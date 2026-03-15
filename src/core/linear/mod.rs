@@ -63,18 +63,25 @@ pub fn desugar_module(
     linear_index: &mut LinearIndex,
 ) -> Vec<ResolveError> {
     let infos = rewrite::collect_direct_linear_infos(module);
-    let machine_infos = machine::collect_machine_spawn_infos(module);
-    let action_override_infos = machine::collect_machine_action_override_infos(module);
-    let action_session_infos = machine::collect_machine_action_session_infos(module);
-    let trigger_handler_infos = machine::collect_machine_trigger_handler_infos(module);
-    let on_handler_infos = machine::collect_machine_on_handler_infos(module);
-    let deliver_infos = machine::collect_machine_deliver_infos(module);
-    let wait_infos = machine::collect_machine_wait_infos(module);
+    let mut machine_infos = machine::collect_machine_spawn_infos(module);
 
     // Generate hosted support types and machine surface before direct-mode lowering,
     // since the generated types (MachineError, SessionError, handle structs) need to
     // exist before resolve sees them.
     if !machine_infos.is_empty() {
+        machine::rewrite_machine_constructor_self_types(module, &machine_infos);
+        machine::rewrite_public_machine_handle_types(module, &machine_infos);
+
+        // Re-collect after the source-facing rewrites so generated spawn helpers
+        // see constructor bodies and handle-typed params in their lowered form.
+        machine_infos = machine::collect_machine_spawn_infos(module);
+        let action_override_infos = machine::collect_machine_action_override_infos(module);
+        let action_session_infos = machine::collect_machine_action_session_infos(module);
+        let trigger_handler_infos = machine::collect_machine_trigger_handler_infos(module);
+        let on_handler_infos = machine::collect_machine_on_handler_infos(module);
+        let deliver_infos = machine::collect_machine_deliver_infos(module);
+        let wait_infos = machine::collect_machine_wait_infos(module);
+
         machine::ensure_hosted_support_types(module, node_id_gen);
         machine::ensure_hosted_runtime_intrinsics(module, node_id_gen);
         machine::append_machine_spawn_support(
@@ -89,8 +96,6 @@ pub fn desugar_module(
             &wait_infos,
             node_id_gen,
         );
-        machine::rewrite_machine_constructor_self_types(module, &machine_infos);
-        machine::rewrite_public_machine_handle_types(module, &machine_infos);
     }
 
     if infos.is_empty() {

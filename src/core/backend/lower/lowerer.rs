@@ -438,8 +438,25 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
     /// is considered ambiguous if the same payload type maps to different kinds
     /// across descriptors.
     /// Resolves an event kind for payload-based send/request emits.
-    pub(super) fn machine_payload_event_kind(&self, payload_ty: &Type) -> Option<u64> {
+    pub(super) fn machine_payload_event_kind(
+        &self,
+        payload_ty: &Type,
+        target_handle_ty: Option<&Type>,
+    ) -> Option<u64> {
         let payload_name = semantic_named_type_name(payload_ty)?;
+        if let Some(target_handle_ty) = target_handle_ty
+            && let Some(handle_name) = self.hosted_machine_handle_type_name(target_handle_ty)
+        {
+            return self
+                .linear_index
+                .machine_hosts
+                .values()
+                .find(|host| host.handle_type_name == handle_name)?
+                .on_event_kinds
+                .get(payload_name)
+                .copied();
+        }
+
         let current_node_id = self.def_table.lookup_def_node_id(self.current_def_id)?;
         let machine_name = self
             .linear_index

@@ -1807,6 +1807,82 @@ fn linear_type_hosted_action_override_send_statement_targets_self() {
 }
 
 #[test]
+fn linear_type_hosted_action_override_send_statement_targets_other_machine() {
+    let run = run_program(
+        "linear_type_hosted_action_override_send_statement_targets_other_machine",
+        r#"
+            type Note = {}
+
+            @linear
+            type PullRequest = {
+                id: u64,
+
+                states {
+                    Draft,
+                    Review,
+                }
+
+                actions {
+                    submit: Draft -> Review,
+                }
+
+                roles {
+                    Author { submit }
+                }
+            }
+
+            PullRequest :: {
+                fn submit(self) -> Review {
+                    Review {}
+                }
+            }
+
+            machine Receiver hosts PullRequest(key: id) {
+                fn new() -> Self {
+                    Self {}
+                }
+
+                on Note(_event) {
+                    println("note");
+                }
+            }
+
+            machine Sender hosts PullRequest(key: id) {
+                fields {
+                    receiver: Machine<Receiver>,
+                }
+
+                fn new(receiver: Machine<Receiver>) -> Self {
+                    Self { receiver: receiver }
+                }
+
+                action submit(draft) -> Review {
+                    send(self.receiver, Note {});
+                    draft;
+                    Review {}
+                }
+            }
+
+            fn main() -> () | MachineError | SessionError {
+                let receiver = Receiver::spawn()?;
+                let sender = Sender::spawn(receiver)?;
+                let draft = sender.create(PullRequest as Author)?;
+                let _review = draft.submit()?;
+                __mc_machine_runtime_step_u64(__mc_machine_runtime_managed_current_u64());
+                ()
+            }
+        "#,
+    );
+
+    assert_eq!(run.status.code(), Some(0));
+    let stdout = String::from_utf8_lossy(&run.stdout);
+    assert_eq!(
+        stdout, "note\n",
+        "hosted action overrides should accept send(...) syntax with machine fields wired through spawn(...)"
+    );
+}
+
+#[test]
 fn linear_type_hosted_on_handler_emit_uses_enclosing_machine_routing() {
     let run = run_program(
         "linear_type_hosted_on_handler_emit_overlapping_machine_names",

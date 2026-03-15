@@ -48,7 +48,7 @@ use crate::core::ast::{
     BindPattern, BindPatternKind, BlockItem, CallArg, CallArgMode, EnumDefVariant, Expr, ExprKind,
     FuncDef, FunctionSig, MachineDef, MachineItem, MatchArm, MethodBlock, MethodDef, MethodItem,
     MethodSig, Module, NodeIdGen, Param, ParamMode, SelfParam, StmtExpr, StmtExprKind,
-    StructLitField, TopLevelItem, TypeDef, TypeDefKind, TypeExpr, TypeExprKind,
+    StructDefField, StructLitField, TopLevelItem, TypeDef, TypeDefKind, TypeExpr, TypeExprKind,
 };
 use crate::core::diag::Span;
 
@@ -67,6 +67,8 @@ pub(super) struct MachineSpawnInfo {
     pub key_field_name: String,
     pub shared_fields: Vec<(String, TypeExpr)>,
     pub key_ty: TypeExpr,
+    pub machine_fields: Vec<StructDefField>,
+    pub constructor: Option<FuncDef>,
     pub handle_type_name: String,
     pub spawn_fn_name: String,
 }
@@ -272,6 +274,18 @@ pub(super) fn collect_machine_spawn_infos(module: &Module) -> Vec<MachineSpawnIn
                 .fields
                 .iter()
                 .find(|field| field.name == machine_def.host.key_field)?;
+            let machine_fields = machine_def
+                .items
+                .iter()
+                .find_map(|item| match item {
+                    MachineItem::Fields(fields) => Some(fields.fields.clone()),
+                    _ => None,
+                })
+                .unwrap_or_default();
+            let constructor = machine_def.items.iter().find_map(|item| match item {
+                MachineItem::Constructor(constructor) => Some(constructor.clone()),
+                _ => None,
+            });
             Some(MachineSpawnInfo {
                 machine_name: machine_def.name.clone(),
                 machine_kind: machine_index as u64 + 1,
@@ -290,6 +304,8 @@ pub(super) fn collect_machine_spawn_infos(module: &Module) -> Vec<MachineSpawnIn
                     .map(|field| (field.name.clone(), field.ty.clone()))
                     .collect(),
                 key_ty: key_field.ty.clone(),
+                machine_fields,
+                constructor,
                 handle_type_name: machine_handle_type_name(&machine_def.name),
                 spawn_fn_name: machine_spawn_fn_name(&machine_def.name),
             })
@@ -896,10 +912,9 @@ pub(super) fn append_machine_spawn_support(
     node_id_gen: &mut NodeIdGen,
 ) {
     for info in machine_infos {
-        module.top_level_items.push(build_machine_handle_type_def(
-            &info.handle_type_name,
-            node_id_gen,
-        ));
+        module
+            .top_level_items
+            .push(build_machine_handle_type_def(info, node_id_gen));
         if let Some(method_block) =
             build_machine_handle_send_method_block(info, on_handler_infos, node_id_gen)
         {
@@ -1026,27 +1041,31 @@ pub(super) fn append_machine_spawn_support(
     }
 }
 
-fn build_machine_handle_type_def(type_name: &str, node_id_gen: &mut NodeIdGen) -> TopLevelItem {
+fn build_machine_handle_type_def(
+    info: &MachineSpawnInfo,
+    node_id_gen: &mut NodeIdGen,
+) -> TopLevelItem {
+    let mut fields = vec![crate::core::ast::StructDefField {
+        id: node_id_gen.new_id(),
+        name: "_id".to_string(),
+        ty: TypeExpr {
+            id: node_id_gen.new_id(),
+            kind: TypeExprKind::Named {
+                ident: "u64".to_string(),
+                type_args: Vec::new(),
+            },
+            span: Span::default(),
+        },
+        span: Span::default(),
+    }];
+    fields.extend(info.machine_fields.iter().cloned());
+
     TopLevelItem::TypeDef(TypeDef {
         id: node_id_gen.new_id(),
         attrs: Vec::new(),
-        name: type_name.to_string(),
+        name: info.handle_type_name.clone(),
         type_params: Vec::new(),
-        kind: TypeDefKind::Struct {
-            fields: vec![crate::core::ast::StructDefField {
-                id: node_id_gen.new_id(),
-                name: "_id".to_string(),
-                ty: TypeExpr {
-                    id: node_id_gen.new_id(),
-                    kind: TypeExprKind::Named {
-                        ident: "u64".to_string(),
-                        type_args: Vec::new(),
-                    },
-                    span: Span::default(),
-                },
-                span: Span::default(),
-            }],
-        },
+        kind: TypeDefKind::Struct { fields },
         span: Span::default(),
     })
 }
@@ -1548,7 +1567,7 @@ fn build_hosted_linear_trigger_dispatch_func(
 /// Generate: `fn __mc_machine_spawn_X() -> HandleType | MachineError { HandleType { _id: 1 } }`
 fn build_machine_spawn_func(info: &MachineSpawnInfo, node_id_gen: &mut NodeIdGen) -> FuncDef {
     let span = Span::default();
-    let items = vec![
+    let mut items = vec![
         BlockItem::Stmt(let_bind_stmt(
             "__mc_rt",
             call_expr(MANAGED_RUNTIME_CURRENT_FN, Vec::new(), node_id_gen, span),
@@ -1586,13 +1605,38 @@ fn build_machine_spawn_func(info: &MachineSpawnInfo, node_id_gen: &mut NodeIdGen
         )),
     ];
 
+    if let Some(constructor) = &info.constructor {
+        items.push(BlockItem::Stmt(let_bind_stmt(
+            "__mc_self",
+            freshen_expr_ids(constructor.body.clone(), node_id_gen),
+            node_id_gen,
+            span,
+        )));
+    }
+
+    let tail = if info.constructor.is_some() {
+        build_machine_handle_value_from_source(
+            info,
+            "__mc_self",
+            "__mc_machine_id",
+            node_id_gen,
+            span,
+        )
+    } else {
+        build_machine_handle_value(info, None, "__mc_machine_id", node_id_gen, span)
+    };
+
     FuncDef {
         id: node_id_gen.new_id(),
         attrs: Vec::new(),
         sig: crate::core::ast::FunctionSig {
             name: info.spawn_fn_name.clone(),
             type_params: Vec::new(),
-            params: Vec::new(),
+            params: info
+                .constructor
+                .as_ref()
+                .map(|constructor| freshen_params(&constructor.sig.params, node_id_gen))
+                .unwrap_or_default(),
             ret_ty_expr: TypeExpr {
                 id: node_id_gen.new_id(),
                 kind: TypeExprKind::Union {
@@ -1623,20 +1667,7 @@ fn build_machine_spawn_func(info: &MachineSpawnInfo, node_id_gen: &mut NodeIdGen
             id: node_id_gen.new_id(),
             kind: ExprKind::Block {
                 items,
-                tail: Some(Box::new(Expr {
-                    id: node_id_gen.new_id(),
-                    kind: ExprKind::StructLit {
-                        name: info.handle_type_name.clone(),
-                        type_args: Vec::new(),
-                        fields: vec![crate::core::ast::StructLitField {
-                            id: node_id_gen.new_id(),
-                            name: "_id".to_string(),
-                            value: var_expr("__mc_machine_id", node_id_gen, span),
-                            span,
-                        }],
-                    },
-                    span,
-                })),
+                tail: Some(Box::new(tail)),
             },
             span,
         },
@@ -2728,6 +2759,56 @@ fn build_on_payload_expr(
     }
 }
 
+fn build_machine_handle_value(
+    info: &MachineSpawnInfo,
+    source_var_name: Option<&str>,
+    machine_id_var_name: &str,
+    node_id_gen: &mut NodeIdGen,
+    span: Span,
+) -> Expr {
+    let mut fields = vec![StructLitField {
+        id: node_id_gen.new_id(),
+        name: "_id".to_string(),
+        value: var_expr(machine_id_var_name, node_id_gen, span),
+        span,
+    }];
+
+    if let Some(source_var_name) = source_var_name {
+        fields.extend(info.machine_fields.iter().map(|field| StructLitField {
+            id: node_id_gen.new_id(),
+            name: field.name.clone(),
+            value: struct_field_expr(source_var_name, &field.name, node_id_gen, span),
+            span,
+        }));
+    }
+
+    Expr {
+        id: node_id_gen.new_id(),
+        kind: ExprKind::StructLit {
+            name: info.handle_type_name.clone(),
+            type_args: Vec::new(),
+            fields,
+        },
+        span,
+    }
+}
+
+fn build_machine_handle_value_from_source(
+    info: &MachineSpawnInfo,
+    source_var_name: &str,
+    machine_id_var_name: &str,
+    node_id_gen: &mut NodeIdGen,
+    span: Span,
+) -> Expr {
+    build_machine_handle_value(
+        info,
+        Some(source_var_name),
+        machine_id_var_name,
+        node_id_gen,
+        span,
+    )
+}
+
 fn eq_var_to_int(name: &str, value: u64, node_id_gen: &mut NodeIdGen, span: Span) -> Expr {
     Expr {
         id: node_id_gen.new_id(),
@@ -3813,9 +3894,10 @@ impl VisitorMut for MachineConstructorSelfRewriter<'_> {
         {
             *name = handle_type.clone();
             type_args.clear();
-            if fields.is_empty() {
-                // Placeholder: synthesize the minimal handle field so `Self {}`
-                // returns a valid struct before real machine allocation lands.
+            if !fields.iter().any(|field| field.name == "_id") {
+                // Placeholder: synthesize the runtime-managed machine id so
+                // constructor `Self { ... }` literals remain valid before the
+                // generated spawn helper replaces it with the actual slot id.
                 fields.push(crate::core::ast::StructLitField {
                     id: expr.id,
                     name: "_id".to_string(),

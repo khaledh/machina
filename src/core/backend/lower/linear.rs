@@ -1442,7 +1442,9 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
             .type_table()
             .get(self.type_map.type_of(payload.id))
             .clone();
-        let event_kind = self.machine_payload_event_kind(&payload_ty).unwrap_or(0);
+        let event_kind = self
+            .machine_payload_event_kind(&payload_ty, Some(&dst_ty))
+            .unwrap_or(0);
         let kind = self
             .builder
             .const_int(event_kind as i128, false, 64, u64_ty);
@@ -1484,7 +1486,9 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
             .type_table()
             .get(self.type_map.type_of(payload.id))
             .clone();
-        let event_kind = self.machine_payload_event_kind(&payload_ty).unwrap_or(0);
+        let event_kind = self
+            .machine_payload_event_kind(&payload_ty, Some(&dst_ty))
+            .unwrap_or(0);
         let kind = self
             .builder
             .const_int(event_kind as i128, false, 64, u64_ty);
