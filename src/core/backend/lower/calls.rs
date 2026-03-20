@@ -432,6 +432,9 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
                 IntrinsicCall::StringLen => {
                     panic!("backend call expr cannot lower string len without a receiver");
                 }
+                IntrinsicCall::StringLines => {
+                    panic!("backend call expr cannot lower string lines without a receiver");
+                }
                 IntrinsicCall::TypeOf => {
                     return self.lower_type_of_intrinsic(expr, args, &call_plan);
                 }
@@ -595,6 +598,13 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
                 self.lower_string_len_method(expr.span, receiver_is_place, receiver_value)
                     .map(Some)
             }
+            IntrinsicCall::StringLines => self.lower_string_lines_method(
+                expr,
+                receiver_is_place,
+                args,
+                call_plan,
+                receiver_value,
+            ),
             IntrinsicCall::TypeOf => {
                 panic!("backend type_of intrinsic cannot lower with a method receiver");
             }
@@ -996,5 +1006,47 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
         };
 
         Ok(len)
+    }
+
+    fn lower_string_lines_method(
+        &mut self,
+        expr: &Expr,
+        receiver_is_place: bool,
+        args: &[CallArg],
+        call_plan: &CallPlan,
+        receiver_value: &mut CallInputValue,
+    ) -> Result<Option<LinearValue>, LowerToIrError> {
+        if !matches!(receiver_value.ty, Type::String) {
+            panic!(
+                "backend string lines intrinsic expects string receiver, got {:?}",
+                receiver_value.ty
+            );
+        }
+        if !args.is_empty() {
+            panic!(
+                "backend string lines intrinsic expects 0 args, got {}",
+                args.len()
+            );
+        }
+
+        let (ptr, len) = if receiver_is_place {
+            let view = self.load_string_view(receiver_value.value);
+            (view.ptr, view.len)
+        } else {
+            self.lower_ptr_len_from_value(expr.span, receiver_value.value, &receiver_value.ty, 32)?
+        };
+
+        let result_ir_ty = self
+            .type_lowerer
+            .lower_type_id(self.type_map.type_of(expr.id));
+        let result_slot = self.alloc_value_slot(result_ir_ty);
+        let unit_ty = self.type_lowerer.lower_type(&Type::Unit);
+        self.builder.call(
+            Callee::Runtime(RuntimeFn::StringLines),
+            vec![result_slot.addr, ptr, len],
+            unit_ty,
+        );
+        self.apply_call_drop_effects(call_plan, args, Some(receiver_value), &[])?;
+        Ok(Some(self.load_slot(&result_slot)))
     }
 }

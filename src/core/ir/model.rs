@@ -138,9 +138,11 @@ pub enum CastKind {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum RuntimeFn {
+    ProcessArgsInit,
     Trap,
     Print,
     StringFromBytes,
+    StringLines,
     FmtInit,
     FmtAppendBytes,
     FmtAppendU64,
@@ -186,9 +188,11 @@ pub enum RuntimeFn {
 impl RuntimeFn {
     pub fn name(&self) -> &'static str {
         match self {
+            RuntimeFn::ProcessArgsInit => "__rt_process_args_init",
             RuntimeFn::Trap => "__rt_trap",
             RuntimeFn::Print => "__rt_print",
             RuntimeFn::StringFromBytes => "__rt_string_from_bytes",
+            RuntimeFn::StringLines => "__rt_string_lines",
             RuntimeFn::FmtInit => "__rt_fmt_init",
             RuntimeFn::FmtAppendBytes => "__rt_fmt_append_bytes",
             RuntimeFn::FmtAppendU64 => "__rt_fmt_append_u64",

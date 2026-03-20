@@ -12,6 +12,12 @@ fn __rt_memset(inout buf: u8[], value: u8);
 fn __rt_string_from_bytes(out dst: string, bytes: u8[]);
 
 @runtime
+fn __rt_args_len() -> u64;
+
+@runtime
+fn __rt_arg_at(out dst: string, index: u64);
+
+@runtime
 fn __rt_file_last_errno() -> u64;
 
 @runtime
@@ -126,6 +132,13 @@ string :: {
   prop len: u64 {
     get;
   }
+
+  @intrinsic
+  fn lines(self) -> string[*];
+
+  @intrinsic
+  @link_name("string_contains_impl")
+  fn contains(self, needle: string) -> bool;
 
   @runtime
   fn append(inout self, other: string);

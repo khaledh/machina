@@ -83,10 +83,18 @@ pub(super) fn append_executable_entry_wrapper(
     let unit_ty = type_lowerer.lower_type(&Type::Unit);
     let bool_ty = type_lowerer.lower_type(&Type::Bool);
     let sig = FunctionSig {
-        params: Vec::new(),
+        params: vec![u64_ty, u64_ty],
         ret: u64_ty,
     };
     let mut builder = FunctionBuilder::new(wrapper_def_id, ENTRY_MAIN_WRAPPER_NAME, sig);
+    let entry = builder.current_block();
+    let argc = builder.add_block_param(entry, u64_ty);
+    let argv = builder.add_block_param(entry, u64_ty);
+    let _ = builder.call(
+        Callee::Runtime(RuntimeFn::ProcessArgsInit),
+        vec![argc, argv],
+        unit_ty,
+    );
 
     let ret_ty = *ret_ty;
     let ret_ir_ty = type_lowerer.lower_type(&ret_ty);

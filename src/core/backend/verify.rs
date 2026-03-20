@@ -213,6 +213,10 @@ fn runtime_call_spec(runtime: &RuntimeFn) -> RuntimeCallSpec {
     use RuntimeRetKind::{Bool as RetBool, Int as RetInt, Ptr as RetPtr, Unit};
 
     match runtime {
+        RuntimeFn::ProcessArgsInit => RuntimeCallSpec {
+            args: &[AnyReg, AnyReg],
+            ret: Unit,
+        },
         RuntimeFn::Trap => RuntimeCallSpec {
             args: &[AnyReg, AnyReg, AnyReg, AnyReg],
             ret: Unit,
@@ -222,6 +226,10 @@ fn runtime_call_spec(runtime: &RuntimeFn) -> RuntimeCallSpec {
             ret: Unit,
         },
         RuntimeFn::StringFromBytes => RuntimeCallSpec {
+            args: &[Ptr, Ptr, Int],
+            ret: Unit,
+        },
+        RuntimeFn::StringLines => RuntimeCallSpec {
             args: &[Ptr, Ptr, Int],
             ret: Unit,
         },

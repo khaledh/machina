@@ -7,6 +7,12 @@ void __mc_trap(uint64_t kind, uint64_t arg0, uint64_t arg1, uint64_t arg2);
 uint64_t __mc_u64_to_dec(const mc_slice_t *s, uint64_t value);
 uint64_t __mc_i64_to_dec(const mc_slice_t *s, int64_t value);
 void __mc_memcpy(mc_slice_t *dst, const mc_slice_t *src);
+void __mc_dyn_array_append_elem(
+    mc_dyn_array_t *v,
+    const void *elem,
+    uint64_t elem_size,
+    uint64_t elem_align
+);
 void *__mc_alloc(size_t size, size_t align);
 void *__mc_realloc(void *ptr, size_t size, size_t align);
 void __mc_free(void *ptr);
@@ -292,6 +298,54 @@ void __rt_string_from_bytes(uint64_t out_ptr, uint64_t ptr, uint64_t len) {
 void __rt_string_append_bytes(uint64_t s_ptr, uint64_t ptr, uint64_t len) {
     mc_string_t *s = (mc_string_t *)s_ptr;
     __mc_string_append_bytes(s, ptr, len);
+}
+
+static void mc_string_lines_push(
+    mc_dyn_array_t *out,
+    const mc_string_t *text,
+    uint32_t start,
+    uint32_t end
+) {
+    mc_string_t line = {0};
+    if (end > start) {
+        __mc_string_append_bytes(&line, text->ptr + start, (uint64_t)(end - start));
+    }
+    __mc_dyn_array_append_elem(out, &line, sizeof(mc_string_t), _Alignof(mc_string_t));
+}
+
+void __rt_string_lines(uint64_t out_ptr, uint64_t ptr, uint64_t len) {
+    mc_dyn_array_t *out = (mc_dyn_array_t *)(uintptr_t)out_ptr;
+    mc_string_t text = {
+        .ptr = ptr,
+        .len = (uint32_t)len,
+        .cap = 0,
+    };
+    uint32_t start = 0;
+    const uint8_t *bytes = (const uint8_t *)(uintptr_t)text.ptr;
+
+    if (!out) {
+        return;
+    }
+    out->ptr = 0;
+    out->len = 0;
+    out->cap = 0;
+
+    for (uint32_t i = 0; i < text.len; ++i) {
+        if (bytes[i] != '\n') {
+            continue;
+        }
+
+        uint32_t end = i;
+        if (end > start && bytes[end - 1] == '\r') {
+            end -= 1;
+        }
+        mc_string_lines_push(out, &text, start, end);
+        start = i + 1;
+    }
+
+    if (start < text.len) {
+        mc_string_lines_push(out, &text, start, text.len);
+    }
 }
 
 void __rt_string_append_bool(uint64_t s_ptr, uint8_t value) {

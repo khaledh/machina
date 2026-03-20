@@ -110,6 +110,13 @@ impl<'a> Elaborator<'a> {
                     )
                 {
                     target = CallTarget::Intrinsic(IntrinsicCall::StringLen);
+                } else if intrinsic_name == "lines"
+                    && matches!(
+                        call_sig.receiver.as_ref().map(|recv| &recv.ty),
+                        Some(Type::String)
+                    )
+                {
+                    target = CallTarget::Intrinsic(IntrinsicCall::StringLines);
                 } else if intrinsic_name == "type_of" {
                     target = CallTarget::Intrinsic(IntrinsicCall::TypeOf);
                 }
@@ -258,6 +265,18 @@ impl<'a> Elaborator<'a> {
                         len_bits: 64,
                     },
                 ]
+            }
+            CallTarget::Intrinsic(IntrinsicCall::StringLines) => {
+                if !has_receiver {
+                    panic!("compiler bug: intrinsic string lines missing receiver");
+                }
+                if !call_sig.params.is_empty() {
+                    panic!(
+                        "compiler bug: intrinsic string lines expects 0 args, got {}",
+                        call_sig.params.len()
+                    );
+                }
+                vec![ArgLowering::Direct(CallInput::Receiver)]
             }
             CallTarget::Runtime(RuntimeCall::StringAppendBytes) => {
                 if !has_receiver {

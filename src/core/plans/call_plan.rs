@@ -9,6 +9,7 @@ use crate::core::resolve::DefId;
 #[derive(Clone, Debug)]
 pub enum IntrinsicCall {
     StringLen,
+    StringLines,
     TypeOf,
     MachinePayloadPack,
     DynArrayAppend,

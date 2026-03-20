@@ -589,6 +589,7 @@ fn run_executable(exe_path: &Path) -> Result<i32, String> {
 
 const RUNTIME_SOURCE_FILES: &[&str] = &[
     "alloc.c",
+    "args.c",
     "conv.c",
     "dyn_array.c",
     "hash_table.c",
