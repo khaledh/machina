@@ -82,6 +82,7 @@ pub(super) struct MachineActionOverrideInfo {
 #[derive(Clone, Debug)]
 pub(super) struct MachineActionSessionInfo {
     pub machine_name: String,
+    pub action_name: String,
     pub hosted_type_name: String,
     pub handle_type_name: String,
     pub key_field_name: String,
@@ -241,6 +242,8 @@ const HOSTED_LINEAR_CREATE_FN: &str = "__mc_hosted_linear_create_u64";
 const HOSTED_LINEAR_RESUME_STATE_FN: &str = "__mc_hosted_linear_resume_state_u64";
 const HOSTED_LINEAR_DELIVER_FN: &str = "__mc_hosted_linear_deliver_u64";
 const HOSTED_LINEAR_WAIT_STATE_FN: &str = "__mc_hosted_linear_wait_state_u64";
+const HOSTED_LINEAR_BEGIN_DERIVED_INTERACTION_FN: &str =
+    "__mc_hosted_linear_begin_derived_interaction_u64";
 const HOSTED_ACTION_EMIT_BEGIN_FN: &str = "__mc_hosted_action_emit_begin_u64";
 const HOSTED_ACTION_EMIT_COMMIT_FN: &str = "__mc_hosted_action_emit_commit_u64";
 const HOSTED_ACTION_EMIT_ABORT_FN: &str = "__mc_hosted_action_emit_abort_u64";
@@ -436,6 +439,7 @@ pub(super) fn collect_machine_action_session_infos(
 
                     Some(MachineActionSessionInfo {
                         machine_name: machine_def.name.clone(),
+                        action_name: action.name.clone(),
                         hosted_type_name: machine_def.host.type_name.clone(),
                         handle_type_name: handle_type_name.clone(),
                         key_field_name: key_field.name.clone(),
@@ -869,6 +873,10 @@ pub(super) fn ensure_hosted_runtime_intrinsics(module: &mut Module, node_id_gen:
             HOSTED_LINEAR_WAIT_STATE_FN,
             &["runtime", "machine_id", "key", "expected_state_tag"],
         ),
+        (
+            HOSTED_LINEAR_BEGIN_DERIVED_INTERACTION_FN,
+            &["runtime", "machine_id", "key"],
+        ),
         (HOSTED_ACTION_EMIT_BEGIN_FN, &["runtime", "machine_id"]),
         (HOSTED_ACTION_EMIT_COMMIT_FN, &["scope"]),
         (HOSTED_ACTION_EMIT_ABORT_FN, &["scope"]),
@@ -955,7 +963,12 @@ pub(super) fn append_machine_spawn_support(
     }
 
     for action_info in action_session_infos {
-        let action_func = build_machine_action_session_func(action_info, node_id_gen);
+        let derived_interaction = linear_index.derived_interactions.contains_key(&(
+            action_info.machine_name.clone(),
+            action_info.action_name.clone(),
+        ));
+        let action_func =
+            build_machine_action_session_func(action_info, derived_interaction, node_id_gen);
         linear_index
             .hosted_dispatch_handler_machines
             .insert(action_func.id, action_info.machine_name.clone());
@@ -2079,6 +2092,7 @@ fn build_machine_action_override_func(
 
 fn build_machine_action_session_func(
     info: &MachineActionSessionInfo,
+    derived_interaction: bool,
     node_id_gen: &mut NodeIdGen,
 ) -> FuncDef {
     let span = Span::default();
@@ -2204,6 +2218,7 @@ fn build_machine_action_session_func(
                 tail: Some(Box::new(build_machine_action_commit_expr(
                     info,
                     action_body,
+                    derived_interaction,
                     node_id_gen,
                 ))),
             },
@@ -3195,11 +3210,17 @@ fn build_machine_wait_state_expr(
 fn build_machine_action_commit_expr(
     info: &MachineActionSessionInfo,
     action_body: Expr,
+    derived_interaction: bool,
     node_id_gen: &mut NodeIdGen,
 ) -> Expr {
     let span = Span::default();
     if matches!(&info.ret_ty_expr.kind, TypeExprKind::Union { .. }) {
-        return build_machine_action_match_expr(info, action_body, node_id_gen);
+        return build_machine_action_match_expr(
+            info,
+            action_body,
+            derived_interaction,
+            node_id_gen,
+        );
     }
     Expr {
         id: node_id_gen.new_id(),
@@ -3213,6 +3234,7 @@ fn build_machine_action_commit_expr(
             tail: Some(Box::new(build_machine_action_deliver_then_return(
                 info,
                 "__mc_ok",
+                derived_interaction,
                 node_id_gen,
             ))),
         },
@@ -3223,6 +3245,7 @@ fn build_machine_action_commit_expr(
 fn build_machine_action_match_expr(
     info: &MachineActionSessionInfo,
     action_body: Expr,
+    derived_interaction: bool,
     node_id_gen: &mut NodeIdGen,
 ) -> Expr {
     let span = Span::default();
@@ -3241,7 +3264,12 @@ fn build_machine_action_match_expr(
             },
             span,
         },
-        body: build_machine_action_deliver_then_return(info, "__mc_ok", node_id_gen),
+        body: build_machine_action_deliver_then_return(
+            info,
+            "__mc_ok",
+            derived_interaction,
+            node_id_gen,
+        ),
         span,
     }];
 
@@ -3288,73 +3316,104 @@ fn build_machine_action_match_expr(
 fn build_machine_action_deliver_then_return(
     info: &MachineActionSessionInfo,
     ok_var_name: &str,
+    derived_interaction: bool,
     node_id_gen: &mut NodeIdGen,
 ) -> Expr {
     let span = Span::default();
+    let mut items = vec![
+        BlockItem::Stmt(let_bind_stmt(
+            "__mc_result",
+            call_expr(
+                HOSTED_LINEAR_DELIVER_FN,
+                vec![
+                    var_expr("__mc_rt", node_id_gen, span),
+                    self_field_expr("_id", node_id_gen, span),
+                    struct_field_expr(
+                        &info.instance_param_name,
+                        &info.key_field_name,
+                        node_id_gen,
+                        span,
+                    ),
+                    int_expr(info.source_state_tag, node_id_gen, span),
+                    int_expr(info.target_state_tag, node_id_gen, span),
+                    int_expr(0, node_id_gen, span),
+                    int_expr(0, node_id_gen, span),
+                    int_expr(0, node_id_gen, span),
+                ],
+                node_id_gen,
+                span,
+            ),
+            node_id_gen,
+            span,
+        )),
+        BlockItem::Expr(return_enum_error_if_eq(
+            "__mc_result",
+            HOSTED_UPDATE_STALE,
+            "SessionError",
+            "InvalidState",
+            node_id_gen,
+            span,
+        )),
+        BlockItem::Expr(return_enum_error_if_ne(
+            "__mc_result",
+            HOSTED_UPDATE_OK,
+            "SessionError",
+            "InstanceNotFound",
+            node_id_gen,
+            span,
+        )),
+        BlockItem::Stmt(let_bind_stmt(
+            "__mc_emit_committed",
+            call_expr(
+                HOSTED_ACTION_EMIT_COMMIT_FN,
+                vec![var_expr("__mc_emit_scope", node_id_gen, span)],
+                node_id_gen,
+                span,
+            ),
+            node_id_gen,
+            span,
+        )),
+        BlockItem::Expr(return_enum_error_if_zero(
+            "__mc_emit_committed",
+            "SessionError",
+            "InstanceNotFound",
+            node_id_gen,
+            span,
+        )),
+    ];
+    if derived_interaction {
+        items.push(BlockItem::Stmt(let_bind_stmt(
+            "__mc_interaction_id",
+            call_expr(
+                HOSTED_LINEAR_BEGIN_DERIVED_INTERACTION_FN,
+                vec![
+                    var_expr("__mc_rt", node_id_gen, span),
+                    self_field_expr("_id", node_id_gen, span),
+                    struct_field_expr(
+                        &info.instance_param_name,
+                        &info.key_field_name,
+                        node_id_gen,
+                        span,
+                    ),
+                ],
+                node_id_gen,
+                span,
+            ),
+            node_id_gen,
+            span,
+        )));
+        items.push(BlockItem::Expr(return_enum_error_if_zero(
+            "__mc_interaction_id",
+            "SessionError",
+            "InstanceNotFound",
+            node_id_gen,
+            span,
+        )));
+    }
     Expr {
         id: node_id_gen.new_id(),
         kind: ExprKind::Block {
-            items: vec![
-                BlockItem::Stmt(let_bind_stmt(
-                    "__mc_result",
-                    call_expr(
-                        HOSTED_LINEAR_DELIVER_FN,
-                        vec![
-                            var_expr("__mc_rt", node_id_gen, span),
-                            self_field_expr("_id", node_id_gen, span),
-                            struct_field_expr(
-                                &info.instance_param_name,
-                                &info.key_field_name,
-                                node_id_gen,
-                                span,
-                            ),
-                            int_expr(info.source_state_tag, node_id_gen, span),
-                            int_expr(info.target_state_tag, node_id_gen, span),
-                            int_expr(0, node_id_gen, span),
-                            int_expr(0, node_id_gen, span),
-                            int_expr(0, node_id_gen, span),
-                        ],
-                        node_id_gen,
-                        span,
-                    ),
-                    node_id_gen,
-                    span,
-                )),
-                BlockItem::Expr(return_enum_error_if_eq(
-                    "__mc_result",
-                    HOSTED_UPDATE_STALE,
-                    "SessionError",
-                    "InvalidState",
-                    node_id_gen,
-                    span,
-                )),
-                BlockItem::Expr(return_enum_error_if_ne(
-                    "__mc_result",
-                    HOSTED_UPDATE_OK,
-                    "SessionError",
-                    "InstanceNotFound",
-                    node_id_gen,
-                    span,
-                )),
-                BlockItem::Stmt(let_bind_stmt(
-                    "__mc_emit_committed",
-                    call_expr(
-                        HOSTED_ACTION_EMIT_COMMIT_FN,
-                        vec![var_expr("__mc_emit_scope", node_id_gen, span)],
-                        node_id_gen,
-                        span,
-                    ),
-                    node_id_gen,
-                    span,
-                )),
-                BlockItem::Expr(return_enum_error_if_zero(
-                    "__mc_emit_committed",
-                    "SessionError",
-                    "InstanceNotFound",
-                    node_id_gen,
-                    span,
-                )),
-            ],
+            items,
             tail: Some(Box::new(var_expr(ok_var_name, node_id_gen, span))),
         },
         span,

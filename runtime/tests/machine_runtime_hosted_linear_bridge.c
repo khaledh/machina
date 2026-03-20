@@ -99,6 +99,25 @@ int main(void) {
         return 9;
     }
 
+    uint64_t interaction_id =
+        __mc_hosted_linear_begin_derived_interaction_u64(rt_handle, machine_id, key);
+    if (interaction_id == 0) {
+        __mc_machine_runtime_free(rt_handle);
+        return 10;
+    }
+    if (__mc_hosted_linear_debug_active_interaction_u64(rt_handle, machine_id, key) !=
+        interaction_id) {
+        __mc_machine_runtime_free(rt_handle);
+        return 11;
+    }
+    if (__mc_hosted_linear_debug_interaction_created_count_u64(rt_handle, machine_id, key) !=
+            1 ||
+        __mc_hosted_linear_debug_interaction_resolved_count_u64(rt_handle, machine_id, key) !=
+            0) {
+        __mc_machine_runtime_free(rt_handle);
+        return 12;
+    }
+
     if (__mc_hosted_linear_deliver_u64(
             rt_handle,
             machine_id,
@@ -111,19 +130,28 @@ int main(void) {
         ) !=
         MC_HOSTED_UPDATE_OK) {
         __mc_machine_runtime_free(rt_handle);
-        return 10;
+        return 13;
+    }
+    if (__mc_hosted_linear_debug_active_interaction_u64(rt_handle, machine_id, key) != 0) {
+        __mc_machine_runtime_free(rt_handle);
+        return 14;
+    }
+    if (__mc_hosted_linear_debug_interaction_resolved_count_u64(rt_handle, machine_id, key) !=
+        1) {
+        __mc_machine_runtime_free(rt_handle);
+        return 15;
     }
 
     if (__mc_machine_runtime_mailbox_len(rt, (mc_machine_id_t)machine_id) != 0 ||
         __mc_machine_runtime_ready_len(rt) != 0) {
         __mc_machine_runtime_free(rt_handle);
-        return 11;
+        return 16;
     }
 
     resumed_tag = __mc_hosted_linear_resume_state_u64(rt_handle, machine_id, key);
     if (resumed_tag != 2) {
         __mc_machine_runtime_free(rt_handle);
-        return 12;
+        return 17;
     }
 
     if (__mc_hosted_linear_deliver_u64(
@@ -138,7 +166,7 @@ int main(void) {
         ) !=
         MC_HOSTED_UPDATE_STALE) {
         __mc_machine_runtime_free(rt_handle);
-        return 13;
+        return 18;
     }
 
     if (__mc_hosted_linear_deliver_u64(
@@ -153,12 +181,12 @@ int main(void) {
         ) !=
         MC_HOSTED_UPDATE_NOT_FOUND) {
         __mc_machine_runtime_free(rt_handle);
-        return 14;
+        return 19;
     }
 
     if (__mc_hosted_linear_resume_state_u64(rt_handle, machine_id, key + 1) != 0) {
         __mc_machine_runtime_free(rt_handle);
-        return 15;
+        return 20;
     }
 
     uint64_t wait_key = __mc_hosted_linear_create_u64(
@@ -169,7 +197,7 @@ int main(void) {
     );
     if (wait_key == 0) {
         __mc_machine_runtime_free(rt_handle);
-        return 16;
+        return 21;
     }
 
     mc_machine_envelope_t env = {
@@ -186,20 +214,20 @@ int main(void) {
     if (__mc_machine_runtime_enqueue(rt, (mc_machine_id_t)machine_id, &env) !=
         MC_MAILBOX_ENQUEUE_OK) {
         __mc_machine_runtime_free(rt_handle);
-        return 17;
+        return 22;
     }
 
     resumed_tag =
         __mc_hosted_linear_wait_state_u64(rt_handle, machine_id, wait_key, 1);
     if (resumed_tag != 2) {
         __mc_machine_runtime_free(rt_handle);
-        return 18;
+        return 23;
     }
 
     if (__mc_machine_runtime_mailbox_len(rt, (mc_machine_id_t)machine_id) != 0 ||
         __mc_machine_runtime_ready_len(rt) != 0) {
         __mc_machine_runtime_free(rt_handle);
-        return 19;
+        return 24;
     }
 
     __mc_machine_runtime_free(rt_handle);

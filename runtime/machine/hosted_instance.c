@@ -34,6 +34,9 @@ static uint8_t mc_hosted_instance_table_ensure_cap(
         table->slots[i].key = 0;
         table->slots[i].state_tag = 0;
         table->slots[i].state_payload = (uintptr_t)0;
+        table->slots[i].derived_interaction_id = 0;
+        table->slots[i].derived_interaction_created_count = 0;
+        table->slots[i].derived_interaction_resolved_count = 0;
         table->slots[i].active = 0;
     }
 
@@ -85,6 +88,9 @@ uint64_t mc_hosted_instance_table_create(
     table->slots[slot].key = key;
     table->slots[slot].state_tag = initial_state_tag;
     table->slots[slot].state_payload = initial_payload;
+    table->slots[slot].derived_interaction_id = 0;
+    table->slots[slot].derived_interaction_created_count = 0;
+    table->slots[slot].derived_interaction_resolved_count = 0;
     table->slots[slot].active = 1;
     table->len += 1;
     return key;
@@ -151,6 +157,9 @@ uint8_t mc_hosted_instance_table_remove(mc_hosted_instance_table_t *table, uint6
         slot->key = 0;
         slot->state_tag = 0;
         slot->state_payload = (uintptr_t)0;
+        slot->derived_interaction_id = 0;
+        slot->derived_interaction_created_count = 0;
+        slot->derived_interaction_resolved_count = 0;
         table->len -= 1;
         return 1;
     }
@@ -159,4 +168,88 @@ uint8_t mc_hosted_instance_table_remove(mc_hosted_instance_table_t *table, uint6
 
 uint32_t mc_hosted_instance_table_count(const mc_hosted_instance_table_t *table) {
     return table->len;
+}
+
+uint8_t mc_hosted_instance_table_begin_derived_interaction(
+    mc_hosted_instance_table_t *table,
+    uint64_t key,
+    uint64_t interaction_id
+) {
+    if (interaction_id == 0) {
+        return 0;
+    }
+    for (uint32_t i = 0; i < table->cap; i++) {
+        mc_hosted_instance_t *slot = &table->slots[i];
+        if (!slot->active || slot->key != key) {
+            continue;
+        }
+        slot->derived_interaction_id = interaction_id;
+        slot->derived_interaction_created_count += 1;
+        return 1;
+    }
+    return 0;
+}
+
+uint8_t mc_hosted_instance_table_resolve_derived_interaction(
+    mc_hosted_instance_table_t *table,
+    uint64_t key,
+    uint64_t *out_interaction_id
+) {
+    for (uint32_t i = 0; i < table->cap; i++) {
+        mc_hosted_instance_t *slot = &table->slots[i];
+        if (!slot->active || slot->key != key) {
+            continue;
+        }
+        if (out_interaction_id) {
+            *out_interaction_id = slot->derived_interaction_id;
+        }
+        if (slot->derived_interaction_id != 0) {
+            slot->derived_interaction_id = 0;
+            slot->derived_interaction_resolved_count += 1;
+        }
+        return 1;
+    }
+    return 0;
+}
+
+uint64_t mc_hosted_instance_table_active_derived_interaction(
+    const mc_hosted_instance_table_t *table,
+    uint64_t key
+) {
+    for (uint32_t i = 0; i < table->cap; i++) {
+        const mc_hosted_instance_t *slot = &table->slots[i];
+        if (!slot->active || slot->key != key) {
+            continue;
+        }
+        return slot->derived_interaction_id;
+    }
+    return 0;
+}
+
+uint64_t mc_hosted_instance_table_derived_interaction_created_count(
+    const mc_hosted_instance_table_t *table,
+    uint64_t key
+) {
+    for (uint32_t i = 0; i < table->cap; i++) {
+        const mc_hosted_instance_t *slot = &table->slots[i];
+        if (!slot->active || slot->key != key) {
+            continue;
+        }
+        return slot->derived_interaction_created_count;
+    }
+    return 0;
+}
+
+uint64_t mc_hosted_instance_table_derived_interaction_resolved_count(
+    const mc_hosted_instance_table_t *table,
+    uint64_t key
+) {
+    for (uint32_t i = 0; i < table->cap; i++) {
+        const mc_hosted_instance_t *slot = &table->slots[i];
+        if (!slot->active || slot->key != key) {
+            continue;
+        }
+        return slot->derived_interaction_resolved_count;
+    }
+    return 0;
 }

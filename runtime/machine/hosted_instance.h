@@ -17,6 +17,9 @@ typedef struct mc_hosted_instance {
     uint64_t key;
     uint64_t state_tag;
     uintptr_t state_payload;
+    uint64_t derived_interaction_id;
+    uint64_t derived_interaction_created_count;
+    uint64_t derived_interaction_resolved_count;
     uint8_t active;
 } mc_hosted_instance_t;
 
@@ -54,5 +57,27 @@ uint8_t mc_hosted_instance_table_update(
 
 uint8_t mc_hosted_instance_table_remove(mc_hosted_instance_table_t *table, uint64_t key);
 uint32_t mc_hosted_instance_table_count(const mc_hosted_instance_table_t *table);
+uint8_t mc_hosted_instance_table_begin_derived_interaction(
+    mc_hosted_instance_table_t *table,
+    uint64_t key,
+    uint64_t interaction_id
+);
+uint8_t mc_hosted_instance_table_resolve_derived_interaction(
+    mc_hosted_instance_table_t *table,
+    uint64_t key,
+    uint64_t *out_interaction_id
+);
+uint64_t mc_hosted_instance_table_active_derived_interaction(
+    const mc_hosted_instance_table_t *table,
+    uint64_t key
+);
+uint64_t mc_hosted_instance_table_derived_interaction_created_count(
+    const mc_hosted_instance_table_t *table,
+    uint64_t key
+);
+uint64_t mc_hosted_instance_table_derived_interaction_resolved_count(
+    const mc_hosted_instance_table_t *table,
+    uint64_t key
+);
 
 #endif

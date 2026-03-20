@@ -1883,6 +1883,246 @@ fn linear_type_hosted_action_override_send_statement_targets_other_machine() {
 }
 
 #[test]
+fn linear_type_derived_interaction_lifecycle_is_observable_for_recognized_wait_state() {
+    let run = run_program(
+        "linear_type_derived_interaction_lifecycle_is_observable_for_recognized_wait_state",
+        r#"
+            @runtime
+            fn __mc_hosted_linear_debug_active_interaction_u64(
+                runtime: u64,
+                machine_id: u64,
+                key: u64,
+            ) -> u64;
+
+            @runtime
+            fn __mc_hosted_linear_debug_interaction_created_count_u64(
+                runtime: u64,
+                machine_id: u64,
+                key: u64,
+            ) -> u64;
+
+            @runtime
+            fn __mc_hosted_linear_debug_interaction_resolved_count_u64(
+                runtime: u64,
+                machine_id: u64,
+                key: u64,
+            ) -> u64;
+
+            type AuthCheck = {
+                order_id: u64,
+            }
+
+            type AuthApproved = {
+                order_id: u64,
+            }
+
+            @linear
+            type Order = {
+                id: u64,
+
+                states {
+                    Draft,
+                    PendingAuth,
+                    Confirmed,
+                }
+
+                actions {
+                    submit: Draft -> PendingAuth,
+                }
+
+                triggers {
+                    AuthApproved: PendingAuth -> Confirmed,
+                }
+
+                roles {
+                    Author { submit }
+                }
+            }
+
+            Order :: {
+                fn submit(self) -> PendingAuth {
+                    PendingAuth {}
+                }
+            }
+
+            machine OrderService hosts Order(key: id) {
+                fn new() -> Self {
+                    Self {}
+                }
+
+                trigger AuthApproved(pending) {
+                    pending;
+                    Confirmed {}
+                }
+
+                on AuthCheck(_event) {}
+
+                on AuthApproved(event) {
+                    let _result = self.deliver(event.order_id, event);
+                }
+
+                action submit(draft) -> PendingAuth {
+                    send(self, AuthCheck { order_id: draft.id });
+                    draft;
+                    PendingAuth {}
+                }
+            }
+
+            fn main() -> () | MachineError | SessionError {
+                let service = OrderService::spawn()?;
+                let draft = service.create(Order as Author)?;
+                let pending = draft.submit()?;
+                let rt = __mc_machine_runtime_managed_current_u64();
+
+                println(__mc_hosted_linear_debug_active_interaction_u64(
+                    rt,
+                    service._id,
+                    pending.id,
+                ));
+                println(__mc_hosted_linear_debug_interaction_created_count_u64(
+                    rt,
+                    service._id,
+                    pending.id,
+                ));
+
+                __mc_machine_runtime_step_u64(rt);
+
+                service.send(AuthApproved { order_id: pending.id })?;
+                __mc_machine_runtime_step_u64(rt);
+
+                println(__mc_hosted_linear_debug_active_interaction_u64(
+                    rt,
+                    service._id,
+                    pending.id,
+                ));
+                println(__mc_hosted_linear_debug_interaction_resolved_count_u64(
+                    rt,
+                    service._id,
+                    pending.id,
+                ));
+                ()
+            }
+        "#,
+    );
+
+    assert_eq!(run.status.code(), Some(0));
+    let stdout = String::from_utf8_lossy(&run.stdout);
+    assert_eq!(
+        stdout, "1\n1\n0\n1\n",
+        "recognized derived interactions should become active after submit and resolve after the matching reply trigger is delivered"
+    );
+}
+
+#[test]
+fn linear_type_non_qualifying_send_keeps_fire_and_forget_behavior() {
+    let run = run_program(
+        "linear_type_non_qualifying_send_keeps_fire_and_forget_behavior",
+        r#"
+            @runtime
+            fn __mc_hosted_linear_debug_active_interaction_u64(
+                runtime: u64,
+                machine_id: u64,
+                key: u64,
+            ) -> u64;
+
+            @runtime
+            fn __mc_hosted_linear_debug_interaction_created_count_u64(
+                runtime: u64,
+                machine_id: u64,
+                key: u64,
+            ) -> u64;
+
+            type AuthCheck = {
+                order_id: u64,
+            }
+
+            type AuthApproved = {
+                order_id: u64,
+            }
+
+            @linear
+            type Order = {
+                id: u64,
+
+                states {
+                    Draft,
+                    PendingAuth,
+                    Confirmed,
+                }
+
+                actions {
+                    submit: Draft -> PendingAuth,
+                    retry: PendingAuth -> PendingAuth,
+                }
+
+                triggers {
+                    AuthApproved: PendingAuth -> Confirmed,
+                }
+
+                roles {
+                    Author { submit, retry }
+                }
+            }
+
+            Order :: {
+                fn submit(self) -> PendingAuth {
+                    PendingAuth {}
+                }
+
+                fn retry(self) -> PendingAuth {
+                    PendingAuth {}
+                }
+            }
+
+            machine OrderService hosts Order(key: id) {
+                fn new() -> Self {
+                    Self {}
+                }
+
+                trigger AuthApproved(pending) {
+                    pending;
+                    Confirmed {}
+                }
+
+                on AuthCheck(_event) {}
+
+                action submit(draft) -> PendingAuth {
+                    send(self, AuthCheck { order_id: draft.id });
+                    draft;
+                    PendingAuth {}
+                }
+            }
+
+            fn main() -> () | MachineError | SessionError {
+                let service = OrderService::spawn()?;
+                let draft = service.create(Order as Author)?;
+                let pending = draft.submit()?;
+                let rt = __mc_machine_runtime_managed_current_u64();
+
+                println(__mc_hosted_linear_debug_active_interaction_u64(
+                    rt,
+                    service._id,
+                    pending.id,
+                ));
+                println(__mc_hosted_linear_debug_interaction_created_count_u64(
+                    rt,
+                    service._id,
+                    pending.id,
+                ));
+                ()
+            }
+        "#,
+    );
+
+    assert_eq!(run.status.code(), Some(0));
+    let stdout = String::from_utf8_lossy(&run.stdout);
+    assert_eq!(
+        stdout, "0\n0\n",
+        "non-qualifying send patterns should keep plain fire-and-forget behavior and not mint derived interactions"
+    );
+}
+
+#[test]
 fn linear_type_hosted_action_override_send_requires_machine_target() {
     let source = r#"
         type Note = {}

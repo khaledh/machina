@@ -96,6 +96,7 @@ typedef struct mc_hosted_linear_machine_ctx {
     mc_hosted_instance_table_t instances;
     uint64_t machine_kind;
     uint64_t next_delivery_ticket;
+    uint64_t next_derived_interaction_id;
     uint64_t completed_delivery_ticket;
     uint64_t completed_delivery_result;
 } mc_hosted_linear_machine_ctx_t;
@@ -116,6 +117,7 @@ static mc_hosted_linear_machine_ctx_t *mc_hosted_linear_ctx_new(void) {
     mc_hosted_instance_table_init(&ctx->instances);
     ctx->machine_kind = 0;
     ctx->next_delivery_ticket = 1;
+    ctx->next_derived_interaction_id = 1;
     ctx->completed_delivery_ticket = 0;
     ctx->completed_delivery_result = MC_HOSTED_UPDATE_NOT_FOUND;
     return ctx;
@@ -195,7 +197,7 @@ static uint64_t mc_hosted_linear_process_deliver(
         }
     }
 
-    return mc_hosted_instance_table_update(
+    uint64_t result = mc_hosted_instance_table_update(
         &ctx->instances,
         key,
         expected_state_tag,
@@ -203,6 +205,19 @@ static uint64_t mc_hosted_linear_process_deliver(
         0,
         &actual_tag
     );
+    if (result == MC_HOSTED_UPDATE_OK && trigger_kind != 0) {
+        if (!mc_hosted_instance_table_resolve_derived_interaction(
+                &ctx->instances,
+                key,
+                NULL
+            )) {
+            if (fault_code) {
+                *fault_code = 4;
+            }
+            return MC_HOSTED_UPDATE_NOT_FOUND;
+        }
+    }
+    return result;
 }
 
 static mc_dispatch_result_t mc_hosted_linear_dispatch(
@@ -561,6 +576,96 @@ uint64_t __mc_hosted_linear_wait_state_u64(
             return 0;
         }
     }
+}
+
+uint64_t __mc_hosted_linear_begin_derived_interaction_u64(
+    uint64_t runtime,
+    uint64_t machine_id,
+    uint64_t key
+) {
+    mc_machine_runtime_t *rt = mc_runtime_from_handle(runtime);
+    mc_machine_id_t id = 0;
+    if (!rt || !mc_machine_id_from_u64(machine_id, &id) || key == 0) {
+        return 0;
+    }
+
+    mc_hosted_linear_machine_ctx_t *ctx = mc_hosted_linear_ctx_for_machine(rt, id);
+    if (!ctx) {
+        return 0;
+    }
+
+    uint64_t interaction_id = ctx->next_derived_interaction_id++;
+    if (interaction_id == 0) {
+        interaction_id = ctx->next_derived_interaction_id++;
+    }
+    if (!mc_hosted_instance_table_begin_derived_interaction(
+            &ctx->instances,
+            key,
+            interaction_id
+        )) {
+        return 0;
+    }
+    return interaction_id;
+}
+
+uint64_t __mc_hosted_linear_debug_active_interaction_u64(
+    uint64_t runtime,
+    uint64_t machine_id,
+    uint64_t key
+) {
+    mc_machine_runtime_t *rt = mc_runtime_from_handle(runtime);
+    mc_machine_id_t id = 0;
+    if (!rt || !mc_machine_id_from_u64(machine_id, &id) || key == 0) {
+        return 0;
+    }
+
+    mc_hosted_linear_machine_ctx_t *ctx = mc_hosted_linear_ctx_for_machine(rt, id);
+    if (!ctx) {
+        return 0;
+    }
+    return mc_hosted_instance_table_active_derived_interaction(&ctx->instances, key);
+}
+
+uint64_t __mc_hosted_linear_debug_interaction_created_count_u64(
+    uint64_t runtime,
+    uint64_t machine_id,
+    uint64_t key
+) {
+    mc_machine_runtime_t *rt = mc_runtime_from_handle(runtime);
+    mc_machine_id_t id = 0;
+    if (!rt || !mc_machine_id_from_u64(machine_id, &id) || key == 0) {
+        return 0;
+    }
+
+    mc_hosted_linear_machine_ctx_t *ctx = mc_hosted_linear_ctx_for_machine(rt, id);
+    if (!ctx) {
+        return 0;
+    }
+    return mc_hosted_instance_table_derived_interaction_created_count(
+        &ctx->instances,
+        key
+    );
+}
+
+uint64_t __mc_hosted_linear_debug_interaction_resolved_count_u64(
+    uint64_t runtime,
+    uint64_t machine_id,
+    uint64_t key
+) {
+    mc_machine_runtime_t *rt = mc_runtime_from_handle(runtime);
+    mc_machine_id_t id = 0;
+    if (!rt || !mc_machine_id_from_u64(machine_id, &id) || key == 0) {
+        return 0;
+    }
+
+    mc_hosted_linear_machine_ctx_t *ctx = mc_hosted_linear_ctx_for_machine(rt, id);
+    if (!ctx) {
+        return 0;
+    }
+    return mc_hosted_instance_table_derived_interaction_resolved_count(
+        &ctx->instances,
+        key
+    );
 }
 
 uint64_t __mc_hosted_action_emit_begin_u64(uint64_t runtime, uint64_t machine_id) {
