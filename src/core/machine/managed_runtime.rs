@@ -4,10 +4,11 @@
 //! wrapper for `main()`.
 
 use crate::core::ast::{
-    BindPattern, BindPatternKind, BlockItem, Expr, ExprKind, FuncDef, Module, NodeIdGen, StmtExpr,
-    StmtExprKind, TopLevelItem,
+    BinaryOp, BindPattern, BindPatternKind, BlockItem, CallArg, CallArgMode, Expr, ExprKind,
+    FuncDef, InitInfo, Module, NodeIdGen, StmtExpr, StmtExprKind, TopLevelItem,
 };
 use crate::core::diag::Span;
+use crate::core::machine::runtime_intrinsics::ensure_u64_runtime_intrinsics;
 
 const MANAGED_RUNTIME_CURRENT_FN: &str = "__mc_machine_runtime_managed_current_u64";
 
@@ -16,7 +17,7 @@ const MANAGED_RUNTIME_SHUTDOWN_FN: &str = "__mc_machine_runtime_managed_shutdown
 const MANAGED_RUNTIME_STEP_FN: &str = "__mc_machine_runtime_step_u64";
 
 pub(crate) fn ensure_managed_runtime_intrinsics(module: &mut Module, node_id_gen: &mut NodeIdGen) {
-    crate::core::machine::runtime_intrinsics::ensure_u64_runtime_intrinsics(
+    ensure_u64_runtime_intrinsics(
         module,
         node_id_gen,
         &[
@@ -82,7 +83,7 @@ fn wrap_main_with_managed_runtime(main: &mut FuncDef, node_id_gen: &mut NodeIdGe
         id: node_id_gen.new_id(),
         kind: ExprKind::BinOp {
             left: Box::new(var_expr("__mc_rt", node_id_gen, span)),
-            op: crate::core::ast::BinaryOp::Ne,
+            op: BinaryOp::Ne,
             right: Box::new(int_expr(0, node_id_gen, span)),
         },
         span,
@@ -218,10 +219,10 @@ fn call_expr(callee_name: &str, args: Vec<Expr>, node_id_gen: &mut NodeIdGen, sp
             callee: Box::new(var_expr(callee_name, node_id_gen, span)),
             args: args
                 .into_iter()
-                .map(|expr| crate::core::ast::CallArg {
-                    mode: crate::core::ast::CallArgMode::Default,
+                .map(|expr| CallArg {
+                    mode: CallArgMode::Default,
                     expr,
-                    init: crate::core::ast::InitInfo::default(),
+                    init: InitInfo::default(),
                     span,
                 })
                 .collect(),

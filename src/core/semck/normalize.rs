@@ -1,7 +1,7 @@
 use crate::core::analysis::facts::{SyntheticReason, TypeMapOverlay};
 use crate::core::ast::visit_mut::{self, VisitorMut};
 use crate::core::ast::*;
-use crate::core::context::TypeCheckedContext;
+use crate::core::context::{ResolvedTables, TypeCheckedContext, TypedTables};
 use crate::core::context::{SemCheckNormalizedContext, SemCheckStageInput};
 use crate::core::resolve::DefKind;
 use crate::core::resolve::def_table::DefTable;
@@ -16,13 +16,13 @@ use crate::core::types::{
 /// mapping and inserts explicit call-argument coercions.
 pub fn normalize(ctx: SemCheckStageInput) -> SemCheckNormalizedContext {
     let TypeCheckedContext { module, payload } = ctx;
-    let crate::core::context::TypedTables {
+    let TypedTables {
         resolved,
         type_map,
         call_sigs,
         generic_insts,
     } = payload;
-    let crate::core::context::ResolvedTables {
+    let ResolvedTables {
         def_table,
         module_path,
         def_owners,
@@ -48,8 +48,8 @@ pub fn normalize(ctx: SemCheckStageInput) -> SemCheckNormalizedContext {
     normalizer.visit_module(&mut module);
     SemCheckNormalizedContext {
         module,
-        payload: crate::core::context::TypedTables {
-            resolved: crate::core::context::ResolvedTables {
+        payload: TypedTables {
+            resolved: ResolvedTables {
                 def_table,
                 module_path,
                 def_owners,

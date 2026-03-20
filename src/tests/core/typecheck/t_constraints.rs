@@ -3,7 +3,7 @@ use crate::core::context::ParsedContext;
 use crate::core::context::ResolvedContext;
 use crate::core::lexer::{LexError, Lexer, Token};
 use crate::core::parse::Parser;
-use crate::core::resolve::resolve;
+use crate::core::resolve::{ImportedFacts, resolve};
 use crate::core::typecheck::{collect, engine::TypecheckEngine};
 
 fn resolve_source(source: &str) -> ResolvedContext {
@@ -21,7 +21,7 @@ fn resolve_source(source: &str) -> ResolvedContext {
 
 fn collect_constraints(source: &str) -> ConstrainOutput {
     let resolved = resolve_source(source);
-    let mut engine = TypecheckEngine::new(resolved, crate::core::resolve::ImportedFacts::default());
+    let mut engine = TypecheckEngine::new(resolved, ImportedFacts::default());
     collect::run(&mut engine).expect("collect pass failed");
     run(&mut engine).expect("constrain pass failed");
     engine.state().constrain.clone()

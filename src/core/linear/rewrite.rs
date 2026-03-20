@@ -22,8 +22,10 @@
 use std::collections::{HashMap, HashSet};
 
 use crate::core::ast::{
-    ArrayLitInit, BlockItem, Expr, ExprKind, MethodItem, Module, NodeIdGen, ParamMode, StmtExpr,
-    StmtExprKind, TopLevelItem, TypeDefKind, TypeExpr, TypeExprKind,
+    ArrayLitInit, BindPattern, BindPatternKind, BlockItem, CallArg, CallArgMode, EnumDefVariant,
+    Expr, ExprKind, InitInfo, MachineItem, MatchPattern, MethodItem, MethodSig, Module, NodeIdGen,
+    Param, ParamMode, StmtExpr, StmtExprKind, StructLitField, TopLevelItem, TypeDefKind, TypeExpr,
+    TypeExprKind,
 };
 use crate::core::diag::Span;
 use crate::core::resolve::{REK, ResolveError};
@@ -197,7 +199,7 @@ pub(super) fn rewrite_linear_type_defs(
             variants: linear
                 .states
                 .iter()
-                .map(|state| crate::core::ast::EnumDefVariant {
+                .map(|state| EnumDefVariant {
                     id: state.id,
                     name: state.name.clone(),
                     payload: shared_payload_tys
@@ -270,7 +272,7 @@ pub(super) fn rewrite_linear_method_blocks(
     }
 }
 
-fn rewrite_linear_method_sig(sig: &mut crate::core::ast::MethodSig, info: &DirectLinearInfo) {
+fn rewrite_linear_method_sig(sig: &mut MethodSig, info: &DirectLinearInfo) {
     if let Some(source_state) = method_source_state(sig, info)
         && let Some(action) = info
             .action_by_source_and_name
@@ -285,10 +287,7 @@ fn rewrite_linear_method_sig(sig: &mut crate::core::ast::MethodSig, info: &Direc
 
 /// Determine which source state a method implements, either from an explicit
 /// receiver annotation (`self: Draft`) or by finding a unique action match.
-fn method_source_state(
-    sig: &crate::core::ast::MethodSig,
-    info: &DirectLinearInfo,
-) -> Option<String> {
+fn method_source_state(sig: &MethodSig, info: &DirectLinearInfo) -> Option<String> {
     if let Some(receiver_ty) = sig.self_param.receiver_ty_expr.as_ref()
         && let Some(name) = named_type_name(receiver_ty)
     {
@@ -473,7 +472,7 @@ pub(super) fn rewrite_linear_exprs(
 
                 for machine_item in &mut machine_def.items {
                     match machine_item {
-                        crate::core::ast::MachineItem::Action(handler) => {
+                        MachineItem::Action(handler) => {
                             let Some(source_state) =
                                 unique_machine_action_source_state(info, &handler.name)
                             else {
@@ -503,7 +502,7 @@ pub(super) fn rewrite_linear_exprs(
                             );
                             errors.extend(rewrite_errors);
                         }
-                        crate::core::ast::MachineItem::Trigger(handler) => {
+                        MachineItem::Trigger(handler) => {
                             let Some(trigger) = info.triggers_by_name.get(&handler.name) else {
                                 continue;
                             };
@@ -555,7 +554,7 @@ pub(super) fn rewrite_linear_exprs(
 }
 
 fn collect_machine_param_bindings(
-    params: &[crate::core::ast::Param],
+    params: &[Param],
     linear_index: &LinearIndex,
 ) -> Vec<(String, MachineBindingState)> {
     params
@@ -801,8 +800,8 @@ fn rewrite_expr_in_scope(
                             span: expr.span,
                         }),
                         args: vec![
-                            crate::core::ast::CallArg {
-                                mode: crate::core::ast::CallArgMode::Default,
+                            CallArg {
+                                mode: CallArgMode::Default,
                                 expr: Expr {
                                     id: node_id_gen.new_id(),
                                     kind: ExprKind::Var {
@@ -810,13 +809,13 @@ fn rewrite_expr_in_scope(
                                     },
                                     span: expr.span,
                                 },
-                                init: crate::core::ast::InitInfo::default(),
+                                init: InitInfo::default(),
                                 span: expr.span,
                             },
-                            crate::core::ast::CallArg {
-                                mode: crate::core::ast::CallArgMode::Default,
+                            CallArg {
+                                mode: CallArgMode::Default,
                                 expr: (**callee).clone(),
-                                init: crate::core::ast::InitInfo::default(),
+                                init: InitInfo::default(),
                                 span: expr.span,
                             },
                         ],
@@ -846,16 +845,16 @@ fn rewrite_expr_in_scope(
                         span: expr.span,
                     }),
                     args: vec![
-                        crate::core::ast::CallArg {
-                            mode: crate::core::ast::CallArgMode::Default,
+                        CallArg {
+                            mode: CallArgMode::Default,
                             expr: (**callee).clone(),
-                            init: crate::core::ast::InitInfo::default(),
+                            init: InitInfo::default(),
                             span: expr.span,
                         },
-                        crate::core::ast::CallArg {
-                            mode: crate::core::ast::CallArgMode::Default,
+                        CallArg {
+                            mode: CallArgMode::Default,
                             expr: key_expr,
-                            init: crate::core::ast::InitInfo::default(),
+                            init: InitInfo::default(),
                             span: expr.span,
                         },
                     ],
@@ -887,8 +886,8 @@ fn rewrite_expr_in_scope(
                 ))
             {
                 let mut helper_args = Vec::with_capacity(args.len() + 2);
-                helper_args.push(crate::core::ast::CallArg {
-                    mode: crate::core::ast::CallArgMode::Default,
+                helper_args.push(CallArg {
+                    mode: CallArgMode::Default,
                     expr: Expr {
                         id: node_id_gen.new_id(),
                         kind: ExprKind::Var {
@@ -896,13 +895,13 @@ fn rewrite_expr_in_scope(
                         },
                         span: expr.span,
                     },
-                    init: crate::core::ast::InitInfo::default(),
+                    init: InitInfo::default(),
                     span: expr.span,
                 });
-                helper_args.push(crate::core::ast::CallArg {
-                    mode: crate::core::ast::CallArgMode::Default,
+                helper_args.push(CallArg {
+                    mode: CallArgMode::Default,
                     expr: (**callee).clone(),
-                    init: crate::core::ast::InitInfo::default(),
+                    init: InitInfo::default(),
                     span: expr.span,
                 });
                 helper_args.extend(args.iter().cloned());
@@ -1823,7 +1822,7 @@ fn parse_qualified_linear_state_name(
 }
 
 fn linear_state_payload_from_fields(
-    fields: &[crate::core::ast::StructLitField],
+    fields: &[StructLitField],
     info: &DirectLinearInfo,
     carry_binding_name: Option<&str>,
     span: Span,
@@ -1910,13 +1909,13 @@ fn build_linear_carried_field_expr(
 }
 
 fn refine_match_scrutinee_binding(
-    pattern: &crate::core::ast::MatchPattern,
+    pattern: &MatchPattern,
     binding_name: &str,
     scrutinee_state: &LinearBindingState,
     infos: &HashMap<String, DirectLinearInfo>,
     env: &mut HashMap<String, LinearBindingState>,
 ) {
-    let crate::core::ast::MatchPattern::EnumVariant {
+    let MatchPattern::EnumVariant {
         enum_name,
         variant_name,
         ..
@@ -1979,9 +1978,9 @@ fn machine_spawn_machine_name(expr: &Expr, linear_index: &LinearIndex) -> Option
     }
 }
 
-fn bind_pattern_name_mut(pattern: &mut crate::core::ast::BindPattern) -> Option<&mut String> {
+fn bind_pattern_name_mut(pattern: &mut BindPattern) -> Option<&mut String> {
     match &mut pattern.kind {
-        crate::core::ast::BindPatternKind::Name { ident } => Some(ident),
+        BindPatternKind::Name { ident } => Some(ident),
         _ => None,
     }
 }

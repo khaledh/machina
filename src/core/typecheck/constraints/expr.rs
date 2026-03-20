@@ -2,12 +2,11 @@
 
 use super::*;
 use crate::core::ast::{ArrayLitInit, Param, StructLitField};
+use crate::core::linear::HostedActionExprInfo;
+use crate::core::types::{FnParam, FnParamMode};
 
 impl<'a> ConstraintCollector<'a> {
-    fn hosted_action_expected_arg_tys(
-        &self,
-        hosted_action: &crate::core::linear::HostedActionExprInfo,
-    ) -> Vec<Type> {
+    fn hosted_action_expected_arg_tys(&self, hosted_action: &HostedActionExprInfo) -> Vec<Type> {
         self.ctx
             .linear_index
             .types
@@ -50,7 +49,7 @@ impl<'a> ConstraintCollector<'a> {
         expr: &Expr,
         receiver_ty: Type,
         arg_terms: Vec<Type>,
-        hosted_action: &crate::core::linear::HostedActionExprInfo,
+        hosted_action: &HostedActionExprInfo,
         expr_ty: Type,
     ) -> Type {
         let runtime_arg_prefix = hosted_action.runtime_arg_prefix.min(arg_terms.len());
@@ -955,8 +954,8 @@ impl<'a> ConstraintCollector<'a> {
     ) {
         let operand_ty = self.collect_expr(fallible_expr, None);
         let handler_expected_ty = Type::Fn {
-            params: vec![crate::core::types::FnParam {
-                mode: crate::core::types::FnParamMode::In,
+            params: vec![FnParam {
+                mode: FnParamMode::In,
                 ty: operand_ty.clone(),
             }],
             ret_ty: Box::new(expr_ty.clone()),

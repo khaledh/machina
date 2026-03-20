@@ -10,7 +10,11 @@ use crate::core::ast::NodeId;
 use crate::core::ast::visit::Visitor;
 use crate::core::ast::*;
 use crate::core::context::TypeCheckedContext;
-use crate::core::resolve::DefId;
+use crate::core::diag::Span;
+use crate::core::linear::{
+    LinearHostInfo, direct_action_method_name, machine_create_fn_name, machine_lookup_fn_name,
+};
+use crate::core::resolve::{DefId, DefKind};
 use crate::core::symbol_id::SelectedCallable;
 use crate::core::typecheck::InferUnifier;
 use crate::core::typecheck::builtin_methods;
@@ -390,8 +394,7 @@ fn record_linear_session_call_sigs(engine: &TypecheckEngine, builder: &mut TypeM
             continue;
         }
         let receiver_ty = resolve_term(receiver, engine);
-        let internal_name =
-            crate::core::linear::direct_action_method_name(source_state, action_name);
+        let internal_name = direct_action_method_name(source_state, action_name);
         let Some(helper_def_id) = lookup_named_function(engine, &internal_name) else {
             continue;
         };
@@ -440,8 +443,7 @@ fn record_linear_machine_create_call_sigs(engine: &TypecheckEngine, builder: &mu
         if host_info.hosted_type_name != *type_name {
             continue;
         }
-        let helper_name =
-            crate::core::linear::machine_create_fn_name(machine_name, type_name, role_name);
+        let helper_name = machine_create_fn_name(machine_name, type_name, role_name);
         let Some(helper_def_id) = lookup_named_function(engine, &helper_name) else {
             continue;
         };
@@ -531,7 +533,7 @@ fn record_linear_machine_lookup_call_sigs(engine: &TypecheckEngine, builder: &mu
         if host_info.hosted_type_name != *type_name {
             continue;
         }
-        let helper_name = crate::core::linear::machine_lookup_fn_name(machine_name, type_name);
+        let helper_name = machine_lookup_fn_name(machine_name, type_name);
         let Some(helper_def_id) = lookup_named_function(engine, &helper_name) else {
             continue;
         };
@@ -617,7 +619,7 @@ fn record_linear_machine_deliver_call_sigs(engine: &TypecheckEngine, builder: &m
 fn machine_host_for_receiver<'a>(
     engine: &'a TypecheckEngine,
     receiver_ty: &Type,
-) -> Option<(&'a str, &'a crate::core::linear::LinearHostInfo)> {
+) -> Option<(&'a str, &'a LinearHostInfo)> {
     let Type::Struct { name, .. } = receiver_ty.peel_heap() else {
         return None;
     };
@@ -639,11 +641,7 @@ fn lookup_named_function(engine: &TypecheckEngine, name: &str) -> Option<DefId> 
         .iter()
         .find(|def| {
             def.name == name
-                && matches!(
-                    def.kind,
-                    crate::core::resolve::DefKind::FuncDef { .. }
-                        | crate::core::resolve::DefKind::FuncDecl { .. }
-                )
+                && matches!(def.kind, DefKind::FuncDef { .. } | DefKind::FuncDecl { .. })
         })
         .map(|def| def.id)
 }
@@ -809,7 +807,7 @@ fn resolve_named_call(
     engine: &TypecheckEngine,
     name: &str,
     arg_types: &[Type],
-    span: crate::core::diag::Span,
+    span: Span,
     expected_ret: &Type,
 ) -> Option<ResolvedCall> {
     let overloads = engine.env().func_sigs.get(name)?;
@@ -828,7 +826,7 @@ fn resolve_named_call_by_def_id(
     name: &str,
     def_id: DefId,
     arg_types: &[Type],
-    span: crate::core::diag::Span,
+    span: Span,
     expected_ret: &Type,
 ) -> Option<ResolvedCall> {
     let overloads = engine.env().func_sigs.get(name)?;
@@ -847,7 +845,7 @@ fn resolve_method_call(
     receiver: Option<&Type>,
     method_name: &str,
     arg_types: &[Type],
-    span: crate::core::diag::Span,
+    span: Span,
     expected_ret: &Type,
 ) -> Option<ResolvedCall> {
     let receiver_ty = receiver.map(|term| resolve_term(term, engine))?;
@@ -904,7 +902,7 @@ fn resolve_method_call_by_def_id(
     method_name: &str,
     def_id: DefId,
     arg_types: &[Type],
-    span: crate::core::diag::Span,
+    span: Span,
     expected_ret: &Type,
 ) -> Option<ResolvedCall> {
     let receiver_ty = receiver.map(|term| resolve_term(term, engine))?;
@@ -970,7 +968,7 @@ fn instantiate_call_sig(
     sig: &CollectedCallableSig,
     arg_types: &[Type],
     receiver: Option<CallParam>,
-    span: crate::core::diag::Span,
+    span: Span,
     expected_ret: &Type,
 ) -> ResolvedCall {
     if sig.type_param_count == 0 {

@@ -4,7 +4,7 @@ use crate::core::ast::{CallArg, CallArgMode, Expr, ExprKind, NodeId, ParamMode};
 use crate::core::backend::lower::LowerToIrError;
 use crate::core::backend::lower::lowerer::{CallInputValue, FuncLowerer, LinearValue};
 use crate::core::diag::Span;
-use crate::core::ir::{Callee, CastKind, RuntimeFn, ValueId};
+use crate::core::ir::{BinOp, Callee, CastKind, RuntimeFn, ValueId};
 use crate::core::plans::{
     ArgLowering, CallInput, CallPlan, CallTarget, IntrinsicCall, RuntimeCall,
 };
@@ -810,9 +810,7 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
 
                 let hit_u32 = self.builder.int_extend(hit, tag_ty, false);
                 let one_u32 = self.builder.const_int(1, false, 32, tag_ty);
-                let tag = self
-                    .builder
-                    .binop(crate::core::ir::BinOp::Xor, one_u32, hit_u32, tag_ty);
+                let tag = self.builder.binop(BinOp::Xor, one_u32, hit_u32, tag_ty);
                 self.store_field(union_slot.addr, 0, tag_ty, tag);
 
                 let payload = self.builder.load(value_slot.addr, value_ir_ty);

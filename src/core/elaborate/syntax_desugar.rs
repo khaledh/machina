@@ -37,7 +37,7 @@ use crate::core::ast::{
 use crate::core::diag::Span;
 use crate::core::elaborate::elaborator::Elaborator;
 use crate::core::plans::{ArgLowering, CallInput, CallPlan, CallTarget};
-use crate::core::resolve::{DefId, DefKind};
+use crate::core::resolve::{DefId, DefKind, DefTable};
 use crate::core::types::Type;
 use std::collections::HashMap;
 use std::ops::{Deref, DerefMut};
@@ -98,7 +98,7 @@ pub(super) fn run(elaborator: &mut Elaborator<'_>, module: &mut Module) {
 
 fn collect_using_cleanup_methods(
     module: &Module,
-    def_table: &impl Deref<Target = crate::core::resolve::DefTable>,
+    def_table: &impl Deref<Target = DefTable>,
 ) -> UsingCleanupMethods {
     let mut close_ignore_error_by_type = HashMap::new();
     for block in module.method_blocks() {

@@ -1,6 +1,6 @@
 use crate::core::api::parse_module_with_id_gen;
-use crate::core::ast::NodeIdGen;
 use crate::core::ast::TopLevelItem;
+use crate::core::ast::{MethodItem, NodeIdGen};
 use crate::core::capsule::ModulePath;
 use crate::core::context::ParsedContext;
 use crate::core::resolve::resolve;
@@ -38,9 +38,7 @@ fn run() {}
     };
     let method_id = match &resolved.module.top_level_items[1] {
         TopLevelItem::MethodBlock(block) => match &block.method_items[0] {
-            crate::core::ast::MethodItem::Def(def) => {
-                resolved.def_table.lookup_node_def_id(def.id).unwrap()
-            }
+            MethodItem::Def(def) => resolved.def_table.lookup_node_def_id(def.id).unwrap(),
             _ => unreachable!(),
         },
         _ => unreachable!(),

@@ -30,7 +30,7 @@ fn test_collect_type_and_function_signatures() {
     "#;
 
     let resolved = resolve_source(source);
-    let mut engine = TypecheckEngine::new(resolved, crate::core::resolve::ImportedFacts::default());
+    let mut engine = TypecheckEngine::new(resolved, ImportedFacts::default());
     run(&mut engine).expect("collect pass failed");
 
     let env = engine.env();
@@ -67,7 +67,7 @@ fn test_collect_method_and_property_signatures() {
     "#;
 
     let resolved = resolve_source(source);
-    let mut engine = TypecheckEngine::new(resolved, crate::core::resolve::ImportedFacts::default());
+    let mut engine = TypecheckEngine::new(resolved, ImportedFacts::default());
     run(&mut engine).expect("collect pass failed");
 
     let env = engine.env();
@@ -101,7 +101,7 @@ fn test_collect_trait_contract_and_trait_impl_methods() {
     "#;
 
     let resolved = resolve_source(source);
-    let mut engine = TypecheckEngine::new(resolved, crate::core::resolve::ImportedFacts::default());
+    let mut engine = TypecheckEngine::new(resolved, ImportedFacts::default());
     run(&mut engine).expect("collect pass failed");
 
     let env = engine.env();

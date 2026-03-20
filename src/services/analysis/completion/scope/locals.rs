@@ -6,11 +6,11 @@
 use std::collections::HashMap;
 
 use crate::core::ast::{
-    BlockItem, ClosureDef, Expr, ExprKind, FuncDef, MethodDef, MethodItem, Module, StmtExprKind,
-    TopLevelItem,
+    BindPattern, BindPatternKind, BlockItem, ClosureDef, Expr, ExprKind, FuncDef, MatchPattern,
+    MatchPatternBinding, MethodDef, MethodItem, Module, StmtExpr, StmtExprKind, TopLevelItem,
 };
 use crate::core::diag::{Position, Span};
-use crate::core::resolve::DefId;
+use crate::core::resolve::{DefId, DefTable};
 use crate::services::analysis::results::CompletionItem;
 use crate::services::analysis::syntax_index::position_leq;
 
@@ -18,7 +18,7 @@ use super::global::completion_kind_for_def;
 
 pub(super) fn collect_local_scopes(
     module: &Module,
-    def_table: &crate::core::resolve::DefTable,
+    def_table: &DefTable,
     cursor: Position,
 ) -> Vec<HashMap<String, CompletionItem>> {
     let mut collector = LocalScopeCollector::new(cursor, def_table);
@@ -34,12 +34,12 @@ pub(super) fn enclosing_callable_def_id(_module: &Module, _cursor: Position) -> 
 
 struct LocalScopeCollector<'a> {
     cursor: Position,
-    def_table: &'a crate::core::resolve::DefTable,
+    def_table: &'a DefTable,
     scopes: Vec<HashMap<String, CompletionItem>>,
 }
 
 impl<'a> LocalScopeCollector<'a> {
-    fn new(cursor: Position, def_table: &'a crate::core::resolve::DefTable) -> Self {
+    fn new(cursor: Position, def_table: &'a DefTable) -> Self {
         Self {
             cursor,
             def_table,
@@ -133,7 +133,7 @@ impl<'a> LocalScopeCollector<'a> {
         }
     }
 
-    fn collect_stmt_at_cursor(&mut self, stmt: &crate::core::ast::StmtExpr) {
+    fn collect_stmt_at_cursor(&mut self, stmt: &StmtExpr) {
         match &stmt.kind {
             StmtExprKind::LetBind { value, .. } | StmtExprKind::VarBind { value, .. } => {
                 if self.span_contains_pos(value.span) {
@@ -205,7 +205,7 @@ impl<'a> LocalScopeCollector<'a> {
         }
     }
 
-    fn collect_stmt_bindings(&mut self, stmt: &crate::core::ast::StmtExpr) {
+    fn collect_stmt_bindings(&mut self, stmt: &StmtExpr) {
         match &stmt.kind {
             StmtExprKind::LetBind { pattern, .. } | StmtExprKind::VarBind { pattern, .. } => {
                 self.collect_bind_pattern_bindings(pattern);
@@ -220,18 +220,17 @@ impl<'a> LocalScopeCollector<'a> {
         }
     }
 
-    fn collect_bind_pattern_bindings(&mut self, pattern: &crate::core::ast::BindPattern) {
+    fn collect_bind_pattern_bindings(&mut self, pattern: &BindPattern) {
         match &pattern.kind {
-            crate::core::ast::BindPatternKind::Name { .. } => {
+            BindPatternKind::Name { .. } => {
                 self.insert_def(self.def_table.def_id(pattern.id));
             }
-            crate::core::ast::BindPatternKind::Array { patterns }
-            | crate::core::ast::BindPatternKind::Tuple { patterns } => {
+            BindPatternKind::Array { patterns } | BindPatternKind::Tuple { patterns } => {
                 for sub in patterns {
                     self.collect_bind_pattern_bindings(sub);
                 }
             }
-            crate::core::ast::BindPatternKind::Struct { fields, .. } => {
+            BindPatternKind::Struct { fields, .. } => {
                 for field in fields {
                     self.collect_bind_pattern_bindings(&field.pattern);
                 }
@@ -239,20 +238,19 @@ impl<'a> LocalScopeCollector<'a> {
         }
     }
 
-    fn collect_match_pattern_bindings(&mut self, pattern: &crate::core::ast::MatchPattern) {
+    fn collect_match_pattern_bindings(&mut self, pattern: &MatchPattern) {
         match pattern {
-            crate::core::ast::MatchPattern::Binding { id, .. }
-            | crate::core::ast::MatchPattern::TypedBinding { id, .. } => {
+            MatchPattern::Binding { id, .. } | MatchPattern::TypedBinding { id, .. } => {
                 self.insert_def(self.def_table.def_id(*id));
             }
-            crate::core::ast::MatchPattern::Tuple { patterns, .. } => {
+            MatchPattern::Tuple { patterns, .. } => {
                 for sub in patterns {
                     self.collect_match_pattern_bindings(sub);
                 }
             }
-            crate::core::ast::MatchPattern::EnumVariant { bindings, .. } => {
+            MatchPattern::EnumVariant { bindings, .. } => {
                 for binding in bindings {
-                    if let crate::core::ast::MatchPatternBinding::Named { id, .. } = binding {
+                    if let MatchPatternBinding::Named { id, .. } = binding {
                         self.insert_def(self.def_table.def_id(*id));
                     }
                 }

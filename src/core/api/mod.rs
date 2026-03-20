@@ -15,8 +15,11 @@ use crate::core::context::{
     ElaborateStageInput, ElaborateStageOutput, ResolveStageInput, SemCheckStageOutput,
     TypecheckStageInput, TypecheckStageOutput,
 };
-use crate::core::elaborate;
 use crate::core::lexer::{LexError, Lexer, Token};
+use crate::core::linear::{build_linear_index, validate_module};
+use crate::core::machine::managed_runtime::{
+    ensure_managed_runtime_intrinsics, rewrite_machines_entrypoint,
+};
 use crate::core::parse::{ParseError, Parser};
 use crate::core::resolve::{
     ImportedFacts, ImportedModule, ImportedSymbol, ResolveError, ResolveOutput, attach_def_owners,
@@ -27,6 +30,7 @@ use crate::core::typecheck::{
     TypeCheckError, TypecheckOutput, type_check_partial_with_imported_facts,
     type_check_with_imported_facts,
 };
+use crate::core::{elaborate, linear};
 
 pub(crate) use strict_frontend::{
     StrictFrontendOptions, build_strict_frontend_input, run_strict_frontend,
@@ -222,20 +226,14 @@ pub fn resolve_stage_with_policy(
     policy: FrontendPolicy,
 ) -> ResolveStageResult {
     let has_machine_defs = !input.module.machine_defs().is_empty();
-    let managed_main_wrapped = crate::core::machine::managed_runtime::rewrite_machines_entrypoint(
-        &mut input.module,
-        has_machine_defs,
-        &mut input.node_id_gen,
-    );
+    let managed_main_wrapped =
+        rewrite_machines_entrypoint(&mut input.module, has_machine_defs, &mut input.node_id_gen);
     if managed_main_wrapped {
-        crate::core::machine::managed_runtime::ensure_managed_runtime_intrinsics(
-            &mut input.module,
-            &mut input.node_id_gen,
-        );
+        ensure_managed_runtime_intrinsics(&mut input.module, &mut input.node_id_gen);
     }
     let mut frontend_errors = Vec::new();
-    frontend_errors.extend(crate::core::linear::validate_module(&input.module));
-    input.linear_index = crate::core::linear::build_linear_index(&input.module);
+    frontend_errors.extend(validate_module(&input.module));
+    input.linear_index = build_linear_index(&input.module);
     if policy == FrontendPolicy::Strict && !frontend_errors.is_empty() {
         return ResolveStageResult {
             context: None,
@@ -243,7 +241,7 @@ pub fn resolve_stage_with_policy(
             errors: frontend_errors,
         };
     }
-    frontend_errors.extend(crate::core::linear::desugar_module(
+    frontend_errors.extend(linear::desugar_module(
         &mut input.module,
         &mut input.node_id_gen,
         &mut input.linear_index,

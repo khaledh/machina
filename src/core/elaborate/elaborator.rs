@@ -18,7 +18,7 @@ use crate::core::plans::{
     CallPlan, CallPlanMap, IndexPlan, IndexPlanMap, MatchPlan, MatchPlanMap, SlicePlan,
     SlicePlanMap, StringFmtPlan,
 };
-use crate::core::resolve::DefId;
+use crate::core::resolve::{Def, DefId, DefKind};
 use crate::core::semck::closure::capture::CaptureMode;
 use crate::core::semck::closure::capture::ClosureCapture;
 use crate::core::typecheck::type_map::CallSigMap;
@@ -262,7 +262,7 @@ impl<'a> Elaborator<'a> {
         self.type_map.type_of(node_id)
     }
 
-    pub(super) fn def_or_panic(&self, def_id: DefId, context: &str) -> crate::core::resolve::Def {
+    pub(super) fn def_or_panic(&self, def_id: DefId, context: &str) -> Def {
         self.def_table
             .lookup_def(def_id)
             .unwrap_or_else(|| panic!("compiler bug: missing def for {context}: {def_id}"))
@@ -275,13 +275,13 @@ impl<'a> Elaborator<'a> {
             .unwrap_or_else(|| panic!("compiler bug: missing type for {context}: {node_id:?}"))
     }
 
-    pub(super) fn def_type_or_panic(&self, def: &crate::core::resolve::Def, context: &str) -> Type {
+    pub(super) fn def_type_or_panic(&self, def: &Def, context: &str) -> Type {
         self.type_map
             .lookup_def_type(def)
             .unwrap_or_else(|| panic!("compiler bug: missing def type for {context}: {}", def.id))
     }
 
-    pub(super) fn has_def_type(&self, def: &crate::core::resolve::Def) -> bool {
+    pub(super) fn has_def_type(&self, def: &Def) -> bool {
         self.type_map.lookup_def_type_id(def).is_some()
     }
 
@@ -354,7 +354,7 @@ impl<'a> Elaborator<'a> {
 
     pub(super) fn insert_def_type_for(
         &mut self,
-        def: crate::core::resolve::Def,
+        def: Def,
         ty: Type,
         reason: SyntheticReason,
     ) -> TypeId {
@@ -364,7 +364,7 @@ impl<'a> Elaborator<'a> {
     pub(super) fn add_synthetic_def(
         &mut self,
         name: String,
-        kind: crate::core::resolve::DefKind,
+        kind: DefKind,
         reason: SyntheticReason,
     ) -> DefId {
         self.def_table.add_def(name, kind, "elaborate", reason)
@@ -377,7 +377,7 @@ impl<'a> Elaborator<'a> {
     pub(super) fn add_typed_synthetic_def(
         &mut self,
         name: String,
-        kind: crate::core::resolve::DefKind,
+        kind: DefKind,
         ty: Type,
         reason: SyntheticReason,
     ) -> DefId {

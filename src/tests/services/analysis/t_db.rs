@@ -10,9 +10,11 @@ use crate::services::analysis::db::AnalysisDb;
 use crate::services::analysis::diagnostics::{
     ANALYSIS_FILE_ID_KEY, DiagnosticPhase, DiagnosticValue,
 };
+use crate::services::analysis::lookups::hover_for_resolved_target;
 use crate::services::analysis::module_graph::ModuleGraph;
 use crate::services::analysis::pipeline::ROOT_POISON_NODE;
 use crate::services::analysis::query::{CancellationToken, QueryCancelled, QueryKey, QueryKind};
+use crate::services::analysis::results::SemanticTokenKind;
 
 static ANALYSIS_TMP_COUNTER: AtomicUsize = AtomicUsize::new(0);
 
@@ -1835,7 +1837,7 @@ machine PaymentService hosts Payment(key: id) {
 
     assert!(
         tokens.iter().any(|tok| {
-            tok.kind == crate::services::analysis::results::SemanticTokenKind::Type
+            tok.kind == SemanticTokenKind::Type
                 && tok.span.start.line == machine_decl.start.line
                 && tok.span.start.column == machine_decl.start.column
         }),
@@ -2632,7 +2634,7 @@ fn hover_for_symbol_id_in_program_matches_source_definition_render() {
         .resolve_target_in_program(entry_id, target)
         .expect("target resolution query should succeed")
         .expect("expected resolved target");
-    let rendered = crate::services::analysis::lookups::hover_for_resolved_target(&resolved_target)
+    let rendered = hover_for_resolved_target(&resolved_target)
         .expect("expected hover render for canonical symbol");
 
     assert_eq!(rendered.def_name.as_deref(), Some("println"));

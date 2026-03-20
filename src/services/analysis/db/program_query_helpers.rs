@@ -1,26 +1,29 @@
 //! Program-aware query helper methods for `AnalysisDb`.
 
+use crate::core::context::ImportEnv;
 use crate::core::diag::Span;
-use crate::core::symbol_id::SelectedCallable;
+use crate::core::symbol_id::{SelectedCallable, SymbolNs};
 use crate::core::types::Type;
 use crate::services::analysis::db::pipeline_helpers::def_target_for_symbol_id_in_states;
 use crate::services::analysis::lookups::{
-    binding_value_node_id_for_def, def_at_span, hover_at_span_in_file, hover_for_resolved_target,
-    identifier_token_at_span, location_for_resolved_target, resolved_binding_type_for_def,
-    signature_help_for_resolved_target_at_call_site, type_at_span,
+    ResolvedSymbolTarget, binding_value_node_id_for_def, def_at_span, hover_at_span_in_file,
+    hover_for_resolved_target, identifier_token_at_span, location_for_resolved_target,
+    resolved_binding_type_for_def, signature_help_for_resolved_target_at_call_site, type_at_span,
 };
+use crate::services::analysis::pipeline::LookupState;
 use crate::services::analysis::program_pipeline::resolve_imported_symbol_id_from_import_env;
 use crate::services::analysis::query::QueryResult;
 use crate::services::analysis::results::{
     CompletionItem, DefTarget, HoverInfo, Location, SignatureHelp,
 };
+use crate::services::analysis::snapshot::AnalysisSnapshot;
 use std::collections::HashMap;
 
 use crate::core::capsule::ModuleId;
 use crate::core::resolve::DefId;
 use crate::services::analysis::snapshot::FileId;
 use crate::services::analysis::syntax_index::{
-    call_site_at_span, call_site_by_node_id, node_span_map, span_contains_span,
+    CallSite, call_site_at_span, call_site_by_node_id, node_span_map, span_contains_span,
 };
 
 impl super::AnalysisDb {
@@ -191,12 +194,12 @@ fn hover_needs_strict_fallback(info: &HoverInfo) -> bool {
 fn imported_hover_target(
     db: &mut super::AnalysisDb,
     origin_file_id: FileId,
-    state: &crate::services::analysis::pipeline::LookupState,
+    state: &LookupState,
     module_id: ModuleId,
     hover: &HoverInfo,
     query_span: Span,
-    import_env_by_module: &HashMap<ModuleId, crate::core::context::ImportEnv>,
-    module_states: &HashMap<ModuleId, crate::services::analysis::pipeline::LookupState>,
+    import_env_by_module: &HashMap<ModuleId, ImportEnv>,
+    module_states: &HashMap<ModuleId, LookupState>,
 ) -> Option<HoverInfo> {
     let snapshot = db.snapshot();
     let source = snapshot.text(origin_file_id);
@@ -245,15 +248,15 @@ fn imported_hover_target(
 fn resolved_target_at_program_span(
     db: &mut super::AnalysisDb,
     origin_file_id: FileId,
-    snapshot: &crate::services::analysis::snapshot::AnalysisSnapshot,
+    snapshot: &AnalysisSnapshot,
     query_span: Span,
     source: Option<&str>,
     module_id: ModuleId,
-    state: &crate::services::analysis::pipeline::LookupState,
-    import_env_by_module: &HashMap<ModuleId, crate::core::context::ImportEnv>,
-    module_states: &HashMap<ModuleId, crate::services::analysis::pipeline::LookupState>,
+    state: &LookupState,
+    import_env_by_module: &HashMap<ModuleId, ImportEnv>,
+    module_states: &HashMap<ModuleId, LookupState>,
     require_callee_span: bool,
-) -> QueryResult<Option<crate::services::analysis::lookups::ResolvedSymbolTarget>> {
+) -> QueryResult<Option<ResolvedSymbolTarget>> {
     let target = if let Some(target) = selected_callable_target(
         snapshot,
         origin_file_id,
@@ -286,13 +289,13 @@ fn resolved_target_at_program_span(
 }
 
 fn selected_callable_target(
-    snapshot: &crate::services::analysis::snapshot::AnalysisSnapshot,
+    snapshot: &AnalysisSnapshot,
     origin_file_id: FileId,
-    state: &crate::services::analysis::pipeline::LookupState,
+    state: &LookupState,
     query_span: Span,
     source: Option<&str>,
     require_callee_span: bool,
-    module_states: &HashMap<ModuleId, crate::services::analysis::pipeline::LookupState>,
+    module_states: &HashMap<ModuleId, LookupState>,
 ) -> Option<DefTarget> {
     let typed = state.typed.as_ref()?;
     let call = call_site_at_span(&typed.module, query_span)?;
@@ -330,11 +333,11 @@ fn selected_callable_target(
 // so fall back to matching the resolved receiver/arg/result types against
 // source method definitions in the loaded program states.
 fn selected_method_target(
-    snapshot: &crate::services::analysis::snapshot::AnalysisSnapshot,
+    snapshot: &AnalysisSnapshot,
     origin_file_id: FileId,
-    state: &crate::services::analysis::pipeline::LookupState,
-    call: &crate::services::analysis::syntax_index::CallSite,
-    module_states: &HashMap<ModuleId, crate::services::analysis::pipeline::LookupState>,
+    state: &LookupState,
+    call: &CallSite,
+    module_states: &HashMap<ModuleId, LookupState>,
 ) -> Option<DefTarget> {
     let typed = state.typed.as_ref()?;
     let method_name = call.method_name.as_deref()?;
@@ -359,7 +362,7 @@ fn selected_method_target(
             let Some(symbol_id) = candidate_typed.symbol_ids.lookup_symbol_id(def.id) else {
                 continue;
             };
-            if symbol_id.ns != crate::core::symbol_id::SymbolNs::Method {
+            if symbol_id.ns != SymbolNs::Method {
                 continue;
             }
             let Some(owner_segment) = symbol_id.path.segments.iter().rev().nth(1) else {
@@ -399,11 +402,11 @@ fn selected_method_target(
 }
 
 fn receiver_type_for_call(
-    snapshot: &crate::services::analysis::snapshot::AnalysisSnapshot,
+    snapshot: &AnalysisSnapshot,
     origin_file_id: FileId,
-    state: &crate::services::analysis::pipeline::LookupState,
+    state: &LookupState,
     call: &crate::services::analysis::syntax_index::CallSite,
-    module_states: &HashMap<ModuleId, crate::services::analysis::pipeline::LookupState>,
+    module_states: &HashMap<ModuleId, LookupState>,
 ) -> Option<Type> {
     let typed = state.typed.as_ref()?;
     let receiver_ty = typed.type_map.lookup_node_type(call.callee_node_id);
@@ -427,9 +430,7 @@ fn receiver_type_for_call(
     let value_node_id = binding_value_node_id_for_def(&typed.module, &typed.def_table, def_id);
     let value_node_id = value_node_id?;
     let init_sig = typed.call_sigs.get(&value_node_id)?;
-    let target = if let Some(crate::core::symbol_id::SelectedCallable::Canonical(symbol_id)) =
-        init_sig.selected.as_ref()
-    {
+    let target = if let Some(SelectedCallable::Canonical(symbol_id)) = init_sig.selected.as_ref() {
         def_target_for_symbol_id_in_states(snapshot, module_states, origin_file_id, symbol_id)?
     } else {
         let init_call = call_site_by_node_id(&typed.module, value_node_id)?;
@@ -438,8 +439,7 @@ fn receiver_type_for_call(
     let module_id = target.module_id?;
     let target_state = module_states.get(&module_id)?.typed.as_ref()?;
     let def = target_state.def_table.lookup_def(target.def_id)?;
-    let crate::core::types::Type::Fn { ret_ty, .. } = target_state.type_map.lookup_def_type(def)?
-    else {
+    let Type::Fn { ret_ty, .. } = target_state.type_map.lookup_def_type(def)? else {
         return receiver_ty;
     };
     Some(ret_ty.as_ref().clone())
@@ -493,10 +493,10 @@ fn types_compatible(expected: &Type, actual: &Type) -> bool {
 }
 
 fn local_def_target(
-    snapshot: &crate::services::analysis::snapshot::AnalysisSnapshot,
+    snapshot: &AnalysisSnapshot,
     origin_file_id: FileId,
     module_id: ModuleId,
-    state: &crate::services::analysis::pipeline::LookupState,
+    state: &LookupState,
     def_id: DefId,
 ) -> Option<DefTarget> {
     let resolved = state.resolved.as_ref()?;
@@ -515,13 +515,13 @@ fn local_def_target(
 }
 
 fn imported_or_local_def_target(
-    snapshot: &crate::services::analysis::snapshot::AnalysisSnapshot,
+    snapshot: &AnalysisSnapshot,
     origin_file_id: FileId,
     module_id: ModuleId,
-    state: &crate::services::analysis::pipeline::LookupState,
+    state: &LookupState,
     def_id: DefId,
-    import_env_by_module: &HashMap<ModuleId, crate::core::context::ImportEnv>,
-    module_states: &HashMap<ModuleId, crate::services::analysis::pipeline::LookupState>,
+    import_env_by_module: &HashMap<ModuleId, ImportEnv>,
+    module_states: &HashMap<ModuleId, LookupState>,
 ) -> Option<DefTarget> {
     let resolved = state.resolved.as_ref()?;
     if let Some(symbol_id) = resolved.symbol_ids.lookup_symbol_id(def_id)

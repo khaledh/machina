@@ -10,8 +10,9 @@ use std::ops::Deref;
 use std::sync::Arc;
 
 use crate::core::ast::NodeId;
+use crate::core::diag::Span;
 use crate::core::resolve::def_table::DefTable;
-use crate::core::resolve::{Def, DefId};
+use crate::core::resolve::{Def, DefId, DefKind};
 use crate::core::typecheck::type_map::TypeMap;
 use crate::core::types::{Type, TypeId};
 
@@ -247,7 +248,7 @@ impl DefTableOverlay {
     pub fn add_def(
         &mut self,
         name: String,
-        kind: crate::core::resolve::DefKind,
+        kind: DefKind,
         stage: impl Into<String>,
         reason: SyntheticReason,
     ) -> DefId {
@@ -262,12 +263,7 @@ impl DefTableOverlay {
         def_id
     }
 
-    pub fn record_def_node(
-        &mut self,
-        def_id: DefId,
-        node_id: NodeId,
-        span: crate::core::diag::Span,
-    ) {
+    pub fn record_def_node(&mut self, def_id: DefId, node_id: NodeId, span: Span) {
         self.working.record_def_node(def_id, node_id, span);
     }
 

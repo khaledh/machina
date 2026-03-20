@@ -12,7 +12,10 @@
 use std::collections::HashMap;
 
 use crate::core::ast::visit::{self, Visitor};
-use crate::core::ast::{EmitKind, Expr, ExprKind, Module, NodeId, TypeDefKind, TypeExpr};
+use crate::core::ast::{
+    EmitKind, Expr, ExprKind, LinearTypeDef, MachineDef, MachineItem, Module, NodeId, TypeDefKind,
+    TypeExpr, TypeExprKind,
+};
 
 use super::machine::{
     machine_action_override_fn_name, machine_action_session_fn_name, machine_deliver_fn_name,
@@ -279,7 +282,7 @@ pub fn build_linear_index(module: &Module) -> LinearIndex {
             .items
             .iter()
             .filter_map(|item| {
-                let crate::core::ast::MachineItem::Action(handler) = item else {
+                let MachineItem::Action(handler) = item else {
                     return None;
                 };
                 Some((handler.name.as_str(), handler.instance_param.as_str()))
@@ -366,8 +369,8 @@ pub fn build_linear_index(module: &Module) -> LinearIndex {
 }
 
 fn collect_machine_derived_interactions(
-    machine_def: &crate::core::ast::MachineDef,
-    linear: &crate::core::ast::LinearTypeDef,
+    machine_def: &MachineDef,
+    linear: &LinearTypeDef,
     derived: &mut HashMap<(String, String), DerivedInteractionInfo>,
 ) {
     let action_counts =
@@ -385,7 +388,7 @@ fn collect_machine_derived_interactions(
         .collect::<HashMap<_, _>>();
 
     for item in &machine_def.items {
-        let crate::core::ast::MachineItem::Action(handler) = item else {
+        let MachineItem::Action(handler) = item else {
             continue;
         };
         if action_counts
@@ -422,7 +425,7 @@ fn collect_machine_derived_interactions(
 }
 
 fn trigger_only_waiting_state_reply_types(
-    linear: &crate::core::ast::LinearTypeDef,
+    linear: &LinearTypeDef,
     waiting_state: &str,
 ) -> Option<Vec<String>> {
     if linear
@@ -496,20 +499,16 @@ fn request_type_name_from_expr(expr: &Expr) -> Option<String> {
     }
 }
 
-fn collect_machine_on_event_kinds(
-    machine_def: &crate::core::ast::MachineDef,
-) -> HashMap<String, u64> {
+fn collect_machine_on_event_kinds(machine_def: &MachineDef) -> HashMap<String, u64> {
     machine_def
         .items
         .iter()
         .enumerate()
         .filter_map(|(index, item)| {
-            let crate::core::ast::MachineItem::On(handler) = item else {
+            let MachineItem::On(handler) = item else {
                 return None;
             };
-            let crate::core::ast::TypeExprKind::Named { ident, type_args } =
-                &handler.selector_ty.kind
-            else {
+            let TypeExprKind::Named { ident, type_args } = &handler.selector_ty.kind else {
                 return None;
             };
             if !type_args.is_empty() {
@@ -521,8 +520,8 @@ fn collect_machine_on_event_kinds(
 }
 
 fn collect_machine_action_overrides(
-    machine_def: &crate::core::ast::MachineDef,
-    linear: &crate::core::ast::LinearTypeDef,
+    machine_def: &MachineDef,
+    linear: &LinearTypeDef,
     generated: &mut HashMap<String, GeneratedActionOverrideInfo>,
 ) -> HashMap<String, String> {
     let mut action_counts = HashMap::<&str, usize>::new();
@@ -532,7 +531,7 @@ fn collect_machine_action_overrides(
 
     let mut overrides = HashMap::new();
     for item in &machine_def.items {
-        let crate::core::ast::MachineItem::Action(handler) = item else {
+        let MachineItem::Action(handler) = item else {
             continue;
         };
         // Leave malformed or ambiguous overrides to validation. The runtime
@@ -572,8 +571,8 @@ fn collect_machine_action_overrides(
 }
 
 fn collect_machine_trigger_handlers(
-    machine_def: &crate::core::ast::MachineDef,
-    linear: &crate::core::ast::LinearTypeDef,
+    machine_def: &MachineDef,
+    linear: &LinearTypeDef,
     generated: &mut HashMap<String, GeneratedTriggerHandlerInfo>,
 ) {
     let triggers_by_name = linear
@@ -583,7 +582,7 @@ fn collect_machine_trigger_handlers(
         .collect::<HashMap<_, _>>();
 
     for item in &machine_def.items {
-        let crate::core::ast::MachineItem::Trigger(handler) = item else {
+        let MachineItem::Trigger(handler) = item else {
             continue;
         };
         let Some(trigger) = triggers_by_name.get(handler.name.as_str()).copied() else {

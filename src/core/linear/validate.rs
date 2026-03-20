@@ -12,13 +12,14 @@
 
 use std::collections::{HashMap, HashSet};
 
-use crate::core::ast::ExprKind;
 use crate::core::ast::visit::{self, Visitor};
+use crate::core::ast::{EmitKind, Expr, ExprKind, LinearTransitionParam, LinearTypeDef, Param};
 use crate::core::ast::{
     LinearRoleDecl, LinearStateVariant, LinearTransitionDecl, MachineDef, MachineItem,
     MachineOnHandler, MachineTransitionHandler, MethodBlock, MethodDef, MethodItem, Module,
     TopLevelItem, TypeDef, TypeDefKind, TypeExpr, TypeExprKind,
 };
+use crate::core::diag::Span;
 use crate::core::resolve::{REK, ResolveError};
 
 pub fn validate_module(module: &Module) -> Vec<ResolveError> {
@@ -46,7 +47,7 @@ pub fn validate_module(module: &Module) -> Vec<ResolveError> {
 
 fn validate_linear_type(
     type_def: &TypeDef,
-    linear: &crate::core::ast::LinearTypeDef,
+    linear: &LinearTypeDef,
     method_blocks: Option<&Vec<&MethodBlock>>,
     errors: &mut Vec<ResolveError>,
 ) {
@@ -81,7 +82,7 @@ fn validate_linear_type(
 fn collect_states(
     type_name: &str,
     states: &[LinearStateVariant],
-    type_span: crate::core::diag::Span,
+    type_span: Span,
     errors: &mut Vec<ResolveError>,
 ) -> HashSet<String> {
     let mut names = HashSet::new();
@@ -454,7 +455,7 @@ fn validate_machine_def(
 
 fn validate_machine_handlers(
     machine_def: &MachineDef,
-    linear: &crate::core::ast::LinearTypeDef,
+    linear: &LinearTypeDef,
     type_defs: &HashMap<String, &TypeDef>,
     errors: &mut Vec<ResolveError>,
 ) {
@@ -677,18 +678,16 @@ fn is_u64_named_type(ty_expr: &TypeExpr) -> bool {
     )
 }
 
-fn collect_hosted_action_emit_unsupported_spans(
-    expr: &crate::core::ast::Expr,
-) -> Vec<crate::core::diag::Span> {
+fn collect_hosted_action_emit_unsupported_spans(expr: &Expr) -> Vec<Span> {
     struct EmitCollector {
-        spans: Vec<crate::core::diag::Span>,
+        spans: Vec<Span>,
     }
 
     impl Visitor for EmitCollector {
-        fn visit_expr(&mut self, expr: &crate::core::ast::Expr) {
+        fn visit_expr(&mut self, expr: &Expr) {
             match &expr.kind {
                 ExprKind::Emit {
-                    kind: crate::core::ast::EmitKind::Request { .. },
+                    kind: EmitKind::Request { .. },
                 }
                 | ExprKind::Reply { .. } => {
                     self.spans.push(expr.span);
@@ -704,10 +703,7 @@ fn collect_hosted_action_emit_unsupported_spans(
     collector.spans
 }
 
-fn params_match(
-    action_params: &[crate::core::ast::LinearTransitionParam],
-    method_params: &[crate::core::ast::Param],
-) -> bool {
+fn params_match(action_params: &[LinearTransitionParam], method_params: &[Param]) -> bool {
     action_params.len() == method_params.len()
         && action_params
             .iter()

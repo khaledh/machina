@@ -9,6 +9,7 @@
 //!
 //! This split keeps inference productive while preserving precise
 //! assignability/runtime-refinement behavior.
+
 mod access_utils;
 mod assignability;
 mod calls;
@@ -35,12 +36,13 @@ use crate::core::diag::Span;
 use crate::core::resolve::{DefId, DefKind, DefTable};
 use crate::core::typecheck::capability::ensure_hashable;
 use crate::core::typecheck::constraints::{
-    ConstrainOutput, Constraint, ConstraintReason, ExprObligation,
+    CallObligation, ConstrainOutput, Constraint, ConstraintReason, ExprObligation,
+    PatternObligation,
 };
 use crate::core::typecheck::engine::{CollectedPropertySig, CollectedTraitSig, TypecheckEngine};
 use crate::core::typecheck::errors::{TEK, TypeCheckError};
 use crate::core::typecheck::property_access;
-use crate::core::typecheck::typesys::TypeVarKind;
+use crate::core::typecheck::typesys::{TypeVarKind, TypeVarStore};
 use crate::core::typecheck::unify::{TcUnifier, TcUnifyError};
 use crate::core::types::{TyVarId, Type};
 
@@ -248,7 +250,7 @@ fn solve_call_stage(
 ) -> (
     Vec<TypeCheckError>,
     HashMap<NodeId, DefId>,
-    Vec<crate::core::typecheck::constraints::CallObligation>,
+    Vec<CallObligation>,
 ) {
     let mut call_errors = Vec::new();
     let mut resolved_call_defs = HashMap::new();
@@ -718,7 +720,7 @@ fn should_retry_post_call_expr_obligation(
 fn check_unresolved_local_infer_vars(
     resolved_def_types: &HashMap<DefId, Type>,
     constraints: &[Constraint],
-    pattern_obligations: &[crate::core::typecheck::constraints::PatternObligation],
+    pattern_obligations: &[PatternObligation],
     def_table: &DefTable,
     vars: &crate::core::typecheck::typesys::TypeVarStore,
     existing_errors: &[TypeCheckError],
@@ -733,10 +735,7 @@ fn check_unresolved_local_infer_vars(
         }
     }
     for obligation in pattern_obligations {
-        if let crate::core::typecheck::constraints::PatternObligation::Bind {
-            pattern, span, ..
-        } = obligation
-        {
+        if let PatternObligation::Bind { pattern, span, .. } = obligation {
             collect_pattern_bind_decl_spans(pattern, *span, def_table, &mut decl_spans);
         }
     }
@@ -814,10 +813,7 @@ fn collect_pattern_bind_decl_spans(
     }
 }
 
-fn has_unresolved_infer_var(
-    ty: &Type,
-    vars: &crate::core::typecheck::typesys::TypeVarStore,
-) -> bool {
+fn has_unresolved_infer_var(ty: &Type, vars: &TypeVarStore) -> bool {
     ty.any(&|t| {
         matches!(t, Type::Var(var) if matches!(
             vars.kind(*var),

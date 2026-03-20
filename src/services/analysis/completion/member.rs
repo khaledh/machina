@@ -7,6 +7,7 @@
 use crate::core::ast::{MethodItem, TopLevelItem, TypeDefKind};
 use crate::core::capsule::ModuleId;
 use crate::core::context::ResolvedContext;
+use crate::core::linear::LinearHostInfo;
 use crate::core::resolve::{DefId, UNKNOWN_DEF_ID};
 use crate::core::types::Type;
 use crate::services::analysis::results::{CompletionItem, CompletionKind};
@@ -125,7 +126,7 @@ fn builtin_member_completions(owner: &Type) -> Vec<CompletionItem> {
 fn hosted_machine_for_owner<'a>(
     resolved: &'a ResolvedContext,
     owner: &Type,
-) -> Option<(&'a str, &'a crate::core::linear::LinearHostInfo)> {
+) -> Option<(&'a str, &'a LinearHostInfo)> {
     let owner_name = match owner {
         Type::Struct { name, .. } | Type::Enum { name, .. } => name.as_str(),
         _ => return None,
@@ -141,7 +142,7 @@ fn hosted_machine_for_owner<'a>(
 fn hosted_machine_member_completions(
     resolved: &ResolvedContext,
     machine_name: &str,
-    host_info: &crate::core::linear::LinearHostInfo,
+    host_info: &LinearHostInfo,
 ) -> Vec<CompletionItem> {
     let mut out = Vec::new();
     let roles = resolved

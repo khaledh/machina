@@ -7,7 +7,7 @@
 
 use std::path::Path;
 
-use crate::core::ast::Module;
+use crate::core::ast::{Module, NodeId};
 use crate::core::diag::Span;
 use crate::core::resolve::{DefId, DefTable, UNKNOWN_DEF_ID};
 use crate::core::typecheck::type_map::TypeMap;
@@ -120,7 +120,7 @@ pub(crate) fn hover_for_def_in_state(state: &LookupState, def_id: DefId) -> Opti
         node_id: typed
             .def_table
             .lookup_def_node_id(def_id)
-            .unwrap_or(crate::core::ast::NodeId(0)),
+            .unwrap_or(NodeId(0)),
         span,
         def_id: Some(def_id),
         symbol_id: typed.symbol_ids.lookup_symbol_id(def_id).cloned(),
@@ -309,7 +309,7 @@ fn try_machine_handle_hover(
         node_id: resolved
             .def_table
             .lookup_def_node_id(def_id)
-            .unwrap_or(crate::core::ast::NodeId(0)),
+            .unwrap_or(NodeId(0)),
         span: query_span,
         def_id: Some(def_id),
         symbol_id: resolved.symbol_ids.lookup_symbol_id(def_id).cloned(),
@@ -358,7 +358,7 @@ fn try_syntactic_field_hover(
     let query_ident = query_ident?;
     let display = syntactic_field_hover_display(source_text, query_offset, query_ident)?;
     Some(HoverInfo {
-        node_id: crate::core::ast::NodeId(0),
+        node_id: NodeId(0),
         span: query_span,
         def_id: None,
         symbol_id: None,
@@ -563,9 +563,7 @@ fn fallback_hover_from_def_table(
             def_table,
         );
         return Some(HoverInfo {
-            node_id: def_table
-                .lookup_def_node_id(def.id)
-                .unwrap_or(crate::core::ast::NodeId(0)),
+            node_id: def_table.lookup_def_node_id(def.id).unwrap_or(NodeId(0)),
             span: query_span,
             def_id: Some(def.id),
             symbol_id: None,

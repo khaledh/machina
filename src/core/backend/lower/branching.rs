@@ -3,8 +3,12 @@
 use crate::core::ast::{BinaryOp, BlockItem, Expr, ExprKind, NodeId, StmtExpr, StmtExprKind};
 use crate::core::backend::lower::LowerToIrError;
 use crate::core::backend::lower::join::JoinSession;
-use crate::core::backend::lower::lowerer::{BranchResult, FuncLowerer, LoopContext, StmtOutcome};
+use crate::core::backend::lower::locals::LocalValue;
+use crate::core::backend::lower::lowerer::{
+    BranchResult, CallInputValue, FuncLowerer, LoopContext, StmtOutcome,
+};
 use crate::core::backend::lower::r#match::MatchLowerer;
+use crate::core::diag::Span;
 use crate::core::ir::IrTypeId;
 use crate::core::ir::{
     BlockId, Callee, CastKind, CmpOp, ConstValue, SwitchCase, Terminator, ValueId,
@@ -33,7 +37,7 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
         &mut self,
         join: &JoinSession,
         expr: &Expr,
-        span: crate::core::diag::Span,
+        span: Span,
         join_sem_ty: Option<&Type>,
     ) -> Result<bool, LowerToIrError> {
         match self.lower_branching_value_expr(expr)? {
@@ -66,7 +70,7 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
         stmt_id: NodeId,
         target: BlockId,
         defs: &[DefId],
-        locals: &[crate::core::backend::lower::locals::LocalValue],
+        locals: &[LocalValue],
     ) -> Result<BranchResult, LowerToIrError> {
         self.emit_drops_for_stmt(stmt_id)?;
         let args = self.local_args_for_like(defs, locals);
@@ -330,7 +334,7 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
             BranchResult::Return => return Ok(BranchResult::Return),
         };
         let call_plan = self.call_plan(expr.id);
-        let mut handler_args = vec![crate::core::backend::lower::lowerer::CallInputValue {
+        let mut handler_args = vec![CallInputValue {
             value: setup.union_value,
             ty: setup.union_ty.clone(),
             is_addr: false,
@@ -414,7 +418,7 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
     fn lower_try_ok_path(
         &mut self,
         setup: &TryLoweringSetup,
-        span: crate::core::diag::Span,
+        span: Span,
     ) -> Result<(), LowerToIrError> {
         self.builder.select_block(setup.ok_bb);
         let ok_value = self.load_union_payload(

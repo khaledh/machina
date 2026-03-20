@@ -3,8 +3,8 @@ use crate::core::api::{
     resolve_stage_with_policy, semcheck_stage, typecheck_stage_with_policy,
 };
 use crate::core::ast::*;
-use crate::core::context::ParsedContext;
-use crate::core::resolve::ResolveErrorKind;
+use crate::core::context::{ParsedContext, SemanticContext};
+use crate::core::resolve::{ResolveError, ResolveErrorKind};
 
 fn parsed_context(source: &str) -> ParsedContext {
     let id_gen = NodeIdGen::new();
@@ -13,7 +13,7 @@ fn parsed_context(source: &str) -> ParsedContext {
     ParsedContext::new(module, id_gen)
 }
 
-fn resolve_errors(source: &str) -> Vec<crate::core::resolve::ResolveError> {
+fn resolve_errors(source: &str) -> Vec<ResolveError> {
     let parsed = parsed_context(source);
     let out = resolve_stage_with_policy(parsed, ResolveInputs::default(), FrontendPolicy::Strict);
     assert!(
@@ -305,7 +305,7 @@ fn machine_host_facts_are_recorded_in_resolved_context() {
     assert!(linear_ty.roles.contains_key("Author"));
 }
 
-fn elaborate_linear_semantic(source: &str) -> crate::core::context::SemanticContext {
+fn elaborate_linear_semantic(source: &str) -> SemanticContext {
     let parsed = parsed_context(source);
     let resolved =
         resolve_stage_with_policy(parsed, ResolveInputs::default(), FrontendPolicy::Strict);

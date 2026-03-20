@@ -26,6 +26,7 @@ use crate::core::typecheck::engine::{
 };
 use crate::core::typecheck::errors::{TEK, TypeCheckError};
 use crate::core::typecheck::imported::{extend_imported_function_sigs, extend_imported_trait_sigs};
+use crate::core::typecheck::tc_push_error;
 use crate::core::typecheck::type_map::{
     TypeDefLookup, resolve_return_type_expr_with_params, resolve_type_expr,
     resolve_type_expr_with_params,
@@ -245,7 +246,7 @@ fn collect_trait_sigs(
             };
 
             if methods.insert(method.sig.name.clone(), collected).is_some() {
-                crate::core::typecheck::tc_push_error!(
+                tc_push_error!(
                     errors,
                     method.span,
                     TEK::TraitMethodDuplicate(trait_def.name.clone(), method.sig.name.clone(),)
@@ -275,7 +276,7 @@ fn collect_trait_sigs(
                 )
                 .is_some()
             {
-                crate::core::typecheck::tc_push_error!(
+                tc_push_error!(
                     errors,
                     property.span,
                     TEK::TraitPropertyDuplicate(trait_def.name.clone(), property.name.clone(),)
@@ -359,7 +360,7 @@ fn collect_method_sigs(
         if let Some(trait_name) = &method_block.trait_name {
             let impl_key = (method_block.type_name.clone(), trait_name.clone());
             if !seen_trait_impls.insert(impl_key) {
-                crate::core::typecheck::tc_push_error!(
+                tc_push_error!(
                     errors,
                     method_block.span,
                     TEK::TraitImplDuplicate(method_block.type_name.clone(), trait_name.clone(),)
@@ -459,7 +460,7 @@ fn collect_method_sigs(
         {
             for prop_name in &implemented_trait_properties {
                 if !contract.properties.contains_key(prop_name) {
-                    crate::core::typecheck::tc_push_error!(
+                    tc_push_error!(
                         errors,
                         method_block.span,
                         TEK::TraitPropertyNotInTrait(
@@ -473,7 +474,7 @@ fn collect_method_sigs(
 
             for required in contract.methods.keys() {
                 if !implemented_trait_methods.contains(required) {
-                    crate::core::typecheck::tc_push_error!(
+                    tc_push_error!(
                         errors,
                         method_block.span,
                         TEK::TraitMethodMissingImpl(
@@ -491,7 +492,7 @@ fn collect_method_sigs(
                     .and_then(|by_name| by_name.get(prop_name));
 
                 let Some(impl_prop) = impl_prop else {
-                    crate::core::typecheck::tc_push_error!(
+                    tc_push_error!(
                         errors,
                         method_block.span,
                         TEK::TraitPropertyMissingImpl(
@@ -504,7 +505,7 @@ fn collect_method_sigs(
                 };
 
                 if impl_prop.ty != required.ty {
-                    crate::core::typecheck::tc_push_error!(
+                    tc_push_error!(
                         errors,
                         method_block.span,
                         TEK::TraitPropertyTypeMismatch(
@@ -517,7 +518,7 @@ fn collect_method_sigs(
                     );
                 }
                 if required.has_get && impl_prop.getter.is_none() {
-                    crate::core::typecheck::tc_push_error!(
+                    tc_push_error!(
                         errors,
                         method_block.span,
                         TEK::TraitPropertyMissingGetter(
@@ -528,7 +529,7 @@ fn collect_method_sigs(
                     );
                 }
                 if required.has_set && impl_prop.setter.is_none() {
-                    crate::core::typecheck::tc_push_error!(
+                    tc_push_error!(
                         errors,
                         method_block.span,
                         TEK::TraitPropertyMissingSetter(
@@ -666,7 +667,7 @@ fn validate_trait_method_impl(
     errors: &mut Vec<TypeCheckError>,
 ) {
     let Some(expected) = contract.methods.get(method_name) else {
-        crate::core::typecheck::tc_push_error!(
+        tc_push_error!(
             errors,
             span,
             TEK::TraitMethodNotInTrait(
@@ -679,7 +680,7 @@ fn validate_trait_method_impl(
     };
 
     if !seen_methods.insert(method_name.to_string()) {
-        crate::core::typecheck::tc_push_error!(
+        tc_push_error!(
             errors,
             span,
             TEK::TraitMethodImplDuplicate(
@@ -703,7 +704,7 @@ fn validate_trait_method_impl(
             .all(|(actual, expected)| actual.mode == expected.mode && actual.ty == expected.ty);
 
     if !matches {
-        crate::core::typecheck::tc_push_error!(
+        tc_push_error!(
             errors,
             span,
             TEK::TraitMethodSignatureMismatch(
@@ -797,7 +798,7 @@ fn record_property_sig(
     let prop_ty = match kind {
         PropertyAccessorKind::Get => {
             if !params.is_empty() {
-                crate::core::typecheck::tc_push_error!(
+                tc_push_error!(
                     errors,
                     span,
                     TEK::PropertyGetterHasParams(prop_name.to_string())
@@ -808,7 +809,7 @@ fn record_property_sig(
         }
         PropertyAccessorKind::Set => {
             if params.len() != 1 {
-                crate::core::typecheck::tc_push_error!(
+                tc_push_error!(
                     errors,
                     span,
                     TEK::PropertySetterParamCount(prop_name.to_string(), params.len(),)
@@ -816,7 +817,7 @@ fn record_property_sig(
                 return;
             }
             if *ret_ty != Type::Unit {
-                crate::core::typecheck::tc_push_error!(
+                tc_push_error!(
                     errors,
                     span,
                     TEK::PropertySetterReturnType(prop_name.to_string(), ret_ty.clone(),)
@@ -835,7 +836,7 @@ fn record_property_sig(
         && let Some(field) = fields.iter().find(|field| field.name == prop_name)
     {
         if property_conflicts.insert((type_name.to_string(), prop_name.to_string())) {
-            crate::core::typecheck::tc_push_error!(
+            tc_push_error!(
                 errors,
                 span,
                 TEK::PropertyConflictsWithField(prop_name.to_string(), field.name.clone(),)
@@ -854,7 +855,7 @@ fn record_property_sig(
         });
 
     if entry.ty != prop_ty {
-        crate::core::typecheck::tc_push_error!(
+        tc_push_error!(
             errors,
             span,
             TEK::PropertyAccessorTypeMismatch(prop_name.to_string(), entry.ty.clone(), prop_ty,)
@@ -865,7 +866,7 @@ fn record_property_sig(
     match kind {
         PropertyAccessorKind::Get => {
             if entry.getter.is_some() {
-                crate::core::typecheck::tc_push_error!(
+                tc_push_error!(
                     errors,
                     span,
                     TEK::PropertyAccessorDuplicate(prop_name.to_string())
@@ -876,7 +877,7 @@ fn record_property_sig(
         }
         PropertyAccessorKind::Set => {
             if entry.setter.is_some() {
-                crate::core::typecheck::tc_push_error!(
+                tc_push_error!(
                     errors,
                     span,
                     TEK::PropertyAccessorDuplicate(prop_name.to_string())

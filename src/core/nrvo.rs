@@ -4,7 +4,9 @@ use crate::core::ast::model::{
     ArrayLitInit, BlockItem, CallArgMode, Expr, ExprKind as VEK, StmtExpr, StmtExprKind as SEK,
     StringFmtSegment,
 };
-use crate::core::context::{AnalyzedContext, SemanticContext};
+use crate::core::context::{
+    AnalyzedContext, ResolvedTables, SemanticContext, SemanticPayload, TypedTables,
+};
 use crate::core::resolve::{DefId, DefTable};
 use crate::core::typecheck::type_map::TypeMap;
 
@@ -23,18 +25,18 @@ impl NrvoAnalyzer {
 
     pub fn analyze(self) -> AnalyzedContext {
         let SemanticContext { module, payload } = self.ctx;
-        let crate::core::context::SemanticPayload {
+        let SemanticPayload {
             typed,
             lowering_plans,
             drop_plans,
         } = payload;
-        let crate::core::context::TypedTables {
+        let TypedTables {
             resolved,
             type_map,
             call_sigs,
             generic_insts,
         } = typed;
-        let crate::core::context::ResolvedTables {
+        let ResolvedTables {
             def_table,
             module_path,
             def_owners,
@@ -52,9 +54,9 @@ impl NrvoAnalyzer {
 
         AnalyzedContext {
             module,
-            payload: crate::core::context::SemanticPayload {
-                typed: crate::core::context::TypedTables {
-                    resolved: crate::core::context::ResolvedTables {
+            payload: SemanticPayload {
+                typed: TypedTables {
+                    resolved: ResolvedTables {
                         def_table,
                         module_path,
                         def_owners,

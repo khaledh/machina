@@ -14,7 +14,7 @@ use crate::core::ir::{
 };
 use crate::core::resolve::{DefId, DefTable};
 use crate::core::typecheck::type_map::TypeMap;
-use crate::core::types::Type;
+use crate::core::types::{Type, TypeId};
 
 const ENTRY_MAIN_WRAPPER_NAME: &str = "__mc_entry_main_wrapper";
 const USER_MAIN_IMPL_NAME: &str = "__mc_user_main";
@@ -386,7 +386,7 @@ fn emit_enum_variant_main_error_trap(
     type_lowerer: &mut TypeLowerer<'_>,
     globals: &mut GlobalArena,
     enum_addr: ValueId,
-    enum_ty_id: crate::core::types::TypeId,
+    enum_ty_id: TypeId,
     enum_name: &str,
     unit_ty: IrTypeId,
     u64_ty: IrTypeId,

@@ -28,7 +28,11 @@
 //! needed for lowering to proceed without further semantic reasoning.
 
 use crate::core::analysis::facts::{DefTableOverlay, TypeMapOverlay};
-use crate::core::context::{ElaborateStageInput, ElaborateStageOutput};
+use crate::core::context::{
+    ElaborateStageInput, ElaborateStageOutput, ResolvedTables, SemCheckedPayload, SemanticPayload,
+    TypedTables,
+};
+
 mod bind_pattern;
 mod calls;
 mod closure;
@@ -55,20 +59,20 @@ use crate::core::elaborate::lowering_plan::build_lowering_plans;
 /// orchestration code.
 pub fn elaborate(ctx: ElaborateStageInput) -> ElaborateStageOutput {
     let ElaborateStageInput { module, payload } = ctx;
-    let crate::core::context::SemCheckedPayload {
+    let SemCheckedPayload {
         typed,
         implicit_moves,
         init_assigns,
         full_init_assigns,
         closure_captures,
     } = payload;
-    let crate::core::context::TypedTables {
+    let TypedTables {
         resolved,
         type_map,
         call_sigs,
         generic_insts,
     } = typed;
-    let crate::core::context::ResolvedTables {
+    let ResolvedTables {
         def_table,
         module_path,
         def_owners,
@@ -110,9 +114,9 @@ pub fn elaborate(ctx: ElaborateStageInput) -> ElaborateStageOutput {
 
     ElaborateStageOutput {
         module,
-        payload: crate::core::context::SemanticPayload {
-            typed: crate::core::context::TypedTables {
-                resolved: crate::core::context::ResolvedTables {
+        payload: SemanticPayload {
+            typed: TypedTables {
+                resolved: ResolvedTables {
                     def_table: def_table.into_inner(),
                     module_path,
                     def_owners,

@@ -12,12 +12,12 @@ use crate::core::api::{
     FrontendPolicy, ParseModuleError, ResolveInputs, parse_module_with_id_gen,
     resolve_stage_with_policy, semcheck_stage_with_policy, typecheck_stage_with_policy,
 };
-use crate::core::ast::NodeId;
 use crate::core::ast::NodeIdGen;
+use crate::core::ast::{NodeId, ParamMode};
 use crate::core::capsule::ModuleId;
-use crate::core::context::ParsedContext;
-use crate::core::context::ResolvedContext;
-use crate::core::context::TypeCheckedContext;
+use crate::core::context::{
+    ParsedContext, ResolvedContext, SemanticCheckedContext, TypeCheckedContext,
+};
 use crate::core::resolve::{
     ImportedCallableSig, ImportedFacts, ImportedModule, ImportedParamSig, ImportedSymbol,
     ImportedTraitMethodSig, ImportedTraitPropertySig, ImportedTraitSig,
@@ -48,7 +48,7 @@ impl<T> Default for StageOutput<T> {
 pub(crate) type ParseStageOutput = StageOutput<ParsedContext>;
 pub(crate) type ResolveStageOutput = StageOutput<ResolvedContext>;
 pub(crate) type TypecheckStageOutput = StageOutput<TypeCheckedContext>;
-pub(crate) type SemcheckStageOutput = StageOutput<crate::core::context::SemanticCheckedContext>;
+pub(crate) type SemcheckStageOutput = StageOutput<SemanticCheckedContext>;
 
 #[derive(Clone, Default)]
 pub(crate) struct ModulePipelineState {
@@ -453,12 +453,12 @@ fn hash_trait_property_sig(
     property.has_set.hash(hasher);
 }
 
-fn param_mode_tag(mode: &crate::core::ast::ParamMode) -> u8 {
+fn param_mode_tag(mode: &ParamMode) -> u8 {
     match mode {
-        crate::core::ast::ParamMode::In => 0,
-        crate::core::ast::ParamMode::InOut => 1,
-        crate::core::ast::ParamMode::Out => 2,
-        crate::core::ast::ParamMode::Sink => 3,
+        ParamMode::In => 0,
+        ParamMode::InOut => 1,
+        ParamMode::Out => 2,
+        ParamMode::Sink => 3,
     }
 }
 

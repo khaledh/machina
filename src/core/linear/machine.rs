@@ -43,16 +43,11 @@
 
 use std::collections::{HashMap, HashSet};
 
-use crate::core::ast::visit_mut::{self, VisitorMut};
-use crate::core::ast::{
-    BindPattern, BindPatternKind, BlockItem, CallArg, CallArgMode, EnumDefVariant, Expr, ExprKind,
-    FuncDef, FunctionSig, MachineDef, MachineItem, MatchArm, MethodBlock, MethodDef, MethodItem,
-    MethodSig, Module, NodeIdGen, Param, ParamMode, SelfParam, StmtExpr, StmtExprKind,
-    StructDefField, StructLitField, TopLevelItem, TypeDef, TypeDefKind, TypeExpr, TypeExprKind,
-};
-use crate::core::diag::Span;
-
 use super::LinearIndex;
+use crate::core::ast::visit_mut::{self, VisitorMut};
+use crate::core::ast::*;
+use crate::core::diag::Span;
+use crate::core::machine::runtime_intrinsics::ensure_u64_runtime_intrinsics;
 
 // ── Internal data structures ────────────────────────────────────────
 
@@ -879,11 +874,7 @@ pub(super) fn ensure_hosted_runtime_intrinsics(module: &mut Module, node_id_gen:
         (HOSTED_ACTION_EMIT_ABORT_FN, &["scope"]),
     ];
 
-    crate::core::machine::runtime_intrinsics::ensure_u64_runtime_intrinsics(
-        module,
-        node_id_gen,
-        intrinsics,
-    );
+    ensure_u64_runtime_intrinsics(module, node_id_gen, intrinsics);
 }
 
 fn ensure_type_def(module: &mut Module, type_name: &str, item: TopLevelItem) {
@@ -1045,7 +1036,7 @@ fn build_machine_handle_type_def(
     info: &MachineSpawnInfo,
     node_id_gen: &mut NodeIdGen,
 ) -> TopLevelItem {
-    let mut fields = vec![crate::core::ast::StructDefField {
+    let mut fields = vec![StructDefField {
         id: node_id_gen.new_id(),
         name: "_id".to_string(),
         ty: TypeExpr {
@@ -1629,7 +1620,7 @@ fn build_machine_spawn_func(info: &MachineSpawnInfo, node_id_gen: &mut NodeIdGen
     FuncDef {
         id: node_id_gen.new_id(),
         attrs: Vec::new(),
-        sig: crate::core::ast::FunctionSig {
+        sig: FunctionSig {
             name: info.spawn_fn_name.clone(),
             type_params: Vec::new(),
             params: info
@@ -1689,7 +1680,7 @@ fn build_machine_create_func(
     FuncDef {
         id: node_id_gen.new_id(),
         attrs: Vec::new(),
-        sig: crate::core::ast::FunctionSig {
+        sig: FunctionSig {
             name: machine_create_fn_name(&info.machine_name, &info.hosted_type_name, role_name),
             type_params: Vec::new(),
             params: vec![Param {
@@ -1808,7 +1799,7 @@ fn build_machine_resume_func(
     FuncDef {
         id: node_id_gen.new_id(),
         attrs: Vec::new(),
-        sig: crate::core::ast::FunctionSig {
+        sig: FunctionSig {
             name: machine_resume_fn_name(&info.machine_name, &info.hosted_type_name, role_name),
             type_params: Vec::new(),
             params: vec![
@@ -1921,7 +1912,7 @@ fn build_machine_lookup_func(info: &MachineSpawnInfo, node_id_gen: &mut NodeIdGe
     FuncDef {
         id: node_id_gen.new_id(),
         attrs: Vec::new(),
-        sig: crate::core::ast::FunctionSig {
+        sig: FunctionSig {
             name: machine_lookup_fn_name(&info.machine_name, &info.hosted_type_name),
             type_params: Vec::new(),
             params: vec![
@@ -2034,7 +2025,7 @@ fn build_machine_action_override_func(
     FuncDef {
         id: node_id_gen.new_id(),
         attrs: Vec::new(),
-        sig: crate::core::ast::FunctionSig {
+        sig: FunctionSig {
             name: info.fn_name.clone(),
             type_params: Vec::new(),
             params: std::iter::once(Param {
@@ -2096,7 +2087,7 @@ fn build_machine_action_session_func(
     FuncDef {
         id: node_id_gen.new_id(),
         attrs: Vec::new(),
-        sig: crate::core::ast::FunctionSig {
+        sig: FunctionSig {
             name: info.fn_name.clone(),
             type_params: Vec::new(),
             params: std::iter::once(Param {
@@ -2230,7 +2221,7 @@ fn build_machine_trigger_handler_func(
     FuncDef {
         id: node_id_gen.new_id(),
         attrs: Vec::new(),
-        sig: crate::core::ast::FunctionSig {
+        sig: FunctionSig {
             name: info.fn_name.clone(),
             type_params: Vec::new(),
             params: std::iter::once(Param {
@@ -2288,7 +2279,7 @@ fn build_machine_on_handler_func(
     FuncDef {
         id: node_id_gen.new_id(),
         attrs: Vec::new(),
-        sig: crate::core::ast::FunctionSig {
+        sig: FunctionSig {
             name: info.fn_name.clone(),
             type_params: Vec::new(),
             params: std::iter::once(Param {
@@ -2339,7 +2330,7 @@ fn build_machine_deliver_func(info: &MachineDeliverInfo, node_id_gen: &mut NodeI
     FuncDef {
         id: node_id_gen.new_id(),
         attrs: Vec::new(),
-        sig: crate::core::ast::FunctionSig {
+        sig: FunctionSig {
             name: info.fn_name.clone(),
             type_params: Vec::new(),
             params: vec![
@@ -2443,7 +2434,7 @@ fn build_machine_wait_func(info: &MachineWaitInfo, node_id_gen: &mut NodeIdGen) 
     FuncDef {
         id: node_id_gen.new_id(),
         attrs: Vec::new(),
-        sig: crate::core::ast::FunctionSig {
+        sig: FunctionSig {
             name: info.fn_name.clone(),
             type_params: Vec::new(),
             params: vec![
@@ -2686,7 +2677,7 @@ fn call_expr(callee_name: &str, args: Vec<Expr>, node_id_gen: &mut NodeIdGen, sp
                 .map(|expr| CallArg {
                     mode: CallArgMode::Default,
                     expr,
-                    init: crate::core::ast::InitInfo::default(),
+                    init: InitInfo::default(),
                     span,
                 })
                 .collect(),
@@ -2814,7 +2805,7 @@ fn eq_var_to_int(name: &str, value: u64, node_id_gen: &mut NodeIdGen, span: Span
         id: node_id_gen.new_id(),
         kind: ExprKind::BinOp {
             left: Box::new(var_expr(name, node_id_gen, span)),
-            op: crate::core::ast::BinaryOp::Eq,
+            op: BinaryOp::Eq,
             right: Box::new(int_expr(value, node_id_gen, span)),
         },
         span,
@@ -2826,7 +2817,7 @@ fn and_expr(left: Expr, right: Expr, node_id_gen: &mut NodeIdGen, span: Span) ->
         id: node_id_gen.new_id(),
         kind: ExprKind::BinOp {
             left: Box::new(left),
-            op: crate::core::ast::BinaryOp::LogicalAnd,
+            op: BinaryOp::LogicalAnd,
             right: Box::new(right),
         },
         span,
@@ -2876,7 +2867,7 @@ fn return_enum_error_if_zero(
                 id: node_id_gen.new_id(),
                 kind: ExprKind::BinOp {
                     left: Box::new(var_expr(value_var, node_id_gen, span)),
-                    op: crate::core::ast::BinaryOp::Eq,
+                    op: BinaryOp::Eq,
                     right: Box::new(int_expr(0, node_id_gen, span)),
                 },
                 span,
@@ -2932,7 +2923,7 @@ fn return_enum_error_if_ne(
                 id: node_id_gen.new_id(),
                 kind: ExprKind::BinOp {
                     left: Box::new(var_expr(value_var, node_id_gen, span)),
-                    op: crate::core::ast::BinaryOp::Ne,
+                    op: BinaryOp::Ne,
                     right: Box::new(int_expr(expected_value, node_id_gen, span)),
                 },
                 span,
@@ -2988,7 +2979,7 @@ fn return_enum_error_if_eq(
                 id: node_id_gen.new_id(),
                 kind: ExprKind::BinOp {
                     left: Box::new(var_expr(value_var, node_id_gen, span)),
-                    op: crate::core::ast::BinaryOp::Eq,
+                    op: BinaryOp::Eq,
                     right: Box::new(int_expr(expected_value, node_id_gen, span)),
                 },
                 span,
@@ -3097,7 +3088,7 @@ fn build_machine_resume_state_expr(
                     id: node_id_gen.new_id(),
                     kind: ExprKind::BinOp {
                         left: Box::new(var_expr(tag_var_name, node_id_gen, span)),
-                        op: crate::core::ast::BinaryOp::Eq,
+                        op: BinaryOp::Eq,
                         right: Box::new(int_expr((index + 1) as u64, node_id_gen, span)),
                     },
                     span,
@@ -3126,14 +3117,14 @@ fn build_machine_state_tag_expr(
             arms: state_names
                 .iter()
                 .enumerate()
-                .map(|(index, state_name)| crate::core::ast::MatchArm {
+                .map(|(index, state_name)| MatchArm {
                     id: node_id_gen.new_id(),
-                    pattern: crate::core::ast::MatchPattern::EnumVariant {
+                    pattern: MatchPattern::EnumVariant {
                         id: node_id_gen.new_id(),
                         enum_name: Some(enum_name.to_string()),
                         type_args: Vec::new(),
                         variant_name: state_name.clone(),
-                        bindings: vec![crate::core::ast::MatchPatternBinding::Wildcard { span }],
+                        bindings: vec![MatchPatternBinding::Wildcard { span }],
                         span,
                     },
                     body: int_expr((index + 1) as u64, node_id_gen, span),
@@ -3186,7 +3177,7 @@ fn build_machine_wait_state_expr(
                     id: node_id_gen.new_id(),
                     kind: ExprKind::BinOp {
                         left: Box::new(var_expr(tag_var_name, node_id_gen, span)),
-                        op: crate::core::ast::BinaryOp::Eq,
+                        op: BinaryOp::Eq,
                         right: Box::new(int_expr((index + 1) as u64, node_id_gen, span)),
                     },
                     span,
@@ -3237,7 +3228,7 @@ fn build_machine_action_match_expr(
     let span = Span::default();
     let mut arms = vec![MatchArm {
         id: node_id_gen.new_id(),
-        pattern: crate::core::ast::MatchPattern::TypedBinding {
+        pattern: MatchPattern::TypedBinding {
             id: node_id_gen.new_id(),
             ident: "__mc_ok".to_string(),
             ty_expr: TypeExpr {
@@ -3261,7 +3252,7 @@ fn build_machine_action_match_expr(
         let err_name = format!("__mc_err_{index}");
         arms.push(MatchArm {
             id: node_id_gen.new_id(),
-            pattern: crate::core::ast::MatchPattern::TypedBinding {
+            pattern: MatchPattern::TypedBinding {
                 id: node_id_gen.new_id(),
                 ident: err_name.clone(),
                 ty_expr: err_ty_expr,
@@ -3451,7 +3442,7 @@ fn build_machine_deliver_result_expr(result_var_name: &str, node_id_gen: &mut No
                 id: node_id_gen.new_id(),
                 kind: ExprKind::BinOp {
                     left: Box::new(var_expr(result_var_name, node_id_gen, span)),
-                    op: crate::core::ast::BinaryOp::Eq,
+                    op: BinaryOp::Eq,
                     right: Box::new(int_expr(HOSTED_UPDATE_OK, node_id_gen, span)),
                 },
                 span,
@@ -3464,7 +3455,7 @@ fn build_machine_deliver_result_expr(result_var_name: &str, node_id_gen: &mut No
                         id: node_id_gen.new_id(),
                         kind: ExprKind::BinOp {
                             left: Box::new(var_expr(result_var_name, node_id_gen, span)),
-                            op: crate::core::ast::BinaryOp::Eq,
+                            op: BinaryOp::Eq,
                             right: Box::new(int_expr(HOSTED_UPDATE_STALE, node_id_gen, span)),
                         },
                         span,
@@ -3497,7 +3488,7 @@ fn collect_base_action_impls(
         }
 
         for item in &method_block.method_items {
-            let crate::core::ast::MethodItem::Def(method) = item else {
+            let MethodItem::Def(method) = item else {
                 continue;
             };
             let source_state = if let Some(receiver_ty) = &method.sig.self_param.receiver_ty_expr {
@@ -3592,16 +3583,16 @@ fn freshen_expr_ids(mut expr: Expr, node_id_gen: &mut NodeIdGen) -> Expr {
             visit_mut::walk_bind_pattern(self, pattern);
         }
 
-        fn visit_match_arm(&mut self, arm: &mut crate::core::ast::MatchArm) {
+        fn visit_match_arm(&mut self, arm: &mut MatchArm) {
             arm.id = self.node_id_gen.new_id();
             visit_mut::walk_match_arm(self, arm);
         }
 
-        fn visit_match_pattern(&mut self, pattern: &mut crate::core::ast::MatchPattern) {
+        fn visit_match_pattern(&mut self, pattern: &mut MatchPattern) {
             match pattern {
-                crate::core::ast::MatchPattern::Binding { id, .. }
-                | crate::core::ast::MatchPattern::TypedBinding { id, .. }
-                | crate::core::ast::MatchPattern::EnumVariant { id, .. } => {
+                MatchPattern::Binding { id, .. }
+                | MatchPattern::TypedBinding { id, .. }
+                | MatchPattern::EnumVariant { id, .. } => {
                     *id = self.node_id_gen.new_id();
                 }
                 _ => {}
@@ -3609,11 +3600,8 @@ fn freshen_expr_ids(mut expr: Expr, node_id_gen: &mut NodeIdGen) -> Expr {
             visit_mut::walk_match_pattern(self, pattern);
         }
 
-        fn visit_match_pattern_binding(
-            &mut self,
-            binding: &mut crate::core::ast::MatchPatternBinding,
-        ) {
-            if let crate::core::ast::MatchPatternBinding::Named { id, .. } = binding {
+        fn visit_match_pattern_binding(&mut self, binding: &mut MatchPatternBinding) {
+            if let MatchPatternBinding::Named { id, .. } = binding {
                 *id = self.node_id_gen.new_id();
             }
             visit_mut::walk_match_pattern_binding(self, binding);
@@ -3791,10 +3779,10 @@ impl VisitorMut for MachineSpawnCallRewriter<'_> {
         {
             let args = std::mem::take(payload)
                 .into_iter()
-                .map(|arg| crate::core::ast::CallArg {
-                    mode: crate::core::ast::CallArgMode::Default,
+                .map(|arg| CallArg {
+                    mode: CallArgMode::Default,
                     expr: arg,
-                    init: crate::core::ast::InitInfo::default(),
+                    init: InitInfo::default(),
                     span: expr.span,
                 })
                 .collect();
@@ -3898,7 +3886,7 @@ impl VisitorMut for MachineConstructorSelfRewriter<'_> {
                 // Placeholder: synthesize the runtime-managed machine id so
                 // constructor `Self { ... }` literals remain valid before the
                 // generated spawn helper replaces it with the actual slot id.
-                fields.push(crate::core::ast::StructLitField {
+                fields.push(StructLitField {
                     id: expr.id,
                     name: "_id".to_string(),
                     value: Expr {

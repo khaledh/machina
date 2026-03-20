@@ -15,6 +15,7 @@ use crate::core::typecheck::engine::{
     CollectedCallableSig, CollectedPropertySig, CollectedTraitSig, lookup_property,
 };
 use crate::core::typecheck::errors::{TEK, TypeCheckError};
+use crate::core::typecheck::tc_push_error;
 use crate::core::typecheck::unify::TcUnifier;
 use crate::core::types::{TyVarId, Type};
 
@@ -45,7 +46,7 @@ pub(super) fn check_call_obligations(
                 let callee_ty = super::term_utils::resolve_term(callee_term, unifier);
                 if let Type::Fn { params, ret_ty } = callee_ty {
                     if params.len() != obligation.arg_terms.len() {
-                        crate::core::typecheck::tc_push_error!(
+                        tc_push_error!(
                             errors,
                             obligation.span,
                             TEK::ArgCountMismatch(
@@ -64,7 +65,7 @@ pub(super) fn check_call_obligations(
                         if super::assignability::solve_assignable(&arg_ty, &param.ty, unifier)
                             .is_err()
                         {
-                            crate::core::typecheck::tc_push_error!(
+                            tc_push_error!(
                                 errors,
                                 obligation.span,
                                 TEK::ArgTypeMismatch(
@@ -92,7 +93,7 @@ pub(super) fn check_call_obligations(
                 } else if super::term_utils::is_unresolved(&callee_ty) {
                     deferred.push(obligation.clone());
                 } else {
-                    crate::core::typecheck::tc_push_error!(
+                    tc_push_error!(
                         errors,
                         obligation.span,
                         TEK::OverloadNoMatch(format!("<dynamic:{expr_id}>"))
@@ -181,17 +182,9 @@ pub(super) fn check_call_obligations(
                 CallCallee::Dynamic { expr_id, .. } => format!("<dynamic:{expr_id}>"),
             };
             if inaccessible_count > 0 {
-                crate::core::typecheck::tc_push_error!(
-                    errors,
-                    obligation.span,
-                    TEK::CallableNotAccessible(name)
-                );
+                tc_push_error!(errors, obligation.span, TEK::CallableNotAccessible(name));
             } else {
-                crate::core::typecheck::tc_push_error!(
-                    errors,
-                    obligation.span,
-                    TEK::OverloadNoMatch(name)
-                );
+                tc_push_error!(errors, obligation.span, TEK::OverloadNoMatch(name));
             }
             continue;
         }
@@ -277,11 +270,7 @@ pub(super) fn check_call_obligations(
                     CallCallee::Method { name } => name.clone(),
                     CallCallee::Dynamic { expr_id, .. } => format!("<dynamic:{expr_id}>"),
                 };
-                crate::core::typecheck::tc_push_error!(
-                    errors,
-                    obligation.span,
-                    TEK::OverloadAmbiguous(name)
-                );
+                tc_push_error!(errors, obligation.span, TEK::OverloadAmbiguous(name));
                 continue;
             }
             if let Some(prop_name) = called_property_name(obligation, def_id, property_sigs, &next)
@@ -289,7 +278,7 @@ pub(super) fn check_call_obligations(
                 // Preserve substitutions to reduce follow-on inference noise, but
                 // reject property accessor call syntax in source.
                 *unifier = next;
-                crate::core::typecheck::tc_push_error!(
+                tc_push_error!(
                     errors,
                     obligation.span,
                     TEK::PropertyCalledAsMethod(prop_name)
@@ -314,11 +303,7 @@ pub(super) fn check_call_obligations(
                 CallCallee::Method { name } => name.clone(),
                 CallCallee::Dynamic { expr_id, .. } => format!("<dynamic:{expr_id}>"),
             };
-            crate::core::typecheck::tc_push_error!(
-                errors,
-                obligation.span,
-                TEK::OverloadNoMatch(name)
-            );
+            tc_push_error!(errors, obligation.span, TEK::OverloadNoMatch(name));
         }
     }
     (errors, resolved_call_defs, deferred)

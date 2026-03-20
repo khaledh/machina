@@ -2,6 +2,7 @@
 
 use super::*;
 use crate::core::ast::{FunctionSig, Param, TypeExprKind};
+use crate::core::types::FnParam;
 
 impl<'a> ConstraintCollector<'a> {
     pub(super) fn collect_closure_signature(
@@ -17,7 +18,7 @@ impl<'a> ConstraintCollector<'a> {
             } else {
                 self.resolve_type_in_scope(&param.typ).ok()?
             };
-            fn_params.push(crate::core::types::FnParam {
+            fn_params.push(FnParam {
                 mode: fn_param_mode(param.mode.clone()),
                 ty: param_ty.clone(),
             });
@@ -53,7 +54,7 @@ impl<'a> ConstraintCollector<'a> {
         let self_ty = self.type_defs.get(type_name).cloned()?;
         let tail_params = self.resolve_fn_params(&sig.params)?;
         let mut params = Vec::with_capacity(sig.params.len() + 1);
-        params.push(crate::core::types::FnParam {
+        params.push(FnParam {
             mode: fn_param_mode(sig.self_param.mode.clone()),
             ty: self_ty,
         });
@@ -61,13 +62,13 @@ impl<'a> ConstraintCollector<'a> {
         self.resolve_fn_type(params, &sig.ret_ty_expr)
     }
 
-    fn resolve_fn_params(&self, params: &[Param]) -> Option<Vec<crate::core::types::FnParam>> {
+    fn resolve_fn_params(&self, params: &[Param]) -> Option<Vec<FnParam>> {
         params
             .iter()
             .map(|param| {
                 self.resolve_type_in_scope(&param.typ)
                     .ok()
-                    .map(|ty| crate::core::types::FnParam {
+                    .map(|ty| FnParam {
                         mode: fn_param_mode(param.mode.clone()),
                         ty,
                     })
@@ -75,11 +76,7 @@ impl<'a> ConstraintCollector<'a> {
             .collect::<Option<Vec<_>>>()
     }
 
-    fn resolve_fn_type(
-        &self,
-        params: Vec<crate::core::types::FnParam>,
-        return_ty: &TypeExpr,
-    ) -> Option<Type> {
+    fn resolve_fn_type(&self, params: Vec<FnParam>, return_ty: &TypeExpr) -> Option<Type> {
         let ret_ty = self.resolve_return_type_in_scope(return_ty).ok()?;
         Some(Type::Fn {
             params,

@@ -21,6 +21,7 @@ use crate::core::ast::{
 use crate::core::elaborate::elaborator::Elaborator;
 use crate::core::machine::request_site::labeled_request_site_key;
 use crate::core::typecheck::type_map::{CallParam, CallSig};
+use crate::core::types::Type;
 
 impl<'a> Elaborator<'a> {
     /// Main entry point for elaborating a value expression.
@@ -84,7 +85,7 @@ impl<'a> Elaborator<'a> {
                         .type_table()
                         .get(self.type_id_for(target.id))
                         .peel_heap(),
-                    crate::core::types::Type::Map { .. }
+                    Type::Map { .. }
                 ) =>
             {
                 let place = self.elab_place(expr);
@@ -462,7 +463,7 @@ impl<'a> Elaborator<'a> {
                         .type_table()
                         .get(self.type_id_for(target.id))
                         .peel_heap(),
-                    crate::core::types::Type::Map { .. }
+                    Type::Map { .. }
                 ) =>
             {
                 let key_expr = indices

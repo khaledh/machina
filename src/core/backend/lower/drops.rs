@@ -4,7 +4,9 @@ use crate::core::ast::{CallArg, CallArgMode, Expr, ExprKind, InitInfo, NodeId, P
 use crate::core::backend::lower::LowerToIrError;
 use crate::core::backend::lower::locals::LocalStorage;
 use crate::core::backend::lower::lowerer::{CallInputValue, FuncLowerer};
-use crate::core::ir::{Callee, ConstValue, RuntimeFn, SwitchCase, Terminator, ValueId};
+use crate::core::ir::{
+    BinOp, Callee, CmpOp, ConstValue, RuntimeFn, SwitchCase, Terminator, ValueId,
+};
 use crate::core::plans::{CallPlan, DropGuard, DropItem, DropPlanMap};
 use crate::core::resolve::DefId;
 use crate::core::types::Type;
@@ -697,13 +699,9 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
 
         let cap_val = self.load_field(addr, 2, u32_ty);
         let owned_mask = self.builder.const_int(0x8000_0000, false, 32, u32_ty);
-        let owned_bits =
-            self.builder
-                .binop(crate::core::ir::BinOp::And, cap_val, owned_mask, u32_ty);
+        let owned_bits = self.builder.binop(BinOp::And, cap_val, owned_mask, u32_ty);
         let zero_u32 = self.builder.const_int(0, false, 32, u32_ty);
-        let is_owned = self
-            .builder
-            .cmp(crate::core::ir::CmpOp::Ne, owned_bits, zero_u32, bool_ty);
+        let is_owned = self.builder.cmp(CmpOp::Ne, owned_bits, zero_u32, bool_ty);
 
         let owned_bb = self.builder.add_block();
         let ret_bb = self.builder.add_block();
@@ -737,9 +735,7 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
             self.builder.select_block(loop_head);
             let idx_val = self.builder.load(idx_addr, u64_ty);
             let zero_u64 = self.builder.const_int(0, false, 64, u64_ty);
-            let has_items =
-                self.builder
-                    .cmp(crate::core::ir::CmpOp::Ne, idx_val, zero_u64, bool_ty);
+            let has_items = self.builder.cmp(CmpOp::Ne, idx_val, zero_u64, bool_ty);
             self.builder.terminate(Terminator::CondBr {
                 cond: has_items,
                 then_bb: loop_body,
@@ -750,9 +746,7 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
 
             self.builder.select_block(loop_body);
             let one_u64 = self.builder.const_int(1, false, 64, u64_ty);
-            let next_idx =
-                self.builder
-                    .binop(crate::core::ir::BinOp::Sub, idx_val, one_u64, u64_ty);
+            let next_idx = self.builder.binop(BinOp::Sub, idx_val, one_u64, u64_ty);
             self.builder.store(idx_addr, next_idx);
             let elem_addr = self.builder.index_addr(ptr_val, next_idx, elem_ptr_ty);
             self.drop_value_at_addr(elem_addr, elem_ty)?;
@@ -783,13 +777,9 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
 
         let cap_val = self.load_field(addr, 2, u32_ty);
         let owned_mask = self.builder.const_int(0x8000_0000, false, 32, u32_ty);
-        let owned_bits =
-            self.builder
-                .binop(crate::core::ir::BinOp::And, cap_val, owned_mask, u32_ty);
+        let owned_bits = self.builder.binop(BinOp::And, cap_val, owned_mask, u32_ty);
         let zero_u32 = self.builder.const_int(0, false, 32, u32_ty);
-        let is_owned = self
-            .builder
-            .cmp(crate::core::ir::CmpOp::Ne, owned_bits, zero_u32, bool_ty);
+        let is_owned = self.builder.cmp(CmpOp::Ne, owned_bits, zero_u32, bool_ty);
 
         let owned_bb = self.builder.add_block();
         let ret_bb = self.builder.add_block();

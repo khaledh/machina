@@ -22,7 +22,9 @@ pub(crate) use symbol_target::{
 };
 
 use crate::core::ast::visit::{Visitor, walk_module};
-use crate::core::ast::{BindPattern, BindPatternKind, Module, StmtExpr, StmtExprKind};
+use crate::core::ast::{
+    BindPattern, BindPatternKind, Module, NodeId, StmtExpr, StmtExprKind, visit,
+};
 use crate::core::diag::{Position, Span};
 use crate::core::resolve::{DefId, DefTable};
 use crate::core::typecheck::type_map::TypeMap;
@@ -94,11 +96,11 @@ pub(crate) fn binding_value_node_id_for_def(
     module: &Module,
     def_table: &DefTable,
     target_def_id: DefId,
-) -> Option<crate::core::ast::NodeId> {
+) -> Option<NodeId> {
     struct Finder<'a> {
         def_table: &'a DefTable,
         target_def_id: DefId,
-        found: Option<crate::core::ast::NodeId>,
+        found: Option<NodeId>,
     }
 
     impl Visitor for Finder<'_> {
@@ -122,7 +124,7 @@ pub(crate) fn binding_value_node_id_for_def(
                 }
                 _ => {}
             }
-            crate::core::ast::visit::walk_stmt_expr(self, stmt);
+            visit::walk_stmt_expr(self, stmt);
         }
     }
 

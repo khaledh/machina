@@ -7,6 +7,7 @@ use crate::core::analysis::facts::{
 use crate::core::ast::NodeId;
 use crate::core::resolve::def_table::DefTable;
 use crate::core::resolve::{Def, DefId, DefKind};
+use crate::core::typecheck::type_map::TypeMapBuilder;
 use crate::core::types::Type;
 
 #[test]
@@ -94,7 +95,7 @@ fn type_map_overlay_tracks_source_and_synthetic_origins() {
             is_mutable: false,
         },
     };
-    let mut base = crate::core::typecheck::type_map::TypeMapBuilder::new();
+    let mut base = TypeMapBuilder::new();
     base.record_def_type(source_def.clone(), Type::uint(64));
     let base = base.finish().0;
 

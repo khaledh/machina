@@ -1,6 +1,6 @@
-use std::path::PathBuf;
-
 use super::*;
+use crate::core::resolve::FuncAttrs;
+use std::path::PathBuf;
 
 #[test]
 fn def_location_uses_override_when_present() {
@@ -11,7 +11,7 @@ fn def_location_uses_override_when_present() {
             id: def_id,
             name: "f".to_string(),
             kind: DefKind::FuncDef {
-                attrs: crate::core::resolve::FuncAttrs::default(),
+                attrs: FuncAttrs::default(),
             },
         },
         NodeId(1),
@@ -44,7 +44,7 @@ fn synthetic_def_without_span_has_no_location() {
     let def_id = table.add_def(
         "__synthetic".to_string(),
         DefKind::FuncDef {
-            attrs: crate::core::resolve::FuncAttrs::default(),
+            attrs: FuncAttrs::default(),
         },
     );
     table.set_source_path(Some(PathBuf::from("main.mc")));

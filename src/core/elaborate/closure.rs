@@ -42,7 +42,7 @@
 //! }
 //! ```
 
-use crate::core::analysis::facts::SyntheticReason;
+use crate::core::analysis::facts::{DefTableOverlay, SyntheticReason};
 use crate::core::ast::{
     BindPattern, BindPatternKind, Expr, ExprKind, FuncDef, FunctionSig, MethodBlock, MethodDef,
     MethodItem, MethodSig, Module, NodeId, Param, ParamMode, SelfParam, StructDefField,
@@ -64,7 +64,7 @@ use std::collections::HashSet;
 /// formatting can print and reference them.
 pub(super) fn register_lifted_method_symbols(
     module: &Module,
-    def_table: &crate::core::analysis::facts::DefTableOverlay,
+    def_table: &DefTableOverlay,
     symbols: &mut CodegenNameTable,
 ) {
     let mut used_names: HashSet<String> = symbols.def_names.values().cloned().collect();

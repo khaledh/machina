@@ -3,8 +3,9 @@ use crate::core::context::ParsedContext;
 use crate::core::context::ResolvedContext;
 use crate::core::lexer::{LexError, Lexer, Token};
 use crate::core::parse::Parser;
-use crate::core::resolve::resolve;
+use crate::core::resolve::{ImportedFacts, resolve};
 use crate::core::typecheck::{collect, constraints, solver, validate};
+use crate::core::types::{EnumVariant, StructField};
 
 fn resolve_source(source: &str) -> ResolvedContext {
     let lexer = Lexer::new(source);
@@ -29,7 +30,7 @@ fn test_finalize_materializes_typechecked_context() {
     "#;
 
     let resolved = resolve_source(source);
-    let mut engine = TypecheckEngine::new(resolved, crate::core::resolve::ImportedFacts::default());
+    let mut engine = TypecheckEngine::new(resolved, ImportedFacts::default());
     collect::run(&mut engine).expect("collect pass failed");
     constraints::run(&mut engine).expect("constrain pass failed");
     solver::run(&mut engine).expect("solve pass failed");
@@ -53,7 +54,7 @@ fn test_finalize_records_nominal_keys_for_generic_instantiations() {
     "#;
 
     let resolved = resolve_source(source);
-    let mut engine = TypecheckEngine::new(resolved, crate::core::resolve::ImportedFacts::default());
+    let mut engine = TypecheckEngine::new(resolved, ImportedFacts::default());
     collect::run(&mut engine).expect("collect pass failed");
     constraints::run(&mut engine).expect("constrain pass failed");
     solver::run(&mut engine).expect("solve pass failed");
@@ -115,14 +116,14 @@ fn test_finalize_records_nominal_keys_for_generic_instantiations() {
 fn test_infer_type_args_from_instance_matches_generic_nominal_shape() {
     let template = Type::Struct {
         name: "Box<T0>".to_string(),
-        fields: vec![crate::core::types::StructField {
+        fields: vec![StructField {
             name: "value".to_string(),
             ty: Type::Var(TyVarId::new(0)),
         }],
     };
     let concrete = Type::Struct {
         name: "Box<i32>".to_string(),
-        fields: vec![crate::core::types::StructField {
+        fields: vec![StructField {
             name: "value".to_string(),
             ty: Type::sint(32),
         }],
@@ -138,11 +139,11 @@ fn test_infer_type_args_from_instance_allows_var_bindings() {
     let template = Type::Enum {
         name: "Option<T0>".to_string(),
         variants: vec![
-            crate::core::types::EnumVariant {
+            EnumVariant {
                 name: "None".to_string(),
                 payload: Vec::new(),
             },
-            crate::core::types::EnumVariant {
+            EnumVariant {
                 name: "Some".to_string(),
                 payload: vec![Type::Var(TyVarId::new(0))],
             },
@@ -151,11 +152,11 @@ fn test_infer_type_args_from_instance_allows_var_bindings() {
     let concrete = Type::Enum {
         name: "Option<T42>".to_string(),
         variants: vec![
-            crate::core::types::EnumVariant {
+            EnumVariant {
                 name: "None".to_string(),
                 payload: Vec::new(),
             },
-            crate::core::types::EnumVariant {
+            EnumVariant {
                 name: "Some".to_string(),
                 payload: vec![Type::Var(TyVarId::new(42))],
             },

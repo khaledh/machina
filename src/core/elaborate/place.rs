@@ -8,16 +8,14 @@
 //! variables are rewritten to access the closure's environment struct
 //! (`env.<field>` for move captures, `*env.<field>` for borrow captures).
 
-use crate::core::ast::{Expr, ExprKind};
-
 use super::elaborator::Elaborator;
+use crate::core::ast::{Expr, ExprKind};
+use crate::core::types::Type;
 
 impl<'a> Elaborator<'a> {
-    fn peel_place_base_type(&self, ty: &crate::core::types::Type) -> crate::core::types::Type {
+    fn peel_place_base_type(&self, ty: &Type) -> Type {
         let mut curr = ty.clone();
-        while let crate::core::types::Type::Heap { elem_ty }
-        | crate::core::types::Type::Ref { elem_ty, .. } = curr
-        {
+        while let Type::Heap { elem_ty } | Type::Ref { elem_ty, .. } = curr {
             curr = (*elem_ty).clone();
         }
         curr
@@ -88,8 +86,7 @@ impl<'a> Elaborator<'a> {
                     .get(self.type_map.type_of(inner.id))
                     .clone();
                 match inner_ty {
-                    crate::core::types::Type::Heap { elem_ty }
-                    | crate::core::types::Type::Ref { elem_ty, .. } => {
+                    Type::Heap { elem_ty } | Type::Ref { elem_ty, .. } => {
                         self.insert_synth_node_type(expr.id, (*elem_ty).clone())
                     }
                     _ => self.type_map.type_of(expr.id),
@@ -102,7 +99,7 @@ impl<'a> Elaborator<'a> {
                         .get(self.type_map.type_of(target.id)),
                 );
                 match target_ty {
-                    crate::core::types::Type::Tuple { field_tys } => field_tys
+                    Type::Tuple { field_tys } => field_tys
                         .get(*index)
                         .cloned()
                         .map(|ty| self.insert_synth_node_type(expr.id, ty))
@@ -117,7 +114,7 @@ impl<'a> Elaborator<'a> {
                         .get(self.type_map.type_of(target.id)),
                 );
                 match target_ty {
-                    crate::core::types::Type::Struct { fields, .. } => fields
+                    Type::Struct { fields, .. } => fields
                         .iter()
                         .find(|f| f.name == *field)
                         .map(|f| self.insert_synth_node_type(expr.id, f.ty.clone()))

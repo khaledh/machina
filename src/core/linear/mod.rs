@@ -22,7 +22,7 @@ mod validate;
 
 use std::collections::HashMap;
 
-use crate::core::ast::{Module, NodeIdGen};
+use crate::core::ast::{Module, NodeIdGen, TypeDef};
 use crate::core::resolve::ResolveError;
 
 pub use index::*;
@@ -120,7 +120,7 @@ pub fn desugar_module(
 // ── Shared helpers ──────────────────────────────────────────────────
 
 /// Collect all type definitions by name for quick lookup.
-pub(super) fn type_defs_by_name(module: &Module) -> HashMap<String, &crate::core::ast::TypeDef> {
+pub(super) fn type_defs_by_name(module: &Module) -> HashMap<String, &TypeDef> {
     let mut type_defs = HashMap::new();
     for type_def in module.type_defs() {
         type_defs.insert(type_def.name.clone(), type_def);

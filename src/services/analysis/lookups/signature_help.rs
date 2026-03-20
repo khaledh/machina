@@ -1,8 +1,9 @@
 //! Signature help lookup.
 
-use crate::core::diag::Span;
+use crate::core::ast::ParamMode;
+use crate::core::diag::{Position, Span};
 use crate::core::resolve::{DefId, DefTable, UNKNOWN_DEF_ID};
-use crate::core::types::Type;
+use crate::core::types::{FnParamMode, Type};
 use crate::services::analysis::pipeline::LookupState;
 use crate::services::analysis::results::SignatureHelp;
 use crate::services::analysis::signature_help::offset_for_position;
@@ -165,7 +166,7 @@ where
 
 fn active_param_index_with_comma_context(
     arg_spans: &[Span],
-    pos: crate::core::diag::Position,
+    pos: Position,
     source: Option<&str>,
     param_count: usize,
 ) -> usize {
@@ -206,12 +207,12 @@ fn nudge_span_left(span: Span) -> Option<Span> {
         return None;
     }
     Some(Span {
-        start: crate::core::diag::Position {
+        start: Position {
             offset: span.start.offset.saturating_sub(1),
             line: span.start.line,
             column: span.start.column - 1,
         },
-        end: crate::core::diag::Position {
+        end: Position {
             offset: span.end.offset.saturating_sub(1),
             line: span.end.line,
             column: span.end.column - 1,
@@ -223,20 +224,20 @@ fn format_signature_label(_def_table: &DefTable, name: &str, params: &[String]) 
     format!("{name}({})", params.join(", "))
 }
 
-fn param_mode_name(mode: &crate::core::ast::ParamMode) -> &'static str {
+fn param_mode_name(mode: &ParamMode) -> &'static str {
     match mode {
-        crate::core::ast::ParamMode::In => "in",
-        crate::core::ast::ParamMode::InOut => "inout",
-        crate::core::ast::ParamMode::Out => "out",
-        crate::core::ast::ParamMode::Sink => "sink",
+        ParamMode::In => "in",
+        ParamMode::InOut => "inout",
+        ParamMode::Out => "out",
+        ParamMode::Sink => "sink",
     }
 }
 
-fn fn_param_mode_name(mode: &crate::core::types::FnParamMode) -> &'static str {
+fn fn_param_mode_name(mode: &FnParamMode) -> &'static str {
     match mode {
-        crate::core::types::FnParamMode::In => "in",
-        crate::core::types::FnParamMode::InOut => "inout",
-        crate::core::types::FnParamMode::Out => "out",
-        crate::core::types::FnParamMode::Sink => "sink",
+        FnParamMode::In => "in",
+        FnParamMode::InOut => "inout",
+        FnParamMode::Out => "out",
+        FnParamMode::Sink => "sink",
     }
 }
