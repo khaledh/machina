@@ -2014,6 +2014,94 @@ fn linear_type_derived_interaction_lifecycle_is_observable_for_recognized_wait_s
 }
 
 #[test]
+fn linear_type_derived_interaction_auto_correlates_reply_without_manual_deliver() {
+    let run = run_program(
+        "linear_type_derived_interaction_auto_correlates_reply_without_manual_deliver",
+        r#"
+            type AuthCheck = {
+                order_id: u64,
+            }
+
+            type AuthApproved = {
+                order_id: u64,
+            }
+
+            @linear
+            type Order = {
+                id: u64,
+
+                states {
+                    Draft,
+                    PendingAuth,
+                    Confirmed,
+                }
+
+                actions {
+                    submit: Draft -> PendingAuth,
+                }
+
+                triggers {
+                    AuthApproved: PendingAuth -> Confirmed,
+                }
+
+                roles {
+                    Author { submit }
+                }
+            }
+
+            Order :: {
+                fn submit(self) -> PendingAuth {
+                    PendingAuth {}
+                }
+            }
+
+            machine OrderService hosts Order(key: id) {
+                fn new() -> Self {
+                    Self {}
+                }
+
+                trigger AuthApproved(pending) {
+                    pending;
+                    Confirmed {}
+                }
+
+                on AuthCheck(check) {
+                    send(self, AuthApproved { order_id: check.order_id });
+                }
+
+                action submit(draft) -> PendingAuth {
+                    send(self, AuthCheck { order_id: draft.id });
+                    draft;
+                    PendingAuth {}
+                }
+            }
+
+            fn main() -> () | MachineError | SessionError {
+                let service = OrderService::spawn()?;
+                let draft = service.create(Order as Author)?;
+                let pending = draft.submit()?;
+                let next = pending.wait()?;
+                match next {
+                    Order::Confirmed(_) => println("confirmed"),
+                    Order::PendingAuth(_) => println("pending"),
+                    Order::Draft(_) => println("draft"),
+                };
+                ()
+            }
+        "#,
+    );
+
+    assert_eq!(run.status.code(), Some(0));
+    let stdout = String::from_utf8_lossy(&run.stdout);
+    assert_eq!(
+        stdout,
+        "confirmed
+",
+        "recognized interactions should route replies back to the waiting instance without requiring manual self.deliver(key, event) reconstruction"
+    );
+}
+
+#[test]
 fn linear_type_non_qualifying_send_keeps_fire_and_forget_behavior() {
     let run = run_program(
         "linear_type_non_qualifying_send_keeps_fire_and_forget_behavior",

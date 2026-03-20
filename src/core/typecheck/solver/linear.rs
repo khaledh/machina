@@ -385,7 +385,12 @@ fn check_linear_machine_send(
         return true;
     };
 
-    if !host_info.on_event_kinds.contains_key(&payload_name) {
+    let derived_reply_allowed = linear_index
+        .derived_interactions
+        .values()
+        .any(|info| info.machine_name == machine_name && info.reply_types.contains(&payload_name));
+
+    if !host_info.on_event_kinds.contains_key(&payload_name) && !derived_reply_allowed {
         tc_push_error!(
             errors,
             span,

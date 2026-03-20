@@ -71,6 +71,13 @@ uint64_t mc_hosted_instance_table_active_derived_interaction(
     const mc_hosted_instance_table_t *table,
     uint64_t key
 );
+uint8_t mc_hosted_instance_table_lookup_by_derived_interaction(
+    const mc_hosted_instance_table_t *table,
+    uint64_t interaction_id,
+    uint64_t *out_key,
+    uint64_t *out_state_tag,
+    uintptr_t *out_payload
+);
 uint64_t mc_hosted_instance_table_derived_interaction_created_count(
     const mc_hosted_instance_table_t *table,
     uint64_t key

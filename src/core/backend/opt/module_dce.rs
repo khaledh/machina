@@ -28,6 +28,7 @@ pub fn reachable_def_ids(funcs: &[Function]) -> HashSet<DefId> {
             || func.name == "__mc_machine_bootstrap"
             || func.name == "__mc_hosted_linear_on_dispatch_u64"
             || func.name == "__mc_hosted_linear_trigger_dispatch_u64"
+            || func.name == "__mc_hosted_linear_reply_trigger_kind_u64"
             || func.name == "__mc_entry_main_wrapper"
         {
             worklist.push_back(func.def_id);

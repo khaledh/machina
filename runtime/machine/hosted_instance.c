@@ -226,6 +226,35 @@ uint64_t mc_hosted_instance_table_active_derived_interaction(
     return 0;
 }
 
+uint8_t mc_hosted_instance_table_lookup_by_derived_interaction(
+    const mc_hosted_instance_table_t *table,
+    uint64_t interaction_id,
+    uint64_t *out_key,
+    uint64_t *out_state_tag,
+    uintptr_t *out_payload
+) {
+    if (interaction_id == 0) {
+        return 0;
+    }
+    for (uint32_t i = 0; i < table->cap; i++) {
+        const mc_hosted_instance_t *slot = &table->slots[i];
+        if (!slot->active || slot->derived_interaction_id != interaction_id) {
+            continue;
+        }
+        if (out_key) {
+            *out_key = slot->key;
+        }
+        if (out_state_tag) {
+            *out_state_tag = slot->state_tag;
+        }
+        if (out_payload) {
+            *out_payload = slot->state_payload;
+        }
+        return 1;
+    }
+    return 0;
+}
+
 uint64_t mc_hosted_instance_table_derived_interaction_created_count(
     const mc_hosted_instance_table_t *table,
     uint64_t key

@@ -33,6 +33,16 @@ uint8_t mc_pending_insert_active(
     mc_machine_id_t requester,
     uint64_t created_tick
 );
+uint8_t mc_pending_allow_reply_kind(
+    mc_pending_reply_table_t *pending,
+    uint64_t pending_id,
+    uint64_t kind
+);
+uint8_t mc_pending_reply_kind_allowed(
+    const mc_pending_reply_table_t *pending,
+    uint64_t pending_id,
+    uint64_t kind
+);
 
 uint8_t mc_pending_next_cap_id(mc_pending_reply_table_t *pending, uint64_t *out_cap_id);
 

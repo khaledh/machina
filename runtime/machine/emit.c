@@ -140,6 +140,60 @@ uint8_t __mc_machine_emit_send(
         return 0;
     }
 
+    if (ctx->reply_context_active
+        && dst == (uint64_t)ctx->reply_context_origin_machine
+        && mc_pending_reply_kind_allowed(&ctx->rt->pending, ctx->reply_context_pending_id, kind)) {
+        mc_machine_reply_effect_t effect = {
+            .reply_cap_id = ctx->reply_context_pending_id,
+            .env = {
+                .kind = kind,
+                .src = ctx->machine_id,
+                .reply_cap_id = 0,
+                .pending_id = 0,
+                .payload0 = payload0,
+                .payload1 = payload1,
+                .origin_payload0 = 0,
+                .origin_payload1 = 0,
+                .origin_request_site_key = 0,
+            },
+        };
+        if (!mc_emit_stage_replies(ctx, &effect)) {
+            return 0;
+        }
+        ctx->reply_context_active = 0;
+        return 1;
+    }
+
+    if (ctx->derived_request_armed && ctx->derived_request_pending_id == 0) {
+        uint64_t pending_id = 0;
+        if (!mc_pending_next_cap_id(&ctx->rt->pending, &pending_id)) {
+            return 0;
+        }
+
+        mc_machine_request_effect_t effect = {
+            .dst = (mc_machine_id_t)dst,
+            .pending_id = pending_id,
+            .request_site_key = ctx->derived_request_site_key,
+            .env = {
+                .kind = kind,
+                .src = ctx->machine_id,
+                .reply_cap_id = 0,
+                .pending_id = 0,
+                .payload0 = payload0,
+                .payload1 = payload1,
+                .origin_payload0 = 0,
+                .origin_payload1 = 0,
+                .origin_request_site_key = 0,
+            },
+        };
+        if (!mc_emit_stage_requests(ctx, &effect)) {
+            return 0;
+        }
+        ctx->derived_request_pending_id = pending_id;
+        ctx->derived_request_armed = 0;
+        return 1;
+    }
+
     mc_machine_outbox_effect_t effect = {
         .dst = (mc_machine_id_t)dst,
         .env = {

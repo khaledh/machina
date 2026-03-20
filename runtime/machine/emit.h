@@ -12,6 +12,12 @@ typedef struct mc_emit_staging_ctx {
     struct mc_emit_staging_ctx *prev;
     mc_machine_runtime_t *rt;
     mc_machine_id_t machine_id;
+    uint8_t derived_request_armed;
+    uint64_t derived_request_site_key;
+    uint64_t derived_request_pending_id;
+    uint8_t reply_context_active;
+    mc_machine_id_t reply_context_origin_machine;
+    uint64_t reply_context_pending_id;
 
     // Effects staged via __mc_machine_emit_send/request/reply.
     mc_machine_outbox_effect_t *outbox;

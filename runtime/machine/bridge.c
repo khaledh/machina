@@ -2,6 +2,7 @@
 #include "emit.h"
 #include "hosted_instance.h"
 #include "internal.h"
+#include "pending.h"
 
 #include <stdlib.h>
 
@@ -44,6 +45,16 @@ MC_WEAK uint64_t __mc_hosted_linear_trigger_dispatch_u64(
     (void)key;
     (void)payload0;
     (void)payload1;
+    return 0;
+}
+MC_WEAK uint64_t __mc_hosted_linear_reply_trigger_kind_u64(
+    uint64_t machine_kind,
+    uint64_t event_kind,
+    uint64_t current_state_tag
+) {
+    (void)machine_kind;
+    (void)event_kind;
+    (void)current_state_tag;
     return 0;
 }
 
@@ -159,6 +170,24 @@ static uint64_t mc_hosted_linear_lookup_state_tag(
     return state_tag;
 }
 
+static uint8_t mc_hosted_linear_lookup_key_by_interaction(
+    mc_hosted_linear_machine_ctx_t *ctx,
+    uint64_t interaction_id,
+    uint64_t *out_key,
+    uint64_t *out_state_tag
+) {
+    if (!ctx || interaction_id == 0) {
+        return 0;
+    }
+    return mc_hosted_instance_table_lookup_by_derived_interaction(
+        &ctx->instances,
+        interaction_id,
+        out_key,
+        out_state_tag,
+        NULL
+    );
+}
+
 static uint64_t mc_hosted_linear_process_deliver(
     mc_hosted_linear_machine_ctx_t *ctx,
     mc_machine_id_t machine_id,
@@ -220,6 +249,50 @@ static uint64_t mc_hosted_linear_process_deliver(
     return result;
 }
 
+static uint8_t mc_hosted_linear_try_auto_resolve_reply(
+    mc_hosted_linear_machine_ctx_t *ctx,
+    mc_machine_id_t machine_id,
+    const mc_machine_envelope_t *env,
+    uint64_t *fault_code
+) {
+    if (!ctx || !env || env->pending_id == 0) {
+        return 0;
+    }
+
+    uint64_t key = 0;
+    uint64_t state_tag = 0;
+    if (!mc_hosted_linear_lookup_key_by_interaction(
+            ctx,
+            env->pending_id,
+            &key,
+            &state_tag
+        )) {
+        return 0;
+    }
+
+    uint64_t trigger_kind = __mc_hosted_linear_reply_trigger_kind_u64(
+        ctx->machine_kind,
+        env->kind,
+        state_tag
+    );
+    if (trigger_kind == 0) {
+        return 0;
+    }
+
+    uint64_t result = mc_hosted_linear_process_deliver(
+        ctx,
+        machine_id,
+        trigger_kind,
+        key,
+        state_tag,
+        0,
+        env->payload0,
+        env->payload1,
+        fault_code
+    );
+    return result == MC_HOSTED_UPDATE_OK;
+}
+
 static mc_dispatch_result_t mc_hosted_linear_dispatch(
     void *ctx_ptr,
     mc_machine_id_t machine_id,
@@ -241,6 +314,9 @@ static mc_dispatch_result_t mc_hosted_linear_dispatch(
     }
 
     if (env->kind != MC_HOSTED_LINEAR_KIND_DELIVER) {
+        if (mc_hosted_linear_try_auto_resolve_reply(ctx, machine_id, env, fault_code)) {
+            return MC_DISPATCH_OK;
+        }
         if (__mc_hosted_linear_on_dispatch_u64(
                 ctx->machine_kind,
                 (uint64_t)machine_id,
@@ -608,6 +684,42 @@ uint64_t __mc_hosted_linear_begin_derived_interaction_u64(
     return interaction_id;
 }
 
+uint64_t __mc_hosted_linear_bind_derived_interaction_u64(
+    uint64_t runtime,
+    uint64_t machine_id,
+    uint64_t key,
+    uint64_t interaction_id
+) {
+    mc_machine_runtime_t *rt = mc_runtime_from_handle(runtime);
+    mc_machine_id_t id = 0;
+    if (!rt || !mc_machine_id_from_u64(machine_id, &id) || key == 0 ||
+        interaction_id == 0) {
+        return 0;
+    }
+
+    mc_hosted_linear_machine_ctx_t *ctx = mc_hosted_linear_ctx_for_machine(rt, id);
+    if (!ctx) {
+        return 0;
+    }
+    return mc_hosted_instance_table_begin_derived_interaction(
+        &ctx->instances,
+        key,
+        interaction_id
+    );
+}
+
+uint64_t __mc_hosted_linear_allow_reply_kind_u64(
+    uint64_t runtime,
+    uint64_t pending_id,
+    uint64_t kind
+) {
+    mc_machine_runtime_t *rt = mc_runtime_from_handle(runtime);
+    if (!rt || pending_id == 0 || kind == 0) {
+        return 0;
+    }
+    return mc_pending_allow_reply_kind(&rt->pending, pending_id, kind);
+}
+
 uint64_t __mc_hosted_linear_debug_active_interaction_u64(
     uint64_t runtime,
     uint64_t machine_id,
@@ -687,6 +799,21 @@ uint64_t __mc_hosted_action_emit_begin_u64(uint64_t runtime, uint64_t machine_id
     return (uint64_t)(uintptr_t)scope;
 }
 
+uint64_t __mc_hosted_action_emit_enable_derived_request_u64(
+    uint64_t scope_handle,
+    uint64_t request_site_key
+) {
+    mc_hosted_action_emit_scope_t *scope =
+        (mc_hosted_action_emit_scope_t *)(uintptr_t)scope_handle;
+    if (!scope || request_site_key == 0) {
+        return 0;
+    }
+    scope->emit_ctx.derived_request_armed = 1;
+    scope->emit_ctx.derived_request_site_key = request_site_key;
+    scope->emit_ctx.derived_request_pending_id = 0;
+    return 1;
+}
+
 uint64_t __mc_hosted_action_emit_commit_u64(uint64_t scope_handle) {
     mc_hosted_action_emit_scope_t *scope =
         (mc_hosted_action_emit_scope_t *)(uintptr_t)scope_handle;
@@ -703,9 +830,47 @@ uint64_t __mc_hosted_action_emit_commit_u64(uint64_t scope_handle) {
         );
     }
 
+    for (uint32_t i = 0; i < scope->emit_ctx.requests_len; i++) {
+        const mc_machine_request_effect_t *req = &scope->emit_ctx.requests[i];
+        mc_machine_envelope_t request_env = req->env;
+        request_env.src = scope->emit_ctx.machine_id;
+        request_env.reply_cap_id = req->pending_id;
+        request_env.pending_id = 0;
+        request_env.origin_payload0 = 0;
+        request_env.origin_payload1 = 0;
+        request_env.origin_request_site_key = 0;
+
+        if (__mc_machine_runtime_enqueue(rt, req->dst, &request_env) !=
+            MC_MAILBOX_ENQUEUE_OK) {
+            mc_emit_staging_end(&scope->emit_ctx);
+            __mc_free(scope);
+            return 0;
+        }
+        mc_pending_correlation_id_t correlation = {
+            .pending_id = req->pending_id,
+            .request_site_key = req->request_site_key,
+        };
+        if (!mc_pending_insert_active(
+                &rt->pending,
+                correlation,
+                req->env.payload0,
+                req->env.payload1,
+                scope->emit_ctx.machine_id,
+                rt->dispatch_tick
+            )) {
+            mc_emit_staging_end(&scope->emit_ctx);
+            __mc_free(scope);
+            return 0;
+        }
+        rt->pending_created_count += 1;
+    }
+
+    uint64_t result = scope->emit_ctx.derived_request_pending_id != 0
+        ? scope->emit_ctx.derived_request_pending_id
+        : 1;
     mc_emit_staging_end(&scope->emit_ctx);
     __mc_free(scope);
-    return 1;
+    return result;
 }
 
 uint64_t __mc_hosted_action_emit_abort_u64(uint64_t scope_handle) {

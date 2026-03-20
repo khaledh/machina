@@ -1,6 +1,8 @@
 #include "pending.h"
 #include "internal.h"
 
+#include <string.h>
+
 uint8_t mc_pending_ensure_cap(mc_pending_reply_table_t *pending, uint32_t min_cap) {
     if (pending->cap >= min_cap) {
         return 1;
@@ -95,6 +97,9 @@ uint8_t mc_pending_insert_active(
             pending->entries[i].requester = requester;
             pending->entries[i].request_payload0 = request_payload0;
             pending->entries[i].request_payload1 = request_payload1;
+            pending->entries[i].allowed_reply_kinds = NULL;
+            pending->entries[i].allowed_reply_kinds_len = 0;
+            pending->entries[i].allowed_reply_kinds_cap = 0;
             pending->entries[i].created_tick = created_tick;
             pending->entries[i].active = 1;
             return 1;
@@ -107,10 +112,73 @@ uint8_t mc_pending_insert_active(
     pending->entries[pending->len].requester = requester;
     pending->entries[pending->len].request_payload0 = request_payload0;
     pending->entries[pending->len].request_payload1 = request_payload1;
+    pending->entries[pending->len].allowed_reply_kinds = NULL;
+    pending->entries[pending->len].allowed_reply_kinds_len = 0;
+    pending->entries[pending->len].allowed_reply_kinds_cap = 0;
     pending->entries[pending->len].created_tick = created_tick;
     pending->entries[pending->len].active = 1;
     pending->len += 1;
     return 1;
+}
+
+uint8_t mc_pending_allow_reply_kind(
+    mc_pending_reply_table_t *pending,
+    uint64_t pending_id,
+    uint64_t kind
+) {
+    if (!pending || pending_id == 0 || kind == 0) {
+        return 0;
+    }
+    int32_t idx = mc_pending_find_active(pending, pending_id);
+    if (idx < 0) {
+        return 0;
+    }
+    mc_pending_reply_entry_t *entry = &pending->entries[(uint32_t)idx];
+    for (uint32_t i = 0; i < entry->allowed_reply_kinds_len; i++) {
+        if (entry->allowed_reply_kinds[i] == kind) {
+            return 1;
+        }
+    }
+    if (entry->allowed_reply_kinds_len == entry->allowed_reply_kinds_cap) {
+        uint32_t new_cap = entry->allowed_reply_kinds_cap == 0 ? 4u : entry->allowed_reply_kinds_cap * 2u;
+        if (new_cap < entry->allowed_reply_kinds_cap) {
+            return 0;
+        }
+        uint64_t *new_items = (uint64_t *)__mc_realloc(
+            entry->allowed_reply_kinds,
+            (size_t)new_cap * sizeof(uint64_t),
+            _Alignof(uint64_t)
+        );
+        if (!new_items) {
+            return 0;
+        }
+        entry->allowed_reply_kinds = new_items;
+        entry->allowed_reply_kinds_cap = new_cap;
+    }
+    entry->allowed_reply_kinds[entry->allowed_reply_kinds_len] = kind;
+    entry->allowed_reply_kinds_len += 1;
+    return 1;
+}
+
+uint8_t mc_pending_reply_kind_allowed(
+    const mc_pending_reply_table_t *pending,
+    uint64_t pending_id,
+    uint64_t kind
+) {
+    if (!pending || pending_id == 0 || kind == 0) {
+        return 0;
+    }
+    int32_t idx = mc_pending_find_active(pending, pending_id);
+    if (idx < 0) {
+        return 0;
+    }
+    const mc_pending_reply_entry_t *entry = &pending->entries[(uint32_t)idx];
+    for (uint32_t i = 0; i < entry->allowed_reply_kinds_len; i++) {
+        if (entry->allowed_reply_kinds[i] == kind) {
+            return 1;
+        }
+    }
+    return 0;
 }
 
 // Monotonic capability id allocator.
@@ -168,6 +236,12 @@ void mc_pending_release_request_payload(mc_pending_reply_entry_t *entry) {
     }
     entry->request_payload0 = 0;
     entry->request_payload1 = 0;
+    if (entry->allowed_reply_kinds) {
+        __mc_free(entry->allowed_reply_kinds);
+        entry->allowed_reply_kinds = NULL;
+    }
+    entry->allowed_reply_kinds_len = 0;
+    entry->allowed_reply_kinds_cap = 0;
 }
 
 uint8_t mc_pending_cleanup_reason_valid(mc_pending_cleanup_reason_t reason) {

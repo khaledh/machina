@@ -331,6 +331,9 @@ typedef struct mc_pending_reply_entry {
     // Captured request payload ABI so response handlers can bind provenance.
     uint64_t request_payload0;
     mc_payload_layout_id_t request_payload1;
+    uint64_t *allowed_reply_kinds;
+    uint32_t allowed_reply_kinds_len;
+    uint32_t allowed_reply_kinds_cap;
     // Dispatch-step tick at request insertion time.
     // Used by timeout-based inflight cleanup policy.
     uint64_t created_tick;

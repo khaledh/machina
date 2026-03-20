@@ -677,6 +677,7 @@ static uint8_t mc_commit_replies(
         // runtime teardown/timeout cleanup won't free the same payload again.
         rt->pending.entries[(uint32_t)idx].request_payload0 = 0;
         rt->pending.entries[(uint32_t)idx].request_payload1 = 0;
+        mc_pending_release_request_payload(&rt->pending.entries[(uint32_t)idx]);
 
         // Consume capability only after successful delivery.
         rt->pending.entries[(uint32_t)idx].active = 0;
@@ -1127,6 +1128,7 @@ mc_machine_reply_result_t __mc_machine_runtime_reply(
         // provenance fields so response-dispatch cleanup can release it.
         rt->pending.entries[(uint32_t)idx].request_payload0 = 0;
         rt->pending.entries[(uint32_t)idx].request_payload1 = 0;
+        mc_pending_release_request_payload(&rt->pending.entries[(uint32_t)idx]);
         // Consume capability on successful reply delivery.
         rt->pending.entries[(uint32_t)idx].active = 0;
         mc_emit_pending_cleanup(
@@ -1225,6 +1227,11 @@ uint8_t mc_machine_runtime_dispatch_one_txn_impl(
         // every handler ABI.
         mc_emit_staging_ctx_t emit_ctx;
         mc_emit_staging_begin(&emit_ctx, rt, machine_id);
+        if (env.reply_cap_id != 0 && env.src != 0) {
+            emit_ctx.reply_context_active = 1;
+            emit_ctx.reply_context_origin_machine = (mc_machine_id_t)env.src;
+            emit_ctx.reply_context_pending_id = env.reply_cap_id;
+        }
         // Explicit callback argument takes precedence; otherwise fall back to
         // machine-local callback bound during spawn/bootstrap.
         mc_machine_dispatch_txn_fn effective_dispatch =

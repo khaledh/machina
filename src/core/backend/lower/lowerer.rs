@@ -447,14 +447,16 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
         if let Some(target_handle_ty) = target_handle_ty
             && let Some(handle_name) = self.hosted_machine_handle_type_name(target_handle_ty)
         {
-            return self
+            let host = self
                 .linear_index
                 .machine_hosts
                 .values()
-                .find(|host| host.handle_type_name == handle_name)?
+                .find(|host| host.handle_type_name == handle_name)?;
+            return host
                 .on_event_kinds
                 .get(payload_name)
-                .copied();
+                .copied()
+                .or_else(|| host.trigger_event_kinds.get(payload_name).copied());
         }
 
         let current_node_id = self.def_table.lookup_def_node_id(self.current_def_id)?;
@@ -462,12 +464,11 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
             .linear_index
             .hosted_dispatch_handler_machines
             .get(&current_node_id)?;
-        self.linear_index
-            .machine_hosts
-            .get(machine_name)?
-            .on_event_kinds
+        let host = self.linear_index.machine_hosts.get(machine_name)?;
+        host.on_event_kinds
             .get(payload_name)
             .copied()
+            .or_else(|| host.trigger_event_kinds.get(payload_name).copied())
     }
 
     pub(super) fn hosted_machine_handle_type_name<'b>(&self, ty: &'b Type) -> Option<&'b str> {

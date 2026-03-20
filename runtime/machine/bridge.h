@@ -149,6 +149,17 @@ uint64_t __mc_hosted_linear_begin_derived_interaction_u64(
     uint64_t machine_id,
     uint64_t key
 );
+uint64_t __mc_hosted_linear_bind_derived_interaction_u64(
+    uint64_t runtime,
+    uint64_t machine_id,
+    uint64_t key,
+    uint64_t interaction_id
+);
+uint64_t __mc_hosted_linear_allow_reply_kind_u64(
+    uint64_t runtime,
+    uint64_t pending_id,
+    uint64_t kind
+);
 uint64_t __mc_hosted_linear_debug_active_interaction_u64(
     uint64_t runtime,
     uint64_t machine_id,
@@ -168,6 +179,10 @@ uint64_t __mc_hosted_linear_debug_interaction_resolved_count_u64(
 uint64_t __mc_hosted_action_emit_begin_u64(
     uint64_t runtime,
     uint64_t machine_id
+);
+uint64_t __mc_hosted_action_emit_enable_derived_request_u64(
+    uint64_t scope,
+    uint64_t request_site_key
 );
 
 uint64_t __mc_hosted_action_emit_commit_u64(uint64_t scope);
