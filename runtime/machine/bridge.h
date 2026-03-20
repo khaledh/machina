@@ -160,6 +160,17 @@ uint64_t __mc_hosted_linear_allow_reply_kind_u64(
     uint64_t pending_id,
     uint64_t kind
 );
+uint64_t __mc_hosted_linear_bind_machine_config_word_u64(
+    uint64_t runtime,
+    uint64_t machine_id,
+    uint64_t index,
+    uint64_t value
+);
+uint64_t __mc_hosted_linear_machine_config_word_u64(
+    uint64_t runtime,
+    uint64_t machine_id,
+    uint64_t index
+);
 uint64_t __mc_hosted_linear_debug_active_interaction_u64(
     uint64_t runtime,
     uint64_t machine_id,

@@ -106,6 +106,9 @@ static void mc_machine_runtime_managed_atexit_cleanup(void) {
 typedef struct mc_hosted_linear_machine_ctx {
     mc_hosted_instance_table_t instances;
     uint64_t machine_kind;
+    uint64_t *machine_config_words;
+    uint32_t machine_config_words_len;
+    uint32_t machine_config_words_cap;
     uint64_t next_delivery_ticket;
     uint64_t next_derived_interaction_id;
     uint64_t completed_delivery_ticket;
@@ -127,6 +130,9 @@ static mc_hosted_linear_machine_ctx_t *mc_hosted_linear_ctx_new(void) {
     }
     mc_hosted_instance_table_init(&ctx->instances);
     ctx->machine_kind = 0;
+    ctx->machine_config_words = NULL;
+    ctx->machine_config_words_len = 0;
+    ctx->machine_config_words_cap = 0;
     ctx->next_delivery_ticket = 1;
     ctx->next_derived_interaction_id = 1;
     ctx->completed_delivery_ticket = 0;
@@ -141,6 +147,9 @@ static void mc_hosted_linear_ctx_drop(void *dispatch_ctx) {
         return;
     }
     mc_hosted_instance_table_drop(&ctx->instances);
+    if (ctx->machine_config_words) {
+        __mc_free(ctx->machine_config_words);
+    }
     __mc_free(ctx);
 }
 
@@ -168,6 +177,69 @@ static uint64_t mc_hosted_linear_lookup_state_tag(
         return 0;
     }
     return state_tag;
+}
+
+static uint8_t mc_hosted_linear_config_ensure_cap(
+    mc_hosted_linear_machine_ctx_t *ctx,
+    uint32_t min_cap
+) {
+    if (!ctx) {
+        return 0;
+    }
+    if (ctx->machine_config_words_cap >= min_cap) {
+        return 1;
+    }
+
+    uint32_t new_cap = ctx->machine_config_words_cap == 0 ? 4 : ctx->machine_config_words_cap;
+    while (new_cap < min_cap) {
+        new_cap *= 2;
+    }
+
+    size_t new_size = sizeof(uint64_t) * (size_t)new_cap;
+    size_t align = _Alignof(uint64_t);
+    if (ctx->machine_config_words) {
+        ctx->machine_config_words = (uint64_t *)__mc_realloc(
+            ctx->machine_config_words,
+            new_size,
+            align
+        );
+    } else {
+        ctx->machine_config_words = (uint64_t *)__mc_alloc(new_size, align);
+    }
+    if (!ctx->machine_config_words) {
+        return 0;
+    }
+
+    for (uint32_t i = ctx->machine_config_words_cap; i < new_cap; i++) {
+        ctx->machine_config_words[i] = 0;
+    }
+    ctx->machine_config_words_cap = new_cap;
+    return 1;
+}
+
+static uint8_t mc_hosted_linear_bind_machine_config_word(
+    mc_hosted_linear_machine_ctx_t *ctx,
+    uint32_t index,
+    uint64_t value
+) {
+    if (!ctx || !mc_hosted_linear_config_ensure_cap(ctx, index + 1)) {
+        return 0;
+    }
+    ctx->machine_config_words[index] = value;
+    if (ctx->machine_config_words_len < index + 1) {
+        ctx->machine_config_words_len = index + 1;
+    }
+    return 1;
+}
+
+static uint64_t mc_hosted_linear_machine_config_word(
+    const mc_hosted_linear_machine_ctx_t *ctx,
+    uint32_t index
+) {
+    if (!ctx || index >= ctx->machine_config_words_len) {
+        return 0;
+    }
+    return ctx->machine_config_words[index];
 }
 
 static uint8_t mc_hosted_linear_lookup_key_by_interaction(
@@ -718,6 +790,43 @@ uint64_t __mc_hosted_linear_allow_reply_kind_u64(
         return 0;
     }
     return mc_pending_allow_reply_kind(&rt->pending, pending_id, kind);
+}
+
+uint64_t __mc_hosted_linear_bind_machine_config_word_u64(
+    uint64_t runtime,
+    uint64_t machine_id,
+    uint64_t index,
+    uint64_t value
+) {
+    mc_machine_runtime_t *rt = mc_runtime_from_handle(runtime);
+    mc_machine_id_t id = 0;
+    if (!rt || !mc_machine_id_from_u64(machine_id, &id) || index > UINT32_MAX) {
+        return 0;
+    }
+
+    mc_hosted_linear_machine_ctx_t *ctx = mc_hosted_linear_ctx_for_machine(rt, id);
+    if (!ctx) {
+        return 0;
+    }
+    return mc_hosted_linear_bind_machine_config_word(ctx, (uint32_t)index, value);
+}
+
+uint64_t __mc_hosted_linear_machine_config_word_u64(
+    uint64_t runtime,
+    uint64_t machine_id,
+    uint64_t index
+) {
+    mc_machine_runtime_t *rt = mc_runtime_from_handle(runtime);
+    mc_machine_id_t id = 0;
+    if (!rt || !mc_machine_id_from_u64(machine_id, &id) || index > UINT32_MAX) {
+        return 0;
+    }
+
+    mc_hosted_linear_machine_ctx_t *ctx = mc_hosted_linear_ctx_for_machine(rt, id);
+    if (!ctx) {
+        return 0;
+    }
+    return mc_hosted_linear_machine_config_word(ctx, (uint32_t)index);
 }
 
 uint64_t __mc_hosted_linear_debug_active_interaction_u64(

@@ -254,6 +254,9 @@ const HOSTED_LINEAR_BEGIN_DERIVED_INTERACTION_FN: &str =
 const HOSTED_LINEAR_BIND_DERIVED_INTERACTION_FN: &str =
     "__mc_hosted_linear_bind_derived_interaction_u64";
 const HOSTED_LINEAR_ALLOW_REPLY_KIND_FN: &str = "__mc_hosted_linear_allow_reply_kind_u64";
+const HOSTED_LINEAR_BIND_MACHINE_CONFIG_WORD_FN: &str =
+    "__mc_hosted_linear_bind_machine_config_word_u64";
+const HOSTED_LINEAR_MACHINE_CONFIG_WORD_FN: &str = "__mc_hosted_linear_machine_config_word_u64";
 const HOSTED_ACTION_EMIT_BEGIN_FN: &str = "__mc_hosted_action_emit_begin_u64";
 const HOSTED_ACTION_EMIT_ENABLE_DERIVED_REQUEST_FN: &str =
     "__mc_hosted_action_emit_enable_derived_request_u64";
@@ -898,6 +901,14 @@ pub(super) fn ensure_hosted_runtime_intrinsics(module: &mut Module, node_id_gen:
             HOSTED_LINEAR_ALLOW_REPLY_KIND_FN,
             &["runtime", "pending_id", "kind"],
         ),
+        (
+            HOSTED_LINEAR_BIND_MACHINE_CONFIG_WORD_FN,
+            &["runtime", "machine_id", "index", "value"],
+        ),
+        (
+            HOSTED_LINEAR_MACHINE_CONFIG_WORD_FN,
+            &["runtime", "machine_id", "index"],
+        ),
         (HOSTED_ACTION_EMIT_BEGIN_FN, &["runtime", "machine_id"]),
         (
             HOSTED_ACTION_EMIT_ENABLE_DERIVED_REQUEST_FN,
@@ -935,6 +946,7 @@ pub(super) fn append_machine_spawn_support(
     wait_infos: &[MachineWaitInfo],
     node_id_gen: &mut NodeIdGen,
 ) {
+    let machine_field_layouts = machine_field_layouts_by_handle_type(machine_infos);
     for info in machine_infos {
         module
             .top_level_items
@@ -948,6 +960,7 @@ pub(super) fn append_machine_spawn_support(
             .top_level_items
             .push(TopLevelItem::FuncDef(build_machine_spawn_func(
                 info,
+                &machine_field_layouts,
                 node_id_gen,
             )));
         // Generate a create helper for each role the hosted type declares.
@@ -1015,7 +1028,11 @@ pub(super) fn append_machine_spawn_support(
             .push(TopLevelItem::FuncDef(trigger_func));
         if trigger_info.payload_shape.is_some() {
             module.top_level_items.push(TopLevelItem::FuncDef(
-                build_machine_trigger_dispatch_wrapper_func(trigger_info, node_id_gen),
+                build_machine_trigger_dispatch_wrapper_func(
+                    trigger_info,
+                    &machine_field_layouts,
+                    node_id_gen,
+                ),
             ));
         }
     }
@@ -1028,7 +1045,11 @@ pub(super) fn append_machine_spawn_support(
         module.top_level_items.push(TopLevelItem::FuncDef(on_func));
         if on_info.payload_shape.is_some() {
             module.top_level_items.push(TopLevelItem::FuncDef(
-                build_machine_on_dispatch_wrapper_func(on_info, node_id_gen),
+                build_machine_on_dispatch_wrapper_func(
+                    on_info,
+                    &machine_field_layouts,
+                    node_id_gen,
+                ),
             ));
         }
     }
@@ -1101,6 +1122,15 @@ fn derive_interaction_lowering_info(
         )),
         reply_event_kinds,
     })
+}
+
+fn machine_field_layouts_by_handle_type(
+    machine_infos: &[MachineSpawnInfo],
+) -> HashMap<String, Vec<StructDefField>> {
+    machine_infos
+        .iter()
+        .map(|info| (info.handle_type_name.clone(), info.machine_fields.clone()))
+        .collect()
 }
 
 fn build_machine_handle_type_def(
@@ -1271,6 +1301,7 @@ fn build_machine_handle_send_method(
 
 fn build_machine_on_dispatch_wrapper_func(
     info: &MachineOnHandlerInfo,
+    machine_field_layouts: &HashMap<String, Vec<StructDefField>>,
     node_id_gen: &mut NodeIdGen,
 ) -> FuncDef {
     let span = Span::default();
@@ -1300,21 +1331,22 @@ fn build_machine_on_dispatch_wrapper_func(
             kind: ExprKind::Block {
                 items: vec![
                     BlockItem::Stmt(let_bind_stmt(
+                        "__mc_rt",
+                        call_expr(MANAGED_RUNTIME_CURRENT_FN, Vec::new(), node_id_gen, span),
+                        node_id_gen,
+                        span,
+                    )),
+                    BlockItem::Expr(return_u64_if_zero("__mc_rt", node_id_gen, span)),
+                    BlockItem::Stmt(let_bind_stmt(
                         "__mc_self",
-                        Expr {
-                            id: node_id_gen.new_id(),
-                            kind: ExprKind::StructLit {
-                                name: info.handle_type_name.clone(),
-                                type_args: Vec::new(),
-                                fields: vec![StructLitField {
-                                    id: node_id_gen.new_id(),
-                                    name: "_id".to_string(),
-                                    value: var_expr("machine_id", node_id_gen, span),
-                                    span,
-                                }],
-                            },
+                        build_machine_handle_from_runtime_expr(
+                            &info.handle_type_name,
+                            "__mc_rt",
+                            var_expr("machine_id", node_id_gen, span),
+                            machine_field_layouts,
+                            node_id_gen,
                             span,
-                        },
+                        ),
                         node_id_gen,
                         span,
                     )),
@@ -1417,6 +1449,7 @@ fn build_hosted_linear_on_dispatch_func(
 
 fn build_machine_trigger_dispatch_wrapper_func(
     info: &MachineTriggerHandlerInfo,
+    machine_field_layouts: &HashMap<String, Vec<StructDefField>>,
     node_id_gen: &mut NodeIdGen,
 ) -> FuncDef {
     let span = Span::default();
@@ -1508,21 +1541,22 @@ fn build_machine_trigger_dispatch_wrapper_func(
             kind: ExprKind::Block {
                 items: vec![
                     BlockItem::Stmt(let_bind_stmt(
+                        "__mc_rt",
+                        call_expr(MANAGED_RUNTIME_CURRENT_FN, Vec::new(), node_id_gen, span),
+                        node_id_gen,
+                        span,
+                    )),
+                    BlockItem::Expr(return_u64_if_zero("__mc_rt", node_id_gen, span)),
+                    BlockItem::Stmt(let_bind_stmt(
                         "__mc_self",
-                        Expr {
-                            id: node_id_gen.new_id(),
-                            kind: ExprKind::StructLit {
-                                name: info.handle_type_name.clone(),
-                                type_args: Vec::new(),
-                                fields: vec![StructLitField {
-                                    id: node_id_gen.new_id(),
-                                    name: "_id".to_string(),
-                                    value: var_expr("machine_id", node_id_gen, span),
-                                    span,
-                                }],
-                            },
+                        build_machine_handle_from_runtime_expr(
+                            &info.handle_type_name,
+                            "__mc_rt",
+                            var_expr("machine_id", node_id_gen, span),
+                            machine_field_layouts,
+                            node_id_gen,
                             span,
-                        },
+                        ),
                         node_id_gen,
                         span,
                     )),
@@ -1627,7 +1661,11 @@ fn build_hosted_linear_trigger_dispatch_func(
 }
 
 /// Generate: `fn __mc_machine_spawn_X() -> HandleType | MachineError { HandleType { _id: 1 } }`
-fn build_machine_spawn_func(info: &MachineSpawnInfo, node_id_gen: &mut NodeIdGen) -> FuncDef {
+fn build_machine_spawn_func(
+    info: &MachineSpawnInfo,
+    machine_field_layouts: &HashMap<String, Vec<StructDefField>>,
+    node_id_gen: &mut NodeIdGen,
+) -> FuncDef {
     let span = Span::default();
     let mut items = vec![
         BlockItem::Stmt(let_bind_stmt(
@@ -1674,6 +1712,17 @@ fn build_machine_spawn_func(info: &MachineSpawnInfo, node_id_gen: &mut NodeIdGen
             node_id_gen,
             span,
         )));
+    }
+    if info.constructor.is_some() {
+        items.extend(build_machine_config_bind_items(
+            info,
+            "__mc_self",
+            "__mc_rt",
+            "__mc_machine_id",
+            machine_field_layouts,
+            node_id_gen,
+            span,
+        ));
     }
 
     let tail = if info.constructor.is_some() {
@@ -2764,6 +2813,17 @@ fn struct_field_expr(
     }
 }
 
+fn expr_field_expr(target: Expr, field: &str, node_id_gen: &mut NodeIdGen, span: Span) -> Expr {
+    Expr {
+        id: node_id_gen.new_id(),
+        kind: ExprKind::StructField {
+            target: Box::new(target),
+            field: field.to_string(),
+        },
+        span,
+    }
+}
+
 fn call_expr(callee_name: &str, args: Vec<Expr>, node_id_gen: &mut NodeIdGen, span: Span) -> Expr {
     Expr {
         id: node_id_gen.new_id(),
@@ -3010,6 +3070,195 @@ fn build_machine_handle_value_from_source(
     )
 }
 
+fn build_machine_config_bind_items(
+    info: &MachineSpawnInfo,
+    source_var_name: &str,
+    runtime_var_name: &str,
+    machine_id_var_name: &str,
+    machine_field_layouts: &HashMap<String, Vec<StructDefField>>,
+    node_id_gen: &mut NodeIdGen,
+    span: Span,
+) -> Vec<BlockItem> {
+    info.machine_fields
+        .iter()
+        .enumerate()
+        .flat_map(|(index, field)| {
+            let status_var = format!("__mc_machine_cfg_status_{index}");
+            let value_expr = machine_config_word_from_source_expr(
+                field,
+                source_var_name,
+                machine_field_layouts,
+                node_id_gen,
+                span,
+            );
+            [
+                BlockItem::Stmt(let_bind_stmt(
+                    &status_var,
+                    call_expr(
+                        HOSTED_LINEAR_BIND_MACHINE_CONFIG_WORD_FN,
+                        vec![
+                            var_expr(runtime_var_name, node_id_gen, span),
+                            var_expr(machine_id_var_name, node_id_gen, span),
+                            int_expr(index as u64, node_id_gen, span),
+                            value_expr,
+                        ],
+                        node_id_gen,
+                        span,
+                    ),
+                    node_id_gen,
+                    span,
+                )),
+                BlockItem::Expr(return_enum_error_if_zero(
+                    &status_var,
+                    "MachineError",
+                    "SpawnFailed",
+                    node_id_gen,
+                    span,
+                )),
+            ]
+        })
+        .collect()
+}
+
+fn machine_config_word_from_source_expr(
+    field: &StructDefField,
+    source_var_name: &str,
+    machine_field_layouts: &HashMap<String, Vec<StructDefField>>,
+    node_id_gen: &mut NodeIdGen,
+    span: Span,
+) -> Expr {
+    match &field.ty.kind {
+        TypeExprKind::Named { ident, type_args } if ident == "u64" && type_args.is_empty() => {
+            struct_field_expr(source_var_name, &field.name, node_id_gen, span)
+        }
+        TypeExprKind::Named { ident, type_args }
+            if type_args.is_empty() && machine_field_layouts.contains_key(ident) =>
+        {
+            expr_field_expr(
+                struct_field_expr(source_var_name, &field.name, node_id_gen, span),
+                "_id",
+                node_id_gen,
+                span,
+            )
+        }
+        _ => panic!(
+            "compiler bug: unsupported machine config field type `{}` on `{}`",
+            field.ty, field.name
+        ),
+    }
+}
+
+fn machine_config_word_expr(
+    runtime_var_name: &str,
+    machine_id_expr: Expr,
+    index: u64,
+    node_id_gen: &mut NodeIdGen,
+    span: Span,
+) -> Expr {
+    call_expr(
+        HOSTED_LINEAR_MACHINE_CONFIG_WORD_FN,
+        vec![
+            var_expr(runtime_var_name, node_id_gen, span),
+            machine_id_expr,
+            int_expr(index, node_id_gen, span),
+        ],
+        node_id_gen,
+        span,
+    )
+}
+
+fn build_machine_handle_from_runtime_expr(
+    handle_type_name: &str,
+    runtime_var_name: &str,
+    machine_id_expr: Expr,
+    machine_field_layouts: &HashMap<String, Vec<StructDefField>>,
+    node_id_gen: &mut NodeIdGen,
+    span: Span,
+) -> Expr {
+    let mut fields = vec![StructLitField {
+        id: node_id_gen.new_id(),
+        name: "_id".to_string(),
+        value: machine_id_expr.clone(),
+        span,
+    }];
+
+    let machine_fields = machine_field_layouts
+        .get(handle_type_name)
+        .cloned()
+        .unwrap_or_default();
+    for (index, field) in machine_fields.iter().enumerate() {
+        fields.push(StructLitField {
+            id: node_id_gen.new_id(),
+            name: field.name.clone(),
+            value: build_machine_config_field_value_from_runtime_expr(
+                field,
+                runtime_var_name,
+                machine_id_expr.clone(),
+                index as u64,
+                machine_field_layouts,
+                node_id_gen,
+                span,
+            ),
+            span,
+        });
+    }
+
+    Expr {
+        id: node_id_gen.new_id(),
+        kind: ExprKind::StructLit {
+            name: handle_type_name.to_string(),
+            type_args: Vec::new(),
+            fields,
+        },
+        span,
+    }
+}
+
+fn build_machine_config_field_value_from_runtime_expr(
+    field: &StructDefField,
+    runtime_var_name: &str,
+    owner_machine_id_expr: Expr,
+    index: u64,
+    machine_field_layouts: &HashMap<String, Vec<StructDefField>>,
+    node_id_gen: &mut NodeIdGen,
+    span: Span,
+) -> Expr {
+    match &field.ty.kind {
+        TypeExprKind::Named { ident, type_args } if ident == "u64" && type_args.is_empty() => {
+            machine_config_word_expr(
+                runtime_var_name,
+                owner_machine_id_expr,
+                index,
+                node_id_gen,
+                span,
+            )
+        }
+        TypeExprKind::Named { ident, type_args }
+            if type_args.is_empty() && machine_field_layouts.contains_key(ident) =>
+        {
+            let nested_machine_id = machine_config_word_expr(
+                runtime_var_name,
+                owner_machine_id_expr,
+                index,
+                node_id_gen,
+                span,
+            );
+            build_machine_handle_from_runtime_expr(
+                ident,
+                runtime_var_name,
+                nested_machine_id,
+                machine_field_layouts,
+                node_id_gen,
+                span,
+            )
+        }
+        _ => panic!(
+            "compiler bug: unsupported runtime-dispatched machine field type `{}` on `{}`",
+            field.ty, field.name
+        ),
+    }
+}
+
 fn eq_var_to_int(name: &str, value: u64, node_id_gen: &mut NodeIdGen, span: Span) -> Expr {
     Expr {
         id: node_id_gen.new_id(),
@@ -3113,6 +3362,39 @@ fn return_enum_error_if_zero(
                 },
                 span,
             }),
+        },
+        span,
+    }
+}
+
+fn return_u64_if_zero(value_var: &str, node_id_gen: &mut NodeIdGen, span: Span) -> Expr {
+    Expr {
+        id: node_id_gen.new_id(),
+        kind: ExprKind::If {
+            cond: Box::new(Expr {
+                id: node_id_gen.new_id(),
+                kind: ExprKind::BinOp {
+                    left: Box::new(var_expr(value_var, node_id_gen, span)),
+                    op: BinaryOp::Eq,
+                    right: Box::new(int_expr(0, node_id_gen, span)),
+                },
+                span,
+            }),
+            then_body: Box::new(Expr {
+                id: node_id_gen.new_id(),
+                kind: ExprKind::Block {
+                    items: vec![BlockItem::Stmt(StmtExpr {
+                        id: node_id_gen.new_id(),
+                        kind: StmtExprKind::Return {
+                            value: Some(Box::new(int_expr(0, node_id_gen, span))),
+                        },
+                        span,
+                    })],
+                    tail: None,
+                },
+                span,
+            }),
+            else_body: Box::new(empty_block_expr(node_id_gen, span)),
         },
         span,
     }

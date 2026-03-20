@@ -2102,6 +2102,110 @@ fn linear_type_derived_interaction_auto_correlates_reply_without_manual_deliver(
 }
 
 #[test]
+fn linear_type_derived_interaction_auto_correlates_reply_across_machines() {
+    let run = run_program(
+        "linear_type_derived_interaction_auto_correlates_reply_across_machines",
+        r#"
+            type AuthCheck = {
+                order_id: u64,
+            }
+
+            type AuthApproved = {
+                order_id: u64,
+            }
+
+            @linear
+            type Order = {
+                id: u64,
+
+                states {
+                    Draft,
+                    PendingAuth,
+                    Confirmed,
+                }
+
+                actions {
+                    submit(auth: Machine<AuthService>): Draft -> PendingAuth,
+                }
+
+                triggers {
+                    AuthApproved: PendingAuth -> Confirmed,
+                }
+
+                roles {
+                    Author { submit }
+                }
+            }
+
+            Order :: {
+                fn submit(self, _auth: Machine<AuthService>) -> PendingAuth {
+                    PendingAuth {}
+                }
+            }
+
+            machine OrderService hosts Order(key: id) {
+                fn new() -> Self {
+                    Self {}
+                }
+
+                trigger AuthApproved(pending) {
+                    pending;
+                    Confirmed {}
+                }
+
+                action submit(draft, auth: Machine<AuthService>) -> PendingAuth {
+                    send(auth, AuthCheck { order_id: draft.id });
+                    draft;
+                    PendingAuth {}
+                }
+            }
+
+            machine AuthService hosts Order(key: id) {
+                fields {
+                    order_service: Machine<OrderService>,
+                }
+
+                fn new(order_service: Machine<OrderService>) -> Self {
+                    Self { order_service: order_service }
+                }
+
+                trigger AuthApproved(pending) {
+                    pending;
+                    Confirmed {}
+                }
+
+                on AuthCheck(check) {
+                    send(self.order_service, AuthApproved { order_id: check.order_id });
+                }
+            }
+
+            fn main() -> () | MachineError | SessionError {
+                let order_service = OrderService::spawn()?;
+                let auth_service = AuthService::spawn(order_service)?;
+                let draft = order_service.create(Order as Author)?;
+                let pending = draft.submit(auth_service)?;
+                let next = pending.wait()?;
+                match next {
+                    Order::Confirmed(_) => println("confirmed"),
+                    Order::PendingAuth(_) => println("pending"),
+                    Order::Draft(_) => println("draft"),
+                };
+                ()
+            }
+        "#,
+    );
+
+    assert_eq!(run.status.code(), Some(0));
+    let stdout = String::from_utf8_lossy(&run.stdout);
+    assert_eq!(
+        stdout,
+        "confirmed
+",
+        "recognized derived interactions should auto-correlate replies across separate requester and responder machines"
+    );
+}
+
+#[test]
 fn linear_type_non_qualifying_send_keeps_fire_and_forget_behavior() {
     let run = run_program(
         "linear_type_non_qualifying_send_keeps_fire_and_forget_behavior",

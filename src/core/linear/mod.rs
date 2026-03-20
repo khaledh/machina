@@ -72,6 +72,11 @@ pub fn desugar_module(
         machine::rewrite_machine_constructor_self_types(module, &machine_infos);
         machine::rewrite_public_machine_handle_types(module, &machine_infos);
 
+        // The linear index stores AST-level type expressions (including action
+        // params), so refresh it after rewriting public `Machine<T>` surface
+        // types into concrete handle structs.
+        *linear_index = build_linear_index(module);
+
         // Re-collect after the source-facing rewrites so generated spawn helpers
         // see constructor bodies and handle-typed params in their lowered form.
         machine_infos = machine::collect_machine_spawn_infos(module);
