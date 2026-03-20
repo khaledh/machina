@@ -3,7 +3,9 @@
 > This document walks through a cross-machine auth-check scenario using only
 > V1 primitives (`send`, `on`, `self.deliver()`, manual correlation). The goal
 > is to surface the exact pain points that a V2 interaction model should
-> address.
+> address. The second half of the document shows the narrower V2 slice that is
+> now implemented: recognized derived interactions can auto-correlate replies
+> without manual `self.deliver(...)`.
 
 ## Scenario
 
@@ -326,74 +328,81 @@ an interaction type would declare states (Pending, Approved, Denied, TimedOut),
 enforce linear consumption (must be resolved), and carry correlation
 implicitly.
 
-## Conceptual Rewrite with an Interaction Handle
+## Implemented V2 Slice: Derived Interaction Auto-Correlation
 
-The V1 walkthrough above is still useful because it makes the pain visible.
-The next question is whether the interaction-handle concept from
-[12-interaction-handle.md](12-interaction-handle.md) actually reduces that
-pain in a meaningful way.
+The conceptual direction above is no longer purely hypothetical. Machina now
+implements a narrow derived-interaction slice for recognized patterns:
 
-This section stays deliberately conceptual. It does **not** choose final
-syntax. The point is to test the model, not the spelling.
+- one distinguished `send(...)` in the action override
+- the action transitions into a trigger-only waiting state
+- the waiting state's outgoing triggers define the allowed reply set
 
-### Conceptual Shift
+When that pattern is recognized, the outgoing request is treated as a derived
+interaction and matching replies can resolve the waiting instance
+automatically.
 
-In V1, the auth check is represented indirectly:
-- `OrderService` sends `AuthCheck`
-- `AuthService` later sends `AuthApproved` or `AuthDenied`
-- `OrderService` manually correlates the reply back to the waiting order
+### Working Cross-Machine Shape
 
-With an interaction handle, the request is still delivered by directed send,
-but the pending auth check is also represented as a typed value:
-- the outgoing request creates a pending interaction handle
-- the interaction handle carries correlation identity
-- later replies resolve that interaction rather than being matched purely by
-  user-managed fields
-
-So the conceptual change is:
-- **V1**: send now, manually reconstruct the conversation later
-- **V2 direction**: send now, keep the conversation alive as a typed value
-
-### Conceptual OrderService Rewrite
-
-In V1, the submit override is:
+The currently working shape looks like this:
 
 ```mc
-action submit(draft) -> PendingAuth {
-    send(self.auth_service, AuthCheck {
-        order_id: draft.id,
-        user_id: draft.user_id,
-    });
-    draft.submit()
+@linear
+type Order = {
+    id: u64,
+
+    states {
+        Draft,
+        PendingAuth,
+        Confirmed,
+    }
+
+    actions {
+        submit(auth: Machine<AuthService>): Draft -> PendingAuth,
+    }
+
+    triggers {
+        AuthApproved: PendingAuth -> Confirmed,
+    }
+
+    roles {
+        Buyer { submit }
+    }
+}
+
+machine OrderService hosts Order(key: id) {
+    fn new() -> Self {
+        Self {}
+    }
+
+    trigger AuthApproved(pending) {
+        pending;
+        Confirmed {}
+    }
+
+    action submit(draft, auth: Machine<AuthService>) -> PendingAuth {
+        send(auth, AuthCheck { order_id: draft.id });
+        draft;
+        PendingAuth {}
+    }
+}
+
+machine AuthService hosts Order(key: id) {
+    fields {
+        order_service: Machine<OrderService>,
+    }
+
+    fn new(order_service: Machine<OrderService>) -> Self {
+        Self { order_service: order_service }
+    }
+
+    on AuthCheck(check) {
+        send(self.order_service, AuthApproved { order_id: check.order_id });
+    }
 }
 ```
 
-Conceptually, with an interaction handle:
-
-```mc
-action submit(draft) -> PendingAuth {
-    // Directed send still performs the routing.
-    // The important difference is that the auth check also creates a
-    // pending interaction value associated with this order.
-    send(self.auth_service, AuthCheck {
-        order_id: draft.id,
-        user_id: draft.user_id,
-    });
-
-    // Conceptually: store or attach the pending interaction to the waiting
-    // order/session rather than rebuilding the connection from raw fields.
-    draft.submit()
-}
-```
-
-The routing step is unchanged. The semantic difference is that the machine now
-has something explicit to resolve later:
-- not just "some reply might arrive"
-- but "this specific auth interaction is pending"
-
-### Conceptual Reply Handling Rewrite
-
-In V1, reply handling is shaped around raw event correlation:
+The important difference from the V1 flow is that `OrderService` no longer
+needs:
 
 ```mc
 on AuthApproved(approval) {
@@ -401,72 +410,65 @@ on AuthApproved(approval) {
 }
 ```
 
-Conceptually, with an interaction handle, reply handling is shaped around
-resolving the pending interaction first and only then driving the entity:
+The derived interaction created at the recognized `send(...)` site carries the
+correlation underneath. When `AuthApproved` comes back from `AuthService`, the
+runtime can match it to the waiting `PendingAuth` instance and drive the
+`AuthApproved: PendingAuth -> Confirmed` trigger automatically.
+
+### What Is Automatic
+
+For recognized derived interactions, the compiler/runtime now handles:
+
+1. creating hidden pending interaction state at the request `send(...)` site
+2. routing reply transport through the runtime's correlation machinery
+3. matching the reply back to the waiting instance
+4. resolving the trigger transition without manual `self.deliver(...)`
+
+At the client surface, this means the workflow becomes:
 
 ```mc
-on AuthApproved(approval) {
-    // Conceptually:
-    // 1. resolve the pending auth interaction for this reply
-    // 2. then deliver the resolved result to the waiting order
-}
+let pending = draft.submit(auth_service)?;
+let next = pending.wait()?;
 ```
 
-This is where the design earns its keep. If the interaction-handle model is
-real, the compiler/runtime should help with:
-- finding the correct in-flight interaction
-- rejecting replies that do not match an active interaction
-- preserving the connection between the request and the allowed reply set
+There is no reply-side manual key reconstruction in source.
 
-### What Gets Simpler
+### What Is Still Manual or Open
 
-The interaction-handle concept appears to improve several things immediately:
+The implemented slice is intentionally narrow. These parts are still manual or
+not yet designed:
 
-1. **Correlation has a home**
-   - Instead of threading `order_id` through every reply path as ad hoc
-     bookkeeping, the interaction itself owns the pending link between request
-     and reply.
+1. **Recognition is pattern-based**
+   - Non-qualifying `send(...)` still behaves as plain V1 fire-and-forget.
 
-2. **Reply handling becomes about resolution**
-   - The machine is no longer just receiving unrelated `AuthApproved` values.
-     It is resolving a known pending auth interaction.
+2. **Timeouts**
+   - A waiting interaction can still hang forever if no reply arrives.
 
-3. **The model names the missing state explicitly**
-   - In V1, "waiting for auth" exists only implicitly in the combination of:
-     `PendingAuth` state + copied ids + later `on` handlers.
-   - With an interaction handle, the waiting conversation becomes an explicit
-     thing the system can reason about.
+3. **Duplicate and unmatched reply policy**
+   - The runtime now auto-correlates matching replies, but broader policy for
+     duplicates and stray replies is still an open design question.
 
-### What Does *Not* Get Simpler Yet
+4. **Reply completeness**
+   - The compiler still does not prove that every branch on the responder side
+     eventually produces one of the expected replies.
 
-This conceptual rewrite is useful partly because it shows what remains open:
+5. **Circular wiring**
+   - The cross-machine proof above avoids the circular-handle problem by
+     passing `Machine<AuthService>` into the action call rather than storing it
+     on `OrderService`.
 
-1. **Timeouts are still unspecified**
-   - A pending interaction needs a way to become `TimedOut`, but this note does
-     not define it yet.
+### Practical Result
 
-2. **Duplicate replies are still unspecified**
-   - Resolving the same interaction twice should probably be rejected, but that
-     rule has not been designed yet.
+This is the first point where the interaction design reduces real auth-check
+bookkeeping:
 
-3. **Reply completeness is still unspecified**
-   - The model suggests an expected reply set, but does not yet say how or when
-     the compiler checks it.
+- V1 still shows the original pain clearly
+- the implemented derived-interaction slice removes manual `self.deliver(...)`
+  correlation for recognized request/reply flows
+- the remaining gaps are now much narrower and easier to reason about
 
-4. **Circular handle wiring is only partially addressed**
-   - The interaction handle may reduce the need to model both directions as raw
-     machine handles, but the exact routing/return-address story is still open.
-
-### Pressure-Test Result
-
-This rewrite suggests that the interaction-handle model is worth continuing:
-- it does **not** change the routing story
-- it gives correlation a proper semantic home
-- and it turns "waiting for a reply" into something the language could
-  represent directly
-
-But it also shows the next design question clearly:
-- once a pending interaction exists, **what are its resolution rules?**
-
-That is the next focused design step. See
-[13-interaction-resolution.md](13-interaction-resolution.md).
+The deeper design notes still matter:
+- [12-interaction-handle.md](12-interaction-handle.md)
+- [13-interaction-resolution.md](13-interaction-resolution.md)
+- [14-correlation-identity.md](14-correlation-identity.md)
+- [15-interaction-handle-value.md](15-interaction-handle-value.md)
