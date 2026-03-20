@@ -1119,6 +1119,25 @@ fn test_partial_indexing_returns_subarray() {
 }
 
 #[test]
+fn test_dyn_array_index_retries_after_call_resolution() {
+    let source = r#"
+        fn make() -> string[*] {
+            var xs: string[*] = [];
+            let s = "hi";
+            xs.append(move s);
+            xs
+        }
+
+        fn test() -> string {
+            let argv = make();
+            argv[0]
+        }
+    "#;
+
+    let _ctx = type_check_source(source).expect("Failed to type check");
+}
+
+#[test]
 fn test_assignment_to_multidim_array_element() {
     let source = r#"
         fn test() -> u64 {
@@ -2451,6 +2470,30 @@ fn test_for_slice_typechecks() {
             var acc = 0;
             for x in xs { acc = acc + x; }
             acc
+        }
+    "#;
+
+    let _ctx = type_check_source(source).expect("Failed to type check");
+}
+
+#[test]
+fn test_for_dyn_array_from_call_retries_after_call_resolution() {
+    let source = r#"
+        fn make() -> string[*] {
+            var xs: string[*] = [];
+            let a = "alpha";
+            let b = "beta";
+            xs.append(move a);
+            xs.append(move b);
+            xs
+        }
+
+        fn test() -> u64 {
+            var count: u64 = 0;
+            for line in make() {
+                count = count + line.len;
+            }
+            count
         }
     "#;
 

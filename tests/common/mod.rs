@@ -8,6 +8,10 @@ use std::fs;
 static TEST_COUNTER: AtomicUsize = AtomicUsize::new(0);
 
 pub(crate) fn run_program(name: &str, source: &str) -> Output {
+    run_program_with_args(name, source, &[])
+}
+
+pub(crate) fn run_program_with_args(name: &str, source: &str, args: &[&str]) -> Output {
     run_program_with_opts(
         name,
         source,
@@ -19,10 +23,16 @@ pub(crate) fn run_program(name: &str, source: &str) -> Output {
             trace_drops: false,
             inject_prelude: true,
         },
+        args,
     )
 }
 
-pub(crate) fn run_program_with_opts(name: &str, source: &str, opts: CompileOptions) -> Output {
+pub(crate) fn run_program_with_opts(
+    name: &str,
+    source: &str,
+    opts: CompileOptions,
+    args: &[&str],
+) -> Output {
     let repo_root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
     let run_id = TEST_COUNTER.fetch_add(1, Ordering::Relaxed);
     let temp_dir = std::env::temp_dir().join(format!(
@@ -47,6 +57,7 @@ pub(crate) fn run_program_with_opts(name: &str, source: &str, opts: CompileOptio
     link_exe(&exe_path, &asm_path, &runtime_sources, &[prelude_obj]);
 
     let run = Command::new(&exe_path)
+        .args(args)
         .output()
         .expect("failed to run executable");
     let _ = fs::remove_dir_all(&temp_dir);
@@ -127,6 +138,7 @@ fn compile_prelude_impl(repo_root: &Path, temp_dir: &Path) -> PathBuf {
 fn runtime_sources(repo_root: &Path) -> Vec<PathBuf> {
     vec![
         repo_root.join("runtime").join("alloc.c"),
+        repo_root.join("runtime").join("args.c"),
         repo_root.join("runtime").join("conv.c"),
         repo_root.join("runtime").join("dyn_array.c"),
         repo_root.join("runtime").join("hash_table.c"),

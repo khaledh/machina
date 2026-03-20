@@ -110,7 +110,7 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
 
                     if let Some(tail) = tail {
                         lowerer.annotate_expr(tail);
-                        return match lowerer.lower_value_expr(tail)? {
+                        return match lowerer.lower_consuming_value_expr(tail)? {
                             BranchResult::Value(value) => {
                                 let tail_sem_ty = lowerer
                                     .type_map
@@ -130,12 +130,18 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
                         };
                     }
 
-                    // Blocks without a tail produce unit.
-                    let ty = lowerer
-                        .type_lowerer
-                        .lower_type_id(lowerer.type_map.type_of(expr.id));
-                    let value = lowerer.builder.const_unit(ty);
-                    Ok(BranchResult::Value(value))
+                    // Blocks without a tail produce semantic unit, which may still
+                    // need coercion into the block expression's declared type
+                    // (for example `() | E` success values).
+                    let unit_ty = lowerer.type_lowerer.lower_type(&Type::Unit);
+                    let value = lowerer.builder.const_unit(unit_ty);
+                    let block_sem_ty = lowerer
+                        .type_map
+                        .type_table()
+                        .get(lowerer.type_map.type_of(expr.id))
+                        .clone();
+                    let coerced = lowerer.coerce_value(value, &Type::Unit, &block_sem_ty);
+                    Ok(BranchResult::Value(coerced))
                 })
             }
 

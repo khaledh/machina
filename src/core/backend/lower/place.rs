@@ -99,7 +99,7 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
 
                         // Walk indices and compute element/sub-array type in each step.
                         for index_expr in indices {
-                            let index_val = self.lower_linear_value_expr(index_expr)?;
+                            let index_val = self.lower_index_value(index_expr)?;
                             let Type::Array { dims, .. } = &curr_ty else {
                                 panic!("backend array index too many indices for {:?}", curr_ty);
                             };
@@ -140,7 +140,7 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
                         let elem_ir_ty = self.type_lowerer.lower_type(&elem_ty);
                         let elem_ptr_ty = self.type_lowerer.ptr_to(elem_ir_ty);
                         let view = self.load_slice_view(base_addr, elem_ptr_ty);
-                        let index_val = self.lower_linear_value_expr(&indices[0])?;
+                        let index_val = self.lower_index_value(&indices[0])?;
                         let addr = self.index_with_bounds(view, index_val, elem_ptr_ty);
                         Ok(PlaceAddr {
                             addr,
@@ -162,7 +162,7 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
                         let u8_ty = self.type_lowerer.lower_type(&Type::uint(8));
                         let u8_ptr_ty = self.type_lowerer.ptr_to(u8_ty);
                         let view = self.load_string_view(base_addr);
-                        let index_val = self.lower_linear_value_expr(&indices[0])?;
+                        let index_val = self.lower_index_value(&indices[0])?;
                         let addr = self.index_with_bounds(view, index_val, u8_ptr_ty);
                         Ok(PlaceAddr {
                             addr,
@@ -186,7 +186,7 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
                         let elem_ir_ty = self.type_lowerer.lower_type(&elem_ty);
                         let elem_ptr_ty = self.type_lowerer.ptr_to(elem_ir_ty);
                         let view = self.load_dyn_array_view(base_addr, elem_ptr_ty);
-                        let index_val = self.lower_linear_value_expr(&indices[0])?;
+                        let index_val = self.lower_index_value(&indices[0])?;
                         let addr = self.index_with_bounds(view, index_val, elem_ptr_ty);
                         Ok(PlaceAddr {
                             addr,
@@ -362,5 +362,14 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
         } else {
             value
         }
+    }
+
+    fn lower_index_value(&mut self, expr: &Expr) -> Result<ValueId, LowerToIrError> {
+        let value = self.lower_linear_value_expr(expr)?;
+        let from_ty = self
+            .type_lowerer
+            .lower_type_id(self.type_map.type_of(expr.id));
+        let u64_ty = self.type_lowerer.lower_type(&Type::uint(64));
+        Ok(self.cast_int_if_needed(value, from_ty, u64_ty))
     }
 }

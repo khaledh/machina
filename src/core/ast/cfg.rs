@@ -1,7 +1,7 @@
 //! Parsed-ast-based CFG construction.
 
 use crate::core::analysis::dataflow::DataflowGraph;
-use crate::core::ast::{BindPattern, BlockItem, Expr, ExprKind, StmtExpr, StmtExprKind};
+use crate::core::ast::{BindPattern, BlockItem, Expr, ExprKind, NodeId, StmtExpr, StmtExprKind};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct AstBlockId(pub usize);
@@ -25,6 +25,7 @@ pub struct CfgNode<'a> {
     pub items: Vec<CfgItem<'a>>,
     pub term: CfgTerminator<'a>,
     pub loop_inits: Vec<&'a BindPattern>,
+    pub binding_inits: Vec<NodeId>,
 }
 
 pub struct Cfg<'a> {
@@ -72,6 +73,7 @@ impl<'a> CfgBuilder<'a> {
             items: Vec::new(),
             term: CfgTerminator::End,
             loop_inits: Vec::new(),
+            binding_inits: Vec::new(),
         });
         self.succs.push(Vec::new());
         id
@@ -91,6 +93,10 @@ impl<'a> CfgBuilder<'a> {
 
     fn push_loop_init(&mut self, block: AstBlockId, pattern: &'a BindPattern) {
         self.nodes[block.0].loop_inits.push(pattern);
+    }
+
+    fn push_binding_init(&mut self, block: AstBlockId, binding: NodeId) {
+        self.nodes[block.0].binding_inits.push(binding);
     }
 
     pub fn build_from_expr(self, expr: &'a Expr) -> Cfg<'a> {
@@ -116,7 +122,7 @@ impl<'a> CfgBuilder<'a> {
                     curr_bb = self.handle_stmt(curr_bb, stmt);
                 }
                 BlockItem::Expr(expr) => match &expr.kind {
-                    ExprKind::If { .. } => {
+                    ExprKind::If { .. } | ExprKind::Block { .. } => {
                         curr_bb = self.handle_expr(curr_bb, expr);
                     }
                     _ => {
@@ -128,8 +134,15 @@ impl<'a> CfgBuilder<'a> {
         }
 
         if let Some(tail) = tail {
-            self.push_item(curr_bb, CfgItem::Expr(tail));
-            curr_bb = self.handle_expr(curr_bb, tail);
+            match &tail.kind {
+                ExprKind::If { .. } | ExprKind::Block { .. } => {
+                    curr_bb = self.handle_expr(curr_bb, tail);
+                }
+                _ => {
+                    self.push_item(curr_bb, CfgItem::Expr(tail));
+                    curr_bb = self.handle_expr(curr_bb, tail);
+                }
+            }
         }
 
         BlockRange {
@@ -204,9 +217,14 @@ impl<'a> CfgBuilder<'a> {
 
                 exit_bb
             }
-            StmtExprKind::Using { body, .. } => {
-                self.push_item(curr_bb, CfgItem::Stmt(stmt));
+            StmtExprKind::Using {
+                binding,
+                value,
+                body,
+            } => {
+                self.push_item(curr_bb, CfgItem::Expr(value));
                 let body_range = self.build_block_expr(body);
+                self.push_binding_init(body_range.entry, binding.id);
                 self.set_term(curr_bb, CfgTerminator::Goto(body_range.entry));
                 self.push_edge(curr_bb, body_range.entry);
                 body_range.exit
@@ -245,6 +263,16 @@ impl<'a> CfgBuilder<'a> {
 
     fn handle_expr(&mut self, cur: AstBlockId, expr: &'a Expr) -> AstBlockId {
         match &expr.kind {
+            ExprKind::Block { .. } => {
+                let body_range = self.build_block_expr(expr);
+                let join = self.new_block();
+
+                self.set_term(cur, CfgTerminator::Goto(body_range.entry));
+                self.push_edge(cur, body_range.entry);
+                self.push_edge(body_range.exit, join);
+
+                join
+            }
             ExprKind::If {
                 cond,
                 then_body,

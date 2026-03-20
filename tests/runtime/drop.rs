@@ -84,7 +84,7 @@ fn assert_no_leak_or_double_free(output: &std::process::Output) {
 
 fn assert_fixture_no_leak(name: &str) {
     let source = load_fixture(name);
-    let run = run_program_with_opts(name, &source, trace_opts());
+    let run = run_program_with_opts(name, &source, trace_opts(), &[]);
     assert_eq!(run.status.code(), Some(0));
     assert_no_leak_or_double_free(&run);
 }

@@ -3,7 +3,7 @@
 use crate::core::ast::format_compact::{
     format_semantic_stmt_compact, format_semantic_value_expr_compact,
 };
-use crate::core::ast::{Expr, FuncDef, MethodDef, Module, NodeId, ParamMode, StmtExpr};
+use crate::core::ast::{Expr, ExprKind, FuncDef, MethodDef, Module, NodeId, ParamMode, StmtExpr};
 use crate::core::backend::lower::LowerToIrError;
 use crate::core::backend::lower::drop_glue::DropGlueRegistry;
 use crate::core::backend::lower::drops::DropManager;
@@ -584,6 +584,20 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
         }
     }
 
+    /// Lowers a value expression in a consuming context such as block tails or
+    /// returns. When elaboration left a local owned value as `Load(var)`, we
+    /// need to move it out instead of loading and then dropping it in the
+    /// callee epilogue.
+    pub(super) fn lower_consuming_value_expr(
+        &mut self,
+        expr: &Expr,
+    ) -> Result<BranchResult, LowerToIrError> {
+        if let Some(value) = self.try_lower_consuming_local_load(expr) {
+            return Ok(BranchResult::Value(value));
+        }
+        self.lower_value_expr(expr)
+    }
+
     /// Lowers a value expression and returns `None` if it forces an early return.
     ///
     /// This is used by linear lowering to evaluate subexpressions that may contain
@@ -596,6 +610,28 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
             BranchResult::Value(value) => Ok(Some(value)),
             BranchResult::Return => Ok(None),
         }
+    }
+
+    fn try_lower_consuming_local_load(&mut self, expr: &Expr) -> Option<ValueId> {
+        let ExprKind::Load { expr: place } = &expr.kind else {
+            return None;
+        };
+        let ExprKind::Var { .. } = place.kind else {
+            return None;
+        };
+
+        let sem_ty = self
+            .type_map
+            .type_table()
+            .get(self.type_map.type_of(expr.id))
+            .clone();
+        if !sem_ty.needs_drop() {
+            return None;
+        }
+
+        let def_id = self.def_table.def_id(place.id);
+        self.set_drop_flag_for_def(def_id, false);
+        Some(self.load_local_value(def_id))
     }
 }
 

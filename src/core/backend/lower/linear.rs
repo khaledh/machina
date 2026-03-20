@@ -439,7 +439,7 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
 
             StmtExprKind::Return { value } => {
                 let value = match value {
-                    Some(expr) => match self.lower_value_expr_value(expr)? {
+                    Some(expr) => match self.lower_consuming_value_expr(expr)? {
                         BranchResult::Value(value) => {
                             let ty = self
                                 .type_map
@@ -526,23 +526,34 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
 
             if let Some(tail) = tail {
                 lowerer.annotate_expr(tail);
-                let tail_value = lowerer.lower_linear_value_expr(tail)?;
-                let tail_sem_ty = lowerer
-                    .type_map
-                    .type_table()
-                    .get(lowerer.type_map.type_of(tail.id))
-                    .clone();
-                let block_sem_ty = lowerer
-                    .type_map
-                    .type_table()
-                    .get(lowerer.type_map.type_of(expr.id))
-                    .clone();
-                let coerced = lowerer.coerce_value(tail_value, &tail_sem_ty, &block_sem_ty);
-                return Ok(coerced.into());
+                return match lowerer.lower_consuming_value_expr(tail)? {
+                    BranchResult::Value(value) => {
+                        let tail_sem_ty = lowerer
+                            .type_map
+                            .type_table()
+                            .get(lowerer.type_map.type_of(tail.id))
+                            .clone();
+                        let block_sem_ty = lowerer
+                            .type_map
+                            .type_table()
+                            .get(lowerer.type_map.type_of(expr.id))
+                            .clone();
+                        let coerced = lowerer.coerce_value(value, &tail_sem_ty, &block_sem_ty);
+                        Ok(coerced.into())
+                    }
+                    BranchResult::Return => Ok(BranchResult::Return),
+                };
             }
 
-            let ty = lowerer.type_lowerer.lower_type_id(lowerer.type_map.type_of(expr.id));
-            Ok(lowerer.builder.const_unit(ty).into())
+            let unit_ty = lowerer.type_lowerer.lower_type(&Type::Unit);
+            let value = lowerer.builder.const_unit(unit_ty);
+            let block_sem_ty = lowerer
+                .type_map
+                .type_table()
+                .get(lowerer.type_map.type_of(expr.id))
+                .clone();
+            let coerced = lowerer.coerce_value(value, &Type::Unit, &block_sem_ty);
+            Ok(coerced.into())
         })
     }
 

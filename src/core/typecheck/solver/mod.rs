@@ -644,6 +644,21 @@ fn should_retry_post_call_expr_obligation(
             let owner_ty = term_utils::peel_heap(term_utils::resolve_term(target, unifier));
             term_utils::is_unresolved(&owner_ty)
         }
+        ExprObligation::ForIter { iter, pattern, .. } => {
+            let iter_ty = term_utils::resolve_term(iter, unifier);
+            let pattern_ty = term_utils::resolve_term(pattern, unifier);
+            term_utils::is_unresolved(&iter_ty) || term_utils::is_unresolved(&pattern_ty)
+        }
+        ExprObligation::ArrayIndex { target, result, .. } => {
+            let owner_ty = term_utils::peel_heap(term_utils::resolve_term(target, unifier));
+            let result_ty = term_utils::resolve_term(result, unifier);
+            term_utils::is_unresolved(&owner_ty) || term_utils::is_unresolved(&result_ty)
+        }
+        ExprObligation::Slice { target, result, .. } => {
+            let owner_ty = term_utils::peel_heap(term_utils::resolve_term(target, unifier));
+            let result_ty = term_utils::resolve_term(result, unifier);
+            term_utils::is_unresolved(&owner_ty) || term_utils::is_unresolved(&result_ty)
+        }
         ExprObligation::Try {
             callable_def_id: _, ..
         } => true,

@@ -124,6 +124,43 @@ fn test_signed_bounds_rejects_out_of_range_literal() {
 }
 
 #[test]
+fn test_nested_block_for_binding_is_initialized() {
+    let source = r#"
+        fn test() {
+            {
+                for line in 0..2 {
+                    let copy = line;
+                    copy;
+                }
+            }
+        }
+    "#;
+
+    let _ctx = sem_check_source(source).expect("Failed to sem check");
+}
+
+#[test]
+fn test_using_body_for_binding_is_initialized() {
+    let source = r#"
+        fn source() -> u64 {
+            1
+        }
+
+        fn test() {
+            using value = source() {
+                for line in 0..2 {
+                    let copy = line;
+                    copy;
+                }
+                value;
+            }
+        }
+    "#;
+
+    let _ctx = sem_check_source(source).expect("Failed to sem check");
+}
+
+#[test]
 fn test_range_out_of_bounds_via_const_binding() {
     let source = r#"
         type MidRange = u64: bounds(50, 100);

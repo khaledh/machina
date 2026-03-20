@@ -1,4 +1,4 @@
-use crate::common::run_program;
+use crate::common::{run_program, run_program_with_args};
 use machina::core::capsule::CapsuleError;
 use machina::core::diag::CompileError;
 use machina::core::typecheck::TypeCheckErrorKind;
@@ -142,6 +142,162 @@ fn test_std_io_file_open_read_write_close_roundtrip() {
 
     let stdout = String::from_utf8_lossy(&run.stdout);
     assert_eq!(stdout, "abc\n\n", "unexpected stdout: {stdout}");
+}
+
+#[test]
+fn test_returned_dyn_array_keeps_elements_alive() {
+    let run = run_program(
+        "returned_dyn_array_keeps_elements_alive",
+        r#"
+            requires {
+                std::io::println
+            }
+
+            fn make() -> u64[*] {
+                var xs: u64[*] = [];
+                xs.append(11);
+                xs.append(22);
+                xs
+            }
+
+            fn main() {
+                let xs = make();
+                println(xs.len);
+                println(xs[0]);
+                println(xs[1]);
+            }
+        "#,
+    );
+    assert_eq!(run.status.code(), Some(0));
+
+    let stdout = String::from_utf8_lossy(&run.stdout);
+    assert_eq!(stdout, "2\n11\n22\n", "unexpected stdout: {stdout}");
+}
+
+#[test]
+fn test_args_error_union_early_return_builds_and_runs() {
+    let run = run_program(
+        "args_error_union_early_return",
+        r#"
+            requires {
+                std::env::args
+                std::io::IoError
+            }
+
+            fn main() -> () | IoError {
+                let argv = args();
+                if argv.len < 3 {
+                    println("usage");
+                    return ();
+                };
+            }
+        "#,
+    );
+    assert_eq!(run.status.code(), Some(0));
+
+    let stdout = String::from_utf8_lossy(&run.stdout);
+    assert_eq!(stdout, "usage\n", "unexpected stdout: {stdout}");
+}
+
+#[test]
+fn test_args_indexing_builds_and_runs_in_error_union_main() {
+    let run = run_program_with_args(
+        "args_indexing_error_union_main",
+        r#"
+            requires {
+                std::env::args
+                std::io::IoError
+            }
+
+            fn main() -> () | IoError {
+                let argv = args();
+                if argv.len < 3 {
+                    println("usage");
+                    return ();
+                };
+
+                let path = argv[1];
+                let needle = argv[2];
+                println(path);
+                println(needle);
+            }
+        "#,
+        &["alpha", "beta"],
+    );
+    assert_eq!(run.status.code(), Some(0));
+
+    let stdout = String::from_utf8_lossy(&run.stdout);
+    assert_eq!(stdout, "alpha\nbeta\n", "unexpected stdout: {stdout}");
+}
+
+#[test]
+fn test_string_lines_returns_owned_lines_without_newlines() {
+    let run = run_program(
+        "string_lines_returns_owned_lines_without_newlines",
+        r#"
+            requires {
+                std::io::println
+            }
+
+            fn make_lines() -> string[*] {
+                var text: string = "";
+                text.append("alpha\n");
+                text.append("beta\r\n");
+                text.append("gamma");
+                text.lines()
+            }
+
+            fn main() {
+                let lines = make_lines();
+                println(lines.len);
+                println(lines[0]);
+                println(lines[1]);
+                println(lines[2]);
+            }
+        "#,
+    );
+    assert_eq!(run.status.code(), Some(0));
+
+    let stdout = String::from_utf8_lossy(&run.stdout);
+    assert_eq!(
+        stdout, "3\nalpha\nbeta\ngamma\n",
+        "unexpected stdout: {stdout}"
+    );
+}
+
+#[test]
+fn test_string_contains_finds_substrings() {
+    let run = run_program(
+        "string_contains_finds_substrings",
+        r#"
+            requires {
+                std::io::println
+            }
+
+            fn main() {
+                let text = "alpha beta";
+                if text.contains("alpha") {
+                    println("head");
+                };
+                if text.contains("beta") {
+                    println("tail");
+                };
+                if text.contains("") {
+                    println("empty");
+                };
+                if !text.contains("gamma") {
+                    println("miss");
+                };
+            }
+        "#,
+    );
+    assert_eq!(run.status.code(), Some(0));
+
+    let stdout = String::from_utf8_lossy(&run.stdout);
+    assert_eq!(
+        stdout, "head\ntail\nempty\nmiss\n",
+        "unexpected stdout: {stdout}"
+    );
 }
 
 #[test]

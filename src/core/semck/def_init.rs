@@ -643,6 +643,10 @@ impl<'a> DefInitChecker<'a> {
         for pattern in &node.loop_inits {
             self.mark_pattern_initialized(pattern);
         }
+        for binding_id in &node.binding_inits {
+            let def_id = self.ctx.def_table.def_id(*binding_id);
+            self.initialized.mark_full(def_id);
+        }
         for item in &node.items {
             match item {
                 CfgItem::Stmt(stmt) => self.check_stmt(stmt),
