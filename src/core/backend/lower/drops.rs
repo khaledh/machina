@@ -696,17 +696,16 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
         let u32_ty = self.type_lowerer.lower_type(&Type::uint(32));
         let u64_ty = self.type_lowerer.lower_type(&Type::uint(64));
         let bool_ty = self.type_lowerer.lower_type(&Type::Bool);
+        let unit_ty = self.type_lowerer.lower_type(&Type::Unit);
 
-        let cap_val = self.load_field(addr, 2, u32_ty);
-        let owned_mask = self.builder.const_int(0x8000_0000, false, 32, u32_ty);
-        let owned_bits = self.builder.binop(BinOp::And, cap_val, owned_mask, u32_ty);
-        let zero_u32 = self.builder.const_int(0, false, 32, u32_ty);
-        let is_owned = self.builder.cmp(CmpOp::Ne, owned_bits, zero_u32, bool_ty);
+        let is_unique_owner = self
+            .builder
+            .call(Callee::Runtime(RuntimeFn::DynArrayRelease), vec![addr], bool_ty);
 
         let owned_bb = self.builder.add_block();
         let ret_bb = self.builder.add_block();
         self.builder.terminate(Terminator::CondBr {
-            cond: is_owned,
+            cond: is_unique_owner,
             then_bb: owned_bb,
             then_args: Vec::new(),
             else_bb: ret_bb,
@@ -758,10 +757,9 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
             self.builder.select_block(loop_done);
         }
 
-        let unit_ty = self.type_lowerer.lower_type(&Type::Unit);
         let _ = self
             .builder
-            .call(Callee::Runtime(RuntimeFn::Free), vec![ptr_val], unit_ty);
+            .call(Callee::Runtime(RuntimeFn::DynArrayFreeBacking), vec![addr], unit_ty);
         self.builder.terminate(Terminator::Br {
             target: ret_bb,
             args: Vec::new(),

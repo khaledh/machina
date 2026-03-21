@@ -1346,31 +1346,37 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
         let elem_size = layout.size();
         let elem_align = layout.align();
 
+        let len_val = self.builder.const_int(len_u32 as i128, false, 32, u32_ty);
+        let zero_u64 = self.builder.const_int(0, false, 64, u64_ty);
+        let zero_ptr = self.builder.cast(CastKind::IntToPtr, zero_u64, elem_ptr_ty);
+        let zero_u32 = self.builder.const_int(0, false, 32, u32_ty);
+        self.store_field(dyn_slot.addr, 0, elem_ptr_ty, zero_ptr);
+        self.store_field(dyn_slot.addr, 1, u32_ty, zero_u32);
+        self.store_field(dyn_slot.addr, 2, u32_ty, zero_u32);
+
+        let ensure_cap = self.builder.const_int(len_u32 as i128, false, 32, u32_ty);
+        let elem_size_val = self.builder.const_int(elem_size as i128, false, 64, u64_ty);
+        let elem_align_val = self.builder.const_int(elem_align as i128, false, 64, u64_ty);
+        let unit_ty = self.type_lowerer.lower_type(&Type::Unit);
+        let _ = self.builder.call(
+            Callee::Runtime(RuntimeFn::DynArrayEnsure),
+            vec![dyn_slot.addr, ensure_cap, elem_size_val, elem_align_val],
+            unit_ty,
+        );
+
         let data_ptr = if len_u32 == 0 || elem_size == 0 {
-            let zero = self.builder.const_int(0, false, 64, u64_ty);
-            self.builder.cast(CastKind::IntToPtr, zero, elem_ptr_ty)
+            zero_ptr
         } else {
             let bytes =
                 self.builder
                     .const_int((len_u32 as u64 * elem_size) as i128, false, 64, u64_ty);
-            let align = self
-                .builder
-                .const_int(elem_align as i128, false, 64, u64_ty);
-            let dst_ptr = self.builder.call(
-                Callee::Runtime(RuntimeFn::Alloc),
-                vec![bytes, align],
-                elem_ptr_ty,
-            );
-
-            let zero = self.builder.const_int(0, false, 64, u64_ty);
-            let src_ptr = self.builder.index_addr(source_addr, zero, elem_ptr_ty);
+            let src_ptr = self.builder.index_addr(source_addr, zero_u64, elem_ptr_ty);
+            let dst_ptr = self.load_field(dyn_slot.addr, 0, elem_ptr_ty);
             self.builder.memcopy(dst_ptr, src_ptr, bytes);
             dst_ptr
         };
 
-        let len_val = self.builder.const_int(len_u32 as i128, false, 32, u32_ty);
-        let cap_raw = (len_u32 | 0x8000_0000) as i128;
-        let cap_val = self.builder.const_int(cap_raw, false, 32, u32_ty);
+        let cap_val = self.load_field(dyn_slot.addr, 2, u32_ty);
 
         self.store_field(dyn_slot.addr, 0, elem_ptr_ty, data_ptr);
         self.store_field(dyn_slot.addr, 1, u32_ty, len_val);

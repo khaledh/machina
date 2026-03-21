@@ -17,6 +17,7 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
     pub(super) fn type_needs_owned_copy(&self, ty: &Type) -> bool {
         match ty {
             Type::String => true,
+            Type::DynArray { .. } => true,
             Type::Tuple { field_tys } => field_tys.iter().any(|field| self.type_needs_owned_copy(field)),
             Type::Struct { fields, .. } => fields.iter().any(|field| self.type_needs_owned_copy(&field.ty)),
             Type::Array { elem_ty, .. } => self.type_needs_owned_copy(elem_ty),
@@ -943,6 +944,13 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
             .call(Callee::Runtime(RuntimeFn::StringRetain), vec![addr], unit_ty);
     }
 
+    fn retain_dyn_array_at_addr(&mut self, addr: ValueId) {
+        let unit_ty = self.type_lowerer.lower_type(&Type::Unit);
+        let _ = self
+            .builder
+            .call(Callee::Runtime(RuntimeFn::DynArrayRetain), vec![addr], unit_ty);
+    }
+
     fn store_string_copy(&mut self, dst: ValueId, value: ValueId, ir_ty: IrTypeId) {
         let temp = self.materialize_value_slot(value, ir_ty);
         let layout = self.type_lowerer.ir_type_cache.layout(ir_ty);
@@ -952,6 +960,17 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
             .const_int(layout.size() as i128, false, 64, u64_ty);
         self.builder.memcopy(dst, temp.addr, len);
         self.retain_string_at_addr(dst);
+    }
+
+    fn store_dyn_array_copy(&mut self, dst: ValueId, value: ValueId, ir_ty: IrTypeId) {
+        let temp = self.materialize_value_slot(value, ir_ty);
+        let layout = self.type_lowerer.ir_type_cache.layout(ir_ty);
+        let u64_ty = self.type_lowerer.lower_type(&Type::uint(64));
+        let len = self
+            .builder
+            .const_int(layout.size() as i128, false, 64, u64_ty);
+        self.builder.memcopy(dst, temp.addr, len);
+        self.retain_dyn_array_at_addr(dst);
     }
 
     fn store_array_copy(
@@ -1023,6 +1042,10 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
         match ty {
             Type::String => {
                 self.store_string_copy(dst, value, ir_ty);
+                return;
+            }
+            Type::DynArray { .. } => {
+                self.store_dyn_array_copy(dst, value, ir_ty);
                 return;
             }
             Type::Tuple { field_tys } => {

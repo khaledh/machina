@@ -309,6 +309,18 @@ fn runtime_call_spec(runtime: &RuntimeFn) -> RuntimeCallSpec {
             args: &[Ptr, Ptr, Int, Int],
             ret: Unit,
         },
+        RuntimeFn::DynArrayRetain => RuntimeCallSpec {
+            args: &[Ptr],
+            ret: Unit,
+        },
+        RuntimeFn::DynArrayRelease => RuntimeCallSpec {
+            args: &[Ptr],
+            ret: RetBool,
+        },
+        RuntimeFn::DynArrayFreeBacking => RuntimeCallSpec {
+            args: &[Ptr],
+            ret: Unit,
+        },
         RuntimeFn::SetInsertElem => RuntimeCallSpec {
             args: &[Ptr, Ptr, Int, Int],
             ret: RetBool,

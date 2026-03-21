@@ -478,6 +478,41 @@ fn test_string_indexed_split_field_copy_does_not_abort() {
 }
 
 #[test]
+fn test_copied_dyn_array_of_strings_remains_usable() {
+    let run = run_program(
+        "copied_dyn_array_of_strings_remains_usable",
+        r#"
+            requires {
+                std::io::println
+            }
+
+            fn main() {
+                let original = "pear\napple\nbanana\n".lines();
+                let copy = original;
+
+                println("original:");
+                for line in original {
+                    println(line);
+                }
+
+                println("copy:");
+                for line in copy {
+                    println(line);
+                }
+            }
+        "#,
+    );
+    assert_eq!(run.status.code(), Some(0));
+
+    let stdout = String::from_utf8_lossy(&run.stdout);
+    assert_eq!(
+        stdout,
+        "original:\npear\napple\nbanana\ncopy:\npear\napple\nbanana\n",
+        "unexpected stdout: {stdout}"
+    );
+}
+
+#[test]
 fn test_returning_indexed_split_field_keeps_string_alive() {
     let run = run_program(
         "returning_indexed_split_field_keeps_string_alive",
