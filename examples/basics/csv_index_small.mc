@@ -12,10 +12,10 @@ type Row = {
 }
 
 fn parse_row(line: string) -> Row | ParseError {
-    let cols = line.split(",");
-    let score = parse::parse_u64(cols[1].trim())?;
+    let [name_text, score_text, ...] = line.split(",");
+    let score = parse::parse_u64(score_text.trim())?;
     Row {
-        name: cols[0].trim(),
+        name: name_text.trim(),
         score,
     }
 }

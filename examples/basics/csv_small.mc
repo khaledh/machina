@@ -29,10 +29,10 @@ fn main() -> () | IoError | ParseError {
             if first {
                 first = false;
             } else {
-                let cols = line.split(",");
-                let score = parse::parse_u64(cols[1].trim())?;
+                let [name_text, score_text, ...] = line.split(",");
+                let score = parse::parse_u64(score_text.trim())?;
                 let row = Row {
-                    name: cols[0].trim(),
+                    name: name_text.trim(),
                     score,
                 };
                 if row.score > 9 {

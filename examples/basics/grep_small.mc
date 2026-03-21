@@ -11,8 +11,7 @@ fn main() -> () | IoError {
         return ();
     }
 
-    let path = argv[1];
-    let needle = argv[2];
+    let [program, path, needle, ...] = argv;
 
     using reader = open_read(path)?.text() {
         let text = reader.read_all()?;
