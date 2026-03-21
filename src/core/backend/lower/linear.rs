@@ -1356,7 +1356,9 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
 
         let ensure_cap = self.builder.const_int(len_u32 as i128, false, 32, u32_ty);
         let elem_size_val = self.builder.const_int(elem_size as i128, false, 64, u64_ty);
-        let elem_align_val = self.builder.const_int(elem_align as i128, false, 64, u64_ty);
+        let elem_align_val = self
+            .builder
+            .const_int(elem_align as i128, false, 64, u64_ty);
         let unit_ty = self.type_lowerer.lower_type(&Type::Unit);
         let _ = self.builder.call(
             Callee::Runtime(RuntimeFn::DynArrayEnsure),

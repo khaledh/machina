@@ -14,11 +14,11 @@ pub(super) fn check_match(
     span: Span,
     errors: &mut Vec<SemCheckError>,
 ) {
-    if let Some((index, arm)) = arms
-        .iter()
-        .enumerate()
-        .find(|(_, arm)| arm.patterns.iter().any(|pattern| matches!(pattern, MatchPattern::Wildcard { .. })))
-        && index + 1 != arms.len()
+    if let Some((index, arm)) = arms.iter().enumerate().find(|(_, arm)| {
+        arm.patterns
+            .iter()
+            .any(|pattern| matches!(pattern, MatchPattern::Wildcard { .. }))
+    }) && index + 1 != arms.len()
     {
         let wildcard = arm
             .patterns
@@ -138,7 +138,10 @@ impl<'a> EnumRule<'a> {
                             push_error(
                                 errors,
                                 *span,
-                                SEK::UnknownEnumVariant(self.name.to_string(), variant_name.clone()),
+                                SEK::UnknownEnumVariant(
+                                    self.name.to_string(),
+                                    variant_name.clone(),
+                                ),
                             );
                             continue;
                         };
@@ -202,7 +205,9 @@ impl<'a> UnionRule<'a> {
                             .type_map
                             .lookup_node_type(ty_expr.id)
                             .filter(|ty| !matches!(ty, Type::Unknown))
-                            .or_else(|| resolve_type_expr(&ctx.def_table, &ctx.module, ty_expr).ok());
+                            .or_else(|| {
+                                resolve_type_expr(&ctx.def_table, &ctx.module, ty_expr).ok()
+                            });
                         let Some(arm_ty) = arm_ty else {
                             continue;
                         };
@@ -221,7 +226,9 @@ impl<'a> UnionRule<'a> {
                         }
                     }
                     _ => {
-                        errors.push(SEK::InvalidMatchPattern(union_ty.clone()).at(pattern_span(pattern)));
+                        errors.push(
+                            SEK::InvalidMatchPattern(union_ty.clone()).at(pattern_span(pattern)),
+                        );
                     }
                 }
             }
@@ -288,7 +295,11 @@ impl IntRule {
                         }
 
                         if !seen.insert(*value) {
-                            push_error(errors, *span, SEK::DuplicateMatchVariant(value.to_string()));
+                            push_error(
+                                errors,
+                                *span,
+                                SEK::DuplicateMatchVariant(value.to_string()),
+                            );
                         }
                     }
                     _ => {

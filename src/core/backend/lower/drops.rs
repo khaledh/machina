@@ -698,9 +698,11 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
         let bool_ty = self.type_lowerer.lower_type(&Type::Bool);
         let unit_ty = self.type_lowerer.lower_type(&Type::Unit);
 
-        let is_unique_owner = self
-            .builder
-            .call(Callee::Runtime(RuntimeFn::DynArrayRelease), vec![addr], bool_ty);
+        let is_unique_owner = self.builder.call(
+            Callee::Runtime(RuntimeFn::DynArrayRelease),
+            vec![addr],
+            bool_ty,
+        );
 
         let owned_bb = self.builder.add_block();
         let ret_bb = self.builder.add_block();
@@ -757,9 +759,11 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
             self.builder.select_block(loop_done);
         }
 
-        let _ = self
-            .builder
-            .call(Callee::Runtime(RuntimeFn::DynArrayFreeBacking), vec![addr], unit_ty);
+        let _ = self.builder.call(
+            Callee::Runtime(RuntimeFn::DynArrayFreeBacking),
+            vec![addr],
+            unit_ty,
+        );
         self.builder.terminate(Terminator::Br {
             target: ret_bb,
             args: Vec::new(),

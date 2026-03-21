@@ -65,11 +65,7 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
     }
 
     /// Returns a slot for a local value, materializing value storage if needed.
-    pub(super) fn slot_for_value_typed(
-        &mut self,
-        value: LocalValue,
-        value_ty: &Type,
-    ) -> ValueSlot {
+    pub(super) fn slot_for_value_typed(&mut self, value: LocalValue, value_ty: &Type) -> ValueSlot {
         match value.storage {
             LocalStorage::Value(value_id) => {
                 if self.type_needs_owned_copy(value_ty) {

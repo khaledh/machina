@@ -18,8 +18,12 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
         match ty {
             Type::String => true,
             Type::DynArray { .. } => true,
-            Type::Tuple { field_tys } => field_tys.iter().any(|field| self.type_needs_owned_copy(field)),
-            Type::Struct { fields, .. } => fields.iter().any(|field| self.type_needs_owned_copy(&field.ty)),
+            Type::Tuple { field_tys } => field_tys
+                .iter()
+                .any(|field| self.type_needs_owned_copy(field)),
+            Type::Struct { fields, .. } => fields
+                .iter()
+                .any(|field| self.type_needs_owned_copy(&field.ty)),
             Type::Array { elem_ty, .. } => self.type_needs_owned_copy(elem_ty),
             _ => false,
         }
@@ -939,16 +943,20 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
 
     fn retain_string_at_addr(&mut self, addr: ValueId) {
         let unit_ty = self.type_lowerer.lower_type(&Type::Unit);
-        let _ = self
-            .builder
-            .call(Callee::Runtime(RuntimeFn::StringRetain), vec![addr], unit_ty);
+        let _ = self.builder.call(
+            Callee::Runtime(RuntimeFn::StringRetain),
+            vec![addr],
+            unit_ty,
+        );
     }
 
     fn retain_dyn_array_at_addr(&mut self, addr: ValueId) {
         let unit_ty = self.type_lowerer.lower_type(&Type::Unit);
-        let _ = self
-            .builder
-            .call(Callee::Runtime(RuntimeFn::DynArrayRetain), vec![addr], unit_ty);
+        let _ = self.builder.call(
+            Callee::Runtime(RuntimeFn::DynArrayRetain),
+            vec![addr],
+            unit_ty,
+        );
     }
 
     fn store_string_copy(&mut self, dst: ValueId, value: ValueId, ir_ty: IrTypeId) {
@@ -991,7 +999,9 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
             .unwrap_or_else(|| panic!("backend array copy missing dims"));
         for index in 0..len {
             let index_val = self.builder.const_int(index as i128, false, 64, u64_ty);
-            let src_elem = self.builder.index_addr(src_slot.addr, index_val, elem_ptr_ty);
+            let src_elem = self
+                .builder
+                .index_addr(src_slot.addr, index_val, elem_ptr_ty);
             let dst_elem = self.builder.index_addr(dst, index_val, elem_ptr_ty);
             let elem_val = self.builder.load(src_elem, elem_ir_ty);
             self.store_value_into_addr(dst_elem, elem_val, elem_ty, elem_ir_ty);
