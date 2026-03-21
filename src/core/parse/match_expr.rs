@@ -32,7 +32,12 @@ impl<'a> Parser<'a> {
     pub(super) fn parse_match_arm(&mut self) -> Result<MatchArm, ParseError> {
         let marker = self.mark();
 
-        let pattern = self.parse_match_pattern()?;
+        let mut patterns = vec![self.parse_match_pattern()?];
+        while self.curr_token.kind == TK::Pipe {
+            self.advance();
+            patterns.push(self.parse_match_pattern()?);
+        }
+        self.validate_match_arm_patterns(&patterns)?;
 
         self.consume(&TK::FatArrow)?;
 
@@ -40,10 +45,24 @@ impl<'a> Parser<'a> {
 
         Ok(MatchArm {
             id: self.id_gen.new_id(),
-            pattern,
+            patterns,
             body,
             span: self.close(marker),
         })
+    }
+
+    fn validate_match_arm_patterns(&self, patterns: &[MatchPattern]) -> Result<(), ParseError> {
+        if patterns.len() <= 1 {
+            return Ok(());
+        }
+
+        for pattern in patterns {
+            if !pattern_supports_alternation(pattern) {
+                return Err(PEK::UnsupportedMatchAlternationPattern.at(pattern_span(pattern)));
+            }
+        }
+
+        Ok(())
     }
 
     fn parse_match_pattern(&mut self) -> Result<MatchPattern, ParseError> {
@@ -235,5 +254,28 @@ impl<'a> Parser<'a> {
             bindings,
             span: self.close(marker),
         })
+    }
+}
+
+fn pattern_supports_alternation(pattern: &MatchPattern) -> bool {
+    match pattern {
+        MatchPattern::Wildcard { .. }
+        | MatchPattern::Binding { .. }
+        | MatchPattern::TypedBinding { .. } => false,
+        MatchPattern::BoolLit { .. } | MatchPattern::IntLit { .. } => true,
+        MatchPattern::Tuple { patterns, .. } => patterns.iter().all(pattern_supports_alternation),
+        MatchPattern::EnumVariant { bindings, .. } => bindings.is_empty(),
+    }
+}
+
+fn pattern_span(pattern: &MatchPattern) -> Span {
+    match pattern {
+        MatchPattern::Wildcard { span }
+        | MatchPattern::BoolLit { span, .. }
+        | MatchPattern::IntLit { span, .. }
+        | MatchPattern::Binding { span, .. }
+        | MatchPattern::TypedBinding { span, .. }
+        | MatchPattern::Tuple { span, .. }
+        | MatchPattern::EnumVariant { span, .. } => *span,
     }
 }

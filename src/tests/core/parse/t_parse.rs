@@ -1517,8 +1517,11 @@ fn test_parse_match_expr_enum_variants() {
                 _ => panic!("Expected scrutinee Var"),
             }
             assert_eq!(arms.len(), 3);
+            assert_eq!(arms[0].patterns.len(), 1);
+            assert_eq!(arms[1].patterns.len(), 1);
+            assert_eq!(arms[2].patterns.len(), 1);
 
-            match &arms[0].pattern {
+            match &arms[0].patterns[0] {
                 MatchPattern::EnumVariant {
                     enum_name,
                     variant_name,
@@ -1533,7 +1536,7 @@ fn test_parse_match_expr_enum_variants() {
                 _ => panic!("Expected enum variant pattern in arm 0"),
             }
 
-            match &arms[1].pattern {
+            match &arms[1].patterns[0] {
                 MatchPattern::EnumVariant {
                     enum_name,
                     variant_name,
@@ -1551,7 +1554,7 @@ fn test_parse_match_expr_enum_variants() {
                 _ => panic!("Expected enum variant pattern in arm 1"),
             }
 
-            assert!(matches!(arms[2].pattern, MatchPattern::Wildcard { .. }));
+            assert!(matches!(arms[2].patterns[0], MatchPattern::Wildcard { .. }));
         }
         _ => panic!("Expected match expression"),
     }
@@ -1583,7 +1586,7 @@ fn test_parse_enum_variant_pattern_with_type_args() {
         type_args,
         variant_name,
         ..
-    } = &arms[0].pattern
+    } = &arms[0].patterns[0]
     else {
         panic!("Expected enum variant pattern in arm 0");
     };
@@ -1619,13 +1622,15 @@ fn test_parse_match_expr_bool_patterns() {
                 _ => panic!("Expected scrutinee Var"),
             }
             assert_eq!(arms.len(), 2);
+            assert_eq!(arms[0].patterns.len(), 1);
+            assert_eq!(arms[1].patterns.len(), 1);
 
-            match &arms[0].pattern {
+            match &arms[0].patterns[0] {
                 MatchPattern::BoolLit { value, .. } => assert!(*value),
                 _ => panic!("Expected bool literal pattern in arm 0"),
             }
 
-            match &arms[1].pattern {
+            match &arms[1].patterns[0] {
                 MatchPattern::BoolLit { value, .. } => assert!(!*value),
                 _ => panic!("Expected bool literal pattern in arm 1"),
             }
@@ -1656,13 +1661,15 @@ fn test_parse_match_expr_int_patterns() {
                 _ => panic!("Expected scrutinee Var"),
             }
             assert_eq!(arms.len(), 2);
+            assert_eq!(arms[0].patterns.len(), 1);
+            assert_eq!(arms[1].patterns.len(), 1);
 
-            match &arms[0].pattern {
+            match &arms[0].patterns[0] {
                 MatchPattern::IntLit { value, .. } => assert_eq!(*value, 0),
                 _ => panic!("Expected int literal pattern in arm 0"),
             }
 
-            match &arms[1].pattern {
+            match &arms[1].patterns[0] {
                 MatchPattern::IntLit { value, .. } => assert_eq!(*value, 42),
                 _ => panic!("Expected int literal pattern in arm 1"),
             }
@@ -1692,8 +1699,9 @@ fn test_parse_match_expr_tuple_patterns() {
                 _ => panic!("Expected scrutinee Var"),
             }
             assert_eq!(arms.len(), 1);
+            assert_eq!(arms[0].patterns.len(), 1);
 
-            match &arms[0].pattern {
+            match &arms[0].patterns[0] {
                 MatchPattern::Tuple { patterns, .. } => {
                     assert_eq!(patterns.len(), 2);
                     assert!(
@@ -1729,8 +1737,9 @@ fn test_parse_match_expr_tuple_patterns_nested() {
                 _ => panic!("Expected scrutinee Var"),
             }
             assert_eq!(arms.len(), 1);
+            assert_eq!(arms[0].patterns.len(), 1);
 
-            match &arms[0].pattern {
+            match &arms[0].patterns[0] {
                 MatchPattern::Tuple { patterns, .. } => {
                     assert_eq!(patterns.len(), 2);
                     assert!(matches!(
@@ -1780,8 +1789,10 @@ fn test_parse_match_expr_tuple_patterns_literals() {
                 _ => panic!("Expected scrutinee Var"),
             }
             assert_eq!(arms.len(), 2);
+            assert_eq!(arms[0].patterns.len(), 1);
+            assert_eq!(arms[1].patterns.len(), 1);
 
-            match &arms[0].pattern {
+            match &arms[0].patterns[0] {
                 MatchPattern::Tuple { patterns, .. } => {
                     assert_eq!(patterns.len(), 3);
                     assert!(
@@ -1795,7 +1806,7 @@ fn test_parse_match_expr_tuple_patterns_literals() {
                 }
                 _ => panic!("Expected tuple pattern"),
             }
-            assert!(matches!(arms[1].pattern, MatchPattern::Wildcard { .. }));
+            assert!(matches!(arms[1].patterns[0], MatchPattern::Wildcard { .. }));
         }
         _ => panic!("Expected match expression"),
     }
@@ -1818,7 +1829,8 @@ fn test_parse_match_expr_typed_binding_pattern() {
     match &tail.kind {
         ExprKind::Match { arms, .. } => {
             assert_eq!(arms.len(), 1);
-            match &arms[0].pattern {
+            assert_eq!(arms[0].patterns.len(), 1);
+            match &arms[0].patterns[0] {
                 MatchPattern::Tuple { patterns, .. } => {
                     assert_eq!(patterns.len(), 2);
                     match &patterns[0] {
@@ -1837,6 +1849,52 @@ fn test_parse_match_expr_typed_binding_pattern() {
             }
         }
         _ => panic!("Expected match expression"),
+    }
+}
+
+#[test]
+fn test_parse_match_expr_alternation_patterns() {
+    let source = r#"
+        fn test(x: u8) -> bool {
+            match x {
+                32 | 10 | 9 | 13 => true,
+                _ => false,
+            }
+        }
+    "#;
+
+    let funcs = parse_source(source).expect("Failed to parse");
+    let func = &funcs[0];
+    let tail = block_tail(&func.body);
+
+    match &tail.kind {
+        ExprKind::Match { arms, .. } => {
+            assert_eq!(arms.len(), 2);
+            assert_eq!(arms[0].patterns.len(), 4);
+            assert!(matches!(&arms[0].patterns[0], MatchPattern::IntLit { value, .. } if *value == 32));
+            assert!(matches!(&arms[0].patterns[1], MatchPattern::IntLit { value, .. } if *value == 10));
+            assert!(matches!(&arms[0].patterns[2], MatchPattern::IntLit { value, .. } if *value == 9));
+            assert!(matches!(&arms[0].patterns[3], MatchPattern::IntLit { value, .. } if *value == 13));
+            assert!(matches!(arms[1].patterns[0], MatchPattern::Wildcard { .. }));
+        }
+        _ => panic!("Expected match expression"),
+    }
+}
+
+#[test]
+fn test_parse_match_expr_alternation_rejects_binding_patterns() {
+    let source = r#"
+        fn test(t: (u64, u64)) -> u64 {
+            match t {
+                (x, _) | (1, 2) => x,
+                _ => 0,
+            }
+        }
+    "#;
+
+    match parse_source(source) {
+        Err(err) if matches!(err.kind(), ParseErrorKind::UnsupportedMatchAlternationPattern) => {}
+        other => panic!("Expected UnsupportedMatchAlternationPattern, got {:?}", other),
     }
 }
 

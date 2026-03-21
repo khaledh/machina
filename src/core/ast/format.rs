@@ -691,7 +691,11 @@ impl MatchArm {
     fn fmt_with_indent(&self, f: &mut fmt::Formatter<'_>, level: usize) -> fmt::Result {
         let pad = indent(level);
         writeln!(f, "{}MatchArm [{}]", pad, self.id)?;
-        self.pattern.fmt_with_indent(f, level + 1)?;
+        let pad1 = indent(level + 1);
+        writeln!(f, "{}Patterns:", pad1)?;
+        for pattern in &self.patterns {
+            pattern.fmt_with_indent(f, level + 2)?;
+        }
         writeln!(f, "{}Body:", pad)?;
         self.body.fmt_with_indent(f, level + 1)?;
         Ok(())

@@ -419,15 +419,17 @@ impl<'a> ConstraintCollector<'a> {
                 let scrutinee_ty = self.collect_expr(scrutinee, None);
                 let mut arm_terms = Vec::with_capacity(arms.len());
                 for arm in arms {
-                    self.out
-                        .pattern_obligations
-                        .push(PatternObligation::MatchArm {
+                    for pattern in &arm.patterns {
+                        self.out
+                            .pattern_obligations
+                            .push(PatternObligation::MatchArm {
                             arm_id: arm.id,
-                            pattern: arm.pattern.clone(),
+                            pattern: pattern.clone(),
                             scrutinee_ty: scrutinee_ty.clone(),
                             caller_def_id: self.current_callable_def_id(),
                             span: arm.span,
                         });
+                    }
                     let arm_ty = self.collect_match_arm(arm, expected.clone());
                     if expected.is_some() {
                         self.push_assignable(

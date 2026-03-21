@@ -1155,13 +1155,15 @@ fn rewrite_expr_in_scope(
                 if let (Some(scrutinee_ident), Some(scrutinee_state)) =
                     (scrutinee_ident.as_ref(), scrutinee_state.as_ref())
                 {
-                    refine_match_scrutinee_binding(
-                        &arm.pattern,
-                        scrutinee_ident,
-                        scrutinee_state,
-                        infos,
-                        &mut arm_env,
-                    );
+                    for pattern in &arm.patterns {
+                        refine_match_scrutinee_binding(
+                            pattern,
+                            scrutinee_ident,
+                            scrutinee_state,
+                            infos,
+                            &mut arm_env,
+                        );
+                    }
                 }
                 let _ = rewrite_expr_in_scope(
                     &mut arm.body,

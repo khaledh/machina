@@ -71,83 +71,85 @@ impl<'a> Elaborator<'a> {
 
         for (index, arm) in arms.iter().enumerate() {
             let mut bindings = Vec::new();
-            match &arm.pattern {
-                MatchPattern::Wildcard { .. } => {
-                    default = Some(index);
-                }
-                MatchPattern::EnumVariant {
-                    variant_name,
-                    bindings: pattern_bindings,
-                    ..
-                } => {
-                    let tag = scrutinee_ty.enum_variant_index(variant_name) as u64;
-                    cases.push(MatchSwitchCase {
-                        value: tag,
-                        arm_index: index,
-                    });
-                    self.collect_enum_bindings(
-                        scrutinee_ty,
-                        scrutinee_place,
+            for pattern in &arm.patterns {
+                match pattern {
+                    MatchPattern::Wildcard { .. } => {
+                        default = Some(index);
+                    }
+                    MatchPattern::EnumVariant {
                         variant_name,
-                        pattern_bindings,
-                        &mut bindings,
-                    );
-                }
-                MatchPattern::BoolLit { value, .. } => {
-                    cases.push(MatchSwitchCase {
-                        value: u64::from(*value),
-                        arm_index: index,
-                    });
-                }
-                MatchPattern::IntLit { value, .. } => {
-                    cases.push(MatchSwitchCase {
-                        value: *value,
-                        arm_index: index,
-                    });
-                }
-                MatchPattern::TypedBinding { id, ty_expr, .. } => {
-                    let Type::ErrorUnion { ok_ty, err_tys } = scrutinee_ty else {
-                        panic!(
-                            "compiler bug: typed binding pattern in switch plan requires error-union scrutinee"
+                        bindings: pattern_bindings,
+                        ..
+                    } => {
+                        let tag = scrutinee_ty.enum_variant_index(variant_name) as u64;
+                        cases.push(MatchSwitchCase {
+                            value: tag,
+                            arm_index: index,
+                        });
+                        self.collect_enum_bindings(
+                            scrutinee_ty,
+                            scrutinee_place,
+                            variant_name,
+                            pattern_bindings,
+                            &mut bindings,
                         );
-                    };
-                    let payload_ty = self
-                        .type_map
-                        .lookup_node_type(ty_expr.id)
-                        .filter(|ty| !matches!(ty, Type::Unknown))
-                        .or_else(|| {
-                            self.error_union_variant_from_type_expr(ok_ty, err_tys, ty_expr)
-                                .cloned()
-                        })
-                        .unwrap_or_else(|| {
-                            panic!(
-                                "compiler bug: missing typed-binding type for match pattern {}",
-                                ty_expr.id
-                            )
+                    }
+                    MatchPattern::BoolLit { value, .. } => {
+                        cases.push(MatchSwitchCase {
+                            value: u64::from(*value),
+                            arm_index: index,
                         });
-                    let tag = self
-                        .error_union_variant_index(ok_ty, err_tys, &payload_ty)
-                        .unwrap_or_else(|| {
-                            panic!(
-                                "compiler bug: typed-binding pattern type {} is not a union variant",
-                                payload_ty
-                            )
+                    }
+                    MatchPattern::IntLit { value, .. } => {
+                        cases.push(MatchSwitchCase {
+                            value: *value,
+                            arm_index: index,
                         });
-                    cases.push(MatchSwitchCase {
-                        value: tag,
-                        arm_index: index,
-                    });
-                    bindings.push(MatchBinding {
-                        def_id: self.def_id_for(*id),
-                        node_id: *id,
-                        source: self.error_union_payload_place(scrutinee_place, payload_ty),
-                    });
-                }
-                MatchPattern::Binding { .. } | MatchPattern::Tuple { .. } => {
-                    panic!(
-                        "compiler bug: unexpected match pattern in switch plan: {:?}",
-                        arm.pattern
-                    );
+                    }
+                    MatchPattern::TypedBinding { id, ty_expr, .. } => {
+                        let Type::ErrorUnion { ok_ty, err_tys } = scrutinee_ty else {
+                            panic!(
+                                "compiler bug: typed binding pattern in switch plan requires error-union scrutinee"
+                            );
+                        };
+                        let payload_ty = self
+                            .type_map
+                            .lookup_node_type(ty_expr.id)
+                            .filter(|ty| !matches!(ty, Type::Unknown))
+                            .or_else(|| {
+                                self.error_union_variant_from_type_expr(ok_ty, err_tys, ty_expr)
+                                    .cloned()
+                            })
+                            .unwrap_or_else(|| {
+                                panic!(
+                                    "compiler bug: missing typed-binding type for match pattern {}",
+                                    ty_expr.id
+                                )
+                            });
+                        let tag = self
+                            .error_union_variant_index(ok_ty, err_tys, &payload_ty)
+                            .unwrap_or_else(|| {
+                                panic!(
+                                    "compiler bug: typed-binding pattern type {} is not a union variant",
+                                    payload_ty
+                                )
+                            });
+                        cases.push(MatchSwitchCase {
+                            value: tag,
+                            arm_index: index,
+                        });
+                        bindings.push(MatchBinding {
+                            def_id: self.def_id_for(*id),
+                            node_id: *id,
+                            source: self.error_union_payload_place(scrutinee_place, payload_ty),
+                        });
+                    }
+                    MatchPattern::Binding { .. } | MatchPattern::Tuple { .. } => {
+                        panic!(
+                            "compiler bug: unexpected match pattern in switch plan: {:?}",
+                            pattern
+                        );
+                    }
                 }
             }
 
@@ -177,35 +179,43 @@ impl<'a> Elaborator<'a> {
         let mut arm_plans = Vec::with_capacity(arms.len());
 
         for (index, arm) in arms.iter().enumerate() {
-            let mut tests = Vec::new();
             let mut bindings = Vec::new();
 
-            match &arm.pattern {
-                MatchPattern::Wildcard { .. } => {}
-                MatchPattern::Tuple { patterns, .. } => {
-                    self.collect_tuple_pattern_tests(
-                        scrutinee_ty,
-                        scrutinee_place,
-                        patterns,
-                        arm.id,
-                        &mut tests,
-                    );
-                    self.collect_tuple_bindings(
-                        scrutinee_ty,
-                        scrutinee_place,
-                        patterns,
-                        &mut bindings,
-                    );
-                }
-                _ => {
-                    panic!(
-                        "compiler bug: unexpected match pattern in tuple plan: {:?}",
-                        arm.pattern
-                    );
+            for pattern in &arm.patterns {
+                match pattern {
+                    MatchPattern::Wildcard { .. } => {}
+                    MatchPattern::Tuple { patterns, .. } => {
+                        let mut pattern_tests = Vec::new();
+                        self.collect_tuple_pattern_tests(
+                            scrutinee_ty,
+                            scrutinee_place,
+                            patterns,
+                            arm.id,
+                            &mut pattern_tests,
+                        );
+                        decisions.push((index, pattern_tests));
+                        self.collect_tuple_bindings(
+                            scrutinee_ty,
+                            scrutinee_place,
+                            patterns,
+                            &mut bindings,
+                        );
+                    }
+                    _ => {
+                        panic!(
+                            "compiler bug: unexpected match pattern in tuple plan: {:?}",
+                            pattern
+                        );
+                    }
                 }
             }
-
-            decisions.push((index, tests));
+            if arm
+                .patterns
+                .iter()
+                .any(|pattern| matches!(pattern, MatchPattern::Wildcard { .. }))
+            {
+                decisions.push((index, Vec::new()));
+            }
             arm_plans.push(MatchArmPlan { bindings });
         }
 

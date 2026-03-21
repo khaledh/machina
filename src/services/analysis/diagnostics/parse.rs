@@ -73,6 +73,9 @@ pub(super) fn from_parse_error(error: &ParseError) -> Diagnostic {
         ParseErrorKind::InvalidFormatExpr => "MC-PARSE-INVALID-FORMAT-EXPR",
         ParseErrorKind::EmptyFormatExpr => "MC-PARSE-EMPTY-FORMAT-EXPR",
         ParseErrorKind::UnterminatedFormatExpr => "MC-PARSE-UNTERMINATED-FORMAT-EXPR",
+        ParseErrorKind::UnsupportedMatchAlternationPattern => {
+            "MC-PARSE-UNSUPPORTED-MATCH-ALTERNATION-PATTERN"
+        }
     };
     Diagnostic {
         phase: DiagnosticPhase::Parse,

@@ -17,10 +17,15 @@ pub(super) fn check_match(
     if let Some((index, arm)) = arms
         .iter()
         .enumerate()
-        .find(|(_, arm)| matches!(arm.pattern, MatchPattern::Wildcard { .. }))
+        .find(|(_, arm)| arm.patterns.iter().any(|pattern| matches!(pattern, MatchPattern::Wildcard { .. })))
         && index + 1 != arms.len()
     {
-        errors.push(SEK::WildcardArmNotLast.at(pattern_span(&arm.pattern)));
+        let wildcard = arm
+            .patterns
+            .iter()
+            .find(|pattern| matches!(pattern, MatchPattern::Wildcard { .. }))
+            .expect("wildcard arm lookup must succeed");
+        errors.push(SEK::WildcardArmNotLast.at(pattern_span(wildcard)));
     }
 
     let scrutinee_ty = ctx
@@ -94,69 +99,71 @@ impl<'a> EnumRule<'a> {
         let mut has_wildcard = false;
 
         for arm in arms {
-            match &arm.pattern {
-                MatchPattern::Wildcard { .. } => {
-                    has_wildcard = true;
-                }
-                MatchPattern::EnumVariant {
-                    enum_name: pat_enum_name,
-                    type_args: _,
-                    variant_name,
-                    bindings,
-                    span,
-                    ..
-                } => {
-                    if let Some(pat_enum_name) = pat_enum_name
-                        && !enum_name_matches(pat_enum_name, self.name)
-                    {
-                        push_error(
-                            errors,
-                            *span,
-                            SEK::MatchPatternEnumMismatch(
-                                self.name.to_string(),
-                                pat_enum_name.clone(),
-                            ),
+            for pattern in &arm.patterns {
+                match pattern {
+                    MatchPattern::Wildcard { .. } => {
+                        has_wildcard = true;
+                    }
+                    MatchPattern::EnumVariant {
+                        enum_name: pat_enum_name,
+                        type_args: _,
+                        variant_name,
+                        bindings,
+                        span,
+                        ..
+                    } => {
+                        if let Some(pat_enum_name) = pat_enum_name
+                            && !enum_name_matches(pat_enum_name, self.name)
+                        {
+                            push_error(
+                                errors,
+                                *span,
+                                SEK::MatchPatternEnumMismatch(
+                                    self.name.to_string(),
+                                    pat_enum_name.clone(),
+                                ),
+                            );
+                        }
+
+                        if !seen_variants.insert(variant_name.clone()) {
+                            push_error(
+                                errors,
+                                *span,
+                                SEK::DuplicateMatchVariant(variant_name.clone()),
+                            );
+                        }
+
+                        let Some(variant) = self.variants.iter().find(|v| v.name == *variant_name)
+                        else {
+                            push_error(
+                                errors,
+                                *span,
+                                SEK::UnknownEnumVariant(self.name.to_string(), variant_name.clone()),
+                            );
+                            continue;
+                        };
+
+                        if bindings.len() != variant.payload.len() {
+                            push_error(
+                                errors,
+                                *span,
+                                SEK::EnumVariantPayloadArityMismatch(
+                                    variant_name.clone(),
+                                    variant.payload.len(),
+                                    bindings.len(),
+                                ),
+                            );
+                        }
+                    }
+                    _ => {
+                        errors.push(
+                            SEK::InvalidMatchPattern(Type::Enum {
+                                name: self.name.to_string(),
+                                variants: self.variants.to_vec(),
+                            })
+                            .at(pattern_span(pattern)),
                         );
                     }
-
-                    if !seen_variants.insert(variant_name.clone()) {
-                        push_error(
-                            errors,
-                            *span,
-                            SEK::DuplicateMatchVariant(variant_name.clone()),
-                        );
-                    }
-
-                    let Some(variant) = self.variants.iter().find(|v| v.name == *variant_name)
-                    else {
-                        push_error(
-                            errors,
-                            *span,
-                            SEK::UnknownEnumVariant(self.name.to_string(), variant_name.clone()),
-                        );
-                        continue;
-                    };
-
-                    if bindings.len() != variant.payload.len() {
-                        push_error(
-                            errors,
-                            *span,
-                            SEK::EnumVariantPayloadArityMismatch(
-                                variant_name.clone(),
-                                variant.payload.len(),
-                                bindings.len(),
-                            ),
-                        );
-                    }
-                }
-                _ => {
-                    errors.push(
-                        SEK::InvalidMatchPattern(Type::Enum {
-                            name: self.name.to_string(),
-                            variants: self.variants.to_vec(),
-                        })
-                        .at(pattern_span(&arm.pattern)),
-                    );
                 }
             }
         }
@@ -185,37 +192,37 @@ impl<'a> UnionRule<'a> {
         let union_ty = self.full_type();
 
         for arm in arms {
-            match &arm.pattern {
-                MatchPattern::Wildcard { .. } => {
-                    has_wildcard = true;
-                }
-                MatchPattern::TypedBinding { ty_expr, span, .. } => {
-                    let arm_ty = ctx
-                        .type_map
-                        .lookup_node_type(ty_expr.id)
-                        .filter(|ty| !matches!(ty, Type::Unknown))
-                        .or_else(|| resolve_type_expr(&ctx.def_table, &ctx.module, ty_expr).ok());
-                    let Some(arm_ty) = arm_ty else {
-                        continue;
-                    };
-
-                    let Some(index) = self.variant_index(&arm_ty) else {
-                        push_error(errors, *span, SEK::InvalidMatchPattern(union_ty.clone()));
-                        continue;
-                    };
-
-                    if !seen_variant_indices.insert(index) {
-                        push_error(
-                            errors,
-                            *span,
-                            SEK::DuplicateMatchVariant(arm_ty.to_string()),
-                        );
+            for pattern in &arm.patterns {
+                match pattern {
+                    MatchPattern::Wildcard { .. } => {
+                        has_wildcard = true;
                     }
-                }
-                _ => {
-                    errors.push(
-                        SEK::InvalidMatchPattern(union_ty.clone()).at(pattern_span(&arm.pattern)),
-                    );
+                    MatchPattern::TypedBinding { ty_expr, span, .. } => {
+                        let arm_ty = ctx
+                            .type_map
+                            .lookup_node_type(ty_expr.id)
+                            .filter(|ty| !matches!(ty, Type::Unknown))
+                            .or_else(|| resolve_type_expr(&ctx.def_table, &ctx.module, ty_expr).ok());
+                        let Some(arm_ty) = arm_ty else {
+                            continue;
+                        };
+
+                        let Some(index) = self.variant_index(&arm_ty) else {
+                            push_error(errors, *span, SEK::InvalidMatchPattern(union_ty.clone()));
+                            continue;
+                        };
+
+                        if !seen_variant_indices.insert(index) {
+                            push_error(
+                                errors,
+                                *span,
+                                SEK::DuplicateMatchVariant(arm_ty.to_string()),
+                            );
+                        }
+                    }
+                    _ => {
+                        errors.push(SEK::InvalidMatchPattern(union_ty.clone()).at(pattern_span(pattern)));
+                    }
                 }
             }
         }
@@ -265,34 +272,36 @@ impl IntRule {
         let max_value = self.max_value();
 
         for arm in arms {
-            match &arm.pattern {
-                MatchPattern::Wildcard { .. } => {
-                    has_wildcard = true;
-                }
-                MatchPattern::IntLit { value, span } => {
-                    if *value > max_value {
-                        push_error(
-                            errors,
-                            *span,
-                            SEK::ValueOutOfRange(*value as i128, 0, (max_value as i128) + 1),
-                        );
-                        continue;
+            for pattern in &arm.patterns {
+                match pattern {
+                    MatchPattern::Wildcard { .. } => {
+                        has_wildcard = true;
                     }
+                    MatchPattern::IntLit { value, span } => {
+                        if *value > max_value {
+                            push_error(
+                                errors,
+                                *span,
+                                SEK::ValueOutOfRange(*value as i128, 0, (max_value as i128) + 1),
+                            );
+                            continue;
+                        }
 
-                    if !seen.insert(*value) {
-                        push_error(errors, *span, SEK::DuplicateMatchVariant(value.to_string()));
+                        if !seen.insert(*value) {
+                            push_error(errors, *span, SEK::DuplicateMatchVariant(value.to_string()));
+                        }
                     }
-                }
-                _ => {
-                    errors.push(
-                        SEK::InvalidMatchPattern(Type::Int {
-                            signed: self.signed,
-                            bits: self.bits,
-                            bounds: None,
-                            nonzero: false,
-                        })
-                        .at(pattern_span(&arm.pattern)),
-                    );
+                    _ => {
+                        errors.push(
+                            SEK::InvalidMatchPattern(Type::Int {
+                                signed: self.signed,
+                                bits: self.bits,
+                                bounds: None,
+                                nonzero: false,
+                            })
+                            .at(pattern_span(pattern)),
+                        );
+                    }
                 }
             }
         }
@@ -327,24 +336,26 @@ impl<'a> TupleRule<'a> {
         let mut all_irrefutable = true;
 
         for arm in arms {
-            match &arm.pattern {
-                MatchPattern::Tuple { patterns, span } => {
-                    self.check_tuple_pattern(self.field_tys, patterns, *span, errors);
-                    if !pattern_is_irrefutable(&arm.pattern) {
-                        all_irrefutable = false;
+            for pattern in &arm.patterns {
+                match pattern {
+                    MatchPattern::Tuple { patterns, span } => {
+                        self.check_tuple_pattern(self.field_tys, patterns, *span, errors);
+                        if !pattern_is_irrefutable(pattern) {
+                            all_irrefutable = false;
+                        }
                     }
-                }
-                MatchPattern::Wildcard { .. } => {
-                    has_wildcard = true;
-                }
-                _ => {
-                    all_irrefutable = false;
-                    errors.push(
-                        SEK::InvalidMatchPattern(Type::Tuple {
-                            field_tys: self.field_tys.to_vec(),
-                        })
-                        .at(pattern_span(&arm.pattern)),
-                    );
+                    MatchPattern::Wildcard { .. } => {
+                        has_wildcard = true;
+                    }
+                    _ => {
+                        all_irrefutable = false;
+                        errors.push(
+                            SEK::InvalidMatchPattern(Type::Tuple {
+                                field_tys: self.field_tys.to_vec(),
+                            })
+                            .at(pattern_span(pattern)),
+                        );
+                    }
                 }
             }
         }
@@ -415,23 +426,25 @@ fn check_bool_match(arms: &[MatchArm], span: Span, errors: &mut Vec<SemCheckErro
     let mut has_wildcard = false;
 
     for arm in arms {
-        match &arm.pattern {
-            MatchPattern::Wildcard { .. } => {
-                has_wildcard = true;
-            }
-            MatchPattern::BoolLit { value, span } => {
-                let seen = if *value {
-                    &mut saw_true
-                } else {
-                    &mut saw_false
-                };
-                if *seen {
-                    push_error(errors, *span, SEK::DuplicateMatchVariant(value.to_string()));
+        for pattern in &arm.patterns {
+            match pattern {
+                MatchPattern::Wildcard { .. } => {
+                    has_wildcard = true;
                 }
-                *seen = true;
-            }
-            _ => {
-                errors.push(SEK::InvalidMatchPattern(Type::Bool).at(pattern_span(&arm.pattern)));
+                MatchPattern::BoolLit { value, span } => {
+                    let seen = if *value {
+                        &mut saw_true
+                    } else {
+                        &mut saw_false
+                    };
+                    if *seen {
+                        push_error(errors, *span, SEK::DuplicateMatchVariant(value.to_string()));
+                    }
+                    *seen = true;
+                }
+                _ => {
+                    errors.push(SEK::InvalidMatchPattern(Type::Bool).at(pattern_span(pattern)));
+                }
             }
         }
     }

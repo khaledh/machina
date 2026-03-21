@@ -11,16 +11,9 @@ type Counts = {
 }
 
 fn is_whitespace(b: u8) -> bool {
-    if b == 32 {
-        true
-    } else if b == 10 {
-        true
-    } else if b == 9 {
-        true
-    } else if b == 13 {
-        true
-    } else {
-        false
+    match b {
+        32 | 10 | 9 | 13 => true,
+        _ => false,
     }
 }
 

@@ -1804,7 +1804,9 @@ impl Visitor for SymbolResolver {
                 for arm in arms {
                     // enter a new scope for the arm body
                     self.with_scope(|resolver| {
-                        resolver.check_match_pattern(&arm.pattern);
+                        for pattern in &arm.patterns {
+                            resolver.check_match_pattern(pattern);
+                        }
                         resolver.visit_expr(&arm.body);
                     });
                 }

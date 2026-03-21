@@ -535,7 +535,9 @@ pub fn walk_match_pattern_binding<V: VisitorMut + ?Sized>(
 }
 
 pub fn walk_match_arm<V: VisitorMut + ?Sized>(v: &mut V, arm: &mut MatchArm) {
-    v.visit_match_pattern(&mut arm.pattern);
+    for pattern in &mut arm.patterns {
+        v.visit_match_pattern(pattern);
+    }
     v.visit_expr(&mut arm.body);
 }
 

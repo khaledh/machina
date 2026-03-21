@@ -6,7 +6,9 @@ use super::*;
 
 impl<'a> ConstraintCollector<'a> {
     pub(super) fn collect_match_arm(&mut self, arm: &MatchArm, expected: Option<Type>) -> Type {
-        self.collect_match_pattern_bindings(&arm.pattern);
+        for pattern in &arm.patterns {
+            self.collect_match_pattern_bindings(pattern);
+        }
         self.collect_expr(&arm.body, expected)
     }
 

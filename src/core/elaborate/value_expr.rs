@@ -575,7 +575,7 @@ impl<'a> Elaborator<'a> {
     fn elab_match_arm(&mut self, arm: &MatchArm) -> MatchArm {
         MatchArm {
             id: arm.id,
-            pattern: arm.pattern.clone(),
+            patterns: arm.patterns.clone(),
             body: self.elab_value(&arm.body),
             span: arm.span,
         }

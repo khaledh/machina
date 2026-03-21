@@ -343,7 +343,9 @@ impl<'a> DefCollector<'a> {
             ExprKind::Match { scrutinee, arms } => {
                 self.collect_expr(scrutinee);
                 for arm in arms {
-                    self.collect_match_pattern(&arm.pattern);
+                    for pattern in &arm.patterns {
+                        self.collect_match_pattern(pattern);
+                    }
                     self.collect_expr(&arm.body);
                 }
             }
@@ -489,7 +491,9 @@ impl<'a> DefSpanCollector<'a> {
             ExprKind::Match { scrutinee, arms } => {
                 self.collect_expr(scrutinee);
                 for arm in arms {
-                    self.collect_match_pattern(&arm.pattern);
+                    for pattern in &arm.patterns {
+                        self.collect_match_pattern(pattern);
+                    }
                     self.collect_expr(&arm.body);
                 }
             }
@@ -1063,7 +1067,9 @@ impl<'a> DefInitChecker<'a> {
                 let mut arm_states = Vec::new();
                 for arm in arms {
                     let mut init = self.initialized.clone();
-                    self.mark_match_pattern_initialized(&mut init, &arm.pattern);
+                    for pattern in &arm.patterns {
+                        self.mark_match_pattern_initialized(&mut init, pattern);
+                    }
                     let out = self.with_init(init, |this| {
                         this.check_expr(&arm.body);
                     });

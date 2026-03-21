@@ -48,6 +48,9 @@ pub enum ParseErrorKind {
     #[error("Expected match pattern, found: {0}")]
     ExpectedMatchPattern(Token),
 
+    #[error("Match arm alternation only supports refutable, non-binding patterns in v1")]
+    UnsupportedMatchAlternationPattern,
+
     #[error("Expected array index or slice range, found: {0}")]
     ExpectedArrayIndexOrRange(Token),
 

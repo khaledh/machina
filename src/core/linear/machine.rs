@@ -3611,14 +3611,14 @@ fn build_machine_state_tag_expr(
                 .enumerate()
                 .map(|(index, state_name)| MatchArm {
                     id: node_id_gen.new_id(),
-                    pattern: MatchPattern::EnumVariant {
+                    patterns: vec![MatchPattern::EnumVariant {
                         id: node_id_gen.new_id(),
                         enum_name: Some(enum_name.to_string()),
                         type_args: Vec::new(),
                         variant_name: state_name.clone(),
                         bindings: vec![MatchPatternBinding::Wildcard { span }],
                         span,
-                    },
+                    }],
                     body: int_expr((index + 1) as u64, node_id_gen, span),
                     span,
                 })
@@ -3728,7 +3728,7 @@ fn build_machine_action_match_expr(
     let span = Span::default();
     let mut arms = vec![MatchArm {
         id: node_id_gen.new_id(),
-        pattern: MatchPattern::TypedBinding {
+        patterns: vec![MatchPattern::TypedBinding {
             id: node_id_gen.new_id(),
             ident: "__mc_ok".to_string(),
             ty_expr: TypeExpr {
@@ -3740,7 +3740,7 @@ fn build_machine_action_match_expr(
                 span,
             },
             span,
-        },
+        }],
         body: build_machine_action_deliver_then_return(
             info,
             "__mc_ok",
@@ -3757,12 +3757,12 @@ fn build_machine_action_match_expr(
         let err_name = format!("__mc_err_{index}");
         arms.push(MatchArm {
             id: node_id_gen.new_id(),
-            pattern: MatchPattern::TypedBinding {
+            patterns: vec![MatchPattern::TypedBinding {
                 id: node_id_gen.new_id(),
                 ident: err_name.clone(),
                 ty_expr: err_ty_expr,
                 span,
-            },
+            }],
             body: Expr {
                 id: node_id_gen.new_id(),
                 kind: ExprKind::Block {

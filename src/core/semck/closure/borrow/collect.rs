@@ -198,7 +198,9 @@ struct VarUseCollector<'a> {
 impl Visitor for VarUseCollector<'_> {
     fn visit_match_arm(&mut self, arm: &MatchArm) {
         let mut defs = HashSet::new();
-        collect_match_pattern_defs(&arm.pattern, self.def_table, &mut defs);
+        for pattern in &arm.patterns {
+            collect_match_pattern_defs(pattern, self.def_table, &mut defs);
+        }
         self.visit_expr(&arm.body);
         for def_id in defs {
             self.uses.remove(&def_id);

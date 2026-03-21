@@ -115,7 +115,9 @@ impl<'a> LocalScopeCollector<'a> {
                         continue;
                     }
                     self.push_scope();
-                    self.collect_match_pattern_bindings(&arm.pattern);
+                    for pattern in &arm.patterns {
+                        self.collect_match_pattern_bindings(pattern);
+                    }
                     self.collect_expr(&arm.body);
                     return;
                 }

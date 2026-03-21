@@ -656,7 +656,7 @@ pub struct UsingBinding {
 #[derive(Clone, Debug)]
 pub struct MatchArm {
     pub id: NodeId,
-    pub pattern: MatchPattern,
+    pub patterns: Vec<MatchPattern>,
     pub body: Expr,
     pub span: Span,
 }

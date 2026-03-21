@@ -732,6 +732,60 @@ fn check_with_modules(entry_path: &Path, entry_source: &str) -> Result<(), Vec<C
 }
 
 #[test]
+fn test_match_arm_alternation_runs() {
+    let run = run_program(
+        "match_arm_alternation",
+        r#"
+            fn is_whitespace(b: u8) -> bool {
+                match b {
+                    32 | 10 | 9 | 13 => true,
+                    _ => false,
+                }
+            }
+
+            fn main() -> u64 {
+                if is_whitespace(32) {
+                } else {
+                    return 1;
+                };
+                if is_whitespace(13) {
+                } else {
+                    return 2;
+                };
+                if is_whitespace(65) {
+                    return 3;
+                } else {
+                };
+                return 0;
+            }
+        "#,
+    );
+    assert_eq!(run.status.code(), Some(0));
+}
+
+#[test]
+fn test_match_arm_alternation_rejects_binding_patterns() {
+    let entry_source = r#"
+        fn main(t: (u64, u64)) -> u64 {
+            match t {
+                (x, _) | (1, 2) => x,
+                _ => 0,
+            }
+        }
+    "#;
+
+    with_temp_program(
+        "match_arm_alternation_rejects_bindings",
+        entry_source,
+        &[],
+        |entry_path, entry_src| {
+            let result = check_with_modules(entry_path, entry_src);
+            assert!(result.is_err(), "expected parse failure for binding alternation");
+        },
+    );
+}
+
+#[test]
 fn test_modules_opaque_field_access_rejected() {
     let entry_source = r#"
         requires {
