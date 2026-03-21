@@ -24,20 +24,16 @@ fn main() -> () | IoError | ParseError {
     using reader = open_read(path)?.text() {
         let text = reader.read_all()?;
 
-        var first = true;
-        for line in text.lines() {
-            if first {
-                first = false;
-            } else {
-                let [name_text, score_text, ...] = line.split(",");
-                let score = parse::parse_u64(score_text.trim())?;
-                let row = Row {
-                    name: name_text.trim(),
-                    score,
-                };
-                if row.score > 9 {
-                    println(row.name);
-                }
+        let lines = text.lines();
+        for line in lines[1..] {
+            let [name_text, score_text, ...] = line.split(",");
+            let score = parse::parse_u64(score_text.trim())?;
+            let row = Row {
+                name: name_text.trim(),
+                score,
+            };
+            if row.score > 9 {
+                println(row.name);
             }
         }
     }
