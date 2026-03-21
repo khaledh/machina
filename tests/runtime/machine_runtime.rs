@@ -113,7 +113,7 @@ fn main() -> u64 {
             close_runtime(inout rt);
             return 1;
         }
-    };
+    }
 
     match start(rt, id) {
         _ok: () => {}
@@ -121,14 +121,14 @@ fn main() -> u64 {
             close_runtime(inout rt);
             return 1;
         }
-    };
+    }
     match send(rt, id, 1, 0, 0) {
         _ok: () => {}
         _ => {
             close_runtime(inout rt);
             return 1;
         }
-    };
+    }
     let stepped = match step(rt) {
         StepStatus::DidWork => true,
         _ => false,

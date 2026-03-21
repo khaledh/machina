@@ -1844,7 +1844,7 @@ fn test_slice_borrow_rebind_not_all_paths_rejected() {
                 s = b[0..2];
             } else {
                 s[0];
-            };
+            }
 
             a[0] = 9;
             s[0];

@@ -662,7 +662,7 @@ fn test_dyn_array_append_drop_elem_typecheck() {
 fn test_if_without_else_requires_unit() {
     let source = r#"
         fn test() -> () {
-            if true { 1 };
+            if true { 1 }
             ()
         }
     "#;
@@ -675,7 +675,7 @@ fn test_if_without_else_requires_unit() {
 fn test_if_without_else_unit_ok() {
     let source = r#"
         fn test() -> () {
-            if true { };
+            if true { }
             ()
         }
     "#;

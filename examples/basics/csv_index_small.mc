@@ -43,7 +43,7 @@ fn build_index(rows: Row[*]) -> map<string, u64> {
         let inserted = index.insert(row.name, i);
         if inserted {
         } else {
-        };
+        }
         i += 1;
     }
     index

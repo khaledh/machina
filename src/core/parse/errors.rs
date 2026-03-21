@@ -51,6 +51,9 @@ pub enum ParseErrorKind {
     #[error("Match arm alternation only supports refutable, non-binding patterns in v1")]
     UnsupportedMatchAlternationPattern,
 
+    #[error("Unexpected trailing `;` after block statement; remove the semicolon")]
+    TrailingSemicolonAfterBlockStmt,
+
     #[error("Expected array index or slice range, found: {0}")]
     ExpectedArrayIndexOrRange(Token),
 

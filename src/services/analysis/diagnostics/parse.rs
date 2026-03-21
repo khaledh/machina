@@ -59,6 +59,9 @@ pub(super) fn from_parse_error(error: &ParseError) -> Diagnostic {
         ParseErrorKind::ExpectedStructField(_) => "MC-PARSE-EXPECTED-STRUCT-FIELD",
         ParseErrorKind::ExpectedMatchArm(_) => "MC-PARSE-EXPECTED-MATCH-ARM",
         ParseErrorKind::ExpectedMatchPattern(_) => "MC-PARSE-EXPECTED-MATCH-PATTERN",
+        ParseErrorKind::TrailingSemicolonAfterBlockStmt => {
+            "MC-PARSE-TRAILING-SEMICOLON-AFTER-BLOCK-STMT"
+        }
         ParseErrorKind::ExpectedArrayIndexOrRange(_) => "MC-PARSE-EXPECTED-INDEX-OR-RANGE",
         ParseErrorKind::ExpectedRefinement(_) => "MC-PARSE-EXPECTED-REFINEMENT",
         ParseErrorKind::UnknownAttribute(name) => {

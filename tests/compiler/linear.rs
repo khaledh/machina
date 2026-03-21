@@ -192,7 +192,7 @@ fn linear_type_hosted_runtime_is_available_without_machines_attr() {
                 match approved {
                     Approval::Approved(_) => println("approved"),
                     _ => println("unexpected"),
-                };
+                }
                 ()
             }
         "#,
@@ -279,7 +279,7 @@ fn linear_type_hosted_machine_handle_is_user_facing_in_helper_functions() {
                     Payment::Declined(_) => println("declined"),
                     Payment::Authorized(_) => println("authorized"),
                     _ => println("unexpected"),
-                };
+                }
                 ()
             }
 
@@ -292,7 +292,7 @@ fn linear_type_hosted_machine_handle_is_user_facing_in_helper_functions() {
                         let _authorized = payment.authorize()?;
                     }
                     _ => println("gateway-unexpected"),
-                };
+                }
                 fraud_service(service, payment_id)?;
                 merchant_check(service, payment_id)?;
                 ()
@@ -345,7 +345,7 @@ fn linear_type_hosted_machine_handle_runtime_helper_can_create_and_act() {
                 match approved {
                     Approval::Approved(_) => println("approved"),
                     _ => println("unexpected"),
-                };
+                }
                 ()
             }
 
@@ -548,7 +548,7 @@ fn linear_type_hosted_multi_actor_payment_lifecycle_through_helper_functions() {
                         println("gateway");
                     }
                     _ => println("gateway-unexpected"),
-                };
+                }
                 ()
             }
 
@@ -571,7 +571,7 @@ fn linear_type_hosted_multi_actor_payment_lifecycle_through_helper_functions() {
                     Payment::Declined(_) => println("declined"),
                     Payment::Authorized(_) => println("authorized"),
                     _ => println("unexpected"),
-                };
+                }
                 ()
             }
 
@@ -1158,13 +1158,13 @@ fn linear_type_hosted_fallible_action_does_not_advance_state_on_error() {
                 match draft.submit() {
                     _ok: PullRequest => {}
                     _err: SessionError => {}
-                };
+                }
 
                 let resumed = service.resume(PullRequest as Author, draft_id)?;
                 match resumed {
                     PullRequest::Draft(_) => println("draft"),
                     PullRequest::Review(_) => println("review"),
-                };
+                }
                 ()
             }
         "#,
@@ -1333,7 +1333,7 @@ fn linear_type_hosted_lookup_reads_current_instance_state() {
                 match current {
                     PullRequest::Draft(id) => println(id),
                     PullRequest::Review(id) => println(id),
-                };
+                }
                 ()
             }
         "#,
@@ -1381,7 +1381,7 @@ fn linear_type_hosted_lookup_reports_missing_instance() {
                         InvalidState => println("invalid"),
                         InstanceNotFound => println("missing"),
                     },
-                };
+                }
                 ()
             }
         "#,
@@ -1544,14 +1544,14 @@ fn linear_type_hosted_full_lifecycle_runs_end_to_end() {
                     PullRequest::Review(_) => println("wait-review"),
                     PullRequest::PendingCI(_) => println("wait-pending"),
                     PullRequest::Draft(_) => println("wait-draft"),
-                };
+                }
 
                 let fresh = service.resume(PullRequest as Author, pending_id)?;
                 match fresh {
                     PullRequest::Review(_) => println("resume-review"),
                     PullRequest::PendingCI(_) => println("resume-pending"),
                     PullRequest::Draft(_) => println("resume-draft"),
-                };
+                }
 
                 match resumed {
                     PullRequest::PendingCI(_) => match resumed.retry() {
@@ -1567,7 +1567,7 @@ fn linear_type_hosted_full_lifecycle_runs_end_to_end() {
                     },
                     PullRequest::Review(_) => println("resumed-review"),
                     PullRequest::Draft(_) => println("resumed-draft"),
-                };
+                }
                 ()
             }
         "#,
@@ -1658,7 +1658,7 @@ fn linear_type_hosted_on_handler_dispatches_from_mailbox() {
                         MailboxFull => println("send-full"),
                         RequestFailed => println("send-request"),
                     },
-                };
+                }
 
                 match pending.wait() {
                     next: PullRequest => match next {
@@ -1670,7 +1670,7 @@ fn linear_type_hosted_on_handler_dispatches_from_mailbox() {
                         InvalidState => println("wait-invalid"),
                         InstanceNotFound => println("wait-missing"),
                     },
-                };
+                }
                 ()
             }
         "#,
@@ -2085,7 +2085,7 @@ fn linear_type_derived_interaction_auto_correlates_reply_without_manual_deliver(
                     Order::Confirmed(_) => println("confirmed"),
                     Order::PendingAuth(_) => println("pending"),
                     Order::Draft(_) => println("draft"),
-                };
+                }
                 ()
             }
         "#,
@@ -2189,7 +2189,7 @@ fn linear_type_derived_interaction_auto_correlates_reply_across_machines() {
                     Order::Confirmed(_) => println("confirmed"),
                     Order::PendingAuth(_) => println("pending"),
                     Order::Draft(_) => println("draft"),
-                };
+                }
                 ()
             }
         "#,
@@ -2575,7 +2575,7 @@ fn linear_type_hosted_trigger_handler_body_runs_during_delivery() {
                     PullRequest::Review(_) => println("wait-review"),
                     PullRequest::PendingCI(_) => println("wait-pending"),
                     PullRequest::Draft(_) => println("wait-draft"),
-                };
+                }
                 ()
             }
         "#,
@@ -2662,7 +2662,7 @@ fn linear_type_hosted_trigger_handler_can_emit_send() {
                     PullRequest::Review(_) => println("wait-review"),
                     PullRequest::PendingCI(_) => println("wait-pending"),
                     PullRequest::Draft(_) => println("wait-draft"),
-                };
+                }
 
                 __mc_machine_runtime_step_u64(__mc_machine_runtime_managed_current_u64());
                 ()
@@ -2947,13 +2947,13 @@ fn linear_type_hosted_fallible_action_does_not_commit_emitted_send_on_error() {
                 match draft.submit() {
                     _ok: PullRequest => println("ok"),
                     _err: SessionError => println("err"),
-                };
+                }
                 __mc_machine_runtime_step_u64(__mc_machine_runtime_managed_current_u64());
                 let looked_up = service.lookup(PullRequest, 1)?;
                 match looked_up {
                     PullRequest::Draft(_) => println("draft"),
                     PullRequest::Review(_) => println("review"),
-                };
+                }
                 ()
             }
         "#,
@@ -3609,7 +3609,7 @@ fn linear_type_hosted_multi_actor_payment_lifecycle() {
                         println("gateway: authorized");
                     },
                     _ => println("gateway: unexpected state"),
-                };
+                }
 
                 // Stage 3: fraud service sends an alert.
                 service.send(FraudAlert { payment_id })?;
@@ -3627,7 +3627,7 @@ fn linear_type_hosted_multi_actor_payment_lifecycle() {
                     },
                     Payment::Declined(_) => println("merchant: cannot capture, payment was declined"),
                     _ => println("merchant: unexpected state"),
-                };
+                }
 
                 ()
             }

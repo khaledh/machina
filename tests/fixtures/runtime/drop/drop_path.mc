@@ -8,11 +8,9 @@ fn maybe_consume(flag: bool, sink p: Point^) {
     // p starts as initialized (due to sink param)
     if flag {
         consume(move p); // clears the init flag (avoids dropping at scope exit)
-        0
     } else {
         p.x = 1;
-        0
-    };
+    }
     // dropped at scope exit if init flag is still set
 }
 

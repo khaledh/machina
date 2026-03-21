@@ -38,14 +38,14 @@ fn main() -> u64 {
     if direct == 78 {
     } else {
         return 1;
-    };
+    }
 
     let p = Pair { a: 10, b: 20 };
     let nested = mix(p, 30, 40, 50, 60);
     if nested == 231 {
     } else {
         return 2;
-    };
+    }
 
     0
 }
@@ -106,7 +106,7 @@ fn main() -> u64 {
         if call_sum == local_sum {
         } else {
             return 1;
-        };
+        }
 
         // Keep values live after the call to stress caller-save preservation/spills.
         acc = acc + call_sum + v10 + v11 + v0 + v1 + v2 + v3;
@@ -155,13 +155,13 @@ fn main() -> u64 {
     if s1 == 185 {
     } else {
         return 1;
-    };
+    }
 
     let s2 = score(make_big(2, 4, 6, 8, 10), y, z);
     if s2 == 200 {
     } else {
         return 2;
-    };
+    }
 
     0
 }

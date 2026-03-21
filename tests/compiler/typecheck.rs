@@ -107,6 +107,39 @@ fn test_type_of_intrinsic_handles_generic_struct_values() {
 }
 
 #[test]
+fn test_statement_position_block_forms_do_not_require_semicolons() {
+    let run = run_program(
+        "stmt_position_block_forms_no_semicolons",
+        r#"
+            requires {
+                std::io::println
+            }
+
+            fn main() {
+                if true {
+                    println("if");
+                }
+                match 1 {
+                    1 => println("match"),
+                    _ => println("nope"),
+                }
+                {
+                    println("block");
+                }
+                println("done");
+            }
+        "#,
+    );
+    assert_eq!(run.status.code(), Some(0));
+
+    let stdout = String::from_utf8_lossy(&run.stdout);
+    assert_eq!(
+        stdout, "if\nmatch\nblock\ndone\n",
+        "unexpected stdout: {stdout}"
+    );
+}
+
+#[test]
 fn test_std_io_file_open_read_write_close_roundtrip() {
     let run = run_program(
         "std_io_file_roundtrip",
@@ -189,7 +222,7 @@ fn test_args_error_union_early_return_builds_and_runs() {
                 if argv.len < 3 {
                     println("usage");
                     return ();
-                };
+                }
             }
         "#,
     );
@@ -214,7 +247,7 @@ fn test_args_indexing_builds_and_runs_in_error_union_main() {
                 if argv.len < 3 {
                     println("usage");
                     return ();
-                };
+                }
 
                 let path = argv[1];
                 let needle = argv[2];
@@ -348,16 +381,16 @@ fn test_string_contains_finds_substrings() {
                 let text = "alpha beta";
                 if text.contains("alpha") {
                     println("head");
-                };
+                }
                 if text.contains("beta") {
                     println("tail");
-                };
+                }
                 if text.contains("") {
                     println("empty");
-                };
+                }
                 if !text.contains("gamma") {
                     println("miss");
-                };
+                }
             }
         "#,
     );
@@ -387,35 +420,35 @@ fn test_parse_u64_parses_decimal_and_rejects_invalid_input() {
                 match ok {
                     value: u64 => println(value),
                     err: ParseError => println("err"),
-                };
+                }
 
                 let empty = parse::parse_u64("");
                 println("empty");
                 match empty {
                     value: u64 => println(value),
                     err: ParseError => println("err"),
-                };
+                }
 
                 let bad = parse::parse_u64("7x");
                 println("bad");
                 match bad {
                     value: u64 => println(value),
                     err: ParseError => println("err"),
-                };
+                }
 
                 let overflow = parse::parse_u64("18446744073709551616");
                 println("overflow");
                 match overflow {
                     value: u64 => println(value),
                     err: ParseError => println("err"),
-                };
+                }
 
                 let max = parse::parse_u64("18446744073709551615");
                 println("max");
                 match max {
                     value: u64 => println(value),
                     err: ParseError => println("err"),
-                };
+                }
             }
         "#,
     );
@@ -423,8 +456,7 @@ fn test_parse_u64_parses_decimal_and_rejects_invalid_input() {
 
     let stdout = String::from_utf8_lossy(&run.stdout);
     assert_eq!(
-        stdout,
-        "ok\n42\nempty\nerr\nbad\nerr\noverflow\nerr\nmax\n18446744073709551615\n",
+        stdout, "ok\n42\nempty\nerr\nbad\nerr\noverflow\nerr\nmax\n18446744073709551615\n",
         "unexpected stdout: {stdout}"
     );
 }
@@ -506,8 +538,7 @@ fn test_copied_dyn_array_of_strings_remains_usable() {
 
     let stdout = String::from_utf8_lossy(&run.stdout);
     assert_eq!(
-        stdout,
-        "original:\npear\napple\nbanana\ncopy:\npear\napple\nbanana\n",
+        stdout, "original:\npear\napple\nbanana\ncopy:\npear\napple\nbanana\n",
         "unexpected stdout: {stdout}"
     );
 }
@@ -747,15 +778,15 @@ fn test_match_arm_alternation_runs() {
                 if is_whitespace(32) {
                 } else {
                     return 1;
-                };
+                }
                 if is_whitespace(13) {
                 } else {
                     return 2;
-                };
+                }
                 if is_whitespace(65) {
                     return 3;
                 } else {
-                };
+                }
                 return 0;
             }
         "#,
@@ -780,7 +811,10 @@ fn test_match_arm_alternation_rejects_binding_patterns() {
         &[],
         |entry_path, entry_src| {
             let result = check_with_modules(entry_path, entry_src);
-            assert!(result.is_err(), "expected parse failure for binding alternation");
+            assert!(
+                result.is_err(),
+                "expected parse failure for binding alternation"
+            );
         },
     );
 }

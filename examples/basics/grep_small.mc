@@ -9,7 +9,7 @@ fn main() -> () | IoError {
     if argv.len < 3 {
         println("usage: grep_small <path> <needle>");
         return ();
-    };
+    }
 
     let path = argv[1];
     let needle = argv[2];

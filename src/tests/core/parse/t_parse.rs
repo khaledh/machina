@@ -1871,10 +1871,18 @@ fn test_parse_match_expr_alternation_patterns() {
         ExprKind::Match { arms, .. } => {
             assert_eq!(arms.len(), 2);
             assert_eq!(arms[0].patterns.len(), 4);
-            assert!(matches!(&arms[0].patterns[0], MatchPattern::IntLit { value, .. } if *value == 32));
-            assert!(matches!(&arms[0].patterns[1], MatchPattern::IntLit { value, .. } if *value == 10));
-            assert!(matches!(&arms[0].patterns[2], MatchPattern::IntLit { value, .. } if *value == 9));
-            assert!(matches!(&arms[0].patterns[3], MatchPattern::IntLit { value, .. } if *value == 13));
+            assert!(
+                matches!(&arms[0].patterns[0], MatchPattern::IntLit { value, .. } if *value == 32)
+            );
+            assert!(
+                matches!(&arms[0].patterns[1], MatchPattern::IntLit { value, .. } if *value == 10)
+            );
+            assert!(
+                matches!(&arms[0].patterns[2], MatchPattern::IntLit { value, .. } if *value == 9)
+            );
+            assert!(
+                matches!(&arms[0].patterns[3], MatchPattern::IntLit { value, .. } if *value == 13)
+            );
             assert!(matches!(arms[1].patterns[0], MatchPattern::Wildcard { .. }));
         }
         _ => panic!("Expected match expression"),
@@ -1893,8 +1901,15 @@ fn test_parse_match_expr_alternation_rejects_binding_patterns() {
     "#;
 
     match parse_source(source) {
-        Err(err) if matches!(err.kind(), ParseErrorKind::UnsupportedMatchAlternationPattern) => {}
-        other => panic!("Expected UnsupportedMatchAlternationPattern, got {:?}", other),
+        Err(err)
+            if matches!(
+                err.kind(),
+                ParseErrorKind::UnsupportedMatchAlternationPattern
+            ) => {}
+        other => panic!(
+            "Expected UnsupportedMatchAlternationPattern, got {:?}",
+            other
+        ),
     }
 }
 
@@ -2094,7 +2109,7 @@ fn test_parse_for_array_loop() {
 fn test_parse_if_optional_else_block() {
     let source = r#"
         fn test() -> () {
-            if true { };
+            if true { }
             ()
         }
     "#;
@@ -2145,7 +2160,7 @@ fn test_parse_if_optional_else_block() {
 fn test_parse_else_if_wraps_in_block() {
     let source = r#"
         fn test() -> () {
-            if true { } else if false { } else { };
+            if true { } else if false { } else { }
             ()
         }
     "#;
@@ -2168,6 +2183,149 @@ fn test_parse_else_if_wraps_in_block() {
     };
     let tail = tail.as_deref().expect("Expected nested if tail");
     assert!(matches!(tail.kind, ExprKind::If { .. }));
+}
+
+#[test]
+fn test_parse_statement_position_if_without_semicolon() {
+    let source = r#"
+        fn test() {
+            if true { }
+            let x = 1;
+        }
+    "#;
+
+    let funcs = parse_source(source).expect("Failed to parse");
+    let func = &funcs[0];
+    let (items, tail) = block_parts(&func.body);
+
+    assert_eq!(items.len(), 2);
+    assert!(tail.is_none());
+    assert!(matches!(
+        items[0],
+        BlockItem::Expr(Expr {
+            kind: ExprKind::If { .. },
+            ..
+        })
+    ));
+    assert!(matches!(
+        items[1],
+        BlockItem::Stmt(StmtExpr {
+            kind: StmtExprKind::LetBind { .. },
+            ..
+        })
+    ));
+}
+
+#[test]
+fn test_parse_statement_position_match_without_semicolon() {
+    let source = r#"
+        fn test(x: u64) {
+            match x {
+                0 => (),
+                _ => (),
+            }
+            let y = 2;
+        }
+    "#;
+
+    let funcs = parse_source(source).expect("Failed to parse");
+    let func = &funcs[0];
+    let (items, tail) = block_parts(&func.body);
+
+    assert_eq!(items.len(), 2);
+    assert!(tail.is_none());
+    assert!(matches!(
+        items[0],
+        BlockItem::Expr(Expr {
+            kind: ExprKind::Match { .. },
+            ..
+        })
+    ));
+    assert!(matches!(
+        items[1],
+        BlockItem::Stmt(StmtExpr {
+            kind: StmtExprKind::LetBind { .. },
+            ..
+        })
+    ));
+}
+
+#[test]
+fn test_parse_statement_position_block_without_semicolon() {
+    let source = r#"
+        fn test() {
+            { let x = 1; }
+            let y = 2;
+        }
+    "#;
+
+    let funcs = parse_source(source).expect("Failed to parse");
+    let func = &funcs[0];
+    let (items, tail) = block_parts(&func.body);
+
+    assert_eq!(items.len(), 2);
+    assert!(tail.is_none());
+    assert!(matches!(
+        items[0],
+        BlockItem::Expr(Expr {
+            kind: ExprKind::Block { .. },
+            ..
+        })
+    ));
+    assert!(matches!(
+        items[1],
+        BlockItem::Stmt(StmtExpr {
+            kind: StmtExprKind::LetBind { .. },
+            ..
+        })
+    ));
+}
+
+#[test]
+fn test_parse_if_expression_tail_with_continuation() {
+    let source = r#"
+        fn test(z: u64) -> u64 {
+            if true { 1 } else { 2 } + z
+        }
+    "#;
+
+    let funcs = parse_source(source).expect("Failed to parse");
+    let func = &funcs[0];
+    let tail = block_tail(&func.body);
+
+    assert!(matches!(tail.kind, ExprKind::BinOp { .. }));
+}
+
+#[test]
+fn test_parse_plain_expr_still_requires_semicolon_between_statements() {
+    let source = r#"
+        fn test() {
+            foo()
+            let x = 1;
+        }
+    "#;
+
+    let err = parse_source(source).expect_err("Expected parse error");
+    assert!(matches!(
+        err.kind(),
+        ParseErrorKind::ExpectedToken(TokenKind::RBrace, _)
+    ));
+}
+
+#[test]
+fn test_parse_statement_position_if_rejects_trailing_semicolon() {
+    let source = r#"
+        fn test() {
+            if true { };
+            let x = 1;
+        }
+    "#;
+
+    let err = parse_source(source).expect_err("Expected parse error");
+    assert!(matches!(
+        err.kind(),
+        ParseErrorKind::TrailingSemicolonAfterBlockStmt
+    ));
 }
 
 #[test]

@@ -93,7 +93,7 @@ fn test_lower_if_stmt_side_effect() {
                 return 1;
             } else {
                 i = i + 1;
-            };
+            }
             i
         }
     "});

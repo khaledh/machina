@@ -29,7 +29,7 @@ fn main() {
     match boxed.msg {
         Msg::Ping(n) => println(f"Ping({n})"),
         Msg::Pong(n) => println(f"Pong({n})"),
-    };
+    }
 
     let t = ^(10, 20);
     println(f"t.0={t.0}, t.1={t.1}");
@@ -44,5 +44,5 @@ fn main() {
     match msg {
         Msg::Ping(n) => println(f"Ping({n})"),
         Msg::Pong(n) => println(f"Pong({n})"),
-    };
+    }
 }

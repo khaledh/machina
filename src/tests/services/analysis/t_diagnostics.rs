@@ -35,6 +35,20 @@ fn parse_diagnostic_is_phase_tagged_and_stable_coded() {
 }
 
 #[test]
+fn parse_trailing_block_stmt_semicolon_diagnostic_is_clear_and_stable_coded() {
+    let err = PEK::TrailingSemicolonAfterBlockStmt.at(Span::default());
+    let diag = Diagnostic::from_parse_error(&err);
+
+    assert_eq!(diag.phase, DiagnosticPhase::Parse);
+    assert_eq!(diag.severity, DiagnosticSeverity::Error);
+    assert_eq!(diag.code, "MC-PARSE-TRAILING-SEMICOLON-AFTER-BLOCK-STMT");
+    assert_eq!(
+        diag.message,
+        "Unexpected trailing `;` after block statement; remove the semicolon"
+    );
+}
+
+#[test]
 fn lex_diagnostic_is_phase_tagged_and_stable_coded() {
     let span = Span::default();
     let err = LEK::UnexpectedCharacter('@').at(span);

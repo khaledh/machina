@@ -14,71 +14,82 @@ impl<'a> Parser<'a> {
     /// Expression parsing (using Pratt parsing for operator precedence)
     pub(super) fn parse_expr(&mut self, min_bp: u8) -> Result<Expr, ParseError> {
         let marker = self.mark();
+        let lhs = self.parse_expr_prefix(marker)?;
+        self.parse_expr_suffix(marker, lhs, min_bp)
+    }
 
+    fn parse_expr_prefix(&mut self, marker: Marker) -> Result<Expr, ParseError> {
         // Unary operators / keywords
-        let mut lhs = if self.curr_token.kind == TK::Minus {
+        if self.curr_token.kind == TK::Minus {
             // -<expr>
             self.advance();
             let operand = self.parse_expr(10)?;
-            Expr {
+            Ok(Expr {
                 id: self.id_gen.new_id(),
                 kind: ExprKind::UnaryOp {
                     op: UnaryOp::Neg,
                     expr: Box::new(operand),
                 },
                 span: self.close(marker),
-            }
+            })
         } else if self.curr_token.kind == TK::LogicalNot {
             // !<expr>
             self.advance();
             let operand = self.parse_expr(10)?;
-            Expr {
+            Ok(Expr {
                 id: self.id_gen.new_id(),
                 kind: ExprKind::UnaryOp {
                     op: UnaryOp::LogicalNot,
                     expr: Box::new(operand),
                 },
                 span: self.close(marker),
-            }
+            })
         } else if self.curr_token.kind == TK::Tilde {
             // ~<expr>
             self.advance();
             let operand = self.parse_expr(10)?;
-            Expr {
+            Ok(Expr {
                 id: self.id_gen.new_id(),
                 kind: ExprKind::UnaryOp {
                     op: UnaryOp::BitNot,
                     expr: Box::new(operand),
                 },
                 span: self.close(marker),
-            }
+            })
         } else if self.curr_token.kind == TK::Caret {
             // ^<expr>
             self.advance();
             let operand = self.parse_expr(10)?;
-            Expr {
+            Ok(Expr {
                 id: self.id_gen.new_id(),
                 kind: ExprKind::HeapAlloc {
                     expr: Box::new(operand),
                 },
                 span: self.close(marker),
-            }
+            })
         } else if self.curr_token.kind == TK::KwMove {
             // move <expr>
             self.advance();
             let operand = self.parse_expr(10)?;
-            Expr {
+            Ok(Expr {
                 id: self.id_gen.new_id(),
                 kind: ExprKind::Move {
                     expr: Box::new(operand),
                 },
                 span: self.close(marker),
-            }
+            })
         } else {
             // <expr>
-            self.parse_postfix()?
-        };
+            self.parse_postfix()
+        }
+    }
 
+    pub(super) fn parse_expr_suffix(
+        &mut self,
+        marker: Marker,
+        mut lhs: Expr,
+        min_bp: u8,
+    ) -> Result<Expr, ParseError> {
         if min_bp == 0
             && self.is_contextual_keyword("as")
             && let ExprKind::Var { ident } = &lhs.kind
@@ -202,7 +213,7 @@ impl<'a> Parser<'a> {
             })
     }
 
-    fn is_expr_start_token(token: &TokenKind) -> bool {
+    pub(super) fn is_expr_start_token(token: &TokenKind) -> bool {
         matches!(
             token,
             TK::Minus

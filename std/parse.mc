@@ -42,7 +42,7 @@ fn parse_decimal_digit_or_invalid(b: u8) -> u64 {
 fn parse_u64(text: string) -> u64 | ParseError {
     if text.len == 0 {
         return ParseError {};
-    };
+    }
 
     let max_div10: u64 = 1844674407370955161;
     let max_mod10: u64 = 5;
@@ -54,13 +54,13 @@ fn parse_u64(text: string) -> u64 | ParseError {
         let digit = parse_decimal_digit_or_invalid(b);
         if digit > 9 {
             return ParseError {};
-        };
+        }
         if value > max_div10 {
             return ParseError {};
-        };
+        }
         if value == max_div10 && digit > max_mod10 {
             return ParseError {};
-        };
+        }
 
         value = value * 10 + digit;
         i += 1;

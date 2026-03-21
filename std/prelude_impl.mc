@@ -40,10 +40,10 @@ fn string_trim_impl(s: string) -> string {
 fn string_contains_impl(haystack: string, needle: string) -> bool {
   if needle.len == 0 {
     return true;
-  };
+  }
   if needle.len > haystack.len {
     return false;
-  };
+  }
 
   var i: u64 = 0;
   while i + needle.len <= haystack.len {
@@ -59,7 +59,7 @@ fn string_contains_impl(haystack: string, needle: string) -> bool {
     }
     if matched {
       return true;
-    };
+    }
     i += 1;
   }
 

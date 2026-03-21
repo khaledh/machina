@@ -6,6 +6,11 @@ enum AssignOp {
     Compound(BinaryOp),
 }
 
+enum ExprStmtParse {
+    Item(Expr),
+    Tail(Expr),
+}
+
 impl<'a> Parser<'a> {
     pub(super) fn parse_block(&mut self) -> Result<Expr, ParseError> {
         let marker = self.mark();
@@ -53,6 +58,15 @@ impl<'a> Parser<'a> {
                     let stmt = self.parse_return()?;
                     items.push(BlockItem::Stmt(stmt));
                 }
+                _ if self.starts_semicolon_optional_expr_stmt() => {
+                    match self.parse_semicolon_optional_expr_stmt()? {
+                        ExprStmtParse::Item(expr) => items.push(BlockItem::Expr(expr)),
+                        ExprStmtParse::Tail(expr) => {
+                            tail = Some(Box::new(expr));
+                            break;
+                        }
+                    }
+                }
                 _ => {
                     let expr = self.parse_expr(0)?;
                     if let Some(assign_op) = self.current_assign_op() {
@@ -81,6 +95,64 @@ impl<'a> Parser<'a> {
             kind: ExprKind::Block { items, tail },
             span: self.close(marker),
         })
+    }
+
+    fn starts_semicolon_optional_expr_stmt(&self) -> bool {
+        matches!(self.curr_token.kind, TK::KwIf | TK::KwMatch)
+            || matches!(self.curr_token.kind, TK::LBrace) && self.curr_starts_block_expr()
+    }
+
+    fn curr_starts_block_expr(&self) -> bool {
+        !self.lookahead_for(TK::Pipe, TK::RBrace)
+            && !self.lookahead_for(TK::Colon, TK::RBrace)
+            && !self.lookahead_for(TK::Comma, TK::RBrace)
+    }
+
+    fn parse_semicolon_optional_expr_stmt(&mut self) -> Result<ExprStmtParse, ParseError> {
+        let expr = match self.curr_token.kind {
+            TK::KwIf => self.parse_if()?,
+            TK::KwMatch => self.parse_match_expr()?,
+            TK::LBrace => self.parse_block()?,
+            _ => unreachable!("semicolon-optional stmt expr must start with if, match, or block"),
+        };
+
+        match self.curr_token.kind {
+            TK::Semicolon => self.err_here(PEK::TrailingSemicolonAfterBlockStmt),
+            TK::RBrace => Ok(ExprStmtParse::Tail(expr)),
+            _ if Self::token_can_start_block_item(&self.curr_token.kind) => {
+                Ok(ExprStmtParse::Item(expr))
+            }
+            _ => {
+                let marker = Marker {
+                    pos: expr.span.start,
+                    token_index: self.pos,
+                };
+                let expr = self.parse_expr_suffix(marker, expr, 0)?;
+                match self.curr_token.kind {
+                    TK::Semicolon => {
+                        self.advance();
+                        Ok(ExprStmtParse::Item(expr))
+                    }
+                    TK::RBrace => Ok(ExprStmtParse::Tail(expr)),
+                    _ => self.expected_token(TK::Semicolon),
+                }
+            }
+        }
+    }
+
+    fn token_can_start_block_item(token: &TK) -> bool {
+        matches!(
+            token,
+            TK::KwLet
+                | TK::KwVar
+                | TK::KwWhile
+                | TK::KwFor
+                | TK::KwDefer
+                | TK::KwUsing
+                | TK::KwBreak
+                | TK::KwContinue
+                | TK::KwReturn
+        ) || Self::is_expr_start_token(token)
     }
 
     fn current_assign_op(&self) -> Option<AssignOp> {

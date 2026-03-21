@@ -13,7 +13,7 @@ fn main() -> u64 {
         if inserted {
         } else {
             return 1;
-        };
+        }
         i = i + 1;
     }
 
@@ -23,7 +23,7 @@ fn main() -> u64 {
         if s.contains(v) {
         } else {
             return 2;
-        };
+        }
         i = i + 1;
     }
 
@@ -34,9 +34,9 @@ fn main() -> u64 {
             if removed {
             } else {
                 return 3;
-            };
+            }
         } else {
-        };
+        }
         i = i + 1;
     }
 
@@ -47,13 +47,13 @@ fn main() -> u64 {
             if has {
             } else {
                 return 4;
-            };
+            }
         } else {
             if has {
                 return 5;
             } else {
-            };
-        };
+            }
+        }
         i = i + 1;
     }
 
@@ -64,14 +64,14 @@ fn main() -> u64 {
         if inserted {
         } else {
             return 6;
-        };
+        }
         i = i + 2;
     }
 
     if s.len != 256 {
         return 7;
     } else {
-    };
+    }
 
     return 0;
 }
@@ -93,45 +93,45 @@ fn main() -> u64 {
     if inserted_a {
     } else {
         return 1;
-    };
+    }
     if inserted_b {
     } else {
         return 2;
-    };
+    }
 
     if s.contains("alice") {
     } else {
         return 3;
-    };
+    }
 
     let query = " bob ".trim();
     if s.contains(query) {
     } else {
         return 4;
-    };
+    }
 
     let dup = s.insert("alice");
     if dup {
         return 5;
     } else {
-    };
+    }
 
     let removed = s.remove(query);
     if removed {
     } else {
         return 6;
-    };
+    }
 
     if s.contains("bob") {
         return 7;
     } else {
-    };
+    }
 
     s.clear();
     if s.is_empty {
     } else {
         return 8;
-    };
+    }
 
     return 0;
 }
