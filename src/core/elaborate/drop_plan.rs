@@ -103,6 +103,7 @@ impl<'a> DropPlanBuilder<'a> {
 
     fn register_pattern_drop(&mut self, pattern: &BindPattern, guard: DropGuard) {
         match &pattern.kind {
+            BindPatternKind::Wildcard => {}
             BindPatternKind::Name { .. } => {
                 let def_id = self.def_table.def_id(pattern.id);
                 self.register_def_drop(def_id, guard);

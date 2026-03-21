@@ -128,6 +128,7 @@ fn collect_stmt_defs_uses(
 
 fn collect_pattern_defs(pattern: &BindPattern, ctx: &NormalizedContext, defs: &mut HashSet<DefId>) {
     match &pattern.kind {
+        BindPatternKind::Wildcard => {}
         BindPatternKind::Name { .. } => {
             let def_id = ctx.def_table.def_id(pattern.id);
             add_def_if_heap(def_id, ctx, defs);

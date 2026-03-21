@@ -9,10 +9,20 @@ impl<'a> Parser<'a> {
                 self.parse_struct_bind_pattern(marker, name.clone())
             }
             TK::Ident(name) => self.parse_name_bind_pattern(marker, name.clone()),
+            TK::Underscore => self.parse_wildcard_bind_pattern(marker),
             TK::LBracket => self.parse_array_bind_pattern(marker),
             TK::LParen => self.parse_tuple_bind_pattern(marker),
             _ => self.err_here(PEK::ExpectedPattern(self.curr_token.clone())),
         }
+    }
+
+    fn parse_wildcard_bind_pattern(&mut self, marker: Marker) -> Result<BindPattern, ParseError> {
+        self.advance();
+        Ok(BindPattern {
+            id: self.id_gen.new_id(),
+            kind: BindPatternKind::Wildcard,
+            span: self.close(marker),
+        })
     }
 
     fn parse_name_bind_pattern(
@@ -100,7 +110,7 @@ impl<'a> Parser<'a> {
 
                 let pattern = match self.curr_token.kind {
                     TK::Comma | TK::RBracket => None,
-                    TK::Ident(_) => Some(Box::new(self.parse_bind_pattern()?)),
+                    TK::Ident(_) | TK::Underscore => Some(Box::new(self.parse_bind_pattern()?)),
                     _ => return self.err_here(PEK::InvalidArrayRestPattern),
                 };
 

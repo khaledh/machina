@@ -15,6 +15,14 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
         value_ty: &Type,
     ) -> Result<(), LowerToIrError> {
         match &pattern.kind {
+            BindPatternKind::Wildcard => {
+                self.emit_drop_for_value(
+                    value.storage_value(),
+                    value_ty,
+                    matches!(value.storage, LocalStorage::Addr(_)),
+                )?;
+                Ok(())
+            }
             BindPatternKind::Name { .. } => {
                 let def_id = self.def_table.def_id(pattern.id);
                 let dest_ty = self.def_type(def_id);

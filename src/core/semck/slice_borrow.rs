@@ -263,6 +263,7 @@ fn update_array_rest_slice_bindings(
     ctx: &NormalizedContext,
 ) {
     match &pattern.kind {
+        BindPatternKind::Wildcard => {}
         BindPatternKind::Array { rest, .. } => {
             let Some(rest_pattern) = rest.as_ref().and_then(|rest| rest.pattern.as_deref()) else {
                 return;
@@ -484,6 +485,7 @@ fn collect_stmt_defs_uses(
 /// Collect slice-typed definitions from a pattern.
 fn collect_pattern_defs(pattern: &BindPattern, ctx: &NormalizedContext, defs: &mut HashSet<DefId>) {
     match &pattern.kind {
+        BindPatternKind::Wildcard => {}
         BindPatternKind::Name { .. } => {
             let def_id = ctx.def_table.def_id(pattern.id);
             add_def_if_slice(def_id, ctx, defs);

@@ -335,6 +335,7 @@ impl<'a> MoveVisitor<'a> {
     /// Called on let/var bindings and reassignments to "revive" the variable.
     fn clear_pattern_defs(&mut self, pattern: &BindPattern) {
         match &pattern.kind {
+            BindPatternKind::Wildcard => {}
             BindPatternKind::Name { .. } => {
                 let def_id = self.ctx.def_table.def_id(pattern.id);
                 self.moved.remove(&def_id);

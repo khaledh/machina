@@ -91,6 +91,7 @@ fn bind_bind_pattern_types(
     def_table: &DefTable,
 ) {
     match &pattern.kind {
+        BindPatternKind::Wildcard => {}
         BindPatternKind::Name { .. } => {
             let def_id = def_table.def_id(pattern.id);
             if let Some(term) = def_terms.get(&def_id) {
@@ -444,6 +445,7 @@ fn check_bind_pattern(
     def_owners: &HashMap<DefId, ModuleId>,
 ) -> Option<TypeCheckError> {
     match &pattern.kind {
+        BindPatternKind::Wildcard => None,
         BindPatternKind::Name { .. } => None,
         BindPatternKind::Tuple { patterns } => match value_ty {
             Type::Tuple { field_tys } => {

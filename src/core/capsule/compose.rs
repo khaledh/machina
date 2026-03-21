@@ -785,6 +785,7 @@ impl PrivateSymbolRenamer {
 
     fn bind_pattern_names(&mut self, pattern: &BindPattern) {
         match &pattern.kind {
+            BindPatternKind::Wildcard => {}
             BindPatternKind::Name { ident, .. } => self.bind_value_name(ident),
             BindPatternKind::Array { .. } | BindPatternKind::Tuple { .. } => pattern
                 .kind

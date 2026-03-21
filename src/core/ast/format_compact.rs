@@ -61,6 +61,7 @@ pub fn format_semantic_stmt_compact(stmt: &StmtExpr) -> String {
 pub fn format_semantic_bind_pattern_compact(pattern: &BindPattern) -> String {
     fn fmt_inner(pattern: &BindPattern, out: &mut String) {
         match &pattern.kind {
+            BindPatternKind::Wildcard => out.push('_'),
             BindPatternKind::Name { ident, .. } => out.push_str(ident),
             BindPatternKind::Array {
                 prefix,

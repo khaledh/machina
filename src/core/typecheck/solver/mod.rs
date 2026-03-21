@@ -894,6 +894,7 @@ fn collect_pattern_bind_decl_spans(
     out: &mut HashMap<DefId, Span>,
 ) {
     match &pattern.kind {
+        BindPatternKind::Wildcard => {}
         BindPatternKind::Name { .. } => {
             out.entry(def_table.def_id(pattern.id)).or_insert(span);
         }

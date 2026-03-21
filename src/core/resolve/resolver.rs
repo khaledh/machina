@@ -1118,6 +1118,7 @@ impl SymbolResolver {
         seen_names: &mut HashSet<String>,
     ) {
         match &pattern.kind {
+            BindPatternKind::Wildcard => {}
             BindPatternKind::Name { ident: var_name } => {
                 if !seen_names.insert(var_name.clone()) {
                     self.err(pattern.span, REK::SymbolAlreadyDefined(var_name.clone()));

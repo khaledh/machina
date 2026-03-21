@@ -143,6 +143,7 @@ fn pattern_contains_def_id(
     target_def_id: DefId,
 ) -> bool {
     match &pattern.kind {
+        BindPatternKind::Wildcard => false,
         BindPatternKind::Name { .. } => {
             def_table.lookup_node_def_id(pattern.id) == Some(target_def_id)
         }

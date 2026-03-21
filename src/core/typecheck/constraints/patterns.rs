@@ -59,6 +59,7 @@ impl<'a> ConstraintCollector<'a> {
         });
 
         match &pattern.kind {
+            BindPatternKind::Wildcard => {}
             BindPatternKind::Name { .. } => {
                 let node_ty = self.node_term(pattern.id);
                 if let Some(def_id) = self.lookup_def_id(pattern.id) {

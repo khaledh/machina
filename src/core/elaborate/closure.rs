@@ -388,6 +388,7 @@ impl<'a> Elaborator<'a> {
 
     fn collect_bind_pattern_defs(&self, pattern: &BindPattern, out: &mut Vec<DefId>) {
         match &pattern.kind {
+            BindPatternKind::Wildcard => {}
             BindPatternKind::Name { .. } => out.push(self.def_id_for(pattern.id)),
             BindPatternKind::Array { .. } | BindPatternKind::Tuple { .. } => pattern
                 .kind

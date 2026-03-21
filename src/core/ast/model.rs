@@ -622,6 +622,7 @@ pub struct BindPattern {
 
 #[derive(Clone, Debug)]
 pub enum BindPatternKind {
+    Wildcard,
     Name {
         ident: String,
     },
@@ -648,7 +649,7 @@ pub struct ArrayRestBindPattern {
 impl BindPatternKind {
     pub fn for_each_child_pattern(&self, mut f: impl FnMut(&BindPattern)) {
         match self {
-            Self::Name { .. } => {}
+            Self::Wildcard | Self::Name { .. } => {}
             Self::Array {
                 prefix,
                 rest,
@@ -681,7 +682,7 @@ impl BindPatternKind {
 
     pub fn for_each_child_pattern_mut(&mut self, mut f: impl FnMut(&mut BindPattern)) {
         match self {
-            Self::Name { .. } => {}
+            Self::Wildcard | Self::Name { .. } => {}
             Self::Array {
                 prefix,
                 rest,

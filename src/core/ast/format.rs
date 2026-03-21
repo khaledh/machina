@@ -652,6 +652,9 @@ impl BindPattern {
     fn fmt_with_indent(&self, f: &mut fmt::Formatter<'_>, level: usize) -> fmt::Result {
         let pad = indent(level);
         match &self.kind {
+            BindPatternKind::Wildcard => {
+                writeln!(f, "{}Wildcard [{}]", pad, self.id)?;
+            }
             BindPatternKind::Name { ident, .. } => {
                 writeln!(f, "{}Name({}) [{}]", pad, ident, self.id)?;
             }

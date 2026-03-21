@@ -224,6 +224,7 @@ impl<'a> LocalScopeCollector<'a> {
 
     fn collect_bind_pattern_bindings(&mut self, pattern: &BindPattern) {
         match &pattern.kind {
+            BindPatternKind::Wildcard => {}
             BindPatternKind::Name { .. } => {
                 self.insert_def(self.def_table.def_id(pattern.id));
             }

@@ -1525,6 +1525,60 @@ fn test_parse_array_pattern_with_trailing_rest() {
 }
 
 #[test]
+fn test_parse_wildcard_bind_pattern() {
+    let source = r#"
+        fn test(argv: string[*]) {
+            let _ = argv;
+        }
+    "#;
+
+    let funcs = parse_source(source).expect("Failed to parse");
+    let func = &funcs[0];
+    let (items, _) = block_parts(&func.body);
+    let stmt = block_stmt_at(items, 0);
+
+    let StmtExprKind::LetBind { pattern, .. } = &stmt.kind else {
+        panic!("Expected let binding");
+    };
+
+    assert!(matches!(pattern.kind, BindPatternKind::Wildcard));
+}
+
+#[test]
+fn test_parse_array_pattern_with_wildcard_and_rest() {
+    let source = r#"
+        fn test(argv: string[*]) {
+            let [_, path, needle, ...] = argv;
+        }
+    "#;
+
+    let funcs = parse_source(source).expect("Failed to parse");
+    let func = &funcs[0];
+    let (items, _) = block_parts(&func.body);
+    let stmt = block_stmt_at(items, 0);
+
+    let StmtExprKind::LetBind { pattern, .. } = &stmt.kind else {
+        panic!("Expected let binding");
+    };
+
+    match &pattern.kind {
+        BindPatternKind::Array {
+            prefix,
+            rest,
+            suffix,
+        } => {
+            assert_eq!(prefix.len(), 3);
+            assert!(matches!(prefix[0].kind, BindPatternKind::Wildcard));
+            assert!(matches!(prefix[1].kind, BindPatternKind::Name { .. }));
+            assert!(matches!(prefix[2].kind, BindPatternKind::Name { .. }));
+            assert!(suffix.is_empty());
+            assert!(rest.as_ref().is_some_and(|rest| rest.pattern.is_none()));
+        }
+        other => panic!("Expected array pattern, got {:?}", other),
+    }
+}
+
+#[test]
 fn test_parse_array_pattern_with_middle_rest() {
     let source = r#"
         fn test(argv: string[*]) {

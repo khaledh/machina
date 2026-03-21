@@ -160,6 +160,7 @@ impl<'a> StructuralChecker<'a> {
 
     fn check_pattern(&mut self, pattern: &BindPattern) {
         match &pattern.kind {
+            BindPatternKind::Wildcard => {}
             BindPatternKind::Name { .. } => {}
             BindPatternKind::Array { .. } | BindPatternKind::Tuple { .. } => pattern
                 .kind

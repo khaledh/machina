@@ -412,6 +412,7 @@ impl<'a> DefCollector<'a> {
 
     fn collect_bind_pattern(&mut self, pattern: &BindPattern) {
         match &pattern.kind {
+            BindPatternKind::Wildcard => {}
             BindPatternKind::Name { .. } => {
                 self.defs.insert(self.def_table.def_id(pattern.id));
             }
@@ -558,6 +559,7 @@ impl<'a> DefSpanCollector<'a> {
 
     fn collect_pattern(&mut self, pattern: &BindPattern) {
         match &pattern.kind {
+            BindPatternKind::Wildcard => {}
             BindPatternKind::Name { .. } => {
                 let def_id = self.def_table.def_id(pattern.id);
                 self.spans.entry(def_id).or_insert(pattern.span);
@@ -977,6 +979,7 @@ impl<'a> DefInitChecker<'a> {
 
     fn mark_pattern_initialized(&mut self, pattern: &BindPattern) {
         match &pattern.kind {
+            BindPatternKind::Wildcard => {}
             BindPatternKind::Name { .. } => {
                 self.initialized
                     .mark_full(self.ctx.def_table.def_id(pattern.id));

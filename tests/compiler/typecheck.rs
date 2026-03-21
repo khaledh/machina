@@ -287,6 +287,31 @@ fn test_args_array_destructure_with_rest_builds_and_runs() {
 }
 
 #[test]
+fn test_args_array_destructure_with_wildcard_builds_and_runs() {
+    let run = run_program_with_args(
+        "args_array_destructure_with_wildcard",
+        r#"
+            requires {
+                std::env::args
+                std::io::IoError
+            }
+
+            fn main() -> () | IoError {
+                let argv = args();
+                let [_, path, needle, ...] = argv;
+                println(path);
+                println(needle);
+            }
+        "#,
+        &["/tmp/file.txt", "bytes"],
+    );
+    assert_eq!(run.status.code(), Some(0));
+
+    let stdout = String::from_utf8_lossy(&run.stdout);
+    assert_eq!(stdout, "/tmp/file.txt\nbytes\n");
+}
+
+#[test]
 fn test_dyn_array_destructure_with_middle_rest_keeps_prefix_and_suffix() {
     let run = run_program(
         "dyn_array_destructure_middle_rest",
