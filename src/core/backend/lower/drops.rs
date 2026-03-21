@@ -661,7 +661,7 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
             Type::Array { dims, .. } => self.drop_array(addr, ty, dims),
             Type::DynArray { elem_ty } => self.drop_dyn_array(addr, elem_ty),
             Type::Set { elem_ty } => self.drop_set(addr, elem_ty),
-            Type::Map { .. } => self.drop_map(addr),
+            Type::Map { key_ty, value_ty } => self.drop_map(addr, key_ty, value_ty),
             Type::Enum { variants, .. } => self.drop_enum(addr, ty, variants),
             Type::ErrorUnion { ok_ty, err_tys } => {
                 let variants = std::iter::once(EnumVariant {
@@ -770,6 +770,16 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
     }
 
     fn drop_set(&mut self, addr: ValueId, elem_ty: &Type) -> Result<(), LowerToIrError> {
+        if matches!(elem_ty, Type::String) {
+            let unit_ty = self.type_lowerer.lower_type(&Type::Unit);
+            let _ = self.builder.call(
+                Callee::Runtime(RuntimeFn::SetDropString),
+                vec![addr],
+                unit_ty,
+            );
+            return Ok(());
+        }
+
         let u32_ty = self.type_lowerer.lower_type(&Type::uint(32));
         let bool_ty = self.type_lowerer.lower_type(&Type::Bool);
 
@@ -806,11 +816,25 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
         Ok(())
     }
 
-    fn drop_map(&mut self, addr: ValueId) -> Result<(), LowerToIrError> {
+    fn drop_map(
+        &mut self,
+        addr: ValueId,
+        key_ty: &Type,
+        value_ty: &Type,
+    ) -> Result<(), LowerToIrError> {
         let unit_ty = self.type_lowerer.lower_type(&Type::Unit);
-        let _ = self
-            .builder
-            .call(Callee::Runtime(RuntimeFn::MapDrop), vec![addr], unit_ty);
+        if matches!(key_ty, Type::String) {
+            let value_size = self.runtime_size_const(value_ty);
+            let _ = self.builder.call(
+                Callee::Runtime(RuntimeFn::MapDropStringKeys),
+                vec![addr, value_size],
+                unit_ty,
+            );
+        } else {
+            let _ = self
+                .builder
+                .call(Callee::Runtime(RuntimeFn::MapDrop), vec![addr], unit_ty);
+        }
         Ok(())
     }
 

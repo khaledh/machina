@@ -157,3 +157,86 @@ fn main() -> u64 {
     let run = run_program("map_index_get", source);
     assert_eq!(run.status.code(), Some(0));
 }
+
+#[test]
+fn test_map_string_keys_runtime() {
+    let source = r#"
+fn main() -> u64 {
+    var m = map<string, u64>{};
+
+    let cols = "alice,42\nbob,7\n".lines();
+    let first = cols[0].split(",");
+    let second = cols[1].split(",");
+
+    let inserted_a = m.insert(first[0], 42);
+    if inserted_a {
+    } else {
+        return 1;
+    };
+
+    let inserted_b = m.insert(second[0], 7);
+    if inserted_b {
+    } else {
+        return 2;
+    };
+
+    let query = " bob ".trim();
+    if m.contains_key(query) {
+    } else {
+        return 3;
+    };
+
+    match m.get(query) {
+        value: u64 => {
+            if value == 7 {
+            } else {
+                return 4;
+            };
+        }
+        _ => {
+            return 5;
+        }
+    };
+
+    let updated = m.insert("alice", 99);
+    if updated {
+        return 6;
+    } else {
+    };
+
+    match m.get("alice") {
+        value: u64 => {
+            if value == 99 {
+            } else {
+                return 7;
+            };
+        }
+        _ => {
+            return 8;
+        }
+    };
+
+    let removed = m.remove("alice");
+    if removed {
+    } else {
+        return 9;
+    };
+
+    if m.contains_key("alice") {
+        return 10;
+    } else {
+    };
+
+    m.clear();
+    if m.is_empty {
+    } else {
+        return 11;
+    };
+
+    return 0;
+}
+"#;
+
+    let run = run_program("map_string_keys", source);
+    assert_eq!(run.status.code(), Some(0));
+}

@@ -688,14 +688,22 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
                     panic!("backend set insert expects set receiver");
                 };
                 let elem_addr = self.ensure_call_input_addr(&mut arg_values[0]);
-                let size_val = self.runtime_size_const(&elem_ty);
-                let align_val = self.runtime_align_const(&elem_ty);
                 let ret_ty = self.type_lowerer.lower_type_id(expr_ty);
-                let result = self.builder.call(
-                    Callee::Runtime(RuntimeFn::SetInsertElem),
-                    vec![set_addr, elem_addr, size_val, align_val],
-                    ret_ty,
-                );
+                let result = if matches!(elem_ty.as_ref(), Type::String) {
+                    self.builder.call(
+                        Callee::Runtime(RuntimeFn::SetInsertString),
+                        vec![set_addr, elem_addr],
+                        ret_ty,
+                    )
+                } else {
+                    let size_val = self.runtime_size_const(&elem_ty);
+                    let align_val = self.runtime_align_const(&elem_ty);
+                    self.builder.call(
+                        Callee::Runtime(RuntimeFn::SetInsertElem),
+                        vec![set_addr, elem_addr, size_val, align_val],
+                        ret_ty,
+                    )
+                };
                 self.apply_call_drop_effects(call_plan, args, Some(receiver_value), &arg_values)?;
                 Ok(Some(result))
             }
@@ -714,18 +722,28 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
                     panic!("backend set method expects set receiver");
                 };
                 let elem_addr = self.ensure_call_input_addr(&mut arg_values[0]);
-                let size_val = self.runtime_size_const(&elem_ty);
                 let ret_ty = self.type_lowerer.lower_type_id(expr_ty);
-                let runtime = match intrinsic {
-                    IntrinsicCall::SetContains => RuntimeFn::SetContainsElem,
-                    IntrinsicCall::SetRemove => RuntimeFn::SetRemoveElem,
-                    _ => unreachable!(),
+                let result = if matches!(elem_ty.as_ref(), Type::String) {
+                    let runtime = match intrinsic {
+                        IntrinsicCall::SetContains => RuntimeFn::SetContainsString,
+                        IntrinsicCall::SetRemove => RuntimeFn::SetRemoveString,
+                        _ => unreachable!(),
+                    };
+                    self.builder
+                        .call(Callee::Runtime(runtime), vec![set_addr, elem_addr], ret_ty)
+                } else {
+                    let size_val = self.runtime_size_const(&elem_ty);
+                    let runtime = match intrinsic {
+                        IntrinsicCall::SetContains => RuntimeFn::SetContainsElem,
+                        IntrinsicCall::SetRemove => RuntimeFn::SetRemoveElem,
+                        _ => unreachable!(),
+                    };
+                    self.builder.call(
+                        Callee::Runtime(runtime),
+                        vec![set_addr, elem_addr, size_val],
+                        ret_ty,
+                    )
                 };
-                let result = self.builder.call(
-                    Callee::Runtime(runtime),
-                    vec![set_addr, elem_addr, size_val],
-                    ret_ty,
-                );
                 self.apply_call_drop_effects(call_plan, args, Some(receiver_value), &arg_values)?;
                 Ok(Some(result))
             }
@@ -739,11 +757,19 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
                         arg_values.len()
                     );
                 }
-                let (set_addr, _set_ty) = self.resolve_set_receiver(receiver_value);
+                let (set_addr, set_ty) = self.resolve_set_receiver(receiver_value);
+                let Type::Set { elem_ty } = set_ty else {
+                    panic!("backend set clear expects set receiver");
+                };
                 let ret_ty = self.type_lowerer.lower_type_id(expr_ty);
-                let result =
-                    self.builder
-                        .call(Callee::Runtime(RuntimeFn::SetClear), vec![set_addr], ret_ty);
+                let runtime = if matches!(elem_ty.as_ref(), Type::String) {
+                    RuntimeFn::SetClearString
+                } else {
+                    RuntimeFn::SetClear
+                };
+                let result = self
+                    .builder
+                    .call(Callee::Runtime(runtime), vec![set_addr], ret_ty);
                 self.apply_call_drop_effects(call_plan, args, Some(receiver_value), &arg_values)?;
                 Ok(Some(result))
             }
@@ -764,14 +790,23 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
 
                 let key_addr = self.ensure_call_input_addr(&mut arg_values[0]);
                 let value_addr = self.ensure_call_input_addr(&mut arg_values[1]);
-                let key_size = self.runtime_size_const(&key_ty);
-                let value_size = self.runtime_size_const(&value_ty);
                 let ret_ty = self.type_lowerer.lower_type_id(expr_ty);
-                let result = self.builder.call(
-                    Callee::Runtime(RuntimeFn::MapInsertOrAssign),
-                    vec![map_addr, key_addr, value_addr, key_size, value_size],
-                    ret_ty,
-                );
+                let result = if matches!(key_ty.as_ref(), Type::String) {
+                    let value_size = self.runtime_size_const(&value_ty);
+                    self.builder.call(
+                        Callee::Runtime(RuntimeFn::MapInsertOrAssignStringKey),
+                        vec![map_addr, key_addr, value_addr, value_size],
+                        ret_ty,
+                    )
+                } else {
+                    let key_size = self.runtime_size_const(&key_ty);
+                    let value_size = self.runtime_size_const(&value_ty);
+                    self.builder.call(
+                        Callee::Runtime(RuntimeFn::MapInsertOrAssign),
+                        vec![map_addr, key_addr, value_addr, key_size, value_size],
+                        ret_ty,
+                    )
+                };
                 self.apply_call_drop_effects(call_plan, args, Some(receiver_value), &arg_values)?;
                 Ok(Some(result))
             }
@@ -790,19 +825,33 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
                     panic!("backend map method expects map receiver");
                 };
                 let key_addr = self.ensure_call_input_addr(&mut arg_values[0]);
-                let key_size = self.runtime_size_const(&key_ty);
-                let value_size = self.runtime_size_const(&value_ty);
-                let runtime = match intrinsic {
-                    IntrinsicCall::MapContainsKey => RuntimeFn::MapContainsKey,
-                    IntrinsicCall::MapRemove => RuntimeFn::MapRemoveKey,
-                    _ => unreachable!(),
-                };
                 let ret_ty = self.type_lowerer.lower_type_id(expr_ty);
-                let result = self.builder.call(
-                    Callee::Runtime(runtime),
-                    vec![map_addr, key_addr, key_size, value_size],
-                    ret_ty,
-                );
+                let result = if matches!(key_ty.as_ref(), Type::String) {
+                    let value_size = self.runtime_size_const(&value_ty);
+                    let runtime = match intrinsic {
+                        IntrinsicCall::MapContainsKey => RuntimeFn::MapContainsStringKey,
+                        IntrinsicCall::MapRemove => RuntimeFn::MapRemoveStringKey,
+                        _ => unreachable!(),
+                    };
+                    self.builder.call(
+                        Callee::Runtime(runtime),
+                        vec![map_addr, key_addr, value_size],
+                        ret_ty,
+                    )
+                } else {
+                    let key_size = self.runtime_size_const(&key_ty);
+                    let value_size = self.runtime_size_const(&value_ty);
+                    let runtime = match intrinsic {
+                        IntrinsicCall::MapContainsKey => RuntimeFn::MapContainsKey,
+                        IntrinsicCall::MapRemove => RuntimeFn::MapRemoveKey,
+                        _ => unreachable!(),
+                    };
+                    self.builder.call(
+                        Callee::Runtime(runtime),
+                        vec![map_addr, key_addr, key_size, value_size],
+                        ret_ty,
+                    )
+                };
                 self.apply_call_drop_effects(call_plan, args, Some(receiver_value), &arg_values)?;
                 Ok(Some(result))
             }
@@ -825,15 +874,22 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
                 let value_ir_ty = self.type_lowerer.lower_type(&value_ty);
                 let value_slot = self.alloc_value_slot(value_ir_ty);
 
-                let key_size = self.runtime_size_const(&key_ty);
                 let value_size = self.runtime_size_const(&value_ty);
-
                 let bool_ty = self.type_lowerer.lower_type(&Type::Bool);
-                let hit = self.builder.call(
-                    Callee::Runtime(RuntimeFn::MapGetValue),
-                    vec![map_addr, key_addr, key_size, value_size, value_slot.addr],
-                    bool_ty,
-                );
+                let hit = if matches!(key_ty.as_ref(), Type::String) {
+                    self.builder.call(
+                        Callee::Runtime(RuntimeFn::MapGetValueStringKey),
+                        vec![map_addr, key_addr, value_size, value_slot.addr],
+                        bool_ty,
+                    )
+                } else {
+                    let key_size = self.runtime_size_const(&key_ty);
+                    self.builder.call(
+                        Callee::Runtime(RuntimeFn::MapGetValue),
+                        vec![map_addr, key_addr, key_size, value_size, value_slot.addr],
+                        bool_ty,
+                    )
+                };
 
                 let union_ir_ty = self.type_lowerer.lower_type_id(expr_ty);
                 let union_slot = self.alloc_value_slot(union_ir_ty);
@@ -877,11 +933,22 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
                         arg_values.len()
                     );
                 }
-                let (map_addr, _map_ty) = self.resolve_map_receiver(receiver_value);
+                let (map_addr, map_ty) = self.resolve_map_receiver(receiver_value);
+                let Type::Map { key_ty, value_ty } = map_ty else {
+                    panic!("backend map clear expects map receiver");
+                };
                 let ret_ty = self.type_lowerer.lower_type_id(expr_ty);
-                let result =
+                let result = if matches!(key_ty.as_ref(), Type::String) {
+                    let value_size = self.runtime_size_const(&value_ty);
+                    self.builder.call(
+                        Callee::Runtime(RuntimeFn::MapClearStringKeys),
+                        vec![map_addr, value_size],
+                        ret_ty,
+                    )
+                } else {
                     self.builder
-                        .call(Callee::Runtime(RuntimeFn::MapClear), vec![map_addr], ret_ty);
+                        .call(Callee::Runtime(RuntimeFn::MapClear), vec![map_addr], ret_ty)
+                };
                 self.apply_call_drop_effects(call_plan, args, Some(receiver_value), &arg_values)?;
                 Ok(Some(result))
             }

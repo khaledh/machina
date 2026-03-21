@@ -123,6 +123,8 @@ fn supports_capability_leaf_v1(ty: &Type, capability: Capability) -> bool {
                 Type::Int { .. } | Type::Bool | Type::Char | Type::String
             )
         }
-        Capability::Hashable => matches!(ty, Type::Int { .. } | Type::Bool | Type::Char),
+        Capability::Hashable => {
+            matches!(ty, Type::Int { .. } | Type::Bool | Type::Char | Type::String)
+        }
     }
 }

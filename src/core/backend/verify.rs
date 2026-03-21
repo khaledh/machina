@@ -321,6 +321,34 @@ fn runtime_call_spec(runtime: &RuntimeFn) -> RuntimeCallSpec {
             args: &[Ptr],
             ret: Unit,
         },
+        RuntimeFn::SetInsertString => RuntimeCallSpec {
+            args: &[Ptr, Ptr],
+            ret: RetBool,
+        },
+        RuntimeFn::SetContainsString | RuntimeFn::SetRemoveString => RuntimeCallSpec {
+            args: &[Ptr, Ptr],
+            ret: RetBool,
+        },
+        RuntimeFn::SetClearString | RuntimeFn::SetDropString => RuntimeCallSpec {
+            args: &[Ptr],
+            ret: Unit,
+        },
+        RuntimeFn::MapInsertOrAssignStringKey => RuntimeCallSpec {
+            args: &[Ptr, Ptr, Ptr, Int],
+            ret: RetBool,
+        },
+        RuntimeFn::MapContainsStringKey | RuntimeFn::MapRemoveStringKey => RuntimeCallSpec {
+            args: &[Ptr, Ptr, Int],
+            ret: RetBool,
+        },
+        RuntimeFn::MapGetValueStringKey => RuntimeCallSpec {
+            args: &[Ptr, Ptr, Int, Ptr],
+            ret: RetBool,
+        },
+        RuntimeFn::MapClearStringKeys | RuntimeFn::MapDropStringKeys => RuntimeCallSpec {
+            args: &[Ptr, Int],
+            ret: Unit,
+        },
         RuntimeFn::SetInsertElem => RuntimeCallSpec {
             args: &[Ptr, Ptr, Int, Int],
             ret: RetBool,

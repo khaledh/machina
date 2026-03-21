@@ -43,4 +43,29 @@ uint8_t __mc_map_table_get_value_bytes(
 void __mc_map_table_clear(mc_dyn_array_t *map);
 void __mc_map_table_drop(mc_dyn_array_t *map);
 
+uint8_t __rt_map_contains_string_key(
+    uint64_t map_ptr,
+    uint64_t key_ptr,
+    uint64_t value_size
+);
+uint8_t __rt_map_insert_or_assign_string_key(
+    uint64_t map_ptr,
+    uint64_t key_ptr,
+    uint64_t value_ptr,
+    uint64_t value_size
+);
+uint8_t __rt_map_remove_string_key(
+    uint64_t map_ptr,
+    uint64_t key_ptr,
+    uint64_t value_size
+);
+uint8_t __rt_map_get_value_string_key(
+    uint64_t map_ptr,
+    uint64_t key_ptr,
+    uint64_t value_size,
+    uint64_t out_value_ptr
+);
+void __rt_map_clear_string_keys(uint64_t map_ptr, uint64_t value_size);
+void __rt_map_drop_string_keys(uint64_t map_ptr, uint64_t value_size);
+
 #endif

@@ -80,3 +80,63 @@ fn main() -> u64 {
     let run = run_program("set_hashed_ops", source);
     assert_eq!(run.status.code(), Some(0));
 }
+
+#[test]
+fn test_set_string_elements_runtime() {
+    let source = r#"
+fn main() -> u64 {
+    var s = set<string>{};
+
+    let rows = "alice\nbob\ncara\n".lines();
+    let inserted_a = s.insert(rows[0]);
+    let inserted_b = s.insert(rows[1]);
+    if inserted_a {
+    } else {
+        return 1;
+    };
+    if inserted_b {
+    } else {
+        return 2;
+    };
+
+    if s.contains("alice") {
+    } else {
+        return 3;
+    };
+
+    let query = " bob ".trim();
+    if s.contains(query) {
+    } else {
+        return 4;
+    };
+
+    let dup = s.insert("alice");
+    if dup {
+        return 5;
+    } else {
+    };
+
+    let removed = s.remove(query);
+    if removed {
+    } else {
+        return 6;
+    };
+
+    if s.contains("bob") {
+        return 7;
+    } else {
+    };
+
+    s.clear();
+    if s.is_empty {
+    } else {
+        return 8;
+    };
+
+    return 0;
+}
+"#;
+
+    let run = run_program("set_string_elements", source);
+    assert_eq!(run.status.code(), Some(0));
+}
