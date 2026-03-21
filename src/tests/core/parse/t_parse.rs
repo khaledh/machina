@@ -1493,6 +1493,129 @@ fn test_parse_parenthesized_pattern() {
 }
 
 #[test]
+fn test_parse_array_pattern_with_trailing_rest() {
+    let source = r#"
+        fn test(argv: string[*]) {
+            let [path, needle, ...] = argv;
+        }
+    "#;
+
+    let funcs = parse_source(source).expect("Failed to parse");
+    let func = &funcs[0];
+    let (items, _) = block_parts(&func.body);
+    let stmt = block_stmt_at(items, 0);
+
+    let StmtExprKind::LetBind { pattern, .. } = &stmt.kind else {
+        panic!("Expected let binding");
+    };
+
+    match &pattern.kind {
+        BindPatternKind::Array {
+            prefix,
+            rest,
+            suffix,
+        } => {
+            assert_eq!(prefix.len(), 2);
+            assert!(suffix.is_empty());
+            assert!(rest.is_some());
+            assert!(rest.as_ref().is_some_and(|rest| rest.pattern.is_none()));
+        }
+        other => panic!("Expected array pattern, got {:?}", other),
+    }
+}
+
+#[test]
+fn test_parse_array_pattern_with_middle_rest() {
+    let source = r#"
+        fn test(argv: string[*]) {
+            let [head, ...middle, tail] = argv;
+        }
+    "#;
+
+    let funcs = parse_source(source).expect("Failed to parse");
+    let func = &funcs[0];
+    let (items, _) = block_parts(&func.body);
+    let stmt = block_stmt_at(items, 0);
+
+    let StmtExprKind::LetBind { pattern, .. } = &stmt.kind else {
+        panic!("Expected let binding");
+    };
+
+    match &pattern.kind {
+        BindPatternKind::Array {
+            prefix,
+            rest,
+            suffix,
+        } => {
+            assert_eq!(prefix.len(), 1);
+            assert_eq!(suffix.len(), 1);
+            let rest_pattern = rest
+                .as_ref()
+                .and_then(|rest| rest.pattern.as_deref())
+                .expect("expected named rest binding");
+            match &rest_pattern.kind {
+                BindPatternKind::Name { ident, .. } => assert_eq!(ident, "middle"),
+                other => panic!("Expected name rest pattern, got {:?}", other),
+            }
+        }
+        other => panic!("Expected array pattern, got {:?}", other),
+    }
+}
+
+#[test]
+fn test_parse_array_pattern_with_leading_rest() {
+    let source = r#"
+        fn test(argv: string[*]) {
+            let [...prefix, tail] = argv;
+        }
+    "#;
+
+    let funcs = parse_source(source).expect("Failed to parse");
+    let func = &funcs[0];
+    let (items, _) = block_parts(&func.body);
+    let stmt = block_stmt_at(items, 0);
+
+    let StmtExprKind::LetBind { pattern, .. } = &stmt.kind else {
+        panic!("Expected let binding");
+    };
+
+    match &pattern.kind {
+        BindPatternKind::Array {
+            prefix,
+            rest,
+            suffix,
+        } => {
+            assert!(prefix.is_empty());
+            assert_eq!(suffix.len(), 1);
+            let rest_pattern = rest
+                .as_ref()
+                .and_then(|rest| rest.pattern.as_deref())
+                .expect("expected named rest binding");
+            match &rest_pattern.kind {
+                BindPatternKind::Name { ident, .. } => assert_eq!(ident, "prefix"),
+                other => panic!("Expected name rest pattern, got {:?}", other),
+            }
+        }
+        other => panic!("Expected array pattern, got {:?}", other),
+    }
+}
+
+#[test]
+fn test_parse_array_pattern_rejects_multiple_rest_elements() {
+    let source = r#"
+        fn test(argv: string[*]) {
+            let [head, ...middle, ...tail] = argv;
+        }
+    "#;
+
+    let err = parse_source(source).expect_err("Expected parse error");
+    assert!(matches!(
+        err.kind(),
+        ParseErrorKind::DuplicateArrayRestPattern
+    ));
+}
+
+#[test]
 fn test_parse_match_expr_enum_variants() {
     let source = r#"
         type Color = Red(u64) | Green | Blue(u64)

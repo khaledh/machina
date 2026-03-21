@@ -33,6 +33,12 @@ pub enum ParseErrorKind {
     #[error("Expected pattern, found: {0}")]
     ExpectedPattern(Token),
 
+    #[error("Array rest destructuring supports exactly one `...` element")]
+    DuplicateArrayRestPattern,
+
+    #[error("Array rest destructuring only supports a name binding or bare `...` in v1")]
+    InvalidArrayRestPattern,
+
     #[error("Single field tuple missing trailing comma: {0}")]
     SingleFieldTupleMissingComma(Token),
 

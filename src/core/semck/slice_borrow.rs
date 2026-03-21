@@ -235,6 +235,7 @@ fn apply_item_bindings(state: &mut SliceBindings, item: &CfgItem<'_>, ctx: &Norm
                 let bases = slice_bases_for_value(value, state, ctx);
                 update_slice_binding(state, slice_def_id, bases);
             }
+            update_array_rest_slice_bindings(state, pattern, value, ctx);
         }
         StmtExprKind::Assign {
             assignee, value, ..
@@ -252,6 +253,78 @@ fn apply_item_bindings(state: &mut SliceBindings, item: &CfgItem<'_>, ctx: &Norm
             }
         }
         _ => {}
+    }
+}
+
+fn update_array_rest_slice_bindings(
+    state: &mut SliceBindings,
+    pattern: &BindPattern,
+    value: &Expr,
+    ctx: &NormalizedContext,
+) {
+    match &pattern.kind {
+        BindPatternKind::Array { rest, .. } => {
+            let Some(rest_pattern) = rest.as_ref().and_then(|rest| rest.pattern.as_deref()) else {
+                return;
+            };
+            let Some(def) = ctx
+                .def_table
+                .lookup_def(ctx.def_table.def_id(rest_pattern.id))
+            else {
+                return;
+            };
+            if !matches!(ctx.type_map.lookup_def_type(def), Some(Type::Slice { .. })) {
+                return;
+            }
+            let slice_def_id = ctx.def_table.def_id(rest_pattern.id);
+            let bases = slice_bases_for_array_rest_value(value, state, ctx);
+            update_slice_binding(state, slice_def_id, bases);
+        }
+        BindPatternKind::Tuple { patterns } => {
+            for child in patterns {
+                update_array_rest_slice_bindings(state, child, value, ctx);
+            }
+        }
+        BindPatternKind::Struct { fields, .. } => {
+            for field in fields {
+                update_array_rest_slice_bindings(state, &field.pattern, value, ctx);
+            }
+        }
+        BindPatternKind::Name { .. } => {}
+    }
+}
+
+fn slice_bases_for_array_rest_value(
+    expr: &Expr,
+    state: &SliceBindings,
+    ctx: &NormalizedContext,
+) -> HashSet<DefId> {
+    match &expr.kind {
+        ExprKind::Var { .. } | ExprKind::Move { .. } => {
+            if let Some(slice_def) = slice_def_from_expr(expr, ctx) {
+                return state.get(&slice_def).cloned().unwrap_or_default();
+            }
+            if let Some(base) = base_def_id(expr, ctx) {
+                let mut bases = HashSet::new();
+                bases.insert(base);
+                return bases;
+            }
+            HashSet::new()
+        }
+        ExprKind::If {
+            then_body,
+            else_body,
+            ..
+        } => {
+            let mut bases = slice_bases_for_array_rest_value(then_body, state, ctx);
+            bases.extend(slice_bases_for_array_rest_value(else_body, state, ctx));
+            bases
+        }
+        ExprKind::Block { tail, .. } => tail
+            .as_deref()
+            .map(|tail| slice_bases_for_array_rest_value(tail, state, ctx))
+            .unwrap_or_default(),
+        _ => HashSet::new(),
     }
 }
 
@@ -415,11 +488,9 @@ fn collect_pattern_defs(pattern: &BindPattern, ctx: &NormalizedContext, defs: &m
             let def_id = ctx.def_table.def_id(pattern.id);
             add_def_if_slice(def_id, ctx, defs);
         }
-        BindPatternKind::Array { patterns } | BindPatternKind::Tuple { patterns } => {
-            for pattern in patterns {
-                collect_pattern_defs(pattern, ctx, defs);
-            }
-        }
+        BindPatternKind::Array { .. } | BindPatternKind::Tuple { .. } => pattern
+            .kind
+            .for_each_child_pattern(|pattern| collect_pattern_defs(pattern, ctx, defs)),
         BindPatternKind::Struct { fields, .. } => {
             for field in fields {
                 collect_pattern_defs(&field.pattern, ctx, defs);

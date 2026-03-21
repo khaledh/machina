@@ -152,9 +152,15 @@ fn pattern_contains_def_id(
         BindPatternKind::Struct { fields, .. } => fields
             .iter()
             .any(|field| pattern_contains_def_id(&field.pattern, def_table, target_def_id)),
-        BindPatternKind::Array { patterns } => patterns
-            .iter()
-            .any(|item| pattern_contains_def_id(item, def_table, target_def_id)),
+        BindPatternKind::Array { .. } => {
+            let mut found = false;
+            pattern.kind.for_each_child_pattern(|item| {
+                if pattern_contains_def_id(item, def_table, target_def_id) {
+                    found = true;
+                }
+            });
+            found
+        }
     }
 }
 

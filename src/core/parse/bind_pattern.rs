@@ -79,15 +79,57 @@ impl<'a> Parser<'a> {
     fn parse_array_bind_pattern(&mut self, marker: Marker) -> Result<BindPattern, ParseError> {
         self.consume(&TK::LBracket)?;
 
-        let patterns = self.parse_list(TK::Comma, TK::RBracket, |parser| {
-            parser.parse_bind_pattern()
-        })?;
+        let mut prefix = Vec::new();
+        let mut suffix = Vec::new();
+        let mut rest = None;
+
+        while self.curr_token.kind != TK::RBracket {
+            if rest.is_some() {
+                if self.curr_token.kind == TK::DotDot
+                    && self.peek().map(|token| token.kind.clone()) == Some(TK::Dot)
+                {
+                    return self.err_here(PEK::DuplicateArrayRestPattern);
+                }
+                suffix.push(self.parse_bind_pattern()?);
+            } else if self.curr_token.kind == TK::DotDot
+                && self.peek().map(|token| token.kind.clone()) == Some(TK::Dot)
+            {
+                let rest_marker = self.mark();
+                self.consume(&TK::DotDot)?;
+                self.consume(&TK::Dot)?;
+
+                let pattern = match self.curr_token.kind {
+                    TK::Comma | TK::RBracket => None,
+                    TK::Ident(_) => Some(Box::new(self.parse_bind_pattern()?)),
+                    _ => return self.err_here(PEK::InvalidArrayRestPattern),
+                };
+
+                rest = Some(ArrayRestBindPattern {
+                    pattern,
+                    span: self.close(rest_marker),
+                });
+            } else {
+                prefix.push(self.parse_bind_pattern()?);
+            }
+
+            if self.curr_token.kind != TK::Comma {
+                break;
+            }
+            self.advance();
+            if self.curr_token.kind == TK::RBracket {
+                break;
+            }
+        }
 
         self.consume(&TK::RBracket)?;
 
         Ok(BindPattern {
             id: self.id_gen.new_id(),
-            kind: BindPatternKind::Array { patterns },
+            kind: BindPatternKind::Array {
+                prefix,
+                rest,
+                suffix,
+            },
             span: self.close(marker),
         })
     }

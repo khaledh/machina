@@ -97,18 +97,24 @@ impl<'a> ConstraintCollector<'a> {
                     self.collect_bind_pattern(child, child_term);
                 }
             }
-            BindPatternKind::Array { patterns } => {
+            BindPatternKind::Array {
+                prefix,
+                rest,
+                suffix,
+            } => {
                 let elem_term = self.fresh_var_term();
-                self.push_eq(
-                    value_ty.clone(),
-                    Type::Array {
-                        elem_ty: Box::new(elem_term.clone()),
-                        dims: vec![patterns.len()],
-                    },
-                    ConstraintReason::Pattern(pattern.id, pattern.span),
-                );
-                for child in patterns {
+                for child in prefix.iter().chain(suffix.iter()) {
                     self.collect_bind_pattern(child, elem_term.clone());
+                }
+                if let Some(rest) = rest
+                    && let Some(rest_pattern) = &rest.pattern
+                {
+                    self.collect_bind_pattern(
+                        rest_pattern,
+                        Type::Slice {
+                            elem_ty: Box::new(elem_term),
+                        },
+                    );
                 }
             }
             BindPatternKind::Struct {

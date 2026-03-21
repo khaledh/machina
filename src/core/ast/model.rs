@@ -626,7 +626,9 @@ pub enum BindPatternKind {
         ident: String,
     },
     Array {
-        patterns: Vec<BindPattern>,
+        prefix: Vec<BindPattern>,
+        rest: Option<ArrayRestBindPattern>,
+        suffix: Vec<BindPattern>,
     },
     Tuple {
         patterns: Vec<BindPattern>,
@@ -635,6 +637,80 @@ pub enum BindPatternKind {
         name: String,
         fields: Vec<StructFieldBindPattern>,
     },
+}
+
+#[derive(Clone, Debug)]
+pub struct ArrayRestBindPattern {
+    pub pattern: Option<Box<BindPattern>>,
+    pub span: Span,
+}
+
+impl BindPatternKind {
+    pub fn for_each_child_pattern(&self, mut f: impl FnMut(&BindPattern)) {
+        match self {
+            Self::Name { .. } => {}
+            Self::Array {
+                prefix,
+                rest,
+                suffix,
+            } => {
+                for pattern in prefix {
+                    f(pattern);
+                }
+                if let Some(rest) = rest
+                    && let Some(pattern) = &rest.pattern
+                {
+                    f(pattern);
+                }
+                for pattern in suffix {
+                    f(pattern);
+                }
+            }
+            Self::Tuple { patterns } => {
+                for pattern in patterns {
+                    f(pattern);
+                }
+            }
+            Self::Struct { fields, .. } => {
+                for field in fields {
+                    f(&field.pattern);
+                }
+            }
+        }
+    }
+
+    pub fn for_each_child_pattern_mut(&mut self, mut f: impl FnMut(&mut BindPattern)) {
+        match self {
+            Self::Name { .. } => {}
+            Self::Array {
+                prefix,
+                rest,
+                suffix,
+            } => {
+                for pattern in prefix {
+                    f(pattern);
+                }
+                if let Some(rest) = rest
+                    && let Some(pattern) = &mut rest.pattern
+                {
+                    f(pattern);
+                }
+                for pattern in suffix {
+                    f(pattern);
+                }
+            }
+            Self::Tuple { patterns } => {
+                for pattern in patterns {
+                    f(pattern);
+                }
+            }
+            Self::Struct { fields, .. } => {
+                for field in fields {
+                    f(&mut field.pattern);
+                }
+            }
+        }
+    }
 }
 
 #[derive(Clone, Debug)]

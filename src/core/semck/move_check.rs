@@ -339,11 +339,9 @@ impl<'a> MoveVisitor<'a> {
                 let def_id = self.ctx.def_table.def_id(pattern.id);
                 self.moved.remove(&def_id);
             }
-            BindPatternKind::Array { patterns } | BindPatternKind::Tuple { patterns } => {
-                for p in patterns {
-                    self.clear_pattern_defs(p);
-                }
-            }
+            BindPatternKind::Array { .. } | BindPatternKind::Tuple { .. } => pattern
+                .kind
+                .for_each_child_pattern(|child| self.clear_pattern_defs(child)),
             BindPatternKind::Struct { fields, .. } => {
                 for f in fields {
                     self.clear_pattern_defs(&f.pattern);

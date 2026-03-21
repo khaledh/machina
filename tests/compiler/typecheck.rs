@@ -261,6 +261,125 @@ fn test_args_indexing_builds_and_runs_in_error_union_main() {
 }
 
 #[test]
+fn test_args_array_destructure_with_rest_builds_and_runs() {
+    let run = run_program_with_args(
+        "args_array_destructure_with_rest",
+        r#"
+            requires {
+                std::env::args
+                std::io::IoError
+            }
+
+            fn main() -> () | IoError {
+                let argv = args();
+                let [program, path, needle, ...rest] = argv;
+                println(path);
+                println(needle);
+                println(rest.len);
+            }
+        "#,
+        &["alpha", "beta", "gamma", "delta"],
+    );
+    assert_eq!(run.status.code(), Some(0));
+
+    let stdout = String::from_utf8_lossy(&run.stdout);
+    assert_eq!(stdout, "alpha\nbeta\n2\n");
+}
+
+#[test]
+fn test_dyn_array_destructure_with_middle_rest_keeps_prefix_and_suffix() {
+    let run = run_program(
+        "dyn_array_destructure_middle_rest",
+        r#"
+            requires {
+                std::io::println
+            }
+
+            fn main() {
+                let nums: u64[*] = [1, 2, 3, 4, 5];
+                let [first, ...middle, last] = nums;
+                println(first);
+                println(middle.len);
+                println(last);
+            }
+        "#,
+    );
+    assert_eq!(run.status.code(), Some(0));
+
+    let stdout = String::from_utf8_lossy(&run.stdout);
+    assert_eq!(stdout, "1\n3\n5\n", "unexpected stdout: {stdout}");
+}
+
+#[test]
+fn test_dyn_array_destructure_with_leading_rest_keeps_suffix() {
+    let run = run_program(
+        "dyn_array_destructure_leading_rest",
+        r#"
+            requires {
+                std::io::println
+            }
+
+            fn main() {
+                let nums: u64[*] = [1, 2, 3, 4];
+                let [...prefix, last] = nums;
+                println(prefix.len);
+                println(last);
+            }
+        "#,
+    );
+    assert_eq!(run.status.code(), Some(0));
+
+    let stdout = String::from_utf8_lossy(&run.stdout);
+    assert_eq!(stdout, "3\n4\n", "unexpected stdout: {stdout}");
+}
+
+#[test]
+fn test_dyn_array_destructure_with_bare_rest_discards_remainder() {
+    let run = run_program(
+        "dyn_array_destructure_bare_rest",
+        r#"
+            requires {
+                std::io::println
+            }
+
+            fn main() {
+                let nums: u64[*] = [7, 8, 9];
+                let [first, ...] = nums;
+                println(first);
+            }
+        "#,
+    );
+    assert_eq!(run.status.code(), Some(0));
+
+    let stdout = String::from_utf8_lossy(&run.stdout);
+    assert_eq!(stdout, "7\n", "unexpected stdout: {stdout}");
+}
+
+#[test]
+fn test_fixed_array_destructure_with_middle_rest_builds_and_runs() {
+    let run = run_program(
+        "fixed_array_destructure_middle_rest",
+        r#"
+            requires {
+                std::io::println
+            }
+
+            fn main() {
+                let nums = u64[10, 20, 30, 40];
+                let [first, ...middle, last] = nums;
+                println(first);
+                println(middle.len);
+                println(last);
+            }
+        "#,
+    );
+    assert_eq!(run.status.code(), Some(0));
+
+    let stdout = String::from_utf8_lossy(&run.stdout);
+    assert_eq!(stdout, "10\n2\n40\n", "unexpected stdout: {stdout}");
+}
+
+#[test]
 fn test_string_lines_returns_owned_lines_without_newlines() {
     let run = run_program(
         "string_lines_returns_owned_lines_without_newlines",

@@ -756,12 +756,15 @@ fn test_lower_array_bind() {
             store %v8, %v7
             %v9: u64 = const 0:u64
             %v10: ptr<u64> = index_addr %v8, %v9
-            %v11: u64 = load %v10
-            %v12: u64 = const 1:u64
-            %v13: ptr<u64> = index_addr %v8, %v12
+            %v11: u64 = const 2:u64
+            %v12: u64 = const 0:u64
+            %v13: ptr<u64> = index_addr %v10, %v12
             %v14: u64 = load %v13
-            %v15: u64 = add %v11, %v14
-            ret %v15
+            %v15: u64 = const 1:u64
+            %v16: ptr<u64> = index_addr %v10, %v15
+            %v17: u64 = load %v16
+            %v18: u64 = add %v14, %v17
+            ret %v18
         }
     "};
     assert_ir_eq(&text, expected);

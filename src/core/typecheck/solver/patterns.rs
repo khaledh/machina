@@ -39,7 +39,9 @@ pub(super) fn check_pattern_obligations(
                 caller_def_id,
                 span,
             } => {
-                let value_ty = super::term_utils::resolve_term_for_diagnostics(value_ty, unifier);
+                let value_ty = super::term_utils::resolve_term(value_ty, unifier);
+                bind_bind_pattern_types(pattern, &value_ty, def_terms, unifier, def_table);
+                let value_ty = super::term_utils::resolve_term_for_diagnostics(&value_ty, unifier);
                 if let Some(error) = check_bind_pattern(
                     pattern,
                     &value_ty,
@@ -79,6 +81,140 @@ pub(super) fn check_pattern_obligations(
     }
 
     (errors, covered)
+}
+
+fn bind_bind_pattern_types(
+    pattern: &BindPattern,
+    value_ty: &Type,
+    def_terms: &HashMap<DefId, Type>,
+    unifier: &mut TcUnifier,
+    def_table: &DefTable,
+) {
+    match &pattern.kind {
+        BindPatternKind::Name { .. } => {
+            let def_id = def_table.def_id(pattern.id);
+            if let Some(term) = def_terms.get(&def_id) {
+                let _ = unifier.unify(term, value_ty);
+            }
+        }
+        BindPatternKind::Tuple { patterns } => {
+            if let Type::Tuple { field_tys } = value_ty {
+                for (child, child_ty) in patterns.iter().zip(field_tys.iter()) {
+                    bind_bind_pattern_types(child, child_ty, def_terms, unifier, def_table);
+                }
+            } else if super::term_utils::is_unresolved(value_ty) {
+                let field_tys = patterns
+                    .iter()
+                    .map(|_| Type::Var(unifier.vars_mut().fresh_infer_local()))
+                    .collect::<Vec<_>>();
+                let tuple_ty = Type::Tuple {
+                    field_tys: field_tys.clone(),
+                };
+                let _ = unifier.unify(value_ty, &tuple_ty);
+                for (child, child_ty) in patterns.iter().zip(field_tys.iter()) {
+                    bind_bind_pattern_types(child, child_ty, def_terms, unifier, def_table);
+                }
+            }
+        }
+        BindPatternKind::Array {
+            prefix,
+            rest,
+            suffix,
+        } => {
+            let fixed_len = prefix.len() + suffix.len();
+            match value_ty {
+                Type::Array { elem_ty, dims } => {
+                    let child_ty = if dims.len() <= 1 {
+                        (**elem_ty).clone()
+                    } else {
+                        Type::Array {
+                            elem_ty: elem_ty.clone(),
+                            dims: dims[1..].to_vec(),
+                        }
+                    };
+                    bind_array_pattern_types(
+                        prefix,
+                        rest.as_ref(),
+                        suffix,
+                        &child_ty,
+                        def_terms,
+                        unifier,
+                        def_table,
+                    );
+                }
+                Type::DynArray { elem_ty } => {
+                    bind_array_pattern_types(
+                        prefix,
+                        rest.as_ref(),
+                        suffix,
+                        elem_ty,
+                        def_terms,
+                        unifier,
+                        def_table,
+                    );
+                }
+                ty if super::term_utils::is_unresolved(ty) && rest.is_none() => {
+                    let elem_ty = Type::Var(unifier.vars_mut().fresh_infer_local());
+                    let array_ty = Type::Array {
+                        elem_ty: Box::new(elem_ty.clone()),
+                        dims: vec![fixed_len],
+                    };
+                    let _ = unifier.unify(value_ty, &array_ty);
+                    bind_array_pattern_types(
+                        prefix, None, suffix, &elem_ty, def_terms, unifier, def_table,
+                    );
+                }
+                _ => {}
+            }
+        }
+        BindPatternKind::Struct { fields, .. } => {
+            if let Type::Struct {
+                fields: struct_fields,
+                ..
+            } = value_ty
+            {
+                for field in fields {
+                    if let Some(struct_field) = struct_fields.iter().find(|f| f.name == field.name)
+                    {
+                        bind_bind_pattern_types(
+                            &field.pattern,
+                            &struct_field.ty,
+                            def_terms,
+                            unifier,
+                            def_table,
+                        );
+                    }
+                }
+            }
+        }
+    }
+}
+
+fn bind_array_pattern_types(
+    prefix: &[BindPattern],
+    rest: Option<&crate::core::ast::ArrayRestBindPattern>,
+    suffix: &[BindPattern],
+    child_ty: &Type,
+    def_terms: &HashMap<DefId, Type>,
+    unifier: &mut TcUnifier,
+    def_table: &DefTable,
+) {
+    for child in prefix.iter().chain(suffix.iter()) {
+        bind_bind_pattern_types(child, child_ty, def_terms, unifier, def_table);
+    }
+    if let Some(rest) = rest
+        && let Some(rest_pattern) = &rest.pattern
+    {
+        bind_bind_pattern_types(
+            rest_pattern,
+            &Type::Slice {
+                elem_ty: Box::new(child_ty.clone()),
+            },
+            def_terms,
+            unifier,
+            def_table,
+        );
+    }
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -334,14 +470,24 @@ fn check_bind_pattern(
             ty if super::term_utils::is_unresolved(ty) => None,
             _ => Some(TEK::PatternTypeMismatch(pattern.clone(), value_ty.clone()).at(span)),
         },
-        BindPatternKind::Array { patterns } => match value_ty {
+        BindPatternKind::Array {
+            prefix,
+            rest,
+            suffix,
+        } => match value_ty {
             Type::Array { elem_ty, dims } => {
                 let expected_len = dims.first().copied().unwrap_or(0);
-                if expected_len != patterns.len() {
-                    return Some(
-                        TEK::ArrayPatternLengthMismatch(expected_len, patterns.len()).at(span),
-                    );
+                let fixed_len = prefix.len() + suffix.len();
+                if rest.is_some() {
+                    if expected_len < fixed_len {
+                        return Some(
+                            TEK::ArrayPatternMinLengthMismatch(fixed_len, expected_len).at(span),
+                        );
+                    }
+                } else if expected_len != fixed_len {
+                    return Some(TEK::ArrayPatternLengthMismatch(expected_len, fixed_len).at(span));
                 }
+
                 let child_ty = if dims.len() <= 1 {
                     (**elem_ty).clone()
                 } else {
@@ -350,20 +496,32 @@ fn check_bind_pattern(
                         dims: dims[1..].to_vec(),
                     }
                 };
-                for child in patterns {
-                    if let Some(error) = check_bind_pattern(
-                        child,
-                        &child_ty,
-                        child.span,
-                        caller_def_id,
-                        type_symbols,
-                        def_table,
-                        def_owners,
-                    ) {
-                        return Some(error);
-                    }
+                if let Some(error) = check_array_bind_children(
+                    prefix,
+                    rest.as_ref(),
+                    suffix,
+                    &child_ty,
+                    caller_def_id,
+                    type_symbols,
+                    def_table,
+                    def_owners,
+                ) {
+                    return Some(error);
                 }
                 None
+            }
+            Type::DynArray { elem_ty } => {
+                let child_ty = (**elem_ty).clone();
+                check_array_bind_children(
+                    prefix,
+                    rest.as_ref(),
+                    suffix,
+                    &child_ty,
+                    caller_def_id,
+                    type_symbols,
+                    def_table,
+                    def_owners,
+                )
             }
             ty if super::term_utils::is_unresolved(ty) => None,
             _ => Some(TEK::PatternTypeMismatch(pattern.clone(), value_ty.clone()).at(span)),
@@ -412,4 +570,47 @@ fn check_bind_pattern(
             _ => Some(TEK::PatternTypeMismatch(pattern.clone(), value_ty.clone()).at(span)),
         },
     }
+}
+
+#[allow(clippy::too_many_arguments)]
+fn check_array_bind_children(
+    prefix: &[BindPattern],
+    rest: Option<&crate::core::ast::ArrayRestBindPattern>,
+    suffix: &[BindPattern],
+    child_ty: &Type,
+    caller_def_id: Option<DefId>,
+    type_symbols: &HashMap<String, DefId>,
+    def_table: &DefTable,
+    def_owners: &HashMap<DefId, ModuleId>,
+) -> Option<TypeCheckError> {
+    for child in prefix.iter().chain(suffix.iter()) {
+        if let Some(error) = check_bind_pattern(
+            child,
+            child_ty,
+            child.span,
+            caller_def_id,
+            type_symbols,
+            def_table,
+            def_owners,
+        ) {
+            return Some(error);
+        }
+    }
+    if let Some(rest) = rest
+        && let Some(rest_pattern) = &rest.pattern
+        && let Some(error) = check_bind_pattern(
+            rest_pattern,
+            &Type::Slice {
+                elem_ty: Box::new(child_ty.clone()),
+            },
+            rest_pattern.span,
+            caller_def_id,
+            type_symbols,
+            def_table,
+            def_owners,
+        )
+    {
+        return Some(error);
+    }
+    None
 }

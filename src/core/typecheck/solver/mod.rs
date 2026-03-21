@@ -92,6 +92,7 @@ pub(crate) fn run(engine: &mut TypecheckEngine) -> Result<(), Vec<TypeCheckError
         &mut covered_exprs,
     );
     apply_assignable_inference_pass(&constrain, &mut unifier);
+    prepass_pattern_obligations(&constrain, &mut unifier, engine);
 
     retry_call_stage(
         unresolved_calls,
@@ -350,6 +351,7 @@ fn retry_call_stage(
 
         retry_expr_stage(constrain, unifier, engine, expr_errors, covered_exprs);
         apply_assignable_inference_pass(constrain, unifier);
+        prepass_pattern_obligations(constrain, unifier, engine);
 
         let next_call_state = call_state_signature(&deferred, unifier);
         let made_progress = next_call_state != prior_call_state;
@@ -895,10 +897,10 @@ fn collect_pattern_bind_decl_spans(
         BindPatternKind::Name { .. } => {
             out.entry(def_table.def_id(pattern.id)).or_insert(span);
         }
-        BindPatternKind::Array { patterns } | BindPatternKind::Tuple { patterns } => {
-            for child in patterns {
-                collect_pattern_bind_decl_spans(child, child.span, def_table, out);
-            }
+        BindPatternKind::Array { .. } | BindPatternKind::Tuple { .. } => {
+            pattern.kind.for_each_child_pattern(|child| {
+                collect_pattern_bind_decl_spans(child, child.span, def_table, out)
+            })
         }
         BindPatternKind::Struct { fields, .. } => {
             for field in fields {

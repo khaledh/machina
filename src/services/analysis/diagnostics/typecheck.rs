@@ -134,6 +134,7 @@ macro_rules! with_typecheck_variants {
             DeclTypeMismatch,
             DeclTypeMismatchMulti,
             ArrayPatternLengthMismatch,
+            ArrayPatternMinLengthMismatch,
             EmptyTupleLiteral,
             TupleFieldOutOfBounds,
             InvalidTupleFieldTarget,

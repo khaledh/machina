@@ -62,12 +62,35 @@ pub fn format_semantic_bind_pattern_compact(pattern: &BindPattern) -> String {
     fn fmt_inner(pattern: &BindPattern, out: &mut String) {
         match &pattern.kind {
             BindPatternKind::Name { ident, .. } => out.push_str(ident),
-            BindPatternKind::Array { patterns } => {
+            BindPatternKind::Array {
+                prefix,
+                rest,
+                suffix,
+            } => {
                 out.push('[');
-                for (i, pattern) in patterns.iter().enumerate() {
-                    if i > 0 {
+                let mut first = true;
+                for pattern in prefix {
+                    if !first {
                         out.push_str(", ");
                     }
+                    first = false;
+                    fmt_inner(pattern, out);
+                }
+                if let Some(rest) = rest {
+                    if !first {
+                        out.push_str(", ");
+                    }
+                    first = false;
+                    out.push_str("...");
+                    if let Some(pattern) = &rest.pattern {
+                        fmt_inner(pattern, out);
+                    }
+                }
+                for pattern in suffix {
+                    if !first {
+                        out.push_str(", ");
+                    }
+                    first = false;
                     fmt_inner(pattern, out);
                 }
                 out.push(']');

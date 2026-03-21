@@ -415,11 +415,9 @@ impl<'a> DefCollector<'a> {
             BindPatternKind::Name { .. } => {
                 self.defs.insert(self.def_table.def_id(pattern.id));
             }
-            BindPatternKind::Array { patterns } | BindPatternKind::Tuple { patterns } => {
-                for pat in patterns {
-                    self.collect_bind_pattern(pat);
-                }
-            }
+            BindPatternKind::Array { .. } | BindPatternKind::Tuple { .. } => pattern
+                .kind
+                .for_each_child_pattern(|pat| self.collect_bind_pattern(pat)),
             BindPatternKind::Struct { fields, .. } => {
                 for field in fields {
                     self.collect_bind_pattern(&field.pattern);
@@ -564,11 +562,9 @@ impl<'a> DefSpanCollector<'a> {
                 let def_id = self.def_table.def_id(pattern.id);
                 self.spans.entry(def_id).or_insert(pattern.span);
             }
-            BindPatternKind::Array { patterns } | BindPatternKind::Tuple { patterns } => {
-                for pat in patterns {
-                    self.collect_pattern(pat);
-                }
-            }
+            BindPatternKind::Array { .. } | BindPatternKind::Tuple { .. } => pattern
+                .kind
+                .for_each_child_pattern(|pat| self.collect_pattern(pat)),
             BindPatternKind::Struct { fields, .. } => {
                 for field in fields {
                     self.collect_pattern(&field.pattern);
@@ -985,11 +981,9 @@ impl<'a> DefInitChecker<'a> {
                 self.initialized
                     .mark_full(self.ctx.def_table.def_id(pattern.id));
             }
-            BindPatternKind::Array { patterns } | BindPatternKind::Tuple { patterns } => {
-                for pat in patterns {
-                    self.mark_pattern_initialized(pat);
-                }
-            }
+            BindPatternKind::Array { .. } | BindPatternKind::Tuple { .. } => pattern
+                .kind
+                .for_each_child_pattern(|pat| self.mark_pattern_initialized(pat)),
             BindPatternKind::Struct { fields, .. } => {
                 for field in fields {
                     self.mark_pattern_initialized(&field.pattern);

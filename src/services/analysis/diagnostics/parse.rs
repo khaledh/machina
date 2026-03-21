@@ -54,6 +54,8 @@ pub(super) fn from_parse_error(error: &ParseError) -> Diagnostic {
         ParseErrorKind::ExpectedIntLit(_) => "MC-PARSE-EXPECTED-INT-LIT",
         ParseErrorKind::ExpectedStringLit(_) => "MC-PARSE-EXPECTED-STRING-LIT",
         ParseErrorKind::ExpectedPattern(_) => "MC-PARSE-EXPECTED-PATTERN",
+        ParseErrorKind::DuplicateArrayRestPattern => "MC-PARSE-DUPLICATE-ARRAY-REST-PATTERN",
+        ParseErrorKind::InvalidArrayRestPattern => "MC-PARSE-INVALID-ARRAY-REST-PATTERN",
         ParseErrorKind::SingleFieldTupleMissingComma(_) => "MC-PARSE-TUPLE-MISSING-COMMA",
         ParseErrorKind::SingleElementSetMissingComma(_) => "MC-PARSE-SET-MISSING-COMMA",
         ParseErrorKind::ExpectedStructField(_) => "MC-PARSE-EXPECTED-STRUCT-FIELD",

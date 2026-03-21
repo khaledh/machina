@@ -159,6 +159,9 @@ pub enum TypeCheckErrorKind {
     #[error("Array pattern length mismatch: expected {0}, found {1}")]
     ArrayPatternLengthMismatch(usize, usize),
 
+    #[error("Array pattern requires at least {0} elements, found {1}")]
+    ArrayPatternMinLengthMismatch(usize, usize),
+
     #[error("Empty tuple literals are unsupported")]
     EmptyTupleLiteral,
 

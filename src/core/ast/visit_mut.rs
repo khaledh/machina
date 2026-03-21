@@ -475,19 +475,9 @@ pub fn walk_block_item<V: VisitorMut + ?Sized>(v: &mut V, item: &mut BlockItem) 
 // --- Bind Patterns ---
 
 pub fn walk_bind_pattern<V: VisitorMut + ?Sized>(v: &mut V, pattern: &mut BindPattern) {
-    match &mut pattern.kind {
-        BindPatternKind::Name { .. } => {}
-        BindPatternKind::Array { patterns } | BindPatternKind::Tuple { patterns } => {
-            for pattern in patterns {
-                v.visit_bind_pattern(pattern);
-            }
-        }
-        BindPatternKind::Struct { fields, .. } => {
-            for field in fields {
-                v.visit_bind_pattern(&mut field.pattern);
-            }
-        }
-    }
+    pattern
+        .kind
+        .for_each_child_pattern_mut(|pattern| v.visit_bind_pattern(pattern));
 }
 
 pub fn walk_using_binding<V: VisitorMut + ?Sized>(_v: &mut V, _binding: &mut UsingBinding) {}

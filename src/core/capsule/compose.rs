@@ -786,11 +786,9 @@ impl PrivateSymbolRenamer {
     fn bind_pattern_names(&mut self, pattern: &BindPattern) {
         match &pattern.kind {
             BindPatternKind::Name { ident, .. } => self.bind_value_name(ident),
-            BindPatternKind::Array { patterns } | BindPatternKind::Tuple { patterns } => {
-                for child in patterns {
-                    self.bind_pattern_names(child);
-                }
-            }
+            BindPatternKind::Array { .. } | BindPatternKind::Tuple { .. } => pattern
+                .kind
+                .for_each_child_pattern(|child| self.bind_pattern_names(child)),
             BindPatternKind::Struct { fields, .. } => {
                 for field in fields {
                     self.bind_pattern_names(&field.pattern);

@@ -1143,17 +1143,10 @@ impl SymbolResolver {
                     pattern.span,
                 );
             }
-            BindPatternKind::Array { patterns } => {
-                // Recursively check each sub-pattern
-                for pattern in patterns {
+            BindPatternKind::Array { .. } | BindPatternKind::Tuple { .. } => {
+                pattern.kind.for_each_child_pattern(|pattern| {
                     self.check_bind_pattern_namespaced(pattern, is_mutable, seen_names);
-                }
-            }
-            BindPatternKind::Tuple { patterns } => {
-                // Recursively check each sub-pattern
-                for pattern in patterns {
-                    self.check_bind_pattern_namespaced(pattern, is_mutable, seen_names);
-                }
+                });
             }
             BindPatternKind::Struct {
                 name: struct_name,

@@ -389,11 +389,9 @@ impl<'a> Elaborator<'a> {
     fn collect_bind_pattern_defs(&self, pattern: &BindPattern, out: &mut Vec<DefId>) {
         match &pattern.kind {
             BindPatternKind::Name { .. } => out.push(self.def_id_for(pattern.id)),
-            BindPatternKind::Array { patterns } | BindPatternKind::Tuple { patterns } => {
-                for pattern in patterns {
-                    self.collect_bind_pattern_defs(pattern, out);
-                }
-            }
+            BindPatternKind::Array { .. } | BindPatternKind::Tuple { .. } => pattern
+                .kind
+                .for_each_child_pattern(|pattern| self.collect_bind_pattern_defs(pattern, out)),
             BindPatternKind::Struct { fields, .. } => {
                 for field in fields {
                     self.collect_bind_pattern_defs(&field.pattern, out);

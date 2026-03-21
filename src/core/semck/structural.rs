@@ -161,11 +161,9 @@ impl<'a> StructuralChecker<'a> {
     fn check_pattern(&mut self, pattern: &BindPattern) {
         match &pattern.kind {
             BindPatternKind::Name { .. } => {}
-            BindPatternKind::Array { patterns } | BindPatternKind::Tuple { patterns } => {
-                for pattern in patterns {
-                    self.check_pattern(pattern);
-                }
-            }
+            BindPatternKind::Array { .. } | BindPatternKind::Tuple { .. } => pattern
+                .kind
+                .for_each_child_pattern(|pattern| self.check_pattern(pattern)),
             BindPatternKind::Struct { name, fields } => {
                 // Enforce struct pattern fields and recurse into subpatterns.
                 let Some(struct_fields) = self.struct_fields.get(name).cloned() else {

@@ -655,9 +655,22 @@ impl BindPattern {
             BindPatternKind::Name { ident, .. } => {
                 writeln!(f, "{}Name({}) [{}]", pad, ident, self.id)?;
             }
-            BindPatternKind::Array { patterns } => {
+            BindPatternKind::Array {
+                prefix,
+                rest,
+                suffix,
+            } => {
                 writeln!(f, "{}Array [{}]", pad, self.id)?;
-                for pattern in patterns {
+                for pattern in prefix {
+                    pattern.fmt_with_indent(f, level + 1)?;
+                }
+                if let Some(rest) = rest {
+                    writeln!(f, "{}Rest", indent(level + 1))?;
+                    if let Some(pattern) = &rest.pattern {
+                        pattern.fmt_with_indent(f, level + 2)?;
+                    }
+                }
+                for pattern in suffix {
                     pattern.fmt_with_indent(f, level + 1)?;
                 }
             }

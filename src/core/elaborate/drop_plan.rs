@@ -107,16 +107,9 @@ impl<'a> DropPlanBuilder<'a> {
                 let def_id = self.def_table.def_id(pattern.id);
                 self.register_def_drop(def_id, guard);
             }
-            BindPatternKind::Array { patterns } => {
-                for pat in patterns {
-                    self.register_pattern_drop(pat, guard);
-                }
-            }
-            BindPatternKind::Tuple { patterns } => {
-                for pat in patterns {
-                    self.register_pattern_drop(pat, guard);
-                }
-            }
+            BindPatternKind::Array { .. } | BindPatternKind::Tuple { .. } => pattern
+                .kind
+                .for_each_child_pattern(|pat| self.register_pattern_drop(pat, guard)),
             BindPatternKind::Struct { fields, .. } => {
                 for field in fields {
                     self.register_pattern_drop(&field.pattern, guard);

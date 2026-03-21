@@ -227,11 +227,9 @@ impl<'a> LocalScopeCollector<'a> {
             BindPatternKind::Name { .. } => {
                 self.insert_def(self.def_table.def_id(pattern.id));
             }
-            BindPatternKind::Array { patterns } | BindPatternKind::Tuple { patterns } => {
-                for sub in patterns {
-                    self.collect_bind_pattern_bindings(sub);
-                }
-            }
+            BindPatternKind::Array { .. } | BindPatternKind::Tuple { .. } => pattern
+                .kind
+                .for_each_child_pattern(|sub| self.collect_bind_pattern_bindings(sub)),
             BindPatternKind::Struct { fields, .. } => {
                 for field in fields {
                     self.collect_bind_pattern_bindings(&field.pattern);

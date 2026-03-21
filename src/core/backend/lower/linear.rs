@@ -1600,7 +1600,7 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
 
     /// Builds a slice value from a base pointer and length.
     #[allow(clippy::too_many_arguments)]
-    fn emit_slice_value(
+    pub(super) fn emit_slice_value(
         &mut self,
         slice_ty: IrTypeId,
         elem_ptr_ty: IrTypeId,
