@@ -20,6 +20,42 @@ void __mc_free(void *ptr);
 // CheckKind::Range = 2
 #define MC_TRAP_RANGE 2
 
+typedef struct mc_string_backing {
+    uint32_t refcount;
+    uint32_t cap;
+    uint8_t bytes[];
+} mc_string_backing_t;
+
+static mc_string_backing_t *mc_string_backing(mc_string_t *s) {
+    if (!mc_cap_is_owned(s->cap) || s->ptr == 0) {
+        return NULL;
+    }
+    return (mc_string_backing_t *)((uint8_t *)(uintptr_t)s->ptr
+                                   - offsetof(mc_string_backing_t, bytes));
+}
+
+static const mc_string_backing_t *mc_string_backing_const(const mc_string_t *s) {
+    if (!mc_cap_is_owned(s->cap) || s->ptr == 0) {
+        return NULL;
+    }
+    return (const mc_string_backing_t *)((const uint8_t *)(uintptr_t)s->ptr
+                                         - offsetof(mc_string_backing_t, bytes));
+}
+
+static mc_string_backing_t *mc_string_backing_alloc(uint32_t cap) {
+    size_t bytes = offsetof(mc_string_backing_t, bytes) + (size_t)cap;
+    mc_string_backing_t *backing = (mc_string_backing_t *)__mc_alloc(bytes, 8);
+    if (!backing && bytes != 0) {
+        __mc_trap(MC_TRAP_RANGE, (uint64_t)bytes, 0, (uint64_t)bytes + 1);
+    }
+    if (!backing) {
+        return NULL;
+    }
+    backing->refcount = 1;
+    backing->cap = cap;
+    return backing;
+}
+
 static uint32_t mc_next_cap(uint32_t current, uint32_t min_cap) {
     uint32_t cap = current ? current : 1;
     while (cap < min_cap) {
@@ -62,14 +98,10 @@ void __mc_string_ensure(mc_string_t *s, uint32_t min_cap) {
         __mc_trap(MC_TRAP_RANGE, min_cap, 0, (uint64_t)MC_CAP_MASK + 1);
     }
 
-    uint32_t cap = mc_cap_value(s->cap);
     uint8_t owned = mc_cap_is_owned(s->cap);
-    if (owned && min_cap <= cap) {
-        return;
-    }
-
-    if (!owned && min_cap == 0) {
-        s->cap = mc_cap_with_owned(0);
+    uint32_t cap = mc_cap_value(s->cap);
+    mc_string_backing_t *backing = mc_string_backing(s);
+    if (owned && backing && backing->refcount == 1 && min_cap <= cap) {
         return;
     }
 
@@ -78,43 +110,59 @@ void __mc_string_ensure(mc_string_t *s, uint32_t min_cap) {
         new_cap = mc_next_cap(cap, min_cap);
     }
 
-    uint64_t bytes = (uint64_t)new_cap;
-    void *new_ptr = owned
-        ? __mc_realloc((void *)s->ptr, bytes, 1)
-        : __mc_alloc(bytes, 1);
-    if (!new_ptr && bytes != 0) {
-        __mc_trap(MC_TRAP_RANGE, bytes, 0, bytes + 1);
-    }
-
-    if (!owned && s->ptr && len > 0) {
+    mc_string_backing_t *new_backing = mc_string_backing_alloc(new_cap);
+    if (s->ptr && len > 0) {
         mc_slice_t src = {
             .ptr = s->ptr,
             .len = (uint64_t)len,
         };
         mc_slice_t dst = {
-            .ptr = (uint64_t)new_ptr,
+            .ptr = (uint64_t)new_backing->bytes,
             .len = (uint64_t)len,
         };
         __mc_memcpy(&dst, &src);
     }
 
-    s->ptr = (uint64_t)new_ptr;
-    s->cap = mc_cap_with_owned(new_cap);
+    if (owned && backing) {
+        if (backing->refcount > 1) {
+            backing->refcount -= 1;
+        } else {
+            __mc_free(backing);
+        }
+    }
+
+    s->ptr = (uint64_t)new_backing->bytes;
+    s->cap = mc_cap_with_owned(new_backing->cap);
 }
 
 /**
  * Drops an owned string buffer (no-op for string views).
  */
 void __mc_string_drop(mc_string_t *s) {
-    if (!mc_cap_is_owned(s->cap)) {
+    mc_string_backing_t *backing = mc_string_backing(s);
+    if (!backing) {
         return;
     }
-    if (s->ptr != 0) {
-        __mc_free((void *)s->ptr);
+
+    if (backing->refcount > 1) {
+        backing->refcount -= 1;
+    } else {
+        __mc_free(backing);
     }
     s->ptr = 0;
     s->len = 0;
     s->cap = 0;
+}
+
+void __mc_string_retain(mc_string_t *s) {
+    mc_string_backing_t *backing = mc_string_backing(s);
+    if (!backing) {
+        return;
+    }
+    if (backing->refcount == UINT32_MAX) {
+        __mc_trap(MC_TRAP_RANGE, backing->refcount, 0, (uint64_t)UINT32_MAX + 1);
+    }
+    backing->refcount += 1;
 }
 
 /**
@@ -300,7 +348,7 @@ void __rt_string_append_bytes(uint64_t s_ptr, uint64_t ptr, uint64_t len) {
     __mc_string_append_bytes(s, ptr, len);
 }
 
-static void mc_string_lines_push(
+static void mc_string_push_range(
     mc_dyn_array_t *out,
     const mc_string_t *text,
     uint32_t start,
@@ -339,13 +387,69 @@ void __rt_string_lines(uint64_t out_ptr, uint64_t ptr, uint64_t len) {
         if (end > start && bytes[end - 1] == '\r') {
             end -= 1;
         }
-        mc_string_lines_push(out, &text, start, end);
+        mc_string_push_range(out, &text, start, end);
         start = i + 1;
     }
 
     if (start < text.len) {
-        mc_string_lines_push(out, &text, start, text.len);
+        mc_string_push_range(out, &text, start, text.len);
     }
+}
+
+void __rt_string_split(
+    uint64_t out_ptr,
+    uint64_t ptr,
+    uint64_t len,
+    uint64_t delim_ptr,
+    uint64_t delim_len
+) {
+    mc_dyn_array_t *out = (mc_dyn_array_t *)(uintptr_t)out_ptr;
+    mc_string_t text = {
+        .ptr = ptr,
+        .len = (uint32_t)len,
+        .cap = 0,
+    };
+    const uint8_t *bytes = (const uint8_t *)(uintptr_t)text.ptr;
+    const uint8_t *delim = (const uint8_t *)(uintptr_t)delim_ptr;
+    uint32_t start = 0;
+
+    if (!out) {
+        return;
+    }
+    out->ptr = 0;
+    out->len = 0;
+    out->cap = 0;
+
+    if (delim_len == 0) {
+        mc_string_push_range(out, &text, 0, text.len);
+        return;
+    }
+
+    if (delim_len > text.len) {
+        mc_string_push_range(out, &text, 0, text.len);
+        return;
+    }
+
+    for (uint32_t i = 0; i + delim_len <= text.len;) {
+        uint8_t matched = 1;
+        for (uint32_t j = 0; j < delim_len; ++j) {
+            if (bytes[i + j] != delim[j]) {
+                matched = 0;
+                break;
+            }
+        }
+
+        if (!matched) {
+            i += 1;
+            continue;
+        }
+
+        mc_string_push_range(out, &text, start, i);
+        i += (uint32_t)delim_len;
+        start = i;
+    }
+
+    mc_string_push_range(out, &text, start, text.len);
 }
 
 void __rt_string_append_bool(uint64_t s_ptr, uint8_t value) {
@@ -360,6 +464,11 @@ void __rt_string_append_bool(uint64_t s_ptr, uint8_t value) {
 void __rt_string_ensure(uint64_t s_ptr, uint32_t min_cap) {
     mc_string_t *s = (mc_string_t *)s_ptr;
     __mc_string_ensure(s, min_cap);
+}
+
+void __rt_string_retain(uint64_t s_ptr) {
+    mc_string_t *s = (mc_string_t *)s_ptr;
+    __mc_string_retain(s);
 }
 
 void __rt_string_drop(uint64_t s_ptr) {

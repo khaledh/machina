@@ -32,6 +32,18 @@ fn drop_def_for_place_expr(def_table: &DefTable, place: &Expr) -> Option<DefId> 
     }
 }
 
+fn borrowable_place_expr(expr: &Expr) -> Option<&Expr> {
+    match &expr.kind {
+        ExprKind::Load { expr: place } => Some(place),
+        ExprKind::Var { .. }
+        | ExprKind::ArrayIndex { .. }
+        | ExprKind::TupleField { .. }
+        | ExprKind::StructField { .. }
+        | ExprKind::Deref { .. } => Some(expr),
+        _ => None,
+    }
+}
+
 #[derive(Clone, Copy)]
 enum CollectionReceiverKind {
     DynArray,
@@ -272,7 +284,21 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
         let mut arg_values = Vec::with_capacity(args.len());
         for arg in args {
             match arg.mode {
-                CallArgMode::Default | CallArgMode::Move => {
+                CallArgMode::Default => {
+                    let expr_ty = self.type_map.type_of(arg.expr.id);
+                    let sem_ty = self.type_map.type_table().get(expr_ty).clone();
+                    if !sem_ty.is_scalar()
+                        && let Some(place) = borrowable_place_expr(&arg.expr)
+                    {
+                        arg_values.push(self.call_input_from_place_expr(place)?);
+                        continue;
+                    }
+                    let Some(input) = self.call_input_from_value_expr(&arg.expr)? else {
+                        return Ok(None);
+                    };
+                    arg_values.push(input);
+                }
+                CallArgMode::Move => {
                     let Some(input) = self.call_input_from_value_expr(&arg.expr)? else {
                         return Ok(None);
                     };
@@ -434,6 +460,9 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
                 }
                 IntrinsicCall::StringLines => {
                     panic!("backend call expr cannot lower string lines without a receiver");
+                }
+                IntrinsicCall::StringSplit => {
+                    panic!("backend call expr cannot lower string split without a receiver");
                 }
                 IntrinsicCall::TypeOf => {
                     return self.lower_type_of_intrinsic(expr, args, &call_plan);
@@ -599,6 +628,13 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
                     .map(Some)
             }
             IntrinsicCall::StringLines => self.lower_string_lines_method(
+                expr,
+                receiver_is_place,
+                args,
+                call_plan,
+                receiver_value,
+            ),
+            IntrinsicCall::StringSplit => self.lower_string_split_method(
                 expr,
                 receiver_is_place,
                 args,
@@ -944,7 +980,13 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
                     if input_value.is_addr || input_value.ty.is_scalar() {
                         call_args.push(input_value.value);
                     } else {
-                        let addr = self.materialize_value_addr(input_value.value, &input_value.ty);
+                        let addr = if input_value.drop_def.is_none()
+                            && self.type_needs_owned_copy(&input_value.ty)
+                        {
+                            self.materialize_value_addr_by_move(input_value.value, &input_value.ty)
+                        } else {
+                            self.materialize_value_addr(input_value.value, &input_value.ty)
+                        };
                         input_value.value = addr;
                         input_value.is_addr = true;
                         call_args.push(addr);
@@ -959,12 +1001,16 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
                             panic!("backend call arg index out of range: {index}")
                         }),
                     };
-                    let (ptr, len) = self.lower_ptr_len_from_value(
-                        span,
-                        input_value.value,
-                        &input_value.ty,
-                        *len_bits,
-                    )?;
+                    let (ptr, len) = if input_value.is_addr {
+                        self.lower_ptr_len_from_addr(input_value.value, &input_value.ty, *len_bits)?
+                    } else {
+                        self.lower_ptr_len_from_value(
+                            span,
+                            input_value.value,
+                            &input_value.ty,
+                            *len_bits,
+                        )?
+                    };
                     call_args.push(ptr);
                     call_args.push(len);
                 }
@@ -1047,6 +1093,67 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
             unit_ty,
         );
         self.apply_call_drop_effects(call_plan, args, Some(receiver_value), &[])?;
+        Ok(Some(self.load_slot(&result_slot)))
+    }
+
+    fn lower_string_split_method(
+        &mut self,
+        expr: &Expr,
+        receiver_is_place: bool,
+        args: &[CallArg],
+        call_plan: &CallPlan,
+        receiver_value: &mut CallInputValue,
+    ) -> Result<Option<LinearValue>, LowerToIrError> {
+        if !matches!(receiver_value.ty, Type::String) {
+            panic!(
+                "backend string split intrinsic expects string receiver, got {:?}",
+                receiver_value.ty
+            );
+        }
+        if args.len() != 1 {
+            panic!(
+                "backend string split intrinsic expects 1 arg, got {}",
+                args.len()
+            );
+        }
+
+        let Some(arg_values) = self.lower_call_arg_values(args)? else {
+            return Ok(None);
+        };
+        if arg_values.len() != 1 {
+            panic!(
+                "backend string split intrinsic expects exactly one lowered arg, got {}",
+                arg_values.len()
+            );
+        }
+        if !matches!(arg_values[0].ty, Type::String) {
+            panic!(
+                "backend string split intrinsic expects string delimiter, got {:?}",
+                arg_values[0].ty
+            );
+        }
+
+        let (ptr, len) = if receiver_is_place {
+            let view = self.load_string_view(receiver_value.value);
+            (view.ptr, view.len)
+        } else {
+            self.lower_ptr_len_from_value(expr.span, receiver_value.value, &receiver_value.ty, 32)?
+        };
+
+        let (delim_ptr, delim_len) =
+            self.lower_ptr_len_from_value(expr.span, arg_values[0].value, &arg_values[0].ty, 32)?;
+
+        let result_ir_ty = self
+            .type_lowerer
+            .lower_type_id(self.type_map.type_of(expr.id));
+        let result_slot = self.alloc_value_slot(result_ir_ty);
+        let unit_ty = self.type_lowerer.lower_type(&Type::Unit);
+        self.builder.call(
+            Callee::Runtime(RuntimeFn::StringSplit),
+            vec![result_slot.addr, ptr, len, delim_ptr, delim_len],
+            unit_ty,
+        );
+        self.apply_call_drop_effects(call_plan, args, Some(receiver_value), &arg_values)?;
         Ok(Some(self.load_slot(&result_slot)))
     }
 }

@@ -91,24 +91,18 @@ pub(crate) fn run(engine: &mut TypecheckEngine) -> Result<(), Vec<TypeCheckError
         &mut expr_errors,
         &mut covered_exprs,
     );
+    apply_assignable_inference_pass(&constrain, &mut unifier);
 
-    if !unresolved_calls.is_empty() {
-        let (mut retry_call_errors, retry_resolved, _) = calls::check_call_obligations(
-            &unresolved_calls,
-            &mut unifier,
-            &engine.env().func_sigs,
-            &engine.env().method_sigs,
-            &engine.env().property_sigs,
-            &engine.env().trait_sigs,
-            &engine.env().trait_impls,
-            &constrain.var_trait_bounds,
-            &engine.context().def_table,
-            &engine.context().def_owners,
-            false,
-        );
-        call_errors.append(&mut retry_call_errors);
-        resolved_call_defs.extend(retry_resolved);
-    }
+    retry_call_stage(
+        unresolved_calls,
+        &constrain,
+        &mut unifier,
+        engine,
+        &mut call_errors,
+        &mut resolved_call_defs,
+        &mut expr_errors,
+        &mut covered_exprs,
+    );
 
     apply_final_assignability(
         &constrain,
@@ -323,6 +317,43 @@ fn retry_expr_stage(
     );
     expr_errors.append(&mut retry_errors);
     covered_exprs.extend(retry_covered);
+}
+
+fn retry_call_stage(
+    mut pending_calls: Vec<CallObligation>,
+    constrain: &ConstrainOutput,
+    unifier: &mut TcUnifier,
+    engine: &TypecheckEngine,
+    call_errors: &mut Vec<TypeCheckError>,
+    resolved_call_defs: &mut HashMap<NodeId, DefId>,
+    expr_errors: &mut Vec<TypeCheckError>,
+    covered_exprs: &mut HashSet<NodeId>,
+) {
+    while !pending_calls.is_empty() {
+        let prior_pending = pending_calls.len();
+        let (mut retry_call_errors, retry_resolved, deferred) = calls::check_call_obligations(
+            &pending_calls,
+            unifier,
+            &engine.env().func_sigs,
+            &engine.env().method_sigs,
+            &engine.env().property_sigs,
+            &engine.env().trait_sigs,
+            &engine.env().trait_impls,
+            &constrain.var_trait_bounds,
+            &engine.context().def_table,
+            &engine.context().def_owners,
+            false,
+        );
+        call_errors.append(&mut retry_call_errors);
+        resolved_call_defs.extend(retry_resolved);
+
+        retry_expr_stage(constrain, unifier, engine, expr_errors, covered_exprs);
+
+        if deferred.is_empty() || deferred.len() == prior_pending {
+            break;
+        }
+        pending_calls = deferred;
+    }
 }
 
 fn apply_final_assignability(

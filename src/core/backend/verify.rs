@@ -233,6 +233,10 @@ fn runtime_call_spec(runtime: &RuntimeFn) -> RuntimeCallSpec {
             args: &[Ptr, Ptr, Int],
             ret: Unit,
         },
+        RuntimeFn::StringSplit => RuntimeCallSpec {
+            args: &[Ptr, Ptr, Int, Ptr, Int],
+            ret: Unit,
+        },
         RuntimeFn::FmtInit => RuntimeCallSpec {
             args: &[Ptr, Ptr, Int],
             ret: Unit,
@@ -275,6 +279,10 @@ fn runtime_call_spec(runtime: &RuntimeFn) -> RuntimeCallSpec {
         },
         RuntimeFn::StringEnsure => RuntimeCallSpec {
             args: &[Ptr, Int],
+            ret: Unit,
+        },
+        RuntimeFn::StringRetain => RuntimeCallSpec {
+            args: &[Ptr],
             ret: Unit,
         },
         RuntimeFn::StringDrop => RuntimeCallSpec {

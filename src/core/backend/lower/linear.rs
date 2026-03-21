@@ -1,8 +1,8 @@
 //! Straight-line (single-block) lowering routines.
 
 use crate::core::ast::{
-    ArrayLitInit, BinaryOp, BlockItem, CoerceKind, EmitKind, Expr, ExprKind, MapLitEntry,
-    ParamMode, StmtExpr, StmtExprKind, StructLitField, StructUpdateField, UnaryOp,
+    ArrayLitInit, BinaryOp, BindPatternKind, BlockItem, CoerceKind, EmitKind, Expr, ExprKind,
+    MapLitEntry, ParamMode, StmtExpr, StmtExprKind, StructLitField, StructUpdateField, UnaryOp,
 };
 use crate::core::backend::lower::LowerToIrError;
 use crate::core::backend::lower::locals::LocalValue;
@@ -347,7 +347,16 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
                 let value_expr_ty = self.type_map.type_of(value_expr.id);
                 let ty = self.type_lowerer.lower_type_id(value_expr_ty);
                 let value_ty = self.type_map.type_table().get(value_expr_ty).clone();
-                self.bind_pattern(pattern, LocalValue::value(value, ty), &value_ty)?;
+                if matches!(pattern.kind, BindPatternKind::Name { .. })
+                    && matches!(value_ty, Type::String)
+                    && self.expr_is_static_string_literal(value_expr)
+                {
+                    let def_id = self.def_table.def_id(pattern.id);
+                    self.locals.insert(def_id, LocalValue::value(value, ty));
+                    self.set_drop_flag_for_def(def_id, true);
+                } else {
+                    self.bind_pattern(pattern, LocalValue::value(value, ty), &value_ty)?;
+                }
                 Ok(StmtOutcome::Continue)
             }
 
@@ -395,7 +404,13 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
                             self.emit_drop_for_def_if_live(def_id, value_expr_ty)?;
                         }
                         let ty = self.type_lowerer.lower_type_id(value_expr_ty);
-                        self.assign_local_value(def_id, value, ty);
+                        if matches!(value_ty, Type::String)
+                            && self.expr_is_static_string_literal(value_expr)
+                        {
+                            self.assign_local_storage_value(def_id, value, ty);
+                        } else {
+                            self.assign_local_value(def_id, value, ty);
+                        }
                         self.set_drop_flag_for_def(def_id, true);
                         Ok(StmtOutcome::Continue)
                     }
@@ -448,6 +463,7 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
                             if matches!(ty, Type::Unit) {
                                 None
                             } else {
+                                let value = self.prepare_owned_return_value(expr, value, ty);
                                 Some(self.coerce_return_value(value, ty))
                             }
                         }
@@ -533,6 +549,8 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
                             .type_table()
                             .get(lowerer.type_map.type_of(tail.id))
                             .clone();
+                        let value =
+                            lowerer.prepare_owned_return_value(tail, value, &tail_sem_ty);
                         let block_sem_ty = lowerer
                             .type_map
                             .type_table()

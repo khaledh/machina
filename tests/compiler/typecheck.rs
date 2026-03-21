@@ -266,6 +266,76 @@ fn test_string_lines_returns_owned_lines_without_newlines() {
 }
 
 #[test]
+fn test_string_split_returns_owned_fields() {
+    let run = run_program(
+        "string_split_returns_owned_fields",
+        r#"
+            requires {
+                std::io::println
+            }
+
+            fn main() {
+                let parts = "alpha,beta,,gamma,".split(",");
+                println(parts.len);
+                println(parts[0]);
+                println(parts[1]);
+                println(parts[2].len);
+                println(parts[3]);
+                println(parts[4].len);
+
+                let multi = "a--b----c".split("--");
+                println(multi.len);
+                println(multi[0]);
+                println(multi[1]);
+                println(multi[2].len);
+                println(multi[3]);
+
+                let empty = "alpha".split("");
+                println(empty.len);
+                println(empty[0]);
+            }
+        "#,
+    );
+    assert_eq!(run.status.code(), Some(0));
+
+    let stdout = String::from_utf8_lossy(&run.stdout);
+    assert_eq!(
+        stdout, "5\nalpha\nbeta\n0\ngamma\n0\n4\na\nb\n0\nc\n1\nalpha\n",
+        "unexpected stdout: {stdout}"
+    );
+}
+
+#[test]
+fn test_string_trim_strips_ascii_whitespace() {
+    let run = run_program(
+        "string_trim_strips_ascii_whitespace",
+        r#"
+            requires {
+                std::io::println
+            }
+
+            fn main() {
+                let a = "  alpha  ".trim();
+                let b = "\n\t beta\r\n".trim();
+                let c = "   ".trim();
+                let d = "gamma".trim();
+                println(a);
+                println(b);
+                println(c.len);
+                println(d);
+            }
+        "#,
+    );
+    assert_eq!(run.status.code(), Some(0));
+
+    let stdout = String::from_utf8_lossy(&run.stdout);
+    assert_eq!(
+        stdout, "alpha\nbeta\n0\ngamma\n",
+        "unexpected stdout: {stdout}"
+    );
+}
+
+#[test]
 fn test_string_contains_finds_substrings() {
     let run = run_program(
         "string_contains_finds_substrings",
@@ -298,6 +368,139 @@ fn test_string_contains_finds_substrings() {
         stdout, "head\ntail\nempty\nmiss\n",
         "unexpected stdout: {stdout}"
     );
+}
+
+#[test]
+fn test_parse_u64_parses_decimal_and_rejects_invalid_input() {
+    let run = run_program(
+        "parse_u64_decimal",
+        r#"
+            requires {
+                std::io::println
+                std::parse as parse
+                std::parse::ParseError
+            }
+
+            fn main() {
+                let ok = parse::parse_u64("42");
+                println("ok");
+                match ok {
+                    value: u64 => println(value),
+                    err: ParseError => println("err"),
+                };
+
+                let empty = parse::parse_u64("");
+                println("empty");
+                match empty {
+                    value: u64 => println(value),
+                    err: ParseError => println("err"),
+                };
+
+                let bad = parse::parse_u64("7x");
+                println("bad");
+                match bad {
+                    value: u64 => println(value),
+                    err: ParseError => println("err"),
+                };
+
+                let overflow = parse::parse_u64("18446744073709551616");
+                println("overflow");
+                match overflow {
+                    value: u64 => println(value),
+                    err: ParseError => println("err"),
+                };
+
+                let max = parse::parse_u64("18446744073709551615");
+                println("max");
+                match max {
+                    value: u64 => println(value),
+                    err: ParseError => println("err"),
+                };
+            }
+        "#,
+    );
+    assert_eq!(run.status.code(), Some(0));
+
+    let stdout = String::from_utf8_lossy(&run.stdout);
+    assert_eq!(
+        stdout,
+        "ok\n42\nempty\nerr\nbad\nerr\noverflow\nerr\nmax\n18446744073709551615\n",
+        "unexpected stdout: {stdout}"
+    );
+}
+
+#[test]
+fn test_string_method_on_indexed_inferred_split_field_builds() {
+    let run = run_program(
+        "string_method_on_indexed_inferred_split_field",
+        r#"
+            requires {
+                std::io::println
+            }
+
+            fn main() {
+                for line in " a ,b\n".lines() {
+                    let cols = line.split(",");
+                    let name: string = cols[0].trim();
+                    println(name);
+                }
+            }
+        "#,
+    );
+    assert_eq!(run.status.code(), Some(0));
+
+    let stdout = String::from_utf8_lossy(&run.stdout);
+    assert_eq!(stdout, "a\n", "unexpected stdout: {stdout}");
+}
+
+#[test]
+fn test_string_indexed_split_field_copy_does_not_abort() {
+    let run = run_program(
+        "string_indexed_split_field_copy_does_not_abort",
+        r#"
+            requires {
+                std::io::println
+            }
+
+            fn main() {
+                for line in "alice,10\n".lines() {
+                    let cols: string[*] = line.split(",");
+                    let name: string = cols[0];
+                    println(name);
+                }
+            }
+        "#,
+    );
+    assert_eq!(run.status.code(), Some(0));
+
+    let stdout = String::from_utf8_lossy(&run.stdout);
+    assert_eq!(stdout, "alice\n", "unexpected stdout: {stdout}");
+}
+
+#[test]
+fn test_returning_indexed_split_field_keeps_string_alive() {
+    let run = run_program(
+        "returning_indexed_split_field_keeps_string_alive",
+        r#"
+            requires {
+                std::io::println
+            }
+
+            fn leak() -> string {
+                let cols: string[*] = "alice,10".split(",");
+                cols[0]
+            }
+
+            fn main() {
+                let name: string = leak();
+                println(name);
+            }
+        "#,
+    );
+    assert_eq!(run.status.code(), Some(0));
+
+    let stdout = String::from_utf8_lossy(&run.stdout);
+    assert_eq!(stdout, "alice\n", "unexpected stdout: {stdout}");
 }
 
 #[test]

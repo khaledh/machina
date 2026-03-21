@@ -46,6 +46,19 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
         slot.addr
     }
 
+    /// Materializes a temporary value into a stack slot by moving its current
+    /// representation without taking an owned copy.
+    pub(super) fn materialize_value_addr_by_move(
+        &mut self,
+        value: ValueId,
+        value_ty: &Type,
+    ) -> ValueId {
+        let ir_ty = self.type_lowerer.lower_type(value_ty);
+        let slot = self.alloc_value_slot(ir_ty);
+        self.builder.store(slot.addr, value);
+        slot.addr
+    }
+
     /// Loads a value from a slot.
     pub(super) fn load_slot(&mut self, slot: &ValueSlot) -> ValueId {
         self.builder.load(slot.addr, slot.ty)
@@ -55,10 +68,19 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
     pub(super) fn slot_for_value_typed(
         &mut self,
         value: LocalValue,
-        _value_ty: &Type,
+        value_ty: &Type,
     ) -> ValueSlot {
         match value.storage {
-            LocalStorage::Value(value_id) => self.materialize_value_slot(value_id, value.value_ty),
+            LocalStorage::Value(value_id) => {
+                if self.type_needs_owned_copy(value_ty) {
+                    ValueSlot {
+                        addr: self.materialize_value_addr(value_id, value_ty),
+                        ty: value.value_ty,
+                    }
+                } else {
+                    self.materialize_value_slot(value_id, value.value_ty)
+                }
+            }
             LocalStorage::Addr(addr) => ValueSlot {
                 addr,
                 ty: value.value_ty,

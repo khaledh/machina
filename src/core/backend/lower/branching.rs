@@ -117,6 +117,8 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
                                     .type_table()
                                     .get(lowerer.type_map.type_of(tail.id))
                                     .clone();
+                                let value =
+                                    lowerer.prepare_owned_return_value(tail, value, &tail_sem_ty);
                                 let block_sem_ty = lowerer
                                     .type_map
                                     .type_table()

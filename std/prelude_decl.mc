@@ -137,6 +137,13 @@ string :: {
   fn lines(self) -> string[*];
 
   @intrinsic
+  fn split(self, delim: string) -> string[*];
+
+  @intrinsic
+  @link_name("string_trim_impl")
+  fn trim(self) -> string;
+
+  @intrinsic
   @link_name("string_contains_impl")
   fn contains(self, needle: string) -> bool;
 

@@ -117,6 +117,13 @@ impl<'a> Elaborator<'a> {
                     )
                 {
                     target = CallTarget::Intrinsic(IntrinsicCall::StringLines);
+                } else if intrinsic_name == "split"
+                    && matches!(
+                        call_sig.receiver.as_ref().map(|recv| &recv.ty),
+                        Some(Type::String)
+                    )
+                {
+                    target = CallTarget::Intrinsic(IntrinsicCall::StringSplit);
                 } else if intrinsic_name == "type_of" {
                     target = CallTarget::Intrinsic(IntrinsicCall::TypeOf);
                 }

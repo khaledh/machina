@@ -633,6 +633,7 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
         self.set_drop_flag_for_def(def_id, false);
         Some(self.load_local_value(def_id))
     }
+
 }
 
 fn semantic_named_type_name(ty: &Type) -> Option<&str> {

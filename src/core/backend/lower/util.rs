@@ -1,6 +1,6 @@
 //! Shared lowering helpers for locals, views, bounds, and blob operations.
 
-use crate::core::ast::Expr;
+use crate::core::ast::{Expr, ExprKind};
 use crate::core::backend::lower::LowerToIrError;
 use crate::core::backend::lower::locals::{LocalStorage, LocalValue};
 use crate::core::backend::lower::lowerer::{BaseView, CallInputValue, FuncLowerer, LoopContext};
@@ -14,6 +14,55 @@ use crate::core::types::{Type, TypeAssignability, type_assignable};
 const MACHINE_PAYLOAD_LAYOUT_OWNED_MASK: u64 = 1u64 << 63;
 
 impl<'a, 'g> FuncLowerer<'a, 'g> {
+    pub(super) fn type_needs_owned_copy(&self, ty: &Type) -> bool {
+        match ty {
+            Type::String => true,
+            Type::Tuple { field_tys } => field_tys.iter().any(|field| self.type_needs_owned_copy(field)),
+            Type::Struct { fields, .. } => fields.iter().any(|field| self.type_needs_owned_copy(&field.ty)),
+            Type::Array { elem_ty, .. } => self.type_needs_owned_copy(elem_ty),
+            _ => false,
+        }
+    }
+
+    fn expr_is_consuming_local_move(&self, expr: &Expr) -> bool {
+        let ExprKind::Load { expr: place } = &expr.kind else {
+            return false;
+        };
+        let ExprKind::Var { .. } = place.kind else {
+            return false;
+        };
+
+        let sem_ty = self
+            .type_map
+            .type_table()
+            .get(self.type_map.type_of(expr.id))
+            .clone();
+        sem_ty.needs_drop()
+    }
+
+    pub(super) fn expr_is_static_string_literal(&self, expr: &Expr) -> bool {
+        matches!(expr.kind, ExprKind::StringLit { .. })
+    }
+
+    pub(super) fn prepare_owned_return_value(
+        &mut self,
+        expr: &Expr,
+        value: ValueId,
+        value_ty: &Type,
+    ) -> ValueId {
+        if self.expr_is_consuming_local_move(expr)
+            || !self.type_needs_owned_copy(value_ty)
+            || matches!(value_ty, Type::String) && self.expr_is_static_string_literal(expr)
+        {
+            return value;
+        }
+
+        let ir_ty = self.type_lowerer.lower_type(value_ty);
+        let slot = self.alloc_value_slot(ir_ty);
+        self.store_value_into_addr(slot.addr, value, value_ty, ir_ty);
+        self.load_slot(&slot)
+    }
+
     /// Ensures a call/runtime argument is backed by an addressable slot.
     ///
     /// Collection and runtime helpers uniformly consume pointer inputs, so this
@@ -777,8 +826,7 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
             LocalStorage::Addr(addr) => addr,
             LocalStorage::Value(value) => {
                 let addr = self.alloc_local_addr(value_ty);
-                let ty = self.def_type(def_id);
-                self.store_value_into_addr(addr, value, &ty, value_ty);
+                self.builder.store(addr, value);
                 self.locals.insert(def_id, LocalValue::addr(addr, value_ty));
                 addr
             }
@@ -812,6 +860,36 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
             LocalStorage::Addr(addr) => {
                 let ty = self.def_type(def_id);
                 self.store_value_into_addr(addr, value, &ty, value_ty);
+            }
+        }
+    }
+
+    /// Assigns a new value to a local without taking an owned copy.
+    ///
+    /// This is used for moves into the same local storage or for static
+    /// string literals, where retaining would only introduce redundant runtime
+    /// calls.
+    pub(super) fn assign_local_storage_value(
+        &mut self,
+        def_id: DefId,
+        value: ValueId,
+        value_ty: IrTypeId,
+    ) {
+        let local = self.lookup_local(def_id);
+        if local.value_ty != value_ty {
+            panic!(
+                "backend assign_local_storage_value type mismatch for {:?}: {:?} vs {:?}",
+                def_id, local.value_ty, value_ty
+            );
+        }
+
+        match local.storage {
+            LocalStorage::Value(_) => {
+                self.locals
+                    .insert(def_id, LocalValue::value(value, value_ty));
+            }
+            LocalStorage::Addr(addr) => {
+                self.builder.store(addr, value);
             }
         }
     }
@@ -858,13 +936,116 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
         )
     }
 
+    fn retain_string_at_addr(&mut self, addr: ValueId) {
+        let unit_ty = self.type_lowerer.lower_type(&Type::Unit);
+        let _ = self
+            .builder
+            .call(Callee::Runtime(RuntimeFn::StringRetain), vec![addr], unit_ty);
+    }
+
+    fn store_string_copy(&mut self, dst: ValueId, value: ValueId, ir_ty: IrTypeId) {
+        let temp = self.materialize_value_slot(value, ir_ty);
+        let layout = self.type_lowerer.ir_type_cache.layout(ir_ty);
+        let u64_ty = self.type_lowerer.lower_type(&Type::uint(64));
+        let len = self
+            .builder
+            .const_int(layout.size() as i128, false, 64, u64_ty);
+        self.builder.memcopy(dst, temp.addr, len);
+        self.retain_string_at_addr(dst);
+    }
+
+    fn store_array_copy(
+        &mut self,
+        dst: ValueId,
+        value: ValueId,
+        elem_ty: &Type,
+        dims: &[usize],
+        ir_ty: IrTypeId,
+    ) {
+        let src_slot = self.materialize_value_slot(value, ir_ty);
+        let elem_ir_ty = self.type_lowerer.lower_type(elem_ty);
+        let elem_ptr_ty = self.type_lowerer.ptr_to(elem_ir_ty);
+        let u64_ty = self.type_lowerer.lower_type(&Type::uint(64));
+        let len = dims
+            .first()
+            .copied()
+            .unwrap_or_else(|| panic!("backend array copy missing dims"));
+        for index in 0..len {
+            let index_val = self.builder.const_int(index as i128, false, 64, u64_ty);
+            let src_elem = self.builder.index_addr(src_slot.addr, index_val, elem_ptr_ty);
+            let dst_elem = self.builder.index_addr(dst, index_val, elem_ptr_ty);
+            let elem_val = self.builder.load(src_elem, elem_ir_ty);
+            self.store_value_into_addr(dst_elem, elem_val, elem_ty, elem_ir_ty);
+        }
+    }
+
+    fn store_tuple_copy(
+        &mut self,
+        dst: ValueId,
+        value: ValueId,
+        field_tys: &[Type],
+        ir_ty: IrTypeId,
+    ) {
+        let src_slot = self.materialize_value_slot(value, ir_ty);
+        for (index, field_ty) in field_tys.iter().enumerate() {
+            let field_ir_ty = self.type_lowerer.lower_type(field_ty);
+            let src_field = self.field_addr_typed(src_slot.addr, index, field_ir_ty);
+            let dst_field = self.field_addr_typed(dst, index, field_ir_ty);
+            let field_val = self.builder.load(src_field, field_ir_ty);
+            self.store_value_into_addr(dst_field, field_val, field_ty, field_ir_ty);
+        }
+    }
+
+    fn store_struct_copy(
+        &mut self,
+        dst: ValueId,
+        value: ValueId,
+        fields: &[crate::core::types::StructField],
+        ir_ty: IrTypeId,
+    ) {
+        let src_slot = self.materialize_value_slot(value, ir_ty);
+        for (index, field) in fields.iter().enumerate() {
+            let field_ir_ty = self.type_lowerer.lower_type(&field.ty);
+            let src_field = self.field_addr_typed(src_slot.addr, index, field_ir_ty);
+            let dst_field = self.field_addr_typed(dst, index, field_ir_ty);
+            let field_val = self.builder.load(src_field, field_ir_ty);
+            self.store_value_into_addr(dst_field, field_val, &field.ty, field_ir_ty);
+        }
+    }
+
     pub(super) fn store_value_into_addr(
         &mut self,
         dst: ValueId,
         value: ValueId,
-        _ty: &Type,
+        ty: &Type,
         ir_ty: IrTypeId,
     ) {
+        match ty {
+            Type::String => {
+                self.store_string_copy(dst, value, ir_ty);
+                return;
+            }
+            Type::Tuple { field_tys } => {
+                if self.type_needs_owned_copy(ty) {
+                    self.store_tuple_copy(dst, value, field_tys, ir_ty);
+                    return;
+                }
+            }
+            Type::Struct { fields, .. } => {
+                if self.type_needs_owned_copy(ty) {
+                    self.store_struct_copy(dst, value, fields, ir_ty);
+                    return;
+                }
+            }
+            Type::Array { elem_ty, dims } => {
+                if self.type_needs_owned_copy(ty) {
+                    self.store_array_copy(dst, value, elem_ty, dims, ir_ty);
+                    return;
+                }
+            }
+            _ => {}
+        }
+
         if !self.is_aggregate(ir_ty) {
             self.builder.store(dst, value);
             return;
@@ -984,6 +1165,46 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
         }
 
         Ok((ptr_val, len_val))
+    }
+
+    pub(super) fn lower_ptr_len_from_addr(
+        &mut self,
+        addr: ValueId,
+        ty: &Type,
+        len_bits: u8,
+    ) -> Result<(ValueId, ValueId), LowerToIrError> {
+        let view = match ty {
+            Type::String => {
+                if len_bits != 32 {
+                    panic!("backend ptr/len lowering invalid len_bits {len_bits} for string addr");
+                }
+                self.load_string_view(addr)
+            }
+            Type::Slice { elem_ty } => {
+                if len_bits != 64 {
+                    panic!("backend ptr/len lowering invalid len_bits {len_bits} for slice addr");
+                }
+                let elem_ir = self.type_lowerer.lower_type(elem_ty);
+                let elem_ptr_ty = self.type_lowerer.ptr_to(elem_ir);
+                self.load_slice_view(addr, elem_ptr_ty)
+            }
+            Type::DynArray { elem_ty } => {
+                if len_bits != 64 {
+                    panic!(
+                        "backend ptr/len lowering invalid len_bits {len_bits} for dyn array addr"
+                    );
+                }
+                let elem_ir = self.type_lowerer.lower_type(elem_ty);
+                let elem_ptr_ty = self.type_lowerer.ptr_to(elem_ir);
+                self.load_dyn_array_view(addr, elem_ptr_ty)
+            }
+            _ => {
+                panic!(
+                    "compiler bug: backend ptr/len lowering expects string, slice, or dyn array addr, got {ty:?}"
+                )
+            }
+        };
+        Ok((view.ptr, view.len))
     }
 
     pub(super) fn byte_offset_addr(&mut self, base: ValueId, offset: u64) -> ValueId {

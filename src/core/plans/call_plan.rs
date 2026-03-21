@@ -10,6 +10,7 @@ use crate::core::resolve::DefId;
 pub enum IntrinsicCall {
     StringLen,
     StringLines,
+    StringSplit,
     TypeOf,
     MachinePayloadPack,
     DynArrayAppend,
