@@ -31,12 +31,15 @@
 
 use crate::core::analysis::facts::SyntheticReason;
 use crate::core::ast::{
-    ArrayLitInit, BinaryOp, BindPattern, BindPatternKind, BlockItem, CallArg, EmitKind, Expr,
-    ExprKind, MethodItem, Module, ParamMode, StmtExpr, StmtExprKind, TopLevelItem, UsingBinding,
+    ArrayLitInit, BinaryOp, BindPattern, BindPatternKind, BlockItem, CallArg, CallArgMode,
+    EmitKind, Expr, ExprKind, InitInfo, MethodItem, Module, ParamMode, StmtExpr, StmtExprKind,
+    TopLevelItem, UnaryOp, UsingBinding,
 };
 use crate::core::diag::Span;
 use crate::core::elaborate::elaborator::Elaborator;
-use crate::core::plans::{ArgLowering, CallInput, CallPlan, CallTarget};
+use crate::core::plans::{
+    ArgLowering, CallInput, CallPlan, CallTarget, ForKernel, IntrinsicForKernel, RuntimeCall,
+};
 use crate::core::resolve::{DefId, DefKind, DefTable};
 use crate::core::types::Type;
 use std::collections::HashMap;
@@ -184,11 +187,15 @@ impl<'a, 'b> SyntaxDesugarCtx<'a, 'b> {
         let span = stmt.span;
         let u64_ty = Type::uint(64);
         let bool_ty = Type::Bool;
+        let for_plan = self.for_plan_or_panic(stmt.id, "for desugaring");
 
         let mut items = Vec::new();
 
-        let (iter_place, idx_place, len_value, elem_ty, is_range) = match &iter.kind {
-            ExprKind::Range { start, end } => {
+        let (iter_place, idx_place, len_value, elem_ty, is_range) = match &for_plan.kernel {
+            ForKernel::Intrinsic(IntrinsicForKernel::Range) => {
+                let ExprKind::Range { start, end } = &iter.kind else {
+                    panic!("compiler bug: range for-plan on non-range iterator");
+                };
                 let start_expr = (**start).clone();
                 let len_expr = (**end).clone();
 
@@ -210,41 +217,46 @@ impl<'a, 'b> SyntaxDesugarCtx<'a, 'b> {
                     true,
                 )
             }
-            _ => {
+            ForKernel::Intrinsic(kernel) => {
                 let iter_ty = self
                     .type_map
                     .type_table()
                     .get(self.type_id_for(iter.id))
                     .clone();
-                let elem_ty =
-                    self.iter_elem_type_or_panic(&iter_ty, "for desugaring iterable path");
-
+                let elem_ty = for_plan.item_ty.clone();
                 let iter_info = self.new_for_local("iter", iter_ty.clone(), false, span);
                 let iter_value = iter.clone();
                 let iter_stmt =
                     self.make_let_bind_stmt(iter_info.pattern.clone(), iter_value, span);
                 items.push(BlockItem::Stmt(iter_stmt));
 
-                let len_expr = match iter_ty {
-                    Type::Array { dims, .. } => {
+                let len_expr = match kernel {
+                    IntrinsicForKernel::Array => {
+                        let Type::Array { dims, .. } = &iter_ty else {
+                            panic!("compiler bug: array for-plan on non-array iterator");
+                        };
                         let len = dims
                             .first()
                             .copied()
                             .unwrap_or_else(|| panic!("compiler bug: empty array dims"));
                         self.make_u64_lit(len as u64, span)
                     }
-                    Type::Slice { .. } => {
+                    IntrinsicForKernel::Slice | IntrinsicForKernel::DynArray => {
                         let iter_place = self.make_var_place(&iter_info, span);
                         self.make_len_expr(iter_place, span)
                     }
-                    Type::DynArray { .. } => {
+                    IntrinsicForKernel::String => {
                         let iter_place = self.make_var_place(&iter_info, span);
                         self.make_len_expr(iter_place, span)
                     }
-                    Type::Range { .. } => {
+                    IntrinsicForKernel::Map => {
+                        panic!(
+                            "compiler bug: map for-loops use the dedicated cursor desugaring path"
+                        )
+                    }
+                    IntrinsicForKernel::Range => {
                         panic!("compiler bug: range iteration should take the range path")
                     }
-                    _ => unreachable!("checked above"),
                 };
 
                 let len_info = self.new_for_local("len", u64_ty.clone(), false, span);
@@ -296,8 +308,21 @@ impl<'a, 'b> SyntaxDesugarCtx<'a, 'b> {
                 .unwrap_or_else(|| panic!("compiler bug: missing iter place for iterable loop"));
             let cur_place = self.make_var_place(&cur_info, span);
             let cur_value = self.make_load_expr(cur_place, u64_ty.clone(), span);
-            let index_place = self.make_index_place(iter_place, cur_value, elem_ty.clone(), span);
-            self.make_load_expr(index_place, elem_ty.clone(), span)
+            match &for_plan.kernel {
+                ForKernel::Intrinsic(IntrinsicForKernel::String) => {
+                    let index_place =
+                        self.make_index_place(iter_place, cur_value, Type::uint(8), span);
+                    self.make_load_expr(index_place, Type::uint(8), span)
+                }
+                ForKernel::Intrinsic(IntrinsicForKernel::Map) => {
+                    panic!("compiler bug: map for-loops use the dedicated cursor desugaring path")
+                }
+                _ => {
+                    let index_place =
+                        self.make_index_place(iter_place, cur_value, elem_ty.clone(), span);
+                    self.make_load_expr(index_place, elem_ty.clone(), span)
+                }
+            }
         };
 
         let pattern_stmt = self.make_let_bind_stmt(pattern.clone(), elem_expr, span);
@@ -314,6 +339,139 @@ impl<'a, 'b> SyntaxDesugarCtx<'a, 'b> {
             span,
         );
         items.push(BlockItem::Stmt(while_stmt));
+
+        self.make_block_expr(items, span)
+    }
+
+    fn desugar_map_for_stmt(
+        &mut self,
+        stmt: &StmtExpr,
+        pattern: &BindPattern,
+        iter: &Expr,
+        body: &Expr,
+    ) -> Expr {
+        let span = stmt.span;
+        let for_plan = self.for_plan_or_panic(stmt.id, "map for desugaring");
+        let ForKernel::Intrinsic(IntrinsicForKernel::Map) = &for_plan.kernel else {
+            panic!("compiler bug: expected map for-plan for {:?}", stmt.id);
+        };
+
+        let iter_ty = self
+            .type_map
+            .type_table()
+            .get(self.type_id_for(iter.id))
+            .clone();
+        let Type::Map { key_ty, value_ty } = iter_ty.clone() else {
+            panic!("compiler bug: map for-plan on non-map iterator");
+        };
+
+        let cursor_ty = Type::uint(32);
+        let bool_ty = Type::Bool;
+
+        let iter_info = self.new_for_local("iter", iter_ty, false, span);
+        let cursor_info = self.new_for_local("cursor", cursor_ty.clone(), true, span);
+
+        let mut items = Vec::new();
+        items.push(BlockItem::Stmt(self.make_let_bind_stmt(
+            iter_info.pattern.clone(),
+            iter.clone(),
+            span,
+        )));
+
+        let iter_place = self.make_var_place(&iter_info, span);
+        let init_arg = self.make_call_arg(CallArgMode::Default, iter_place.clone(), span);
+        let cursor_init = self.make_runtime_call_expr(
+            RuntimeCall::MapIterInit,
+            vec![init_arg],
+            cursor_ty.clone(),
+            vec![ParamMode::In],
+            span,
+        );
+        items.push(BlockItem::Stmt(self.make_var_bind_stmt(
+            cursor_info.pattern.clone(),
+            cursor_init,
+            span,
+        )));
+
+        let cursor_place = self.make_var_place(&cursor_info, span);
+        let is_done_cursor = self.make_load_expr(cursor_place.clone(), cursor_ty.clone(), span);
+        let is_done_args = vec![
+            self.make_call_arg(CallArgMode::Default, iter_place.clone(), span),
+            self.make_call_arg(CallArgMode::Default, is_done_cursor, span),
+        ];
+        let is_done = self.make_runtime_call_expr(
+            RuntimeCall::MapIterIsDone,
+            is_done_args,
+            bool_ty.clone(),
+            vec![ParamMode::In, ParamMode::In],
+            span,
+        );
+        let cond_expr = self.make_unary_expr(UnaryOp::LogicalNot, is_done, bool_ty, span);
+
+        let key_info = self.new_for_local("key", (*key_ty).clone(), true, span);
+        let value_info = self.new_for_local("value", (*value_ty).clone(), true, span);
+        let key_place = self.make_var_place(&key_info, span);
+        let value_place = self.make_var_place(&value_info, span);
+
+        let load_cursor = self.make_load_expr(cursor_place.clone(), cursor_ty.clone(), span);
+        let mut load_args = vec![
+            self.make_call_arg(CallArgMode::Default, iter_place.clone(), span),
+            self.make_call_arg(CallArgMode::Default, load_cursor, span),
+        ];
+        let mut load_modes = vec![ParamMode::In, ParamMode::In];
+        let load_runtime = if matches!(key_ty.as_ref(), Type::String) {
+            RuntimeCall::MapIterLoadStringKey
+        } else {
+            let key_size = self.make_u64_lit(key_ty.size_of() as u64, span);
+            load_args.push(self.make_call_arg(CallArgMode::Default, key_size, span));
+            load_modes.push(ParamMode::In);
+            RuntimeCall::MapIterLoadBytes
+        };
+        let value_size = self.make_u64_lit(value_ty.size_of() as u64, span);
+        load_args.push(self.make_call_arg(CallArgMode::Default, value_size, span));
+        load_modes.push(ParamMode::In);
+        load_args.push(self.make_call_arg(CallArgMode::Out, key_place.clone(), span));
+        load_args.push(self.make_call_arg(CallArgMode::Out, value_place.clone(), span));
+        load_modes.push(ParamMode::Out);
+        load_modes.push(ParamMode::Out);
+        let load_entry =
+            self.make_runtime_call_expr(load_runtime, load_args, Type::Unit, load_modes, span);
+
+        let advance_cursor = self.make_load_expr(cursor_place.clone(), cursor_ty.clone(), span);
+        let advance_args = vec![
+            self.make_call_arg(CallArgMode::Default, iter_place, span),
+            self.make_call_arg(CallArgMode::Default, advance_cursor, span),
+        ];
+        let advance = self.make_runtime_call_expr(
+            RuntimeCall::MapIterAdvance,
+            advance_args,
+            cursor_ty.clone(),
+            vec![ParamMode::In, ParamMode::In],
+            span,
+        );
+
+        let moved_key = self.make_move_expr(key_place, (*key_ty).clone(), span);
+        let moved_value = self.make_move_expr(value_place, (*value_ty).clone(), span);
+        let item_tuple =
+            self.make_tuple_expr(vec![moved_key, moved_value], for_plan.item_ty.clone(), span);
+
+        let loop_items = vec![
+            BlockItem::Stmt(self.make_var_decl_stmt(&key_info, span)),
+            BlockItem::Stmt(self.make_var_decl_stmt(&value_info, span)),
+            BlockItem::Expr(load_entry),
+            BlockItem::Stmt(self.make_assign_stmt(cursor_place, advance, span)),
+            BlockItem::Stmt(self.make_let_bind_stmt(pattern.clone(), item_tuple, span)),
+            BlockItem::Expr(body.clone()),
+        ];
+
+        let loop_body = self.make_block_expr(loop_items, span);
+        items.push(BlockItem::Stmt(self.make_stmt(
+            StmtExprKind::While {
+                cond: Box::new(cond_expr),
+                body: Box::new(loop_body),
+            },
+            span,
+        )));
 
         self.make_block_expr(items, span)
     }
@@ -339,7 +497,16 @@ impl<'a, 'b> SyntaxDesugarCtx<'a, 'b> {
                             iter,
                             body,
                         } => {
-                            let mut expr = self.desugar_for_stmt(&stmt, pattern, iter, body);
+                            let for_plan =
+                                self.for_plan_or_panic(stmt.id, "block-item for desugaring");
+                            let mut expr = if matches!(
+                                for_plan.kernel,
+                                ForKernel::Intrinsic(IntrinsicForKernel::Map)
+                            ) {
+                                self.desugar_map_for_stmt(&stmt, pattern, iter, body)
+                            } else {
+                                self.desugar_for_stmt(&stmt, pattern, iter, body)
+                            };
                             self.desugar_value_expr(&mut expr);
                             rewritten.push(BlockItem::Expr(expr));
                         }
@@ -754,6 +921,45 @@ impl<'a, 'b> SyntaxDesugarCtx<'a, 'b> {
         self.make_value_expr(ExprKind::IntLit(value), Type::uint(64), span)
     }
 
+    fn make_call_arg(&mut self, mode: CallArgMode, expr: Expr, span: Span) -> CallArg {
+        let init = if matches!(mode, CallArgMode::Out) {
+            self.init_info_for_id(expr.id)
+        } else {
+            InitInfo::default()
+        };
+        CallArg {
+            mode,
+            expr,
+            init,
+            span,
+        }
+    }
+
+    fn make_unary_expr(&mut self, op: UnaryOp, expr: Expr, ty: Type, span: Span) -> Expr {
+        self.make_value_expr(
+            ExprKind::UnaryOp {
+                op,
+                expr: Box::new(expr),
+            },
+            ty,
+            span,
+        )
+    }
+
+    fn make_tuple_expr(&mut self, items: Vec<Expr>, ty: Type, span: Span) -> Expr {
+        self.make_value_expr(ExprKind::TupleLit(items), ty, span)
+    }
+
+    fn make_move_expr(&mut self, place: Expr, ty: Type, span: Span) -> Expr {
+        self.make_value_expr(
+            ExprKind::Move {
+                expr: Box::new(place),
+            },
+            ty,
+            span,
+        )
+    }
+
     fn make_binop_expr(
         &mut self,
         op: BinaryOp,
@@ -826,6 +1032,19 @@ impl<'a, 'b> SyntaxDesugarCtx<'a, 'b> {
         )
     }
 
+    fn make_var_decl_stmt(&mut self, info: &ForLocal, span: Span) -> StmtExpr {
+        let decl_ty = self.type_expr_from_type(&info.ty, span);
+        let stmt = self.make_stmt(
+            StmtExprKind::VarDecl {
+                ident: info.name.clone(),
+                decl_ty,
+            },
+            span,
+        );
+        self.def_table.record_use(stmt.id, info.def_id);
+        stmt
+    }
+
     fn make_assign_stmt(&mut self, assignee: Expr, value: Expr, span: Span) -> StmtExpr {
         let init = self.init_info_for_id(assignee.id);
         self.make_stmt(
@@ -854,6 +1073,39 @@ impl<'a, 'b> SyntaxDesugarCtx<'a, 'b> {
         let id = self.node_id_gen.new_id();
         let _ty_id = self.insert_synth_node_type(id, ty);
         Expr { id, kind, span }
+    }
+
+    fn make_runtime_call_expr(
+        &mut self,
+        runtime: RuntimeCall,
+        args: Vec<CallArg>,
+        ret_ty: Type,
+        input_modes: Vec<ParamMode>,
+        span: Span,
+    ) -> Expr {
+        let expr_id = self.node_id_gen.new_id();
+        let _ty_id = self.insert_synth_node_type(expr_id, ret_ty);
+        self.record_call_plan(
+            expr_id,
+            CallPlan {
+                target: CallTarget::Runtime(runtime),
+                args: (0..args.len())
+                    .map(|index| ArgLowering::Direct(CallInput::Arg(index)))
+                    .collect(),
+                drop_mask: vec![false; args.len()],
+                input_modes,
+                has_receiver: false,
+            },
+        );
+        let callee = self.make_value_expr(ExprKind::UnitLit, Type::Unit, span);
+        Expr {
+            id: expr_id,
+            kind: ExprKind::Call {
+                callee: Box::new(callee),
+                args,
+            },
+            span,
+        }
     }
 
     fn make_place_expr(

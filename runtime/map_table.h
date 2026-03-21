@@ -43,6 +43,18 @@ uint8_t __mc_map_table_get_value_bytes(
 void __mc_map_table_clear(mc_dyn_array_t *map);
 void __mc_map_table_drop(mc_dyn_array_t *map);
 
+uint32_t __mc_map_table_iter_init(const mc_dyn_array_t *map);
+uint8_t __mc_map_table_iter_is_done(const mc_dyn_array_t *map, uint32_t cursor);
+void __mc_map_table_iter_load_bytes(
+    const mc_dyn_array_t *map,
+    uint32_t cursor,
+    uint64_t key_size,
+    uint64_t value_size,
+    uint8_t *out_key,
+    uint8_t *out_value
+);
+uint32_t __mc_map_table_iter_advance(const mc_dyn_array_t *map, uint32_t cursor);
+
 uint8_t __rt_map_contains_string_key(
     uint64_t map_ptr,
     uint64_t key_ptr,
@@ -67,5 +79,16 @@ uint8_t __rt_map_get_value_string_key(
 );
 void __rt_map_clear_string_keys(uint64_t map_ptr, uint64_t value_size);
 void __rt_map_drop_string_keys(uint64_t map_ptr, uint64_t value_size);
+
+uint32_t __rt_map_iter_init(uint64_t map_ptr);
+uint8_t __rt_map_iter_is_done(uint64_t map_ptr, uint32_t cursor);
+void __rt_map_iter_load_string_key(
+    uint64_t map_ptr,
+    uint32_t cursor,
+    uint64_t value_size,
+    uint64_t out_key_ptr,
+    uint64_t out_value_ptr
+);
+uint32_t __rt_map_iter_advance(uint64_t map_ptr, uint32_t cursor);
 
 #endif

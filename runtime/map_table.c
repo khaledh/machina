@@ -186,6 +186,22 @@ static void mc_ensure_for_insert(mc_dyn_array_t *map, uint64_t key_size, uint64_
     }
 }
 
+static uint32_t mc_find_next_live_slot(const mc_dyn_array_t *map, uint32_t cursor) {
+    uint32_t cap = mc_cap_value(map->cap);
+    if (cap == 0 || map->ptr == 0) {
+        return 0;
+    }
+
+    uint8_t *base = (uint8_t *)map->ptr;
+    uint8_t *ctrl = __mc_hash_table_ctrl(base);
+    for (uint32_t i = cursor; i < cap; i++) {
+        if (ctrl[i] == MC_HASH_CTRL_FULL) {
+            return i;
+        }
+    }
+    return cap;
+}
+
 uint8_t __mc_map_table_contains_key_bytes(
     const mc_dyn_array_t *map,
     const uint8_t *key,
@@ -307,6 +323,48 @@ void __mc_map_table_drop(mc_dyn_array_t *map) {
     map->ptr = 0;
     map->len = 0;
     map->cap = 0;
+}
+
+uint32_t __mc_map_table_iter_init(const mc_dyn_array_t *map) {
+    return mc_find_next_live_slot(map, 0);
+}
+
+uint8_t __mc_map_table_iter_is_done(const mc_dyn_array_t *map, uint32_t cursor) {
+    return cursor >= mc_cap_value(map->cap);
+}
+
+void __mc_map_table_iter_load_bytes(
+    const mc_dyn_array_t *map,
+    uint32_t cursor,
+    uint64_t key_size,
+    uint64_t value_size,
+    uint8_t *out_key,
+    uint8_t *out_value
+) {
+    uint32_t cap = mc_cap_value(map->cap);
+    if (cursor >= cap || map->ptr == 0) {
+        __mc_trap(MC_TRAP_RANGE, cursor, 0, cap);
+    }
+
+    uint64_t entry_size = mc_entry_size(key_size, value_size);
+    uint8_t *base = (uint8_t *)map->ptr;
+    uint8_t *ctrl = __mc_hash_table_ctrl(base);
+    if (ctrl[cursor] != MC_HASH_CTRL_FULL) {
+        __mc_trap(MC_TRAP_RANGE, cursor, 0, cap);
+    }
+
+    uint8_t *slots = __mc_hash_table_slots(base, cap);
+    uint8_t *entry = __mc_hash_table_slot(slots, cursor, entry_size);
+    mc_copy_bytes(out_key, entry, key_size);
+    mc_copy_bytes(out_value, entry + key_size, value_size);
+}
+
+uint32_t __mc_map_table_iter_advance(const mc_dyn_array_t *map, uint32_t cursor) {
+    uint32_t cap = mc_cap_value(map->cap);
+    if (cursor >= cap) {
+        return cap;
+    }
+    return mc_find_next_live_slot(map, cursor + 1);
 }
 
 uint8_t __rt_map_contains_string_key(uint64_t map_ptr, uint64_t key_ptr, uint64_t value_size) {
@@ -461,4 +519,48 @@ void __rt_map_drop_string_keys(uint64_t map_ptr, uint64_t value_size) {
     map->ptr = 0;
     map->len = 0;
     map->cap = 0;
+}
+
+uint32_t __rt_map_iter_init(uint64_t map_ptr) {
+    const mc_dyn_array_t *map = (const mc_dyn_array_t *)map_ptr;
+    return __mc_map_table_iter_init(map);
+}
+
+uint8_t __rt_map_iter_is_done(uint64_t map_ptr, uint32_t cursor) {
+    const mc_dyn_array_t *map = (const mc_dyn_array_t *)map_ptr;
+    return __mc_map_table_iter_is_done(map, cursor);
+}
+
+void __rt_map_iter_load_string_key(
+    uint64_t map_ptr,
+    uint32_t cursor,
+    uint64_t value_size,
+    uint64_t out_key_ptr,
+    uint64_t out_value_ptr
+) {
+    const mc_dyn_array_t *map = (const mc_dyn_array_t *)map_ptr;
+    mc_string_t *out_key = (mc_string_t *)out_key_ptr;
+    uint8_t *out_value = (uint8_t *)out_value_ptr;
+    uint32_t cap = mc_cap_value(map->cap);
+    if (cursor >= cap || map->ptr == 0) {
+        __mc_trap(MC_TRAP_RANGE, cursor, 0, cap);
+    }
+
+    uint64_t entry_size = mc_entry_size(sizeof(mc_string_t), value_size);
+    uint8_t *base = (uint8_t *)map->ptr;
+    uint8_t *ctrl = __mc_hash_table_ctrl(base);
+    if (ctrl[cursor] != MC_HASH_CTRL_FULL) {
+        __mc_trap(MC_TRAP_RANGE, cursor, 0, cap);
+    }
+
+    uint8_t *slots = __mc_hash_table_slots(base, cap);
+    uint8_t *entry = __mc_hash_table_slot(slots, cursor, entry_size);
+    mc_copy_bytes((uint8_t *)out_key, entry, sizeof(mc_string_t));
+    __mc_string_retain(out_key);
+    mc_copy_bytes(out_value, entry + sizeof(mc_string_t), value_size);
+}
+
+uint32_t __rt_map_iter_advance(uint64_t map_ptr, uint32_t cursor) {
+    const mc_dyn_array_t *map = (const mc_dyn_array_t *)map_ptr;
+    return __mc_map_table_iter_advance(map, cursor);
 }

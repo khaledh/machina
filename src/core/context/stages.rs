@@ -6,7 +6,7 @@ use crate::core::ast::{Module, NodeId, NodeIdGen};
 use crate::core::capsule::{ModuleId, ModulePath};
 use crate::core::codegen_names::CodegenNameTable;
 use crate::core::linear::LinearIndex;
-use crate::core::plans::{DropPlanMap, LoweringPlanMap};
+use crate::core::plans::{DropPlanMap, ForPlanMap, LoweringPlanMap};
 use crate::core::resolve::{DefId, DefTable};
 use crate::core::semck::closure::capture::ClosureCapture;
 use crate::core::symbol_id::SymbolIdTable;
@@ -29,6 +29,7 @@ pub struct TypedTables {
     pub type_map: TypeMap,
     pub call_sigs: CallSigMap,
     pub generic_insts: GenericInstMap,
+    pub for_plans: ForPlanMap,
 }
 
 impl Deref for TypedTables {
@@ -212,6 +213,7 @@ impl ResolvedContext {
         type_map: TypeMap,
         call_sigs: CallSigMap,
         generic_insts: GenericInstMap,
+        for_plans: ForPlanMap,
     ) -> TypeCheckedContext {
         let ResolvedContext { module, payload } = self;
         TypeCheckedContext {
@@ -221,6 +223,7 @@ impl ResolvedContext {
                 type_map,
                 call_sigs,
                 generic_insts,
+                for_plans,
             },
         }
     }

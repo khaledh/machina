@@ -32,6 +32,11 @@ pub enum RuntimeCall {
     MemSet,
     StringFromBytes,
     StringAppendBytes,
+    MapIterInit,
+    MapIterIsDone,
+    MapIterLoadBytes,
+    MapIterLoadStringKey,
+    MapIterAdvance,
 }
 
 #[derive(Clone, Debug)]

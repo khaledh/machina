@@ -15,7 +15,7 @@ use crate::core::ast::{
 };
 use crate::core::diag::Span;
 use crate::core::plans::{
-    CallPlan, CallPlanMap, IndexPlan, IndexPlanMap, MatchPlan, MatchPlanMap, SlicePlan,
+    CallPlan, CallPlanMap, ForPlanMap, IndexPlan, IndexPlanMap, MatchPlan, MatchPlanMap, SlicePlan,
     SlicePlanMap, StringFmtPlan,
 };
 use crate::core::resolve::{Def, DefId, DefKind};
@@ -94,6 +94,7 @@ pub struct Elaborator<'a> {
     pub(super) def_table: &'a mut DefTableOverlay,
     pub(super) type_map: &'a mut TypeMapOverlay,
     pub(super) call_sigs: &'a CallSigMap,
+    pub(super) for_plans: &'a ForPlanMap,
     pub(super) node_id_gen: &'a mut NodeIdGen,
 
     // Semantic analysis results from semck
@@ -128,6 +129,7 @@ impl<'a> Elaborator<'a> {
         def_table: &'a mut DefTableOverlay,
         type_map: &'a mut TypeMapOverlay,
         call_sigs: &'a CallSigMap,
+        for_plans: &'a ForPlanMap,
         node_id_gen: &'a mut NodeIdGen,
         implicit_moves: &'a HashSet<NodeId>,
         init_assigns: &'a HashSet<NodeId>,
@@ -138,6 +140,7 @@ impl<'a> Elaborator<'a> {
             def_table,
             type_map,
             call_sigs,
+            for_plans,
             node_id_gen,
             implicit_moves,
             init_assigns,
@@ -258,6 +261,16 @@ impl<'a> Elaborator<'a> {
         self.def_table.def_id(node_id)
     }
 
+    pub(super) fn for_plan_or_panic(
+        &self,
+        stmt_id: NodeId,
+        context: &str,
+    ) -> crate::core::plans::ForPlan {
+        self.for_plans.get(&stmt_id).cloned().unwrap_or_else(|| {
+            panic!("compiler bug: missing for plan for {context} (stmt {stmt_id:?})")
+        })
+    }
+
     pub(super) fn type_id_for(&self, node_id: NodeId) -> TypeId {
         self.type_map.type_of(node_id)
     }
@@ -283,18 +296,6 @@ impl<'a> Elaborator<'a> {
 
     pub(super) fn has_def_type(&self, def: &Def) -> bool {
         self.type_map.lookup_def_type_id(def).is_some()
-    }
-
-    pub(super) fn iter_elem_type_or_panic(&self, iter_ty: &Type, context: &str) -> Type {
-        match iter_ty {
-            Type::Array { .. } => iter_ty
-                .array_item_type()
-                .unwrap_or_else(|| panic!("compiler bug: empty array dims in {context}")),
-            Type::DynArray { elem_ty } => (**elem_ty).clone(),
-            Type::Slice { elem_ty } => (**elem_ty).clone(),
-            Type::Range { elem_ty } => (**elem_ty).clone(),
-            _ => panic!("compiler bug: invalid for-iter type in {context}: {iter_ty:?}"),
-        }
     }
 
     pub(super) fn insert_node_type_for(

@@ -9,7 +9,6 @@
 
 use crate::core::ast::{BindPattern, BlockItem, Expr, ExprKind, StmtExpr, StmtExprKind};
 use crate::core::elaborate::elaborator::Elaborator;
-use crate::core::types::Type;
 
 impl<'a> Elaborator<'a> {
     /// Elaborate a single block item (statement or expression).
@@ -84,7 +83,9 @@ impl<'a> Elaborator<'a> {
                 body,
             } => {
                 let iter_value = self.elab_value(iter);
-                let elem_ty = self.for_iter_elem_type(iter);
+                let elem_ty = self
+                    .for_plan_or_panic(stmt.id, "semantic for statement elaboration")
+                    .item_ty;
                 let pattern = self.elab_bind_pattern(pattern, &elem_ty);
                 StmtExprKind::For {
                     pattern,
@@ -116,15 +117,6 @@ impl<'a> Elaborator<'a> {
             kind,
             span: stmt.span,
         }
-    }
-
-    fn for_iter_elem_type(&self, iter: &Expr) -> Type {
-        let iter_ty = self
-            .type_map
-            .type_table()
-            .get(self.type_id_for(iter.id))
-            .clone();
-        self.iter_elem_type_or_panic(&iter_ty, "semantic for statement elaboration")
     }
 
     /// Elaborate the value in a let/var binding, with special handling for closures.

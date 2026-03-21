@@ -33,6 +33,7 @@ use crate::core::ast::{BindPattern, BindPatternKind};
 use crate::core::capsule::ModuleId;
 use crate::core::context::ResolvedContext;
 use crate::core::diag::Span;
+use crate::core::plans::plan_for_iterable_type;
 use crate::core::resolve::{DefId, DefKind, DefTable};
 use crate::core::typecheck::capability::ensure_hashable;
 use crate::core::typecheck::constraints::{
@@ -930,14 +931,7 @@ fn default_unresolved_int_vars(unifier: &mut TcUnifier) {
 }
 
 fn is_iterable(ty: &Type) -> bool {
-    matches!(
-        ty,
-        Type::Range { .. }
-            | Type::Array { .. }
-            | Type::DynArray { .. }
-            | Type::Slice { .. }
-            | Type::String
-    )
+    plan_for_iterable_type(ty).is_some()
 }
 
 #[derive(Debug, Clone)]
@@ -987,14 +981,7 @@ fn resolve_property_access(
 }
 
 fn iterable_elem_type(ty: &Type) -> Option<Type> {
-    match ty {
-        Type::Range { elem_ty } => Some((**elem_ty).clone()),
-        Type::Array { elem_ty, .. } => Some((**elem_ty).clone()),
-        Type::DynArray { elem_ty } => Some((**elem_ty).clone()),
-        Type::Slice { elem_ty } => Some((**elem_ty).clone()),
-        Type::String => Some(Type::Char),
-        _ => None,
-    }
+    plan_for_iterable_type(ty).map(|plan| plan.item_ty)
 }
 
 #[cfg(test)]

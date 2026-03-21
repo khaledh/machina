@@ -21,6 +21,7 @@ pub fn normalize(ctx: SemCheckStageInput) -> SemCheckNormalizedContext {
         type_map,
         call_sigs,
         generic_insts,
+        for_plans,
     } = payload;
     let ResolvedTables {
         def_table,
@@ -61,6 +62,7 @@ pub fn normalize(ctx: SemCheckStageInput) -> SemCheckNormalizedContext {
             type_map: type_map.into_inner(),
             call_sigs,
             generic_insts,
+            for_plans,
         },
     }
 }

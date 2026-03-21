@@ -118,11 +118,15 @@ fn merge_typecheck_results(
         }
     }
 
+    let mut merged_for_plans = first_pass.for_plans.clone();
+    merged_for_plans.extend(second_pass.for_plans.clone());
+
     // The AST carries no type payload; keep the monomorphized module.
     monomorphized_context.clone().with_type_map(
         merged_type_map,
         merged_call_sigs,
         merged_generic_insts,
+        merged_for_plans,
     )
 }
 

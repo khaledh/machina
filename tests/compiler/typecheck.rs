@@ -405,6 +405,72 @@ fn test_fixed_array_destructure_with_middle_rest_builds_and_runs() {
 }
 
 #[test]
+fn test_for_entry_in_map_builds_and_runs() {
+    let run = run_program(
+        "for_entry_in_map",
+        r#"
+            requires {
+                std::io::println
+            }
+
+            fn main() {
+                let counts = map<string, u64>{"alpha": 2, "beta": 3, "z": 5};
+                var distinct: u64 = 0;
+                var total: u64 = 0;
+                var key_bytes: u64 = 0;
+
+                for entry in counts {
+                    distinct = distinct + 1;
+                    total = total + entry.1;
+                    key_bytes = key_bytes + entry.0.len;
+                }
+
+                println(distinct);
+                println(total);
+                println(key_bytes);
+            }
+        "#,
+    );
+    assert_eq!(run.status.code(), Some(0));
+
+    let stdout = String::from_utf8_lossy(&run.stdout);
+    assert_eq!(stdout, "3\n10\n10\n", "unexpected stdout: {stdout}");
+}
+
+#[test]
+fn test_for_tuple_destructure_in_map_builds_and_runs() {
+    let run = run_program(
+        "for_tuple_destructure_in_map",
+        r#"
+            requires {
+                std::io::println
+            }
+
+            fn main() {
+                let counts = map<string, u64>{"alpha": 2, "beta": 3, "z": 5};
+                var distinct: u64 = 0;
+                var total: u64 = 0;
+                var key_bytes: u64 = 0;
+
+                for (key, value) in counts {
+                    distinct = distinct + 1;
+                    total = total + value;
+                    key_bytes = key_bytes + key.len;
+                }
+
+                println(distinct);
+                println(total);
+                println(key_bytes);
+            }
+        "#,
+    );
+    assert_eq!(run.status.code(), Some(0));
+
+    let stdout = String::from_utf8_lossy(&run.stdout);
+    assert_eq!(stdout, "3\n10\n10\n", "unexpected stdout: {stdout}");
+}
+
+#[test]
 fn test_string_lines_returns_owned_lines_without_newlines() {
     let run = run_program(
         "string_lines_returns_owned_lines_without_newlines",

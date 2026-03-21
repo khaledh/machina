@@ -14,6 +14,7 @@ use crate::core::codegen_names::CodegenNameTable;
 use crate::core::context::{ResolvedContext, ResolvedTables, TypeCheckedContext, TypedTables};
 use crate::core::diag::Span;
 use crate::core::linear::LinearIndex;
+use crate::core::plans::ForPlanMap;
 use crate::core::resolve::{Def, DefId, DefTable};
 use crate::core::symbol_id::{SymbolId, SymbolIdTable};
 use crate::core::typecheck::type_map::{CallSig, CallSigMap, GenericInstMap, TypeMap};
@@ -103,6 +104,7 @@ pub struct TypedModuleResult {
     pub type_map: TypeMap,
     pub call_sigs: CallSigMap,
     pub generic_insts: GenericInstMap,
+    pub for_plans: ForPlanMap,
     pub symbols: CodegenNameTable,
     pub node_id_gen: NodeIdGen,
     pub linear_index: LinearIndex,
@@ -259,6 +261,7 @@ impl TypedModuleResult {
             type_map,
             call_sigs,
             generic_insts,
+            for_plans,
         } = tables;
         let ResolvedTables {
             def_table,
@@ -279,6 +282,7 @@ impl TypedModuleResult {
             type_map,
             call_sigs,
             generic_insts,
+            for_plans,
             symbols,
             node_id_gen,
             linear_index,
@@ -301,6 +305,7 @@ impl TypedModuleResult {
                 type_map: self.type_map,
                 call_sigs: self.call_sigs,
                 generic_insts: self.generic_insts,
+                for_plans: self.for_plans,
             },
         }
     }

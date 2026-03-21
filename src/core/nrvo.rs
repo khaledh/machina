@@ -35,6 +35,7 @@ impl NrvoAnalyzer {
             type_map,
             call_sigs,
             generic_insts,
+            for_plans,
         } = typed;
         let ResolvedTables {
             def_table,
@@ -68,6 +69,7 @@ impl NrvoAnalyzer {
                     type_map,
                     call_sigs,
                     generic_insts,
+                    for_plans,
                 },
                 lowering_plans,
                 drop_plans,

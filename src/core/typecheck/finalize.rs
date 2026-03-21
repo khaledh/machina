@@ -14,6 +14,7 @@ use crate::core::diag::Span;
 use crate::core::linear::{
     LinearHostInfo, direct_action_method_name, machine_create_fn_name, machine_lookup_fn_name,
 };
+use crate::core::plans::{ForPlanMap, plan_for_iterable_type};
 use crate::core::resolve::{DefId, DefKind};
 use crate::core::symbol_id::SelectedCallable;
 use crate::core::typecheck::InferUnifier;
@@ -50,6 +51,7 @@ pub(crate) struct FinalizeOutput {
     pub(crate) type_map: TypeMap,
     pub(crate) call_sigs: CallSigMap,
     pub(crate) generic_insts: GenericInstMap,
+    pub(crate) for_plans: ForPlanMap,
 }
 
 /// Pass 5: finalize side tables.
@@ -83,6 +85,7 @@ pub(crate) fn materialize(
         finalized.type_map,
         finalized.call_sigs,
         finalized.generic_insts,
+        finalized.for_plans,
     );
 
     Ok(type_checked_context)
@@ -264,6 +267,34 @@ fn build_outputs(engine: &TypecheckEngine) -> FinalizeOutput {
         type_map,
         call_sigs,
         generic_insts,
+        for_plans: collect_for_plans(engine),
+    }
+}
+
+fn collect_for_plans(engine: &TypecheckEngine) -> ForPlanMap {
+    let mut plans = ForPlanMap::default();
+    let mut collector = ForPlanCollector {
+        engine,
+        plans: &mut plans,
+    };
+    collector.visit_module(&engine.context().module);
+    plans
+}
+
+struct ForPlanCollector<'a> {
+    engine: &'a TypecheckEngine,
+    plans: &'a mut ForPlanMap,
+}
+
+impl Visitor for ForPlanCollector<'_> {
+    fn visit_stmt_expr(&mut self, stmt: &StmtExpr) {
+        if let StmtExprKind::For { iter, .. } = &stmt.kind {
+            let iter_ty = resolved_node_type_or_unknown(self.engine, iter.id);
+            if let Some(plan) = plan_for_iterable_type(&iter_ty) {
+                self.plans.insert(stmt.id, plan);
+            }
+        }
+        visit::walk_stmt_expr(self, stmt);
     }
 }
 

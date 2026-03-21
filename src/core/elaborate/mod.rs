@@ -71,6 +71,7 @@ pub fn elaborate(ctx: ElaborateStageInput) -> ElaborateStageOutput {
         type_map,
         call_sigs,
         generic_insts,
+        for_plans,
     } = typed;
     let ResolvedTables {
         def_table,
@@ -88,6 +89,7 @@ pub fn elaborate(ctx: ElaborateStageInput) -> ElaborateStageOutput {
         &mut def_table,
         &mut type_map,
         &call_sigs,
+        &for_plans,
         &mut node_id_gen,
         &implicit_moves,
         &init_assigns,
@@ -128,6 +130,7 @@ pub fn elaborate(ctx: ElaborateStageInput) -> ElaborateStageOutput {
                 type_map: type_map.into_inner(),
                 call_sigs,
                 generic_insts,
+                for_plans,
             },
             lowering_plans,
             drop_plans,

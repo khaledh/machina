@@ -338,7 +338,8 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
                 // argument conversion checks against callee parameter types.
                 return None;
             }
-            CallTarget::Intrinsic(_) | CallTarget::Runtime(_) => {
+            CallTarget::Runtime(_) => return None,
+            CallTarget::Intrinsic(_) => {
                 let callee_expr = callee_expr?;
                 let callee_ty = self.type_map.type_of(callee_expr.id);
                 self.type_map.type_table().get(callee_ty).clone()
@@ -375,7 +376,8 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
                 }
             }
             CallTarget::Intrinsic(IntrinsicCall::TypeOf) => return Some(Type::String),
-            CallTarget::Intrinsic(_) | CallTarget::Runtime(_) => {
+            CallTarget::Runtime(_) => return None,
+            CallTarget::Intrinsic(_) => {
                 let callee_expr = callee_expr?;
                 let callee_ty = self.type_map.type_of(callee_expr.id);
                 self.type_map.type_table().get(callee_ty).clone()
@@ -1093,6 +1095,11 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
             RuntimeCall::MemSet => Ok(RuntimeFn::MemSet),
             RuntimeCall::StringFromBytes => Ok(RuntimeFn::StringFromBytes),
             RuntimeCall::StringAppendBytes => Ok(RuntimeFn::StringAppendBytes),
+            RuntimeCall::MapIterInit => Ok(RuntimeFn::MapIterInit),
+            RuntimeCall::MapIterIsDone => Ok(RuntimeFn::MapIterIsDone),
+            RuntimeCall::MapIterLoadBytes => Ok(RuntimeFn::MapIterLoadBytes),
+            RuntimeCall::MapIterLoadStringKey => Ok(RuntimeFn::MapIterLoadStringKey),
+            RuntimeCall::MapIterAdvance => Ok(RuntimeFn::MapIterAdvance),
         }
     }
 

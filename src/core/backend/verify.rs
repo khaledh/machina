@@ -349,6 +349,22 @@ fn runtime_call_spec(runtime: &RuntimeFn) -> RuntimeCallSpec {
             args: &[Ptr, Int],
             ret: Unit,
         },
+        RuntimeFn::MapIterInit => RuntimeCallSpec {
+            args: &[Ptr],
+            ret: RetInt,
+        },
+        RuntimeFn::MapIterIsDone => RuntimeCallSpec {
+            args: &[Ptr, Int],
+            ret: RetBool,
+        },
+        RuntimeFn::MapIterLoadStringKey => RuntimeCallSpec {
+            args: &[Ptr, Int, Int, Ptr, Ptr],
+            ret: Unit,
+        },
+        RuntimeFn::MapIterAdvance => RuntimeCallSpec {
+            args: &[Ptr, Int],
+            ret: RetInt,
+        },
         RuntimeFn::SetInsertElem => RuntimeCallSpec {
             args: &[Ptr, Ptr, Int, Int],
             ret: RetBool,
@@ -375,6 +391,10 @@ fn runtime_call_spec(runtime: &RuntimeFn) -> RuntimeCallSpec {
         },
         RuntimeFn::MapClear | RuntimeFn::MapDrop => RuntimeCallSpec {
             args: &[Ptr],
+            ret: Unit,
+        },
+        RuntimeFn::MapIterLoadBytes => RuntimeCallSpec {
+            args: &[Ptr, Int, Int, Int, Ptr, Ptr],
             ret: Unit,
         },
         RuntimeFn::MachineEmitSend | RuntimeFn::MachineEmitReply => RuntimeCallSpec {
