@@ -145,8 +145,6 @@ fn test_std_io_file_open_read_write_close_roundtrip() {
         "std_io_file_roundtrip",
         r#"
             requires {
-                std::io::TextReader
-                std::io::TextWriter
                 std::io::open_read
                 std::io::open_write
                 std::io::IoError
@@ -157,12 +155,12 @@ fn test_std_io_file_open_read_write_close_roundtrip() {
                 let path = "/tmp/machina_io_roundtrip_test.txt";
 
                 let raw_writer = open_write(path)?;
-                let writer: TextWriter = raw_writer.text();
+                let writer = raw_writer.text();
                 writer.write_all("abc\n")?;
                 writer.close()?;
 
                 let raw_reader = open_read(path)?;
-                let reader: TextReader = raw_reader.text();
+                let reader = raw_reader.text();
                 let text = reader.read_all()?;
                 reader.close()?;
 
@@ -575,8 +573,6 @@ fn test_std_io_using_auto_closes_text_handles() {
         r#"
             requires {
                 std::io::IoError
-                std::io::ReadFile
-                std::io::WriteFile
                 std::io::open_read
                 std::io::open_write
                 std::io::println
@@ -587,15 +583,13 @@ fn test_std_io_using_auto_closes_text_handles() {
 
                 // The writer is scoped to this block and closes automatically
                 // when `using` exits.
-                let raw_writer: WriteFile = open_write(path)?;
-                using writer = raw_writer.text() {
+                using writer = open_write(path)?.text() {
                     writer.write_all("abc\n")?;
                 }
 
                 // Reopen the same path to confirm the first handle really
                 // closed and the contents are visible to the next user.
-                let raw_reader: ReadFile = open_read(path)?;
-                using reader = raw_reader.text() {
+                using reader = open_read(path)?.text() {
                     let text = reader.read_all()?;
                     println(text);
                 }
@@ -615,8 +609,6 @@ fn test_std_io_text_adapter_on_temporary_open_handle() {
         r#"
             requires {
                 std::io::IoError
-                std::io::TextReader
-                std::io::TextWriter
                 std::io::open_read
                 std::io::open_write
                 std::io::println
@@ -628,11 +620,11 @@ fn test_std_io_text_adapter_on_temporary_open_handle() {
                 // Opening and immediately adapting the temporary read/write
                 // handle should be allowed even though `text()` consumes the
                 // intermediate file value.
-                let writer: TextWriter = open_write(path)?.text();
+                let writer = open_write(path)?.text();
                 writer.write_all("temporary\n")?;
                 writer.close()?;
 
-                let reader: TextReader = open_read(path)?.text();
+                let reader = open_read(path)?.text();
                 let text = reader.read_all()?;
                 reader.close()?;
 
@@ -644,6 +636,39 @@ fn test_std_io_text_adapter_on_temporary_open_handle() {
 
     let stdout = String::from_utf8_lossy(&run.stdout);
     assert_eq!(stdout, "temporary\n\n", "unexpected stdout: {stdout}");
+}
+
+#[test]
+fn test_try_then_method_then_try_chain_infers_text_result() {
+    let run = run_program(
+        "try_method_try_chain_infers_text",
+        r#"
+            requires {
+                std::io::IoError
+                std::io::open_read
+                std::io::open_write
+                std::io::println
+            }
+
+            fn main() -> () | IoError {
+                let path = "/tmp/machina_try_method_try_chain.txt";
+
+                let writer = open_write(path)?.text();
+                writer.write_all("hello\n")?;
+                writer.close()?;
+
+                let reader = open_read(path)?.text();
+                let text = reader.read_all()?;
+                reader.close()?;
+
+                println(text);
+            }
+        "#,
+    );
+    assert_eq!(run.status.code(), Some(0));
+
+    let stdout = String::from_utf8_lossy(&run.stdout);
+    assert_eq!(stdout, "hello\n\n", "unexpected stdout: {stdout}");
 }
 
 #[test]

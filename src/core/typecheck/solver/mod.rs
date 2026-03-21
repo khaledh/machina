@@ -331,6 +331,7 @@ fn retry_call_stage(
 ) {
     while !pending_calls.is_empty() {
         let prior_pending = pending_calls.len();
+        let prior_call_state = call_state_signature(&pending_calls, unifier);
         let (mut retry_call_errors, retry_resolved, deferred) = calls::check_call_obligations(
             &pending_calls,
             unifier,
@@ -342,18 +343,66 @@ fn retry_call_stage(
             &constrain.var_trait_bounds,
             &engine.context().def_table,
             &engine.context().def_owners,
-            false,
+            true,
         );
         call_errors.append(&mut retry_call_errors);
         resolved_call_defs.extend(retry_resolved);
 
         retry_expr_stage(constrain, unifier, engine, expr_errors, covered_exprs);
+        apply_assignable_inference_pass(constrain, unifier);
 
-        if deferred.is_empty() || deferred.len() == prior_pending {
+        let next_call_state = call_state_signature(&deferred, unifier);
+        let made_progress = next_call_state != prior_call_state;
+
+        if deferred.is_empty() {
+            break;
+        }
+        if deferred.len() == prior_pending && !made_progress {
+            let (mut final_call_errors, final_resolved, _final_deferred) =
+                calls::check_call_obligations(
+                    &deferred,
+                    unifier,
+                    &engine.env().func_sigs,
+                    &engine.env().method_sigs,
+                    &engine.env().property_sigs,
+                    &engine.env().trait_sigs,
+                    &engine.env().trait_impls,
+                    &constrain.var_trait_bounds,
+                    &engine.context().def_table,
+                    &engine.context().def_owners,
+                    false,
+                );
+            call_errors.append(&mut final_call_errors);
+            resolved_call_defs.extend(final_resolved);
             break;
         }
         pending_calls = deferred;
     }
+}
+
+fn call_state_signature(
+    obligations: &[CallObligation],
+    unifier: &TcUnifier,
+) -> Vec<(NodeId, Option<Type>, Vec<Type>, Type)> {
+    obligations
+        .iter()
+        .map(|obligation| {
+            let receiver_ty = obligation
+                .receiver
+                .as_ref()
+                .map(|term| term_utils::canonicalize_type(term_utils::resolve_term(term, unifier)));
+            let arg_tys = obligation
+                .arg_terms
+                .iter()
+                .map(|term| term_utils::canonicalize_type(term_utils::resolve_term(term, unifier)))
+                .collect::<Vec<_>>();
+            let ret_ty = term_utils::canonicalize_type(term_utils::resolve_term(
+                &obligation.ret_ty,
+                unifier,
+            ));
+            (obligation.call_node, receiver_ty, arg_tys, ret_ty)
+        })
+        .collect()
 }
 
 fn apply_final_assignability(
