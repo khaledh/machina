@@ -247,8 +247,10 @@ ReadWriteFile :: {
 
 TextReader :: {
     @public
-    fn read_all(self, out dst: string) -> () | IoError {
-        read_all_text_from_fd(out dst, self._fd)
+    fn read_all(self) -> string | IoError {
+        var text: string;
+        read_all_text_from_fd(out text, self._fd)?;
+        text
     }
 
     @public
@@ -311,8 +313,10 @@ BinaryWriter :: {
 
 TextFile :: {
     @public
-    fn read_all(self, out dst: string) -> () | IoError {
-        read_all_text_from_fd(out dst, self._fd)
+    fn read_all(self) -> string | IoError {
+        var text: string;
+        read_all_text_from_fd(out text, self._fd)?;
+        text
     }
 
     @public

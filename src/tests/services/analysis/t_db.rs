@@ -3520,10 +3520,7 @@ fn hover_at_program_file_std_io_point_hover_shows_text_writer() {
     let source = fs::read_to_string(&path).expect("failed to read std::io example");
     let file_id = db.upsert_disk_text(path, source.clone());
 
-    let writer_offset = source
-        .find("let writer =")
-        .expect("expected writer binding")
-        + "let ".len();
+    let writer_offset = source.find("let writer").expect("expected writer binding") + "let ".len();
     let writer_point = Span {
         start: position_at(&source, writer_offset),
         end: position_at(&source, writer_offset),

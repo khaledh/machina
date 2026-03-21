@@ -55,8 +55,7 @@ fn main() -> () | IoError | ParseError {
     }
 
     using reader = open_read(path)?.text() {
-        var text: string;
-        reader.read_all(out text)?;
+        let text = reader.read_all()?;
 
         let rows = collect_rows(text)?;
         print_high_scores(rows, 9);

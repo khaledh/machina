@@ -163,8 +163,7 @@ fn test_std_io_file_open_read_write_close_roundtrip() {
 
                 let raw_reader = open_read(path)?;
                 let reader: TextReader = raw_reader.text();
-                var text: string;
-                reader.read_all(out text)?;
+                let text = reader.read_all()?;
                 reader.close()?;
 
                 println(text);
@@ -576,6 +575,8 @@ fn test_std_io_using_auto_closes_text_handles() {
         r#"
             requires {
                 std::io::IoError
+                std::io::ReadFile
+                std::io::WriteFile
                 std::io::open_read
                 std::io::open_write
                 std::io::println
@@ -586,15 +587,16 @@ fn test_std_io_using_auto_closes_text_handles() {
 
                 // The writer is scoped to this block and closes automatically
                 // when `using` exits.
-                using writer = open_write(path)?.text() {
+                let raw_writer: WriteFile = open_write(path)?;
+                using writer = raw_writer.text() {
                     writer.write_all("abc\n")?;
                 }
 
                 // Reopen the same path to confirm the first handle really
                 // closed and the contents are visible to the next user.
-                using reader = open_read(path)?.text() {
-                    var text: string;
-                    reader.read_all(out text)?;
+                let raw_reader: ReadFile = open_read(path)?;
+                using reader = raw_reader.text() {
+                    let text = reader.read_all()?;
                     println(text);
                 }
             }
@@ -613,6 +615,8 @@ fn test_std_io_text_adapter_on_temporary_open_handle() {
         r#"
             requires {
                 std::io::IoError
+                std::io::TextReader
+                std::io::TextWriter
                 std::io::open_read
                 std::io::open_write
                 std::io::println
@@ -624,13 +628,12 @@ fn test_std_io_text_adapter_on_temporary_open_handle() {
                 // Opening and immediately adapting the temporary read/write
                 // handle should be allowed even though `text()` consumes the
                 // intermediate file value.
-                let writer = open_write(path)?.text();
+                let writer: TextWriter = open_write(path)?.text();
                 writer.write_all("temporary\n")?;
                 writer.close()?;
 
-                let reader = open_read(path)?.text();
-                var text: string;
-                reader.read_all(out text)?;
+                let reader: TextReader = open_read(path)?.text();
+                let text = reader.read_all()?;
                 reader.close()?;
 
                 println(text);

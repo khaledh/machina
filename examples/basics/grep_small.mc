@@ -15,8 +15,7 @@ fn main() -> () | IoError {
     let needle = argv[2];
 
     using reader = open_read(path)?.text() {
-        var text: string;
-        reader.read_all(out text)?;
+        let text = reader.read_all()?;
 
         for line in text.lines() {
             if line.contains(needle) {
