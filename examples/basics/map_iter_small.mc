@@ -59,7 +59,7 @@ fn map_values<S, In, Out>(source: S, f: fn(In) -> Out) -> MapIter<S, In, Out> {
 
 fn main() {
     let counter = Counter { cur: 2, end: 5 };
-    let mapped: MapIter<CounterIter, u64, u64> = map_values(counter.iter(), double);
+    let mapped = map_values(counter.iter(), double);
     for n in mapped {
         println(n);
     }

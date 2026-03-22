@@ -150,7 +150,7 @@ fn main() -> () | IoError | ParseError {
 
     using reader = open_read(input_path)?.text() {
         let text = reader.read_all()?;
-        let graded: MapIter<InputRowIter, InputRow, OutputRow> = map_values(
+        let graded = map_values(
             InputRowIter {
                 source: CsvFieldIter {
                     lines: text.lines(),

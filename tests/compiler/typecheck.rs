@@ -2070,8 +2070,7 @@ fn test_generic_map_iter_adapter_builds_and_runs() {
 
             fn main() {
                 let counter = Counter { cur: 2, end: 5 };
-                let mapped: MapIter<CounterIter, u64, u64> =
-                    map_values(counter.iter(), double);
+                let mapped = map_values(counter.iter(), double);
                 for n in mapped {
                     println(n);
                 }
@@ -2267,7 +2266,7 @@ fn test_typed_csv_rewrite_pipeline_uses_generic_map_adapter_builds_and_runs() {
 
                 using reader = open_read(input_path)?.text() {{
                     let text = reader.read_all()?;
-                    let graded: MapIter<InputRowIter, InputRow, OutputRow> = map_values(
+                    let graded = map_values(
                         InputRowIter {{
                             source: CsvFieldIter {{
                                 lines: text.lines(),
