@@ -1964,6 +1964,55 @@ fn test_string_iter_done_union_match_builds_and_runs() {
 }
 
 #[test]
+fn test_direct_dyn_array_tail_coerces_into_error_union() {
+    with_temp_program(
+        "direct_dyn_array_tail_coerces_into_error_union",
+        r#"
+            fn make_fields() -> string[*] | IterDone {
+                let line = "a,b";
+                line.split(",")
+            }
+        "#,
+        &[],
+        |entry_path, entry_source| {
+            let result = check_with_modules(entry_path, entry_source);
+            assert!(result.is_ok(), "compile should succeed: {result:?}");
+        },
+    );
+}
+
+#[test]
+fn test_direct_int_return_coerces_into_error_union() {
+    let run = run_program(
+        "direct_int_return_coerces_into_error_union",
+        r#"
+            fn one() -> u64 | IterDone {
+                return 1;
+            }
+
+            fn two() -> u64 | IterDone {
+                2
+            }
+
+            fn main() {
+                match one() {
+                    value: u64 => println(value),
+                    done: IterDone => println("done"),
+                }
+                match two() {
+                    value: u64 => println(value),
+                    done: IterDone => println("done"),
+                }
+            }
+        "#,
+    );
+    assert_eq!(run.status.code(), Some(0));
+
+    let stdout = String::from_utf8_lossy(&run.stdout);
+    assert_eq!(stdout, "1\n2\n", "unexpected stdout: {stdout}");
+}
+
+#[test]
 fn test_for_protocol_string_iterable_builds_and_runs() {
     let run = run_program(
         "for_protocol_string_iterable",
@@ -2045,14 +2094,6 @@ fn test_typed_csv_iterator_pipeline_builds_and_runs() {
                 values: string[*],
             }
 
-            fn iter_fields(fields: CsvFields) -> CsvFields | IterDone {
-                fields
-            }
-
-            fn iter_done_fields() -> CsvFields | IterDone {
-                IterDone {}
-            }
-
             type CsvFieldIter = {
                 lines: string[*],
                 index: u64,
@@ -2067,9 +2108,9 @@ fn test_typed_csv_iterator_pipeline_builds_and_runs() {
                     if self.index < self.lines.len {
                         let line = self.lines[self.index];
                         self.index = self.index + 1;
-                        iter_fields(CsvFields { values: line.split(",") })
+                        CsvFields { values: line.split(",") }
                     } else {
-                        iter_done_fields()
+                        IterDone {}
                     }
                 }
             }

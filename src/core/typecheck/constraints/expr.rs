@@ -431,10 +431,15 @@ impl<'a> ConstraintCollector<'a> {
                             });
                     }
                     let arm_ty = self.collect_match_arm(arm, expected.clone());
-                    if expected.is_some() {
+                    if let Some(expected) = expected.clone() {
+                        self.push_eq(
+                            expr_ty.clone(),
+                            expected.clone(),
+                            ConstraintReason::Expr(expr.id, expr.span),
+                        );
                         self.push_assignable(
                             arm_ty.clone(),
-                            expr_ty.clone(),
+                            expected,
                             ConstraintReason::Expr(expr.id, expr.span),
                         );
                     }
@@ -875,15 +880,20 @@ impl<'a> ConstraintCollector<'a> {
         } else {
             let then_ty = self.collect_expr(then_body, expected.clone());
             let else_ty = self.collect_expr(else_body, expected.clone());
-            if expected.is_some() {
+            if let Some(expected) = expected.clone() {
+                self.push_eq(
+                    expr_ty.clone(),
+                    expected.clone(),
+                    ConstraintReason::Expr(expr.id, expr.span),
+                );
                 self.push_assignable(
                     then_ty.clone(),
-                    expr_ty.clone(),
+                    expected.clone(),
                     ConstraintReason::Expr(expr.id, expr.span),
                 );
                 self.push_assignable(
                     else_ty,
-                    expr_ty.clone(),
+                    expected,
                     ConstraintReason::Expr(expr.id, expr.span),
                 );
             } else {

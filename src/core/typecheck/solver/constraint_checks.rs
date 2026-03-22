@@ -7,11 +7,32 @@ use crate::core::ast::NodeId;
 use crate::core::diag::Span;
 use crate::core::typecheck::constraints::{Constraint, ConstraintReason};
 use crate::core::typecheck::errors::{TEK, TypeCheckError};
+use crate::core::typecheck::typesys::TypeVarKind;
 use crate::core::typecheck::unify::{TcUnifier, TcUnifyError};
 use crate::core::types::Type;
 
 pub(super) fn apply_assignable_inference(constraint: &Constraint, unifier: &mut TcUnifier) {
     if let Constraint::Assignable { from, to, .. } = constraint {
+        let from_applied = unifier.apply(from);
+        let to_applied = unifier.apply(to);
+
+        if let Type::ErrorUnion { ok_ty, .. } = &to_applied
+            && let Type::Var(var) = &from_applied
+        {
+            // Don't eagerly bind a general expression term to the whole
+            // error union during contextual typing. That turns direct payload
+            // tails like `line.split(",")` into an immediate mismatch before
+            // the surrounding return/join has a chance to coerce them. Keep
+            // integer literals contextual by still steering infer-int vars
+            // toward the union's success type when it is int-like.
+            if matches!(unifier.vars().kind(*var), Some(TypeVarKind::InferInt))
+                && super::term_utils::is_int_like(ok_ty)
+            {
+                let _ = unifier.unify(&from_applied, ok_ty);
+            }
+            return;
+        }
+
         let _ = super::assignability::solve_assignable(from, to, unifier);
     }
 }

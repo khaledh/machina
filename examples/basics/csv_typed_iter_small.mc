@@ -11,18 +11,8 @@ type Row = {
     score: u64,
 }
 
-// Wrap CSV field arrays so the line->fields layer stays nominal while we
-// still have a gap around raw `string[*]` typed match bindings.
 type CsvFields = {
     values: string[*],
-}
-
-fn iter_fields(fields: CsvFields) -> CsvFields | IterDone {
-    fields
-}
-
-fn iter_done_fields() -> CsvFields | IterDone {
-    IterDone {}
 }
 
 type CsvFieldIter = {
@@ -39,9 +29,9 @@ CsvFieldIter :: {
         if self.index < self.lines.len {
             let line = self.lines[self.index];
             self.index = self.index + 1;
-            iter_fields(CsvFields { values: line.split(",") })
+            CsvFields { values: line.split(",") }
         } else {
-            iter_done_fields()
+            IterDone {}
         }
     }
 }

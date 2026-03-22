@@ -643,7 +643,10 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
         match drop_kind(ty) {
             DropKind::Trivial => return Ok(()),
             DropKind::Shallow => {
-                let full_ty = self.drop_glue.full_type_for(ty, self.type_map).unwrap_or(ty);
+                let full_ty = self
+                    .drop_glue
+                    .full_type_for(ty, self.type_map)
+                    .unwrap_or(ty);
                 if is_truly_empty_nominal(full_ty) {
                     return Ok(());
                 }

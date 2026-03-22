@@ -76,11 +76,28 @@ pub fn type_assignable(from: &Type, to: &Type) -> TypeAssignability {
         return assignability;
     }
 
-    if let Type::ErrorUnion { ok_ty, err_tys } = to {
-        let any_match = std::iter::once(ok_ty.as_ref())
-            .chain(err_tys.iter())
-            .any(|variant_ty| type_assignable(from, variant_ty) != TypeAssignability::Incompatible);
-        return if any_match {
+    if let (
+        Type::ErrorUnion {
+            ok_ty: from_ok,
+            err_tys: from_errs,
+        },
+        Type::ErrorUnion {
+            ok_ty: to_ok,
+            err_tys: to_errs,
+        },
+    ) = (from, to)
+    {
+        let to_variants = std::iter::once(to_ok.as_ref())
+            .chain(to_errs.iter())
+            .collect::<Vec<_>>();
+        let all_match = std::iter::once(from_ok.as_ref())
+            .chain(from_errs.iter())
+            .all(|from_variant| {
+                to_variants.iter().any(|to_variant| {
+                    type_assignable(from_variant, to_variant) != TypeAssignability::Incompatible
+                })
+            });
+        return if all_match {
             TypeAssignability::Exact
         } else {
             TypeAssignability::Incompatible
@@ -96,6 +113,17 @@ pub fn type_assignable(from: &Type, to: &Type) -> TypeAssignability {
             .chain(from_errs.iter())
             .all(|variant_ty| type_assignable(variant_ty, to) != TypeAssignability::Incompatible);
         return if all_match {
+            TypeAssignability::Exact
+        } else {
+            TypeAssignability::Incompatible
+        };
+    }
+
+    if let Type::ErrorUnion { ok_ty, err_tys } = to {
+        let any_match = std::iter::once(ok_ty.as_ref())
+            .chain(err_tys.iter())
+            .any(|variant_ty| type_assignable(from, variant_ty) != TypeAssignability::Incompatible);
+        return if any_match {
             TypeAssignability::Exact
         } else {
             TypeAssignability::Incompatible
