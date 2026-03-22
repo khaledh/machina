@@ -33,14 +33,18 @@ use crate::core::ast::{BindPattern, BindPatternKind};
 use crate::core::capsule::ModuleId;
 use crate::core::context::ResolvedContext;
 use crate::core::diag::Span;
-use crate::core::plans::plan_for_iterable_type;
+use crate::core::plans::{
+    ProtocolForPlanError, diagnose_protocol_iterable_type, plan_for_iterable_type_with_methods,
+};
 use crate::core::resolve::{DefId, DefKind, DefTable};
 use crate::core::typecheck::capability::ensure_hashable;
 use crate::core::typecheck::constraints::{
     CallObligation, ConstrainOutput, Constraint, ConstraintReason, ExprObligation,
     PatternObligation,
 };
-use crate::core::typecheck::engine::{CollectedPropertySig, CollectedTraitSig, TypecheckEngine};
+use crate::core::typecheck::engine::{
+    CollectedCallableSig, CollectedPropertySig, CollectedTraitSig, TypecheckEngine,
+};
 use crate::core::typecheck::errors::{TEK, TypeCheckError};
 use crate::core::typecheck::property_access;
 use crate::core::typecheck::typesys::{TypeVarKind, TypeVarStore};
@@ -231,6 +235,7 @@ fn solve_expr_stage(
         &engine.context().def_owners,
         &engine.context().linear_index,
         &engine.env().property_sigs,
+        &engine.env().method_sigs,
         &engine.env().trait_sigs,
         &constrain.var_trait_bounds,
     );
@@ -314,6 +319,7 @@ fn retry_expr_stage(
         &engine.context().def_owners,
         &engine.context().linear_index,
         &engine.env().property_sigs,
+        &engine.env().method_sigs,
         &engine.env().trait_sigs,
         &constrain.var_trait_bounds,
     );
@@ -531,6 +537,7 @@ fn check_expr_obligations(
     def_owners: &HashMap<DefId, ModuleId>,
     linear_index: &crate::core::linear::LinearIndex,
     property_sigs: &HashMap<String, HashMap<String, CollectedPropertySig>>,
+    method_sigs: &HashMap<String, HashMap<String, Vec<CollectedCallableSig>>>,
     trait_sigs: &HashMap<String, CollectedTraitSig>,
     var_trait_bounds: &HashMap<TyVarId, Vec<String>>,
 ) -> (Vec<TypeCheckError>, HashSet<NodeId>) {
@@ -557,6 +564,7 @@ fn check_expr_obligations(
         if control::try_check_expr_obligation_control(
             obligation,
             def_terms,
+            method_sigs,
             unifier,
             &mut errors,
             &mut covered_exprs,
@@ -930,8 +938,18 @@ fn default_unresolved_int_vars(unifier: &mut TcUnifier) {
     }
 }
 
-fn is_iterable(ty: &Type) -> bool {
-    plan_for_iterable_type(ty).is_some()
+fn is_iterable(
+    ty: &Type,
+    method_sigs: &HashMap<String, HashMap<String, Vec<CollectedCallableSig>>>,
+) -> bool {
+    plan_for_iterable_type_with_methods(ty, method_sigs).is_some()
+}
+
+fn iterable_protocol_error(
+    ty: &Type,
+    method_sigs: &HashMap<String, HashMap<String, Vec<CollectedCallableSig>>>,
+) -> Option<ProtocolForPlanError> {
+    diagnose_protocol_iterable_type(ty, method_sigs)
 }
 
 #[derive(Debug, Clone)]
@@ -980,8 +998,11 @@ fn resolve_property_access(
     }
 }
 
-fn iterable_elem_type(ty: &Type) -> Option<Type> {
-    plan_for_iterable_type(ty).map(|plan| plan.item_ty)
+fn iterable_elem_type(
+    ty: &Type,
+    method_sigs: &HashMap<String, HashMap<String, Vec<CollectedCallableSig>>>,
+) -> Option<Type> {
+    plan_for_iterable_type_with_methods(ty, method_sigs).map(|plan| plan.item_ty)
 }
 
 #[cfg(test)]

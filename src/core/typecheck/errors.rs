@@ -318,6 +318,15 @@ pub enum TypeCheckErrorKind {
     #[error("For iterator is not iterable: {0}")]
     ForIterNotIterable(Type),
 
+    #[error("`for` protocol requires `{0}.iter(self) -> Iter`")]
+    ForIterProtocolMissingIter(Type),
+
+    #[error("`for` protocol requires iterator type `{0}` to define `next(inout self)`")]
+    ForIterProtocolMissingNext(Type),
+
+    #[error("`for` protocol `next` must return `Item | IterDone`, found {0}")]
+    ForIterProtocolInvalidNextReturn(Type),
+
     #[error("Division by zero")]
     DivisionByZero,
 

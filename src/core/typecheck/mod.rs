@@ -20,6 +20,9 @@ mod unify;
 mod utils;
 mod validate;
 
+pub(crate) use engine::CollectedCallableSig;
+#[cfg(test)]
+pub(crate) use engine::CollectedParamSig;
 pub use engine::TypecheckOutput;
 pub use errors::{TEK, TypeCheckError, TypeCheckErrorKind};
 pub use infer::{InferUnifier, InferUnifyError};

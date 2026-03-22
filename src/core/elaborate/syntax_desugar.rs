@@ -32,13 +32,14 @@
 use crate::core::analysis::facts::SyntheticReason;
 use crate::core::ast::{
     ArrayLitInit, BinaryOp, BindPattern, BindPatternKind, BlockItem, CallArg, CallArgMode,
-    EmitKind, Expr, ExprKind, InitInfo, MethodItem, Module, ParamMode, StmtExpr, StmtExprKind,
-    TopLevelItem, UnaryOp, UsingBinding,
+    EmitKind, Expr, ExprKind, InitInfo, MatchArm, MatchPattern, MethodItem, Module, ParamMode,
+    StmtExpr, StmtExprKind, TopLevelItem, UnaryOp, UsingBinding,
 };
 use crate::core::diag::Span;
 use crate::core::elaborate::elaborator::Elaborator;
 use crate::core::plans::{
-    ArgLowering, CallInput, CallPlan, CallTarget, ForKernel, IntrinsicForKernel, RuntimeCall,
+    ArgLowering, CallInput, CallPlan, CallTarget, ForKernel, IntrinsicForKernel, ProtocolForKernel,
+    RuntimeCall,
 };
 use crate::core::resolve::{DefId, DefKind, DefTable};
 use crate::core::types::Type;
@@ -51,6 +52,13 @@ struct ForLocal {
     name: String,
     ty: Type,
     pattern: BindPattern,
+}
+
+/// Metadata for a synthesized match binding used inside desugared protocol loops.
+struct MatchBindingLocal {
+    def_id: DefId,
+    name: String,
+    pattern_id: crate::core::ast::NodeId,
 }
 
 /// Known `using` cleanup entrypoints keyed by resource type name.
@@ -279,6 +287,11 @@ impl<'a, 'b> SyntaxDesugarCtx<'a, 'b> {
                     false,
                 )
             }
+            ForKernel::Protocol(_) => {
+                panic!(
+                    "compiler bug: protocol for-loops use the dedicated protocol desugaring path"
+                )
+            }
         };
 
         let idx_load = self.make_load_expr(idx_place.clone(), u64_ty.clone(), span);
@@ -316,6 +329,11 @@ impl<'a, 'b> SyntaxDesugarCtx<'a, 'b> {
                 }
                 ForKernel::Intrinsic(IntrinsicForKernel::Map) => {
                     panic!("compiler bug: map for-loops use the dedicated cursor desugaring path")
+                }
+                ForKernel::Protocol(_) => {
+                    panic!(
+                        "compiler bug: protocol for-loops use the dedicated protocol desugaring path"
+                    )
                 }
                 _ => {
                     let index_place =
@@ -476,6 +494,150 @@ impl<'a, 'b> SyntaxDesugarCtx<'a, 'b> {
         self.make_block_expr(items, span)
     }
 
+    fn desugar_protocol_for_stmt(
+        &mut self,
+        stmt: &StmtExpr,
+        pattern: &BindPattern,
+        iter: &Expr,
+        body: &Expr,
+    ) -> Expr {
+        let span = stmt.span;
+        let bool_ty = Type::Bool;
+        let for_plan = self.for_plan_or_panic(stmt.id, "protocol for desugaring");
+        let ForKernel::Protocol(ProtocolForKernel {
+            iter_ty,
+            done_ty,
+            iter_method,
+            next_method,
+        }) = &for_plan.kernel
+        else {
+            panic!("compiler bug: expected protocol for-plan for {:?}", stmt.id);
+        };
+
+        let src_ty = self
+            .type_map
+            .type_table()
+            .get(self.type_id_for(iter.id))
+            .clone();
+        let src_info = self.new_for_local("iter_src", src_ty.clone(), false, span);
+        let iter_info = self.new_for_local("iter_state", iter_ty.clone(), true, span);
+        let step_info = self.new_for_local(
+            "iter_step",
+            Type::ErrorUnion {
+                ok_ty: Box::new(for_plan.item_ty.clone()),
+                err_tys: vec![done_ty.clone()],
+            },
+            false,
+            span,
+        );
+        let item_binding = self.new_match_binding("iter_item", &for_plan.item_ty, span);
+        let done_binding = self.new_match_binding("iter_done", done_ty, span);
+
+        let mut items = Vec::new();
+        items.push(BlockItem::Stmt(self.make_let_bind_stmt(
+            src_info.pattern.clone(),
+            iter.clone(),
+            span,
+        )));
+
+        let src_place = self.make_var_place(&src_info, span);
+        let src_value = self.make_load_expr(src_place, src_ty, span);
+        let iter_init = self.make_direct_method_call_expr(
+            *iter_method,
+            "iter",
+            src_value,
+            ParamMode::In,
+            iter_ty.clone(),
+            span,
+        );
+        items.push(BlockItem::Stmt(self.make_var_bind_stmt(
+            iter_info.pattern.clone(),
+            iter_init,
+            span,
+        )));
+
+        let cond_expr = self.make_value_expr(ExprKind::BoolLit(true), bool_ty, span);
+        let iter_place = self.make_var_place(&iter_info, span);
+        let next_step = self.make_direct_method_call_expr(
+            *next_method,
+            "next",
+            iter_place.clone(),
+            ParamMode::InOut,
+            step_info.ty.clone(),
+            span,
+        );
+
+        let step_stmt = self.make_let_bind_stmt(step_info.pattern.clone(), next_step, span);
+        let step_place = self.make_var_place(&step_info, span);
+        let step_value = self.make_load_expr(step_place, step_info.ty.clone(), span);
+
+        let break_stmt = self.make_stmt(StmtExprKind::Break, span);
+        let done_body = self.make_block_expr(vec![BlockItem::Stmt(break_stmt)], span);
+        let done_arm = MatchArm {
+            id: self.node_id_gen.new_id(),
+            patterns: vec![MatchPattern::TypedBinding {
+                id: done_binding.pattern_id,
+                ident: done_binding.name.clone(),
+                ty_expr: self.type_expr_from_type(done_ty, span),
+                span,
+            }],
+            body: done_body,
+            span,
+        };
+
+        let item_place = self.make_place_expr(
+            ExprKind::Var {
+                ident: item_binding.name.clone(),
+            },
+            for_plan.item_ty.clone(),
+            span,
+            Some(item_binding.def_id),
+        );
+        let item_value = self.make_load_expr(item_place, for_plan.item_ty.clone(), span);
+        let pattern_bind = self.make_let_bind_stmt(pattern.clone(), item_value, span);
+        let item_body = self.make_block_expr(
+            vec![BlockItem::Stmt(pattern_bind), BlockItem::Expr(body.clone())],
+            span,
+        );
+        let item_arm = MatchArm {
+            id: self.node_id_gen.new_id(),
+            patterns: vec![MatchPattern::TypedBinding {
+                id: item_binding.pattern_id,
+                ident: item_binding.name.clone(),
+                ty_expr: self.type_expr_from_type(&for_plan.item_ty, span),
+                span,
+            }],
+            body: item_body,
+            span,
+        };
+
+        let match_arms = vec![done_arm, item_arm];
+        let step_match = self.make_value_expr(
+            ExprKind::Match {
+                scrutinee: Box::new(step_value),
+                arms: match_arms.clone(),
+            },
+            Type::Unit,
+            span,
+        );
+        let match_plan = self.build_match_plan(step_match.id, step_info.ty.clone(), &match_arms);
+        self.record_match_plan(step_match.id, match_plan);
+
+        let loop_body = self.make_block_expr(
+            vec![BlockItem::Stmt(step_stmt), BlockItem::Expr(step_match)],
+            span,
+        );
+        items.push(BlockItem::Stmt(self.make_stmt(
+            StmtExprKind::While {
+                cond: Box::new(cond_expr),
+                body: Box::new(loop_body),
+            },
+            span,
+        )));
+
+        self.make_block_expr(items, span)
+    }
+
     fn desugar_block_items(&mut self, items: &mut Vec<BlockItem>, boundary: CleanupBoundary) {
         let frame_start = self.cleanup_frames.len();
         self.cleanup_frames.push(CleanupFrame {
@@ -499,13 +661,14 @@ impl<'a, 'b> SyntaxDesugarCtx<'a, 'b> {
                         } => {
                             let for_plan =
                                 self.for_plan_or_panic(stmt.id, "block-item for desugaring");
-                            let mut expr = if matches!(
-                                for_plan.kernel,
-                                ForKernel::Intrinsic(IntrinsicForKernel::Map)
-                            ) {
-                                self.desugar_map_for_stmt(&stmt, pattern, iter, body)
-                            } else {
-                                self.desugar_for_stmt(&stmt, pattern, iter, body)
+                            let mut expr = match &for_plan.kernel {
+                                ForKernel::Intrinsic(IntrinsicForKernel::Map) => {
+                                    self.desugar_map_for_stmt(&stmt, pattern, iter, body)
+                                }
+                                ForKernel::Protocol(_) => {
+                                    self.desugar_protocol_for_stmt(&stmt, pattern, iter, body)
+                                }
+                                _ => self.desugar_for_stmt(&stmt, pattern, iter, body),
                             };
                             self.desugar_value_expr(&mut expr);
                             rewritten.push(BlockItem::Expr(expr));
@@ -892,6 +1055,27 @@ impl<'a, 'b> SyntaxDesugarCtx<'a, 'b> {
         }
     }
 
+    fn new_match_binding(&mut self, suffix: &str, ty: &Type, _span: Span) -> MatchBindingLocal {
+        let hint = self.next_synthetic_def_id_hint();
+        let name = format!("__for_{}_{}", suffix, hint.0);
+        let def_id = self.add_typed_synthetic_def(
+            name.clone(),
+            DefKind::LocalVar {
+                nrvo_eligible: false,
+                is_mutable: false,
+            },
+            ty.clone(),
+            SyntheticReason::ElaborateSyntheticNode,
+        );
+        let pattern_id = self.node_id_gen.new_id();
+        self.def_table.record_use(pattern_id, def_id);
+        MatchBindingLocal {
+            def_id,
+            name,
+            pattern_id,
+        }
+    }
+
     fn make_var_place(&mut self, info: &ForLocal, span: Span) -> Expr {
         self.make_place_expr(
             ExprKind::Var {
@@ -1103,6 +1287,43 @@ impl<'a, 'b> SyntaxDesugarCtx<'a, 'b> {
             kind: ExprKind::Call {
                 callee: Box::new(callee),
                 args,
+            },
+            span,
+        }
+    }
+
+    fn make_direct_method_call_expr(
+        &mut self,
+        method_def_id: DefId,
+        method_name: &str,
+        receiver: Expr,
+        receiver_mode: ParamMode,
+        ret_ty: Type,
+        span: Span,
+    ) -> Expr {
+        let expr_id = self.node_id_gen.new_id();
+        let _ty_id = self.insert_synth_node_type(expr_id, ret_ty.clone());
+        let receiver_needs_drop = self
+            .type_map
+            .type_table()
+            .get(self.type_id_for(receiver.id))
+            .needs_drop();
+        self.record_call_plan(
+            expr_id,
+            CallPlan {
+                target: CallTarget::Direct(method_def_id),
+                args: vec![ArgLowering::Direct(CallInput::Receiver)],
+                drop_mask: vec![receiver_mode == ParamMode::In && receiver_needs_drop],
+                input_modes: vec![receiver_mode],
+                has_receiver: true,
+            },
+        );
+        Expr {
+            id: expr_id,
+            kind: ExprKind::MethodCall {
+                callee: Box::new(receiver),
+                method_name: method_name.to_string(),
+                args: vec![],
             },
             span,
         }

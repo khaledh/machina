@@ -1597,3 +1597,273 @@ fn test_modules_duplicate_public_function_names_allowed_with_aliases() {
         },
     );
 }
+
+#[test]
+fn test_iter_done_prelude_type_builds_and_runs() {
+    let run = run_program(
+        "iter_done_prelude_type",
+        r#"
+            requires {
+                std::io::println
+            }
+
+            fn make_done() -> IterDone {
+                IterDone {}
+            }
+
+            fn main() {
+                let done = make_done();
+                println("ok");
+            }
+        "#,
+    );
+    assert_eq!(run.status.code(), Some(0));
+
+    let stdout = String::from_utf8_lossy(&run.stdout);
+    assert_eq!(stdout, "ok\n", "unexpected stdout: {stdout}");
+}
+
+#[test]
+fn test_for_protocol_iterable_builds_and_runs() {
+    let run = run_program(
+        "for_protocol_iterable",
+        r#"
+            requires {
+                std::io::println
+            }
+
+            type Counter = {
+                cur: u64,
+                end: u64,
+            }
+
+            type CounterIter = {
+                cur: u64,
+                end: u64,
+            }
+
+            Counter :: {
+                fn iter(self) -> CounterIter {
+                    CounterIter { cur: self.cur, end: self.end }
+                }
+            }
+
+            CounterIter :: {
+                fn next(inout self) -> u64 | IterDone {
+                    if self.cur < self.end {
+                        let value = self.cur;
+                        self.cur = self.cur + 1;
+                        value
+                    } else {
+                        IterDone {}
+                    }
+                }
+            }
+
+            fn main() {
+                let counter = Counter { cur: 2, end: 5 };
+                var sum: u64 = 0;
+                for n in counter {
+                    sum = sum + n;
+                }
+                println(sum);
+            }
+        "#,
+    );
+    assert_eq!(run.status.code(), Some(0));
+
+    let stdout = String::from_utf8_lossy(&run.stdout);
+    assert_eq!(stdout, "9\n", "unexpected stdout: {stdout}");
+}
+
+#[test]
+fn test_method_if_join_coerces_local_tail_into_error_union() {
+    let run = run_program(
+        "method_if_join_error_union_coercion",
+        r#"
+            type EmptyErr = {}
+            type CounterIter = {
+                cur: u64,
+                end: u64,
+            }
+
+            CounterIter :: {
+                fn step(inout self) -> u64 | EmptyErr {
+                    if self.cur < self.end {
+                        let value = self.cur;
+                        self.cur = self.cur + 1;
+                        value
+                    } else {
+                        EmptyErr {}
+                    }
+                }
+            }
+
+            fn main() -> u64 | EmptyErr {
+                var it = CounterIter { cur: 2, end: 5 };
+                it.step()
+            }
+        "#,
+    );
+    assert_eq!(run.status.code(), Some(2));
+    assert_eq!(
+        run.stderr,
+        b"",
+        "unexpected stderr: {}",
+        String::from_utf8_lossy(&run.stderr)
+    );
+}
+
+#[test]
+fn test_for_protocol_reports_missing_iter_method() {
+    let entry_source = r#"
+        type Counter = {
+            start: u64,
+            end: u64,
+        }
+
+        fn main() {
+            let counter = Counter { start: 0, end: 3 };
+            for n in counter {
+                println(n);
+            }
+        }
+    "#;
+
+    with_temp_program(
+        "for_protocol_missing_iter",
+        entry_source,
+        &[],
+        |entry_path, entry_src| {
+            let result = check_with_modules(entry_path, entry_src);
+            assert!(result.is_err(), "compile should fail without iter(self)");
+            if let Err(errors) = result {
+                assert!(errors.iter().any(|err| {
+                matches!(
+                    err,
+                    CompileError::TypeCheck(type_err)
+                        if matches!(
+                            type_err.kind(),
+                            TypeCheckErrorKind::ForIterProtocolMissingIter(ty, ..)
+                                if matches!(ty, machina::core::types::Type::Struct { name, .. } if name == "Counter")
+                        )
+                )
+            }));
+            }
+        },
+    );
+}
+
+#[test]
+fn test_for_protocol_reports_missing_next_method() {
+    let entry_source = r#"
+        type Counter = {
+            start: u64,
+            end: u64,
+        }
+
+        type CounterIter = {
+            cur: u64,
+            end: u64,
+        }
+
+        Counter :: {
+            fn iter(self) -> CounterIter {
+                CounterIter { cur: self.start, end: self.end }
+            }
+        }
+
+        fn main() {
+            let counter = Counter { start: 0, end: 3 };
+            for n in counter {
+                println(n);
+            }
+        }
+    "#;
+
+    with_temp_program(
+        "for_protocol_missing_next",
+        entry_source,
+        &[],
+        |entry_path, entry_src| {
+            let result = check_with_modules(entry_path, entry_src);
+            assert!(
+                result.is_err(),
+                "compile should fail without next(inout self)"
+            );
+            if let Err(errors) = result {
+                assert!(errors.iter().any(|err| {
+                matches!(
+                    err,
+                    CompileError::TypeCheck(type_err)
+                        if matches!(
+                            type_err.kind(),
+                            TypeCheckErrorKind::ForIterProtocolMissingNext(ty, ..)
+                                if matches!(ty, machina::core::types::Type::Struct { name, .. } if name == "CounterIter")
+                        )
+                )
+            }));
+            }
+        },
+    );
+}
+
+#[test]
+fn test_for_protocol_reports_invalid_next_return_shape() {
+    let entry_source = r#"
+        type Counter = {
+            start: u64,
+            end: u64,
+        }
+
+        type CounterIter = {
+            cur: u64,
+            end: u64,
+        }
+
+        Counter :: {
+            fn iter(self) -> CounterIter {
+                CounterIter { cur: self.start, end: self.end }
+            }
+        }
+
+        CounterIter :: {
+            fn next(inout self) -> u64 {
+                self.cur
+            }
+        }
+
+        fn main() {
+            let counter = Counter { start: 0, end: 3 };
+            for n in counter {
+                println(n);
+            }
+        }
+    "#;
+
+    with_temp_program(
+        "for_protocol_invalid_next_return",
+        entry_source,
+        &[],
+        |entry_path, entry_src| {
+            let result = check_with_modules(entry_path, entry_src);
+            assert!(
+                result.is_err(),
+                "compile should fail when next() does not return Item | IterDone"
+            );
+            if let Err(errors) = result {
+                assert!(errors.iter().any(|err| {
+                    matches!(
+                        err,
+                        CompileError::TypeCheck(type_err)
+                            if matches!(
+                                type_err.kind(),
+                                TypeCheckErrorKind::ForIterProtocolInvalidNextReturn(ty, ..)
+                                    if matches!(ty, machina::core::types::Type::Int { .. })
+                            )
+                    )
+                }));
+            }
+        },
+    );
+}

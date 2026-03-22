@@ -126,6 +126,7 @@ fn __mc_machine_runtime_bind_descriptor_u64(
 fn __mc_machine_runtime_step_u64(runtime: u64) -> u64;
 
 type KeyNotFound = {}
+type IterDone = {}
 
 string :: {
   @intrinsic

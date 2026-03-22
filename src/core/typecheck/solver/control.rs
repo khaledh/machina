@@ -39,6 +39,10 @@ fn try_error_variant_accepted(err_ty: &Type, return_err_ty: &Type) -> bool {
 pub(super) fn try_check_expr_obligation_control(
     obligation: &ExprObligation,
     def_terms: &HashMap<DefId, Type>,
+    method_sigs: &HashMap<
+        String,
+        HashMap<String, Vec<crate::core::typecheck::CollectedCallableSig>>,
+    >,
     unifier: &mut TcUnifier,
     errors: &mut Vec<TypeCheckError>,
     covered_exprs: &mut HashSet<NodeId>,
@@ -281,15 +285,27 @@ pub(super) fn try_check_expr_obligation_control(
                 iter_ty.clone(),
                 unifier.vars(),
             );
-            if !super::is_iterable(&iter_ty_for_diag)
+            if !super::is_iterable(&iter_ty_for_diag, method_sigs)
                 && !super::term_utils::is_unresolved(&iter_ty_for_diag)
             {
-                tc_push_error!(errors, *span, TEK::ForIterNotIterable(iter_ty_for_diag));
+                let diag = match super::iterable_protocol_error(&iter_ty_for_diag, method_sigs) {
+                    Some(crate::core::plans::ProtocolForPlanError::MissingIter { source_ty }) => {
+                        TEK::ForIterProtocolMissingIter(source_ty)
+                    }
+                    Some(crate::core::plans::ProtocolForPlanError::MissingNext { iter_ty }) => {
+                        TEK::ForIterProtocolMissingNext(iter_ty)
+                    }
+                    Some(crate::core::plans::ProtocolForPlanError::InvalidNextReturn {
+                        ret_ty,
+                    }) => TEK::ForIterProtocolInvalidNextReturn(ret_ty),
+                    None => TEK::ForIterNotIterable(iter_ty_for_diag),
+                };
+                tc_push_error!(errors, *span, diag);
                 covered_exprs.insert(*stmt_id);
                 return true;
             }
 
-            if let Some(elem_ty) = super::iterable_elem_type(&iter_ty) {
+            if let Some(elem_ty) = super::iterable_elem_type(&iter_ty, method_sigs) {
                 let _ = unifier.unify(pattern, &elem_ty);
                 let pattern_ty = super::term_utils::resolve_term(pattern, unifier);
                 if matches!(

@@ -19,6 +19,7 @@ pub struct FunctionBuilder {
     next_local: u32,
     cursor: BlockId,
     pending_comments: Vec<String>,
+    value_tys: Vec<IrTypeId>,
 }
 
 impl FunctionBuilder {
@@ -45,11 +46,19 @@ impl FunctionBuilder {
             next_local: 0,
             cursor: BlockId(0),
             pending_comments: Vec::new(),
+            value_tys: Vec::new(),
         }
     }
 
     pub fn current_block(&self) -> BlockId {
         self.cursor
+    }
+
+    pub fn value_type(&self, value: ValueId) -> IrTypeId {
+        self.value_tys
+            .get(value.index())
+            .copied()
+            .unwrap_or_else(|| panic!("invalid value id {:?}", value))
     }
 
     /// Returns a mutable reference to the current block.
@@ -330,6 +339,7 @@ impl FunctionBuilder {
     fn alloc_value(&mut self, _ty: IrTypeId) -> ValueId {
         let id = ValueId(self.next_value);
         self.next_value += 1;
+        self.value_tys.push(_ty);
         id
     }
 }

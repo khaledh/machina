@@ -14,7 +14,7 @@ use crate::core::diag::Span;
 use crate::core::linear::{
     LinearHostInfo, direct_action_method_name, machine_create_fn_name, machine_lookup_fn_name,
 };
-use crate::core::plans::{ForPlanMap, plan_for_iterable_type};
+use crate::core::plans::{ForPlanMap, plan_for_iterable_type_with_methods};
 use crate::core::resolve::{DefId, DefKind};
 use crate::core::symbol_id::SelectedCallable;
 use crate::core::typecheck::InferUnifier;
@@ -290,7 +290,9 @@ impl Visitor for ForPlanCollector<'_> {
     fn visit_stmt_expr(&mut self, stmt: &StmtExpr) {
         if let StmtExprKind::For { iter, .. } = &stmt.kind {
             let iter_ty = resolved_node_type_or_unknown(self.engine, iter.id);
-            if let Some(plan) = plan_for_iterable_type(&iter_ty) {
+            if let Some(plan) =
+                plan_for_iterable_type_with_methods(&iter_ty, &self.engine.env().method_sigs)
+            {
                 self.plans.insert(stmt.id, plan);
             }
         }

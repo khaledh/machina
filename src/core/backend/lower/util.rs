@@ -144,17 +144,19 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
     }
 
     fn coerce_value_to_type(&mut self, value: ValueId, from_ty: &Type, to_ty: &Type) -> ValueId {
-        if from_ty == to_ty {
-            return value;
-        }
-
-        match to_ty {
-            Type::ErrorUnion { ok_ty, err_tys } => {
-                self.coerce_to_error_union(value, from_ty, to_ty, ok_ty, err_tys)
+        let coerced = if from_ty == to_ty {
+            value
+        } else {
+            match to_ty {
+                Type::ErrorUnion { ok_ty, err_tys } => {
+                    self.coerce_to_error_union(value, from_ty, to_ty, ok_ty, err_tys)
+                }
+                Type::Enum { .. } => self.coerce_to_enum_payload_wrapper(value, from_ty, to_ty),
+                _ => value,
             }
-            Type::Enum { .. } => self.coerce_to_enum_payload_wrapper(value, from_ty, to_ty),
-            _ => value,
-        }
+        };
+
+        self.ensure_value_matches_type(coerced, to_ty)
     }
 
     fn coerce_to_error_union(
@@ -165,7 +167,9 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
         ok_ty: &Type,
         err_tys: &[Type],
     ) -> ValueId {
-        if from_ty == union_ty {
+        let union_ir_ty = self.type_lowerer.lower_type(union_ty);
+        let value_ir_ty = self.builder.value_type(value);
+        if value_ir_ty == union_ir_ty {
             return value;
         }
 
@@ -173,6 +177,7 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
             ok_ty: src_ok_ty,
             err_tys: src_err_tys,
         } = from_ty
+            && value_ir_ty == self.type_lowerer.lower_type(from_ty)
         {
             return self.widen_error_union_prefix(
                 src_ok_ty,
@@ -185,12 +190,15 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
             );
         }
 
+        let source_ty = self
+            .infer_error_union_payload_source_ty(value_ir_ty, ok_ty, err_tys)
+            .unwrap_or(from_ty.clone());
         let variant_index = self
-            .error_union_variant_index(from_ty, ok_ty, err_tys)
+            .error_union_variant_index(&source_ty, ok_ty, err_tys)
             .unwrap_or_else(|| {
                 panic!(
                     "backend cannot coerce return value {:?} into error union {:?}",
-                    from_ty, union_ty
+                    source_ty, union_ty
                 )
             });
         let target_variant_ty = if variant_index == 0 {
@@ -198,8 +206,46 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
         } else {
             &err_tys[variant_index - 1]
         };
-        let coerced_payload = self.coerce_value_to_type(value, from_ty, target_variant_ty);
+        let coerced_payload = self.coerce_value_to_type(value, &source_ty, target_variant_ty);
         self.build_error_union_value(union_ty, variant_index, coerced_payload)
+    }
+
+    fn infer_error_union_payload_source_ty(
+        &mut self,
+        value_ir_ty: IrTypeId,
+        ok_ty: &Type,
+        err_tys: &[Type],
+    ) -> Option<Type> {
+        if self.type_lowerer.lower_type(ok_ty) == value_ir_ty {
+            return Some(ok_ty.clone());
+        }
+
+        for err_ty in err_tys {
+            if self.type_lowerer.lower_type(err_ty) == value_ir_ty {
+                return Some(err_ty.clone());
+            }
+        }
+
+        None
+    }
+
+    fn ensure_value_matches_type(&mut self, value: ValueId, to_ty: &Type) -> ValueId {
+        let target_ir_ty = self.type_lowerer.lower_type(to_ty);
+        let value_ir_ty = self.builder.value_type(value);
+        if value_ir_ty == target_ir_ty {
+            return value;
+        }
+
+        let Type::ErrorUnion { ok_ty, err_tys } = to_ty else {
+            return value;
+        };
+
+        let Some(source_ty) = self.infer_error_union_payload_source_ty(value_ir_ty, ok_ty, err_tys)
+        else {
+            return value;
+        };
+
+        self.coerce_to_error_union(value, &source_ty, to_ty, ok_ty, err_tys)
     }
 
     fn error_union_variant_index(
