@@ -1715,6 +1715,101 @@ fn test_method_if_join_coerces_local_tail_into_error_union() {
 }
 
 #[test]
+fn test_for_protocol_adapter_iterable_builds_and_runs() {
+    let run = run_program(
+        "for_protocol_adapter_iterable",
+        r#"
+            requires {
+                std::io::println
+            }
+
+            type Counter = {
+                start: u64,
+                end: u64,
+            }
+
+            type CounterIter = {
+                cur: u64,
+                end: u64,
+            }
+
+            Counter :: {
+                fn iter(self) -> CounterIter {
+                    CounterIter { cur: self.start, end: self.end }
+                }
+            }
+
+            CounterIter :: {
+                fn next(inout self) -> u64 | IterDone {
+                    if self.cur < self.end {
+                        let value = self.cur;
+                        self.cur = self.cur + 1;
+                        value
+                    } else {
+                        IterDone {}
+                    }
+                }
+            }
+
+            type SkipCounter = {
+                inner: Counter,
+                skip: u64,
+            }
+
+            type SkipCounterIter = {
+                inner: CounterIter,
+                remaining: u64,
+            }
+
+            SkipCounter :: {
+                fn iter(self) -> SkipCounterIter {
+                    SkipCounterIter {
+                        inner: self.inner.iter(),
+                        remaining: self.skip,
+                    }
+                }
+            }
+
+            SkipCounterIter :: {
+                fn next(inout self) -> u64 | IterDone {
+                    while self.remaining > 0 {
+                        let step = self.inner.next();
+                        match step {
+                            value: u64 => {
+                                self.remaining = self.remaining - 1;
+                            }
+                            done: IterDone => {
+                                return IterDone {};
+                            }
+                        }
+                    }
+
+                    self.inner.next()
+                }
+            }
+
+            fn main() {
+                let skipped = SkipCounter {
+                    inner: Counter { start: 2, end: 7 },
+                    skip: 2,
+                };
+
+                var sum: u64 = 0;
+                for n in skipped {
+                    println(n);
+                    sum = sum + n;
+                }
+                println(sum);
+            }
+        "#,
+    );
+    assert_eq!(run.status.code(), Some(0));
+
+    let stdout = String::from_utf8_lossy(&run.stdout);
+    assert_eq!(stdout, "4\n5\n6\n15\n", "unexpected stdout: {stdout}");
+}
+
+#[test]
 fn test_for_protocol_reports_missing_iter_method() {
     let entry_source = r#"
         type Counter = {
