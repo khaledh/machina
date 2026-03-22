@@ -29,7 +29,7 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
                 if let LocalStorage::Value(value) = value.storage {
                     self.emit_conversion_check(value_ty, &dest_ty, value);
                 }
-                if value_ty.is_scalar() {
+                if value_ty.is_scalar() && !value_ty.needs_drop() {
                     self.locals.insert(def_id, value);
                 } else {
                     let slot = self.slot_for_value_typed(value, value_ty);

@@ -133,6 +133,8 @@ pub(crate) enum ExprObligation {
         stmt_id: NodeId,
         iter: Type,
         pattern: Type,
+        expected_return_ty: Option<Type>,
+        callable_def_id: Option<DefId>,
         span: Span,
     },
     EnumVariantPayload {

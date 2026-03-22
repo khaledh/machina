@@ -169,6 +169,8 @@ impl<'a> ConstraintCollector<'a> {
                     stmt_id: stmt.id,
                     iter: iter_ty,
                     pattern: pattern_ty,
+                    expected_return_ty: self.current_return_ty(),
+                    callable_def_id: self.current_callable_def_id(),
                     span: stmt.span,
                 });
                 self.enter_loop();

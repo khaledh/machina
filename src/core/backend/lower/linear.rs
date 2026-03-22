@@ -265,12 +265,24 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
                 }
                 _ => {
                     let place_addr = self.lower_place_addr(place)?;
-                    let value = self.builder.load(place_addr.addr, place_addr.value_ty);
                     let expr_sem_ty = self
                         .type_map
                         .type_table()
                         .get(self.type_map.type_of(expr.id))
                         .clone();
+                    let value = self.builder.load(place_addr.addr, place_addr.value_ty);
+                    let value = if self.type_needs_owned_copy(&expr_sem_ty) {
+                        let slot = self.alloc_value_slot(place_addr.value_ty);
+                        self.store_value_into_addr(
+                            slot.addr,
+                            value,
+                            &expr_sem_ty,
+                            place_addr.value_ty,
+                        );
+                        self.load_slot(&slot)
+                    } else {
+                        value
+                    };
                     Ok(self
                         .coerce_value(value, &place_addr.sem_ty, &expr_sem_ty)
                         .into())

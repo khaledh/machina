@@ -278,6 +278,8 @@ pub(super) fn try_check_expr_obligation_control(
             stmt_id,
             iter,
             pattern,
+            expected_return_ty,
+            callable_def_id,
             span,
         } => {
             let iter_ty = super::term_utils::resolve_term(iter, unifier);
@@ -303,6 +305,73 @@ pub(super) fn try_check_expr_obligation_control(
                 tc_push_error!(errors, *span, diag);
                 covered_exprs.insert(*stmt_id);
                 return true;
+            }
+
+            if let Some(crate::core::plans::ForPlan {
+                kernel:
+                    crate::core::plans::ForKernel::Protocol(crate::core::plans::ProtocolForKernel {
+                        propagated_err_tys,
+                        ..
+                    }),
+                ..
+            }) = super::iterable_plan(&iter_ty_for_diag, method_sigs)
+                && !propagated_err_tys.is_empty()
+            {
+                let return_ty = expected_return_ty.clone().unwrap_or(Type::Unit);
+                if expected_return_ty.is_none() && callable_def_id.is_none() {
+                    tc_push_error!(errors, *span, TEK::TryOutsideFunction);
+                    covered_exprs.insert(*stmt_id);
+                    return true;
+                }
+
+                match &return_ty {
+                    Type::ErrorUnion {
+                        ok_ty,
+                        err_tys: return_err_tys,
+                    } => {
+                        let mut missing = Vec::new();
+                        for err_ty in &propagated_err_tys {
+                            let present = return_err_tys.iter().any(|return_err_ty| {
+                                try_error_variant_accepted(err_ty, return_err_ty)
+                            });
+                            if !present
+                                && !super::term_utils::is_unresolved(err_ty)
+                                && !missing.iter().any(|seen| seen == err_ty)
+                            {
+                                missing.push(err_ty.clone());
+                            }
+                        }
+                        if !missing.is_empty() {
+                            let mut missing_names = missing
+                                .iter()
+                                .map(super::diag_utils::compact_type_name)
+                                .collect::<Vec<_>>();
+                            missing_names.sort();
+                            missing_names.dedup();
+                            let mut return_variant_names = std::iter::once(ok_ty.as_ref())
+                                .chain(return_err_tys.iter())
+                                .map(super::diag_utils::compact_type_name)
+                                .collect::<Vec<_>>();
+                            return_variant_names.sort();
+                            return_variant_names.dedup();
+                            tc_push_error!(
+                                errors,
+                                *span,
+                                TEK::TryErrorNotInReturn(missing_names, return_variant_names,)
+                            );
+                            covered_exprs.insert(*stmt_id);
+                        }
+                    }
+                    ty if super::term_utils::is_unresolved(ty) => {}
+                    _ => {
+                        tc_push_error!(
+                            errors,
+                            *span,
+                            TEK::TryReturnTypeNotErrorUnion(return_ty.clone())
+                        );
+                        covered_exprs.insert(*stmt_id);
+                    }
+                }
             }
 
             if let Some(elem_ty) = super::iterable_elem_type(&iter_ty, method_sigs) {

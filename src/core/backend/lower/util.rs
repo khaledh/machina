@@ -351,8 +351,22 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
         self.store_field(slot.addr, 0, tag_ty, tag_val);
 
         if let (Some(offset), Some(payload_ty)) = (payload_offset, payload_ty) {
+            let payload_sem_ty = self
+                .enum_variant_payload_sem_ty(enum_ty, variant_index)
+                .unwrap_or_else(|| {
+                    panic!(
+                        "backend enum payload wrapper missing semantic payload for variant {} in {:?}",
+                        variant_index, enum_ty
+                    )
+                });
             let payload_ptr = self.field_addr_typed(slot.addr, 1, blob_ty);
-            self.store_into_blob(payload_ptr, offset, payload_value, payload_ty);
+            self.store_semantic_payload_into_blob(
+                payload_ptr,
+                offset,
+                payload_value,
+                &payload_sem_ty,
+                payload_ty,
+            );
         }
 
         self.load_slot(&slot)
@@ -402,11 +416,65 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
         self.store_field(slot.addr, 0, tag_ty, tag_val);
 
         if let (Some(offset), Some(payload_ty)) = (payload_offset, payload_ty) {
+            let payload_sem_ty = self
+                .error_union_variant_sem_ty(union_ty, variant_index)
+                .unwrap_or_else(|| {
+                    panic!(
+                        "backend error union wrapper missing semantic payload for variant {} in {:?}",
+                        variant_index, union_ty
+                    )
+                });
             let payload_ptr = self.field_addr_typed(slot.addr, 1, blob_ty);
-            self.store_into_blob(payload_ptr, offset, payload_value, payload_ty);
+            self.store_semantic_payload_into_blob(
+                payload_ptr,
+                offset,
+                payload_value,
+                &payload_sem_ty,
+                payload_ty,
+            );
         }
 
         self.load_slot(&slot)
+    }
+
+    fn enum_variant_payload_sem_ty(&self, enum_ty: &Type, variant_index: usize) -> Option<Type> {
+        let Type::Enum { variants, .. } = enum_ty else {
+            return None;
+        };
+        variants
+            .get(variant_index)
+            .and_then(|variant| variant.payload.first())
+            .cloned()
+    }
+
+    fn error_union_variant_sem_ty(&self, union_ty: &Type, variant_index: usize) -> Option<Type> {
+        let Type::ErrorUnion { ok_ty, err_tys } = union_ty else {
+            return None;
+        };
+        if variant_index == 0 {
+            Some((**ok_ty).clone())
+        } else {
+            err_tys.get(variant_index - 1).cloned()
+        }
+    }
+
+    fn store_semantic_payload_into_blob(
+        &mut self,
+        blob_ptr: ValueId,
+        offset: u64,
+        payload_value: ValueId,
+        payload_sem_ty: &Type,
+        payload_ir_ty: IrTypeId,
+    ) {
+        if !self.type_needs_owned_copy(payload_sem_ty) {
+            self.store_into_blob(blob_ptr, offset, payload_value, payload_ir_ty);
+            return;
+        }
+
+        let dst_bytes = self.byte_offset_addr(blob_ptr, offset);
+        let dst_ty = self.type_lowerer.ptr_to(payload_ir_ty);
+        let dst_ptr = self.builder.cast(CastKind::PtrToPtr, dst_bytes, dst_ty);
+        self.store_value_into_addr(dst_ptr, payload_value, payload_sem_ty, payload_ir_ty);
     }
 
     #[allow(clippy::too_many_arguments)]

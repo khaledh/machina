@@ -29,17 +29,17 @@ pub(super) struct DropGlueRegistry {
 }
 
 impl DropGlueRegistry {
-    pub(super) fn new(def_table: &DefTable) -> Self {
+    pub(super) fn new(def_table: &DefTable, type_map: &TypeMap) -> Self {
         Self {
             next_def: def_table.next_def_id().0,
             defs: HashMap::new(),
             tys: HashMap::new(),
-            full_tys: HashMap::new(),
+            full_tys: collect_full_nominal_tys(type_map),
         }
     }
 
-    pub(super) fn from_module(def_table: &DefTable, module: &Module) -> Self {
-        let mut full_tys = HashMap::new();
+    pub(super) fn from_module(def_table: &DefTable, module: &Module, type_map: &TypeMap) -> Self {
+        let mut full_tys = collect_full_nominal_tys(type_map);
         let mut view_resolver = TypeViewResolver::new(def_table, module);
         for type_def in module.type_defs() {
             if !type_def.type_params.is_empty() {
@@ -157,6 +157,11 @@ impl DropGlueRegistry {
 
         Ok(funcs)
     }
+
+    pub(super) fn full_type_for<'a>(&'a self, ty: &Type, type_map: &TypeMap) -> Option<&'a Type> {
+        let nominal_key = nominal_key_for_type(ty, type_map);
+        self.full_tys.get(&nominal_key)
+    }
 }
 
 fn type_from_view(view: TypeView) -> Type {
@@ -195,4 +200,52 @@ fn nominal_key_for_type(ty: &Type, type_map: &TypeMap) -> NominalKey {
         .lookup_nominal_key_for_type_id(type_id)
         .cloned()
         .unwrap_or_else(|| panic!("backend drop glue missing nominal key for {:?}", ty))
+}
+
+fn collect_full_nominal_tys(type_map: &TypeMap) -> HashMap<NominalKey, Type> {
+    let mut full_tys = HashMap::new();
+
+    for (_, type_id) in type_map.iter_node_type_ids() {
+        collect_full_nominal_ty(type_map, type_id, &mut full_tys);
+    }
+
+    for (_, type_id) in type_map.iter_def_type_ids() {
+        collect_full_nominal_ty(type_map, type_id, &mut full_tys);
+    }
+
+    full_tys
+}
+
+fn collect_full_nominal_ty(
+    type_map: &TypeMap,
+    type_id: crate::core::types::TypeId,
+    full_tys: &mut HashMap<NominalKey, Type>,
+) {
+    let Some(key) = type_map.lookup_nominal_key_for_type_id(type_id).cloned() else {
+        return;
+    };
+    let candidate = type_map.type_table().get(type_id).clone();
+
+    match full_tys.get_mut(&key) {
+        Some(existing) => {
+            if type_is_more_concrete(&candidate, existing) {
+                *existing = candidate;
+            }
+        }
+        None => {
+            full_tys.insert(key, candidate);
+        }
+    }
+}
+
+fn type_is_more_concrete(candidate: &Type, existing: &Type) -> bool {
+    shallow_score(candidate) > shallow_score(existing)
+}
+
+fn shallow_score(ty: &Type) -> usize {
+    match ty {
+        Type::Struct { fields, .. } => usize::from(!fields.is_empty()),
+        Type::Enum { variants, .. } => usize::from(!variants.is_empty()),
+        _ => 0,
+    }
 }

@@ -324,7 +324,9 @@ pub enum TypeCheckErrorKind {
     #[error("`for` protocol requires iterator type `{0}` to define `next(inout self)`")]
     ForIterProtocolMissingNext(Type),
 
-    #[error("`for` protocol `next` must return `Item | IterDone`, found {0}")]
+    #[error(
+        "`for` protocol `next` must return `Item | IterDone` or `Item | Error | IterDone`, found {0}"
+    )]
     ForIterProtocolInvalidNextReturn(Type),
 
     #[error("Division by zero")]

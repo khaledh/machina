@@ -36,6 +36,7 @@ pub enum IntrinsicForKernel {
 pub struct ProtocolForKernel {
     pub iter_ty: Type,
     pub done_ty: Type,
+    pub propagated_err_tys: Vec<Type>,
     pub iter_method: DefId,
     pub next_method: DefId,
 }
@@ -108,7 +109,7 @@ pub(crate) fn diagnose_protocol_iterable_type(
         return Some(ProtocolForPlanError::MissingNext { iter_ty });
     };
 
-    if protocol_next_item_and_done(&next_sig.ret_ty).is_none() {
+    if protocol_next_shape(&next_sig.ret_ty).is_none() {
         return Some(ProtocolForPlanError::InvalidNextReturn {
             ret_ty: next_sig.ret_ty.clone(),
         });
@@ -126,13 +127,14 @@ fn plan_protocol_iterable_type(
     let iter_ty = iter_sig.ret_ty.clone();
     let iter_owner = protocol_owner_name(&iter_ty)?;
     let next_sig = select_protocol_method(method_sigs, iter_owner, "next", ParamMode::InOut)?;
-    let (item_ty, done_ty) = protocol_next_item_and_done(&next_sig.ret_ty)?;
+    let (item_ty, done_ty, propagated_err_tys) = protocol_next_shape(&next_sig.ret_ty)?;
 
     Some(ForPlan {
         item_ty,
         kernel: ForKernel::Protocol(ProtocolForKernel {
             iter_ty,
             done_ty,
+            propagated_err_tys,
             iter_method: iter_sig.def_id,
             next_method: next_sig.def_id,
         }),
@@ -188,18 +190,29 @@ fn select_protocol_method<'a>(
     if ambiguous { None } else { best }
 }
 
-fn protocol_next_item_and_done(ret_ty: &Type) -> Option<(Type, Type)> {
+fn protocol_next_shape(ret_ty: &Type) -> Option<(Type, Type, Vec<Type>)> {
     let Type::ErrorUnion { ok_ty, err_tys } = ret_ty else {
         return None;
     };
-    if err_tys.len() != 1 {
-        return None;
+
+    let mut done_ty = None;
+    let mut propagated_err_tys = Vec::new();
+    for err_ty in err_tys {
+        if is_iter_done_type(err_ty) {
+            if done_ty.is_some() {
+                return None;
+            }
+            done_ty = Some(err_ty.clone());
+        } else {
+            propagated_err_tys.push(err_ty.clone());
+        }
     }
-    let done_ty = err_tys[0].clone();
-    if !is_iter_done_type(&done_ty) {
+
+    let Some(done_ty) = done_ty else {
         return None;
-    }
-    Some(((**ok_ty).clone(), done_ty))
+    };
+
+    Some(((**ok_ty).clone(), done_ty, propagated_err_tys))
 }
 
 fn is_iter_done_type(ty: &Type) -> bool {
@@ -272,6 +285,63 @@ mod tests {
             ForKernel::Protocol(ProtocolForKernel {
                 iter_ty,
                 done_ty,
+                propagated_err_tys: Vec::new(),
+                iter_method: DefId(1),
+                next_method: DefId(2),
+            })
+        );
+    }
+
+    #[test]
+    fn protocol_plan_accepts_fallible_next_shape() {
+        let source_ty = Type::Struct {
+            name: "Counter".to_string(),
+            fields: Vec::new(),
+        };
+        let iter_ty = Type::Struct {
+            name: "CounterIter".to_string(),
+            fields: Vec::new(),
+        };
+        let done_ty = Type::Struct {
+            name: ITER_DONE_TYPE_NAME.to_string(),
+            fields: Vec::new(),
+        };
+        let parse_err_ty = Type::Struct {
+            name: "ParseError".to_string(),
+            fields: Vec::new(),
+        };
+        let mut methods = HashMap::<String, HashMap<String, Vec<CollectedCallableSig>>>::new();
+        methods.insert(
+            "Counter".to_string(),
+            HashMap::from([(
+                "iter".to_string(),
+                vec![method_sig(1, ParamMode::In, iter_ty.clone())],
+            )]),
+        );
+        methods.insert(
+            "CounterIter".to_string(),
+            HashMap::from([(
+                "next".to_string(),
+                vec![method_sig(
+                    2,
+                    ParamMode::InOut,
+                    Type::ErrorUnion {
+                        ok_ty: Box::new(Type::uint(64)),
+                        err_tys: vec![parse_err_ty.clone(), done_ty.clone()],
+                    },
+                )],
+            )]),
+        );
+
+        let plan = plan_for_iterable_type_with_methods(&source_ty, &methods)
+            .expect("expected fallible protocol for-plan");
+        assert_eq!(plan.item_ty, Type::uint(64));
+        assert_eq!(
+            plan.kernel,
+            ForKernel::Protocol(ProtocolForKernel {
+                iter_ty,
+                done_ty,
+                propagated_err_tys: vec![parse_err_ty],
                 iter_method: DefId(1),
                 next_method: DefId(2),
             })

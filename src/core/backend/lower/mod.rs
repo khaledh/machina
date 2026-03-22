@@ -76,7 +76,7 @@ pub fn lower_func(
     drop_plans: &DropPlanMap,
 ) -> Result<LoweredFunction, LowerToIrError> {
     let mut globals = GlobalArena::new();
-    let mut drop_glue = DropGlueRegistry::new(def_table);
+    let mut drop_glue = DropGlueRegistry::new(def_table, type_map);
     let empty_linear_index = LinearIndex::default();
     lower_func_with_globals(
         func,
@@ -149,7 +149,7 @@ fn lower_module_impl(
 ) -> Result<LoweredModule, LowerToIrError> {
     let mut globals = GlobalArena::new();
     let mut funcs = Vec::new();
-    let mut drop_glue = DropGlueRegistry::from_module(def_table, module);
+    let mut drop_glue = DropGlueRegistry::from_module(def_table, module, type_map);
 
     for func_def in module.func_defs() {
         let lowered = lower_func_with_globals(

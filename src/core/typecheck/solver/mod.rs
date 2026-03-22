@@ -942,7 +942,14 @@ fn is_iterable(
     ty: &Type,
     method_sigs: &HashMap<String, HashMap<String, Vec<CollectedCallableSig>>>,
 ) -> bool {
-    plan_for_iterable_type_with_methods(ty, method_sigs).is_some()
+    iterable_plan(ty, method_sigs).is_some()
+}
+
+fn iterable_plan(
+    ty: &Type,
+    method_sigs: &HashMap<String, HashMap<String, Vec<CollectedCallableSig>>>,
+) -> Option<crate::core::plans::ForPlan> {
+    plan_for_iterable_type_with_methods(ty, method_sigs)
 }
 
 fn iterable_protocol_error(
@@ -1002,7 +1009,7 @@ fn iterable_elem_type(
     ty: &Type,
     method_sigs: &HashMap<String, HashMap<String, Vec<CollectedCallableSig>>>,
 ) -> Option<Type> {
-    plan_for_iterable_type_with_methods(ty, method_sigs).map(|plan| plan.item_ty)
+    iterable_plan(ty, method_sigs).map(|plan| plan.item_ty)
 }
 
 #[cfg(test)]

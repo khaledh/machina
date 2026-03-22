@@ -507,6 +507,7 @@ impl<'a, 'b> SyntaxDesugarCtx<'a, 'b> {
         let ForKernel::Protocol(ProtocolForKernel {
             iter_ty,
             done_ty,
+            propagated_err_tys,
             iter_method,
             next_method,
         }) = &for_plan.kernel
@@ -519,19 +520,30 @@ impl<'a, 'b> SyntaxDesugarCtx<'a, 'b> {
             .type_table()
             .get(self.type_id_for(iter.id))
             .clone();
+        let mut step_err_tys = propagated_err_tys.clone();
+        step_err_tys.push(done_ty.clone());
         let src_info = self.new_for_local("iter_src", src_ty.clone(), false, span);
         let iter_info = self.new_for_local("iter_state", iter_ty.clone(), true, span);
         let step_info = self.new_for_local(
             "iter_step",
             Type::ErrorUnion {
                 ok_ty: Box::new(for_plan.item_ty.clone()),
-                err_tys: vec![done_ty.clone()],
+                err_tys: step_err_tys,
             },
             false,
             span,
         );
         let item_binding = self.new_match_binding("iter_item", &for_plan.item_ty, span);
         let done_binding = self.new_match_binding("iter_done", done_ty, span);
+        let err_bindings = propagated_err_tys
+            .iter()
+            .map(|err_ty| {
+                (
+                    err_ty.clone(),
+                    self.new_match_binding("iter_err", err_ty, span),
+                )
+            })
+            .collect::<Vec<_>>();
 
         let mut items = Vec::new();
         items.push(BlockItem::Stmt(self.make_let_bind_stmt(
@@ -611,7 +623,32 @@ impl<'a, 'b> SyntaxDesugarCtx<'a, 'b> {
             span,
         };
 
-        let match_arms = vec![done_arm, item_arm];
+        let mut match_arms = vec![done_arm];
+        for (err_ty, err_binding) in err_bindings {
+            let err_place = self.make_place_expr(
+                ExprKind::Var {
+                    ident: err_binding.name.clone(),
+                },
+                err_ty.clone(),
+                span,
+                Some(err_binding.def_id),
+            );
+            let err_value = self.make_load_expr(err_place, err_ty.clone(), span);
+            let return_stmt = self.make_return_stmt(Some(err_value), span);
+            let err_body = self.make_block_expr(vec![BlockItem::Stmt(return_stmt)], span);
+            match_arms.push(MatchArm {
+                id: self.node_id_gen.new_id(),
+                patterns: vec![MatchPattern::TypedBinding {
+                    id: err_binding.pattern_id,
+                    ident: err_binding.name.clone(),
+                    ty_expr: self.type_expr_from_type(&err_ty, span),
+                    span,
+                }],
+                body: err_body,
+                span,
+            });
+        }
+        match_arms.push(item_arm);
         let step_match = self.make_value_expr(
             ExprKind::Match {
                 scrutinee: Box::new(step_value),
@@ -1236,6 +1273,15 @@ impl<'a, 'b> SyntaxDesugarCtx<'a, 'b> {
                 assignee: Box::new(assignee),
                 value: Box::new(value),
                 init,
+            },
+            span,
+        )
+    }
+
+    fn make_return_stmt(&mut self, value: Option<Expr>, span: Span) -> StmtExpr {
+        self.make_stmt(
+            StmtExprKind::Return {
+                value: value.map(Box::new),
             },
             span,
         )

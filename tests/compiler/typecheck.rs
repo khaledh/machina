@@ -1677,6 +1677,136 @@ fn test_for_protocol_iterable_builds_and_runs() {
 }
 
 #[test]
+fn test_for_protocol_fallible_iterable_propagates_error() {
+    let run = run_program(
+        "for_protocol_fallible_iterable",
+        r#"
+            type ParseError = {}
+
+            type Counter = {
+                cur: u64,
+                end: u64,
+                fail_at: u64,
+            }
+
+            type CounterIter = {
+                cur: u64,
+                end: u64,
+                fail_at: u64,
+            }
+
+            Counter :: {
+                fn iter(self) -> CounterIter {
+                    CounterIter {
+                        cur: self.cur,
+                        end: self.end,
+                        fail_at: self.fail_at,
+                    }
+                }
+            }
+
+            CounterIter :: {
+                fn next(inout self) -> u64 | ParseError | IterDone {
+                    if self.cur == self.fail_at {
+                        ParseError {}
+                    } else if self.cur < self.end {
+                        let value = self.cur;
+                        self.cur = self.cur + 1;
+                        value
+                    } else {
+                        IterDone {}
+                    }
+                }
+            }
+
+            fn main() -> u64 | ParseError {
+                let counter = Counter { cur: 1, end: 5, fail_at: 3 };
+                var sum: u64 = 0;
+                for n in counter {
+                    sum = sum + n;
+                }
+                sum
+            }
+        "#,
+    );
+    assert_eq!(run.status.code(), Some(106));
+    let stderr = String::from_utf8_lossy(&run.stderr);
+    assert!(
+        stderr.contains("Unhandled error in main: ParseError"),
+        "unexpected stderr: {stderr}"
+    );
+}
+
+#[test]
+fn test_for_protocol_fallible_iterable_requires_error_in_return() {
+    let entry_source = r#"
+        type ParseError = {}
+
+        type Counter = {
+            cur: u64,
+            end: u64,
+        }
+
+        type CounterIter = {
+            cur: u64,
+            end: u64,
+        }
+
+        Counter :: {
+            fn iter(self) -> CounterIter {
+                CounterIter { cur: self.cur, end: self.end }
+            }
+        }
+
+        CounterIter :: {
+            fn next(inout self) -> u64 | ParseError | IterDone {
+                if self.cur < self.end {
+                    let value = self.cur;
+                    self.cur = self.cur + 1;
+                    value
+                } else if self.cur == self.end {
+                    IterDone {}
+                } else {
+                    ParseError {}
+                }
+            }
+        }
+
+        fn main() {
+            let counter = Counter { cur: 0, end: 3 };
+            for n in counter {
+                println(n);
+            }
+        }
+    "#;
+
+    with_temp_program(
+        "for_protocol_fallible_missing_return_error",
+        entry_source,
+        &[],
+        |entry_path, entry_src| {
+            let result = check_with_modules(entry_path, entry_src);
+            assert!(
+                result.is_err(),
+                "compile should fail when for-loop propagation has no enclosing error union"
+            );
+            if let Err(errors) = result {
+                assert!(errors.iter().any(|err| {
+                    matches!(
+                        err,
+                        CompileError::TypeCheck(type_err)
+                            if matches!(
+                                type_err.kind(),
+                                TypeCheckErrorKind::TryReturnTypeNotErrorUnion(_)
+                            )
+                    )
+                }));
+            }
+        },
+    );
+}
+
+#[test]
 fn test_method_if_join_coerces_local_tail_into_error_union() {
     let run = run_program(
         "method_if_join_error_union_coercion",
@@ -1807,6 +1937,201 @@ fn test_for_protocol_adapter_iterable_builds_and_runs() {
 
     let stdout = String::from_utf8_lossy(&run.stdout);
     assert_eq!(stdout, "4\n5\n6\n15\n", "unexpected stdout: {stdout}");
+}
+
+#[test]
+fn test_string_iter_done_union_match_builds_and_runs() {
+    let run = run_program(
+        "string_iter_done_union_match",
+        r#"
+            fn make_done() -> string | IterDone {
+                IterDone {}
+            }
+
+            fn main() {
+                let step = make_done();
+                match step {
+                    line: string => println(line),
+                    done: IterDone => println("done"),
+                }
+            }
+        "#,
+    );
+    assert_eq!(run.status.code(), Some(0));
+
+    let stdout = String::from_utf8_lossy(&run.stdout);
+    assert_eq!(stdout, "done\n", "unexpected stdout: {stdout}");
+}
+
+#[test]
+fn test_for_protocol_string_iterable_builds_and_runs() {
+    let run = run_program(
+        "for_protocol_string_iterable",
+        r#"
+            requires {
+                std::io::IoError
+                std::io::open_read
+                std::io::open_write
+            }
+
+            type LineIter = {
+                lines: string[*],
+                index: u64,
+            }
+
+            LineIter :: {
+                fn iter(self) -> LineIter {
+                    self
+                }
+
+                fn next(inout self) -> string | IterDone {
+                    if self.index < self.lines.len {
+                        let line = self.lines[self.index];
+                        self.index = self.index + 1;
+                        line
+                    } else {
+                        IterDone {}
+                    }
+                }
+            }
+
+            fn main() -> () | IoError {
+                let path = "/tmp/machina_for_protocol_string_iterable.txt";
+
+                using writer = open_write(path)?.text() {
+                    writer.write_all("a\n")?;
+                    writer.write_all("b\n")?;
+                }
+
+                using reader = open_read(path)?.text() {
+                    let text = reader.read_all()?;
+                    let it = LineIter {
+                        lines: text.lines(),
+                        index: 0,
+                    };
+
+                    for line in it {
+                        println(line);
+                    }
+                }
+            }
+        "#,
+    );
+    assert_eq!(run.status.code(), Some(0));
+
+    let stdout = String::from_utf8_lossy(&run.stdout);
+    assert_eq!(stdout, "a\nb\n", "unexpected stdout: {stdout}");
+}
+
+#[test]
+fn test_typed_csv_iterator_pipeline_builds_and_runs() {
+    let run = run_program(
+        "typed_csv_iterator_pipeline",
+        r#"
+            requires {
+                std::io::IoError
+                std::io::open_read
+                std::io::open_write
+                std::parse as parse
+                std::parse::ParseError
+            }
+
+            type Row = {
+                name: string,
+                score: u64,
+            }
+
+            type CsvFields = {
+                values: string[*],
+            }
+
+            fn iter_fields(fields: CsvFields) -> CsvFields | IterDone {
+                fields
+            }
+
+            fn iter_done_fields() -> CsvFields | IterDone {
+                IterDone {}
+            }
+
+            type CsvFieldIter = {
+                lines: string[*],
+                index: u64,
+            }
+
+            CsvFieldIter :: {
+                fn iter(self) -> CsvFieldIter {
+                    self
+                }
+
+                fn next(inout self) -> CsvFields | IterDone {
+                    if self.index < self.lines.len {
+                        let line = self.lines[self.index];
+                        self.index = self.index + 1;
+                        iter_fields(CsvFields { values: line.split(",") })
+                    } else {
+                        iter_done_fields()
+                    }
+                }
+            }
+
+            type RowIter = {
+                source: CsvFieldIter,
+            }
+
+            RowIter :: {
+                fn iter(self) -> RowIter {
+                    self
+                }
+
+                fn next(inout self) -> Row | ParseError | IterDone {
+                    match self.source.next() {
+                        fields: CsvFields => {
+                            let [name_text, score_text, ...] = fields.values;
+                            let score = parse::parse_u64(score_text.trim())?;
+                            Row {
+                                name: name_text.trim(),
+                                score,
+                            }
+                        }
+                        done: IterDone => {
+                            IterDone {}
+                        }
+                    }
+                }
+            }
+
+            fn main() -> () | IoError | ParseError {
+                let path = "/tmp/machina_typed_csv_iterator_pipeline.txt";
+
+                using writer = open_write(path)?.text() {
+                    writer.write_all("name,score\n")?;
+                    writer.write_all("alice,10\n")?;
+                    writer.write_all("bob,42\n")?;
+                    writer.write_all("cara,7\n")?;
+                }
+
+                using reader = open_read(path)?.text() {
+                    let text = reader.read_all()?;
+                    let rows = RowIter {
+                        source: CsvFieldIter {
+                            lines: text.lines(),
+                            index: 1,
+                        },
+                    };
+
+                    for row in rows {
+                        if row.score > 9 {
+                            println(row.name);
+                        }
+                    }
+                }
+            }
+        "#,
+    );
+    assert_eq!(run.status.code(), Some(0));
+
+    let stdout = String::from_utf8_lossy(&run.stdout);
+    assert_eq!(stdout, "alice\nbob\n", "unexpected stdout: {stdout}");
 }
 
 #[test]

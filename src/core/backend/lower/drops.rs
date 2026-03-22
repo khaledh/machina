@@ -643,6 +643,13 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
         match drop_kind(ty) {
             DropKind::Trivial => return Ok(()),
             DropKind::Shallow => {
+                let full_ty = self.drop_glue.full_type_for(ty, self.type_map).unwrap_or(ty);
+                if is_truly_empty_nominal(full_ty) {
+                    return Ok(());
+                }
+                if !has_nontrivial_drop(full_ty) {
+                    return Ok(());
+                }
                 let def_id = self.drop_glue.def_id_for(ty, self.type_map);
                 let unit_ty = self.type_lowerer.lower_type(&Type::Unit);
                 let _ = self
@@ -1059,4 +1066,9 @@ fn is_shallow_named(ty: &Type) -> bool {
         }
         _ => false,
     }
+}
+
+fn is_truly_empty_nominal(ty: &Type) -> bool {
+    matches!(ty, Type::Struct { fields, .. } if fields.is_empty())
+        || matches!(ty, Type::Enum { variants, .. } if variants.is_empty())
 }

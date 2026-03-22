@@ -48,6 +48,7 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
                         .type_table()
                         .get(self.type_map.type_of(expr.id))
                         .clone();
+                    let value = self.prepare_owned_return_value(expr, value, &branch_sem_ty);
                     self.coerce_value(value, &branch_sem_ty, join_sem_ty)
                 } else {
                     value
