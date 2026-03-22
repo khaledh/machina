@@ -420,6 +420,166 @@ impl Type {
         matches!(self, Type::Int { .. })
     }
 
+    pub fn shape_eq(&self, other: &Type) -> bool {
+        match (self, other) {
+            (Type::Unknown, Type::Unknown) => true,
+            (Type::Unit, Type::Unit) => true,
+            (
+                Type::Int {
+                    signed: l_signed,
+                    bits: l_bits,
+                    bounds: l_bounds,
+                    nonzero: l_nonzero,
+                },
+                Type::Int {
+                    signed: r_signed,
+                    bits: r_bits,
+                    bounds: r_bounds,
+                    nonzero: r_nonzero,
+                },
+            ) => {
+                l_signed == r_signed
+                    && l_bits == r_bits
+                    && l_bounds == r_bounds
+                    && l_nonzero == r_nonzero
+            }
+            (Type::Bool, Type::Bool) => true,
+            (Type::Char, Type::Char) => true,
+            (Type::String, Type::String) => true,
+            (Type::Range { elem_ty: l }, Type::Range { elem_ty: r })
+            | (Type::Slice { elem_ty: l }, Type::Slice { elem_ty: r })
+            | (Type::DynArray { elem_ty: l }, Type::DynArray { elem_ty: r })
+            | (Type::Set { elem_ty: l }, Type::Set { elem_ty: r })
+            | (Type::Heap { elem_ty: l }, Type::Heap { elem_ty: r }) => l.shape_eq(r),
+            (
+                Type::Map {
+                    key_ty: l_key,
+                    value_ty: l_value,
+                },
+                Type::Map {
+                    key_ty: r_key,
+                    value_ty: r_value,
+                },
+            ) => l_key.shape_eq(r_key) && l_value.shape_eq(r_value),
+            (
+                Type::Ref {
+                    mutable: l_mut,
+                    elem_ty: l_elem,
+                },
+                Type::Ref {
+                    mutable: r_mut,
+                    elem_ty: r_elem,
+                },
+            ) => l_mut == r_mut && l_elem.shape_eq(r_elem),
+            (
+                Type::Fn {
+                    params: l_params,
+                    ret_ty: l_ret,
+                },
+                Type::Fn {
+                    params: r_params,
+                    ret_ty: r_ret,
+                },
+            ) => {
+                l_params.len() == r_params.len()
+                    && l_params
+                        .iter()
+                        .zip(r_params.iter())
+                        .all(|(l, r)| l.mode == r.mode && l.ty.shape_eq(&r.ty))
+                    && l_ret.shape_eq(r_ret)
+            }
+            (
+                Type::Array {
+                    elem_ty: l_elem,
+                    dims: l_dims,
+                },
+                Type::Array {
+                    elem_ty: r_elem,
+                    dims: r_dims,
+                },
+            ) => l_dims == r_dims && l_elem.shape_eq(r_elem),
+            (Type::Tuple { field_tys: l }, Type::Tuple { field_tys: r }) => {
+                l.len() == r.len() && l.iter().zip(r.iter()).all(|(l, r)| l.shape_eq(r))
+            }
+            (
+                Type::Struct {
+                    name: l_name,
+                    fields: l_fields,
+                },
+                Type::Struct {
+                    name: r_name,
+                    fields: r_fields,
+                },
+            ) => {
+                l_name == r_name
+                    && l_fields.len() == r_fields.len()
+                    && l_fields
+                        .iter()
+                        .zip(r_fields.iter())
+                        .all(|(l, r)| l.name == r.name && l.ty.shape_eq(&r.ty))
+            }
+            (
+                Type::Enum {
+                    name: l_name,
+                    variants: l_variants,
+                },
+                Type::Enum {
+                    name: r_name,
+                    variants: r_variants,
+                },
+            ) => {
+                l_name == r_name
+                    && l_variants.len() == r_variants.len()
+                    && l_variants.iter().zip(r_variants.iter()).all(|(l, r)| {
+                        l.name == r.name
+                            && l.payload.len() == r.payload.len()
+                            && l.payload
+                                .iter()
+                                .zip(r.payload.iter())
+                                .all(|(l, r)| l.shape_eq(r))
+                    })
+            }
+            (
+                Type::ErrorUnion {
+                    ok_ty: l_ok,
+                    err_tys: l_errs,
+                },
+                Type::ErrorUnion {
+                    ok_ty: r_ok,
+                    err_tys: r_errs,
+                },
+            ) => {
+                l_errs.len() == r_errs.len()
+                    && l_ok.shape_eq(r_ok)
+                    && l_errs.iter().zip(r_errs.iter()).all(|(l, r)| l.shape_eq(r))
+            }
+            (
+                Type::Pending {
+                    response_tys: l_responses,
+                },
+                Type::Pending {
+                    response_tys: r_responses,
+                },
+            )
+            | (
+                Type::ReplyCap {
+                    response_tys: l_responses,
+                },
+                Type::ReplyCap {
+                    response_tys: r_responses,
+                },
+            ) => {
+                l_responses.len() == r_responses.len()
+                    && l_responses
+                        .iter()
+                        .zip(r_responses.iter())
+                        .all(|(l, r)| l.shape_eq(r))
+            }
+            (Type::Var(l), Type::Var(r)) => l == r,
+            _ => false,
+        }
+    }
+
     pub fn int_signed_bits(&self) -> Option<(bool, u8)> {
         match self {
             Type::Int { signed, bits, .. } => Some((*signed, *bits)),

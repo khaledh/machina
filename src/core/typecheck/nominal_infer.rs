@@ -11,6 +11,7 @@ use crate::core::ast::*;
 use crate::core::context::ResolvedContext;
 use crate::core::resolve::{DefId, DefTable, ImportedFacts};
 use crate::core::typecheck::nominal::NominalKey;
+use crate::core::typecheck::template_bind::bind_template_type_vars;
 use crate::core::typecheck::type_map::{
     TypeDefLookup, TypeMap, resolve_type_def_with_args, resolve_type_expr,
 };
@@ -75,10 +76,7 @@ pub(crate) fn infer_type_args_from_instance(
     concrete: &Type,
     param_count: usize,
 ) -> Option<Vec<Type>> {
-    let mut bindings: HashMap<TyVarId, Type> = HashMap::new();
-    if !match_template_type(template, concrete, &mut bindings) {
-        return None;
-    }
+    let bindings = bind_template_type_vars(template, concrete)?;
 
     let mut args = Vec::with_capacity(param_count);
     for index in 0..param_count {
@@ -149,144 +147,6 @@ fn infer_nominal_key_from_templates(
         return None;
     }
     Some(best)
-}
-
-fn match_template_type(
-    template: &Type,
-    concrete: &Type,
-    bindings: &mut HashMap<TyVarId, Type>,
-) -> bool {
-    match (template, concrete) {
-        (Type::Var(var), concrete) => match bindings.get(var) {
-            Some(bound) => bound == concrete,
-            None => {
-                bindings.insert(*var, concrete.clone());
-                true
-            }
-        },
-        (Type::Unknown, Type::Unknown) => true,
-        (Type::Unit, Type::Unit) => true,
-        (
-            Type::Int {
-                signed: l_signed,
-                bits: l_bits,
-                bounds: l_bounds,
-                nonzero: l_nonzero,
-            },
-            Type::Int {
-                signed: r_signed,
-                bits: r_bits,
-                bounds: r_bounds,
-                nonzero: r_nonzero,
-            },
-        ) => {
-            l_signed == r_signed
-                && l_bits == r_bits
-                && l_bounds == r_bounds
-                && l_nonzero == r_nonzero
-        }
-        (Type::Bool, Type::Bool) => true,
-        (Type::Char, Type::Char) => true,
-        (Type::String, Type::String) => true,
-        (Type::Range { elem_ty: l }, Type::Range { elem_ty: r })
-        | (Type::Slice { elem_ty: l }, Type::Slice { elem_ty: r })
-        | (Type::DynArray { elem_ty: l }, Type::DynArray { elem_ty: r })
-        | (Type::Set { elem_ty: l }, Type::Set { elem_ty: r })
-        | (Type::Heap { elem_ty: l }, Type::Heap { elem_ty: r }) => {
-            match_template_type(l, r, bindings)
-        }
-        (
-            Type::Map {
-                key_ty: l_key,
-                value_ty: l_value,
-            },
-            Type::Map {
-                key_ty: r_key,
-                value_ty: r_value,
-            },
-        ) => {
-            match_template_type(l_key, r_key, bindings)
-                && match_template_type(l_value, r_value, bindings)
-        }
-        (
-            Type::Ref {
-                mutable: l_mut,
-                elem_ty: l_elem,
-            },
-            Type::Ref {
-                mutable: r_mut,
-                elem_ty: r_elem,
-            },
-        ) => *l_mut == *r_mut && match_template_type(l_elem, r_elem, bindings),
-        (
-            Type::Fn {
-                params: l_params,
-                ret_ty: l_ret,
-            },
-            Type::Fn {
-                params: r_params,
-                ret_ty: r_ret,
-            },
-        ) => {
-            l_params.len() == r_params.len()
-                && l_params
-                    .iter()
-                    .zip(r_params.iter())
-                    .all(|(l, r)| l.mode == r.mode && match_template_type(&l.ty, &r.ty, bindings))
-                && match_template_type(l_ret, r_ret, bindings)
-        }
-        (
-            Type::Array {
-                elem_ty: l_elem,
-                dims: l_dims,
-            },
-            Type::Array {
-                elem_ty: r_elem,
-                dims: r_dims,
-            },
-        ) => l_dims == r_dims && match_template_type(l_elem, r_elem, bindings),
-        (Type::Tuple { field_tys: l }, Type::Tuple { field_tys: r }) => {
-            l.len() == r.len()
-                && l.iter()
-                    .zip(r.iter())
-                    .all(|(lt, rt)| match_template_type(lt, rt, bindings))
-        }
-        (
-            Type::Struct {
-                fields: l_fields, ..
-            },
-            Type::Struct {
-                fields: r_fields, ..
-            },
-        ) => {
-            l_fields.len() == r_fields.len()
-                && l_fields.iter().zip(r_fields.iter()).all(|(lf, rf)| {
-                    lf.name == rf.name && match_template_type(&lf.ty, &rf.ty, bindings)
-                })
-        }
-        (
-            Type::Enum {
-                variants: l_variants,
-                ..
-            },
-            Type::Enum {
-                variants: r_variants,
-                ..
-            },
-        ) => {
-            l_variants.len() == r_variants.len()
-                && l_variants.iter().zip(r_variants.iter()).all(|(lv, rv)| {
-                    lv.name == rv.name
-                        && lv.payload.len() == rv.payload.len()
-                        && lv
-                            .payload
-                            .iter()
-                            .zip(rv.payload.iter())
-                            .all(|(lt, rt)| match_template_type(lt, rt, bindings))
-                })
-        }
-        _ => false,
-    }
 }
 
 #[derive(Debug, Clone)]

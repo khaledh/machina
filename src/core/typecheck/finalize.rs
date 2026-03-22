@@ -27,6 +27,7 @@ use crate::core::typecheck::engine::{
 use crate::core::typecheck::errors::TypeCheckError;
 use crate::core::typecheck::nominal_infer::NominalKeyResolver;
 use crate::core::typecheck::property_access;
+use crate::core::typecheck::template_bind::bind_template_type_vars;
 use crate::core::typecheck::type_map::{
     CallParam, CallSig, CallSigMap, GenericInst, GenericInstMap, TypeMap, TypeMapBuilder,
 };
@@ -1031,7 +1032,7 @@ fn instantiate_call_sig(
 
     let mut unifier = InferUnifier::new();
     if let (Some(receiver), Some(self_ty)) = (receiver.as_ref(), sig.self_ty.as_ref()) {
-        if let Some(receiver_bindings) = infer_receiver_type_var_bindings(self_ty, &receiver.ty) {
+        if let Some(receiver_bindings) = bind_template_type_vars(self_ty, &receiver.ty) {
             for (var, ty) in receiver_bindings {
                 let _ = unifier.unify(&Type::Var(var), &ty);
             }
@@ -1078,193 +1079,6 @@ fn instantiate_call_sig(
         receiver,
         params,
         inst,
-    }
-}
-
-fn infer_receiver_type_var_bindings(
-    template: &Type,
-    concrete: &Type,
-) -> Option<HashMap<TyVarId, Type>> {
-    let mut bindings = HashMap::new();
-    if collect_receiver_type_var_bindings(template, concrete, &mut bindings) {
-        Some(bindings)
-    } else {
-        None
-    }
-}
-
-fn collect_receiver_type_var_bindings(
-    template: &Type,
-    concrete: &Type,
-    bindings: &mut HashMap<TyVarId, Type>,
-) -> bool {
-    match (template, concrete) {
-        (Type::Var(var), concrete) => match bindings.get(var) {
-            Some(bound) => bound == concrete,
-            None => {
-                bindings.insert(*var, concrete.clone());
-                true
-            }
-        },
-        (Type::Unknown, Type::Unknown) => true,
-        (Type::Unit, Type::Unit) => true,
-        (
-            Type::Int {
-                signed: l_signed,
-                bits: l_bits,
-                bounds: l_bounds,
-                nonzero: l_nonzero,
-            },
-            Type::Int {
-                signed: r_signed,
-                bits: r_bits,
-                bounds: r_bounds,
-                nonzero: r_nonzero,
-            },
-        ) => {
-            l_signed == r_signed
-                && l_bits == r_bits
-                && l_bounds == r_bounds
-                && l_nonzero == r_nonzero
-        }
-        (Type::Bool, Type::Bool) => true,
-        (Type::Char, Type::Char) => true,
-        (Type::String, Type::String) => true,
-        (Type::Range { elem_ty: l }, Type::Range { elem_ty: r })
-        | (Type::Slice { elem_ty: l }, Type::Slice { elem_ty: r })
-        | (Type::DynArray { elem_ty: l }, Type::DynArray { elem_ty: r })
-        | (Type::Set { elem_ty: l }, Type::Set { elem_ty: r })
-        | (Type::Heap { elem_ty: l }, Type::Heap { elem_ty: r }) => {
-            collect_receiver_type_var_bindings(l, r, bindings)
-        }
-        (
-            Type::Map {
-                key_ty: l_key,
-                value_ty: l_value,
-            },
-            Type::Map {
-                key_ty: r_key,
-                value_ty: r_value,
-            },
-        ) => {
-            collect_receiver_type_var_bindings(l_key, r_key, bindings)
-                && collect_receiver_type_var_bindings(l_value, r_value, bindings)
-        }
-        (
-            Type::Ref {
-                mutable: l_mut,
-                elem_ty: l_elem,
-            },
-            Type::Ref {
-                mutable: r_mut,
-                elem_ty: r_elem,
-            },
-        ) => *l_mut == *r_mut && collect_receiver_type_var_bindings(l_elem, r_elem, bindings),
-        (
-            Type::Fn {
-                params: l_params,
-                ret_ty: l_ret,
-            },
-            Type::Fn {
-                params: r_params,
-                ret_ty: r_ret,
-            },
-        ) => {
-            l_params.len() == r_params.len()
-                && l_params.iter().zip(r_params.iter()).all(|(l, r)| {
-                    l.mode == r.mode && collect_receiver_type_var_bindings(&l.ty, &r.ty, bindings)
-                })
-                && collect_receiver_type_var_bindings(l_ret, r_ret, bindings)
-        }
-        (
-            Type::Array {
-                elem_ty: l_elem,
-                dims: l_dims,
-            },
-            Type::Array {
-                elem_ty: r_elem,
-                dims: r_dims,
-            },
-        ) => l_dims == r_dims && collect_receiver_type_var_bindings(l_elem, r_elem, bindings),
-        (Type::Tuple { field_tys: l }, Type::Tuple { field_tys: r }) => {
-            l.len() == r.len()
-                && l.iter()
-                    .zip(r.iter())
-                    .all(|(l, r)| collect_receiver_type_var_bindings(l, r, bindings))
-        }
-        (
-            Type::Struct {
-                fields: l_fields, ..
-            },
-            Type::Struct {
-                fields: r_fields, ..
-            },
-        ) => {
-            l_fields.len() == r_fields.len()
-                && l_fields.iter().zip(r_fields.iter()).all(|(l, r)| {
-                    l.name == r.name && collect_receiver_type_var_bindings(&l.ty, &r.ty, bindings)
-                })
-        }
-        (
-            Type::Enum {
-                variants: l_variants,
-                ..
-            },
-            Type::Enum {
-                variants: r_variants,
-                ..
-            },
-        ) => {
-            l_variants.len() == r_variants.len()
-                && l_variants.iter().zip(r_variants.iter()).all(|(l, r)| {
-                    l.name == r.name
-                        && l.payload.len() == r.payload.len()
-                        && l.payload
-                            .iter()
-                            .zip(r.payload.iter())
-                            .all(|(l, r)| collect_receiver_type_var_bindings(l, r, bindings))
-                })
-        }
-        (
-            Type::ErrorUnion {
-                ok_ty: l_ok,
-                err_tys: l_errs,
-            },
-            Type::ErrorUnion {
-                ok_ty: r_ok,
-                err_tys: r_errs,
-            },
-        ) => {
-            l_errs.len() == r_errs.len()
-                && collect_receiver_type_var_bindings(l_ok, r_ok, bindings)
-                && l_errs
-                    .iter()
-                    .zip(r_errs.iter())
-                    .all(|(l, r)| collect_receiver_type_var_bindings(l, r, bindings))
-        }
-        (
-            Type::Pending {
-                response_tys: l_responses,
-            },
-            Type::Pending {
-                response_tys: r_responses,
-            },
-        )
-        | (
-            Type::ReplyCap {
-                response_tys: l_responses,
-            },
-            Type::ReplyCap {
-                response_tys: r_responses,
-            },
-        ) => {
-            l_responses.len() == r_responses.len()
-                && l_responses
-                    .iter()
-                    .zip(r_responses.iter())
-                    .all(|(l, r)| collect_receiver_type_var_bindings(l, r, bindings))
-        }
-        _ => false,
     }
 }
 

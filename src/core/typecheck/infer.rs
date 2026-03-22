@@ -129,7 +129,7 @@ impl InferUnifier {
     /// compound types by matching their structure.
     fn unify_inner(&mut self, left: Type, right: Type) -> Result<(), InferUnifyError> {
         // Fast path: identical types always unify
-        if infer_types_fast_equal(&left, &right) {
+        if left.shape_eq(&right) {
             return Ok(());
         }
 
@@ -392,7 +392,7 @@ impl InferUnifier {
         right: Type,
         is_infer: fn(TyVarId) -> bool,
     ) -> Result<(), InferUnifyError> {
-        if infer_types_fast_equal(&left, &right) {
+        if left.shape_eq(&right) {
             return Ok(());
         }
 
@@ -637,13 +637,4 @@ impl InferUnifier {
     fn occurs_in(&self, var: TyVarId, ty: &Type) -> bool {
         ty.any(&|t| matches!(t, Type::Var(v) if *v == var))
     }
-}
-
-fn infer_types_fast_equal(left: &Type, right: &Type) -> bool {
-    if matches!(left, Type::Struct { .. } | Type::Enum { .. })
-        || matches!(right, Type::Struct { .. } | Type::Enum { .. })
-    {
-        return false;
-    }
-    left == right
 }

@@ -13,6 +13,7 @@ pub(crate) mod nominal;
 mod nominal_infer;
 mod property_access;
 mod solver;
+mod template_bind;
 pub mod type_map;
 pub(crate) mod type_view;
 mod typesys;

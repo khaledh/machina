@@ -167,3 +167,87 @@ fn test_infer_type_args_from_instance_allows_var_bindings() {
         .expect("expected inferred var type args");
     assert_eq!(args, vec![Type::Var(TyVarId::new(42))]);
 }
+
+#[test]
+fn test_infer_type_args_from_instance_rejects_conflicting_repeated_bindings() {
+    let template = Type::Struct {
+        name: "Pair<T0>".to_string(),
+        fields: vec![
+            StructField {
+                name: "left".to_string(),
+                ty: Type::Var(TyVarId::new(0)),
+            },
+            StructField {
+                name: "right".to_string(),
+                ty: Type::Var(TyVarId::new(0)),
+            },
+        ],
+    };
+    let concrete = Type::Struct {
+        name: "Pair<u64>".to_string(),
+        fields: vec![
+            StructField {
+                name: "left".to_string(),
+                ty: Type::uint(64),
+            },
+            StructField {
+                name: "right".to_string(),
+                ty: Type::sint(32),
+            },
+        ],
+    };
+
+    let args = infer_type_args_from_instance(&template, &concrete, 1);
+    assert!(
+        args.is_none(),
+        "expected conflicting repeated template binding to fail"
+    );
+}
+
+#[test]
+fn test_infer_type_args_from_instance_rejects_conflicting_repeated_nominal_bindings() {
+    let template = Type::Struct {
+        name: "Pair<T0>".to_string(),
+        fields: vec![
+            StructField {
+                name: "left".to_string(),
+                ty: Type::Var(TyVarId::new(0)),
+            },
+            StructField {
+                name: "right".to_string(),
+                ty: Type::Var(TyVarId::new(0)),
+            },
+        ],
+    };
+    let concrete = Type::Struct {
+        name: "Pair<Box<u64>>".to_string(),
+        fields: vec![
+            StructField {
+                name: "left".to_string(),
+                ty: Type::Struct {
+                    name: "Box<u64>".to_string(),
+                    fields: vec![StructField {
+                        name: "value".to_string(),
+                        ty: Type::uint(64),
+                    }],
+                },
+            },
+            StructField {
+                name: "right".to_string(),
+                ty: Type::Struct {
+                    name: "Box<u64>".to_string(),
+                    fields: vec![StructField {
+                        name: "value".to_string(),
+                        ty: Type::String,
+                    }],
+                },
+            },
+        ],
+    };
+
+    let args = infer_type_args_from_instance(&template, &concrete, 1);
+    assert!(
+        args.is_none(),
+        "expected conflicting repeated nominal template binding to fail"
+    );
+}

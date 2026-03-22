@@ -31,3 +31,57 @@ fn test_map_cow_rewrites_only_when_needed() {
         }
     );
 }
+
+#[test]
+fn test_type_shape_eq_distinguishes_nominal_shapes_with_same_name() {
+    let left = Type::Struct {
+        name: "Box<u64>".to_string(),
+        fields: vec![StructField {
+            name: "value".to_string(),
+            ty: Type::uint(64),
+        }],
+    };
+    let right = Type::Struct {
+        name: "Box<u64>".to_string(),
+        fields: vec![StructField {
+            name: "value".to_string(),
+            ty: Type::String,
+        }],
+    };
+
+    assert_eq!(
+        left, right,
+        "shallow nominal equality should remain unchanged"
+    );
+    assert!(
+        !left.shape_eq(&right),
+        "shape equality should see through nominal field differences"
+    );
+}
+
+#[test]
+fn test_type_shape_eq_recurse_through_nested_nominals() {
+    let left = Type::Tuple {
+        field_tys: vec![Type::Struct {
+            name: "Box<u64>".to_string(),
+            fields: vec![StructField {
+                name: "value".to_string(),
+                ty: Type::uint(64),
+            }],
+        }],
+    };
+    let right = Type::Tuple {
+        field_tys: vec![Type::Struct {
+            name: "Box<u64>".to_string(),
+            fields: vec![StructField {
+                name: "value".to_string(),
+                ty: Type::String,
+            }],
+        }],
+    };
+
+    assert!(
+        !left.shape_eq(&right),
+        "shape equality should recurse through containing types"
+    );
+}
