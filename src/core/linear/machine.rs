@@ -1187,6 +1187,7 @@ fn build_machine_handle_send_method_block(
     Some(TopLevelItem::MethodBlock(MethodBlock {
         id: node_id_gen.new_id(),
         type_name: info.handle_type_name.clone(),
+        type_args: Vec::new(),
         trait_name: None,
         method_items,
         span: Span::default(),

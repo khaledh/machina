@@ -2675,6 +2675,26 @@ fn test_parse_method_decl() {
 }
 
 #[test]
+fn test_parse_generic_method_block() {
+    let source = r#"
+        type Box<T> = { value: T }
+        Box<T> :: {
+            fn value_of(self) -> T { self.value }
+        }
+    "#;
+    let module = parse_module(source).expect("Failed to parse");
+    let method_blocks = module.method_blocks();
+
+    assert_eq!(method_blocks.len(), 1);
+    assert_eq!(method_blocks[0].type_name, "Box");
+    assert_eq!(method_blocks[0].type_args.len(), 1);
+    assert!(matches!(
+        method_blocks[0].type_args[0].kind,
+        TypeExprKind::Named { ref ident, ref type_args } if ident == "T" && type_args.is_empty()
+    ));
+}
+
+#[test]
 fn test_parse_attr_on_method_block_rejected() {
     let source = "@intrinsic Foo :: { fn bar(self) { 1 } }";
     let result = parse_module(source);

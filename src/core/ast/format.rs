@@ -429,6 +429,15 @@ impl MethodBlock {
         writeln!(f, "{}MethodBlock [{}]", pad, self.id)?;
         let pad1 = indent(level + 1);
         writeln!(f, "{}Type: {}", pad1, self.type_name)?;
+        if !self.type_args.is_empty() {
+            let args = self
+                .type_args
+                .iter()
+                .map(|arg| format!("{}", arg.kind))
+                .collect::<Vec<_>>()
+                .join(", ");
+            writeln!(f, "{}TypeArgs: {}", pad1, args)?;
+        }
         if let Some(trait_name) = &self.trait_name {
             writeln!(f, "{}Trait: {}", pad1, trait_name)?;
         }

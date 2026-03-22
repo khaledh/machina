@@ -1940,6 +1940,151 @@ fn test_for_protocol_adapter_iterable_builds_and_runs() {
 }
 
 #[test]
+fn test_generic_method_block_typechecks() {
+    let source = r#"
+        requires {
+            std::io::println
+        }
+
+        type Box<T> = {
+            value: T,
+        }
+
+        Box<T> :: {
+            fn value_of(self) -> T {
+                self.value
+            }
+        }
+
+        fn main() {
+            let boxed = Box<u64> { value: 7 };
+            let value: u64 = boxed.value_of();
+            println(value);
+        }
+    "#;
+    let result = check_with_path(
+        source,
+        Path::new("/tmp/generic_method_block_typechecks.mc"),
+        true,
+    );
+    assert!(result.is_ok(), "unexpected diagnostics: {:?}", result.err());
+}
+
+#[test]
+fn test_generic_method_block_builds_and_runs() {
+    let run = run_program(
+        "generic_method_block_builds_and_runs",
+        r#"
+            requires {
+                std::io::println
+            }
+
+            type Box<T> = {
+                value: T,
+            }
+
+            Box<T> :: {
+                fn value_of(self) -> T {
+                    self.value
+                }
+            }
+
+            fn main() {
+                let boxed = Box<u64> { value: 7 };
+                println(boxed.value_of());
+            }
+        "#,
+    );
+    assert_eq!(run.status.code(), Some(0));
+
+    let stdout = String::from_utf8_lossy(&run.stdout);
+    assert_eq!(stdout, "7\n", "unexpected stdout: {stdout}");
+}
+
+#[test]
+fn test_generic_map_iter_adapter_builds_and_runs() {
+    let run = run_program(
+        "generic_map_iter_adapter_builds_and_runs",
+        r#"
+            requires {
+                std::io::println
+            }
+
+            type Counter = {
+                cur: u64,
+                end: u64,
+            }
+
+            type CounterIter = {
+                cur: u64,
+                end: u64,
+            }
+
+            Counter :: {
+                fn iter(self) -> CounterIter {
+                    CounterIter { cur: self.cur, end: self.end }
+                }
+            }
+
+            CounterIter :: {
+                fn next(inout self) -> u64 | IterDone {
+                    if self.cur < self.end {
+                        let value = self.cur;
+                        self.cur = self.cur + 1;
+                        value
+                    } else {
+                        IterDone {}
+                    }
+                }
+            }
+
+            type MapIter<S, In, Out> = {
+                source: S,
+                f: fn(In) -> Out,
+            }
+
+            MapIter<S, In, Out> :: {
+                fn iter(self) -> MapIter<S, In, Out> {
+                    self
+                }
+
+                fn next(inout self) -> Out | IterDone {
+                    match self.source.next() {
+                        item: In => {
+                            let f = self.f;
+                            f(item)
+                        },
+                        done: IterDone => IterDone {},
+                    }
+                }
+            }
+
+            fn double(n: u64) -> u64 { n * 2 }
+
+            fn map_values<S, In, Out>(
+                source: S,
+                f: fn(In) -> Out,
+            ) -> MapIter<S, In, Out> {
+                MapIter { source, f }
+            }
+
+            fn main() {
+                let counter = Counter { cur: 2, end: 5 };
+                let mapped: MapIter<CounterIter, u64, u64> =
+                    map_values(counter.iter(), double);
+                for n in mapped {
+                    println(n);
+                }
+            }
+        "#,
+    );
+    assert_eq!(run.status.code(), Some(0));
+
+    let stdout = String::from_utf8_lossy(&run.stdout);
+    assert_eq!(stdout, "4\n6\n8\n", "unexpected stdout: {stdout}");
+}
+
+#[test]
 fn test_string_iter_done_union_match_builds_and_runs() {
     let run = run_program(
         "string_iter_done_union_match",

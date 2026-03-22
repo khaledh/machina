@@ -5,7 +5,7 @@ use std::collections::HashMap;
 use crate::core::ast::visit_mut::{VisitorMut, walk_type_expr};
 use crate::core::ast::*;
 use crate::core::diag::Span;
-use crate::core::resolve::{DefId, DefTable};
+use crate::core::resolve::{DefId, DefKind, DefTable};
 use crate::core::typecheck::type_map::GenericInst;
 use crate::core::types::{FnParamMode, Type};
 
@@ -38,12 +38,17 @@ pub(super) fn apply_inst_to_func_decl(
 }
 
 pub(super) fn apply_inst_to_method_def(
+    receiver_type_args: &[TypeExpr],
     method_def: &mut MethodDef,
     inst: &GenericInst,
     def_table: &DefTable,
     node_id_gen: &mut NodeIdGen,
 ) -> Result<(), MonomorphizeError> {
-    let subst = build_subst(&method_def.sig.type_params, inst, def_table)?;
+    let type_params = method_block_type_params(def_table, receiver_type_args)
+        .into_iter()
+        .chain(method_def.sig.type_params.iter().cloned())
+        .collect::<Vec<_>>();
+    let subst = build_subst(&type_params, inst, def_table)?;
     method_def.sig.type_params.clear();
     let mut substituter = TypeExprSubstitutor::new(&subst, def_table, node_id_gen);
     substituter.visit_method_def(method_def);
@@ -51,16 +56,87 @@ pub(super) fn apply_inst_to_method_def(
 }
 
 pub(super) fn apply_inst_to_method_decl(
+    receiver_type_args: &[TypeExpr],
     method_decl: &mut MethodDecl,
     inst: &GenericInst,
     def_table: &DefTable,
     node_id_gen: &mut NodeIdGen,
 ) -> Result<(), MonomorphizeError> {
-    let subst = build_subst(&method_decl.sig.type_params, inst, def_table)?;
+    let type_params = method_block_type_params(def_table, receiver_type_args)
+        .into_iter()
+        .chain(method_decl.sig.type_params.iter().cloned())
+        .collect::<Vec<_>>();
+    let subst = build_subst(&type_params, inst, def_table)?;
     method_decl.sig.type_params.clear();
     let mut substituter = TypeExprSubstitutor::new(&subst, def_table, node_id_gen);
     substituter.visit_method_decl(method_decl);
     substituter.finish()
+}
+
+pub(super) fn apply_inst_to_method_block(
+    method_block: &mut MethodBlock,
+    receiver_inst_args: &[Type],
+    def_table: &DefTable,
+    node_id_gen: &mut NodeIdGen,
+) -> Result<(), MonomorphizeError> {
+    let type_params = method_block_type_params(def_table, &method_block.type_args);
+    if type_params.is_empty() {
+        return Ok(());
+    }
+
+    if type_params.len() != receiver_inst_args.len() {
+        return Err(MonomorphizeErrorKind::ArityMismatch {
+            name: method_block.type_name.clone(),
+            expected: type_params.len(),
+            got: receiver_inst_args.len(),
+        }
+        .at(method_block.span));
+    }
+    let subst = type_params
+        .iter()
+        .zip(receiver_inst_args.iter().cloned())
+        .map(|(param, ty)| (def_table.def_id(param.id), ty))
+        .collect::<HashMap<_, _>>();
+    let mut substituter = TypeExprSubstitutor::new(&subst, def_table, node_id_gen);
+    for type_arg in &mut method_block.type_args {
+        substituter.visit_type_expr(type_arg);
+    }
+    substituter.finish()
+}
+
+pub(super) fn method_block_type_param_count(
+    def_table: &DefTable,
+    receiver_type_args: &[TypeExpr],
+) -> usize {
+    method_block_type_params(def_table, receiver_type_args).len()
+}
+
+fn method_block_type_params(
+    def_table: &DefTable,
+    receiver_type_args: &[TypeExpr],
+) -> Vec<TypeParam> {
+    receiver_type_args
+        .iter()
+        .filter_map(|type_arg| {
+            let TypeExprKind::Named { ident, type_args } = &type_arg.kind else {
+                return None;
+            };
+            if !type_args.is_empty() {
+                return None;
+            }
+            let def_id = def_table.lookup_node_def_id(type_arg.id)?;
+            let def = def_table.lookup_def(def_id)?;
+            if !matches!(def.kind, DefKind::TypeParam) {
+                return None;
+            }
+            Some(TypeParam {
+                id: type_arg.id,
+                ident: ident.clone(),
+                bound: None,
+                span: type_arg.span,
+            })
+        })
+        .collect()
 }
 
 fn build_subst(

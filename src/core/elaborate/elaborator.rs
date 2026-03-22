@@ -213,6 +213,7 @@ impl<'a> Elaborator<'a> {
             TopLevelItem::MethodBlock(block) => Some(TopLevelItem::MethodBlock(MethodBlock {
                 id: block.id,
                 type_name: block.type_name.clone(),
+                type_args: block.type_args.clone(),
                 trait_name: block.trait_name.clone(),
                 method_items: block
                     .method_items

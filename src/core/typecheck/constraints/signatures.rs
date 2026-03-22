@@ -1,7 +1,7 @@
 //! Function/method/closure signature collection helpers.
 
 use super::*;
-use crate::core::ast::{FunctionSig, Param, TypeExprKind};
+use crate::core::ast::{FunctionSig, MethodBlock, Param, TypeExpr, TypeExprKind};
 use crate::core::types::FnParam;
 
 impl<'a> ConstraintCollector<'a> {
@@ -48,10 +48,10 @@ impl<'a> ConstraintCollector<'a> {
 
     pub(super) fn collect_method_signature(
         &self,
-        type_name: &str,
+        method_block: &MethodBlock,
         sig: &MethodSig,
     ) -> Option<Type> {
-        let self_ty = self.type_defs.get(type_name).cloned()?;
+        let self_ty = self.resolve_method_block_self_type(method_block)?;
         let tail_params = self.resolve_fn_params(&sig.params)?;
         let mut params = Vec::with_capacity(sig.params.len() + 1);
         params.push(FnParam {
@@ -82,6 +82,21 @@ impl<'a> ConstraintCollector<'a> {
             params,
             ret_ty: Box::new(ret_ty),
         })
+    }
+
+    pub(super) fn resolve_method_block_self_type(
+        &self,
+        method_block: &MethodBlock,
+    ) -> Option<Type> {
+        let self_ty_expr = TypeExpr {
+            id: method_block.id,
+            kind: TypeExprKind::Named {
+                ident: method_block.type_name.clone(),
+                type_args: method_block.type_args.clone(),
+            },
+            span: method_block.span,
+        };
+        self.resolve_type_in_scope(&self_ty_expr).ok()
     }
 }
 

@@ -14,8 +14,8 @@ use std::collections::{HashMap, HashSet};
 
 use crate::core::ast::ParamMode;
 use crate::core::ast::{
-    Attribute, EnumDefVariant, FunctionSig, MethodItem, MethodSig, Param, StructDefField, TypeDef,
-    TypeDefKind, TypeParam,
+    Attribute, EnumDefVariant, FunctionSig, MethodBlock, MethodItem, MethodSig, Param,
+    StructDefField, TypeDef, TypeDefKind, TypeExpr, TypeExprKind, TypeParam,
 };
 use crate::core::context::ResolvedContext;
 use crate::core::diag::Span;
@@ -327,6 +327,8 @@ fn collect_function_sigs(
             &sig,
             None,
             None,
+            None,
+            &[],
             func_sigs.entry(sig.name.clone()).or_default(),
             generic_envs,
             errors,
@@ -393,13 +395,22 @@ fn collect_method_sigs(
             let accessor_kind = property_accessor_kind(&attrs);
 
             let mut collected = Vec::new();
+            let receiver_type_params = method_block_type_params(ctx, method_block);
+            let self_ty = resolve_method_block_self_type(
+                ctx,
+                imported_facts,
+                method_block,
+                &receiver_type_params,
+            );
             collect_callable_sig(
                 ctx,
                 imported_facts,
                 def_id,
                 &function_sig_from_method(&sig),
+                self_ty,
                 Some(sig.self_param.mode.clone()),
                 method_block.trait_name.clone(),
+                &receiver_type_params,
                 &mut collected,
                 generic_envs,
                 errors,
@@ -549,16 +560,23 @@ fn collect_callable_sig(
     imported_facts: &ImportedFacts,
     def_id: DefId,
     sig: &FunctionSig,
+    self_ty: Option<Type>,
     self_mode: Option<ParamMode>,
     impl_trait: Option<String>,
+    receiver_type_params: &[TypeParam],
     out: &mut Vec<CollectedCallableSig>,
     generic_envs: &mut HashMap<DefId, HashMap<DefId, TyVarId>>,
     errors: &mut Vec<TypeCheckError>,
 ) {
-    let type_param_map = if sig.type_params.is_empty() {
+    let all_type_params = receiver_type_params
+        .iter()
+        .cloned()
+        .chain(sig.type_params.iter().cloned())
+        .collect::<Vec<_>>();
+    let type_param_map = if all_type_params.is_empty() {
         None
     } else {
-        let map = type_param_map(&ctx.def_table, &sig.type_params);
+        let map = type_param_map(&ctx.def_table, &all_type_params);
         generic_envs.insert(def_id, map.clone());
         Some(map)
     };
@@ -587,11 +605,11 @@ fn collect_callable_sig(
 
     out.push(CollectedCallableSig {
         def_id,
+        self_ty,
         params,
         ret_ty,
-        type_param_count: sig.type_params.len(),
-        type_param_var_names: sig
-            .type_params
+        type_param_count: all_type_params.len(),
+        type_param_var_names: all_type_params
             .iter()
             .filter_map(|type_param| {
                 let var = type_param_map
@@ -605,10 +623,65 @@ fn collect_callable_sig(
                 Some((var.index(), type_param.ident.clone()))
             })
             .collect(),
-        type_param_bounds: type_param_bounds(&sig.type_params),
+        type_param_bounds: type_param_bounds(&all_type_params),
         self_mode,
         impl_trait,
     });
+}
+
+fn resolve_method_block_self_type(
+    ctx: &ResolvedContext,
+    imported_facts: &ImportedFacts,
+    method_block: &MethodBlock,
+    receiver_type_params: &[TypeParam],
+) -> Option<Type> {
+    let type_lookup = ResolvedTypeLookup::new(ctx, imported_facts);
+    let type_param_map = if receiver_type_params.is_empty() {
+        None
+    } else {
+        Some(type_param_map(&ctx.def_table, receiver_type_params))
+    };
+    let self_ty_expr = TypeExpr {
+        id: method_block.id,
+        kind: TypeExprKind::Named {
+            ident: method_block.type_name.clone(),
+            type_args: method_block.type_args.clone(),
+        },
+        span: method_block.span,
+    };
+    resolve_type_expr_with_params(
+        &ctx.def_table,
+        &type_lookup,
+        &self_ty_expr,
+        type_param_map.as_ref(),
+    )
+    .ok()
+}
+
+fn method_block_type_params(ctx: &ResolvedContext, method_block: &MethodBlock) -> Vec<TypeParam> {
+    method_block
+        .type_args
+        .iter()
+        .filter_map(|type_arg| {
+            let TypeExprKind::Named { ident, type_args } = &type_arg.kind else {
+                return None;
+            };
+            if !type_args.is_empty() {
+                return None;
+            }
+            let def_id = ctx.def_table.lookup_node_def_id(type_arg.id)?;
+            let def = ctx.def_table.lookup_def(def_id)?;
+            if def.kind != crate::core::resolve::DefKind::TypeParam {
+                return None;
+            }
+            Some(TypeParam {
+                id: type_arg.id,
+                ident: ident.clone(),
+                bound: None,
+                span: type_arg.span,
+            })
+        })
+        .collect()
 }
 
 fn collect_trait_method_sig(

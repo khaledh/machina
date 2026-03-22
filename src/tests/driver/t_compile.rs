@@ -935,9 +935,12 @@ fn untouched() -> u64 {
         "fixture should trigger generic instantiation"
     );
 
-    let (monomorphized, _stats, plan) =
-        monomorphize_with_plan(resolved_context, &type_checked_context.generic_insts)
-            .expect("monomorphize with plan");
+    let (monomorphized, _stats, plan) = monomorphize_with_plan(
+        resolved_context,
+        &type_checked_context.generic_insts,
+        &type_checked_context.for_plans,
+    )
+    .expect("monomorphize with plan");
     let sparse = build_retype_context(&monomorphized, &plan.retype_def_ids);
 
     let mut saw_id_def = false;

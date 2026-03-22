@@ -3,6 +3,7 @@
 //! Centralizes type-assignability unification and ranking logic used by
 //! constraint solving and call overload selection.
 
+use crate::core::typecheck::typesys::TypeVarKind;
 use crate::core::typecheck::unify::{TcUnifier, TcUnifyError};
 use crate::core::types::{Type, TypeAssignability, array_to_slice_assignable, type_assignable};
 
@@ -15,6 +16,22 @@ pub(super) fn solve_assignable(
     let to_raw = super::term_utils::canonicalize_type(to.clone());
     let from_applied = super::term_utils::canonicalize_type(unifier.apply(&from_raw));
     let to_applied = super::term_utils::canonicalize_type(unifier.apply(&to_raw));
+
+    if let Type::ErrorUnion { ok_ty, .. } = &to_applied
+        && let Type::Var(var) = &from_applied
+    {
+        // Defer binding a general expression term to the full union. This
+        // lets the expression first resolve to its payload type, after which
+        // later assignability checks can widen it into the union naturally.
+        // Keep integer literals contextual by still steering infer-int vars
+        // toward the union's success type.
+        if matches!(unifier.vars().kind(*var), Some(TypeVarKind::InferInt))
+            && super::term_utils::is_int_like(ok_ty)
+        {
+            let _ = unifier.unify(&from_applied, ok_ty);
+        }
+        return Ok(());
+    }
 
     if let Some(result) = infer_array_to_slice_assignability(&from_applied, &to_applied, unifier) {
         return result;
@@ -47,6 +64,26 @@ pub(super) fn solve_assignable(
             }
             _ => Ok(()),
         };
+    }
+
+    if let Type::ErrorUnion { ok_ty, err_tys } = &to_applied
+        && !super::term_utils::is_unresolved(&from_applied)
+    {
+        let matches_known_variant = (!super::term_utils::is_unresolved(ok_ty)
+            && !matches!(
+                type_assignable(&from_applied, ok_ty),
+                TypeAssignability::Incompatible
+            ))
+            || err_tys.iter().any(|err_ty| {
+                !super::term_utils::is_unresolved(err_ty)
+                    && !matches!(
+                        type_assignable(&from_applied, err_ty),
+                        TypeAssignability::Incompatible
+                    )
+            });
+        if matches_known_variant {
+            return Ok(());
+        }
     }
 
     unifier.unify(&erase_refinements(&from_raw), &erase_refinements(&to_raw))

@@ -8,6 +8,7 @@ use crate::core::ast::*;
 use crate::core::capsule::ModuleId;
 use crate::core::context::{ResolvedContext, TypeCheckedContext};
 use crate::core::diag::{Span, SpannedError};
+use crate::core::plans::{ForKernel, ForPlanMap};
 use crate::core::resolve::{DefId, attach_def_owners};
 use crate::core::typecheck::TypeCheckError;
 use crate::core::typecheck::type_map::{GenericInst, GenericInstMap};
@@ -20,8 +21,8 @@ use reseed::{
 };
 use retype::retype_after_monomorphize;
 use subst::{
-    apply_inst_to_func_decl, apply_inst_to_func_def, apply_inst_to_method_decl,
-    apply_inst_to_method_def, def_name,
+    apply_inst_to_func_decl, apply_inst_to_func_def, apply_inst_to_method_block,
+    apply_inst_to_method_decl, apply_inst_to_method_def, def_name, method_block_type_param_count,
 };
 use thiserror::Error;
 
@@ -36,6 +37,13 @@ pub struct MonomorphizeStats {
 pub struct MonomorphizePlan {
     pub retype_def_ids: HashSet<DefId>,
     pub call_rewrites: HashMap<NodeId, DefId>,
+    pub for_plan_rewrites: HashMap<NodeId, ProtocolForRewrite>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ProtocolForRewrite {
+    pub iter_method: DefId,
+    pub next_method: DefId,
 }
 
 #[derive(Debug)]
@@ -83,7 +91,9 @@ pub fn monomorphize(
     top_level_owners: Option<&HashMap<NodeId, ModuleId>>,
 ) -> Result<(ResolvedContext, TypeCheckedContext, MonomorphizeStats), MonomorphizePipelineError> {
     // Fast-path: no generic call instantiations requested by typecheck.
-    if first_pass_typed.generic_insts.is_empty() {
+    if first_pass_typed.generic_insts.is_empty()
+        && !for_plans_require_monomorphization(&first_pass_typed.for_plans)
+    {
         return Ok((
             resolved_context,
             first_pass_typed,
@@ -92,9 +102,12 @@ pub fn monomorphize(
     }
 
     // 1) Clone specialized defs/decls and rewrite callsites to point to clones.
-    let (monomorphized_context, stats, plan) =
-        monomorphize_with_plan(resolved_context, &first_pass_typed.generic_insts)
-            .map_err(MonomorphizePipelineError::Monomorphize)?;
+    let (monomorphized_context, stats, plan) = monomorphize_with_plan(
+        resolved_context,
+        &first_pass_typed.generic_insts,
+        &first_pass_typed.for_plans,
+    )
+    .map_err(MonomorphizePipelineError::Monomorphize)?;
 
     // 2) Recompute def->owner map for cloned defs in multi-module capsules.
     let monomorphized_context = if let Some(owners) = top_level_owners {
@@ -115,7 +128,7 @@ pub(crate) fn monomorphize_resolved(
     ctx: ResolvedContext,
     generic_insts: &GenericInstMap,
 ) -> Result<ResolvedContext, MonomorphizeError> {
-    let (ctx, _stats, _plan) = monomorphize_with_plan(ctx, generic_insts)?;
+    let (ctx, _stats, _plan) = monomorphize_with_plan(ctx, generic_insts, &ForPlanMap::default())?;
     Ok(ctx)
 }
 
@@ -124,13 +137,14 @@ pub(crate) fn monomorphize_resolved_with_stats(
     ctx: ResolvedContext,
     generic_insts: &GenericInstMap,
 ) -> Result<(ResolvedContext, MonomorphizeStats), MonomorphizeError> {
-    let (ctx, stats, _plan) = monomorphize_with_plan(ctx, generic_insts)?;
+    let (ctx, stats, _plan) = monomorphize_with_plan(ctx, generic_insts, &ForPlanMap::default())?;
     Ok((ctx, stats))
 }
 
 pub(crate) fn monomorphize_with_plan(
     ctx: ResolvedContext,
     generic_insts: &GenericInstMap,
+    for_plans: &ForPlanMap,
 ) -> Result<(ResolvedContext, MonomorphizeStats, MonomorphizePlan), MonomorphizeError> {
     let ResolvedContext {
         mut module,
@@ -142,12 +156,13 @@ pub(crate) fn monomorphize_with_plan(
     let symbol_ids = tables.symbol_ids;
     let mut node_id_gen = tables.node_id_gen;
     let linear_index = tables.linear_index;
+    let protocol_inst_reqs = collect_protocol_for_instantiations(for_plans);
     let mut stats = MonomorphizeStats {
-        requested_instantiations: generic_insts.len(),
+        requested_instantiations: generic_insts.len() + protocol_inst_reqs.len(),
         ..MonomorphizeStats::default()
     };
 
-    if generic_insts.is_empty() {
+    if generic_insts.is_empty() && protocol_inst_reqs.is_empty() {
         let symbols = crate::core::codegen_names::CodegenNameTable::new(&module, &def_table);
         return Ok((
             ResolvedContext {
@@ -171,6 +186,11 @@ pub(crate) fn monomorphize_with_plan(
     // of the same instantiation only clone once.
     let mut unique_inst_reqs: HashMap<InstKey, GenericInst> = HashMap::new();
     for inst in generic_insts.values() {
+        unique_inst_reqs
+            .entry(inst_key_for_inst(inst))
+            .or_insert_with(|| inst.clone());
+    }
+    for (_, inst) in &protocol_inst_reqs {
         unique_inst_reqs
             .entry(inst_key_for_inst(inst))
             .or_insert_with(|| inst.clone());
@@ -219,6 +239,7 @@ pub(crate) fn monomorphize_with_plan(
             call_inst_map.insert(*call_id, *def_id);
         }
     }
+    let for_plan_rewrites = collect_protocol_for_rewrites(for_plans, &inst_to_def);
 
     let mut new_items = Vec::with_capacity(module.top_level_items.len());
 
@@ -293,11 +314,18 @@ pub(crate) fn monomorphize_with_plan(
                 }
             }
             TopLevelItem::MethodBlock(method_block) => {
+                let receiver_type_args = method_block.type_args.clone();
+                let receiver_type_param_count =
+                    method_block_type_param_count(&def_table, &receiver_type_args);
                 let mut kept_items = Vec::with_capacity(method_block.method_items.len());
+                let mut specialized_blocks: Vec<MethodBlock> = Vec::new();
+                let mut specialized_block_indices: HashMap<Vec<Type>, usize> = HashMap::new();
                 for mut method_item in method_block.method_items.drain(..) {
                     match &mut method_item {
                         MethodItem::Def(method_def) => {
-                            if method_def.sig.type_params.is_empty() {
+                            if method_block.type_args.is_empty()
+                                && method_def.sig.type_params.is_empty()
+                            {
                                 rewrite_calls_in_method_item(&mut method_item, &call_inst_map);
                                 kept_items.push(method_item);
                                 continue;
@@ -315,6 +343,7 @@ pub(crate) fn monomorphize_with_plan(
                                             "compiler bug: missing instantiated def id for method",
                                         );
                                     apply_inst_to_method_def(
+                                        &receiver_type_args,
                                         &mut cloned,
                                         inst,
                                         &def_table,
@@ -344,13 +373,45 @@ pub(crate) fn monomorphize_with_plan(
                                         &cloned_item,
                                         new_def_id,
                                     );
-
-                                    kept_items.push(cloned_item);
+                                    if receiver_type_param_count == 0 {
+                                        kept_items.push(cloned_item);
+                                    } else {
+                                        let receiver_inst_args =
+                                            inst.type_args[..receiver_type_param_count].to_vec();
+                                        let block_idx = *specialized_block_indices
+                                            .entry(receiver_inst_args.clone())
+                                            .or_insert_with(|| {
+                                                let mut cloned_block = MethodBlock {
+                                                    id: node_id_gen.new_id(),
+                                                    type_name: method_block.type_name.clone(),
+                                                    type_args: method_block.type_args.clone(),
+                                                    trait_name: method_block.trait_name.clone(),
+                                                    method_items: Vec::new(),
+                                                    span: method_block.span,
+                                                };
+                                                apply_inst_to_method_block(
+                                                    &mut cloned_block,
+                                                    &receiver_inst_args,
+                                                    &def_table,
+                                                    &mut node_id_gen,
+                                                )
+                                                .expect(
+                                                    "compiler bug: failed to specialize generic method block receiver",
+                                                );
+                                                specialized_blocks.push(cloned_block);
+                                                specialized_blocks.len() - 1
+                                            });
+                                        specialized_blocks[block_idx]
+                                            .method_items
+                                            .push(cloned_item);
+                                    }
                                 }
                             }
                         }
                         MethodItem::Decl(method_decl) => {
-                            if method_decl.sig.type_params.is_empty() {
+                            if method_block.type_args.is_empty()
+                                && method_decl.sig.type_params.is_empty()
+                            {
                                 rewrite_calls_in_method_item(&mut method_item, &call_inst_map);
                                 kept_items.push(method_item);
                                 continue;
@@ -368,6 +429,7 @@ pub(crate) fn monomorphize_with_plan(
                                             "compiler bug: missing instantiated def id for method decl",
                                         );
                                     apply_inst_to_method_decl(
+                                        &receiver_type_args,
                                         &mut cloned,
                                         inst,
                                         &def_table,
@@ -397,8 +459,38 @@ pub(crate) fn monomorphize_with_plan(
                                         &cloned_item,
                                         new_def_id,
                                     );
-
-                                    kept_items.push(cloned_item);
+                                    if receiver_type_param_count == 0 {
+                                        kept_items.push(cloned_item);
+                                    } else {
+                                        let receiver_inst_args =
+                                            inst.type_args[..receiver_type_param_count].to_vec();
+                                        let block_idx = *specialized_block_indices
+                                            .entry(receiver_inst_args.clone())
+                                            .or_insert_with(|| {
+                                                let mut cloned_block = MethodBlock {
+                                                    id: node_id_gen.new_id(),
+                                                    type_name: method_block.type_name.clone(),
+                                                    type_args: method_block.type_args.clone(),
+                                                    trait_name: method_block.trait_name.clone(),
+                                                    method_items: Vec::new(),
+                                                    span: method_block.span,
+                                                };
+                                                apply_inst_to_method_block(
+                                                    &mut cloned_block,
+                                                    &receiver_inst_args,
+                                                    &def_table,
+                                                    &mut node_id_gen,
+                                                )
+                                                .expect(
+                                                    "compiler bug: failed to specialize generic method block receiver",
+                                                );
+                                                specialized_blocks.push(cloned_block);
+                                                specialized_blocks.len() - 1
+                                            });
+                                        specialized_blocks[block_idx]
+                                            .method_items
+                                            .push(cloned_item);
+                                    }
                                 }
                             }
                         }
@@ -410,6 +502,10 @@ pub(crate) fn monomorphize_with_plan(
                     method_block.id = node_id_gen.new_id();
                     rewrite_calls_in_item(&mut item, &call_inst_map);
                     new_items.push(item);
+                }
+
+                for block in specialized_blocks {
+                    new_items.push(TopLevelItem::MethodBlock(block));
                 }
             }
             _ => {
@@ -438,6 +534,7 @@ pub(crate) fn monomorphize_with_plan(
         MonomorphizePlan {
             retype_def_ids: inst_to_def.values().copied().collect(),
             call_rewrites: call_inst_map,
+            for_plan_rewrites,
         },
     ))
 }
@@ -447,6 +544,85 @@ fn inst_key_for_inst(inst: &GenericInst) -> InstKey {
         def_id: inst.def_id,
         type_args: inst.type_args.clone(),
     }
+}
+
+fn for_plans_require_monomorphization(for_plans: &ForPlanMap) -> bool {
+    for_plans.values().any(|plan| match &plan.kernel {
+        ForKernel::Protocol(kernel) => {
+            !kernel.iter_method_type_args.is_empty() || !kernel.next_method_type_args.is_empty()
+        }
+        _ => false,
+    })
+}
+
+fn collect_protocol_for_instantiations(for_plans: &ForPlanMap) -> Vec<(NodeId, GenericInst)> {
+    let mut out = Vec::new();
+    for (stmt_id, plan) in for_plans {
+        let ForKernel::Protocol(kernel) = &plan.kernel else {
+            continue;
+        };
+        if !kernel.iter_method_type_args.is_empty() {
+            out.push((
+                *stmt_id,
+                GenericInst {
+                    def_id: kernel.iter_method,
+                    type_args: kernel.iter_method_type_args.clone(),
+                    call_span: Span::default(),
+                },
+            ));
+        }
+        if !kernel.next_method_type_args.is_empty() {
+            out.push((
+                *stmt_id,
+                GenericInst {
+                    def_id: kernel.next_method,
+                    type_args: kernel.next_method_type_args.clone(),
+                    call_span: Span::default(),
+                },
+            ));
+        }
+    }
+    out
+}
+
+fn collect_protocol_for_rewrites(
+    for_plans: &ForPlanMap,
+    inst_to_def: &HashMap<InstKey, DefId>,
+) -> HashMap<NodeId, ProtocolForRewrite> {
+    let mut rewrites = HashMap::new();
+    for (stmt_id, plan) in for_plans {
+        let ForKernel::Protocol(kernel) = &plan.kernel else {
+            continue;
+        };
+        let iter_method = if kernel.iter_method_type_args.is_empty() {
+            kernel.iter_method
+        } else {
+            *inst_to_def
+                .get(&InstKey {
+                    def_id: kernel.iter_method,
+                    type_args: kernel.iter_method_type_args.clone(),
+                })
+                .expect("compiler bug: missing specialized iter method def id")
+        };
+        let next_method = if kernel.next_method_type_args.is_empty() {
+            kernel.next_method
+        } else {
+            *inst_to_def
+                .get(&InstKey {
+                    def_id: kernel.next_method,
+                    type_args: kernel.next_method_type_args.clone(),
+                })
+                .expect("compiler bug: missing specialized next method def id")
+        };
+        rewrites.insert(
+            *stmt_id,
+            ProtocolForRewrite {
+                iter_method,
+                next_method,
+            },
+        );
+    }
+    rewrites
 }
 
 /// Kept as a top-level helper for compile-path tests that assert sparse retype shape.

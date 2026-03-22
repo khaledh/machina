@@ -360,6 +360,7 @@ impl<'a> Elaborator<'a> {
         self.closure_methods.push(MethodBlock {
             id: self.node_id_gen.new_id(),
             type_name: info.type_name.clone(),
+            type_args: Vec::new(),
             trait_name: None,
             method_items: vec![MethodItem::Def(method_def)],
             span,

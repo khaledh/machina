@@ -69,6 +69,7 @@ pub(crate) struct CollectedParamSig {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct CollectedCallableSig {
     pub(crate) def_id: DefId,
+    pub(crate) self_ty: Option<Type>,
     pub(crate) params: Vec<CollectedParamSig>,
     pub(crate) ret_ty: Type,
     pub(crate) type_param_count: usize,

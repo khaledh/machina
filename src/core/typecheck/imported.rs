@@ -58,6 +58,7 @@ fn imported_callable_sig_to_collected(
 ) -> CollectedCallableSig {
     CollectedCallableSig {
         def_id,
+        self_ty: None,
         params: imported_params_to_collected(&imported.params),
         ret_ty: imported.ret_ty.clone(),
         type_param_count: 0,

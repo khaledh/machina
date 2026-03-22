@@ -883,7 +883,9 @@ fn resolve_method_call(
 ) -> Option<ResolvedCall> {
     let receiver_ty = receiver.map(|term| resolve_term(term, engine))?;
     let owner = match &receiver_ty {
-        Type::Struct { name, .. } | Type::Enum { name, .. } => name.clone(),
+        Type::Struct { name, .. } | Type::Enum { name, .. } => {
+            name.split('<').next().unwrap_or(name).trim().to_string()
+        }
         Type::String => "string".to_string(),
         _ => return None,
     };
@@ -940,7 +942,9 @@ fn resolve_method_call_by_def_id(
 ) -> Option<ResolvedCall> {
     let receiver_ty = receiver.map(|term| resolve_term(term, engine))?;
     let owner = match &receiver_ty {
-        Type::Struct { name, .. } | Type::Enum { name, .. } => name.clone(),
+        Type::Struct { name, .. } | Type::Enum { name, .. } => {
+            name.split('<').next().unwrap_or(name).trim().to_string()
+        }
         Type::String => "string".to_string(),
         _ => return None,
     };
@@ -1013,6 +1017,10 @@ fn instantiate_call_sig(
                 ty: param.ty.clone(),
             })
             .collect::<Vec<_>>();
+        let receiver = receiver.map(|receiver| CallParam {
+            mode: receiver.mode,
+            ty: sig.self_ty.clone().unwrap_or(receiver.ty),
+        });
         return ResolvedCall {
             def_id: sig.def_id,
             receiver,
@@ -1022,6 +1030,9 @@ fn instantiate_call_sig(
     }
 
     let mut unifier = InferUnifier::new();
+    if let (Some(receiver), Some(self_ty)) = (receiver.as_ref(), sig.self_ty.as_ref()) {
+        let _ = unifier.unify(self_ty, &receiver.ty);
+    }
     for (param, arg_ty) in sig.params.iter().zip(arg_types.iter()) {
         let _ = unifier.unify(&param.ty, arg_ty);
     }
@@ -1048,6 +1059,14 @@ fn instantiate_call_sig(
             ty: unifier.apply(&param.ty),
         })
         .collect::<Vec<_>>();
+    let receiver = receiver.map(|receiver| CallParam {
+        mode: receiver.mode,
+        ty: sig
+            .self_ty
+            .as_ref()
+            .map(|self_ty| unifier.apply(self_ty))
+            .unwrap_or(receiver.ty),
+    });
 
     ResolvedCall {
         def_id: sig.def_id,

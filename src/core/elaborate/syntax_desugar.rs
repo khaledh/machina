@@ -510,6 +510,7 @@ impl<'a, 'b> SyntaxDesugarCtx<'a, 'b> {
             propagated_err_tys,
             iter_method,
             next_method,
+            ..
         }) = &for_plan.kernel
         else {
             panic!("compiler bug: expected protocol for-plan for {:?}", stmt.id);

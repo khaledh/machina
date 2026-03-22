@@ -14,7 +14,7 @@ impl<'a> Parser<'a> {
                 }
             }
             TK::KwFn => self.parse_func(attrs),
-            TK::Ident(_) if self.peek().map(|t| &t.kind) == Some(&TK::DoubleColon) => {
+            TK::Ident(_) if self.is_method_block_start() => {
                 if attrs.is_empty() {
                     self.parse_method_block()
                 } else {
@@ -23,6 +23,29 @@ impl<'a> Parser<'a> {
             }
             _ => self.err_here(PEK::ExpectedDecl(self.curr_token.clone())),
         }
+    }
+
+    fn is_method_block_start(&self) -> bool {
+        let mut index = self.pos + 1;
+        if self.tokens.get(index).map(|t| &t.kind) == Some(&TK::LessThan) {
+            let mut depth = 0usize;
+            while index < self.tokens.len() {
+                match self.tokens[index].kind {
+                    TK::LessThan => depth += 1,
+                    TK::GreaterThan => {
+                        depth = depth.saturating_sub(1);
+                        if depth == 0 {
+                            index += 1;
+                            break;
+                        }
+                    }
+                    TK::Eof => return false,
+                    _ => {}
+                }
+                index += 1;
+            }
+        }
+        self.tokens.get(index).map(|t| &t.kind) == Some(&TK::DoubleColon)
     }
 
     fn parse_type_def(&mut self, attrs: Vec<Attribute>) -> Result<TypeDef, ParseError> {

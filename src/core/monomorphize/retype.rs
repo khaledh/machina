@@ -12,6 +12,7 @@ use crate::core::typecheck::type_map::{CallSigMap, TypeMap};
 use crate::core::types::Type;
 
 use super::MonomorphizePlan;
+use crate::core::plans::ForKernel;
 
 pub(crate) fn retype_after_monomorphize(
     monomorphized_context: &ResolvedContext,
@@ -31,6 +32,7 @@ pub(crate) fn retype_after_monomorphize(
         first_pass,
         second_pass,
         &plan.call_rewrites,
+        &plan.for_plan_rewrites,
     ))
 }
 
@@ -97,6 +99,7 @@ fn merge_typecheck_results(
     first_pass: TypeCheckedContext,
     second_pass: TypeCheckedContext,
     call_rewrites: &HashMap<NodeId, DefId>,
+    for_plan_rewrites: &HashMap<NodeId, super::ProtocolForRewrite>,
 ) -> TypeCheckedContext {
     // Types: patch over first-pass map with second-pass entries.
     let mut merged_type_map = first_pass.type_map.clone();
@@ -120,6 +123,7 @@ fn merge_typecheck_results(
 
     let mut merged_for_plans = first_pass.for_plans.clone();
     merged_for_plans.extend(second_pass.for_plans.clone());
+    apply_for_plan_rewrites(&mut merged_for_plans, for_plan_rewrites);
 
     // The AST carries no type payload; keep the monomorphized module.
     monomorphized_context.clone().with_type_map(
@@ -128,6 +132,22 @@ fn merge_typecheck_results(
         merged_generic_insts,
         merged_for_plans,
     )
+}
+
+fn apply_for_plan_rewrites(
+    for_plans: &mut crate::core::plans::ForPlanMap,
+    rewrites: &HashMap<NodeId, super::ProtocolForRewrite>,
+) {
+    for (stmt_id, rewrite) in rewrites {
+        let Some(plan) = for_plans.get_mut(stmt_id) else {
+            continue;
+        };
+        let ForKernel::Protocol(kernel) = &mut plan.kernel else {
+            continue;
+        };
+        kernel.iter_method = rewrite.iter_method;
+        kernel.next_method = rewrite.next_method;
+    }
 }
 
 fn merge_type_maps(base: &mut TypeMap, patch: &TypeMap) {

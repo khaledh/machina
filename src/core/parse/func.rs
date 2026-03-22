@@ -104,6 +104,7 @@ impl<'a> Parser<'a> {
     pub(super) fn parse_method_block(&mut self) -> Result<TopLevelItem, ParseError> {
         let marker = self.mark();
         let type_name = self.parse_ident()?;
+        let type_args = self.parse_type_args()?;
         self.consume(&TK::DoubleColon)?;
         let trait_name = if self.curr_token.kind == TK::LBrace {
             None
@@ -128,6 +129,7 @@ impl<'a> Parser<'a> {
         Ok(TopLevelItem::MethodBlock(MethodBlock {
             id: self.id_gen.new_id(),
             type_name,
+            type_args,
             trait_name,
             method_items,
             span: self.close(marker),

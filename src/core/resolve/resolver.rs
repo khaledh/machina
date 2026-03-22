@@ -443,6 +443,35 @@ impl SymbolResolver {
         }
     }
 
+    fn register_implicit_type_param(&mut self, ident: &str, id: NodeId, span: Span) {
+        let def_id = self.def_id_gen.new_id();
+        let def = Def {
+            id: def_id,
+            name: ident.to_string(),
+            kind: DefKind::TypeParam,
+        };
+        self.def_table_builder.record_def(def, id, span);
+        self.insert_symbol(
+            ident,
+            Symbol {
+                name: ident.to_string(),
+                kind: SymbolKind::TypeParam { def_id },
+            },
+            span,
+        );
+    }
+
+    fn register_method_block_type_params(&mut self, method_block: &MethodBlock) {
+        for type_arg in &method_block.type_args {
+            if let TypeExprKind::Named { ident, type_args } = &type_arg.kind
+                && type_args.is_empty()
+                && self.lookup_symbol(ident).is_none()
+            {
+                self.register_implicit_type_param(ident, type_arg.id, type_arg.span);
+            }
+        }
+    }
+
     fn lookup_symbol(&self, name: &str) -> Option<&Symbol> {
         for scope in self.scopes.iter().rev() {
             if let Some(symbol) = scope.defs.get(name) {
@@ -1470,19 +1499,29 @@ impl Visitor for SymbolResolver {
     }
 
     fn visit_method_block(&mut self, method_block: &MethodBlock) {
-        let type_def_id = self.check_method_block_type(method_block);
-        let is_intrinsic_type =
-            type_def_id.map(|def_id| self.intrinsic_type_defs.contains(&def_id));
-        self.check_method_block_trait(method_block);
-
-        for method_item in &method_block.method_items {
-            match method_item {
-                MethodItem::Decl(method_decl) => {
-                    self.visit_method_decl_in_block(method_block, method_decl, is_intrinsic_type);
-                }
-                MethodItem::Def(method_def) => self.visit_method_def(method_def),
+        self.with_scope(|resolver| {
+            resolver.register_method_block_type_params(method_block);
+            let type_def_id = resolver.check_method_block_type(method_block);
+            let is_intrinsic_type =
+                type_def_id.map(|def_id| resolver.intrinsic_type_defs.contains(&def_id));
+            resolver.check_method_block_trait(method_block);
+            for type_arg in &method_block.type_args {
+                resolver.visit_type_expr(type_arg);
             }
-        }
+
+            for method_item in &method_block.method_items {
+                match method_item {
+                    MethodItem::Decl(method_decl) => {
+                        resolver.visit_method_decl_in_block(
+                            method_block,
+                            method_decl,
+                            is_intrinsic_type,
+                        );
+                    }
+                    MethodItem::Def(method_def) => resolver.visit_method_def(method_def),
+                }
+            }
+        });
     }
 
     fn visit_trait_def(&mut self, trait_def: &TraitDef) {

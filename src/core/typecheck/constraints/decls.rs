@@ -1,7 +1,7 @@
 //! Module/function/method declaration orchestration.
 
 use super::*;
-use crate::core::ast::{FuncDecl, MethodItem};
+use crate::core::ast::{FuncDecl, MethodBlock, MethodItem, TypeParam};
 
 impl<'a> ConstraintCollector<'a> {
     pub(super) fn collect_module(&mut self) {
@@ -14,12 +14,13 @@ impl<'a> ConstraintCollector<'a> {
             self.collect_func_def(func_def);
         }
         for method_block in self.ctx.module.method_blocks() {
+            let receiver_type_params = method_block_type_params(&self.ctx.def_table, method_block);
             for method_item in &method_block.method_items {
                 let sig = match method_item {
                     MethodItem::Decl(method_decl) => &method_decl.sig,
                     MethodItem::Def(method_def) => &method_def.sig,
                 };
-                self.collect_method_def(&method_block.type_name, method_item, sig);
+                self.collect_method_def(method_block, &receiver_type_params, method_item, sig);
             }
         }
     }
@@ -96,7 +97,13 @@ impl<'a> ConstraintCollector<'a> {
         });
     }
 
-    fn collect_method_def(&mut self, type_name: &str, method_item: &MethodItem, sig: &MethodSig) {
+    fn collect_method_def(
+        &mut self,
+        method_block: &MethodBlock,
+        receiver_type_params: &[TypeParam],
+        method_item: &MethodItem,
+        sig: &MethodSig,
+    ) {
         let method_def_id = match method_item {
             MethodItem::Decl(method_decl) => self.ctx.def_table.def_id(method_decl.id),
             MethodItem::Def(method_def) => self.ctx.def_table.def_id(method_def.id),
@@ -106,87 +113,118 @@ impl<'a> ConstraintCollector<'a> {
             MethodItem::Def(method_def) => method_def.span,
         };
 
-        self.with_type_params(&sig.type_params, |this| {
-            let mut declared_ret_ty = None;
-            if let Some(fn_ty) = this.collect_method_signature(type_name, sig) {
-                declared_ret_ty = fn_type_return(&fn_ty);
-                let def_term = this.def_term(method_def_id);
-                this.push_eq(
-                    def_term,
-                    fn_ty,
-                    ConstraintReason::Decl(method_def_id, method_span),
-                );
-            }
-            let ret_ty = this.resolve_return_type_in_scope(&sig.ret_ty_expr);
-            let return_term = ret_ty
-                .ok()
-                .or(declared_ret_ty)
-                .unwrap_or_else(|| this.fresh_var_term());
-            if let MethodItem::Def(method_def) = method_item {
-                let method_node_term = this.node_term(method_def.id);
-                this.push_eq(
-                    method_node_term,
-                    return_term.clone(),
-                    ConstraintReason::Decl(method_def_id, method_def.span),
-                );
-            }
-            this.enter_callable(method_def_id, return_term.clone(), method_span);
-
-            let self_node = this.node_term(sig.self_param.id);
-            if let Some(self_ty) = this.type_defs.get(type_name).cloned() {
-                if let Some(self_param_def_id) = this.lookup_def_id(sig.self_param.id) {
-                    let self_term = this.def_term(self_param_def_id);
+        self.with_type_params(receiver_type_params, |this| {
+            this.with_type_params(&sig.type_params, |this| {
+                let mut declared_ret_ty = None;
+                if let Some(fn_ty) = this.collect_method_signature(method_block, sig) {
+                    declared_ret_ty = fn_type_return(&fn_ty);
+                    let def_term = this.def_term(method_def_id);
                     this.push_eq(
-                        self_term.clone(),
-                        self_ty.clone(),
-                        ConstraintReason::Decl(self_param_def_id, sig.self_param.span),
-                    );
-                    this.push_eq(
-                        self_node.clone(),
-                        self_term,
-                        ConstraintReason::Decl(self_param_def_id, sig.self_param.span),
-                    );
-                } else {
-                    this.push_eq(
-                        self_node.clone(),
-                        self_ty,
-                        ConstraintReason::Expr(sig.self_param.id, sig.self_param.span),
+                        def_term,
+                        fn_ty,
+                        ConstraintReason::Decl(method_def_id, method_span),
                     );
                 }
-            }
+                let ret_ty = this.resolve_return_type_in_scope(&sig.ret_ty_expr);
+                let return_term = ret_ty
+                    .ok()
+                    .or(declared_ret_ty)
+                    .unwrap_or_else(|| this.fresh_var_term());
+                if let MethodItem::Def(method_def) = method_item {
+                    let method_node_term = this.node_term(method_def.id);
+                    this.push_eq(
+                        method_node_term,
+                        return_term.clone(),
+                        ConstraintReason::Decl(method_def_id, method_def.span),
+                    );
+                }
+                this.enter_callable(method_def_id, return_term.clone(), method_span);
 
-            for param in &sig.params {
-                let node_term = this.node_term(param.id);
-                let declared_ty = this.resolve_type_in_scope(&param.typ).ok();
-                if let Some(param_def_id) = this.lookup_def_id(param.id) {
-                    let def_term = this.def_term(param_def_id);
-                    if let Some(ty) = declared_ty.clone() {
+                let self_node = this.node_term(sig.self_param.id);
+                if let Some(self_ty) = this.resolve_method_block_self_type(method_block) {
+                    if let Some(self_param_def_id) = this.lookup_def_id(sig.self_param.id) {
+                        let self_term = this.def_term(self_param_def_id);
                         this.push_eq(
-                            def_term.clone(),
-                            ty,
-                            ConstraintReason::Decl(param_def_id, param.span),
+                            self_term.clone(),
+                            self_ty.clone(),
+                            ConstraintReason::Decl(self_param_def_id, sig.self_param.span),
+                        );
+                        this.push_eq(
+                            self_node.clone(),
+                            self_term,
+                            ConstraintReason::Decl(self_param_def_id, sig.self_param.span),
+                        );
+                    } else {
+                        this.push_eq(
+                            self_node.clone(),
+                            self_ty,
+                            ConstraintReason::Expr(sig.self_param.id, sig.self_param.span),
                         );
                     }
-                    this.push_eq(
-                        node_term,
-                        def_term,
-                        ConstraintReason::Decl(param_def_id, param.span),
-                    );
-                } else if let Some(ty) = declared_ty {
-                    this.push_eq(node_term, ty, ConstraintReason::Expr(param.id, param.span));
                 }
-            }
 
-            if let MethodItem::Def(method_def) = method_item {
-                let body_ty = this.collect_expr(&method_def.body, Some(return_term.clone()));
-                this.push_assignable(
-                    body_ty,
-                    return_term,
-                    ConstraintReason::Expr(method_def.body.id, method_def.body.span),
-                );
-            }
+                for param in &sig.params {
+                    let node_term = this.node_term(param.id);
+                    let declared_ty = this.resolve_type_in_scope(&param.typ).ok();
+                    if let Some(param_def_id) = this.lookup_def_id(param.id) {
+                        let def_term = this.def_term(param_def_id);
+                        if let Some(ty) = declared_ty.clone() {
+                            this.push_eq(
+                                def_term.clone(),
+                                ty,
+                                ConstraintReason::Decl(param_def_id, param.span),
+                            );
+                        }
+                        this.push_eq(
+                            node_term,
+                            def_term,
+                            ConstraintReason::Decl(param_def_id, param.span),
+                        );
+                    } else if let Some(ty) = declared_ty {
+                        this.push_eq(node_term, ty, ConstraintReason::Expr(param.id, param.span));
+                    }
+                }
 
-            this.exit_callable(method_def_id, method_span);
+                if let MethodItem::Def(method_def) = method_item {
+                    let body_ty = this.collect_expr(&method_def.body, Some(return_term.clone()));
+                    this.push_assignable(
+                        body_ty,
+                        return_term,
+                        ConstraintReason::Expr(method_def.body.id, method_def.body.span),
+                    );
+                }
+
+                this.exit_callable(method_def_id, method_span);
+            });
         });
     }
+}
+
+fn method_block_type_params(
+    def_table: &crate::core::resolve::DefTable,
+    method_block: &MethodBlock,
+) -> Vec<TypeParam> {
+    method_block
+        .type_args
+        .iter()
+        .filter_map(|type_arg| {
+            let crate::core::ast::TypeExprKind::Named { ident, type_args } = &type_arg.kind else {
+                return None;
+            };
+            if !type_args.is_empty() {
+                return None;
+            }
+            let def_id = def_table.lookup_node_def_id(type_arg.id)?;
+            let def = def_table.lookup_def(def_id)?;
+            if def.kind != crate::core::resolve::DefKind::TypeParam {
+                return None;
+            }
+            Some(TypeParam {
+                id: type_arg.id,
+                ident: ident.clone(),
+                bound: None,
+                span: type_arg.span,
+            })
+        })
+        .collect()
 }

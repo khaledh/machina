@@ -516,6 +516,7 @@ pub struct TypeParamBound {
 pub struct MethodBlock {
     pub id: NodeId,
     pub type_name: String,
+    pub type_args: Vec<TypeExpr>,
     pub trait_name: Option<String>,
     pub method_items: Vec<MethodItem>,
     pub span: Span,

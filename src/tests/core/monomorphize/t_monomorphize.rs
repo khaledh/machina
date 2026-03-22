@@ -1,4 +1,4 @@
-use crate::core::ast::{FuncDef, MethodItem, Module, TopLevelItem};
+use crate::core::ast::{FuncDef, MethodItem, Module, TopLevelItem, TypeExprKind};
 use crate::core::context::ParsedContext;
 use crate::core::context::ResolvedContext;
 use crate::core::lexer::{LexError, Lexer, Token};
@@ -136,6 +136,50 @@ fn test_monomorphize_generic_methods_multiple_instantiations() {
 
     let count = count_method_defs(&monomorphized.module, "cast");
     assert_eq!(count, 2, "expected two monomorphized cast methods");
+}
+
+#[test]
+fn test_monomorphize_specializes_generic_receiver_method_block_type_args() {
+    let source = r#"
+        type Box<T> = { value: T }
+
+        Box<T>::{
+            fn value_of(self) -> T { self.value }
+        }
+
+        fn test() -> u64 {
+            let boxed = Box<u64> { value: 7 };
+            boxed.value_of()
+        }
+    "#;
+
+    let (resolved_context, _def_table) = resolve_context(source);
+    let type_checked = type_check(resolved_context.clone()).expect("type check failed");
+    let monomorphized = monomorphize_resolved(resolved_context, &type_checked.generic_insts)
+        .expect("monomorphize failed");
+
+    let blocks = monomorphized
+        .module
+        .top_level_items
+        .iter()
+        .filter_map(|item| match item {
+            TopLevelItem::MethodBlock(block) if block.type_name == "Box" => Some(block),
+            _ => None,
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(blocks.len(), 1, "expected one specialized Box method block");
+    assert_eq!(
+        blocks[0].type_args.len(),
+        1,
+        "expected one receiver type arg"
+    );
+    match &blocks[0].type_args[0].kind {
+        TypeExprKind::Named { ident, type_args } => {
+            assert_eq!(ident, "u64");
+            assert!(type_args.is_empty(), "expected concrete receiver type arg");
+        }
+        other => panic!("expected named receiver type arg, got {other:?}"),
+    }
 }
 
 #[test]

@@ -436,6 +436,9 @@ pub fn walk_param<V: VisitorMut + ?Sized>(v: &mut V, param: &mut Param) {
 // --- Method Blocks ---
 
 pub fn walk_method_block<V: VisitorMut + ?Sized>(v: &mut V, method_block: &mut MethodBlock) {
+    for type_arg in &mut method_block.type_args {
+        v.visit_type_expr(type_arg);
+    }
     for method_item in &mut method_block.method_items {
         v.visit_method_item(method_item);
     }

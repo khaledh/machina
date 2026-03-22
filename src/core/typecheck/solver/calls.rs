@@ -198,6 +198,24 @@ pub(super) fn check_call_obligations(
             let mut failed = false;
             let mut score = 0i32;
             let method_priority = if sig.impl_trait.is_none() { 1 } else { 0 };
+            if let (Some(receiver_term), Some(expected_receiver_ty)) =
+                (&obligation.receiver, &instantiated.receiver_ty)
+            {
+                let receiver_ty = super::term_utils::resolve_term(receiver_term, &trial);
+                if super::assignability::solve_assignable(
+                    &receiver_ty,
+                    expected_receiver_ty,
+                    &mut trial,
+                )
+                .is_err()
+                {
+                    continue;
+                }
+                score += super::assignability::assignability_rank(
+                    &super::term_utils::resolve_term(receiver_term, &trial),
+                    &super::term_utils::canonicalize_type(trial.apply(expected_receiver_ty)),
+                );
+            }
             for (index, (arg_term, param_ty)) in obligation
                 .arg_terms
                 .iter()
@@ -339,7 +357,7 @@ fn method_call_candidates(
     };
     match receiver_ty {
         Type::Struct { name, .. } | Type::Enum { name, .. } => method_sigs
-            .get(name)
+            .get(name.split('<').next().unwrap_or(name).trim())
             .and_then(|by_name| by_name.get(method_name))
             .map(|overloads| {
                 overloads
@@ -374,6 +392,7 @@ fn method_call_candidates(
                 }
                 candidates.push(CollectedCallableSig {
                     def_id: trait_sig.def_id,
+                    self_ty: None,
                     params: method.params.clone(),
                     ret_ty: method.ret_ty.clone(),
                     type_param_count: method.type_param_count,
@@ -492,6 +511,7 @@ fn try_solve_builtin_method(
 }
 
 struct InstantiatedSig {
+    receiver_ty: Option<Type>,
     params: Vec<Type>,
     ret_ty: Type,
     bound_terms: Vec<(String, Type)>,
@@ -500,6 +520,7 @@ struct InstantiatedSig {
 fn instantiate_sig(sig: &CollectedCallableSig, unifier: &mut TcUnifier) -> InstantiatedSig {
     if sig.type_param_count == 0 {
         return InstantiatedSig {
+            receiver_ty: sig.self_ty.clone(),
             params: sig.params.iter().map(|param| param.ty.clone()).collect(),
             ret_ty: sig.ret_ty.clone(),
             bound_terms: Vec::new(),
@@ -519,8 +540,10 @@ fn instantiate_sig(sig: &CollectedCallableSig, unifier: &mut TcUnifier) -> Insta
         .iter()
         .map(|param| subst_type_vars(&param.ty, &map))
         .collect::<Vec<_>>();
+    let receiver_ty = sig.self_ty.as_ref().map(|ty| subst_type_vars(ty, &map));
     let ret_ty = subst_type_vars(&sig.ret_ty, &map);
     InstantiatedSig {
+        receiver_ty,
         params,
         ret_ty,
         bound_terms,
