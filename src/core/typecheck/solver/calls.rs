@@ -17,7 +17,7 @@ use crate::core::typecheck::engine::{
 use crate::core::typecheck::errors::{TEK, TypeCheckError};
 use crate::core::typecheck::tc_push_error;
 use crate::core::typecheck::unify::TcUnifier;
-use crate::core::types::{TyVarId, Type};
+use crate::core::types::{TyVarId, Type, TypeAssignability, type_assignable};
 
 #[allow(clippy::too_many_arguments)]
 pub(super) fn check_call_obligations(
@@ -62,7 +62,7 @@ pub(super) fn check_call_obligations(
                         obligation.arg_terms.iter().zip(params.iter()).enumerate()
                     {
                         let arg_ty = super::term_utils::resolve_term(arg_term, unifier);
-                        if super::assignability::solve_assignable(&arg_ty, &param.ty, unifier)
+                        if solve_call_arg_assignable(&arg_ty, &param.ty, unifier, method_sigs)
                             .is_err()
                         {
                             tc_push_error!(
@@ -202,10 +202,11 @@ pub(super) fn check_call_obligations(
                 (&obligation.receiver, &instantiated.receiver_ty)
             {
                 let receiver_ty = super::term_utils::resolve_term(receiver_term, &trial);
-                if super::assignability::solve_assignable(
+                if solve_call_arg_assignable(
                     &receiver_ty,
                     expected_receiver_ty,
                     &mut trial,
+                    method_sigs,
                 )
                 .is_err()
                 {
@@ -223,7 +224,7 @@ pub(super) fn check_call_obligations(
                 .enumerate()
             {
                 let arg_ty = super::term_utils::resolve_term(arg_term, &trial);
-                if super::assignability::solve_assignable(&arg_ty, param_ty, &mut trial).is_err() {
+                if solve_call_arg_assignable(&arg_ty, param_ty, &mut trial, method_sigs).is_err() {
                     first_error.get_or_insert_with(|| {
                         TEK::ArgTypeMismatch(
                             index + 1,
@@ -235,9 +236,10 @@ pub(super) fn check_call_obligations(
                     failed = true;
                     break;
                 }
-                score += super::assignability::assignability_rank(
+                score += call_arg_assignability_rank(
                     &super::term_utils::resolve_term(arg_term, &trial),
                     &super::term_utils::canonicalize_type(trial.apply(param_ty)),
+                    method_sigs,
                 );
             }
             if failed {
@@ -325,6 +327,82 @@ pub(super) fn check_call_obligations(
         }
     }
     (errors, resolved_call_defs, deferred)
+}
+
+fn call_arg_assignability_rank(
+    from: &Type,
+    to: &Type,
+    method_sigs: &HashMap<String, HashMap<String, Vec<CollectedCallableSig>>>,
+) -> i32 {
+    let Type::Iterable {
+        item_ty: to_item_ty,
+    } = to
+    else {
+        return super::assignability::assignability_rank(from, to);
+    };
+
+    let Some(plan) = super::iterable_plan(from, method_sigs) else {
+        return super::assignability::assignability_rank(from, to);
+    };
+
+    match type_assignable(&plan.item_ty, to_item_ty) {
+        TypeAssignability::Exact => 3,
+        TypeAssignability::IntLitToInt { .. } => 2,
+        TypeAssignability::RefinedToInt | TypeAssignability::IntToRefined { .. } => 1,
+        TypeAssignability::Incompatible => -1000,
+    }
+}
+
+fn solve_call_arg_assignable(
+    from: &Type,
+    to: &Type,
+    unifier: &mut TcUnifier,
+    method_sigs: &HashMap<String, HashMap<String, Vec<CollectedCallableSig>>>,
+) -> Result<(), crate::core::typecheck::unify::TcUnifyError> {
+    if let Some(result) = solve_iterable_param_assignable(from, to, unifier, method_sigs) {
+        return result;
+    }
+    super::assignability::solve_assignable(from, to, unifier)
+}
+
+fn solve_iterable_param_assignable(
+    from: &Type,
+    to: &Type,
+    unifier: &mut TcUnifier,
+    method_sigs: &HashMap<String, HashMap<String, Vec<CollectedCallableSig>>>,
+) -> Option<Result<(), crate::core::typecheck::unify::TcUnifyError>> {
+    let Type::Iterable {
+        item_ty: to_item_ty,
+    } = to
+    else {
+        return None;
+    };
+
+    let resolved_from = super::term_utils::canonicalize_type(unifier.apply(from));
+    if super::term_utils::is_unresolved(&resolved_from) {
+        return Some(Ok(()));
+    }
+
+    if let Type::Iterable {
+        item_ty: from_item_ty,
+    } = &resolved_from
+    {
+        return Some(super::assignability::solve_assignable(
+            from_item_ty,
+            to_item_ty,
+            unifier,
+        ));
+    }
+
+    let Some(plan) = super::iterable_plan(&resolved_from, method_sigs) else {
+        return Some(Err(crate::core::typecheck::unify::TcUnifyError::Mismatch(
+            to.clone(),
+            resolved_from,
+        )));
+    };
+
+    let item_match = super::assignability::solve_assignable(&plan.item_ty, to_item_ty, unifier);
+    Some(item_match)
 }
 
 fn named_call_candidates(

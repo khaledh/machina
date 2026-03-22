@@ -19,9 +19,17 @@ pub(super) fn apply_inst_to_func_def(
 ) -> Result<(), MonomorphizeError> {
     let subst = build_subst(&func_def.sig.type_params, inst, def_table)?;
     func_def.sig.type_params.clear();
-    let mut substituter = TypeExprSubstitutor::new(&subst, def_table, node_id_gen);
-    substituter.visit_func_def(func_def);
-    substituter.finish()
+    {
+        let mut substituter = TypeExprSubstitutor::new(&subst, def_table, node_id_gen);
+        substituter.visit_func_def(func_def);
+        substituter.finish()?;
+    }
+    apply_iterable_param_inst(
+        &mut func_def.sig.params,
+        &inst.iterable_param_tys,
+        def_table,
+        node_id_gen,
+    )
 }
 
 pub(super) fn apply_inst_to_func_decl(
@@ -32,9 +40,17 @@ pub(super) fn apply_inst_to_func_decl(
 ) -> Result<(), MonomorphizeError> {
     let subst = build_subst(&func_decl.sig.type_params, inst, def_table)?;
     func_decl.sig.type_params.clear();
-    let mut substituter = TypeExprSubstitutor::new(&subst, def_table, node_id_gen);
-    substituter.visit_func_decl(func_decl);
-    substituter.finish()
+    {
+        let mut substituter = TypeExprSubstitutor::new(&subst, def_table, node_id_gen);
+        substituter.visit_func_decl(func_decl);
+        substituter.finish()?;
+    }
+    apply_iterable_param_inst(
+        &mut func_decl.sig.params,
+        &inst.iterable_param_tys,
+        def_table,
+        node_id_gen,
+    )
 }
 
 pub(super) fn apply_inst_to_method_def(
@@ -50,9 +66,17 @@ pub(super) fn apply_inst_to_method_def(
         .collect::<Vec<_>>();
     let subst = build_subst(&type_params, inst, def_table)?;
     method_def.sig.type_params.clear();
-    let mut substituter = TypeExprSubstitutor::new(&subst, def_table, node_id_gen);
-    substituter.visit_method_def(method_def);
-    substituter.finish()
+    {
+        let mut substituter = TypeExprSubstitutor::new(&subst, def_table, node_id_gen);
+        substituter.visit_method_def(method_def);
+        substituter.finish()?;
+    }
+    apply_iterable_param_inst(
+        &mut method_def.sig.params,
+        &inst.iterable_param_tys,
+        def_table,
+        node_id_gen,
+    )
 }
 
 pub(super) fn apply_inst_to_method_decl(
@@ -68,9 +92,17 @@ pub(super) fn apply_inst_to_method_decl(
         .collect::<Vec<_>>();
     let subst = build_subst(&type_params, inst, def_table)?;
     method_decl.sig.type_params.clear();
-    let mut substituter = TypeExprSubstitutor::new(&subst, def_table, node_id_gen);
-    substituter.visit_method_decl(method_decl);
-    substituter.finish()
+    {
+        let mut substituter = TypeExprSubstitutor::new(&subst, def_table, node_id_gen);
+        substituter.visit_method_decl(method_decl);
+        substituter.finish()?;
+    }
+    apply_iterable_param_inst(
+        &mut method_decl.sig.params,
+        &inst.iterable_param_tys,
+        def_table,
+        node_id_gen,
+    )
 }
 
 pub(super) fn apply_inst_to_method_block(
@@ -159,6 +191,40 @@ fn build_subst(
         .zip(inst.type_args.iter().cloned())
         .map(|(param, ty)| (def_table.def_id(param.id), ty))
         .collect())
+}
+
+fn apply_iterable_param_inst(
+    params: &mut [Param],
+    concrete_tys: &[Type],
+    def_table: &DefTable,
+    node_id_gen: &mut NodeIdGen,
+) -> Result<(), MonomorphizeError> {
+    if concrete_tys.is_empty() {
+        return Ok(());
+    }
+
+    let iterable_params = params
+        .iter_mut()
+        .filter(|param| type_expr_is_iterable(&param.typ))
+        .collect::<Vec<_>>();
+    if iterable_params.len() != concrete_tys.len() {
+        return Err(MonomorphizeErrorKind::ArityMismatch {
+            name: "Iterable".to_string(),
+            expected: iterable_params.len(),
+            got: concrete_tys.len(),
+        }
+        .at(params.first().map(|p| p.span).unwrap_or_default()));
+    }
+
+    for (param, ty) in iterable_params.into_iter().zip(concrete_tys.iter()) {
+        param.typ = type_expr_from_type(ty, def_table, node_id_gen, param.typ.span)?;
+    }
+
+    Ok(())
+}
+
+fn type_expr_is_iterable(ty_expr: &TypeExpr) -> bool {
+    matches!(&ty_expr.kind, TypeExprKind::Named { ident, type_args } if ident == "Iterable" && type_args.len() == 1)
 }
 
 struct TypeExprSubstitutor<'a> {
@@ -301,6 +367,10 @@ fn type_expr_from_type(
         Type::Set { elem_ty } => TypeExprKind::Named {
             ident: "set".to_string(),
             type_args: vec![type_expr_from_type(elem_ty, def_table, node_id_gen, span)?],
+        },
+        Type::Iterable { item_ty } => TypeExprKind::Named {
+            ident: "Iterable".to_string(),
+            type_args: vec![type_expr_from_type(item_ty, def_table, node_id_gen, span)?],
         },
         Type::Map { key_ty, value_ty } => TypeExprKind::Named {
             ident: "map".to_string(),

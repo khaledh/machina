@@ -56,6 +56,7 @@ pub enum MonomorphizePipelineError {
 struct InstKey {
     def_id: DefId,
     type_args: Vec<Type>,
+    iterable_param_tys: Vec<Type>,
 }
 
 #[derive(Debug, Error)]
@@ -226,6 +227,7 @@ pub(crate) fn monomorphize_with_plan(
                 InstKey {
                     def_id: *def_id,
                     type_args: inst.type_args.clone(),
+                    iterable_param_tys: inst.iterable_param_tys.clone(),
                 },
                 new_def_id,
             );
@@ -246,7 +248,9 @@ pub(crate) fn monomorphize_with_plan(
     for mut item in module.top_level_items.into_iter() {
         match &mut item {
             TopLevelItem::FuncDef(func_def) => {
-                if func_def.sig.type_params.is_empty() {
+                if func_def.sig.type_params.is_empty()
+                    && !insts_by_def.contains_key(&def_table.def_id(func_def.id))
+                {
                     rewrite_calls_in_item(&mut item, &call_inst_map);
                     new_items.push(item);
                     continue;
@@ -260,6 +264,7 @@ pub(crate) fn monomorphize_with_plan(
                             .get(&InstKey {
                                 def_id: func_def_id,
                                 type_args: inst.type_args.clone(),
+                                iterable_param_tys: inst.iterable_param_tys.clone(),
                             })
                             .expect("compiler bug: missing instantiated def id for function");
                         apply_inst_to_func_def(&mut cloned, inst, &def_table, &mut node_id_gen)?;
@@ -280,7 +285,9 @@ pub(crate) fn monomorphize_with_plan(
                 }
             }
             TopLevelItem::FuncDecl(func_decl) => {
-                if func_decl.sig.type_params.is_empty() {
+                if func_decl.sig.type_params.is_empty()
+                    && !insts_by_def.contains_key(&def_table.def_id(func_decl.id))
+                {
                     rewrite_calls_in_item(&mut item, &call_inst_map);
                     new_items.push(item);
                     continue;
@@ -294,6 +301,7 @@ pub(crate) fn monomorphize_with_plan(
                             .get(&InstKey {
                                 def_id: func_decl_id,
                                 type_args: inst.type_args.clone(),
+                                iterable_param_tys: inst.iterable_param_tys.clone(),
                             })
                             .expect("compiler bug: missing instantiated def id for function decl");
                         apply_inst_to_func_decl(&mut cloned, inst, &def_table, &mut node_id_gen)?;
@@ -325,6 +333,7 @@ pub(crate) fn monomorphize_with_plan(
                         MethodItem::Def(method_def) => {
                             if method_block.type_args.is_empty()
                                 && method_def.sig.type_params.is_empty()
+                                && !insts_by_def.contains_key(&def_table.def_id(method_def.id))
                             {
                                 rewrite_calls_in_method_item(&mut method_item, &call_inst_map);
                                 kept_items.push(method_item);
@@ -338,6 +347,7 @@ pub(crate) fn monomorphize_with_plan(
                                         .get(&InstKey {
                                             def_id: method_def_id,
                                             type_args: inst.type_args.clone(),
+                                            iterable_param_tys: inst.iterable_param_tys.clone(),
                                         })
                                         .expect(
                                             "compiler bug: missing instantiated def id for method",
@@ -411,6 +421,7 @@ pub(crate) fn monomorphize_with_plan(
                         MethodItem::Decl(method_decl) => {
                             if method_block.type_args.is_empty()
                                 && method_decl.sig.type_params.is_empty()
+                                && !insts_by_def.contains_key(&def_table.def_id(method_decl.id))
                             {
                                 rewrite_calls_in_method_item(&mut method_item, &call_inst_map);
                                 kept_items.push(method_item);
@@ -424,6 +435,7 @@ pub(crate) fn monomorphize_with_plan(
                                         .get(&InstKey {
                                             def_id: method_decl_id,
                                             type_args: inst.type_args.clone(),
+                                            iterable_param_tys: inst.iterable_param_tys.clone(),
                                         })
                                         .expect(
                                             "compiler bug: missing instantiated def id for method decl",
@@ -543,6 +555,7 @@ fn inst_key_for_inst(inst: &GenericInst) -> InstKey {
     InstKey {
         def_id: inst.def_id,
         type_args: inst.type_args.clone(),
+        iterable_param_tys: inst.iterable_param_tys.clone(),
     }
 }
 
@@ -567,6 +580,7 @@ fn collect_protocol_for_instantiations(for_plans: &ForPlanMap) -> Vec<(NodeId, G
                 GenericInst {
                     def_id: kernel.iter_method,
                     type_args: kernel.iter_method_type_args.clone(),
+                    iterable_param_tys: Vec::new(),
                     call_span: Span::default(),
                 },
             ));
@@ -577,6 +591,7 @@ fn collect_protocol_for_instantiations(for_plans: &ForPlanMap) -> Vec<(NodeId, G
                 GenericInst {
                     def_id: kernel.next_method,
                     type_args: kernel.next_method_type_args.clone(),
+                    iterable_param_tys: Vec::new(),
                     call_span: Span::default(),
                 },
             ));
@@ -601,6 +616,7 @@ fn collect_protocol_for_rewrites(
                 .get(&InstKey {
                     def_id: kernel.iter_method,
                     type_args: kernel.iter_method_type_args.clone(),
+                    iterable_param_tys: Vec::new(),
                 })
                 .expect("compiler bug: missing specialized iter method def id")
         };
@@ -611,6 +627,7 @@ fn collect_protocol_for_rewrites(
                 .get(&InstKey {
                     def_id: kernel.next_method,
                     type_args: kernel.next_method_type_args.clone(),
+                    iterable_param_tys: Vec::new(),
                 })
                 .expect("compiler bug: missing specialized next method def id")
         };

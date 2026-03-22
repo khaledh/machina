@@ -85,6 +85,7 @@ fn type_info_score(ty: &Type) -> usize {
         | Type::Slice { elem_ty }
         | Type::DynArray { elem_ty }
         | Type::Set { elem_ty }
+        | Type::Iterable { item_ty: elem_ty }
         | Type::Heap { elem_ty }
         | Type::Ref { elem_ty, .. } => 1 + type_info_score(elem_ty),
         Type::Pending { response_tys } | Type::ReplyCap { response_tys } => {

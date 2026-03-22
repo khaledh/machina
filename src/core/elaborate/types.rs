@@ -105,6 +105,10 @@ impl<'a> Elaborator<'a> {
                 ident: "set".to_string(),
                 type_args: vec![self.type_expr_from_type(elem_ty, span)],
             },
+            Type::Iterable { item_ty } => TypeExprKind::Named {
+                ident: "Iterable".to_string(),
+                type_args: vec![self.type_expr_from_type(item_ty, span)],
+            },
             Type::Map { key_ty, value_ty } => TypeExprKind::Named {
                 ident: "map".to_string(),
                 type_args: vec![

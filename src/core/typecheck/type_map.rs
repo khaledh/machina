@@ -47,7 +47,7 @@ pub(crate) fn resolve_type_expr(
     module: &impl TypeDefLookup,
     type_expr: &TypeExpr,
 ) -> Result<Type, TypeCheckError> {
-    resolve_type_expr_with_params_and_args(def_table, module, type_expr, None, None, false)
+    resolve_type_expr_with_params_and_args(def_table, module, type_expr, None, None, false, false)
 }
 
 pub(crate) fn resolve_type_expr_with_params(
@@ -56,7 +56,32 @@ pub(crate) fn resolve_type_expr_with_params(
     type_expr: &TypeExpr,
     type_params: Option<&TypeParamMap>,
 ) -> Result<Type, TypeCheckError> {
-    resolve_type_expr_with_params_and_args(def_table, module, type_expr, type_params, None, false)
+    resolve_type_expr_with_params_and_args(
+        def_table,
+        module,
+        type_expr,
+        type_params,
+        None,
+        false,
+        false,
+    )
+}
+
+pub(crate) fn resolve_param_type_expr_with_params(
+    def_table: &DefTable,
+    module: &impl TypeDefLookup,
+    type_expr: &TypeExpr,
+    type_params: Option<&TypeParamMap>,
+) -> Result<Type, TypeCheckError> {
+    resolve_type_expr_with_params_and_args(
+        def_table,
+        module,
+        type_expr,
+        type_params,
+        None,
+        false,
+        true,
+    )
 }
 
 pub(crate) fn resolve_return_type_expr_with_params(
@@ -65,7 +90,15 @@ pub(crate) fn resolve_return_type_expr_with_params(
     type_expr: &TypeExpr,
     type_params: Option<&TypeParamMap>,
 ) -> Result<Type, TypeCheckError> {
-    resolve_type_expr_with_params_and_args(def_table, module, type_expr, type_params, None, true)
+    resolve_type_expr_with_params_and_args(
+        def_table,
+        module,
+        type_expr,
+        type_params,
+        None,
+        true,
+        false,
+    )
 }
 
 #[allow(dead_code)]
@@ -150,6 +183,7 @@ fn resolve_type_expr_with_params_and_args(
     type_params: Option<&TypeParamMap>,
     type_args: Option<&TypeArgMap>,
     allow_error_union: bool,
+    allow_iterable: bool,
 ) -> Result<Type, TypeCheckError> {
     let mut in_progress = HashSet::new();
     resolve_type_expr_impl(
@@ -160,6 +194,7 @@ fn resolve_type_expr_with_params_and_args(
         type_args,
         &mut in_progress,
         allow_error_union,
+        allow_iterable,
     )
 }
 
@@ -197,6 +232,7 @@ fn resolve_type_expr_impl(
     type_args: Option<&TypeArgMap>,
     in_progress: &mut HashSet<DefId>,
     allow_error_union: bool,
+    allow_iterable: bool,
 ) -> Result<Type, TypeCheckError> {
     match &type_expr.kind {
         TypeExprKind::Infer => Err(TEK::UnknownType.at(type_expr.span)),
@@ -214,6 +250,7 @@ fn resolve_type_expr_impl(
                         type_params,
                         type_args,
                         in_progress,
+                        false,
                         false,
                     )
                 })
@@ -245,6 +282,18 @@ fn resolve_type_expr_impl(
                     .or_else(|| def_table.lookup_type_def_id(ident))
                     .ok_or_else(|| TEK::UnknownType.at(type_expr.span))?
             } else {
+                if ident == "Iterable" {
+                    return resolve_iterable_type(
+                        def_table,
+                        module,
+                        type_expr,
+                        type_arg_exprs,
+                        type_params,
+                        type_args,
+                        in_progress,
+                        allow_iterable,
+                    );
+                }
                 def_table
                     .lookup_type_def_id(ident)
                     .ok_or_else(|| TEK::UnknownType.at(type_expr.span))?
@@ -259,6 +308,7 @@ fn resolve_type_expr_impl(
                 type_args,
                 in_progress,
                 allow_error_union,
+                false,
             )
         }
         TypeExprKind::Array { elem_ty_expr, dims } => {
@@ -270,6 +320,7 @@ fn resolve_type_expr_impl(
                 type_args,
                 in_progress,
                 allow_error_union,
+                false,
             )?;
             Ok(Type::Array {
                 elem_ty: Box::new(elem_ty),
@@ -285,6 +336,7 @@ fn resolve_type_expr_impl(
                 type_args,
                 in_progress,
                 allow_error_union,
+                false,
             )?;
             Ok(Type::DynArray {
                 elem_ty: Box::new(elem_ty),
@@ -302,6 +354,7 @@ fn resolve_type_expr_impl(
                         type_args,
                         in_progress,
                         allow_error_union,
+                        false,
                     )
                 })
                 .collect::<Result<Vec<Type>, _>>()?;
@@ -319,6 +372,7 @@ fn resolve_type_expr_impl(
                 type_args,
                 in_progress,
                 allow_error_union,
+                false,
             )?;
             apply_refinements(base_ty, refinements, type_expr.span)
         }
@@ -331,6 +385,7 @@ fn resolve_type_expr_impl(
                 type_args,
                 in_progress,
                 allow_error_union,
+                false,
             )?;
             Ok(Type::Slice {
                 elem_ty: Box::new(elem_ty),
@@ -345,6 +400,7 @@ fn resolve_type_expr_impl(
                 type_args,
                 in_progress,
                 allow_error_union,
+                false,
             )?;
             Ok(Type::Heap {
                 elem_ty: Box::new(elem_ty),
@@ -362,6 +418,7 @@ fn resolve_type_expr_impl(
                 type_args,
                 in_progress,
                 allow_error_union,
+                false,
             )?;
             Ok(Type::Ref {
                 mutable: *mutable,
@@ -383,6 +440,7 @@ fn resolve_type_expr_impl(
                         type_args,
                         in_progress,
                         allow_error_union,
+                        false,
                     )?;
                     Ok(FnParam {
                         mode: fn_param_mode(param.mode.clone()),
@@ -398,6 +456,7 @@ fn resolve_type_expr_impl(
                 type_args,
                 in_progress,
                 allow_error_union,
+                false,
             )?;
             Ok(Type::Fn {
                 params: param_tys,
@@ -515,10 +574,24 @@ fn resolve_named_type(
     type_args: Option<&TypeArgMap>,
     in_progress: &mut HashSet<DefId>,
     allow_error_union: bool,
+    allow_iterable: bool,
 ) -> Result<Type, TypeCheckError> {
     let def = def_table
         .lookup_def(*def_id)
         .ok_or(TEK::UnknownType.at(type_expr.span))?;
+
+    if def.name == "Iterable" {
+        return resolve_iterable_type(
+            def_table,
+            module,
+            type_expr,
+            type_arg_exprs,
+            type_params,
+            type_args,
+            in_progress,
+            allow_iterable,
+        );
+    }
 
     if def.name == "set" {
         if type_arg_exprs.len() != 1 {
@@ -535,6 +608,7 @@ fn resolve_named_type(
             type_args,
             in_progress,
             allow_error_union,
+            false,
         )?;
         return Ok(Type::Set {
             elem_ty: Box::new(elem_ty),
@@ -555,6 +629,7 @@ fn resolve_named_type(
             type_args,
             in_progress,
             allow_error_union,
+            false,
         )?;
         let value_ty = resolve_type_expr_impl(
             def_table,
@@ -564,6 +639,7 @@ fn resolve_named_type(
             type_args,
             in_progress,
             allow_error_union,
+            false,
         )?;
         return Ok(Type::Map {
             key_ty: Box::new(key_ty),
@@ -585,6 +661,7 @@ fn resolve_named_type(
             type_args,
             in_progress,
             true,
+            false,
         )?;
         let response_tys = match response_set_ty {
             Type::ErrorUnion { ok_ty, err_tys } => std::iter::once(*ok_ty).chain(err_tys).collect(),
@@ -705,6 +782,7 @@ fn resolve_named_type(
                         type_args,
                         in_progress,
                         allow_error_union,
+                        false,
                     )
                 })
                 .collect::<Result<Vec<_>, _>>()?;
@@ -757,6 +835,40 @@ fn resolve_named_type(
     }
 }
 
+fn resolve_iterable_type(
+    def_table: &DefTable,
+    module: &impl TypeDefLookup,
+    type_expr: &TypeExpr,
+    type_arg_exprs: &[TypeExpr],
+    type_params: Option<&TypeParamMap>,
+    type_args: Option<&TypeArgMap>,
+    in_progress: &mut HashSet<DefId>,
+    allow_iterable: bool,
+) -> Result<Type, TypeCheckError> {
+    if !allow_iterable {
+        return Err(TEK::IterableNotAllowedHere.at(type_expr.span));
+    }
+    if type_arg_exprs.len() != 1 {
+        return Err(
+            TEK::TypeArgCountMismatch("Iterable".to_string(), 1, type_arg_exprs.len())
+                .at(type_expr.span),
+        );
+    }
+    let item_ty = resolve_type_expr_impl(
+        def_table,
+        module,
+        &type_arg_exprs[0],
+        type_params,
+        type_args,
+        in_progress,
+        false,
+        false,
+    )?;
+    Ok(Type::Iterable {
+        item_ty: Box::new(item_ty),
+    })
+}
+
 fn resolve_type_alias(
     def_table: &DefTable,
     module: &impl TypeDefLookup,
@@ -779,6 +891,7 @@ fn resolve_type_alias(
         type_args,
         in_progress,
         allow_error_union,
+        false,
     );
     in_progress.remove(&def.id);
     ty
@@ -841,6 +954,7 @@ fn resolve_struct_fields(
                 type_args,
                 in_progress,
                 allow_error_union,
+                false,
             )?;
             Ok(StructField {
                 name: field.name.clone(),
@@ -910,6 +1024,7 @@ fn resolve_enum_variants(
                     type_args,
                     in_progress,
                     allow_error_union,
+                    false,
                 )
             })
             .collect::<Result<Vec<Type>, _>>()?;
@@ -1082,6 +1197,7 @@ pub type CallSigMap = HashMap<NodeId, CallSig>;
 pub struct GenericInst {
     pub def_id: DefId,
     pub type_args: Vec<Type>,
+    pub iterable_param_tys: Vec<Type>,
     pub call_span: Span,
 }
 

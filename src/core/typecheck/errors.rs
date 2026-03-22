@@ -147,6 +147,9 @@ pub enum TypeCheckErrorKind {
     #[error("Error union types are only allowed in return type position")]
     UnionNotAllowedHere,
 
+    #[error("`Iterable<T>` is only allowed in function and method parameter position")]
+    IterableNotAllowedHere,
+
     #[error("Pattern type mismatch: expected {0}, found {1}")]
     PatternTypeMismatch(BindPattern, Type),
 

@@ -150,7 +150,7 @@ fn csv_encode(source: MapIter<InputRowIter, InputRow, OutputRow>) -> CsvEncoder 
     }
 }
 
-fn write_lines(writer: TextWriter, lines: CsvEncoder) -> () | IoError | ParseError {
+fn write_lines(writer: TextWriter, lines: Iterable<string>) -> () | IoError | ParseError {
     for line in lines {
         writer.write_all(line)?;
         writer.write_all("\n")?;

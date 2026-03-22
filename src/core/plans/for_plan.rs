@@ -19,6 +19,7 @@ pub struct ForPlan {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum ForKernel {
     Intrinsic(IntrinsicForKernel),
+    AbstractIterable(AbstractIterableForKernel),
     Protocol(ProtocolForKernel),
 }
 
@@ -30,6 +31,11 @@ pub enum IntrinsicForKernel {
     Slice,
     String,
     Map,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct AbstractIterableForKernel {
+    pub done_ty: Type,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -59,6 +65,14 @@ pub fn plan_for_iterable_type(ty: &Type) -> Option<ForPlan> {
         Type::DynArray { elem_ty } => ((**elem_ty).clone(), IntrinsicForKernel::DynArray),
         Type::Slice { elem_ty } => ((**elem_ty).clone(), IntrinsicForKernel::Slice),
         Type::String => (Type::Char, IntrinsicForKernel::String),
+        Type::Iterable { item_ty } => {
+            return Some(ForPlan {
+                item_ty: (**item_ty).clone(),
+                kernel: ForKernel::AbstractIterable(AbstractIterableForKernel {
+                    done_ty: iter_done_type(),
+                }),
+            });
+        }
         Type::Map { key_ty, value_ty }
             if (!key_ty.needs_drop() || matches!(key_ty.as_ref(), Type::String))
                 && !value_ty.needs_drop() =>
@@ -77,6 +91,13 @@ pub fn plan_for_iterable_type(ty: &Type) -> Option<ForPlan> {
         item_ty,
         kernel: ForKernel::Intrinsic(kernel),
     })
+}
+
+fn iter_done_type() -> Type {
+    Type::Struct {
+        name: ITER_DONE_TYPE_NAME.to_string(),
+        fields: Vec::new(),
+    }
 }
 
 pub(crate) fn plan_for_iterable_type_with_methods(
@@ -590,6 +611,22 @@ mod tests {
                 next_method_type_args: Vec::new(),
             })
         );
+    }
+
+    #[test]
+    fn iterable_type_plan_builds_without_method_lookup() {
+        let source_ty = Type::Iterable {
+            item_ty: Box::new(Type::String),
+        };
+
+        let plan = plan_for_iterable_type(&source_ty).expect("expected iterable plan");
+        assert_eq!(plan.item_ty, Type::String);
+        match plan.kernel {
+            ForKernel::AbstractIterable(AbstractIterableForKernel { done_ty }) => {
+                assert!(is_iter_done_type(&done_ty));
+            }
+            other => panic!("expected abstract iterable kernel, found {other:?}"),
+        }
     }
 
     #[test]

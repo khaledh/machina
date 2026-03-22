@@ -104,6 +104,7 @@ fn check_capability_at_path(
         | Type::Pending { .. }
         | Type::ReplyCap { .. }
         | Type::Set { .. }
+        | Type::Iterable { .. }
         | Type::Map { .. }
         | Type::Slice { .. }
         | Type::Heap { .. }

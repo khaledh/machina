@@ -22,7 +22,8 @@ use crate::core::resolve::{DefId, DefKind};
 use crate::core::typecheck::engine::TypecheckEngine;
 use crate::core::typecheck::errors::TypeCheckError;
 use crate::core::typecheck::type_map::{
-    resolve_return_type_expr_with_params, resolve_type_def_with_args, resolve_type_expr_with_params,
+    resolve_param_type_expr_with_params, resolve_return_type_expr_with_params,
+    resolve_type_def_with_args, resolve_type_expr_with_params,
 };
 use crate::core::types::{TyVarId, Type};
 
@@ -417,6 +418,15 @@ impl<'a> ConstraintCollector<'a> {
 
     fn resolve_type_in_scope(&self, ty_expr: &TypeExpr) -> Result<Type, TypeCheckError> {
         resolve_type_expr_with_params(
+            &self.ctx.def_table,
+            self.ctx,
+            ty_expr,
+            self.current_type_params(),
+        )
+    }
+
+    fn resolve_param_type_in_scope(&self, ty_expr: &TypeExpr) -> Result<Type, TypeCheckError> {
+        resolve_param_type_expr_with_params(
             &self.ctx.def_table,
             self.ctx,
             ty_expr,

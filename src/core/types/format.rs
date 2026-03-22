@@ -80,6 +80,9 @@ impl fmt::Display for Type {
             Type::Set { elem_ty } => {
                 write!(f, "set<{}>", elem_ty)
             }
+            Type::Iterable { item_ty } => {
+                write!(f, "Iterable<{}>", item_ty)
+            }
             Type::Map { key_ty, value_ty } => {
                 write!(f, "map<{}, {}>", key_ty, value_ty)
             }

@@ -38,8 +38,8 @@ use crate::core::ast::{
 use crate::core::diag::Span;
 use crate::core::elaborate::elaborator::Elaborator;
 use crate::core::plans::{
-    ArgLowering, CallInput, CallPlan, CallTarget, ForKernel, IntrinsicForKernel, ProtocolForKernel,
-    RuntimeCall,
+    AbstractIterableForKernel, ArgLowering, CallInput, CallPlan, CallTarget, ForKernel,
+    IntrinsicForKernel, ProtocolForKernel, RuntimeCall,
 };
 use crate::core::resolve::{DefId, DefKind, DefTable};
 use crate::core::types::Type;
@@ -287,7 +287,7 @@ impl<'a, 'b> SyntaxDesugarCtx<'a, 'b> {
                     false,
                 )
             }
-            ForKernel::Protocol(_) => {
+            ForKernel::AbstractIterable(_) | ForKernel::Protocol(_) => {
                 panic!(
                     "compiler bug: protocol for-loops use the dedicated protocol desugaring path"
                 )
@@ -330,7 +330,7 @@ impl<'a, 'b> SyntaxDesugarCtx<'a, 'b> {
                 ForKernel::Intrinsic(IntrinsicForKernel::Map) => {
                     panic!("compiler bug: map for-loops use the dedicated cursor desugaring path")
                 }
-                ForKernel::Protocol(_) => {
+                ForKernel::AbstractIterable(_) | ForKernel::Protocol(_) => {
                     panic!(
                         "compiler bug: protocol for-loops use the dedicated protocol desugaring path"
                     )
@@ -504,16 +504,30 @@ impl<'a, 'b> SyntaxDesugarCtx<'a, 'b> {
         let span = stmt.span;
         let bool_ty = Type::Bool;
         let for_plan = self.for_plan_or_panic(stmt.id, "protocol for desugaring");
-        let ForKernel::Protocol(ProtocolForKernel {
-            iter_ty,
-            done_ty,
-            propagated_err_tys,
-            iter_method,
-            next_method,
-            ..
-        }) = &for_plan.kernel
-        else {
-            panic!("compiler bug: expected protocol for-plan for {:?}", stmt.id);
+        let (iter_ty, done_ty, propagated_err_tys, iter_method, next_method) = match &for_plan
+            .kernel
+        {
+            ForKernel::Protocol(ProtocolForKernel {
+                iter_ty,
+                done_ty,
+                propagated_err_tys,
+                iter_method,
+                next_method,
+                ..
+            }) => (
+                iter_ty,
+                done_ty,
+                propagated_err_tys,
+                Some(*iter_method),
+                Some(*next_method),
+            ),
+            ForKernel::AbstractIterable(AbstractIterableForKernel { .. }) => {
+                panic!(
+                    "compiler bug: abstract Iterable<T> for-plan must be specialized before elaboration for {:?}",
+                    stmt.id
+                );
+            }
+            _ => panic!("compiler bug: expected protocol for-plan for {:?}", stmt.id),
         };
 
         let src_ty = self
@@ -556,7 +570,7 @@ impl<'a, 'b> SyntaxDesugarCtx<'a, 'b> {
         let src_place = self.make_var_place(&src_info, span);
         let src_value = self.make_load_expr(src_place, src_ty, span);
         let iter_init = self.make_direct_method_call_expr(
-            *iter_method,
+            iter_method.expect("protocol for-plan must have iter method"),
             "iter",
             src_value,
             ParamMode::In,
@@ -572,7 +586,7 @@ impl<'a, 'b> SyntaxDesugarCtx<'a, 'b> {
         let cond_expr = self.make_value_expr(ExprKind::BoolLit(true), bool_ty, span);
         let iter_place = self.make_var_place(&iter_info, span);
         let next_step = self.make_direct_method_call_expr(
-            *next_method,
+            next_method.expect("protocol for-plan must have next method"),
             "next",
             iter_place.clone(),
             ParamMode::InOut,
@@ -703,7 +717,7 @@ impl<'a, 'b> SyntaxDesugarCtx<'a, 'b> {
                                 ForKernel::Intrinsic(IntrinsicForKernel::Map) => {
                                     self.desugar_map_for_stmt(&stmt, pattern, iter, body)
                                 }
-                                ForKernel::Protocol(_) => {
+                                ForKernel::AbstractIterable(_) | ForKernel::Protocol(_) => {
                                     self.desugar_protocol_for_stmt(&stmt, pattern, iter, body)
                                 }
                                 _ => self.desugar_for_stmt(&stmt, pattern, iter, body),

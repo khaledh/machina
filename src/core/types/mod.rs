@@ -57,6 +57,9 @@ pub enum Type {
     Set {
         elem_ty: Box<Type>,
     },
+    Iterable {
+        item_ty: Box<Type>,
+    },
     Map {
         key_ty: Box<Type>,
         value_ty: Box<Type>,
@@ -189,6 +192,7 @@ impl PartialEq for Type {
             (Type::Pending { response_tys: r1 }, Type::Pending { response_tys: r2 }) => r1 == r2,
             (Type::ReplyCap { response_tys: r1 }, Type::ReplyCap { response_tys: r2 }) => r1 == r2,
             (Type::Set { elem_ty: e1 }, Type::Set { elem_ty: e2 }) => e1 == e2,
+            (Type::Iterable { item_ty: e1 }, Type::Iterable { item_ty: e2 }) => e1 == e2,
             (
                 Type::Map {
                     key_ty: lk,
@@ -284,6 +288,10 @@ impl Hash for Type {
             Type::Set { elem_ty } => {
                 19u8.hash(state);
                 elem_ty.hash(state);
+            }
+            Type::Iterable { item_ty } => {
+                23u8.hash(state);
+                item_ty.hash(state);
             }
             Type::Map { key_ty, value_ty } => {
                 20u8.hash(state);
@@ -450,6 +458,7 @@ impl Type {
             | (Type::Slice { elem_ty: l }, Type::Slice { elem_ty: r })
             | (Type::DynArray { elem_ty: l }, Type::DynArray { elem_ty: r })
             | (Type::Set { elem_ty: l }, Type::Set { elem_ty: r })
+            | (Type::Iterable { item_ty: l }, Type::Iterable { item_ty: r })
             | (Type::Heap { elem_ty: l }, Type::Heap { elem_ty: r }) => l.shape_eq(r),
             (
                 Type::Map {
@@ -608,6 +617,7 @@ impl Type {
             Type::Pending { .. } => 8,
             Type::ReplyCap { .. } => 8,
             Type::Set { .. } => 16,
+            Type::Iterable { .. } => 16,
             Type::Map { .. } => 16,
             Type::Tuple { field_tys } => {
                 let total_size: usize = field_tys.iter().map(|f| f.size_of()).sum();
@@ -647,6 +657,7 @@ impl Type {
             Type::Pending { .. } => 8,
             Type::ReplyCap { .. } => 8,
             Type::Set { .. } => 8,
+            Type::Iterable { .. } => 8,
             Type::Map { .. } => 8,
             Type::Tuple { field_tys } => field_tys.iter().map(|t| t.align_of()).max().unwrap_or(1),
             Type::Struct { fields, .. } => {
@@ -675,6 +686,7 @@ impl Type {
             Type::Array { .. }
                 | Type::DynArray { .. }
                 | Type::Set { .. }
+                | Type::Iterable { .. }
                 | Type::Map { .. }
                 | Type::Tuple { .. }
                 | Type::Struct { .. }
@@ -728,6 +740,7 @@ impl Type {
             Type::Pending { .. } => false,
             Type::ReplyCap { .. } => false,
             Type::Set { .. } => true,
+            Type::Iterable { .. } => true,
             Type::Map { .. } => true,
             Type::Tuple { field_tys } => field_tys.iter().any(Type::needs_drop),
             Type::Struct { fields, .. } => fields.iter().any(|f| f.ty.needs_drop()),
@@ -949,6 +962,9 @@ impl Type {
             Type::Set { elem_ty } => Type::Set {
                 elem_ty: Box::new((*elem_ty).map(f)),
             },
+            Type::Iterable { item_ty } => Type::Iterable {
+                item_ty: Box::new((*item_ty).map(f)),
+            },
             Type::Map { key_ty, value_ty } => Type::Map {
                 key_ty: Box::new((*key_ty).map(f)),
                 value_ty: Box::new((*value_ty).map(f)),
@@ -1079,6 +1095,16 @@ impl Type {
                 if matches!(mapped_elem, Cow::Owned(_)) {
                     Cow::Owned(Type::Set {
                         elem_ty: Box::new(mapped_elem.into_owned()),
+                    })
+                } else {
+                    Cow::Borrowed(self)
+                }
+            }
+            Type::Iterable { item_ty } => {
+                let mapped_item = item_ty.map_cow(f);
+                if matches!(mapped_item, Cow::Owned(_)) {
+                    Cow::Owned(Type::Iterable {
+                        item_ty: Box::new(mapped_item.into_owned()),
                     })
                 } else {
                     Cow::Borrowed(self)
@@ -1222,6 +1248,7 @@ impl Type {
             | Type::Array { elem_ty, .. }
             | Type::DynArray { elem_ty }
             | Type::Set { elem_ty }
+            | Type::Iterable { item_ty: elem_ty }
             | Type::Slice { elem_ty }
             | Type::Heap { elem_ty }
             | Type::Ref { elem_ty, .. } => elem_ty.any(predicate),

@@ -32,6 +32,9 @@ fn render_type_inner(ty: &Type, cfg: &TypeRenderConfig<'_>, seen_vars: &mut Vec<
         Type::Set { elem_ty } => {
             format!("set<{}>", render_type_inner(elem_ty, cfg, seen_vars))
         }
+        Type::Iterable { item_ty } => {
+            format!("Iterable<{}>", render_type_inner(item_ty, cfg, seen_vars))
+        }
         Type::Map { key_ty, value_ty } => format!(
             "map<{}, {}>",
             render_type_inner(key_ty, cfg, seen_vars),

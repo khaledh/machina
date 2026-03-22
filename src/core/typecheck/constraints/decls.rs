@@ -67,7 +67,7 @@ impl<'a> ConstraintCollector<'a> {
 
             for param in &func_def.sig.params {
                 let node_term = this.node_term(param.id);
-                let declared_ty = this.resolve_type_in_scope(&param.typ).ok();
+                let declared_ty = this.resolve_param_type_in_scope(&param.typ).ok();
                 if let Some(param_def_id) = this.lookup_def_id(param.id) {
                     let def_term = this.def_term(param_def_id);
                     if let Some(ty) = declared_ty.clone() {
@@ -165,7 +165,7 @@ impl<'a> ConstraintCollector<'a> {
 
                 for param in &sig.params {
                     let node_term = this.node_term(param.id);
-                    let declared_ty = this.resolve_type_in_scope(&param.typ).ok();
+                    let declared_ty = this.resolve_param_type_in_scope(&param.typ).ok();
                     if let Some(param_def_id) = this.lookup_def_id(param.id) {
                         let def_term = this.def_term(param_def_id);
                         if let Some(ty) = declared_ty.clone() {

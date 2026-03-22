@@ -16,7 +16,7 @@ impl<'a> ConstraintCollector<'a> {
             let param_ty = if is_infer_type_expr(&param.typ) {
                 self.fresh_var_term()
             } else {
-                self.resolve_type_in_scope(&param.typ).ok()?
+                self.resolve_param_type_in_scope(&param.typ).ok()?
             };
             fn_params.push(FnParam {
                 mode: fn_param_mode(param.mode.clone()),
@@ -66,7 +66,7 @@ impl<'a> ConstraintCollector<'a> {
         params
             .iter()
             .map(|param| {
-                self.resolve_type_in_scope(&param.typ)
+                self.resolve_param_type_in_scope(&param.typ)
                     .ok()
                     .map(|ty| FnParam {
                         mode: fn_param_mode(param.mode.clone()),

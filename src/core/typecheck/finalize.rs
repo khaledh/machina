@@ -1009,6 +1009,7 @@ fn instantiate_call_sig(
     span: Span,
     expected_ret: &Type,
 ) -> ResolvedCall {
+    let iterable_param_tys = instantiate_iterable_param_types(sig, arg_types);
     if sig.type_param_count == 0 {
         let params = sig
             .params
@@ -1026,7 +1027,12 @@ fn instantiate_call_sig(
             def_id: sig.def_id,
             receiver,
             params,
-            inst: None,
+            inst: (!iterable_param_tys.is_empty()).then_some(GenericInst {
+                def_id: sig.def_id,
+                type_args: Vec::new(),
+                iterable_param_tys,
+                call_span: span,
+            }),
         };
     }
 
@@ -1053,6 +1059,7 @@ fn instantiate_call_sig(
         Some(GenericInst {
             def_id: sig.def_id,
             type_args: type_args.clone(),
+            iterable_param_tys,
             call_span: span,
         })
     };
@@ -1080,6 +1087,19 @@ fn instantiate_call_sig(
         params,
         inst,
     }
+}
+
+fn instantiate_iterable_param_types(sig: &CollectedCallableSig, arg_types: &[Type]) -> Vec<Type> {
+    sig.params
+        .iter()
+        .zip(arg_types.iter())
+        .filter_map(|(param, arg_ty)| match &param.ty {
+            Type::Iterable { .. } if !matches!(arg_ty, Type::Iterable { .. }) => {
+                Some(arg_ty.clone())
+            }
+            _ => None,
+        })
+        .collect()
 }
 
 struct PayloadNodeCollector {

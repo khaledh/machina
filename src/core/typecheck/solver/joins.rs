@@ -44,6 +44,7 @@ fn join_variant_rank(ty: &Type) -> u8 {
         | Type::Pending { .. }
         | Type::ReplyCap { .. }
         | Type::Set { .. }
+        | Type::Iterable { .. }
         | Type::Map { .. } => 2,
         Type::Struct { .. } | Type::Enum { .. } => 3,
         Type::Fn { .. } => 4,

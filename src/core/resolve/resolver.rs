@@ -1419,6 +1419,12 @@ impl Visitor for SymbolResolver {
                 type_args,
                 ..
             } => {
+                if name == "Iterable" {
+                    for arg in type_args {
+                        self.visit_type_expr(arg);
+                    }
+                    return;
+                }
                 match self.lookup_symbol(name) {
                     Some(symbol) => match &symbol.kind {
                         SymbolKind::TypeAlias { .. }

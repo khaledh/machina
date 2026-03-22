@@ -130,6 +130,7 @@ macro_rules! with_typecheck_variants {
             MapIndexAssignUnsupported,
             UnknownType,
             UnionNotAllowedHere,
+            IterableNotAllowedHere,
             PatternTypeMismatch,
             DeclTypeMismatch,
             DeclTypeMismatchMulti,

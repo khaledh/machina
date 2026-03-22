@@ -2084,6 +2084,117 @@ fn test_generic_map_iter_adapter_builds_and_runs() {
 }
 
 #[test]
+fn test_iterable_param_typechecks_with_concrete_iterable_argument() {
+    let source = r#"
+        fn write_lines(lines: Iterable<string>) -> u64 {
+            var count: u64 = 0;
+            for line in lines {
+                let text: string = line;
+                count = count + 1;
+            }
+            count
+        }
+
+        fn main() -> u64 {
+            let lines = ["a", "b"];
+            write_lines(lines)
+        }
+    "#;
+    let result = check_with_path(
+        source,
+        Path::new("/tmp/iterable_param_typechecks_with_concrete_iterable_argument.mc"),
+        true,
+    );
+    assert!(result.is_ok(), "unexpected diagnostics: {:?}", result.err());
+}
+
+#[test]
+fn test_iterable_param_builds_and_runs_with_concrete_iterable_argument() {
+    let run = run_program(
+        "iterable_param_builds_and_runs_with_concrete_iterable_argument",
+        r#"
+            requires {
+                std::io::println
+            }
+
+            fn write_lines(lines: Iterable<string>) -> u64 {
+                var count: u64 = 0;
+                for line in lines {
+                    println(line);
+                    count = count + 1;
+                }
+                count
+            }
+
+            fn main() {
+                let count = write_lines(["a", "b"]);
+                println(count);
+            }
+        "#,
+    );
+    assert_eq!(run.status.code(), Some(0));
+
+    let stdout = String::from_utf8_lossy(&run.stdout);
+    assert_eq!(stdout, "a\nb\n2\n", "unexpected stdout: {stdout}");
+}
+
+#[test]
+fn test_iterable_param_rejects_fallible_source_not_in_callee_return() {
+    let source = r#"
+        requires {
+            std::io::println
+            std::parse as parse
+            std::parse::ParseError
+        }
+
+        type Lines = {}
+
+        Lines :: {
+            fn iter(self) -> Lines {
+                self
+            }
+
+            fn next(inout self) -> string | ParseError | IterDone {
+                let _n = parse::parse_u64("nope")?;
+                "ok"
+            }
+        }
+
+        fn consume(lines: Iterable<string>) -> u64 {
+            for line in lines {
+                let text: string = line;
+                println(text);
+            }
+            0
+        }
+
+        fn main() -> u64 {
+            consume(Lines {})
+        }
+    "#;
+    let result = check_with_path(
+        source,
+        Path::new("/tmp/iterable_param_rejects_fallible_source_not_in_callee_return.mc"),
+        true,
+    );
+    let errors = result.expect_err("expected specialized fallible iterable to be rejected");
+    assert!(
+        errors.iter().any(|e| {
+            matches!(
+                e,
+                CompileError::TypeCheck(type_err)
+                    if matches!(
+                        type_err.kind(),
+                        TypeCheckErrorKind::TryReturnTypeNotErrorUnion(_)
+                            | TypeCheckErrorKind::TryErrorNotInReturn(_, _)
+                    )
+            )
+        }),
+        "unexpected diagnostics: {errors:?}"
+    );
+}
+
+#[test]
 fn test_string_iter_done_union_match_builds_and_runs() {
     let run = run_program(
         "string_iter_done_union_match",
@@ -2266,7 +2377,7 @@ fn test_typed_csv_rewrite_pipeline_uses_generic_map_adapter_builds_and_runs() {
                 }}
             }}
 
-            fn write_lines(writer: TextWriter, lines: CsvEncoder) -> () | IoError | ParseError {{
+            fn write_lines(writer: TextWriter, lines: Iterable<string>) -> () | IoError | ParseError {{
                 for line in lines {{
                     writer.write_all(line)?;
                     writer.write_all("\n")?;

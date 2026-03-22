@@ -3206,3 +3206,95 @@ fn test_error_union_not_allowed_in_generic_argument_type() {
         );
     }
 }
+
+#[test]
+fn test_iterable_allowed_in_param_type() {
+    let source = r#"
+        fn write_lines(lines: Iterable<string>) -> u64 {
+            0
+        }
+    "#;
+
+    let _ctx = type_check_source(source).expect("Failed to type check");
+}
+
+#[test]
+fn test_iterable_not_allowed_in_return_type() {
+    let source = r#"
+        fn make_lines() -> Iterable<string> {
+            ()
+        }
+    "#;
+
+    let result = type_check_source(source);
+    assert!(result.is_err());
+
+    if let Err(errors) = result {
+        assert!(
+            errors
+                .iter()
+                .any(|e| matches!(e.kind(), TypeCheckErrorKind::IterableNotAllowedHere))
+        );
+    }
+}
+
+#[test]
+fn test_iterable_not_allowed_in_struct_field_type() {
+    let source = r#"
+        type Reader = {
+            lines: Iterable<string>,
+        }
+
+        fn main(reader: Reader) -> u64 {
+            0
+        }
+    "#;
+
+    let result = type_check_source(source);
+    assert!(result.is_err());
+
+    if let Err(errors) = result {
+        assert!(
+            errors
+                .iter()
+                .any(|e| matches!(e.kind(), TypeCheckErrorKind::IterableNotAllowedHere))
+        );
+    }
+}
+
+#[test]
+fn test_iterable_param_for_loop_typechecks() {
+    let source = r#"
+        fn write_lines(lines: Iterable<string>) -> u64 {
+            var count: u64 = 0;
+            for line in lines {
+                let text: string = line;
+                count = count + 1;
+            }
+            count
+        }
+    "#;
+
+    let _ctx = type_check_source(source).expect("Failed to type check");
+}
+
+#[test]
+fn test_concrete_iterable_argument_matches_iterable_param() {
+    let source = r#"
+        fn write_lines(lines: Iterable<string>) -> u64 {
+            var count: u64 = 0;
+            for line in lines {
+                let text: string = line;
+                count = count + 1;
+            }
+            count
+        }
+
+        fn main() -> u64 {
+            let lines = ["a", "b"];
+            write_lines(lines)
+        }
+    "#;
+
+    let _ctx = type_check_source(source).expect("Failed to type check");
+}

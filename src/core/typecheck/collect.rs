@@ -28,8 +28,8 @@ use crate::core::typecheck::errors::{TEK, TypeCheckError};
 use crate::core::typecheck::imported::{extend_imported_function_sigs, extend_imported_trait_sigs};
 use crate::core::typecheck::tc_push_error;
 use crate::core::typecheck::type_map::{
-    TypeDefLookup, resolve_return_type_expr_with_params, resolve_type_expr,
-    resolve_type_expr_with_params,
+    TypeDefLookup, resolve_param_type_expr_with_params, resolve_return_type_expr_with_params,
+    resolve_type_expr, resolve_type_expr_with_params,
 };
 use crate::core::types::{EnumVariant, StructField, TyVarId, Type};
 
@@ -798,8 +798,12 @@ fn build_param_sigs(
     let type_lookup = ResolvedTypeLookup::new(ctx, imported_facts);
     let mut out = Vec::with_capacity(params.len());
     for param in params {
-        let ty =
-            resolve_type_expr_with_params(&ctx.def_table, &type_lookup, &param.typ, type_params)?;
+        let ty = resolve_param_type_expr_with_params(
+            &ctx.def_table,
+            &type_lookup,
+            &param.typ,
+            type_params,
+        )?;
         let name = ctx
             .def_table
             .lookup_node_def_id(param.id)
