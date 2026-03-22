@@ -471,6 +471,50 @@ fn test_for_tuple_destructure_in_map_builds_and_runs() {
 }
 
 #[test]
+fn test_tuple_destructure_with_unused_trailing_binding_builds_and_runs() {
+    let run = run_program(
+        "tuple_destructure_unused_trailing_binding",
+        r#"
+            requires {
+                std::io::println
+            }
+
+            fn main() {
+                let pair: (string, u64) = ("alpha", 5);
+                let (key, value) = pair;
+                println(key);
+            }
+        "#,
+    );
+    assert_eq!(run.status.code(), Some(0));
+
+    let stdout = String::from_utf8_lossy(&run.stdout);
+    assert_eq!(stdout, "alpha\n", "unexpected stdout: {stdout}");
+}
+
+#[test]
+fn test_tuple_destructure_with_wildcard_builds_and_runs() {
+    let run = run_program(
+        "tuple_destructure_with_wildcard",
+        r#"
+            requires {
+                std::io::println
+            }
+
+            fn main() {
+                let pair: (string, u64) = ("alpha", 5);
+                let (key, _) = pair;
+                println(key);
+            }
+        "#,
+    );
+    assert_eq!(run.status.code(), Some(0));
+
+    let stdout = String::from_utf8_lossy(&run.stdout);
+    assert_eq!(stdout, "alpha\n", "unexpected stdout: {stdout}");
+}
+
+#[test]
 fn test_string_lines_returns_owned_lines_without_newlines() {
     let run = run_program(
         "string_lines_returns_owned_lines_without_newlines",

@@ -413,7 +413,12 @@ impl Arm64Emitter {
         if let Some(result) = &inst.result {
             let dst = locs.value(result.id);
             let ty = result.ty;
-            let addr = if let Some((base, offset)) = locs.index_addr_folds.get(&ptr).copied() {
+            let addr = if let Some((base, offset)) = locs
+                .field_addr_folds
+                .get(&ptr)
+                .or_else(|| locs.index_addr_folds.get(&ptr))
+                .copied()
+            {
                 let base_loc = locs.value(base);
                 let base_ty = locs.value_ty(base);
                 let base_reg = self.load_value_typed(locs, base_loc, base_ty, "x15");

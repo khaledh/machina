@@ -297,125 +297,23 @@ fn build_layouts(
 }
 
 fn build_field_addr_folds(
-    func: &Function,
-    value_types: &HashMap<ValueId, IrTypeId>,
-    layouts: &HashMap<IrTypeId, IrLayout>,
-    types: &IrTypeCache,
+    _func: &Function,
+    _value_types: &HashMap<ValueId, IrTypeId>,
+    _layouts: &HashMap<IrTypeId, IrLayout>,
+    _types: &IrTypeCache,
 ) -> HashMap<ValueId, (ValueId, u32)> {
-    let mut uses: HashMap<ValueId, Vec<(usize, usize)>> = HashMap::new();
-    for (block_idx, block) in func.blocks.iter().enumerate() {
-        for (inst_idx, inst) in block.insts.iter().enumerate() {
-            for_each_inst_use(&inst.kind, |value| {
-                uses.entry(value).or_default().push((block_idx, inst_idx));
-            });
-        }
-    }
-
-    let mut folds = HashMap::new();
-
-    for block in func.blocks.iter() {
-        for inst in block.insts.iter() {
-            let InstKind::FieldAddr { base, index } = &inst.kind else {
-                continue;
-            };
-            let Some(result) = &inst.result else {
-                continue;
-            };
-
-            let Some(users) = uses.get(&result.id) else {
-                continue;
-            };
-            if users.is_empty() {
-                continue;
-            }
-            let mut ok = true;
-            for (use_block, use_idx) in users {
-                let use_inst = &func.blocks[*use_block].insts[*use_idx];
-                match &use_inst.kind {
-                    InstKind::Store { ptr, .. } if ptr == &result.id => {}
-                    _ => {
-                        ok = false;
-                        break;
-                    }
-                }
-            }
-            if !ok {
-                continue;
-            }
-
-            let Some(base_ty) = value_types.get(base).copied() else {
-                continue;
-            };
-            let elem_ty = match types.kind(base_ty) {
-                IrTypeKind::Ptr { elem } => *elem,
-                _ => continue,
-            };
-            let Some(layout) = layouts.get(&elem_ty) else {
-                continue;
-            };
-            let offset = layout.field_offsets().get(*index).copied().unwrap_or(0) as u32;
-            folds.insert(result.id, (*base, offset));
-        }
-    }
-
-    folds
+    // Codegen-only address folding hides base-pointer uses from liveness and
+    // regalloc, which can produce illegal register aliasing for tuple/struct
+    // field loads and stores. Keep address arithmetic explicit until folding is
+    // represented earlier in the backend pipeline.
+    HashMap::new()
 }
 
 fn build_index_addr_folds(
-    func: &Function,
-    const_zero_values: &HashSet<ValueId>,
+    _func: &Function,
+    _const_zero_values: &HashSet<ValueId>,
 ) -> HashMap<ValueId, (ValueId, u32)> {
-    let mut uses: HashMap<ValueId, Vec<(usize, usize)>> = HashMap::new();
-    for (block_idx, block) in func.blocks.iter().enumerate() {
-        for (inst_idx, inst) in block.insts.iter().enumerate() {
-            for_each_inst_use(&inst.kind, |value| {
-                uses.entry(value).or_default().push((block_idx, inst_idx));
-            });
-        }
-    }
-
-    let mut folds = HashMap::new();
-
-    for block in &func.blocks {
-        for inst in &block.insts {
-            let InstKind::IndexAddr { base, index } = inst.kind else {
-                continue;
-            };
-            if !const_zero_values.contains(&index) {
-                continue;
-            }
-            let Some(result) = &inst.result else {
-                continue;
-            };
-
-            let Some(users) = uses.get(&result.id) else {
-                continue;
-            };
-            if users.is_empty() {
-                continue;
-            }
-            let mut ok = true;
-            for (use_block, use_idx) in users {
-                let use_inst = &func.blocks[*use_block].insts[*use_idx];
-                match &use_inst.kind {
-                    InstKind::Store { ptr, .. } if ptr == &result.id => {}
-                    InstKind::Load { ptr } if ptr == &result.id => {}
-                    _ => {
-                        ok = false;
-                        break;
-                    }
-                }
-            }
-            if !ok {
-                continue;
-            }
-
-            // Index 0 folds to the base address with offset 0 when used only for loads/stores.
-            folds.insert(result.id, (base, 0));
-        }
-    }
-
-    folds
+    HashMap::new()
 }
 
 fn build_const_zero_values(func: &Function) -> HashSet<ValueId> {
