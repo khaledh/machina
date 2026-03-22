@@ -2157,6 +2157,13 @@ fn test_typed_csv_rewrite_pipeline_uses_generic_map_adapter_builds_and_runs() {
                 }}
             }}
 
+            fn csv_fields(lines: string[*], start_index: u64) -> CsvFieldIter {{
+                CsvFieldIter {{
+                    lines,
+                    index: start_index,
+                }}
+            }}
+
             type InputRowIter = {{
                 source: CsvFieldIter,
             }}
@@ -2168,16 +2175,22 @@ fn test_typed_csv_rewrite_pipeline_uses_generic_map_adapter_builds_and_runs() {
 
                 fn next(inout self) -> InputRow | ParseError | IterDone {{
                     match self.source.next() {{
-                        fields: CsvFields => {{
-                            let [name_text, score_text, ...] = fields.values;
-                            let score = parse::parse_u64(score_text.trim())?;
-                            InputRow {{
-                                name: name_text.trim(),
-                                score,
-                            }}
-                        }}
+                        fields: CsvFields => parse_input_row(fields),
                         done: IterDone => IterDone {{}},
                     }}
+                }}
+            }}
+
+            fn parse_rows(source: CsvFieldIter) -> InputRowIter {{
+                InputRowIter {{ source }}
+            }}
+
+            fn parse_input_row(fields: CsvFields) -> InputRow | ParseError {{
+                let [name_text, score_text, ...] = fields.values;
+                let score = parse::parse_u64(score_text.trim())?;
+                InputRow {{
+                    name: name_text.trim(),
+                    score,
                 }}
             }}
 
@@ -2246,6 +2259,13 @@ fn test_typed_csv_rewrite_pipeline_uses_generic_map_adapter_builds_and_runs() {
                 }}
             }}
 
+            fn csv_encode(source: MapIter<InputRowIter, InputRow, OutputRow>) -> CsvEncoder {{
+                CsvEncoder {{
+                    source,
+                    wrote_header: false,
+                }}
+            }}
+
             fn write_lines(writer: TextWriter, lines: CsvEncoder) -> () | IoError | ParseError {{
                 for line in lines {{
                     writer.write_all(line)?;
@@ -2266,19 +2286,12 @@ fn test_typed_csv_rewrite_pipeline_uses_generic_map_adapter_builds_and_runs() {
 
                 using reader = open_read(input_path)?.text() {{
                     let text = reader.read_all()?;
-                    let graded = map_values(
-                        InputRowIter {{
-                            source: CsvFieldIter {{
-                                lines: text.lines(),
-                                index: 1,
-                            }},
-                        }},
-                        grade_row,
+                    let pipeline = csv_encode(
+                        map_values(
+                            parse_rows(csv_fields(text.lines(), 1)),
+                            grade_row,
+                        ),
                     );
-                    let pipeline = CsvEncoder {{
-                        source: graded,
-                        wrote_header: false,
-                    }};
 
                     using output_writer = open_write(output_path)?.text() {{
                         write_lines(output_writer, pipeline)?;
