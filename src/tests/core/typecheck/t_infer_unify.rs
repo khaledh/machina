@@ -1,5 +1,5 @@
 use crate::core::typecheck::{InferUnifier, InferUnifyError};
-use crate::core::types::{FnParam, FnParamMode, Type};
+use crate::core::types::{EnumVariant, FnParam, FnParamMode, StructField, Type};
 
 #[test]
 fn test_unify_var_with_concrete() {
@@ -123,6 +123,117 @@ fn test_unify_tuple_mismatching_arity() {
     };
     let err = unifier.unify(&left, &right).unwrap_err();
     assert!(matches!(err, InferUnifyError::Mismatch(_, _)));
+}
+
+#[test]
+fn test_unify_struct_binds_nested_type_vars() {
+    let mut unifier = InferUnifier::new();
+    let inner = unifier.new_var();
+    let left = Type::Struct {
+        name: "MapIter".to_string(),
+        fields: vec![
+            StructField {
+                name: "source".to_string(),
+                ty: Type::Struct {
+                    name: "CounterIter".to_string(),
+                    fields: vec![],
+                },
+            },
+            StructField {
+                name: "f".to_string(),
+                ty: Type::Fn {
+                    params: vec![FnParam {
+                        mode: FnParamMode::In,
+                        ty: Type::Var(inner),
+                    }],
+                    ret_ty: Box::new(Type::Var(inner)),
+                },
+            },
+        ],
+    };
+    let right = Type::Struct {
+        name: "MapIter".to_string(),
+        fields: vec![
+            StructField {
+                name: "source".to_string(),
+                ty: Type::Struct {
+                    name: "CounterIter".to_string(),
+                    fields: vec![],
+                },
+            },
+            StructField {
+                name: "f".to_string(),
+                ty: Type::Fn {
+                    params: vec![FnParam {
+                        mode: FnParamMode::In,
+                        ty: Type::uint(64),
+                    }],
+                    ret_ty: Box::new(Type::uint(64)),
+                },
+            },
+        ],
+    };
+
+    unifier.unify(&left, &right).expect("unify should succeed");
+    assert_eq!(unifier.apply(&Type::Var(inner)), Type::uint(64));
+}
+
+#[test]
+fn test_unify_error_union_binds_payload_vars() {
+    let mut unifier = InferUnifier::new();
+    let payload = unifier.new_var();
+    let left = Type::ErrorUnion {
+        ok_ty: Box::new(Type::Var(payload)),
+        err_tys: vec![Type::Struct {
+            name: "IterDone".to_string(),
+            fields: vec![],
+        }],
+    };
+    let right = Type::ErrorUnion {
+        ok_ty: Box::new(Type::uint(64)),
+        err_tys: vec![Type::Struct {
+            name: "IterDone".to_string(),
+            fields: vec![],
+        }],
+    };
+
+    unifier.unify(&left, &right).expect("unify should succeed");
+    assert_eq!(unifier.apply(&Type::Var(payload)), Type::uint(64));
+}
+
+#[test]
+fn test_unify_enum_binds_nested_payload_vars() {
+    let mut unifier = InferUnifier::new();
+    let payload = unifier.new_var();
+    let left = Type::Enum {
+        name: "Option".to_string(),
+        variants: vec![
+            EnumVariant {
+                name: "Some".to_string(),
+                payload: vec![Type::Var(payload)],
+            },
+            EnumVariant {
+                name: "None".to_string(),
+                payload: vec![],
+            },
+        ],
+    };
+    let right = Type::Enum {
+        name: "Option".to_string(),
+        variants: vec![
+            EnumVariant {
+                name: "Some".to_string(),
+                payload: vec![Type::uint(64)],
+            },
+            EnumVariant {
+                name: "None".to_string(),
+                payload: vec![],
+            },
+        ],
+    };
+
+    unifier.unify(&left, &right).expect("unify should succeed");
+    assert_eq!(unifier.apply(&Type::Var(payload)), Type::uint(64));
 }
 
 #[test]

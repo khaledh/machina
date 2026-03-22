@@ -73,22 +73,28 @@ fn grade_of(score: u64) -> string {
     }
 }
 
-type GradeTransform = {
-    source: InputRowIter,
+fn grade_row(row: InputRow) -> OutputRow {
+    OutputRow {
+        name: row.name,
+        grade: grade_of(row.score),
+    }
 }
 
-GradeTransform :: {
-    fn iter(self) -> GradeTransform {
+type MapIter<S, In, Out> = {
+    source: S,
+    f: fn(In) -> Out,
+}
+
+MapIter<S, In, Out> :: {
+    fn iter(self) -> MapIter<S, In, Out> {
         self
     }
 
-    fn next(inout self) -> OutputRow | ParseError | IterDone {
+    fn next(inout self) -> Out | ParseError | IterDone {
         match self.source.next() {
-            row: InputRow => {
-                OutputRow {
-                    name: row.name,
-                    grade: grade_of(row.score),
-                }
+            row: In => {
+                let f = self.f;
+                f(row)
             }
             err: ParseError => err,
             done: IterDone => IterDone {},
@@ -96,8 +102,12 @@ GradeTransform :: {
     }
 }
 
+fn map_values<S, In, Out>(source: S, f: fn(In) -> Out) -> MapIter<S, In, Out> {
+    MapIter { source, f }
+}
+
 type CsvEncoder = {
-    source: GradeTransform,
+    source: MapIter<InputRowIter, InputRow, OutputRow>,
     wrote_header: bool,
 }
 
@@ -140,15 +150,17 @@ fn main() -> () | IoError | ParseError {
 
     using reader = open_read(input_path)?.text() {
         let text = reader.read_all()?;
-        let pipeline = CsvEncoder {
-            source: GradeTransform {
-                source: InputRowIter {
-                    source: CsvFieldIter {
-                        lines: text.lines(),
-                        index: 1,
-                    },
+        let graded: MapIter<InputRowIter, InputRow, OutputRow> = map_values(
+            InputRowIter {
+                source: CsvFieldIter {
+                    lines: text.lines(),
+                    index: 1,
                 },
             },
+            grade_row,
+        );
+        let pipeline = CsvEncoder {
+            source: graded,
             wrote_header: false,
         };
 

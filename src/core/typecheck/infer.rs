@@ -129,7 +129,7 @@ impl InferUnifier {
     /// compound types by matching their structure.
     fn unify_inner(&mut self, left: Type, right: Type) -> Result<(), InferUnifyError> {
         // Fast path: identical types always unify
-        if left == right {
+        if infer_types_fast_equal(&left, &right) {
             return Ok(());
         }
 
@@ -213,6 +213,19 @@ impl InferUnifier {
             }
             (Type::DynArray { elem_ty: l }, Type::DynArray { elem_ty: r }) => self.unify(&l, &r),
             (Type::Set { elem_ty: l }, Type::Set { elem_ty: r }) => self.unify(&l, &r),
+            (
+                Type::Map {
+                    key_ty: l_key,
+                    value_ty: l_value,
+                },
+                Type::Map {
+                    key_ty: r_key,
+                    value_ty: r_value,
+                },
+            ) => {
+                self.unify(&l_key, &r_key)?;
+                self.unify(&l_value, &r_value)
+            }
 
             // Tuple types: must have same arity and unify field-wise
             (Type::Tuple { field_tys: l }, Type::Tuple { field_tys: r }) => {
@@ -227,10 +240,120 @@ impl InferUnifier {
                 }
                 Ok(())
             }
+            (
+                Type::Struct {
+                    name: l_name,
+                    fields: l_fields,
+                },
+                Type::Struct {
+                    name: r_name,
+                    fields: r_fields,
+                },
+            ) => {
+                if l_name != r_name || l_fields.len() != r_fields.len() {
+                    return Err(InferUnifyError::Mismatch(
+                        Type::Struct {
+                            name: l_name,
+                            fields: l_fields,
+                        },
+                        Type::Struct {
+                            name: r_name,
+                            fields: r_fields,
+                        },
+                    ));
+                }
+                for (l_field, r_field) in l_fields.iter().zip(r_fields.iter()) {
+                    if l_field.name != r_field.name {
+                        return Err(InferUnifyError::Mismatch(
+                            Type::Struct {
+                                name: l_name.clone(),
+                                fields: l_fields.clone(),
+                            },
+                            Type::Struct {
+                                name: r_name.clone(),
+                                fields: r_fields.clone(),
+                            },
+                        ));
+                    }
+                    self.unify(&l_field.ty, &r_field.ty)?;
+                }
+                Ok(())
+            }
+            (
+                Type::Enum {
+                    name: l_name,
+                    variants: l_variants,
+                },
+                Type::Enum {
+                    name: r_name,
+                    variants: r_variants,
+                },
+            ) => {
+                if l_name != r_name || l_variants.len() != r_variants.len() {
+                    return Err(InferUnifyError::Mismatch(
+                        Type::Enum {
+                            name: l_name,
+                            variants: l_variants,
+                        },
+                        Type::Enum {
+                            name: r_name,
+                            variants: r_variants,
+                        },
+                    ));
+                }
+                for (l_variant, r_variant) in l_variants.iter().zip(r_variants.iter()) {
+                    if l_variant.name != r_variant.name
+                        || l_variant.payload.len() != r_variant.payload.len()
+                    {
+                        return Err(InferUnifyError::Mismatch(
+                            Type::Enum {
+                                name: l_name.clone(),
+                                variants: l_variants.clone(),
+                            },
+                            Type::Enum {
+                                name: r_name.clone(),
+                                variants: r_variants.clone(),
+                            },
+                        ));
+                    }
+                    for (l_ty, r_ty) in l_variant.payload.iter().zip(r_variant.payload.iter()) {
+                        self.unify(l_ty, r_ty)?;
+                    }
+                }
+                Ok(())
+            }
 
             // Container types: recursively unify element types
             (Type::Slice { elem_ty: l }, Type::Slice { elem_ty: r }) => self.unify(&l, &r),
             (Type::Heap { elem_ty: l }, Type::Heap { elem_ty: r }) => self.unify(&l, &r),
+            (
+                Type::ErrorUnion {
+                    ok_ty: l_ok,
+                    err_tys: l_errs,
+                },
+                Type::ErrorUnion {
+                    ok_ty: r_ok,
+                    err_tys: r_errs,
+                },
+            ) => {
+                if l_errs.len() != r_errs.len() {
+                    return Err(InferUnifyError::Mismatch(
+                        Type::ErrorUnion {
+                            ok_ty: l_ok,
+                            err_tys: l_errs,
+                        },
+                        Type::ErrorUnion {
+                            ok_ty: r_ok,
+                            err_tys: r_errs,
+                        },
+                    ));
+                }
+                self.unify(&l_ok, &r_ok)?;
+                for (l_err, r_err) in l_errs.iter().zip(r_errs.iter()) {
+                    self.unify(l_err, r_err)?;
+                }
+                Ok(())
+            }
 
             // Reference types: must have same mutability and compatible element types
             (
@@ -269,7 +392,7 @@ impl InferUnifier {
         right: Type,
         is_infer: fn(TyVarId) -> bool,
     ) -> Result<(), InferUnifyError> {
-        if left == right {
+        if infer_types_fast_equal(&left, &right) {
             return Ok(());
         }
 
@@ -514,4 +637,13 @@ impl InferUnifier {
     fn occurs_in(&self, var: TyVarId, ty: &Type) -> bool {
         ty.any(&|t| matches!(t, Type::Var(v) if *v == var))
     }
+}
+
+fn infer_types_fast_equal(left: &Type, right: &Type) -> bool {
+    if matches!(left, Type::Struct { .. } | Type::Enum { .. })
+        || matches!(right, Type::Struct { .. } | Type::Enum { .. })
+    {
+        return false;
+    }
+    left == right
 }

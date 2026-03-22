@@ -2109,6 +2109,196 @@ fn test_string_iter_done_union_match_builds_and_runs() {
 }
 
 #[test]
+fn test_typed_csv_rewrite_pipeline_uses_generic_map_adapter_builds_and_runs() {
+    let output_path = "/tmp/machina_csv_grade_rewrite_generic_map_output.txt";
+    let run = run_program(
+        "typed_csv_rewrite_pipeline_uses_generic_map_adapter",
+        &format!(
+            r#"
+            requires {{
+                std::io::IoError
+                std::io::open_read
+                std::io::open_write
+                std::parse as parse
+                std::parse::ParseError
+            }}
+
+            type InputRow = {{
+                name: string,
+                score: u64,
+            }}
+
+            type OutputRow = {{
+                name: string,
+                grade: string,
+            }}
+
+            type CsvFields = {{
+                values: string[*],
+            }}
+
+            type CsvFieldIter = {{
+                lines: string[*],
+                index: u64,
+            }}
+
+            CsvFieldIter :: {{
+                fn iter(self) -> CsvFieldIter {{
+                    self
+                }}
+
+                fn next(inout self) -> CsvFields | IterDone {{
+                    if self.index < self.lines.len {{
+                        let line = self.lines[self.index];
+                        self.index = self.index + 1;
+                        CsvFields {{ values: line.split(",") }}
+                    }} else {{
+                        IterDone {{}}
+                    }}
+                }}
+            }}
+
+            type InputRowIter = {{
+                source: CsvFieldIter,
+            }}
+
+            InputRowIter :: {{
+                fn iter(self) -> InputRowIter {{
+                    self
+                }}
+
+                fn next(inout self) -> InputRow | ParseError | IterDone {{
+                    match self.source.next() {{
+                        fields: CsvFields => {{
+                            let [name_text, score_text, ...] = fields.values;
+                            let score = parse::parse_u64(score_text.trim())?;
+                            InputRow {{
+                                name: name_text.trim(),
+                                score,
+                            }}
+                        }}
+                        done: IterDone => IterDone {{}},
+                    }}
+                }}
+            }}
+
+            fn grade_of(score: u64) -> string {{
+                if score > 9 {{
+                    "pass"
+                }} else {{
+                    "fail"
+                }}
+            }}
+
+            fn grade_row(row: InputRow) -> OutputRow {{
+                OutputRow {{
+                    name: row.name,
+                    grade: grade_of(row.score),
+                }}
+            }}
+
+            type MapIter<S, In, Out> = {{
+                source: S,
+                f: fn(In) -> Out,
+            }}
+
+            MapIter<S, In, Out> :: {{
+                fn iter(self) -> MapIter<S, In, Out> {{
+                    self
+                }}
+
+                fn next(inout self) -> Out | ParseError | IterDone {{
+                    match self.source.next() {{
+                        row: In => {{
+                            let f = self.f;
+                            f(row)
+                        }}
+                        err: ParseError => err,
+                        done: IterDone => IterDone {{}},
+                    }}
+                }}
+            }}
+
+            fn map_values<S, In, Out>(source: S, f: fn(In) -> Out) -> MapIter<S, In, Out> {{
+                MapIter {{ source, f }}
+            }}
+
+            type CsvEncoder = {{
+                source: MapIter<InputRowIter, InputRow, OutputRow>,
+                wrote_header: bool,
+            }}
+
+            CsvEncoder :: {{
+                fn iter(self) -> CsvEncoder {{
+                    self
+                }}
+
+                fn next(inout self) -> string | ParseError | IterDone {{
+                    if !self.wrote_header {{
+                        self.wrote_header = true;
+                        "name,grade"
+                    }} else {{
+                        match self.source.next() {{
+                            row: OutputRow => f"{{row.name}},{{row.grade}}",
+                            err: ParseError => err,
+                            done: IterDone => IterDone {{}},
+                        }}
+                    }}
+                }}
+            }}
+
+            fn write_lines(writer: TextWriter, lines: CsvEncoder) -> () | IoError | ParseError {{
+                for line in lines {{
+                    writer.write_all(line)?;
+                    writer.write_all("\n")?;
+                }}
+            }}
+
+            fn main() -> () | IoError | ParseError {{
+                let input_path = "/tmp/machina_csv_grade_rewrite_generic_map_input.txt";
+                let output_path = "{output_path}";
+
+                using writer = open_write(input_path)?.text() {{
+                    writer.write_all("name,score\n")?;
+                    writer.write_all("alice,10\n")?;
+                    writer.write_all("bob,42\n")?;
+                    writer.write_all("cara,7\n")?;
+                }}
+
+                using reader = open_read(input_path)?.text() {{
+                    let text = reader.read_all()?;
+                    let graded: MapIter<InputRowIter, InputRow, OutputRow> = map_values(
+                        InputRowIter {{
+                            source: CsvFieldIter {{
+                                lines: text.lines(),
+                                index: 1,
+                            }},
+                        }},
+                        grade_row,
+                    );
+                    let pipeline = CsvEncoder {{
+                        source: graded,
+                        wrote_header: false,
+                    }};
+
+                    using output_writer = open_write(output_path)?.text() {{
+                        write_lines(output_writer, pipeline)?;
+                    }}
+                }}
+            }}
+        "#
+        ),
+    );
+    assert_eq!(run.status.code(), Some(0));
+
+    let output = fs::read_to_string(output_path).expect("expected rewritten csv output");
+    assert_eq!(
+        output, "name,grade\nalice,pass\nbob,pass\ncara,fail\n",
+        "unexpected rewritten csv output: {output}"
+    );
+}
+
+#[test]
 fn test_direct_dyn_array_tail_coerces_into_error_union() {
     with_temp_program(
         "direct_dyn_array_tail_coerces_into_error_union",

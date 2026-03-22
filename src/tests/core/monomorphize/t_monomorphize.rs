@@ -183,6 +183,141 @@ fn test_monomorphize_specializes_generic_receiver_method_block_type_args() {
 }
 
 #[test]
+fn test_monomorphize_nested_generic_receiver_method_call_specializes_adapter_block() {
+    let source = r#"
+        type IterDone = {}
+
+        type Counter = { cur: u64, end: u64 }
+        type CounterIter = { cur: u64, end: u64 }
+
+        Counter :: {
+            fn iter(self) -> CounterIter {
+                CounterIter { cur: self.cur, end: self.end }
+            }
+        }
+
+        CounterIter :: {
+            fn next(inout self) -> u64 | IterDone {
+                if self.cur < self.end {
+                    let value = self.cur;
+                    self.cur = self.cur + 1;
+                    value
+                } else {
+                    IterDone {}
+                }
+            }
+        }
+
+        type MapIter<S, In, Out> = {
+            source: S,
+            f: fn(In) -> Out,
+        }
+
+        MapIter<S, In, Out> :: {
+            fn iter(self) -> MapIter<S, In, Out> { self }
+
+            fn next(inout self) -> Out | IterDone {
+                match self.source.next() {
+                    item: In => {
+                        let f = self.f;
+                        f(item)
+                    },
+                    done: IterDone => IterDone {},
+                }
+            }
+        }
+
+        fn double(n: u64) -> u64 { n * 2 }
+
+        fn map_values<S, In, Out>(source: S, f: fn(In) -> Out) -> MapIter<S, In, Out> {
+            MapIter { source, f }
+        }
+
+        type Stringify = {
+            source: MapIter<CounterIter, u64, u64>,
+        }
+
+        Stringify :: {
+            fn iter(self) -> Stringify { self }
+
+            fn next(inout self) -> string | IterDone {
+                match self.source.next() {
+                    n: u64 => f"{n}",
+                    done: IterDone => IterDone {},
+                }
+            }
+        }
+
+        fn test() -> string | IterDone {
+            let counter = Counter { cur: 2, end: 5 };
+            let pipeline = Stringify { source: map_values(counter.iter(), double) };
+            pipeline.next()
+        }
+    "#;
+
+    let (resolved_context, _def_table) = resolve_context(source);
+    let type_checked = type_check(resolved_context.clone()).expect("type check failed");
+    let inst_descriptions = type_checked
+        .generic_insts
+        .values()
+        .map(|inst| {
+            let name = resolved_context
+                .def_table
+                .lookup_def(inst.def_id)
+                .map(|def| def.name.clone())
+                .unwrap_or_else(|| format!("def {:?}", inst.def_id));
+            format!("{name}<{:?}>", inst.type_args)
+        })
+        .collect::<Vec<_>>();
+    let monomorphized = monomorphize_resolved(resolved_context, &type_checked.generic_insts)
+        .expect("monomorphize failed");
+
+    let map_blocks = monomorphized
+        .module
+        .top_level_items
+        .iter()
+        .filter_map(|item| match item {
+            TopLevelItem::MethodBlock(block) if block.type_name == "MapIter" => Some(block),
+            _ => None,
+        })
+        .collect::<Vec<_>>();
+    let all_method_blocks = monomorphized
+        .module
+        .top_level_items
+        .iter()
+        .filter_map(|item| match item {
+            TopLevelItem::MethodBlock(block) => {
+                Some(format!("{}::{:?}", block.type_name, block.type_args))
+            }
+            _ => None,
+        })
+        .collect::<Vec<_>>();
+    let block_summaries = map_blocks
+        .iter()
+        .map(|block| format!("{:?}", block.type_args))
+        .collect::<Vec<_>>();
+
+    assert!(
+        map_blocks.iter().any(|block| {
+            block.type_args.len() == 3
+                && matches!(
+                    &block.type_args[0].kind,
+                    TypeExprKind::Named { ident, type_args } if ident == "CounterIter" && type_args.is_empty()
+                )
+                && matches!(
+                    &block.type_args[1].kind,
+                    TypeExprKind::Named { ident, type_args } if ident == "u64" && type_args.is_empty()
+                )
+                && matches!(
+                    &block.type_args[2].kind,
+                    TypeExprKind::Named { ident, type_args } if ident == "u64" && type_args.is_empty()
+                )
+        }),
+        "expected a specialized MapIter<CounterIter, u64, u64> method block, insts={inst_descriptions:?}, map={block_summaries:?}, all={all_method_blocks:?}"
+    );
+}
+
+#[test]
 fn test_monomorphize_reuses_duplicate_instantiation_requests() {
     let source = r#"
         fn id<T>(x: T) -> T { x }
