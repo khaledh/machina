@@ -2935,6 +2935,36 @@ fn test_fn_type_alias_typechecks() {
 }
 
 #[test]
+fn test_fn_type_with_error_union_return_typechecks() {
+    let source = r#"
+        type ParseError = { code: u64 }
+
+        fn test() -> u64 {
+            let parse: fn(string) -> u64 | ParseError =
+                |text: string| -> u64 | ParseError ParseError { code: text.len };
+            0
+        }
+    "#;
+
+    let _ctx = type_check_source(source).expect("Failed to type check");
+}
+
+#[test]
+fn test_fn_type_alias_with_error_union_return_typechecks() {
+    let source = r#"
+        type ParseError = { code: u64 }
+        type Parser = fn(string) -> u64 | ParseError
+
+        fn test() -> u64 {
+            let parse: Parser = |text: string| -> u64 | ParseError ParseError { code: text.len };
+            0
+        }
+    "#;
+
+    let _ctx = type_check_source(source).expect("Failed to type check");
+}
+
+#[test]
 fn test_fn_type_annotation_mismatch_rejected() {
     let source = r#"
         fn test() -> u64 {

@@ -455,7 +455,7 @@ fn resolve_type_expr_impl(
                 type_params,
                 type_args,
                 in_progress,
-                allow_error_union,
+                true,
                 false,
             )?;
             Ok(Type::Fn {

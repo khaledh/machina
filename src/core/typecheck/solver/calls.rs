@@ -81,9 +81,11 @@ pub(super) fn check_call_obligations(
                     if arg_failed {
                         continue;
                     }
-                    if let Err(err) = unifier.unify(
-                        &super::term_utils::canonicalize_type(obligation.ret_ty.clone()),
+                    if let Err(err) = solve_call_arg_assignable(
                         &super::term_utils::canonicalize_type((*ret_ty).clone()),
+                        &super::term_utils::canonicalize_type(obligation.ret_ty.clone()),
+                        unifier,
+                        method_sigs,
                     ) {
                         errors.push(super::constraint_checks::unify_error_to_diag(
                             err,

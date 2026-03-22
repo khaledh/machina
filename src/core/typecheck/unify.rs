@@ -154,6 +154,34 @@ impl TcUnifier {
             }
             (Type::DynArray { elem_ty: l }, Type::DynArray { elem_ty: r }) => self.unify(&l, &r),
             (Type::Set { elem_ty: l }, Type::Set { elem_ty: r }) => self.unify(&l, &r),
+            (
+                Type::ErrorUnion {
+                    ok_ty: l_ok,
+                    err_tys: l_errs,
+                },
+                Type::ErrorUnion {
+                    ok_ty: r_ok,
+                    err_tys: r_errs,
+                },
+            ) => {
+                if l_errs.len() != r_errs.len() {
+                    return Err(TcUnifyError::Mismatch(
+                        Type::ErrorUnion {
+                            ok_ty: l_ok,
+                            err_tys: l_errs,
+                        },
+                        Type::ErrorUnion {
+                            ok_ty: r_ok,
+                            err_tys: r_errs,
+                        },
+                    ));
+                }
+                self.unify(&l_ok, &r_ok)?;
+                for (l_ty, r_ty) in l_errs.iter().zip(r_errs.iter()) {
+                    self.unify(l_ty, r_ty)?;
+                }
+                Ok(())
+            }
             (Type::Tuple { field_tys: l }, Type::Tuple { field_tys: r }) => {
                 if l.len() != r.len() {
                     return Err(TcUnifyError::Mismatch(
