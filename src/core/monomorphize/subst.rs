@@ -304,7 +304,7 @@ impl<M: TypeDefLookup> VisitorMut for TypeExprSubstitutor<'_, M> {
     }
 }
 
-fn type_expr_from_type(
+pub(crate) fn type_expr_from_type(
     ty: &Type,
     def_table: &DefTable,
     module: &impl TypeDefLookup,

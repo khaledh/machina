@@ -145,8 +145,11 @@ impl<'a> Elaborator<'a> {
                         });
                     }
                     MatchPattern::Binding { id, .. } => {
-                        let remainder_ty =
-                            self.error_union_remainder_for_default(scrutinee_ty, &cases);
+                        let Some(remainder_ty) =
+                            self.error_union_remainder_for_default(scrutinee_ty, &cases)
+                        else {
+                            continue;
+                        };
                         default = Some(index);
                         let source = if matches!(remainder_ty, Type::ErrorUnion { .. }) {
                             self.project_place(
@@ -313,7 +316,7 @@ impl<'a> Elaborator<'a> {
         &self,
         scrutinee_ty: &Type,
         cases: &[MatchSwitchCase],
-    ) -> Type {
+    ) -> Option<Type> {
         let matched = match scrutinee_ty {
             Type::ErrorUnion { ok_ty, err_tys } => cases
                 .iter()
@@ -328,14 +331,7 @@ impl<'a> Elaborator<'a> {
             ),
         };
 
-        scrutinee_ty
-            .error_union_remainder_excluding(&matched)
-            .unwrap_or_else(|| {
-                panic!(
-                    "compiler bug: catch-all binding switch plan exhausted {:?}",
-                    scrutinee_ty
-                )
-            })
+        scrutinee_ty.error_union_remainder_excluding(&matched)
     }
 
     fn error_union_payload_place(

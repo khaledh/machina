@@ -2398,6 +2398,13 @@ fn test_typed_csv_rewrite_pipeline_uses_generic_map_adapter_builds_and_runs() {
                 }}
             }}
 
+            fn grade_row(row: InputRow) -> OutputRow {{
+                OutputRow {{
+                    name: row.name,
+                    grade: grade_of(row.score),
+                }}
+            }}
+
             type TryMapIter<S, In, Out, E> = {{
                 source: S,
                 f: fn(In) -> Out | E,
@@ -2415,8 +2422,35 @@ fn test_typed_csv_rewrite_pipeline_uses_generic_map_adapter_builds_and_runs() {
                             return f(item);
                         }},
                         done: IterDone => IterDone {{}},
+                        other => other,
                     }}
                 }}
+            }}
+
+            type MapIter<S, In, Out> = {{
+                source: S,
+                f: fn(In) -> Out,
+            }}
+
+            MapIter<S, In, Out> :: {{
+                fn iter(self) -> MapIter<S, In, Out> {{
+                    self
+                }}
+
+                fn next(inout self) -> Out | IterDone {{
+                    match self.source.next() {{
+                        item: In => {{
+                            let f = self.f;
+                            f(item)
+                        }},
+                        done: IterDone => IterDone {{}},
+                        other => other,
+                    }}
+                }}
+            }}
+
+            fn map_values<S, In, Out>(source: S, f: fn(In) -> Out) -> MapIter<S, In, Out> {{
+                MapIter {{ source, f }}
             }}
 
             fn try_map_values<S, In, Out, E>(
@@ -2426,35 +2460,8 @@ fn test_typed_csv_rewrite_pipeline_uses_generic_map_adapter_builds_and_runs() {
                 TryMapIter {{ source, f }}
             }}
 
-            type GradeTransform = {{
-                source: TryMapIter<CsvFieldIter, CsvFields, InputRow, ParseError>,
-            }}
-
-            GradeTransform :: {{
-                fn iter(self) -> GradeTransform {{
-                    self
-                }}
-
-                fn next(inout self) -> OutputRow | ParseError | IterDone {{
-                    match self.source.next() {{
-                        row: InputRow => OutputRow {{
-                            name: row.name,
-                            grade: grade_of(row.score),
-                        }},
-                        done: IterDone => IterDone {{}},
-                        err: ParseError => err,
-                    }}
-                }}
-            }}
-
-            fn grade_rows(
-                source: TryMapIter<CsvFieldIter, CsvFields, InputRow, ParseError>,
-            ) -> GradeTransform {{
-                GradeTransform {{ source }}
-            }}
-
             type CsvEncoder = {{
-                source: GradeTransform,
+                source: MapIter<TryMapIter<CsvFieldIter, CsvFields, InputRow, ParseError>, InputRow, OutputRow>,
                 wrote_header: bool,
             }}
 
@@ -2477,7 +2484,9 @@ fn test_typed_csv_rewrite_pipeline_uses_generic_map_adapter_builds_and_runs() {
                 }}
             }}
 
-            fn csv_encode(source: GradeTransform) -> CsvEncoder {{
+            fn csv_encode(
+                source: MapIter<TryMapIter<CsvFieldIter, CsvFields, InputRow, ParseError>, InputRow, OutputRow>,
+            ) -> CsvEncoder {{
                 CsvEncoder {{
                     source,
                     wrote_header: false,
@@ -2504,8 +2513,10 @@ fn test_typed_csv_rewrite_pipeline_uses_generic_map_adapter_builds_and_runs() {
 
                 using reader = open_read(input_path)?.text() {{
                     let text = reader.read_all()?;
-                    let pipeline =
-                        csv_encode(grade_rows(try_map_values(csv_fields(text.lines(), 1), parse_input_row)));
+                    let pipeline = csv_encode(map_values(
+                        try_map_values(csv_fields(text.lines(), 1), parse_input_row),
+                        grade_row,
+                    ));
 
                     using output_writer = open_write(output_path)?.text() {{
                         write_lines(output_writer, pipeline)?;

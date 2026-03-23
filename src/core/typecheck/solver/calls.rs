@@ -191,7 +191,7 @@ pub(super) fn check_call_obligations(
             continue;
         }
 
-        let mut best_choice: Option<(i32, i32, TcUnifier, DefId)> = None;
+        let mut best_choice: Option<(i32, i32, i32, TcUnifier, DefId)> = None;
         let mut ambiguous_best = false;
         let mut first_error = None;
         for sig in candidates.drain(..) {
@@ -200,6 +200,7 @@ pub(super) fn check_call_obligations(
             let mut failed = false;
             let mut score = 0i32;
             let method_priority = if sig.impl_trait.is_none() { 1 } else { 0 };
+            let specialization_priority = if sig.type_param_count == 0 { 1 } else { 0 };
             if let (Some(receiver_term), Some(expected_receiver_ty)) =
                 (&obligation.receiver, &instantiated.receiver_ty)
             {
@@ -266,22 +267,33 @@ pub(super) fn check_call_obligations(
                 continue;
             }
             match &best_choice {
-                Some((best_score, best_priority, _, _))
+                Some((best_score, best_method_priority, best_specialization_priority, _, _))
                     if score < *best_score
-                        || (score == *best_score && method_priority < *best_priority) => {}
-                Some((best_score, best_priority, _, _))
-                    if score == *best_score && method_priority == *best_priority =>
+                        || (score == *best_score && method_priority < *best_method_priority)
+                        || (score == *best_score
+                            && method_priority == *best_method_priority
+                            && specialization_priority < *best_specialization_priority) => {}
+                Some((best_score, best_method_priority, best_specialization_priority, _, _))
+                    if score == *best_score
+                        && method_priority == *best_method_priority
+                        && specialization_priority == *best_specialization_priority =>
                 {
                     ambiguous_best = true;
                 }
                 _ => {
                     ambiguous_best = false;
-                    best_choice = Some((score, method_priority, trial, sig.def_id));
+                    best_choice = Some((
+                        score,
+                        method_priority,
+                        specialization_priority,
+                        trial,
+                        sig.def_id,
+                    ));
                 }
             }
         }
 
-        if let Some((_, _, next, def_id)) = best_choice {
+        if let Some((_, _, _, next, def_id)) = best_choice {
             if ambiguous_best {
                 if should_defer_for_unresolved {
                     deferred.push(obligation.clone());

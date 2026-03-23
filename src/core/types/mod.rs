@@ -339,12 +339,16 @@ impl Hash for Type {
                 11u8.hash(state);
                 field_tys.hash(state);
             }
-            Type::Struct { name, type_args, .. } => {
+            Type::Struct {
+                name, type_args, ..
+            } => {
                 12u8.hash(state);
                 name.hash(state);
                 type_args.hash(state);
             }
-            Type::Enum { name, type_args, .. } => {
+            Type::Enum {
+                name, type_args, ..
+            } => {
                 13u8.hash(state);
                 name.hash(state);
                 type_args.hash(state);
@@ -1231,7 +1235,9 @@ impl Type {
                     .iter()
                     .map(|field| (&field.name, field.ty.map_cow(f)))
                     .collect::<Vec<_>>();
-                let changed = mapped_type_args.iter().any(|ty| matches!(ty, Cow::Owned(_)))
+                let changed = mapped_type_args
+                    .iter()
+                    .any(|ty| matches!(ty, Cow::Owned(_)))
                     || mapped_fields
                         .iter()
                         .any(|(_, ty)| matches!(ty, Cow::Owned(_)));
@@ -1268,7 +1274,9 @@ impl Type {
                         (&variant.name, payload)
                     })
                     .collect::<Vec<_>>();
-                let changed = mapped_type_args.iter().any(|ty| matches!(ty, Cow::Owned(_)))
+                let changed = mapped_type_args
+                    .iter()
+                    .any(|ty| matches!(ty, Cow::Owned(_)))
                     || mapped_variants
                         .iter()
                         .any(|(_, payload)| payload.iter().any(|ty| matches!(ty, Cow::Owned(_))));

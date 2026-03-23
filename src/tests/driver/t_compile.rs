@@ -940,6 +940,8 @@ fn untouched() -> u64 {
         &type_checked_context.generic_insts,
         &type_checked_context.for_plans,
         &std::collections::HashSet::new(),
+        &std::collections::HashMap::new(),
+        &std::collections::HashMap::new(),
     )
     .expect("monomorphize with plan");
     let sparse = build_retype_context(&monomorphized, &plan.retype_def_ids);

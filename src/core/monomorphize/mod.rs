@@ -92,6 +92,7 @@ pub fn monomorphize(
     first_pass_typed: TypeCheckedContext,
     top_level_owners: Option<&HashMap<NodeId, ModuleId>>,
 ) -> Result<(ResolvedContext, TypeCheckedContext, MonomorphizeStats), MonomorphizePipelineError> {
+    let (func_templates, method_templates) = collect_generic_callable_templates(&resolved_context);
     let mut current_resolved = resolved_context;
     let mut current_typed = first_pass_typed;
     let mut processed_inst_keys = HashSet::new();
@@ -109,6 +110,8 @@ pub fn monomorphize(
             &current_typed.generic_insts,
             &current_typed.for_plans,
             &processed_inst_keys,
+            &func_templates,
+            &method_templates,
         )
         .map_err(MonomorphizePipelineError::Monomorphize)?;
 
@@ -145,8 +148,15 @@ pub(crate) fn monomorphize_resolved(
     ctx: ResolvedContext,
     generic_insts: &GenericInstMap,
 ) -> Result<ResolvedContext, MonomorphizeError> {
-    let (ctx, _stats, _plan) =
-        monomorphize_with_plan(ctx, generic_insts, &ForPlanMap::default(), &HashSet::new())?;
+    let (func_templates, method_templates) = collect_generic_callable_templates(&ctx);
+    let (ctx, _stats, _plan) = monomorphize_with_plan(
+        ctx,
+        generic_insts,
+        &ForPlanMap::default(),
+        &HashSet::new(),
+        &func_templates,
+        &method_templates,
+    )?;
     Ok(ctx)
 }
 
@@ -155,8 +165,15 @@ pub(crate) fn monomorphize_resolved_with_stats(
     ctx: ResolvedContext,
     generic_insts: &GenericInstMap,
 ) -> Result<(ResolvedContext, MonomorphizeStats), MonomorphizeError> {
-    let (ctx, stats, _plan) =
-        monomorphize_with_plan(ctx, generic_insts, &ForPlanMap::default(), &HashSet::new())?;
+    let (func_templates, method_templates) = collect_generic_callable_templates(&ctx);
+    let (ctx, stats, _plan) = monomorphize_with_plan(
+        ctx,
+        generic_insts,
+        &ForPlanMap::default(),
+        &HashSet::new(),
+        &func_templates,
+        &method_templates,
+    )?;
     Ok((ctx, stats))
 }
 
@@ -165,6 +182,8 @@ pub(crate) fn monomorphize_with_plan(
     generic_insts: &GenericInstMap,
     for_plans: &ForPlanMap,
     already_specialized: &HashSet<InstKey>,
+    func_templates: &HashMap<DefId, FuncDef>,
+    method_templates: &HashMap<DefId, MethodDef>,
 ) -> Result<(ResolvedContext, MonomorphizeStats, MonomorphizePlan), MonomorphizeError> {
     let ResolvedContext {
         mut module,
@@ -346,6 +365,40 @@ pub(crate) fn monomorphize_with_plan(
                         new_items.push(TopLevelItem::FuncDecl(func_decl.clone()));
                     }
                     for inst in insts {
+                        if let Some(template_def) = func_templates.get(&func_decl_id) {
+                            let mut cloned = template_def.clone();
+                            let new_def_id = *inst_to_def
+                                .get(&InstKey {
+                                    def_id: func_decl_id,
+                                    type_args: inst.type_args.clone(),
+                                    iterable_param_tys: inst.iterable_param_tys.clone(),
+                                })
+                                .expect(
+                                    "compiler bug: missing instantiated def id for function decl",
+                                );
+                            apply_inst_to_func_def(
+                                &mut cloned,
+                                inst,
+                                &def_table,
+                                &module_lookup,
+                                &mut node_id_gen,
+                            )?;
+
+                            let mut cloned_item = TopLevelItem::FuncDef(cloned);
+                            cloned_item = remap_local_defs_in_item(cloned_item, &mut def_table);
+                            rewrite_calls_in_item(&mut cloned_item, &call_inst_map);
+
+                            let old_node_ids = collect_node_ids_in_top_level_item(&cloned_item);
+                            reseed_ids_in_item(&mut cloned_item, &mut node_id_gen);
+
+                            let new_node_ids = collect_node_ids_in_top_level_item(&cloned_item);
+                            replay_node_def_mappings(&mut def_table, &old_node_ids, &new_node_ids);
+                            register_item_def_id(&mut def_table, &cloned_item, new_def_id);
+
+                            new_items.push(cloned_item);
+                            continue;
+                        }
+
                         let mut cloned = func_decl.clone();
                         let new_def_id = *inst_to_def
                             .get(&InstKey {
@@ -414,7 +467,7 @@ pub(crate) fn monomorphize_with_plan(
                 for mut method_item in method_block.method_items.drain(..) {
                     match &mut method_item {
                         MethodItem::Def(method_def) => {
-                            if method_block.type_args.is_empty()
+                            if receiver_type_param_count == 0
                                 && method_def.sig.type_params.is_empty()
                                 && !insts_by_def.contains_key(&def_table.def_id(method_def.id))
                             {
@@ -509,7 +562,7 @@ pub(crate) fn monomorphize_with_plan(
                             }
                         }
                         MethodItem::Decl(method_decl) => {
-                            if method_block.type_args.is_empty()
+                            if receiver_type_param_count == 0
                                 && method_decl.sig.type_params.is_empty()
                                 && !insts_by_def.contains_key(&def_table.def_id(method_decl.id))
                             {
@@ -520,6 +573,102 @@ pub(crate) fn monomorphize_with_plan(
                             let method_decl_id = def_table.def_id(method_decl.id);
                             if let Some(insts) = insts_by_def.get(&method_decl_id) {
                                 for inst in insts {
+                                    if let Some(template_def) =
+                                        method_templates.get(&method_decl_id)
+                                    {
+                                        let mut cloned = template_def.clone();
+                                        let new_def_id = *inst_to_def
+                                            .get(&InstKey {
+                                                def_id: method_decl_id,
+                                                type_args: inst.type_args.clone(),
+                                                iterable_param_tys: inst.iterable_param_tys.clone(),
+                                            })
+                                            .expect(
+                                                "compiler bug: missing instantiated def id for method decl",
+                                            );
+                                        apply_inst_to_method_def(
+                                            &receiver_type_args,
+                                            &mut cloned,
+                                            inst,
+                                            &def_table,
+                                            &module_lookup,
+                                            &mut node_id_gen,
+                                        )?;
+
+                                        let mut cloned_item = MethodItem::Def(cloned);
+                                        cloned_item = remap_local_defs_in_method_item(
+                                            cloned_item,
+                                            &mut def_table,
+                                        );
+                                        rewrite_calls_in_method_item(
+                                            &mut cloned_item,
+                                            &call_inst_map,
+                                        );
+
+                                        let old_node_ids =
+                                            collect_node_ids_in_method_item(&cloned_item);
+                                        reseed_ids_in_method_item(
+                                            &mut cloned_item,
+                                            &mut node_id_gen,
+                                        );
+
+                                        let new_node_ids =
+                                            collect_node_ids_in_method_item(&cloned_item);
+                                        replay_node_def_mappings(
+                                            &mut def_table,
+                                            &old_node_ids,
+                                            &new_node_ids,
+                                        );
+                                        register_method_item_def_id(
+                                            &mut def_table,
+                                            &cloned_item,
+                                            new_def_id,
+                                        );
+                                        if receiver_type_param_count == 0 {
+                                            kept_items.push(cloned_item);
+                                        } else {
+                                            let receiver_inst_args = inst.type_args
+                                                [..receiver_type_param_count]
+                                                .to_vec();
+                                            let block_idx = *specialized_block_indices
+                                                .entry(receiver_inst_args.clone())
+                                                .or_insert_with(|| {
+                                                    let mut cloned_block = MethodBlock {
+                                                        id: node_id_gen.new_id(),
+                                                        type_name: method_block.type_name.clone(),
+                                                        type_args: method_block.type_args.clone(),
+                                                        trait_name: method_block.trait_name.clone(),
+                                                        method_items: Vec::new(),
+                                                        span: method_block.span,
+                                                    };
+                                                    apply_inst_to_method_block(
+                                                        &mut cloned_block,
+                                                        &receiver_inst_args,
+                                                        &def_table,
+                                                        &module_lookup,
+                                                        &mut node_id_gen,
+                                                    )
+                                                    .expect(
+                                                        "compiler bug: failed to specialize generic method block receiver",
+                                                    );
+                                                    if let Some(type_def_id) = def_table
+                                                        .lookup_type_def_id(&cloned_block.type_name)
+                                                    {
+                                                        def_table.record_use(
+                                                            cloned_block.id,
+                                                            type_def_id,
+                                                        );
+                                                    }
+                                                    specialized_blocks.push(cloned_block);
+                                                    specialized_blocks.len() - 1
+                                                });
+                                            specialized_blocks[block_idx]
+                                                .method_items
+                                                .push(cloned_item);
+                                        }
+                                        continue;
+                                    }
+
                                     let mut cloned = method_decl.clone();
                                     let new_def_id = *inst_to_def
                                         .get(&InstKey {
@@ -806,6 +955,34 @@ fn callable_requires_monomorphization(
     false
 }
 
+fn collect_generic_callable_templates(
+    ctx: &ResolvedContext,
+) -> (HashMap<DefId, FuncDef>, HashMap<DefId, MethodDef>) {
+    let mut func_templates = HashMap::new();
+    let mut method_templates = HashMap::new();
+    for item in &ctx.module.top_level_items {
+        match item {
+            TopLevelItem::FuncDef(func_def) if !func_def.sig.type_params.is_empty() => {
+                func_templates.insert(ctx.def_table.def_id(func_def.id), func_def.clone());
+            }
+            TopLevelItem::MethodBlock(method_block) => {
+                let receiver_generic =
+                    method_block_type_param_count(&ctx.def_table, &method_block.type_args) > 0;
+                for method_item in &method_block.method_items {
+                    let MethodItem::Def(method_def) = method_item else {
+                        continue;
+                    };
+                    if receiver_generic || !method_def.sig.type_params.is_empty() {
+                        method_templates
+                            .insert(ctx.def_table.def_id(method_def.id), method_def.clone());
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+    (func_templates, method_templates)
+}
 /// Kept as a top-level helper for compile-path tests that assert sparse retype shape.
 #[allow(dead_code)]
 pub(crate) fn build_retype_context(

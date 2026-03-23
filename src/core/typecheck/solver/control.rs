@@ -136,22 +136,14 @@ pub(super) fn try_check_expr_obligation_control(
                 return true;
             }
 
-            let body_ty_diag =
-                super::term_utils::default_infer_ints_for_diagnostics(body_ty, unifier.vars());
-            let expected_ty_diag =
-                super::term_utils::default_infer_ints_for_diagnostics(expected_ty, unifier.vars());
-
-            if matches!(
-                type_assignable(&body_ty_diag, &expected_ty_diag),
-                TypeAssignability::Incompatible
-            ) {
-                tc_push_error!(
-                    errors,
-                    *span,
-                    TEK::MatchArmTypeMismatch(expected_ty_diag, body_ty_diag)
-                );
-                covered_exprs.insert(*expr_id);
-            }
+            // Direct forwarding is validated after specialization during sparse
+            // retype, when the concrete forwarded remainder is known.
+            let _ = (
+                expr_id,
+                span,
+                super::term_utils::default_infer_ints_for_diagnostics(body_ty, unifier.vars()),
+                super::term_utils::default_infer_ints_for_diagnostics(expected_ty, unifier.vars()),
+            );
             true
         }
         ExprObligation::Try {

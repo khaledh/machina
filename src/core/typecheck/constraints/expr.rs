@@ -434,8 +434,7 @@ impl<'a> ConstraintCollector<'a> {
                             });
                     }
                     prior_patterns.extend(arm.patterns.iter().cloned());
-                    let forwarding_arm =
-                        expected.is_some() && self.is_generic_catch_all_forwarding_arm(arm);
+                    let forwarding_arm = expected.is_some() && self.is_direct_forwarding_arm(arm);
                     let arm_ty = self.collect_match_arm(
                         arm,
                         if forwarding_arm {
@@ -1091,8 +1090,8 @@ impl<'a> ConstraintCollector<'a> {
         self.exit_callable(def_id, expr.span);
     }
 
-    fn is_generic_catch_all_forwarding_arm(&self, arm: &MatchArm) -> bool {
-        if self.current_type_params().is_none() || arm.patterns.len() != 1 {
+    fn is_direct_forwarding_arm(&self, arm: &MatchArm) -> bool {
+        if arm.patterns.len() != 1 {
             return false;
         }
         let MatchPattern::Binding { id, .. } = &arm.patterns[0] else {

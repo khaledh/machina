@@ -8,10 +8,12 @@ use crate::core::resolve::{DefId, DefTable, ImportedFacts};
 use crate::core::symbol_id::SelectedCallable;
 use crate::core::typecheck::TypeCheckError;
 use crate::core::typecheck::type_check_with_imported_facts;
+use crate::core::typecheck::type_map::resolve_type_expr;
 use crate::core::typecheck::type_map::{CallSigMap, TypeMap};
 use crate::core::types::Type;
 
 use super::MonomorphizePlan;
+use super::subst::type_expr_from_type;
 use crate::core::plans::ForKernel;
 
 pub(crate) fn retype_after_monomorphize(
@@ -19,23 +21,30 @@ pub(crate) fn retype_after_monomorphize(
     first_pass: TypeCheckedContext,
     plan: &MonomorphizePlan,
 ) -> Result<(ResolvedContext, TypeCheckedContext), Vec<TypeCheckError>> {
-    // Build a sparse module where unchanged function/method bodies become decls.
-    let retype_context = build_retype_context(monomorphized_context, &plan.retype_def_ids);
+    let mut rewritten_context = monomorphized_context.clone();
+    let mut retype_def_ids = plan.retype_def_ids.clone();
 
-    // Re-run typecheck only across this sparse module.
-    let second_pass = type_check_with_imported_facts(retype_context, ImportedFacts::default())?;
+    let second_pass = loop {
+        let retype_context = build_retype_context(&rewritten_context, &retype_def_ids);
+        let typed = type_check_with_imported_facts(retype_context, ImportedFacts::default())?;
+        if rewrite_direct_forwarding_returns(&mut rewritten_context, &typed, &retype_def_ids) {
+            retype_def_ids = all_callable_def_ids(&rewritten_context);
+            continue;
+        }
+        break typed;
+    };
 
     // Merge patch tables over the first pass so unaffected nodes/defs keep
     // their original entries.
     let typed = merge_typecheck_results(
-        monomorphized_context,
+        &rewritten_context,
         first_pass,
         second_pass,
         &plan.call_rewrites,
         &plan.for_plan_rewrites,
     );
 
-    Ok((monomorphized_context.clone(), typed))
+    Ok((rewritten_context, typed))
 }
 
 pub(crate) fn build_retype_context(
@@ -114,7 +123,9 @@ fn merge_typecheck_results(
     apply_call_rewrites(&mut merged_call_sigs, call_rewrites);
 
     // Generic instantiations: keep first pass and fill any second-pass
-    // additions.
+    // additions. For call nodes that were reretyped in the sparse pass, the
+    // sparse result is authoritative: drop any stale first-pass inst request
+    // before layering the sparse pass back on top.
     //
     // Important: these instantiations must stay anchored to the original
     // generic template defs, not the specialized clone ids from call_rewrites.
@@ -122,6 +133,9 @@ fn merge_typecheck_results(
     // retype, and those requests need to target the generic template again.
     // Rewriting them to clone ids corrupts the next round's substitution basis.
     let mut merged_generic_insts = first_pass.generic_insts.clone();
+    for call_id in second_pass.call_sigs.keys() {
+        merged_generic_insts.remove(call_id);
+    }
     merged_generic_insts.extend(second_pass.generic_insts.clone());
 
     let mut merged_for_plans = first_pass.for_plans.clone();
@@ -191,5 +205,241 @@ fn apply_call_rewrites(call_sigs: &mut CallSigMap, call_rewrites: &HashMap<NodeI
                 *local_def_id = *rewritten_def_id;
             }
         }
+    }
+}
+
+fn rewrite_direct_forwarding_returns(
+    context: &mut ResolvedContext,
+    typed: &TypeCheckedContext,
+    retype_def_ids: &HashSet<DefId>,
+) -> bool {
+    let lookup_ctx = context.clone();
+    let rewrites = context
+        .module
+        .top_level_items
+        .iter()
+        .flat_map(|item| match item {
+            TopLevelItem::FuncDef(func_def) => {
+                let def_id = lookup_ctx.def_table.def_id(func_def.id);
+                if !retype_def_ids.contains(&def_id) {
+                    return Vec::new();
+                }
+                widened_direct_forwarding_return(
+                    &lookup_ctx,
+                    typed,
+                    Some(func_def.sig.name.as_str()),
+                    func_def.id,
+                    &func_def.sig.ret_ty_expr,
+                    &func_def.body,
+                )
+                .map(|ret_ty| (func_def.id, ret_ty, func_def.sig.ret_ty_expr.span))
+                .into_iter()
+                .collect::<Vec<_>>()
+            }
+            TopLevelItem::MethodBlock(method_block) => method_block
+                .method_items
+                .iter()
+                .filter_map(|method_item| {
+                    let MethodItem::Def(method_def) = method_item else {
+                        return None;
+                    };
+                    let def_id = lookup_ctx.def_table.def_id(method_def.id);
+                    if !retype_def_ids.contains(&def_id) {
+                        return None;
+                    }
+                    widened_direct_forwarding_return(
+                        &lookup_ctx,
+                        typed,
+                        Some(method_def.sig.name.as_str()),
+                        method_def.id,
+                        &method_def.sig.ret_ty_expr,
+                        &method_def.body,
+                    )
+                    .map(|ret_ty| (method_def.id, ret_ty, method_def.sig.ret_ty_expr.span))
+                })
+                .collect::<Vec<_>>(),
+            _ => Vec::new(),
+        })
+        .collect::<Vec<_>>();
+
+    if rewrites.is_empty() {
+        return false;
+    }
+
+    let mut rewritten = HashMap::new();
+    for (node_id, ret_ty, span) in rewrites {
+        let Ok(ret_ty_expr) = type_expr_from_type(
+            &ret_ty,
+            &lookup_ctx.def_table,
+            &lookup_ctx,
+            &mut context.node_id_gen,
+            span,
+        ) else {
+            continue;
+        };
+        rewritten.insert(node_id, ret_ty_expr);
+    }
+
+    let mut changed = false;
+    for item in &mut context.module.top_level_items {
+        match item {
+            TopLevelItem::FuncDef(func_def) => {
+                if let Some(ret_ty_expr) = rewritten.remove(&func_def.id) {
+                    if ret_ty_expr != func_def.sig.ret_ty_expr {
+                        func_def.sig.ret_ty_expr = ret_ty_expr;
+                        changed = true;
+                    }
+                }
+            }
+            TopLevelItem::MethodBlock(method_block) => {
+                for method_item in &mut method_block.method_items {
+                    let MethodItem::Def(method_def) = method_item else {
+                        continue;
+                    };
+                    if let Some(ret_ty_expr) = rewritten.remove(&method_def.id) {
+                        if ret_ty_expr != method_def.sig.ret_ty_expr {
+                            method_def.sig.ret_ty_expr = ret_ty_expr;
+                            changed = true;
+                        }
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+
+    changed
+}
+
+fn widened_direct_forwarding_return(
+    context: &ResolvedContext,
+    typed: &TypeCheckedContext,
+    _callable_name: Option<&str>,
+    callable_node_id: NodeId,
+    ret_ty_expr: &TypeExpr,
+    body: &Expr,
+) -> Option<Type> {
+    let Some(match_expr) = direct_forwarding_match_expr(body) else {
+        return None;
+    };
+    let ExprKind::Match { scrutinee, arms } = &match_expr.kind else {
+        unreachable!("direct_forwarding_match_expr only returns match expressions");
+    };
+    let forwarding_arm = arms.last()?;
+    if !is_direct_forwarding_arm(forwarding_arm, &context.def_table) {
+        return None;
+    }
+
+    let Some(scrutinee_ty) = typed.type_map.lookup_node_type(scrutinee.id) else {
+        return None;
+    };
+    let matched = arms[..arms.len().saturating_sub(1)]
+        .iter()
+        .map(|arm| {
+            if arm.patterns.len() != 1 {
+                return None;
+            }
+            let MatchPattern::TypedBinding { ty_expr, .. } = &arm.patterns[0] else {
+                return None;
+            };
+            typed
+                .type_map
+                .lookup_node_type(ty_expr.id)
+                .filter(|ty| !matches!(ty, Type::Unknown))
+                .or_else(|| resolve_type_expr(&context.def_table, context, ty_expr).ok())
+        })
+        .collect::<Option<Vec<_>>>()?;
+    let Some(remainder) = scrutinee_ty.error_union_remainder_excluding(&matched) else {
+        return None;
+    };
+    let declared_ret_ty = typed
+        .type_map
+        .lookup_node_type(callable_node_id)
+        .filter(|ty| !matches!(ty, Type::Unknown))
+        .or_else(|| resolve_type_expr(&context.def_table, context, ret_ty_expr).ok())?;
+    let widened = infer_join_type_from_arms(&[declared_ret_ty.clone(), remainder.clone()]);
+    if widened.as_ref() == Some(&declared_ret_ty) {
+        return None;
+    }
+    widened
+}
+
+fn direct_forwarding_match_expr<'a>(expr: &'a Expr) -> Option<&'a Expr> {
+    match &expr.kind {
+        ExprKind::Match { .. } => Some(expr),
+        ExprKind::Block {
+            tail: Some(tail), ..
+        } => direct_forwarding_match_expr(tail),
+        _ => None,
+    }
+}
+
+fn is_direct_forwarding_arm(arm: &MatchArm, def_table: &DefTable) -> bool {
+    if arm.patterns.len() != 1 {
+        return false;
+    }
+    let MatchPattern::Binding { id, ident, .. } = &arm.patterns[0] else {
+        return false;
+    };
+    let ExprKind::Var { ident: body_ident } = &arm.body.kind else {
+        return false;
+    };
+    if ident != body_ident {
+        return false;
+    }
+    match (
+        def_table.lookup_node_def_id(*id),
+        def_table.lookup_node_def_id(arm.body.id),
+    ) {
+        (Some(pattern_def), Some(body_def)) => pattern_def == body_def,
+        _ => true,
+    }
+}
+
+fn all_callable_def_ids(context: &ResolvedContext) -> HashSet<DefId> {
+    let mut out = HashSet::new();
+    for func_def in context.module.func_defs() {
+        out.insert(context.def_table.def_id(func_def.id));
+    }
+    for method_block in context.module.method_blocks() {
+        for method_item in &method_block.method_items {
+            if let MethodItem::Def(method_def) = method_item {
+                out.insert(context.def_table.def_id(method_def.id));
+            }
+        }
+    }
+    out
+}
+
+fn infer_join_type_from_arms(arms: &[Type]) -> Option<Type> {
+    let mut variants = Vec::new();
+    for arm_ty in arms {
+        collect_join_variants(arm_ty, &mut variants);
+    }
+    variants.dedup();
+    if variants.is_empty() {
+        return None;
+    }
+    if variants.len() == 1 {
+        return variants.into_iter().next();
+    }
+    let ok_ty = variants[0].clone();
+    let err_tys = variants.into_iter().skip(1).collect::<Vec<_>>();
+    Some(Type::ErrorUnion {
+        ok_ty: Box::new(ok_ty),
+        err_tys,
+    })
+}
+
+fn collect_join_variants(ty: &Type, out: &mut Vec<Type>) {
+    match ty {
+        Type::ErrorUnion { ok_ty, err_tys } => {
+            collect_join_variants(ok_ty, out);
+            for err_ty in err_tys {
+                collect_join_variants(err_ty, out);
+            }
+        }
+        _ if !out.iter().any(|existing| existing == ty) => out.push(ty.clone()),
+        _ => {}
     }
 }

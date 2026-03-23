@@ -4,7 +4,7 @@
 
 use crate::core::types::Type;
 
-pub(super) fn infer_join_type_from_arms(arms: &[Type]) -> Option<Type> {
+pub(crate) fn infer_join_type_from_arms(arms: &[Type]) -> Option<Type> {
     let mut variants = Vec::new();
     for arm_ty in arms {
         if super::term_utils::is_unresolved(arm_ty) {
