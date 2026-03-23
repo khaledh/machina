@@ -349,6 +349,9 @@ fn hash_imported_modules(
             members.sort();
             for member in members {
                 member.hash(hasher);
+                if let Some(imported) = module.member_symbols.get(member.as_str()) {
+                    hash_imported_symbol(hasher, imported);
+                }
             }
         }
     }
@@ -363,24 +366,31 @@ fn hash_imported_symbols(
     for alias in aliases {
         alias.hash(hasher);
         if let Some(symbol) = imported_symbols.get(alias) {
-            symbol.has_callable().hash(hasher);
-            symbol.has_type().hash(hasher);
-            symbol.has_trait().hash(hasher);
-            for symbol_id in &symbol.callable_symbols {
-                symbol_id.hash(hasher);
-            }
-            symbol.type_symbol.hash(hasher);
-            symbol.trait_symbol.hash(hasher);
-            if let Some(ty) = symbol.type_ty.as_ref() {
-                ty.hash(hasher);
-            }
-            for sig in canonicalize_callable_sigs(&symbol.callable_sigs) {
-                sig.hash(hasher);
-            }
-            if let Some(trait_sig) = symbol.trait_sig.as_ref() {
-                hash_trait_sig(hasher, trait_sig);
-            }
+            hash_imported_symbol(hasher, symbol);
         }
+    }
+}
+
+fn hash_imported_symbol(
+    hasher: &mut std::collections::hash_map::DefaultHasher,
+    symbol: &ImportedSymbol,
+) {
+    symbol.has_callable().hash(hasher);
+    symbol.has_type().hash(hasher);
+    symbol.has_trait().hash(hasher);
+    for symbol_id in &symbol.callable_symbols {
+        symbol_id.hash(hasher);
+    }
+    symbol.type_symbol.hash(hasher);
+    symbol.trait_symbol.hash(hasher);
+    if let Some(ty) = symbol.type_ty.as_ref() {
+        ty.hash(hasher);
+    }
+    for sig in canonicalize_callable_sigs(&symbol.callable_sigs) {
+        sig.hash(hasher);
+    }
+    if let Some(trait_sig) = symbol.trait_sig.as_ref() {
+        hash_trait_sig(hasher, trait_sig);
     }
 }
 

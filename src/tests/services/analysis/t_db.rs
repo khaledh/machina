@@ -3454,6 +3454,32 @@ fn diagnostics_for_program_file_std_io_file_read_stdout_example_is_clean() {
 }
 
 #[test]
+fn diagnostics_for_program_file_resolves_module_qualified_callable_access() {
+    let mut db = AnalysisDb::new();
+    let source = r#"
+requires {
+    std::parse as parse
+    std::parse::ParseError
+}
+
+fn main() -> u64 | ParseError {
+    parse::parse_u64("42")
+}
+"#;
+    let path =
+        Path::new(env!("CARGO_MANIFEST_DIR")).join("examples/analysis_module_qualified_parse.mc");
+    let file_id = db.upsert_disk_text(path, source);
+
+    let diagnostics = db
+        .diagnostics_for_program_file(file_id)
+        .expect("program diagnostics query should succeed");
+    assert!(
+        diagnostics.is_empty(),
+        "expected module-qualified callable access to resolve cleanly in program mode, got: {diagnostics:#?}"
+    );
+}
+
+#[test]
 fn diagnostics_for_program_file_std_io_examples_ignore_unrelated_open_overlays() {
     let mut db = AnalysisDb::new();
 

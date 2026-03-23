@@ -22,6 +22,7 @@ use crate::core::types::{BUILTIN_TYPES, Type};
 pub struct ImportedModule {
     pub path: String,
     pub members: HashSet<String>,
+    pub member_symbols: HashMap<String, ImportedSymbol>,
 }
 
 #[derive(Clone, Debug, Default)]
@@ -40,9 +41,17 @@ impl ImportedModule {
         members.extend(exports.callables.keys().cloned());
         members.extend(exports.types.keys().cloned());
         members.extend(exports.traits.keys().cloned());
+        let member_symbols = members
+            .iter()
+            .filter_map(|member| {
+                ImportedSymbol::from_exports(exports, member, Vec::new(), None, None)
+                    .map(|imported| (member.clone(), imported))
+            })
+            .collect();
         Self {
             path: module_path.to_string(),
             members,
+            member_symbols,
         }
     }
 }
@@ -758,81 +767,95 @@ impl SymbolResolver {
         // Populate imported symbol aliases so resolve can bind unqualified uses
         // (e.g. `requires { std::io::println }` then `println(...)`).
         self.populate_imported_symbol_aliases();
+        self.populate_imported_module_member_aliases();
     }
 
     fn populate_imported_symbol_aliases(&mut self) {
         let aliases = self.imported_symbols.clone();
         for (alias, imported) in aliases {
-            if imported.has_callable() {
-                let def_id = self.add_built_in_symbol(&alias, false, |def_id| SymbolKind::Func {
+            self.populate_imported_symbol_alias(&alias, imported);
+        }
+    }
+
+    fn populate_imported_module_member_aliases(&mut self) {
+        let imported_modules = self.imported_modules.clone();
+        for (alias, imported_module) in imported_modules {
+            for (member, imported) in imported_module.member_symbols {
+                let qualified_alias = format!("{alias}::{member}");
+                self.populate_imported_symbol_alias(&qualified_alias, imported);
+            }
+        }
+    }
+
+    fn populate_imported_symbol_alias(&mut self, alias: &str, imported: ImportedSymbol) {
+        if imported.has_callable() {
+            let def_id =
+                self.add_built_in_symbol(alias, false, |def_id| SymbolKind::Func {
                     overloads: vec![def_id],
                 });
-                let callable_symbols = imported
-                    .callable_symbols
-                    .iter()
-                    .cloned()
-                    .zip(imported.callable_sigs.iter().cloned())
-                    .map(|(symbol_id, sig)| {
-                        self.imported_callable_sigs.insert(symbol_id.clone(), sig);
-                        symbol_id
-                    })
-                    .collect();
-                self.imported_defs.insert(
-                    def_id,
-                    ImportedDefFacts {
-                        callable_symbols,
-                        type_symbol: None,
-                        trait_symbol: None,
-                    },
-                );
-                continue;
-            }
+            let callable_symbols = imported
+                .callable_symbols
+                .iter()
+                .cloned()
+                .zip(imported.callable_sigs.iter().cloned())
+                .map(|(symbol_id, sig)| {
+                    self.imported_callable_sigs.insert(symbol_id.clone(), sig);
+                    symbol_id
+                })
+                .collect();
+            self.imported_defs.insert(
+                def_id,
+                ImportedDefFacts {
+                    callable_symbols,
+                    type_symbol: None,
+                    trait_symbol: None,
+                },
+            );
+            return;
+        }
 
-            if imported.has_type() {
-                let def_id =
-                    self.add_built_in_symbol(&alias, false, |def_id| SymbolKind::TypeAlias {
-                        def_id,
-                        ty_expr: TypeExpr {
-                            id: NodeId(0),
-                            kind: TypeExprKind::Infer,
-                            span: Span::default(),
-                        },
-                    });
-                let type_symbol = imported.type_symbol.clone();
-                if let (Some(symbol_id), Some(type_ty)) =
-                    (type_symbol.clone(), imported.type_ty.clone())
-                {
-                    self.imported_type_defs.insert(symbol_id, type_ty);
-                }
-                self.imported_defs.insert(
-                    def_id,
-                    ImportedDefFacts {
-                        callable_symbols: Vec::new(),
-                        type_symbol,
-                        trait_symbol: None,
-                    },
-                );
-                continue;
+        if imported.has_type() {
+            let def_id = self.add_built_in_symbol(alias, false, |def_id| SymbolKind::TypeAlias {
+                def_id,
+                ty_expr: TypeExpr {
+                    id: NodeId(0),
+                    kind: TypeExprKind::Infer,
+                    span: Span::default(),
+                },
+            });
+            let type_symbol = imported.type_symbol.clone();
+            if let (Some(symbol_id), Some(type_ty)) = (type_symbol.clone(), imported.type_ty.clone())
+            {
+                self.imported_type_defs.insert(symbol_id, type_ty);
             }
+            self.imported_defs.insert(
+                def_id,
+                ImportedDefFacts {
+                    callable_symbols: Vec::new(),
+                    type_symbol,
+                    trait_symbol: None,
+                },
+            );
+            return;
+        }
 
-            if imported.has_trait() {
-                let def_id = self
-                    .add_built_in_symbol(&alias, false, |def_id| SymbolKind::TraitDef { def_id });
-                let trait_symbol = imported.trait_symbol.clone();
-                if let (Some(symbol_id), Some(trait_sig)) =
-                    (trait_symbol.clone(), imported.trait_sig.clone())
-                {
-                    self.imported_trait_defs.insert(symbol_id, trait_sig);
-                }
-                self.imported_defs.insert(
-                    def_id,
-                    ImportedDefFacts {
-                        callable_symbols: Vec::new(),
-                        type_symbol: None,
-                        trait_symbol,
-                    },
-                );
+        if imported.has_trait() {
+            let def_id =
+                self.add_built_in_symbol(alias, false, |def_id| SymbolKind::TraitDef { def_id });
+            let trait_symbol = imported.trait_symbol.clone();
+            if let (Some(symbol_id), Some(trait_sig)) =
+                (trait_symbol.clone(), imported.trait_sig.clone())
+            {
+                self.imported_trait_defs.insert(symbol_id, trait_sig);
             }
+            self.imported_defs.insert(
+                def_id,
+                ImportedDefFacts {
+                    callable_symbols: Vec::new(),
+                    type_symbol: None,
+                    trait_symbol,
+                },
+            );
         }
     }
 

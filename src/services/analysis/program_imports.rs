@@ -36,10 +36,15 @@ impl ProgramImportFactsCache {
         let import_env =
             import_env_from_requires(program_context, module_id, &self.export_facts_by_module);
         for (alias, binding) in import_env.module_aliases {
-            out.insert(
-                alias,
-                ImportedModule::from_exports(&binding.module_path.to_string(), &binding.exports),
-            );
+            let mut imported =
+                ImportedModule::from_exports(&binding.module_path.to_string(), &binding.exports);
+            for member in imported.members.clone() {
+                if let Some(materialized) = self.materialize_imported_symbol(&binding.exports, &member)
+                {
+                    imported.member_symbols.insert(member, materialized);
+                }
+            }
+            out.insert(alias, imported);
         }
 
         out
@@ -54,50 +59,13 @@ impl ProgramImportFactsCache {
         let import_env =
             import_env_from_requires(program_context, module_id, &self.export_facts_by_module);
         for (alias, binding) in import_env.symbol_aliases {
-            let callable_sigs = binding
-                .callables
-                .iter()
-                .filter_map(|item| item.symbol_id.as_ref())
-                .filter_map(|symbol_id| self.callable_sigs_by_symbol.get(symbol_id))
-                .cloned()
-                .collect();
-            let type_ty = binding
-                .type_def
-                .as_ref()
-                .and_then(|item| item.symbol_id.as_ref())
-                .and_then(|symbol_id| self.type_tys_by_symbol.get(symbol_id))
-                .cloned();
-            let trait_sig = binding
-                .trait_def
-                .as_ref()
-                .and_then(|item| item.symbol_id.as_ref())
-                .and_then(|symbol_id| self.trait_sigs_by_symbol.get(symbol_id))
-                .cloned();
             if binding.is_empty() {
                 continue;
             }
 
-            out.insert(
-                alias,
-                ImportedSymbol {
-                    callable_sigs,
-                    callable_symbols: binding
-                        .callables
-                        .iter()
-                        .filter_map(|item| item.symbol_id.clone())
-                        .collect(),
-                    type_ty,
-                    type_symbol: binding
-                        .type_def
-                        .as_ref()
-                        .and_then(|item| item.symbol_id.clone()),
-                    trait_sig,
-                    trait_symbol: binding
-                        .trait_def
-                        .as_ref()
-                        .and_then(|item| item.symbol_id.clone()),
-                },
-            );
+            if let Some(imported) = self.materialize_imported_symbol_binding(&binding) {
+                out.insert(alias, imported);
+            }
         }
 
         out
@@ -147,6 +115,61 @@ impl ProgramImportFactsCache {
             .extend(collect_public_type_tys(module_id, typed));
         self.trait_sigs_by_symbol
             .extend(collect_public_trait_sigs(module_id, typed));
+    }
+
+    fn materialize_imported_symbol_binding(
+        &self,
+        binding: &crate::core::context::ImportedSymbolBinding,
+    ) -> Option<ImportedSymbol> {
+        let callable_sigs = binding
+            .callables
+            .iter()
+            .filter_map(|item| item.symbol_id.as_ref())
+            .filter_map(|symbol_id| self.callable_sigs_by_symbol.get(symbol_id))
+            .cloned()
+            .collect();
+        let type_ty = binding
+            .type_def
+            .as_ref()
+            .and_then(|item| item.symbol_id.as_ref())
+            .and_then(|symbol_id| self.type_tys_by_symbol.get(symbol_id))
+            .cloned();
+        let trait_sig = binding
+            .trait_def
+            .as_ref()
+            .and_then(|item| item.symbol_id.as_ref())
+            .and_then(|symbol_id| self.trait_sigs_by_symbol.get(symbol_id))
+            .cloned();
+        ImportedSymbol::from_binding(binding, callable_sigs, type_ty, trait_sig)
+    }
+
+    fn materialize_imported_symbol(
+        &self,
+        exports: &ModuleExportFacts,
+        member: &str,
+    ) -> Option<ImportedSymbol> {
+        let callable_sigs = exports
+            .callables
+            .get(member)
+            .into_iter()
+            .flat_map(|items| items.iter())
+            .filter_map(|item| item.symbol_id.as_ref())
+            .filter_map(|symbol_id| self.callable_sigs_by_symbol.get(symbol_id))
+            .cloned()
+            .collect();
+        let type_ty = exports
+            .types
+            .get(member)
+            .and_then(|item| item.symbol_id.as_ref())
+            .and_then(|symbol_id| self.type_tys_by_symbol.get(symbol_id))
+            .cloned();
+        let trait_sig = exports
+            .traits
+            .get(member)
+            .and_then(|item| item.symbol_id.as_ref())
+            .and_then(|symbol_id| self.trait_sigs_by_symbol.get(symbol_id))
+            .cloned();
+        ImportedSymbol::from_exports(exports, member, callable_sigs, type_ty, trait_sig)
     }
 }
 
