@@ -319,58 +319,77 @@ fn widened_direct_forwarding_return(
     ret_ty_expr: &TypeExpr,
     body: &Expr,
 ) -> Option<Type> {
-    let Some(match_expr) = direct_forwarding_match_expr(body) else {
-        return None;
-    };
-    let ExprKind::Match { scrutinee, arms } = &match_expr.kind else {
-        unreachable!("direct_forwarding_match_expr only returns match expressions");
-    };
-    let forwarding_arm = arms.last()?;
-    if !is_direct_forwarding_arm(forwarding_arm, &context.def_table) {
+    let match_exprs = direct_forwarding_match_exprs(body);
+    if match_exprs.is_empty() {
         return None;
     }
-
-    let Some(scrutinee_ty) = typed.type_map.lookup_node_type(scrutinee.id) else {
-        return None;
-    };
-    let matched = arms[..arms.len().saturating_sub(1)]
-        .iter()
-        .map(|arm| {
-            if arm.patterns.len() != 1 {
-                return None;
-            }
-            let MatchPattern::TypedBinding { ty_expr, .. } = &arm.patterns[0] else {
-                return None;
-            };
-            typed
-                .type_map
-                .lookup_node_type(ty_expr.id)
-                .filter(|ty| !matches!(ty, Type::Unknown))
-                .or_else(|| resolve_type_expr(&context.def_table, context, ty_expr).ok())
-        })
-        .collect::<Option<Vec<_>>>()?;
-    let Some(remainder) = scrutinee_ty.error_union_remainder_excluding(&matched) else {
-        return None;
-    };
     let declared_ret_ty = typed
         .type_map
         .lookup_node_type(callable_node_id)
         .filter(|ty| !matches!(ty, Type::Unknown))
         .or_else(|| resolve_type_expr(&context.def_table, context, ret_ty_expr).ok())?;
-    let widened = infer_join_type_from_arms(&[declared_ret_ty.clone(), remainder.clone()]);
+
+    let mut join_terms = vec![declared_ret_ty.clone()];
+    for match_expr in match_exprs {
+        let ExprKind::Match { scrutinee, arms } = &match_expr.kind else {
+            unreachable!("direct_forwarding_match_exprs only returns match expressions");
+        };
+        let forwarding_arm = arms.last()?;
+        if !is_direct_forwarding_arm(forwarding_arm, &context.def_table) {
+            continue;
+        }
+
+        let Some(scrutinee_ty) = typed.type_map.lookup_node_type(scrutinee.id) else {
+            continue;
+        };
+        let matched = arms[..arms.len().saturating_sub(1)]
+            .iter()
+            .map(|arm| {
+                if arm.patterns.len() != 1 {
+                    return None;
+                }
+                let MatchPattern::TypedBinding { ty_expr, .. } = &arm.patterns[0] else {
+                    return None;
+                };
+                typed
+                    .type_map
+                    .lookup_node_type(ty_expr.id)
+                    .filter(|ty| !matches!(ty, Type::Unknown))
+                    .or_else(|| resolve_type_expr(&context.def_table, context, ty_expr).ok())
+            })
+            .collect::<Option<Vec<_>>>()?;
+        let Some(remainder) = scrutinee_ty.error_union_remainder_excluding(&matched) else {
+            continue;
+        };
+        join_terms.push(remainder);
+    }
+
+    if join_terms.len() == 1 {
+        return None;
+    }
+    let widened = infer_join_type_from_arms(&join_terms);
     if widened.as_ref() == Some(&declared_ret_ty) {
         return None;
     }
     widened
 }
 
-fn direct_forwarding_match_expr<'a>(expr: &'a Expr) -> Option<&'a Expr> {
+fn direct_forwarding_match_exprs<'a>(expr: &'a Expr) -> Vec<&'a Expr> {
     match &expr.kind {
-        ExprKind::Match { .. } => Some(expr),
+        ExprKind::Match { .. } => vec![expr],
         ExprKind::Block {
             tail: Some(tail), ..
-        } => direct_forwarding_match_expr(tail),
-        _ => None,
+        } => direct_forwarding_match_exprs(tail),
+        ExprKind::If {
+            then_body,
+            else_body,
+            ..
+        } => {
+            let mut out = direct_forwarding_match_exprs(then_body);
+            out.extend(direct_forwarding_match_exprs(else_body));
+            out
+        }
+        _ => Vec::new(),
     }
 }
 

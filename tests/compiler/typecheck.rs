@@ -2498,7 +2498,7 @@ fn test_typed_csv_rewrite_pipeline_uses_generic_map_adapter_builds_and_runs() {
                     self
                 }}
 
-                fn next(inout self) -> string | ParseError | IterDone {{
+                fn next(inout self) -> string | IterDone {{
                     if !self.wrote_header {{
                         self.wrote_header = true;
                         self.opts.header

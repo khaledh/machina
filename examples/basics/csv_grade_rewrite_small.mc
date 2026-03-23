@@ -164,7 +164,7 @@ CsvFormatIter<S, T> :: {
         self
     }
 
-    fn next(inout self) -> string | ParseError | IterDone {
+    fn next(inout self) -> string | IterDone {
         if !self.wrote_header {
             self.wrote_header = true;
             self.opts.header
