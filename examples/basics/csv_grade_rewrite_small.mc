@@ -16,45 +16,27 @@ type OutputRow = {
     grade: string,
 }
 
-type CsvFields = {
-    values: string[*],
+type CsvParseOptions = {
+    skip: u64,
+    delimiter: string,
 }
 
-type CsvFieldIter = {
-    lines: string[*],
-    index: u64,
+type CsvFormatOptions = {
+    header: string,
+    delimiter: string,
 }
 
-CsvFieldIter :: {
-    fn iter(self) -> CsvFieldIter {
-        self
-    }
-
-    fn next(inout self) -> CsvFields | IterDone {
-        if self.index < self.lines.len {
-            let line = self.lines[self.index];
-            self.index = self.index + 1;
-            CsvFields { values: line.split(",") }
-        } else {
-            IterDone {}
-        }
-    }
-}
-
-fn csv_fields(lines: string[*], start_index: u64) -> CsvFieldIter {
-    CsvFieldIter {
-        lines,
-        index: start_index,
-    }
-}
-
-fn parse_input_row(fields: CsvFields) -> InputRow | ParseError {
-    let [name_text, score_text, ...] = fields.values;
+fn parse_row(fields: string[*]) -> InputRow | ParseError {
+    let [name_text, score_text, ...] = fields;
     let score = parse::parse_u64(score_text.trim())?;
     InputRow {
         name: name_text.trim(),
         score,
     }
+}
+
+fn format_row(row: OutputRow) -> string {
+    f"{row.name},{row.grade}"
 }
 
 fn grade_of(score: u64) -> string {
@@ -127,35 +109,87 @@ fn map_values<S, In, Out>(source: S, f: fn(In) -> Out) -> MapIter<S, In, Out> {
     MapIter { source, f }
 }
 
-type CsvEncoder = {
-    source: MapIter<TryMapIter<CsvFieldIter, CsvFields, InputRow, ParseError>, InputRow, OutputRow>,
+type CsvParseIter<T, E> = {
+    source: string[*],
+    parse: fn(string[*]) -> T | E,
+    opts: CsvParseOptions,
+    index: u64,
+}
+
+CsvParseIter<T, E> :: {
+    fn iter(self) -> CsvParseIter<T, E> {
+        self
+    }
+
+    fn next(inout self) -> T | E | IterDone {
+        while self.index < self.opts.skip {
+            self.index = self.index + 1;
+        }
+
+        while self.index < self.source.len {
+            let line = self.source[self.index];
+            self.index = self.index + 1;
+            if line.trim() == "" {
+                continue;
+            }
+            let parse = self.parse;
+            return parse(line.split(","));
+        }
+        IterDone {}
+    }
+}
+
+fn from_csv<T, E>(
+    source: string[*],
+    parse: fn(string[*]) -> T | E,
+    opts: CsvParseOptions,
+) -> CsvParseIter<T, E> {
+    CsvParseIter {
+        source,
+        parse,
+        opts,
+        index: 0,
+    }
+}
+
+type CsvFormatIter<S, T> = {
+    source: S,
+    format: fn(T) -> string,
+    opts: CsvFormatOptions,
     wrote_header: bool,
 }
 
-CsvEncoder :: {
-    fn iter(self) -> CsvEncoder {
+CsvFormatIter<S, T> :: {
+    fn iter(self) -> CsvFormatIter<S, T> {
         self
     }
 
     fn next(inout self) -> string | ParseError | IterDone {
         if !self.wrote_header {
             self.wrote_header = true;
-            "name,grade"
+            self.opts.header
         } else {
             match self.source.next() {
-                row: OutputRow => f"{row.name},{row.grade}",
-                err: ParseError => err,
+                item: T => {
+                    let format = self.format;
+                    format(item)
+                }
                 done: IterDone => IterDone {},
+                other => other,
             }
         }
     }
 }
 
-fn csv_encode(
-    source: MapIter<TryMapIter<CsvFieldIter, CsvFields, InputRow, ParseError>, InputRow, OutputRow>,
-) -> CsvEncoder {
-    CsvEncoder {
+fn to_csv<S, T>(
+    source: S,
+    format: fn(T) -> string,
+    opts: CsvFormatOptions,
+) -> CsvFormatIter<S, T> {
+    CsvFormatIter {
         source,
+        format,
+        opts,
         wrote_header: false,
     }
 }
@@ -180,10 +214,24 @@ fn main() -> () | IoError | ParseError {
 
     using reader = open_read(input_path)?.text() {
         let text = reader.read_all()?;
-        let pipeline = csv_encode(map_values(
-            try_map_values(csv_fields(text.lines(), 1), parse_input_row),
-            grade_row,
-        ));
+        let pipeline = to_csv(
+            map_values(
+                from_csv(
+                    text.lines(),
+                    parse_row,
+                    CsvParseOptions {
+                        skip: 1,
+                        delimiter: ",",
+                    },
+                ),
+                grade_row,
+            ),
+            format_row,
+            CsvFormatOptions {
+                header: "name,grade",
+                delimiter: ",",
+            },
+        );
 
         using output_writer = open_write(output_path)?.text() {
             write_lines(output_writer, pipeline)?;
