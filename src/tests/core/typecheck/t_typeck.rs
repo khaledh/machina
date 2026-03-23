@@ -3045,6 +3045,39 @@ fn test_error_union_widening_backtracks_across_ambiguous_targets() {
 }
 
 #[test]
+fn test_generic_catch_all_forwarding_arm_typechecks() {
+    let source = r#"
+        type IterDone = {}
+
+        type Source<E> = {
+            step: u64 | E | IterDone,
+        }
+
+        Source<E> :: {
+            fn next(self) -> u64 | E | IterDone {
+                self.step
+            }
+        }
+
+        type Forward<S> = {
+            source: S,
+        }
+
+        Forward<S> :: {
+            fn next(self) -> u64 | IterDone {
+                match self.source.next() {
+                    item: u64 => item,
+                    done: IterDone => done,
+                    other => other,
+                }
+            }
+        }
+    "#;
+
+    let _ctx = type_check_source(source).expect("Failed to type check");
+}
+
+#[test]
 fn test_fn_type_annotation_mismatch_rejected() {
     let source = r#"
         fn test() -> u64 {

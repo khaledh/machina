@@ -5,7 +5,11 @@
 
 use std::collections::{HashMap, HashSet};
 
-use crate::core::ast::{BindPattern, BindPatternKind, MatchPattern, MatchPatternBinding, NodeId};
+use crate::core::ast::{
+    BindPattern, BindPatternKind, Expr, ExprKind, MatchArm, MatchPattern, MatchPatternBinding,
+    MethodItem, NodeId, TopLevelItem,
+    visit::{Visitor, walk_expr},
+};
 use crate::core::capsule::ModuleId;
 use crate::core::context::ResolvedContext;
 use crate::core::diag::Span;
@@ -23,6 +27,7 @@ pub(super) fn check_pattern_obligations(
     type_defs: &HashMap<String, Type>,
     type_symbols: &HashMap<String, DefId>,
     def_table: &DefTable,
+    resolved_call_defs: &HashMap<NodeId, DefId>,
     def_owners: &HashMap<DefId, ModuleId>,
     ctx: &ResolvedContext,
     allow_missing_def_ids: bool,
@@ -58,6 +63,7 @@ pub(super) fn check_pattern_obligations(
             PatternObligation::MatchArm {
                 arm_id,
                 pattern,
+                scrutinee_expr_id,
                 scrutinee_ty,
                 prior_patterns,
                 caller_def_id: _,
@@ -73,10 +79,12 @@ pub(super) fn check_pattern_obligations(
                     unifier,
                     type_defs,
                     def_table,
+                    resolved_call_defs,
                     ctx,
                     &mut errors,
                     &mut covered,
                     *arm_id,
+                    *scrutinee_expr_id,
                     allow_missing_def_ids,
                 );
             }
@@ -231,10 +239,12 @@ fn bind_match_pattern_types(
     unifier: &mut TcUnifier,
     type_defs: &HashMap<String, Type>,
     def_table: &DefTable,
+    resolved_call_defs: &HashMap<NodeId, DefId>,
     ctx: &ResolvedContext,
     errors: &mut Vec<TypeCheckError>,
     covered: &mut HashSet<NodeId>,
     pattern_id: NodeId,
+    scrutinee_expr_id: NodeId,
     allow_missing_def_ids: bool,
 ) {
     match pattern {
@@ -293,6 +303,14 @@ fn bind_match_pattern_types(
                             let _ = unifier.unify(term, &pat_ty);
                         }
                     } else if !super::term_utils::is_unresolved(&pat_ty) {
+                        if should_defer_forwarded_call_mismatch(
+                            scrutinee_expr_id,
+                            resolved_call_defs,
+                            def_table,
+                            ctx,
+                        ) {
+                            return;
+                        }
                         let variant_names = variants
                             .iter()
                             .map(super::diag_utils::compact_type_name)
@@ -328,10 +346,12 @@ fn bind_match_pattern_types(
                         unifier,
                         type_defs,
                         def_table,
+                        resolved_call_defs,
                         ctx,
                         errors,
                         covered,
                         pattern_id,
+                        scrutinee_expr_id,
                         allow_missing_def_ids,
                     );
                 }
@@ -354,10 +374,12 @@ fn bind_match_pattern_types(
                         unifier,
                         type_defs,
                         def_table,
+                        resolved_call_defs,
                         ctx,
                         errors,
                         covered,
                         pattern_id,
+                        scrutinee_expr_id,
                         allow_missing_def_ids,
                     );
                 }
@@ -400,6 +422,124 @@ fn bind_match_pattern_types(
                 }
             }
         }
+    }
+}
+
+fn should_defer_forwarded_call_mismatch(
+    scrutinee_expr_id: NodeId,
+    resolved_call_defs: &HashMap<NodeId, DefId>,
+    def_table: &DefTable,
+    ctx: &ResolvedContext,
+) -> bool {
+    let Some(def_id) = resolved_call_defs.get(&scrutinee_expr_id).copied() else {
+        return false;
+    };
+    let Some(callable) = find_callable_def(&ctx.module, def_table, def_id) else {
+        return false;
+    };
+    callable.is_generic && callable.has_direct_forwarding
+}
+
+struct CallablePatternInfo {
+    is_generic: bool,
+    has_direct_forwarding: bool,
+}
+
+fn find_callable_def(
+    module: &crate::core::ast::Module,
+    def_table: &DefTable,
+    def_id: DefId,
+) -> Option<CallablePatternInfo> {
+    for item in &module.top_level_items {
+        match item {
+            TopLevelItem::FuncDef(func) if def_table.def_id(func.id) == def_id => {
+                return Some(CallablePatternInfo {
+                    is_generic: !func.sig.type_params.is_empty(),
+                    has_direct_forwarding: expr_has_direct_forwarding(&func.body, def_table),
+                });
+            }
+            TopLevelItem::MethodBlock(block) => {
+                for method_item in &block.method_items {
+                    if let MethodItem::Def(method) = method_item
+                        && def_table.def_id(method.id) == def_id
+                    {
+                        let receiver_is_generic = block.type_args.iter().any(|type_arg| {
+                            def_table
+                                .lookup_node_def_id(type_arg.id)
+                                .and_then(|type_arg_def_id| def_table.lookup_def(type_arg_def_id))
+                                .is_some_and(|def| {
+                                    matches!(
+                                        def.kind,
+                                        crate::core::resolve::DefKind::TypeParam { .. }
+                                    )
+                                })
+                        });
+                        return Some(CallablePatternInfo {
+                            is_generic: receiver_is_generic || !method.sig.type_params.is_empty(),
+                            has_direct_forwarding: expr_has_direct_forwarding(
+                                &method.body,
+                                def_table,
+                            ),
+                        });
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+    None
+}
+
+fn expr_has_direct_forwarding(expr: &Expr, def_table: &DefTable) -> bool {
+    struct Finder<'a> {
+        def_table: &'a DefTable,
+        found: bool,
+    }
+
+    impl Visitor for Finder<'_> {
+        fn visit_expr(&mut self, expr: &Expr) {
+            if self.found {
+                return;
+            }
+            if let ExprKind::Match { arms, .. } = &expr.kind
+                && arms
+                    .iter()
+                    .any(|arm| is_direct_forwarding_arm(arm, self.def_table))
+            {
+                self.found = true;
+                return;
+            }
+            walk_expr(self, expr);
+        }
+    }
+
+    let mut finder = Finder {
+        def_table,
+        found: false,
+    };
+    finder.visit_expr(expr);
+    finder.found
+}
+
+fn is_direct_forwarding_arm(arm: &MatchArm, def_table: &DefTable) -> bool {
+    if arm.patterns.len() != 1 {
+        return false;
+    }
+    let MatchPattern::Binding { id, ident, .. } = &arm.patterns[0] else {
+        return false;
+    };
+    let ExprKind::Var { ident: body_ident } = &arm.body.kind else {
+        return false;
+    };
+    if ident != body_ident {
+        return false;
+    }
+    match (
+        def_table.lookup_node_def_id(*id),
+        def_table.lookup_node_def_id(arm.body.id),
+    ) {
+        (Some(pattern_def), Some(body_def)) => pattern_def == body_def,
+        _ => true,
     }
 }
 

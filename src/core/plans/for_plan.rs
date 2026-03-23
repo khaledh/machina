@@ -189,6 +189,7 @@ fn select_protocol_method(
     let overloads = method_sigs.get(owner)?.get(method_name)?;
     let mut best: Option<InstantiatedProtocolMethodSig> = None;
     let mut best_priority = i32::MIN;
+    let mut best_specialization_priority = i32::MIN;
     let mut ambiguous = false;
 
     for sig in overloads {
@@ -201,18 +202,32 @@ fn select_protocol_method(
         };
 
         let priority = if sig.impl_trait.is_none() { 1 } else { 0 };
+        let specialization_priority = if sig.type_param_count == 0 { 1 } else { 0 };
         match best {
             None => {
                 best = Some(instantiated);
                 best_priority = priority;
+                best_specialization_priority = specialization_priority;
                 ambiguous = false;
             }
             Some(_) if priority > best_priority => {
                 best = Some(instantiated);
                 best_priority = priority;
+                best_specialization_priority = specialization_priority;
                 ambiguous = false;
             }
-            Some(_) if priority == best_priority => {
+            Some(_)
+                if priority == best_priority
+                    && specialization_priority > best_specialization_priority =>
+            {
+                best = Some(instantiated);
+                best_specialization_priority = specialization_priority;
+                ambiguous = false;
+            }
+            Some(_)
+                if priority == best_priority
+                    && specialization_priority == best_specialization_priority =>
+            {
                 ambiguous = true;
             }
             Some(_) => {}

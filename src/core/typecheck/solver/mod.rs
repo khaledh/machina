@@ -136,8 +136,13 @@ pub(crate) fn run(engine: &mut TypecheckEngine) -> Result<(), Vec<TypeCheckError
         &enum_payload_nodes,
     );
 
-    let pattern_errors =
-        solve_pattern_stage(&constrain, &mut unifier, engine, deferred_pattern_errors);
+    let pattern_errors = solve_pattern_stage(
+        &constrain,
+        &mut unifier,
+        engine,
+        &resolved_call_defs,
+        deferred_pattern_errors,
+    );
 
     let mut errors = Vec::new();
     errors.append(&mut call_errors);
@@ -217,6 +222,7 @@ fn prepass_pattern_obligations(
         &engine.env().type_defs,
         &engine.env().type_symbols,
         &engine.context().def_table,
+        &HashMap::new(),
         &engine.context().def_owners,
         engine.context(),
         engine.is_partial_mode(),
@@ -487,6 +493,7 @@ fn solve_pattern_stage(
     constrain: &ConstrainOutput,
     unifier: &mut TcUnifier,
     engine: &TypecheckEngine,
+    resolved_call_defs: &HashMap<NodeId, DefId>,
     deferred_pattern_errors: Vec<DeferredPatternError>,
 ) -> Vec<TypeCheckError> {
     let (mut pattern_errors, covered_patterns) = patterns::check_pattern_obligations(
@@ -496,6 +503,7 @@ fn solve_pattern_stage(
         &engine.env().type_defs,
         &engine.env().type_symbols,
         &engine.context().def_table,
+        resolved_call_defs,
         &engine.context().def_owners,
         engine.context(),
         engine.is_partial_mode(),
@@ -619,7 +627,9 @@ fn check_expr_obligations(
             ExprObligation::BinOp { .. } | ExprObligation::UnaryOp { .. } => {
                 unreachable!("operator obligations are handled by solve::expr_ops");
             }
-            ExprObligation::Join { .. } | ExprObligation::Try { .. } => {
+            ExprObligation::Join { .. }
+            | ExprObligation::GenericCatchAllForward { .. }
+            | ExprObligation::Try { .. } => {
                 unreachable!("control obligations are handled by solve::control");
             }
             ExprObligation::ArrayIndex { .. }
@@ -708,6 +718,19 @@ fn should_retry_post_call_expr_obligation(
             arms.iter()
                 .map(|arm| term_utils::resolve_term(arm, unifier))
                 .any(|arm_ty| term_utils::is_unresolved(&arm_ty))
+        }
+        ExprObligation::GenericCatchAllForward {
+            scrutinee,
+            body,
+            expected,
+            ..
+        } => {
+            let scrutinee_ty = term_utils::resolve_term(scrutinee, unifier);
+            let body_ty = term_utils::resolve_term(body, unifier);
+            let expected_ty = term_utils::resolve_term(expected, unifier);
+            term_utils::is_unresolved(&scrutinee_ty)
+                || term_utils::is_unresolved(&body_ty)
+                || term_utils::is_unresolved(&expected_ty)
         }
         ExprObligation::StructField { target, result, .. } => {
             let owner_ty = term_utils::peel_heap(term_utils::resolve_term(target, unifier));

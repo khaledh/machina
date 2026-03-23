@@ -118,6 +118,42 @@ pub(super) fn try_check_expr_obligation_control(
             }
             true
         }
+        ExprObligation::GenericCatchAllForward {
+            expr_id,
+            scrutinee,
+            body,
+            expected,
+            span,
+        } => {
+            let scrutinee_ty = super::term_utils::resolve_term(scrutinee, unifier);
+            let body_ty = super::term_utils::resolve_term(body, unifier);
+            let expected_ty = super::term_utils::resolve_term(expected, unifier);
+
+            if super::term_utils::is_unresolved(&scrutinee_ty)
+                || super::term_utils::is_unresolved(&body_ty)
+                || super::term_utils::is_unresolved(&expected_ty)
+            {
+                return true;
+            }
+
+            let body_ty_diag =
+                super::term_utils::default_infer_ints_for_diagnostics(body_ty, unifier.vars());
+            let expected_ty_diag =
+                super::term_utils::default_infer_ints_for_diagnostics(expected_ty, unifier.vars());
+
+            if matches!(
+                type_assignable(&body_ty_diag, &expected_ty_diag),
+                TypeAssignability::Incompatible
+            ) {
+                tc_push_error!(
+                    errors,
+                    *span,
+                    TEK::MatchArmTypeMismatch(expected_ty_diag, body_ty_diag)
+                );
+                covered_exprs.insert(*expr_id);
+            }
+            true
+        }
         ExprObligation::Try {
             expr_id,
             operand,

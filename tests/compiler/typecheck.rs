@@ -2441,8 +2441,8 @@ fn test_typed_csv_rewrite_pipeline_uses_generic_map_adapter_builds_and_runs() {
                             name: row.name,
                             grade: grade_of(row.score),
                         }},
-                        err: ParseError => err,
                         done: IterDone => IterDone {{}},
+                        err: ParseError => err,
                     }}
                 }}
             }}
@@ -2631,6 +2631,39 @@ fn test_for_protocol_string_iterable_builds_and_runs() {
 
     let stdout = String::from_utf8_lossy(&run.stdout);
     assert_eq!(stdout, "a\nb\n", "unexpected stdout: {stdout}");
+}
+
+#[test]
+fn test_error_union_reordered_widening_builds_and_runs() {
+    let run = run_program(
+        "error_union_reordered_widening_builds_and_runs",
+        r#"
+            requires {
+                std::io::println
+                std::parse::ParseError
+            }
+
+            fn source() -> u64 | IterDone | ParseError {
+                7
+            }
+
+            fn widen() -> u64 | ParseError | IterDone {
+                source()
+            }
+
+            fn main() -> () | ParseError {
+                match widen() {
+                    n: u64 => println(n),
+                    err: ParseError => err,
+                    done: IterDone => (),
+                }
+            }
+        "#,
+    );
+    assert_eq!(run.status.code(), Some(0));
+
+    let stdout = String::from_utf8_lossy(&run.stdout);
+    assert_eq!(stdout, "7\n", "unexpected stdout: {stdout}");
 }
 
 #[test]

@@ -1,7 +1,7 @@
 //! Module/function/method declaration orchestration.
 
 use super::*;
-use crate::core::ast::{FuncDecl, MethodBlock, MethodItem, TypeParam};
+use crate::core::ast::{FuncDecl, MethodBlock, MethodDecl, MethodDef, MethodItem, TypeParam};
 
 impl<'a> ConstraintCollector<'a> {
     pub(super) fn collect_module(&mut self) {
@@ -16,11 +16,14 @@ impl<'a> ConstraintCollector<'a> {
         for method_block in self.ctx.module.method_blocks() {
             let receiver_type_params = method_block_type_params(&self.ctx.def_table, method_block);
             for method_item in &method_block.method_items {
-                let sig = match method_item {
-                    MethodItem::Decl(method_decl) => &method_decl.sig,
-                    MethodItem::Def(method_def) => &method_def.sig,
-                };
-                self.collect_method_def(method_block, &receiver_type_params, method_item, sig);
+                match method_item {
+                    MethodItem::Decl(method_decl) => {
+                        self.collect_method_decl(method_block, &receiver_type_params, method_decl);
+                    }
+                    MethodItem::Def(method_def) => {
+                        self.collect_method_def(method_block, &receiver_type_params, method_def);
+                    }
+                }
             }
         }
     }
@@ -97,21 +100,36 @@ impl<'a> ConstraintCollector<'a> {
         });
     }
 
+    fn collect_method_decl(
+        &mut self,
+        method_block: &MethodBlock,
+        receiver_type_params: &[TypeParam],
+        method_decl: &MethodDecl,
+    ) {
+        let method_def_id = self.ctx.def_table.def_id(method_decl.id);
+        self.with_type_params(receiver_type_params, |this| {
+            this.with_type_params(&method_decl.sig.type_params, |this| {
+                if let Some(fn_ty) = this.collect_method_signature(method_block, &method_decl.sig) {
+                    let def_term = this.def_term(method_def_id);
+                    this.push_eq(
+                        def_term,
+                        fn_ty,
+                        ConstraintReason::Decl(method_def_id, method_decl.span),
+                    );
+                }
+            });
+        });
+    }
+
     fn collect_method_def(
         &mut self,
         method_block: &MethodBlock,
         receiver_type_params: &[TypeParam],
-        method_item: &MethodItem,
-        sig: &MethodSig,
+        method_def: &MethodDef,
     ) {
-        let method_def_id = match method_item {
-            MethodItem::Decl(method_decl) => self.ctx.def_table.def_id(method_decl.id),
-            MethodItem::Def(method_def) => self.ctx.def_table.def_id(method_def.id),
-        };
-        let method_span = match method_item {
-            MethodItem::Decl(method_decl) => method_decl.span,
-            MethodItem::Def(method_def) => method_def.span,
-        };
+        let method_def_id = self.ctx.def_table.def_id(method_def.id);
+        let method_span = method_def.span;
+        let sig = &method_def.sig;
 
         self.with_type_params(receiver_type_params, |this| {
             this.with_type_params(&sig.type_params, |this| {
@@ -130,14 +148,12 @@ impl<'a> ConstraintCollector<'a> {
                     .ok()
                     .or(declared_ret_ty)
                     .unwrap_or_else(|| this.fresh_var_term());
-                if let MethodItem::Def(method_def) = method_item {
-                    let method_node_term = this.node_term(method_def.id);
-                    this.push_eq(
-                        method_node_term,
-                        return_term.clone(),
-                        ConstraintReason::Decl(method_def_id, method_def.span),
-                    );
-                }
+                let method_node_term = this.node_term(method_def.id);
+                this.push_eq(
+                    method_node_term,
+                    return_term.clone(),
+                    ConstraintReason::Decl(method_def_id, method_def.span),
+                );
                 this.enter_callable(method_def_id, return_term.clone(), method_span);
 
                 let self_node = this.node_term(sig.self_param.id);
@@ -185,14 +201,12 @@ impl<'a> ConstraintCollector<'a> {
                     }
                 }
 
-                if let MethodItem::Def(method_def) = method_item {
-                    let body_ty = this.collect_expr(&method_def.body, Some(return_term.clone()));
-                    this.push_assignable(
-                        body_ty,
-                        return_term,
-                        ConstraintReason::Expr(method_def.body.id, method_def.body.span),
-                    );
-                }
+                let body_ty = this.collect_expr(&method_def.body, Some(return_term.clone()));
+                this.push_assignable(
+                    body_ty,
+                    return_term,
+                    ConstraintReason::Expr(method_def.body.id, method_def.body.span),
+                );
 
                 this.exit_callable(method_def_id, method_span);
             });

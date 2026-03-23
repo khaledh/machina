@@ -6,7 +6,8 @@ use crate::core::backend::lower::locals::{LocalStorage, LocalValue};
 use crate::core::backend::lower::lowerer::{BaseView, CallInputValue, FuncLowerer, LoopContext};
 use crate::core::diag::Span;
 use crate::core::ir::{
-    BinOp, Callee, CastKind, CmpOp, IrTypeId, IrTypeKind, RuntimeFn, Terminator, ValueId,
+    BinOp, Callee, CastKind, CmpOp, ConstValue, IrTypeId, IrTypeKind, RuntimeFn, SwitchCase,
+    Terminator, ValueId,
 };
 use crate::core::resolve::DefId;
 use crate::core::types::{Type, TypeAssignability, type_assignable};
@@ -488,18 +489,14 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
         dst_union_ty: &Type,
         src_value: ValueId,
     ) -> ValueId {
-        if src_ok_ty != dst_ok_ty
-            || src_err_tys.len() > dst_err_tys.len()
-            || !src_err_tys
-                .iter()
-                .zip(dst_err_tys.iter())
-                .all(|(src, dst)| src == dst)
-        {
+        let Some(tag_mapping) =
+            self.error_union_variant_tag_mapping(src_ok_ty, src_err_tys, dst_ok_ty, dst_err_tys)
+        else {
             panic!(
                 "backend unsupported error union widening: {:?} -> {:?}",
                 src_union_ty, dst_union_ty
             );
-        }
+        };
 
         let src_ir_ty = self.type_lowerer.lower_type(src_union_ty);
         let src_slot = self.materialize_value_slot(src_value, src_ir_ty);
@@ -540,8 +537,13 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
         }
 
         // Fast path: if both unions have identical physical ABI (same tag and payload blob
-        // shape), reinterpret the value directly instead of copying tag/payload bytes.
-        if src_blob_size == dst_blob_size && src_blob_align == dst_blob_align {
+        // shape) and the variant tags line up, reinterpret the value directly instead of
+        // copying tag/payload bytes.
+        let identity_mapping = tag_mapping
+            .iter()
+            .enumerate()
+            .all(|(src_tag, dst_tag)| src_tag == *dst_tag as usize);
+        if identity_mapping && src_blob_size == dst_blob_size && src_blob_align == dst_blob_align {
             return self.reinterpret_value_between_types(src_value, src_union_ty, dst_union_ty);
         }
 
@@ -550,17 +552,93 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
 
         let src_tag_addr = self.field_addr_typed(src_slot.addr, 0, src_tag_ty);
         let src_tag = self.builder.load(src_tag_addr, src_tag_ty);
-        self.store_field(dst_slot.addr, 0, dst_tag_ty, src_tag);
-
         let src_payload_ptr = self.field_addr_typed(src_slot.addr, 1, src_blob_ty);
         let dst_payload_ptr = self.field_addr_typed(dst_slot.addr, 1, dst_blob_ty);
         let u64_ty = self.type_lowerer.lower_type(&Type::uint(64));
         let len = self
             .builder
             .const_int(src_blob_size as i128, false, 64, u64_ty);
-        self.builder.memcopy(dst_payload_ptr, src_payload_ptr, len);
+
+        let switch_bb = self.builder.current_block();
+        let done_bb = self.builder.add_block();
+        let unreachable_bb = self.builder.add_block();
+        let mut cases = Vec::with_capacity(tag_mapping.len());
+        for (src_tag_index, dst_tag_index) in tag_mapping.iter().enumerate() {
+            let case_bb = self.builder.add_block();
+            cases.push(SwitchCase {
+                value: ConstValue::Int {
+                    value: src_tag_index as i128,
+                    signed: false,
+                    bits: 32,
+                },
+                target: case_bb,
+                args: Vec::new(),
+            });
+
+            self.builder.select_block(case_bb);
+            let dst_tag = self
+                .builder
+                .const_int(*dst_tag_index as i128, false, 32, dst_tag_ty);
+            self.store_field(dst_slot.addr, 0, dst_tag_ty, dst_tag);
+            self.builder.memcopy(dst_payload_ptr, src_payload_ptr, len);
+            self.builder.terminate(Terminator::Br {
+                target: done_bb,
+                args: Vec::new(),
+            });
+        }
+
+        self.builder.select_block(unreachable_bb);
+        self.builder.terminate(Terminator::Unreachable);
+
+        self.builder.select_block(switch_bb);
+        self.builder.terminate(Terminator::Switch {
+            value: src_tag,
+            cases,
+            default: unreachable_bb,
+            default_args: Vec::new(),
+        });
+
+        self.builder.select_block(done_bb);
 
         self.load_slot(&dst_slot)
+    }
+
+    fn error_union_variant_tag_mapping(
+        &self,
+        src_ok_ty: &Type,
+        src_err_tys: &[Type],
+        dst_ok_ty: &Type,
+        dst_err_tys: &[Type],
+    ) -> Option<Vec<u32>> {
+        if !src_ok_ty.shape_eq(dst_ok_ty) || src_err_tys.len() > dst_err_tys.len() {
+            return None;
+        }
+
+        let src_variants = std::iter::once(src_ok_ty)
+            .chain(src_err_tys.iter())
+            .collect::<Vec<_>>();
+        let dst_variants = std::iter::once(dst_ok_ty)
+            .chain(dst_err_tys.iter())
+            .collect::<Vec<_>>();
+        let mut used = vec![false; dst_variants.len()];
+        let mut mapping = Vec::with_capacity(src_variants.len());
+
+        for src_variant in src_variants {
+            let Some((dst_index, _)) =
+                dst_variants
+                    .iter()
+                    .enumerate()
+                    .find(|(dst_index, dst_variant)| {
+                        !used[*dst_index] && src_variant.shape_eq(dst_variant)
+                    })
+            else {
+                return None;
+            };
+            used[dst_index] = true;
+            mapping.push(dst_index as u32);
+        }
+
+        Some(mapping)
     }
 
     /// Reinterprets a value from one aggregate type to another via pointer cast.

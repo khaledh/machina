@@ -46,10 +46,7 @@ fn count_method_defs(module: &Module, method_name: &str) -> usize {
             _ => None,
         })
         .flat_map(|block| block.method_items.iter())
-        .filter(|item| match item {
-            MethodItem::Def(def) => def.sig.name == method_name,
-            MethodItem::Decl(decl) => decl.sig.name == method_name,
-        })
+        .filter(|item| matches!(item, MethodItem::Def(def) if def.sig.name == method_name))
         .count()
 }
 
@@ -158,22 +155,37 @@ fn test_monomorphize_specializes_generic_receiver_method_block_type_args() {
     let monomorphized = monomorphize_resolved(resolved_context, &type_checked.generic_insts)
         .expect("monomorphize failed");
 
-    let blocks = monomorphized
+    let specialized_blocks = monomorphized
         .module
         .top_level_items
         .iter()
         .filter_map(|item| match item {
-            TopLevelItem::MethodBlock(block) if block.type_name == "Box" => Some(block),
+            TopLevelItem::MethodBlock(block)
+                if block.type_name == "Box"
+                    && block.type_args.iter().all(|arg| {
+                        matches!(
+                            &arg.kind,
+                            TypeExprKind::Named { ident, type_args }
+                                if ident != "T" && type_args.is_empty()
+                        )
+                    }) =>
+            {
+                Some(block)
+            }
             _ => None,
         })
         .collect::<Vec<_>>();
-    assert_eq!(blocks.len(), 1, "expected one specialized Box method block");
     assert_eq!(
-        blocks[0].type_args.len(),
+        specialized_blocks.len(),
+        1,
+        "expected one specialized Box method block"
+    );
+    assert_eq!(
+        specialized_blocks[0].type_args.len(),
         1,
         "expected one receiver type arg"
     );
-    match &blocks[0].type_args[0].kind {
+    match &specialized_blocks[0].type_args[0].kind {
         TypeExprKind::Named { ident, type_args } => {
             assert_eq!(ident, "u64");
             assert!(type_args.is_empty(), "expected concrete receiver type arg");

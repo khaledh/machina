@@ -96,6 +96,13 @@ pub(crate) enum ExprObligation {
         result: Type,
         span: Span,
     },
+    GenericCatchAllForward {
+        expr_id: NodeId,
+        scrutinee: Type,
+        body: Type,
+        expected: Type,
+        span: Span,
+    },
     ArrayIndex {
         expr_id: NodeId,
         target: Type,
@@ -279,6 +286,7 @@ pub(crate) enum PatternObligation {
     MatchArm {
         arm_id: NodeId,
         pattern: MatchPattern,
+        scrutinee_expr_id: NodeId,
         scrutinee_ty: Type,
         prior_patterns: Vec<MatchPattern>,
         caller_def_id: Option<DefId>,

@@ -426,6 +426,7 @@ impl<'a> ConstraintCollector<'a> {
                             .push(PatternObligation::MatchArm {
                                 arm_id: arm.id,
                                 pattern: pattern.clone(),
+                                scrutinee_expr_id: scrutinee.id,
                                 scrutinee_ty: scrutinee_ty.clone(),
                                 prior_patterns: prior_patterns.clone(),
                                 caller_def_id: self.current_callable_def_id(),
@@ -433,18 +434,39 @@ impl<'a> ConstraintCollector<'a> {
                             });
                     }
                     prior_patterns.extend(arm.patterns.iter().cloned());
-                    let arm_ty = self.collect_match_arm(arm, expected.clone());
+                    let forwarding_arm =
+                        expected.is_some() && self.is_generic_catch_all_forwarding_arm(arm);
+                    let arm_ty = self.collect_match_arm(
+                        arm,
+                        if forwarding_arm {
+                            None
+                        } else {
+                            expected.clone()
+                        },
+                    );
                     if let Some(expected) = expected.clone() {
                         self.push_eq(
                             expr_ty.clone(),
                             expected.clone(),
                             ConstraintReason::Expr(expr.id, expr.span),
                         );
-                        self.push_assignable(
-                            arm_ty.clone(),
-                            expected,
-                            ConstraintReason::Expr(expr.id, expr.span),
-                        );
+                        if forwarding_arm {
+                            self.out.expr_obligations.push(
+                                ExprObligation::GenericCatchAllForward {
+                                    expr_id: arm.body.id,
+                                    scrutinee: scrutinee_ty.clone(),
+                                    body: arm_ty.clone(),
+                                    expected,
+                                    span: arm.span,
+                                },
+                            );
+                        } else {
+                            self.push_assignable(
+                                arm_ty.clone(),
+                                expected,
+                                ConstraintReason::Expr(expr.id, expr.span),
+                            );
+                        }
                     }
                     arm_terms.push(arm_ty);
                 }
@@ -1067,5 +1089,22 @@ impl<'a> ConstraintCollector<'a> {
             ConstraintReason::Expr(body.id, body.span),
         );
         self.exit_callable(def_id, expr.span);
+    }
+
+    fn is_generic_catch_all_forwarding_arm(&self, arm: &MatchArm) -> bool {
+        if self.current_type_params().is_none() || arm.patterns.len() != 1 {
+            return false;
+        }
+        let MatchPattern::Binding { id, .. } = &arm.patterns[0] else {
+            return false;
+        };
+        let ExprKind::Var { .. } = &arm.body.kind else {
+            return false;
+        };
+        let Some(pattern_def_id) = self.lookup_def_id(*id) else {
+            return false;
+        };
+        self.lookup_def_id(arm.body.id)
+            .is_some_and(|body_def_id| body_def_id == pattern_def_id)
     }
 }

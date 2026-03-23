@@ -18,7 +18,7 @@ pub(crate) fn retype_after_monomorphize(
     monomorphized_context: &ResolvedContext,
     first_pass: TypeCheckedContext,
     plan: &MonomorphizePlan,
-) -> Result<TypeCheckedContext, Vec<TypeCheckError>> {
+) -> Result<(ResolvedContext, TypeCheckedContext), Vec<TypeCheckError>> {
     // Build a sparse module where unchanged function/method bodies become decls.
     let retype_context = build_retype_context(monomorphized_context, &plan.retype_def_ids);
 
@@ -27,13 +27,15 @@ pub(crate) fn retype_after_monomorphize(
 
     // Merge patch tables over the first pass so unaffected nodes/defs keep
     // their original entries.
-    Ok(merge_typecheck_results(
+    let typed = merge_typecheck_results(
         monomorphized_context,
         first_pass,
         second_pass,
         &plan.call_rewrites,
         &plan.for_plan_rewrites,
-    ))
+    );
+
+    Ok((monomorphized_context.clone(), typed))
 }
 
 pub(crate) fn build_retype_context(
@@ -111,15 +113,16 @@ fn merge_typecheck_results(
     merged_call_sigs.extend(second_pass.call_sigs.clone());
     apply_call_rewrites(&mut merged_call_sigs, call_rewrites);
 
-    // Generic instantiations: keep first pass, fill any second-pass additions,
-    // and update def ids to rewritten specialized defs.
+    // Generic instantiations: keep first pass and fill any second-pass
+    // additions.
+    //
+    // Important: these instantiations must stay anchored to the original
+    // generic template defs, not the specialized clone ids from call_rewrites.
+    // Later monomorphization rounds discover nested instantiations from sparse
+    // retype, and those requests need to target the generic template again.
+    // Rewriting them to clone ids corrupts the next round's substitution basis.
     let mut merged_generic_insts = first_pass.generic_insts.clone();
     merged_generic_insts.extend(second_pass.generic_insts.clone());
-    for (call_id, def_id) in call_rewrites {
-        if let Some(inst) = merged_generic_insts.get_mut(call_id) {
-            inst.def_id = *def_id;
-        }
-    }
 
     let mut merged_for_plans = first_pass.for_plans.clone();
     merged_for_plans.extend(second_pass.for_plans.clone());
