@@ -1042,17 +1042,6 @@ impl SymbolResolver {
                     span: Span::default(),
                 },
             });
-            let _ = resolver.add_built_in_symbol("map", false, |def_id| SymbolKind::TypeAlias {
-                def_id,
-                ty_expr: TypeExpr {
-                    id: NodeId(0),
-                    kind: TypeExprKind::Named {
-                        ident: "map".to_string(),
-                        type_args: Vec::new(),
-                    },
-                    span: Span::default(),
-                },
-            });
             let _ =
                 resolver.add_built_in_symbol("Pending", false, |def_id| SymbolKind::TypeAlias {
                     def_id,
@@ -1419,7 +1408,7 @@ impl Visitor for SymbolResolver {
                 type_args,
                 ..
             } => {
-                if name == "Iterable" {
+                if name == "Iterable" || name == "map" {
                     for arg in type_args {
                         self.visit_type_expr(arg);
                     }

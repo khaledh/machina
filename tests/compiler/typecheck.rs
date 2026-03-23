@@ -2061,7 +2061,7 @@ fn test_generic_map_iter_adapter_builds_and_runs() {
 
             fn double(n: u64) -> u64 { n * 2 }
 
-            fn map_values<S, In, Out>(
+            fn map<S, In, Out>(
                 source: S,
                 f: fn(In) -> Out,
             ) -> MapIter<S, In, Out> {
@@ -2070,7 +2070,7 @@ fn test_generic_map_iter_adapter_builds_and_runs() {
 
             fn main() {
                 let counter = Counter { cur: 2, end: 5 };
-                let mapped = map_values(counter.iter(), double);
+                let mapped = map(counter.iter(), double);
                 for n in mapped {
                     println(n);
                 }
@@ -2135,7 +2135,7 @@ fn test_generic_try_map_iter_adapter_builds_and_runs() {
                 }
             }
 
-            fn try_map_values<S, In, Out, E>(
+            fn try_map<S, In, Out, E>(
                 source: S,
                 f: fn(In) -> Out | E,
             ) -> TryMapIter<S, In, Out, E> {
@@ -2147,7 +2147,7 @@ fn test_generic_try_map_iter_adapter_builds_and_runs() {
             }
 
             fn main() -> () | ParseError {
-                let mapped = try_map_values(CounterIter { cur: 2, end: 5 }, double);
+                let mapped = try_map(CounterIter { cur: 2, end: 5 }, double);
                 for n in mapped {
                     println(n);
                 }
@@ -2410,7 +2410,7 @@ fn test_typed_csv_rewrite_pipeline_uses_generic_map_adapter_builds_and_runs() {
                 }}
             }}
 
-            fn try_map_values<S, In, Out, E>(
+            fn try_map<S, In, Out, E>(
                 source: S,
                 f: fn(In) -> Out | E,
             ) -> TryMapIter<S, In, Out, E> {{
@@ -2439,7 +2439,7 @@ fn test_typed_csv_rewrite_pipeline_uses_generic_map_adapter_builds_and_runs() {
                 }}
             }}
 
-            fn map_values<S, In, Out>(source: S, f: fn(In) -> Out) -> MapIter<S, In, Out> {{
+            fn map<S, In, Out>(source: S, f: fn(In) -> Out) -> MapIter<S, In, Out> {{
                 MapIter {{ source, f }}
             }}
 
@@ -2549,7 +2549,7 @@ fn test_typed_csv_rewrite_pipeline_uses_generic_map_adapter_builds_and_runs() {
                 using reader = open_read(input_path)?.text() {{
                     let text = reader.read_all()?;
                     let pipeline = to_csv(
-                        map_values(
+                        map(
                             from_csv(
                                 text.lines(),
                                 parse_row,

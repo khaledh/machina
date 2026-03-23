@@ -295,6 +295,40 @@ fn resolve_type_expr_impl(
                         allow_iterable,
                     );
                 }
+                if ident == "map" {
+                    if type_arg_exprs.len() != 2 {
+                        return Err(TEK::TypeArgCountMismatch(
+                            ident.clone(),
+                            2,
+                            type_arg_exprs.len(),
+                        )
+                        .at(type_expr.span));
+                    }
+                    let key_ty = resolve_type_expr_impl(
+                        def_table,
+                        module,
+                        &type_arg_exprs[0],
+                        type_params,
+                        type_args,
+                        in_progress,
+                        allow_error_union,
+                        false,
+                    )?;
+                    let value_ty = resolve_type_expr_impl(
+                        def_table,
+                        module,
+                        &type_arg_exprs[1],
+                        type_params,
+                        type_args,
+                        in_progress,
+                        allow_error_union,
+                        false,
+                    )?;
+                    return Ok(Type::Map {
+                        key_ty: Box::new(key_ty),
+                        value_ty: Box::new(value_ty),
+                    });
+                }
                 def_table
                     .lookup_type_def_id(ident)
                     .ok_or_else(|| TEK::UnknownType.at(type_expr.span))?

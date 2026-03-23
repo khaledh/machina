@@ -403,7 +403,14 @@ impl<'a> Parser<'a> {
                     let (_type_name, type_args) = self.parse_type_name_with_args()?;
                     return self.parse_typed_map_lit_with_args(marker, type_args);
                 }
-                self.err_here(PEK::ExpectedPrimary(self.curr_token.clone()))
+                self.advance();
+                Ok(Expr {
+                    id: self.id_gen.new_id(),
+                    kind: ExprKind::Var {
+                        ident: "map".to_string(),
+                    },
+                    span: self.close(marker),
+                })
             }
             TK::KwSelf => {
                 let marker = self.mark();

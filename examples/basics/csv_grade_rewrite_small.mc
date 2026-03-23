@@ -76,7 +76,7 @@ TryMapIter<S, In, Out, E> :: {
     }
 }
 
-fn try_map_values<S, In, Out, E>(
+fn try_map<S, In, Out, E>(
     source: S,
     f: fn(In) -> Out | E,
 ) -> TryMapIter<S, In, Out, E> {
@@ -105,7 +105,7 @@ MapIter<S, In, Out> :: {
     }
 }
 
-fn map_values<S, In, Out>(source: S, f: fn(In) -> Out) -> MapIter<S, In, Out> {
+fn map<S, In, Out>(source: S, f: fn(In) -> Out) -> MapIter<S, In, Out> {
     MapIter { source, f }
 }
 
@@ -215,7 +215,7 @@ fn main() -> () | IoError | ParseError {
     using reader = open_read(input_path)?.text() {
         let text = reader.read_all()?;
         let pipeline = to_csv(
-            map_values(
+            map(
                 from_csv(
                     text.lines(),
                     parse_row,

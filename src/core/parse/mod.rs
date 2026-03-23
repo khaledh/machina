@@ -181,11 +181,16 @@ impl<'a> Parser<'a> {
     }
 
     fn parse_ident(&mut self) -> Result<String, ParseError> {
-        if let TK::Ident(name) = &self.curr_token.kind {
-            self.advance();
-            Ok(name.clone())
-        } else {
-            self.err_here(PEK::ExpectedIdent(self.curr_token.clone()))
+        match &self.curr_token.kind {
+            TK::Ident(name) => {
+                self.advance();
+                Ok(name.clone())
+            }
+            TK::KwMap => {
+                self.advance();
+                Ok("map".to_string())
+            }
+            _ => self.err_here(PEK::ExpectedIdent(self.curr_token.clone())),
         }
     }
 

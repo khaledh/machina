@@ -241,7 +241,7 @@ fn test_monomorphize_nested_generic_receiver_method_call_specializes_adapter_blo
 
         fn double(n: u64) -> u64 { n * 2 }
 
-        fn map_values<S, In, Out>(source: S, f: fn(In) -> Out) -> MapIter<S, In, Out> {
+        fn map<S, In, Out>(source: S, f: fn(In) -> Out) -> MapIter<S, In, Out> {
             MapIter { source, f }
         }
 
@@ -262,7 +262,7 @@ fn test_monomorphize_nested_generic_receiver_method_call_specializes_adapter_blo
 
         fn test() -> string | IterDone {
             let counter = Counter { cur: 2, end: 5 };
-            let pipeline = Stringify { source: map_values(counter.iter(), double) };
+            let pipeline = Stringify { source: map(counter.iter(), double) };
             pipeline.next()
         }
     "#;
@@ -341,7 +341,7 @@ fn test_monomorphize_reconstructs_nested_generic_receiver_type_args() {
             f: fn(In) -> Out | E,
         }
 
-        fn try_map_values<S, In, Out, E>(
+        fn try_map<S, In, Out, E>(
             source: S,
             f: fn(In) -> Out | E,
         ) -> TryMapIter<S, In, Out, E> {
@@ -363,7 +363,7 @@ fn test_monomorphize_reconstructs_nested_generic_receiver_type_args() {
         fn test() -> u64 {
             let iter = CounterIter { cur: 1, end: 3 };
             let holder = Holder {
-                value: try_map_values(iter, parse),
+                value: try_map(iter, parse),
             };
             let _mapped = holder.value_of();
             0

@@ -53,13 +53,13 @@ MapIter<S, In, Out> :: {
 
 fn double(n: u64) -> u64 { n * 2 }
 
-fn map_values<S, In, Out>(source: S, f: fn(In) -> Out) -> MapIter<S, In, Out> {
+fn map<S, In, Out>(source: S, f: fn(In) -> Out) -> MapIter<S, In, Out> {
     MapIter { source, f }
 }
 
 fn main() {
     let counter = Counter { cur: 2, end: 5 };
-    let mapped = map_values(counter.iter(), double);
+    let mapped = map(counter.iter(), double);
     for n in mapped {
         println(n);
     }
