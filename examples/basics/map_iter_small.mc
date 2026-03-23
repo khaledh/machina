@@ -1,5 +1,6 @@
 requires {
     std::io::println
+    std::iter::map
 }
 
 type Counter = {
@@ -30,32 +31,7 @@ CounterIter :: {
     }
 }
 
-type MapIter<S, In, Out> = {
-    source: S,
-    f: fn(In) -> Out,
-}
-
-MapIter<S, In, Out> :: {
-    fn iter(self) -> MapIter<S, In, Out> {
-        self
-    }
-
-    fn next(inout self) -> Out | IterDone {
-        match self.source.next() {
-            item: In => {
-                let f = self.f;
-                f(item)
-            },
-            done: IterDone => IterDone {},
-        }
-    }
-}
-
 fn double(n: u64) -> u64 { n * 2 }
-
-fn map<S, In, Out>(source: S, f: fn(In) -> Out) -> MapIter<S, In, Out> {
-    MapIter { source, f }
-}
 
 fn main() {
     let counter = Counter { cur: 2, end: 5 };
