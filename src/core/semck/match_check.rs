@@ -192,13 +192,20 @@ impl<'a> UnionRule<'a> {
     ) {
         let mut seen_variant_indices = HashSet::new();
         let mut has_wildcard = false;
+        let mut has_catch_all = false;
         let union_ty = self.full_type();
 
-        for arm in arms {
+        for (arm_index, arm) in arms.iter().enumerate() {
             for pattern in &arm.patterns {
                 match pattern {
                     MatchPattern::Wildcard { .. } => {
                         has_wildcard = true;
+                    }
+                    MatchPattern::Binding { span, .. } => {
+                        has_catch_all = true;
+                        if arm_index + 1 != arms.len() {
+                            push_error(errors, *span, SEK::CatchAllArmNotLast);
+                        }
                     }
                     MatchPattern::TypedBinding { ty_expr, span, .. } => {
                         let arm_ty = ctx
@@ -235,7 +242,7 @@ impl<'a> UnionRule<'a> {
         }
 
         let variant_count = 1 + self.err_tys.len();
-        if !has_wildcard && seen_variant_indices.len() != variant_count {
+        if !has_wildcard && !has_catch_all && seen_variant_indices.len() != variant_count {
             let mut missing = Vec::new();
             if !seen_variant_indices.contains(&0) {
                 missing.push(compact_type_name(self.ok_ty));

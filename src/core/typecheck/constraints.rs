@@ -280,6 +280,7 @@ pub(crate) enum PatternObligation {
         arm_id: NodeId,
         pattern: MatchPattern,
         scrutinee_ty: Type,
+        prior_patterns: Vec<MatchPattern>,
         caller_def_id: Option<DefId>,
         span: Span,
     },

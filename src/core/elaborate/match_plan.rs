@@ -144,7 +144,26 @@ impl<'a> Elaborator<'a> {
                             source: self.error_union_payload_place(scrutinee_place, payload_ty),
                         });
                     }
-                    MatchPattern::Binding { .. } | MatchPattern::Tuple { .. } => {
+                    MatchPattern::Binding { id, .. } => {
+                        let remainder_ty =
+                            self.error_union_remainder_for_default(scrutinee_ty, &cases);
+                        default = Some(index);
+                        let source = if matches!(remainder_ty, Type::ErrorUnion { .. }) {
+                            self.project_place(
+                                scrutinee_place,
+                                MatchProjection::ByteOffset { offset: 0 },
+                                remainder_ty.clone(),
+                            )
+                        } else {
+                            self.error_union_payload_place(scrutinee_place, remainder_ty.clone())
+                        };
+                        bindings.push(MatchBinding {
+                            def_id: self.def_id_for(*id),
+                            node_id: *id,
+                            source,
+                        });
+                    }
+                    MatchPattern::Tuple { .. } => {
                         panic!(
                             "compiler bug: unexpected match pattern in switch plan: {:?}",
                             pattern
@@ -288,6 +307,35 @@ impl<'a> Elaborator<'a> {
             .iter()
             .position(|err_ty| err_ty == pattern_ty)
             .map(|idx| (idx + 1) as u64)
+    }
+
+    fn error_union_remainder_for_default(
+        &self,
+        scrutinee_ty: &Type,
+        cases: &[MatchSwitchCase],
+    ) -> Type {
+        let matched = match scrutinee_ty {
+            Type::ErrorUnion { ok_ty, err_tys } => cases
+                .iter()
+                .filter_map(|case| match case.value {
+                    0 => Some((**ok_ty).clone()),
+                    tag => err_tys.get((tag - 1) as usize).cloned(),
+                })
+                .collect::<Vec<_>>(),
+            other => panic!(
+                "compiler bug: catch-all binding switch plan requires error-union scrutinee, got {:?}",
+                other
+            ),
+        };
+
+        scrutinee_ty
+            .error_union_remainder_excluding(&matched)
+            .unwrap_or_else(|| {
+                panic!(
+                    "compiler bug: catch-all binding switch plan exhausted {:?}",
+                    scrutinee_ty
+                )
+            })
     }
 
     fn error_union_payload_place(

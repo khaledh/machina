@@ -418,6 +418,7 @@ impl<'a> ConstraintCollector<'a> {
             ExprKind::Match { scrutinee, arms } => {
                 let scrutinee_ty = self.collect_expr(scrutinee, None);
                 let mut arm_terms = Vec::with_capacity(arms.len());
+                let mut prior_patterns = Vec::new();
                 for arm in arms {
                     for pattern in &arm.patterns {
                         self.out
@@ -426,10 +427,12 @@ impl<'a> ConstraintCollector<'a> {
                                 arm_id: arm.id,
                                 pattern: pattern.clone(),
                                 scrutinee_ty: scrutinee_ty.clone(),
+                                prior_patterns: prior_patterns.clone(),
                                 caller_def_id: self.current_callable_def_id(),
                                 span: arm.span,
                             });
                     }
+                    prior_patterns.extend(arm.patterns.iter().cloned());
                     let arm_ty = self.collect_match_arm(arm, expected.clone());
                     if let Some(expected) = expected.clone() {
                         self.push_eq(

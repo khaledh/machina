@@ -66,6 +66,9 @@ pub enum SemCheckErrorKind {
     #[error("Wildcard match arm must be last")]
     WildcardArmNotLast,
 
+    #[error("Catch-all match arm must be last")]
+    CatchAllArmNotLast,
+
     #[error("Tuple match requires a single arm for now")]
     TupleMatchRequiresSingleArm,
 

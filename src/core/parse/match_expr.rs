@@ -117,8 +117,16 @@ impl<'a> Parser<'a> {
             });
         }
 
-        let variant_name = self.parse_ident()?;
-        self.parse_enum_variant_pattern(marker, variant_name)
+        let ident = self.parse_ident()?;
+        if match_pattern_ident_is_binding(&ident, &self.curr_token.kind) {
+            return Ok(MatchPattern::Binding {
+                id: self.id_gen.new_id(),
+                ident,
+                span: self.close(marker),
+            });
+        }
+
+        self.parse_enum_variant_pattern(marker, ident)
     }
 
     fn parse_tuple_match_pattern(&mut self, marker: Marker) -> Result<MatchPattern, ParseError> {
@@ -266,6 +274,17 @@ fn pattern_supports_alternation(pattern: &MatchPattern) -> bool {
         MatchPattern::Tuple { patterns, .. } => patterns.iter().all(pattern_supports_alternation),
         MatchPattern::EnumVariant { bindings, .. } => bindings.is_empty(),
     }
+}
+
+fn match_pattern_ident_is_binding(ident: &str, next: &TK) -> bool {
+    if matches!(next, TK::DoubleColon | TK::LParen | TK::LessThan) {
+        return false;
+    }
+
+    ident
+        .chars()
+        .next()
+        .is_some_and(|ch| ch.is_ascii_lowercase() || ch == '_')
 }
 
 fn pattern_span(pattern: &MatchPattern) -> Span {

@@ -356,9 +356,9 @@ fn retry_call_stage(
         call_errors.append(&mut retry_call_errors);
         resolved_call_defs.extend(retry_resolved);
 
+        prepass_pattern_obligations(constrain, unifier, engine);
         retry_expr_stage(constrain, unifier, engine, expr_errors, covered_exprs);
         apply_assignable_inference_pass(constrain, unifier);
-        prepass_pattern_obligations(constrain, unifier, engine);
 
         let next_call_state = call_state_signature(&deferred, unifier);
         let made_progress = next_call_state != prior_call_state;

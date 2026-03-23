@@ -849,6 +849,34 @@ impl Type {
             .unwrap_or_else(|| panic!("Variant not found in enum"))
     }
 
+    pub fn error_union_variants(&self) -> Vec<Type> {
+        let Type::ErrorUnion { ok_ty, err_tys } = self else {
+            panic!("Expected error-union type");
+        };
+
+        std::iter::once(ok_ty.as_ref())
+            .chain(err_tys.iter())
+            .cloned()
+            .collect()
+    }
+
+    pub fn error_union_remainder_excluding(&self, matched: &[Type]) -> Option<Type> {
+        let remaining = self
+            .error_union_variants()
+            .into_iter()
+            .filter(|variant| !matched.iter().any(|matched| matched.shape_eq(variant)))
+            .collect::<Vec<_>>();
+
+        match remaining.as_slice() {
+            [] => None,
+            [single] => Some(single.clone()),
+            [first, rest @ ..] => Some(Type::ErrorUnion {
+                ok_ty: Box::new(first.clone()),
+                err_tys: rest.to_vec(),
+            }),
+        }
+    }
+
     pub fn enum_max_payload_size(&self) -> usize {
         let Type::Enum { variants, .. } = self else {
             panic!("Expected enum type");

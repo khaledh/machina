@@ -59,6 +59,7 @@ pub(super) fn check_pattern_obligations(
                 arm_id,
                 pattern,
                 scrutinee_ty,
+                prior_patterns,
                 caller_def_id: _,
                 ..
             } => {
@@ -66,6 +67,8 @@ pub(super) fn check_pattern_obligations(
                 bind_match_pattern_types(
                     pattern,
                     &scrutinee_ty,
+                    prior_patterns,
+                    false,
                     def_terms,
                     unifier,
                     type_defs,
@@ -222,6 +225,8 @@ fn bind_array_pattern_types(
 fn bind_match_pattern_types(
     pattern: &MatchPattern,
     scrutinee_ty: &Type,
+    prior_patterns: &[MatchPattern],
+    allow_unresolved_scrutinee_binding: bool,
     def_terms: &HashMap<DefId, Type>,
     unifier: &mut TcUnifier,
     type_defs: &HashMap<String, Type>,
@@ -249,7 +254,19 @@ fn bind_match_pattern_types(
             if let Some(def_id) = pattern_def_id(def_table, *id, allow_missing_def_ids)
                 && let Some(term) = def_terms.get(&def_id)
             {
-                let _ = unifier.unify(term, scrutinee_ty);
+                if let Some(binding_ty) = union_binding_remainder_type(
+                    scrutinee_ty,
+                    prior_patterns,
+                    def_table,
+                    ctx,
+                    unifier,
+                ) {
+                    let _ = unifier.unify(term, &binding_ty);
+                } else if allow_unresolved_scrutinee_binding
+                    || !super::term_utils::is_unresolved(scrutinee_ty)
+                {
+                    let _ = unifier.unify(term, scrutinee_ty);
+                }
             }
         }
         MatchPattern::TypedBinding {
@@ -305,6 +322,8 @@ fn bind_match_pattern_types(
                     bind_match_pattern_types(
                         child,
                         child_ty,
+                        &[],
+                        true,
                         def_terms,
                         unifier,
                         type_defs,
@@ -329,6 +348,8 @@ fn bind_match_pattern_types(
                     bind_match_pattern_types(
                         child,
                         child_ty,
+                        &[],
+                        true,
                         def_terms,
                         unifier,
                         type_defs,
@@ -380,6 +401,33 @@ fn bind_match_pattern_types(
             }
         }
     }
+}
+
+fn union_binding_remainder_type(
+    scrutinee_ty: &Type,
+    prior_patterns: &[MatchPattern],
+    def_table: &DefTable,
+    ctx: &ResolvedContext,
+    unifier: &mut TcUnifier,
+) -> Option<Type> {
+    let scrutinee_applied = unifier.apply(scrutinee_ty);
+    let Type::ErrorUnion { .. } = &scrutinee_applied else {
+        return None;
+    };
+
+    let matched = prior_patterns
+        .iter()
+        .filter_map(|pattern| match pattern {
+            MatchPattern::TypedBinding { ty_expr, .. } => {
+                resolve_type_expr(def_table, ctx, ty_expr)
+                    .ok()
+                    .map(|ty| unifier.apply(&ty))
+            }
+            _ => None,
+        })
+        .collect::<Vec<_>>();
+
+    scrutinee_applied.error_union_remainder_excluding(&matched)
 }
 
 fn pattern_def_id(

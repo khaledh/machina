@@ -2084,6 +2084,83 @@ fn test_generic_map_iter_adapter_builds_and_runs() {
 }
 
 #[test]
+fn test_generic_try_map_iter_adapter_builds_and_runs() {
+    let run = run_program(
+        "generic_try_map_iter_adapter_builds_and_runs",
+        r#"
+            requires {
+                std::io::println
+                std::parse::ParseError
+            }
+
+            type CounterIter = {
+                cur: u64,
+                end: u64,
+            }
+
+            CounterIter :: {
+                fn iter(self) -> CounterIter {
+                    self
+                }
+
+                fn next(inout self) -> u64 | IterDone {
+                    if self.cur < self.end {
+                        let value = self.cur;
+                        self.cur = self.cur + 1;
+                        value
+                    } else {
+                        IterDone {}
+                    }
+                }
+            }
+
+            type TryMapIter<S, In, Out, E> = {
+                source: S,
+                f: fn(In) -> Out | E,
+            }
+
+            TryMapIter<S, In, Out, E> :: {
+                fn iter(self) -> TryMapIter<S, In, Out, E> {
+                    self
+                }
+
+                fn next(inout self) -> Out | E | IterDone {
+                    match self.source.next() {
+                        item: In => {
+                            let f = self.f;
+                            return f(item);
+                        },
+                        done: IterDone => IterDone {},
+                    }
+                }
+            }
+
+            fn try_map_values<S, In, Out, E>(
+                source: S,
+                f: fn(In) -> Out | E,
+            ) -> TryMapIter<S, In, Out, E> {
+                TryMapIter { source, f }
+            }
+
+            fn double(n: u64) -> u64 | ParseError {
+                n * 2
+            }
+
+            fn main() -> () | ParseError {
+                let mapped = try_map_values(CounterIter { cur: 2, end: 5 }, double);
+                for n in mapped {
+                    println(n);
+                }
+            }
+        "#,
+    );
+    assert_eq!(run.status.code(), Some(0));
+
+    let stdout = String::from_utf8_lossy(&run.stdout);
+    assert_eq!(stdout, "4\n6\n8\n", "unexpected stdout: {stdout}");
+}
+
+#[test]
 fn test_iterable_param_typechecks_with_concrete_iterable_argument() {
     let source = r#"
         fn write_lines(lines: Iterable<string>) -> u64 {
@@ -2219,6 +2296,35 @@ fn test_string_iter_done_union_match_builds_and_runs() {
 }
 
 #[test]
+fn test_error_union_catch_all_binding_builds_and_runs() {
+    let run = run_program(
+        "error_union_catch_all_binding",
+        r#"
+            requires {
+                std::io::println
+            }
+
+            type ReadIoError = { code: u64 }
+            fn fail_one() -> u64 | ReadIoError {
+                ReadIoError { code: 3 }
+            }
+
+            fn main() {
+                let one = fail_one();
+                match one {
+                    n: u64 => println(n),
+                    other => println(other.code),
+                }
+            }
+        "#,
+    );
+    assert_eq!(run.status.code(), Some(0));
+
+    let stdout = String::from_utf8_lossy(&run.stdout);
+    assert_eq!(stdout, "3\n", "unexpected stdout: {stdout}");
+}
+
+#[test]
 fn test_typed_csv_rewrite_pipeline_uses_generic_map_adapter_builds_and_runs() {
     let output_path = "/tmp/machina_csv_grade_rewrite_generic_map_output.txt";
     let run = run_program(
@@ -2275,27 +2381,6 @@ fn test_typed_csv_rewrite_pipeline_uses_generic_map_adapter_builds_and_runs() {
                 }}
             }}
 
-            type InputRowIter = {{
-                source: CsvFieldIter,
-            }}
-
-            InputRowIter :: {{
-                fn iter(self) -> InputRowIter {{
-                    self
-                }}
-
-                fn next(inout self) -> InputRow | ParseError | IterDone {{
-                    match self.source.next() {{
-                        fields: CsvFields => parse_input_row(fields),
-                        done: IterDone => IterDone {{}},
-                    }}
-                }}
-            }}
-
-            fn parse_rows(source: CsvFieldIter) -> InputRowIter {{
-                InputRowIter {{ source }}
-            }}
-
             fn parse_input_row(fields: CsvFields) -> InputRow | ParseError {{
                 let [name_text, score_text, ...] = fields.values;
                 let score = parse::parse_u64(score_text.trim())?;
@@ -2313,41 +2398,63 @@ fn test_typed_csv_rewrite_pipeline_uses_generic_map_adapter_builds_and_runs() {
                 }}
             }}
 
-            fn grade_row(row: InputRow) -> OutputRow {{
-                OutputRow {{
-                    name: row.name,
-                    grade: grade_of(row.score),
-                }}
-            }}
-
-            type MapIter<S, In, Out> = {{
+            type TryMapIter<S, In, Out, E> = {{
                 source: S,
-                f: fn(In) -> Out,
+                f: fn(In) -> Out | E,
             }}
 
-            MapIter<S, In, Out> :: {{
-                fn iter(self) -> MapIter<S, In, Out> {{
+            TryMapIter<S, In, Out, E> :: {{
+                fn iter(self) -> TryMapIter<S, In, Out, E> {{
                     self
                 }}
 
-                fn next(inout self) -> Out | ParseError | IterDone {{
+                fn next(inout self) -> Out | E | IterDone {{
                     match self.source.next() {{
-                        row: In => {{
+                        item: In => {{
                             let f = self.f;
-                            f(row)
-                        }}
+                            return f(item);
+                        }},
+                        done: IterDone => IterDone {{}},
+                    }}
+                }}
+            }}
+
+            fn try_map_values<S, In, Out, E>(
+                source: S,
+                f: fn(In) -> Out | E,
+            ) -> TryMapIter<S, In, Out, E> {{
+                TryMapIter {{ source, f }}
+            }}
+
+            type GradeTransform = {{
+                source: TryMapIter<CsvFieldIter, CsvFields, InputRow, ParseError>,
+            }}
+
+            GradeTransform :: {{
+                fn iter(self) -> GradeTransform {{
+                    self
+                }}
+
+                fn next(inout self) -> OutputRow | ParseError | IterDone {{
+                    match self.source.next() {{
+                        row: InputRow => OutputRow {{
+                            name: row.name,
+                            grade: grade_of(row.score),
+                        }},
                         err: ParseError => err,
                         done: IterDone => IterDone {{}},
                     }}
                 }}
             }}
 
-            fn map_values<S, In, Out>(source: S, f: fn(In) -> Out) -> MapIter<S, In, Out> {{
-                MapIter {{ source, f }}
+            fn grade_rows(
+                source: TryMapIter<CsvFieldIter, CsvFields, InputRow, ParseError>,
+            ) -> GradeTransform {{
+                GradeTransform {{ source }}
             }}
 
             type CsvEncoder = {{
-                source: MapIter<InputRowIter, InputRow, OutputRow>,
+                source: GradeTransform,
                 wrote_header: bool,
             }}
 
@@ -2370,7 +2477,7 @@ fn test_typed_csv_rewrite_pipeline_uses_generic_map_adapter_builds_and_runs() {
                 }}
             }}
 
-            fn csv_encode(source: MapIter<InputRowIter, InputRow, OutputRow>) -> CsvEncoder {{
+            fn csv_encode(source: GradeTransform) -> CsvEncoder {{
                 CsvEncoder {{
                     source,
                     wrote_header: false,
@@ -2397,12 +2504,8 @@ fn test_typed_csv_rewrite_pipeline_uses_generic_map_adapter_builds_and_runs() {
 
                 using reader = open_read(input_path)?.text() {{
                     let text = reader.read_all()?;
-                    let pipeline = csv_encode(
-                        map_values(
-                            parse_rows(csv_fields(text.lines(), 1)),
-                            grade_row,
-                        ),
-                    );
+                    let pipeline =
+                        csv_encode(grade_rows(try_map_values(csv_fields(text.lines(), 1), parse_input_row)));
 
                     using output_writer = open_write(output_path)?.text() {{
                         write_lines(output_writer, pipeline)?;

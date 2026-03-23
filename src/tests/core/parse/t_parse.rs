@@ -2067,6 +2067,33 @@ fn test_parse_match_expr_alternation_patterns() {
 }
 
 #[test]
+fn test_parse_match_expr_lowercase_binding_pattern() {
+    let source = r#"
+        fn test(result: u64 | ParseError) -> u64 | ParseError {
+            match result {
+                ok: u64 => ok,
+                other => other,
+            }
+        }
+    "#;
+
+    let funcs = parse_source(source).expect("Failed to parse");
+    let func = &funcs[0];
+    let tail = block_tail(&func.body);
+
+    match &tail.kind {
+        ExprKind::Match { arms, .. } => {
+            assert_eq!(arms.len(), 2);
+            match &arms[1].patterns[0] {
+                MatchPattern::Binding { ident, .. } => assert_eq!(ident, "other"),
+                other => panic!("Expected binding pattern, got {other:?}"),
+            }
+        }
+        _ => panic!("Expected match expression"),
+    }
+}
+
+#[test]
 fn test_parse_match_expr_alternation_rejects_binding_patterns() {
     let source = r#"
         fn test(t: (u64, u64)) -> u64 {

@@ -40,6 +40,7 @@ fn semcheck_code(error: &SemCheckError) -> &'static str {
         SemCheckErrorKind::DuplicateMatchVariant(..) => "MC-SEMCK-DuplicateMatchVariant",
         SemCheckErrorKind::InvalidMatchPattern(..) => "MC-SEMCK-InvalidMatchPattern",
         SemCheckErrorKind::WildcardArmNotLast => "MC-SEMCK-WildcardArmNotLast",
+        SemCheckErrorKind::CatchAllArmNotLast => "MC-SEMCK-CatchAllArmNotLast",
         SemCheckErrorKind::TupleMatchRequiresSingleArm => "MC-SEMCK-TupleMatchRequiresSingleArm",
         SemCheckErrorKind::TuplePatternArityMismatch(..) => "MC-SEMCK-TuplePatternArityMismatch",
         SemCheckErrorKind::InOutParamNotAggregate(..) => "MC-SEMCK-InOutParamNotAggregate",

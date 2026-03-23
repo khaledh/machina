@@ -994,6 +994,55 @@ fn test_match_error_union_non_exhaustive() {
 }
 
 #[test]
+fn test_match_error_union_catch_all_binding_is_exhaustive() {
+    let source = r#"
+        type IoError = { code: u64 }
+
+        fn ok(v: u64) -> u64 | IoError { v }
+
+        fn test() -> u64 {
+            let result = ok(42);
+            match result {
+                n: u64 => n,
+                other => other.code,
+            }
+        }
+    "#;
+
+    sem_check_source(source).expect("Expected catch-all binding match to be exhaustive");
+}
+
+#[test]
+fn test_match_error_union_catch_all_binding_must_be_last() {
+    let source = r#"
+        type IoError = { code: u64 }
+
+        fn ok(v: u64) -> u64 | IoError { v }
+
+        fn test() -> u64 {
+            let result = ok(42);
+            match result {
+                other => other.code,
+                n: u64 => n,
+            }
+        }
+    "#;
+
+    let result = sem_check_source(source);
+    assert!(result.is_err());
+
+    if let Err(errors) = result {
+        assert!(
+            errors
+                .iter()
+                .any(|e| matches!(e.kind(), SemCheckErrorKind::CatchAllArmNotLast)),
+            "Expected CatchAllArmNotLast error, got {:?}",
+            errors
+        );
+    }
+}
+
+#[test]
 fn test_match_bool_exhaustive() {
     let source = r#"
         fn test(b: bool) -> u64 {
