@@ -3000,27 +3000,34 @@ fn test_error_union_widening_backtracks_across_ambiguous_targets() {
 
     let parse_error = Type::Struct {
         name: "ParseError".to_string(),
+        type_args: Vec::new(),
         fields: vec![StructField {
             name: "code".to_string(),
             ty: Type::uint(64),
         }],
     };
     let wrap_u64 = Type::Struct {
-        name: "Wrap<u64>".to_string(),
+        name: "Wrap".to_string(),
+        type_args: vec![Type::uint(64)],
         fields: vec![StructField {
             name: "value".to_string(),
             ty: Type::uint(64),
         }],
     };
     let wrap_parse_error = Type::Struct {
-        name: "Wrap<ParseError>".to_string(),
+        name: "Wrap".to_string(),
+        type_args: vec![parse_error.clone()],
         fields: vec![StructField {
             name: "value".to_string(),
             ty: parse_error.clone(),
         }],
     };
     let wrap_num_or_err = Type::Struct {
-        name: "Wrap<NumOrErr>".to_string(),
+        name: "Wrap".to_string(),
+        type_args: vec![Type::ErrorUnion {
+            ok_ty: Box::new(Type::uint(64)),
+            err_tys: vec![parse_error.clone()],
+        }],
         fields: vec![StructField {
             name: "value".to_string(),
             ty: Type::ErrorUnion {

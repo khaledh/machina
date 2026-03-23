@@ -81,7 +81,11 @@ impl<'a, M: TypeDefLookup> TypeViewResolver<'a, M> {
 
     fn type_to_view(&self, key: NominalKey, ty: Type) -> Option<TypeView> {
         match ty {
-            Type::Struct { name, fields } => {
+            Type::Struct {
+                name,
+                type_args: _,
+                fields,
+            } => {
                 let state = if fields.is_empty() {
                     ExpansionState::Shallow
                 } else {
@@ -100,7 +104,11 @@ impl<'a, M: TypeDefLookup> TypeViewResolver<'a, M> {
                     state,
                 }))
             }
-            Type::Enum { name, variants } => {
+            Type::Enum {
+                name,
+                type_args: _,
+                variants,
+            } => {
                 let state = if variants.is_empty() {
                     ExpansionState::Shallow
                 } else {

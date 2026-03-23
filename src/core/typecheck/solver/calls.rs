@@ -437,7 +437,7 @@ fn method_call_candidates(
     };
     match receiver_ty {
         Type::Struct { name, .. } | Type::Enum { name, .. } => method_sigs
-            .get(name.split('<').next().unwrap_or(name).trim())
+            .get(name)
             .and_then(|by_name| by_name.get(method_name))
             .map(|overloads| {
                 overloads

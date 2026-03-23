@@ -168,6 +168,7 @@ fn type_from_view(view: TypeView) -> Type {
     match view {
         TypeView::Struct(struct_view) => Type::Struct {
             name: struct_view.name,
+            type_args: struct_view.key.type_args,
             fields: struct_view
                 .fields
                 .into_iter()
@@ -179,6 +180,7 @@ fn type_from_view(view: TypeView) -> Type {
         },
         TypeView::Enum(enum_view) => Type::Enum {
             name: enum_view.name,
+            type_args: enum_view.key.type_args,
             variants: enum_view
                 .variants
                 .into_iter()

@@ -130,6 +130,7 @@ pub(super) fn try_check_expr_obligation_nominal(
             match &target_ty_for_diag {
                 Type::Struct {
                     name,
+                    type_args: _,
                     fields: struct_fields,
                 } => {
                     if let Some(type_def_id) =
@@ -284,7 +285,7 @@ pub(super) fn try_check_expr_obligation_nominal(
                 return true;
             }
             match &owner_ty {
-                Type::Struct { name, fields } => {
+                Type::Struct { name, fields, .. } => {
                     if let Some(type_def_id) =
                         super::access_utils::type_def_id_for_nominal_name(name, type_symbols)
                         && super::access_utils::is_external_opaque_access(
@@ -429,7 +430,7 @@ pub(super) fn try_check_expr_obligation_nominal(
             }
 
             match &owner_ty {
-                Type::Struct { name, fields } => {
+                Type::Struct { name, fields, .. } => {
                     if let Some(type_def_id) =
                         super::access_utils::type_def_id_for_nominal_name(name, type_symbols)
                         && super::access_utils::is_external_opaque_access(

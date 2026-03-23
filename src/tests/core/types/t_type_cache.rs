@@ -6,11 +6,13 @@ fn test_intern_upgrades_struct_when_richer_type_arrives() {
     let mut cache = TypeCache::new();
     let node_shallow = Type::Struct {
         name: "Node".to_string(),
+        type_args: Vec::new(),
         fields: Vec::new(),
     };
     let id = cache.intern(node_shallow);
     let node_full = Type::Struct {
         name: "Node".to_string(),
+        type_args: Vec::new(),
         fields: vec![StructField {
             name: "value".to_string(),
             ty: Type::uint(64),
@@ -30,6 +32,7 @@ fn test_intern_keeps_richer_enum_when_shallow_seen_later() {
     let mut cache = TypeCache::new();
     let link_full = Type::Enum {
         name: "Link".to_string(),
+        type_args: Vec::new(),
         variants: vec![
             EnumVariant {
                 name: "None".to_string(),
@@ -40,10 +43,12 @@ fn test_intern_keeps_richer_enum_when_shallow_seen_later() {
                 payload: vec![Type::Heap {
                     elem_ty: Box::new(Type::Struct {
                         name: "Node".to_string(),
+                        type_args: Vec::new(),
                         fields: vec![StructField {
                             name: "next".to_string(),
                             ty: Type::Enum {
                                 name: "Link".to_string(),
+                                type_args: Vec::new(),
                                 variants: Vec::new(),
                             },
                         }],
@@ -55,6 +60,7 @@ fn test_intern_keeps_richer_enum_when_shallow_seen_later() {
     let id = cache.intern(link_full);
     let link_shallow = Type::Enum {
         name: "Link".to_string(),
+        type_args: Vec::new(),
         variants: Vec::new(),
     };
     let id2 = cache.intern(link_shallow);

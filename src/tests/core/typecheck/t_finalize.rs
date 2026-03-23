@@ -116,6 +116,7 @@ fn test_finalize_records_nominal_keys_for_generic_instantiations() {
 fn test_infer_type_args_from_instance_matches_generic_nominal_shape() {
     let template = Type::Struct {
         name: "Box<T0>".to_string(),
+        type_args: Vec::new(),
         fields: vec![StructField {
             name: "value".to_string(),
             ty: Type::Var(TyVarId::new(0)),
@@ -123,6 +124,7 @@ fn test_infer_type_args_from_instance_matches_generic_nominal_shape() {
     };
     let concrete = Type::Struct {
         name: "Box<i32>".to_string(),
+        type_args: Vec::new(),
         fields: vec![StructField {
             name: "value".to_string(),
             ty: Type::sint(32),
@@ -138,6 +140,7 @@ fn test_infer_type_args_from_instance_matches_generic_nominal_shape() {
 fn test_infer_type_args_from_instance_allows_var_bindings() {
     let template = Type::Enum {
         name: "Option<T0>".to_string(),
+        type_args: Vec::new(),
         variants: vec![
             EnumVariant {
                 name: "None".to_string(),
@@ -151,6 +154,7 @@ fn test_infer_type_args_from_instance_allows_var_bindings() {
     };
     let concrete = Type::Enum {
         name: "Option<T42>".to_string(),
+        type_args: Vec::new(),
         variants: vec![
             EnumVariant {
                 name: "None".to_string(),
@@ -172,6 +176,7 @@ fn test_infer_type_args_from_instance_allows_var_bindings() {
 fn test_infer_type_args_from_instance_rejects_conflicting_repeated_bindings() {
     let template = Type::Struct {
         name: "Pair<T0>".to_string(),
+        type_args: Vec::new(),
         fields: vec![
             StructField {
                 name: "left".to_string(),
@@ -185,6 +190,7 @@ fn test_infer_type_args_from_instance_rejects_conflicting_repeated_bindings() {
     };
     let concrete = Type::Struct {
         name: "Pair<u64>".to_string(),
+        type_args: Vec::new(),
         fields: vec![
             StructField {
                 name: "left".to_string(),
@@ -208,6 +214,7 @@ fn test_infer_type_args_from_instance_rejects_conflicting_repeated_bindings() {
 fn test_infer_type_args_from_instance_rejects_conflicting_repeated_nominal_bindings() {
     let template = Type::Struct {
         name: "Pair<T0>".to_string(),
+        type_args: Vec::new(),
         fields: vec![
             StructField {
                 name: "left".to_string(),
@@ -221,11 +228,13 @@ fn test_infer_type_args_from_instance_rejects_conflicting_repeated_nominal_bindi
     };
     let concrete = Type::Struct {
         name: "Pair<Box<u64>>".to_string(),
+        type_args: Vec::new(),
         fields: vec![
             StructField {
                 name: "left".to_string(),
                 ty: Type::Struct {
                     name: "Box<u64>".to_string(),
+                    type_args: Vec::new(),
                     fields: vec![StructField {
                         name: "value".to_string(),
                         ty: Type::uint(64),
@@ -236,6 +245,7 @@ fn test_infer_type_args_from_instance_rejects_conflicting_repeated_nominal_bindi
                 name: "right".to_string(),
                 ty: Type::Struct {
                     name: "Box<u64>".to_string(),
+                    type_args: Vec::new(),
                     fields: vec![StructField {
                         name: "value".to_string(),
                         ty: Type::String,

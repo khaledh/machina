@@ -36,6 +36,7 @@ fn test_map_cow_rewrites_only_when_needed() {
 fn test_type_shape_eq_distinguishes_nominal_shapes_with_same_name() {
     let left = Type::Struct {
         name: "Box<u64>".to_string(),
+        type_args: Vec::new(),
         fields: vec![StructField {
             name: "value".to_string(),
             ty: Type::uint(64),
@@ -43,6 +44,7 @@ fn test_type_shape_eq_distinguishes_nominal_shapes_with_same_name() {
     };
     let right = Type::Struct {
         name: "Box<u64>".to_string(),
+        type_args: Vec::new(),
         fields: vec![StructField {
             name: "value".to_string(),
             ty: Type::String,
@@ -64,6 +66,7 @@ fn test_type_shape_eq_recurse_through_nested_nominals() {
     let left = Type::Tuple {
         field_tys: vec![Type::Struct {
             name: "Box<u64>".to_string(),
+            type_args: Vec::new(),
             fields: vec![StructField {
                 name: "value".to_string(),
                 ty: Type::uint(64),
@@ -73,6 +76,7 @@ fn test_type_shape_eq_recurse_through_nested_nominals() {
     let right = Type::Tuple {
         field_tys: vec![Type::Struct {
             name: "Box<u64>".to_string(),
+            type_args: Vec::new(),
             fields: vec![StructField {
                 name: "value".to_string(),
                 ty: Type::String,

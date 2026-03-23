@@ -884,9 +884,7 @@ fn resolve_method_call(
 ) -> Option<ResolvedCall> {
     let receiver_ty = receiver.map(|term| resolve_term(term, engine))?;
     let owner = match &receiver_ty {
-        Type::Struct { name, .. } | Type::Enum { name, .. } => {
-            name.split('<').next().unwrap_or(name).trim().to_string()
-        }
+        Type::Struct { name, .. } | Type::Enum { name, .. } => name.clone(),
         Type::String => "string".to_string(),
         _ => return None,
     };
@@ -943,9 +941,7 @@ fn resolve_method_call_by_def_id(
 ) -> Option<ResolvedCall> {
     let receiver_ty = receiver.map(|term| resolve_term(term, engine))?;
     let owner = match &receiver_ty {
-        Type::Struct { name, .. } | Type::Enum { name, .. } => {
-            name.split('<').next().unwrap_or(name).trim().to_string()
-        }
+        Type::Struct { name, .. } | Type::Enum { name, .. } => name.clone(),
         Type::String => "string".to_string(),
         _ => return None,
     };

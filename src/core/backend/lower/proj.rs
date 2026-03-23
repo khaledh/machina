@@ -94,7 +94,7 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
         ty: &Type,
         field: &str,
     ) -> Option<(Type, IrTypeId, u64)> {
-        let Type::Enum { name, variants } = ty else {
+        let Type::Enum { name, variants, .. } = ty else {
             return None;
         };
         let info = self.linear_index.types.get(name)?;

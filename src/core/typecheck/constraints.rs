@@ -563,7 +563,7 @@ fn nominal_base_name(ty: &Type) -> Option<&str> {
         Type::Struct { name, .. } | Type::Enum { name, .. } => name.as_str(),
         _ => return None,
     };
-    Some(name.split('<').next().unwrap_or(name).trim())
+    Some(name)
 }
 
 fn fn_type_return(ty: &Type) -> Option<Type> {

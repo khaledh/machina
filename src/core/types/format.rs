@@ -90,14 +90,24 @@ impl fmt::Display for Type {
                 let fields_str = field_tys.iter().map(|f| f.to_string()).collect::<Vec<_>>();
                 write!(f, "({})", fields_str.join(", "))
             }
-            Type::Struct { name, fields } => {
+            Type::Struct {
+                name,
+                type_args,
+                fields,
+            } => {
+                let nominal_name = format_nominal_type_name(name, type_args);
                 let fields_str = fields
                     .iter()
                     .map(|f| format!("{}: {}", f.name, f.ty))
                     .collect::<Vec<_>>();
-                write!(f, "{} {{ {} }}", name, fields_str.join(", "))
+                write!(f, "{} {{ {} }}", nominal_name, fields_str.join(", "))
             }
-            Type::Enum { name, variants } => {
+            Type::Enum {
+                name,
+                type_args,
+                variants,
+            } => {
+                let nominal_name = format_nominal_type_name(name, type_args);
                 let variant_names = variants
                     .iter()
                     .map(|v| {
@@ -114,7 +124,7 @@ impl fmt::Display for Type {
                         }
                     })
                     .collect::<Vec<_>>();
-                write!(f, "{} = {}", name, variant_names.join(" | "))
+                write!(f, "{} = {}", nominal_name, variant_names.join(" | "))
             }
             Type::Slice { elem_ty } => {
                 write!(f, "{}[]", elem_ty)

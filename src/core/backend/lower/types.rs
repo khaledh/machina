@@ -172,7 +172,7 @@ impl<'a> TypeLowerer<'a> {
                 let dims = dims.iter().map(|dim| *dim as u64).collect();
                 self.ir_type_cache.add(IrTypeKind::Array { elem, dims })
             }
-            Type::Struct { name, fields } => {
+            Type::Struct { name, fields, .. } => {
                 let placeholder = self.ir_type_cache.add_placeholder_named(name.clone());
                 self.by_type.insert(ty.clone(), placeholder);
 

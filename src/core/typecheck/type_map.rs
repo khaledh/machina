@@ -137,7 +137,6 @@ pub(crate) fn resolve_type_def_with_args(
         arg_map.insert(def_table.def_id(param.id), arg_ty.clone());
     }
 
-    let type_name = mangle_type_name(&def.name, type_args);
     let mut in_progress = HashSet::new();
     match &type_def.kind {
         TypeDefKind::Alias { aliased_ty } => resolve_type_alias(
@@ -154,7 +153,8 @@ pub(crate) fn resolve_type_def_with_args(
             def_table,
             module,
             def.id,
-            &type_name,
+            &def.name,
+            type_args,
             fields,
             None,
             Some(&arg_map),
@@ -165,7 +165,8 @@ pub(crate) fn resolve_type_def_with_args(
             def_table,
             module,
             def.id,
-            &type_name,
+            &def.name,
+            type_args,
             variants,
             None,
             Some(&arg_map),
@@ -543,27 +544,6 @@ fn apply_refinements(
     Ok(ty)
 }
 
-fn type_arg_name(ty: &Type) -> String {
-    match ty {
-        Type::Struct { name, .. } | Type::Enum { name, .. } => name.clone(),
-        Type::Var(var) => format!("T{}", var.index()),
-        _ => ty.to_string(),
-    }
-}
-
-fn mangle_type_name(base: &str, type_args: &[Type]) -> String {
-    if type_args.is_empty() {
-        base.to_string()
-    } else {
-        let args = type_args
-            .iter()
-            .map(type_arg_name)
-            .collect::<Vec<_>>()
-            .join(", ");
-        format!("{base}<{args}>")
-    }
-}
-
 fn resolve_named_type(
     def_table: &DefTable,
     module: &impl TypeDefLookup,
@@ -739,6 +719,7 @@ fn resolve_named_type(
                         module,
                         def.id,
                         type_name,
+                        &[],
                         fields,
                         type_params,
                         type_args,
@@ -750,6 +731,7 @@ fn resolve_named_type(
                         module,
                         def.id,
                         type_name,
+                        &[],
                         variants,
                         type_params,
                         type_args,
@@ -792,7 +774,6 @@ fn resolve_named_type(
                 arg_map.insert(def_table.def_id(param.id), arg_ty.clone());
             }
 
-            let type_name = mangle_type_name(&def.name, &resolved_args);
             match &type_def.kind {
                 TypeDefKind::Alias { aliased_ty } => resolve_type_alias(
                     def_table,
@@ -808,7 +789,8 @@ fn resolve_named_type(
                     def_table,
                     module,
                     def.id,
-                    &type_name,
+                    &def.name,
+                    &resolved_args,
                     fields,
                     type_params,
                     Some(&arg_map),
@@ -819,7 +801,8 @@ fn resolve_named_type(
                     def_table,
                     module,
                     def.id,
-                    &type_name,
+                    &def.name,
+                    &resolved_args,
                     variants,
                     type_params,
                     Some(&arg_map),
@@ -902,6 +885,7 @@ fn resolve_struct_type(
     module: &impl TypeDefLookup,
     def_id: DefId,
     type_name: &str,
+    nominal_type_args: &[Type],
     fields: &[StructDefField],
     type_params: Option<&TypeParamMap>,
     type_args: Option<&TypeArgMap>,
@@ -911,6 +895,7 @@ fn resolve_struct_type(
     if in_progress.contains(&def_id) {
         return Ok(Type::Struct {
             name: type_name.to_string(),
+            type_args: nominal_type_args.to_vec(),
             // Recursive nominal references must stay shallow so later passes
             // can route recursion through nominal glue instead of truncating
             // structural drop/visit depth.
@@ -930,6 +915,7 @@ fn resolve_struct_type(
     in_progress.remove(&def_id);
     Ok(Type::Struct {
         name: type_name.to_string(),
+        type_args: nominal_type_args.to_vec(),
         fields: struct_fields,
     })
 }
@@ -969,6 +955,7 @@ fn resolve_enum_type(
     module: &impl TypeDefLookup,
     def_id: DefId,
     type_name: &str,
+    nominal_type_args: &[Type],
     variants: &[EnumDefVariant],
     type_params: Option<&TypeParamMap>,
     type_args: Option<&TypeArgMap>,
@@ -978,6 +965,7 @@ fn resolve_enum_type(
     if in_progress.contains(&def_id) {
         return Ok(Type::Enum {
             name: type_name.to_string(),
+            type_args: nominal_type_args.to_vec(),
             // Recursive nominal references must stay shallow so later passes
             // can route recursion through nominal glue instead of truncating
             // structural drop/visit depth.
@@ -997,6 +985,7 @@ fn resolve_enum_type(
     in_progress.remove(&def_id);
     Ok(Type::Enum {
         name: type_name.to_string(),
+        type_args: nominal_type_args.to_vec(),
         variants: enum_variants,
     })
 }

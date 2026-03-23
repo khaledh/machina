@@ -15,7 +15,7 @@ pub(super) fn compact_type_name(ty: &Type) -> String {
 }
 
 pub(super) fn compact_nominal_name(name: &str) -> String {
-    name.split('<').next().unwrap_or(name).trim().to_string()
+    name.trim().to_string()
 }
 
 pub(super) fn error_union_variant_names(ty: &Type) -> Option<Vec<String>> {
@@ -34,6 +34,7 @@ pub(super) fn error_union_variant_names(ty: &Type) -> Option<Vec<String>> {
 pub(super) fn map_key_not_found_type() -> Type {
     Type::Struct {
         name: "KeyNotFound".to_string(),
+        type_args: Vec::new(),
         fields: Vec::new(),
     }
 }

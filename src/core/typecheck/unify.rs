@@ -197,10 +197,12 @@ impl TcUnifier {
             (
                 Type::Struct {
                     name: l_name,
+                    type_args: _,
                     fields: l_fields,
                 },
                 Type::Struct {
                     name: r_name,
+                    type_args: _,
                     fields: r_fields,
                 },
             ) => {
@@ -210,10 +212,12 @@ impl TcUnifier {
                     return Err(TcUnifyError::Mismatch(
                         Type::Struct {
                             name: l_name,
+                            type_args: Vec::new(),
                             fields: l_fields,
                         },
                         Type::Struct {
                             name: r_name,
+                            type_args: Vec::new(),
                             fields: r_fields,
                         },
                     ));
@@ -223,10 +227,12 @@ impl TcUnifier {
                         return Err(TcUnifyError::Mismatch(
                             Type::Struct {
                                 name: l_name.clone(),
+                                type_args: Vec::new(),
                                 fields: l_fields.clone(),
                             },
                             Type::Struct {
                                 name: r_name.clone(),
+                                type_args: Vec::new(),
                                 fields: r_fields.clone(),
                             },
                         ));
@@ -238,10 +244,12 @@ impl TcUnifier {
             (
                 Type::Enum {
                     name: l_name,
+                    type_args: _,
                     variants: l_variants,
                 },
                 Type::Enum {
                     name: r_name,
+                    type_args: _,
                     variants: r_variants,
                 },
             ) => {
@@ -251,10 +259,12 @@ impl TcUnifier {
                     return Err(TcUnifyError::Mismatch(
                         Type::Enum {
                             name: l_name,
+                            type_args: Vec::new(),
                             variants: l_variants,
                         },
                         Type::Enum {
                             name: r_name,
+                            type_args: Vec::new(),
                             variants: r_variants,
                         },
                     ));
@@ -266,10 +276,12 @@ impl TcUnifier {
                         return Err(TcUnifyError::Mismatch(
                             Type::Enum {
                                 name: l_name.clone(),
+                                type_args: Vec::new(),
                                 variants: l_variants.clone(),
                             },
                             Type::Enum {
                                 name: r_name.clone(),
+                                type_args: Vec::new(),
                                 variants: r_variants.clone(),
                             },
                         ));
@@ -343,7 +355,7 @@ impl TcUnifier {
 }
 
 fn canonical_nominal_name(name: &str) -> &str {
-    name.split('<').next().unwrap_or(name)
+    name
 }
 
 #[cfg(test)]

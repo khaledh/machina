@@ -96,6 +96,7 @@ pub fn plan_for_iterable_type(ty: &Type) -> Option<ForPlan> {
 fn iter_done_type() -> Type {
     Type::Struct {
         name: ITER_DONE_TYPE_NAME.to_string(),
+        type_args: Vec::new(),
         fields: Vec::new(),
     }
 }
@@ -171,9 +172,7 @@ fn plan_protocol_iterable_type(
 
 fn protocol_owner_name(ty: &Type) -> Option<&str> {
     match ty {
-        Type::Struct { name, .. } | Type::Enum { name, .. } => {
-            Some(name.split('<').next().unwrap_or(name).trim())
-        }
+        Type::Struct { name, .. } | Type::Enum { name, .. } => Some(name),
         Type::String => Some("string"),
         _ => None,
     }
@@ -376,9 +375,10 @@ fn bind_protocol_type_vars(
                     .zip(concrete_field_tys.iter())
                     .all(|(left, right)| bind_protocol_type_vars(left, right, subst))
         }
-        Type::Struct { name, fields } => {
+        Type::Struct { name, fields, .. } => {
             let Type::Struct {
                 name: concrete_name,
+                type_args: _,
                 fields: concrete_fields,
             } = concrete
             else {
@@ -394,9 +394,10 @@ fn bind_protocol_type_vars(
                             && bind_protocol_type_vars(&left.ty, &right.ty, subst)
                     })
         }
-        Type::Enum { name, variants } => {
+        Type::Enum { name, variants, .. } => {
             let Type::Enum {
                 name: concrete_name,
+                type_args: _,
                 variants: concrete_variants,
             } = concrete
             else {
@@ -492,12 +493,22 @@ fn bind_protocol_type_vars(
 
 fn normalize_protocol_nominal_names(ty: &Type) -> Type {
     ty.map_cloned(&|t| match t {
-        Type::Struct { name, fields } => Type::Struct {
-            name: name.split('<').next().unwrap_or(&name).trim().to_string(),
+        Type::Struct {
+            name,
+            type_args,
+            fields,
+        } => Type::Struct {
+            name,
+            type_args,
             fields,
         },
-        Type::Enum { name, variants } => Type::Enum {
-            name: name.split('<').next().unwrap_or(&name).trim().to_string(),
+        Type::Enum {
+            name,
+            type_args,
+            variants,
+        } => Type::Enum {
+            name,
+            type_args,
             variants,
         },
         other => other,
@@ -537,7 +548,7 @@ fn protocol_next_shape(ret_ty: &Type) -> Option<(Type, Type, Vec<Type>)> {
 }
 
 fn is_iter_done_type(ty: &Type) -> bool {
-    matches!(ty, Type::Struct { name, fields } if name == ITER_DONE_TYPE_NAME && fields.is_empty())
+    matches!(ty, Type::Struct { name, fields, .. } if name == ITER_DONE_TYPE_NAME && fields.is_empty())
 }
 
 #[cfg(test)]
@@ -572,14 +583,17 @@ mod tests {
     fn protocol_plan_builds_for_concrete_iterable_shape() {
         let source_ty = Type::Struct {
             name: "Counter".to_string(),
+            type_args: Vec::new(),
             fields: Vec::new(),
         };
         let iter_ty = Type::Struct {
             name: "CounterIter".to_string(),
+            type_args: Vec::new(),
             fields: Vec::new(),
         };
         let done_ty = Type::Struct {
             name: ITER_DONE_TYPE_NAME.to_string(),
+            type_args: Vec::new(),
             fields: Vec::new(),
         };
         let mut methods = HashMap::<String, HashMap<String, Vec<CollectedCallableSig>>>::new();
@@ -648,18 +662,22 @@ mod tests {
     fn protocol_plan_accepts_fallible_next_shape() {
         let source_ty = Type::Struct {
             name: "Counter".to_string(),
+            type_args: Vec::new(),
             fields: Vec::new(),
         };
         let iter_ty = Type::Struct {
             name: "CounterIter".to_string(),
+            type_args: Vec::new(),
             fields: Vec::new(),
         };
         let done_ty = Type::Struct {
             name: ITER_DONE_TYPE_NAME.to_string(),
+            type_args: Vec::new(),
             fields: Vec::new(),
         };
         let parse_err_ty = Type::Struct {
             name: "ParseError".to_string(),
+            type_args: Vec::new(),
             fields: Vec::new(),
         };
         let mut methods = HashMap::<String, HashMap<String, Vec<CollectedCallableSig>>>::new();
@@ -712,14 +730,17 @@ mod tests {
     fn protocol_plan_rejects_non_iter_done_sentinel() {
         let source_ty = Type::Struct {
             name: "Counter".to_string(),
+            type_args: Vec::new(),
             fields: Vec::new(),
         };
         let iter_ty = Type::Struct {
             name: "CounterIter".to_string(),
+            type_args: Vec::new(),
             fields: Vec::new(),
         };
         let wrong_done_ty = Type::Struct {
             name: "Finished".to_string(),
+            type_args: Vec::new(),
             fields: Vec::new(),
         };
         let mut methods = HashMap::<String, HashMap<String, Vec<CollectedCallableSig>>>::new();
@@ -757,12 +778,22 @@ mod tests {
     #[test]
     fn protocol_plan_accepts_generic_receiver_methods_when_receiver_is_concrete() {
         let source_ty = Type::Struct {
-            name: "MapIter<CounterIter, u64, u64>".to_string(),
+            name: "MapIter".to_string(),
+            type_args: vec![
+                Type::Struct {
+                    name: "CounterIter".to_string(),
+                    type_args: Vec::new(),
+                    fields: Vec::new(),
+                },
+                Type::uint(64),
+                Type::uint(64),
+            ],
             fields: vec![
                 StructField {
                     name: "source".to_string(),
                     ty: Type::Struct {
                         name: "CounterIter".to_string(),
+                        type_args: Vec::new(),
                         fields: Vec::new(),
                     },
                 },
@@ -780,6 +811,7 @@ mod tests {
         };
         let done_ty = Type::Struct {
             name: ITER_DONE_TYPE_NAME.to_string(),
+            type_args: Vec::new(),
             fields: Vec::new(),
         };
         let mut methods = HashMap::<String, HashMap<String, Vec<CollectedCallableSig>>>::new();
@@ -792,6 +824,11 @@ mod tests {
                         def_id: DefId(10),
                         self_ty: Some(Type::Struct {
                             name: "MapIter".to_string(),
+                            type_args: vec![
+                                Type::Var(TyVarId::new(0)),
+                                Type::Var(TyVarId::new(1)),
+                                Type::Var(TyVarId::new(2)),
+                            ],
                             fields: vec![
                                 StructField {
                                     name: "source".to_string(),
@@ -812,6 +849,11 @@ mod tests {
                         params: Vec::new(),
                         ret_ty: Type::Struct {
                             name: "MapIter".to_string(),
+                            type_args: vec![
+                                Type::Var(TyVarId::new(0)),
+                                Type::Var(TyVarId::new(1)),
+                                Type::Var(TyVarId::new(2)),
+                            ],
                             fields: vec![
                                 StructField {
                                     name: "source".to_string(),
@@ -842,6 +884,11 @@ mod tests {
                         def_id: DefId(11),
                         self_ty: Some(Type::Struct {
                             name: "MapIter".to_string(),
+                            type_args: vec![
+                                Type::Var(TyVarId::new(0)),
+                                Type::Var(TyVarId::new(1)),
+                                Type::Var(TyVarId::new(2)),
+                            ],
                             fields: vec![
                                 StructField {
                                     name: "source".to_string(),
@@ -879,6 +926,15 @@ mod tests {
         assert_eq!(plan.item_ty, Type::uint(64));
         let expected_iter_ty = Type::Struct {
             name: "MapIter".to_string(),
+            type_args: vec![
+                Type::Struct {
+                    name: "CounterIter".to_string(),
+                    type_args: Vec::new(),
+                    fields: Vec::new(),
+                },
+                Type::uint(64),
+                Type::uint(64),
+            ],
             fields: match &source_ty {
                 Type::Struct { fields, .. } => fields.clone(),
                 other => panic!("expected struct source type, got {other:?}"),
@@ -895,6 +951,7 @@ mod tests {
                 iter_method_type_args: vec![
                     Type::Struct {
                         name: "CounterIter".to_string(),
+                        type_args: Vec::new(),
                         fields: Vec::new(),
                     },
                     Type::uint(64),
@@ -903,6 +960,7 @@ mod tests {
                 next_method_type_args: vec![
                     Type::Struct {
                         name: "CounterIter".to_string(),
+                        type_args: Vec::new(),
                         fields: Vec::new(),
                     },
                     Type::uint(64),
@@ -915,12 +973,22 @@ mod tests {
     #[test]
     fn instantiate_protocol_sig_accepts_generic_receiver_shape() {
         let receiver_ty = Type::Struct {
-            name: "MapIter<CounterIter, u64, u64>".to_string(),
+            name: "MapIter".to_string(),
+            type_args: vec![
+                Type::Struct {
+                    name: "CounterIter".to_string(),
+                    type_args: Vec::new(),
+                    fields: Vec::new(),
+                },
+                Type::uint(64),
+                Type::uint(64),
+            ],
             fields: vec![
                 StructField {
                     name: "source".to_string(),
                     ty: Type::Struct {
                         name: "CounterIter".to_string(),
+                        type_args: Vec::new(),
                         fields: Vec::new(),
                     },
                 },
@@ -940,6 +1008,11 @@ mod tests {
             def_id: DefId(10),
             self_ty: Some(Type::Struct {
                 name: "MapIter".to_string(),
+                type_args: vec![
+                    Type::Var(TyVarId::new(0)),
+                    Type::Var(TyVarId::new(1)),
+                    Type::Var(TyVarId::new(2)),
+                ],
                 fields: vec![
                     StructField {
                         name: "source".to_string(),
@@ -960,6 +1033,11 @@ mod tests {
             params: Vec::new(),
             ret_ty: Type::Struct {
                 name: "MapIter".to_string(),
+                type_args: vec![
+                    Type::Var(TyVarId::new(0)),
+                    Type::Var(TyVarId::new(1)),
+                    Type::Var(TyVarId::new(2)),
+                ],
                 fields: vec![
                     StructField {
                         name: "source".to_string(),
@@ -995,6 +1073,7 @@ mod tests {
             subst.get(&TyVarId::new(0)),
             Some(&Type::Struct {
                 name: "CounterIter".to_string(),
+                type_args: Vec::new(),
                 fields: Vec::new(),
             })
         );

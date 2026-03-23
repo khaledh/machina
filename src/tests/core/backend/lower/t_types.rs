@@ -58,6 +58,7 @@ fn enum_type_id(ctx: &SemanticContext, name: &str) -> TypeId {
 
     let enum_ty = Type::Enum {
         name: type_def.name.clone(),
+        type_args: Vec::new(),
         variants: enum_variants,
     };
     ctx.type_map
@@ -345,6 +346,7 @@ fn test_lower_shallow_enum_uses_nominal_view_when_available() {
         TypeLowerer::new_with_type_defs(&ctx.type_map, Some(&ctx.def_table), Some(&ctx.module));
     let shallow = Type::Enum {
         name: "Option".to_string(),
+        type_args: Vec::new(),
         variants: Vec::new(),
     };
 
@@ -382,7 +384,8 @@ fn test_lower_shallow_generic_enum_uses_nominal_key_side_table() {
     "});
 
     let shallow = Type::Enum {
-        name: "Option<u64>".to_string(),
+        name: "Option".to_string(),
+        type_args: vec![Type::uint(64)],
         variants: Vec::new(),
     };
     assert!(

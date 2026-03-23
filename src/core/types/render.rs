@@ -15,9 +15,12 @@ pub fn render_type(ty: &Type, cfg: &TypeRenderConfig<'_>) -> String {
 
 fn render_type_inner(ty: &Type, cfg: &TypeRenderConfig<'_>, seen_vars: &mut Vec<u32>) -> String {
     match ty {
-        Type::Struct { name, .. } | Type::Enum { name, .. } => {
-            render_nominal_name(name, cfg, seen_vars)
+        Type::Struct {
+            name, type_args, ..
         }
+        | Type::Enum {
+            name, type_args, ..
+        } => render_nominal_name(name, type_args, cfg, seen_vars),
         Type::Array { elem_ty, dims } => {
             let dims_str = dims.iter().map(|d| d.to_string()).collect::<Vec<_>>();
             format!(
@@ -143,48 +146,25 @@ fn render_type_var(var_id: u32, cfg: &TypeRenderConfig<'_>, seen_vars: &mut Vec<
         .unwrap_or_else(|| format!("T{pos}"))
 }
 
-fn render_nominal_name(name: &str, cfg: &TypeRenderConfig<'_>, seen_vars: &mut Vec<u32>) -> String {
-    let replaced = if name.contains('<') {
-        replace_tyvars_in_text(name, cfg, seen_vars)
+fn render_nominal_name(
+    name: &str,
+    type_args: &[Type],
+    cfg: &TypeRenderConfig<'_>,
+    seen_vars: &mut Vec<u32>,
+) -> String {
+    let replaced = if type_args.is_empty() {
+        name.to_string()
     } else {
-        name.split('<').next().unwrap_or(name).trim().to_string()
+        let args = type_args
+            .iter()
+            .map(|arg| render_type_inner(arg, cfg, seen_vars))
+            .collect::<Vec<_>>()
+            .join(", ");
+        format!("{name}<{args}>")
     };
     if let Some(mapper) = cfg.nominal_name_map {
         mapper(&replaced)
     } else {
         replaced
     }
-}
-
-fn replace_tyvars_in_text(
-    text: &str,
-    cfg: &TypeRenderConfig<'_>,
-    seen_vars: &mut Vec<u32>,
-) -> String {
-    let mut out = String::with_capacity(text.len());
-    let mut chars = text.chars().peekable();
-    while let Some(ch) = chars.next() {
-        if ch == 'T' {
-            let mut digits = String::new();
-            while let Some(next) = chars.peek() {
-                if next.is_ascii_digit() {
-                    digits.push(*next);
-                    chars.next();
-                } else {
-                    break;
-                }
-            }
-            if !digits.is_empty()
-                && let Ok(id) = digits.parse::<u32>()
-            {
-                out.push_str(&render_type_var(id, cfg, seen_vars));
-                continue;
-            }
-            out.push('T');
-            out.push_str(&digits);
-            continue;
-        }
-        out.push(ch);
-    }
-    out
 }

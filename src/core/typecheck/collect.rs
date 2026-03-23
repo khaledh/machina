@@ -170,11 +170,13 @@ fn collect_type_defs(
                 TypeDefKind::Struct { fields } => resolve_struct_type(ctx, &type_lookup, fields)
                     .map(|fields| Type::Struct {
                         name: type_def.name.clone(),
+                        type_args: Vec::new(),
                         fields,
                     }),
                 TypeDefKind::Enum { variants } => resolve_enum_type(ctx, &type_lookup, variants)
                     .map(|variants| Type::Enum {
                         name: type_def.name.clone(),
+                        type_args: Vec::new(),
                         variants,
                     }),
                 TypeDefKind::Linear { .. } => {

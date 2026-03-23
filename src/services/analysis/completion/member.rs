@@ -22,7 +22,7 @@ pub(super) fn member_completions(
     let hosted_machine = hosted_machine_for_owner(resolved, &owner);
     let hide_raw_fields = hosted_machine.is_some();
 
-    if let Type::Struct { name, fields } = &owner
+    if let Type::Struct { name, fields, .. } = &owner
         && !hide_raw_fields
         && struct_fields_accessible(resolved, name, caller_def_id)
     {

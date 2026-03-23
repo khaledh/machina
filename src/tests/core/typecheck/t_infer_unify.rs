@@ -131,11 +131,13 @@ fn test_unify_struct_binds_nested_type_vars() {
     let inner = unifier.new_var();
     let left = Type::Struct {
         name: "MapIter".to_string(),
+        type_args: Vec::new(),
         fields: vec![
             StructField {
                 name: "source".to_string(),
                 ty: Type::Struct {
                     name: "CounterIter".to_string(),
+                    type_args: Vec::new(),
                     fields: vec![],
                 },
             },
@@ -153,11 +155,13 @@ fn test_unify_struct_binds_nested_type_vars() {
     };
     let right = Type::Struct {
         name: "MapIter".to_string(),
+        type_args: Vec::new(),
         fields: vec![
             StructField {
                 name: "source".to_string(),
                 ty: Type::Struct {
                     name: "CounterIter".to_string(),
+                    type_args: Vec::new(),
                     fields: vec![],
                 },
             },
@@ -186,6 +190,7 @@ fn test_unify_error_union_binds_payload_vars() {
         ok_ty: Box::new(Type::Var(payload)),
         err_tys: vec![Type::Struct {
             name: "IterDone".to_string(),
+            type_args: Vec::new(),
             fields: vec![],
         }],
     };
@@ -193,6 +198,7 @@ fn test_unify_error_union_binds_payload_vars() {
         ok_ty: Box::new(Type::uint(64)),
         err_tys: vec![Type::Struct {
             name: "IterDone".to_string(),
+            type_args: Vec::new(),
             fields: vec![],
         }],
     };
@@ -207,6 +213,7 @@ fn test_unify_enum_binds_nested_payload_vars() {
     let payload = unifier.new_var();
     let left = Type::Enum {
         name: "Option".to_string(),
+        type_args: Vec::new(),
         variants: vec![
             EnumVariant {
                 name: "Some".to_string(),
@@ -220,6 +227,7 @@ fn test_unify_enum_binds_nested_payload_vars() {
     };
     let right = Type::Enum {
         name: "Option".to_string(),
+        type_args: Vec::new(),
         variants: vec![
             EnumVariant {
                 name: "Some".to_string(),

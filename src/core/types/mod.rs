@@ -69,10 +69,12 @@ pub enum Type {
     },
     Struct {
         name: String,
+        type_args: Vec<Type>,
         fields: Vec<StructField>,
     },
     Enum {
         name: String,
+        type_args: Vec<Type>,
         variants: Vec<EnumVariant>,
     },
 
@@ -133,6 +135,19 @@ pub struct StructField {
 pub struct EnumVariant {
     pub name: String,
     pub payload: Vec<Type>,
+}
+
+pub fn format_nominal_type_name(name: &str, type_args: &[Type]) -> String {
+    if type_args.is_empty() {
+        name.to_string()
+    } else {
+        let args = type_args
+            .iter()
+            .map(ToString::to_string)
+            .collect::<Vec<_>>()
+            .join(", ");
+        format!("{name}<{args}>")
+    }
 }
 
 impl PartialEq for Type {
@@ -204,8 +219,30 @@ impl PartialEq for Type {
                 },
             ) => lk == rk && lv == rv,
             (Type::Tuple { field_tys: f1 }, Type::Tuple { field_tys: f2 }) => f1 == f2,
-            (Type::Struct { name: n1, .. }, Type::Struct { name: n2, .. }) => n1 == n2,
-            (Type::Enum { name: n1, .. }, Type::Enum { name: n2, .. }) => n1 == n2,
+            (
+                Type::Struct {
+                    name: n1,
+                    type_args: a1,
+                    ..
+                },
+                Type::Struct {
+                    name: n2,
+                    type_args: a2,
+                    ..
+                },
+            ) => n1 == n2 && a1 == a2,
+            (
+                Type::Enum {
+                    name: n1,
+                    type_args: a1,
+                    ..
+                },
+                Type::Enum {
+                    name: n2,
+                    type_args: a2,
+                    ..
+                },
+            ) => n1 == n2 && a1 == a2,
             (Type::Slice { elem_ty: e1 }, Type::Slice { elem_ty: e2 }) => e1 == e2,
             (Type::Heap { elem_ty: e1 }, Type::Heap { elem_ty: e2 }) => e1 == e2,
             (
@@ -302,15 +339,15 @@ impl Hash for Type {
                 11u8.hash(state);
                 field_tys.hash(state);
             }
-            Type::Struct { name, .. } => {
-                // Nominal type: only hash the name
+            Type::Struct { name, type_args, .. } => {
                 12u8.hash(state);
                 name.hash(state);
+                type_args.hash(state);
             }
-            Type::Enum { name, .. } => {
-                // Nominal type: only hash the name
+            Type::Enum { name, type_args, .. } => {
                 13u8.hash(state);
                 name.hash(state);
+                type_args.hash(state);
             }
             Type::Slice { elem_ty } => {
                 14u8.hash(state);
@@ -513,14 +550,21 @@ impl Type {
             (
                 Type::Struct {
                     name: l_name,
+                    type_args: l_type_args,
                     fields: l_fields,
                 },
                 Type::Struct {
                     name: r_name,
+                    type_args: r_type_args,
                     fields: r_fields,
                 },
             ) => {
                 l_name == r_name
+                    && l_type_args.len() == r_type_args.len()
+                    && l_type_args
+                        .iter()
+                        .zip(r_type_args.iter())
+                        .all(|(l, r)| l.shape_eq(r))
                     && l_fields.len() == r_fields.len()
                     && l_fields
                         .iter()
@@ -530,14 +574,21 @@ impl Type {
             (
                 Type::Enum {
                     name: l_name,
+                    type_args: l_type_args,
                     variants: l_variants,
                 },
                 Type::Enum {
                     name: r_name,
+                    type_args: r_type_args,
                     variants: r_variants,
                 },
             ) => {
                 l_name == r_name
+                    && l_type_args.len() == r_type_args.len()
+                    && l_type_args
+                        .iter()
+                        .zip(r_type_args.iter())
+                        .all(|(l, r)| l.shape_eq(r))
                     && l_variants.len() == r_variants.len()
                     && l_variants.iter().zip(r_variants.iter()).all(|(l, r)| {
                         l.name == r.name
@@ -1000,8 +1051,13 @@ impl Type {
             Type::Tuple { field_tys } => Type::Tuple {
                 field_tys: field_tys.into_iter().map(|ty| ty.map(f)).collect(),
             },
-            Type::Struct { name, fields } => Type::Struct {
+            Type::Struct {
                 name,
+                type_args,
+                fields,
+            } => Type::Struct {
+                name,
+                type_args: type_args.into_iter().map(|ty| ty.map(f)).collect(),
                 fields: fields
                     .into_iter()
                     .map(|field| StructField {
@@ -1010,8 +1066,13 @@ impl Type {
                     })
                     .collect(),
             },
-            Type::Enum { name, variants } => Type::Enum {
+            Type::Enum {
                 name,
+                type_args,
+                variants,
+            } => Type::Enum {
+                name,
+                type_args: type_args.into_iter().map(|ty| ty.map(f)).collect(),
                 variants: variants
                     .into_iter()
                     .map(|v| EnumVariant {
@@ -1160,17 +1221,24 @@ impl Type {
                     Cow::Borrowed(self)
                 }
             }
-            Type::Struct { name, fields } => {
+            Type::Struct {
+                name,
+                type_args,
+                fields,
+            } => {
+                let mapped_type_args = type_args.iter().map(|ty| ty.map_cow(f)).collect::<Vec<_>>();
                 let mapped_fields = fields
                     .iter()
                     .map(|field| (&field.name, field.ty.map_cow(f)))
                     .collect::<Vec<_>>();
-                let changed = mapped_fields
-                    .iter()
-                    .any(|(_, ty)| matches!(ty, Cow::Owned(_)));
+                let changed = mapped_type_args.iter().any(|ty| matches!(ty, Cow::Owned(_)))
+                    || mapped_fields
+                        .iter()
+                        .any(|(_, ty)| matches!(ty, Cow::Owned(_)));
                 if changed {
                     Cow::Owned(Type::Struct {
                         name: name.clone(),
+                        type_args: mapped_type_args.into_iter().map(Cow::into_owned).collect(),
                         fields: mapped_fields
                             .into_iter()
                             .map(|(field_name, ty)| StructField {
@@ -1183,7 +1251,12 @@ impl Type {
                     Cow::Borrowed(self)
                 }
             }
-            Type::Enum { name, variants } => {
+            Type::Enum {
+                name,
+                type_args,
+                variants,
+            } => {
+                let mapped_type_args = type_args.iter().map(|ty| ty.map_cow(f)).collect::<Vec<_>>();
                 let mapped_variants = variants
                     .iter()
                     .map(|variant| {
@@ -1195,12 +1268,14 @@ impl Type {
                         (&variant.name, payload)
                     })
                     .collect::<Vec<_>>();
-                let changed = mapped_variants
-                    .iter()
-                    .any(|(_, payload)| payload.iter().any(|ty| matches!(ty, Cow::Owned(_))));
+                let changed = mapped_type_args.iter().any(|ty| matches!(ty, Cow::Owned(_)))
+                    || mapped_variants
+                        .iter()
+                        .any(|(_, payload)| payload.iter().any(|ty| matches!(ty, Cow::Owned(_))));
                 if changed {
                     Cow::Owned(Type::Enum {
                         name: name.clone(),
+                        type_args: mapped_type_args.into_iter().map(Cow::into_owned).collect(),
                         variants: mapped_variants
                             .into_iter()
                             .map(|(variant_name, payload)| EnumVariant {

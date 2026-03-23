@@ -50,7 +50,7 @@ enum MatchRuleKind<'a> {
 impl<'a> MatchRuleKind<'a> {
     fn for_type(ty: &'a Type) -> Self {
         match ty {
-            Type::Enum { name, variants } => Self::Enum(EnumRule { name, variants }),
+            Type::Enum { name, variants, .. } => Self::Enum(EnumRule { name, variants }),
             Type::ErrorUnion { ok_ty, err_tys } => Self::Union(UnionRule { ok_ty, err_tys }),
             Type::Bool => Self::Bool,
             Type::Int { signed, bits, .. } => Self::Int(IntRule {
@@ -162,6 +162,7 @@ impl<'a> EnumRule<'a> {
                         errors.push(
                             SEK::InvalidMatchPattern(Type::Enum {
                                 name: self.name.to_string(),
+                                type_args: Vec::new(),
                                 variants: self.variants.to_vec(),
                             })
                             .at(pattern_span(pattern)),
@@ -417,7 +418,7 @@ impl<'a> TupleRule<'a> {
                     check_int_pattern_range(*value, signed, bits, *span, errors);
                 }
                 MatchPattern::EnumVariant { .. } => {
-                    let Type::Enum { name, variants } = peeled_ty else {
+                    let Type::Enum { name, variants, .. } = peeled_ty else {
                         errors.push(SEK::InvalidMatchPattern(peeled_ty).at(pattern_span(pattern)));
                         continue;
                     };

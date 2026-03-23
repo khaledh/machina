@@ -131,6 +131,7 @@ impl<'a> ConstraintCollector<'a> {
                         value_ty.clone(),
                         Type::Struct {
                             name: type_name.clone(),
+                            type_args: Vec::new(),
                             fields: struct_fields.clone(),
                         },
                         ConstraintReason::Pattern(pattern.id, pattern.span),

@@ -27,7 +27,7 @@ struct NominalTemplate {
 
 #[derive(Debug, Clone)]
 pub(crate) struct NominalKeyResolver {
-    explicit_nominal_keys: HashMap<String, NominalKey>,
+    explicit_nominal_keys: HashMap<Type, NominalKey>,
     nominal_templates: Vec<NominalTemplate>,
 }
 
@@ -40,12 +40,11 @@ impl NominalKeyResolver {
     }
 
     pub(crate) fn infer(&self, ty: &Type) -> Option<NominalKey> {
-        let nominal_name = match ty {
-            Type::Struct { name, .. } | Type::Enum { name, .. } => name.as_str(),
-            _ => return None,
-        };
+        if !matches!(ty, Type::Struct { .. } | Type::Enum { .. }) {
+            return None;
+        }
 
-        if let Some(key) = self.explicit_nominal_keys.get(nominal_name) {
+        if let Some(key) = self.explicit_nominal_keys.get(ty) {
             return Some(key.clone());
         }
 
@@ -235,7 +234,7 @@ impl TypeDefLookup for ResolvedTypeLookup<'_> {
 fn collect_explicit_nominal_keys(
     resolved: &ResolvedContext,
     imported_facts: &ImportedFacts,
-) -> HashMap<String, NominalKey> {
+) -> HashMap<Type, NominalKey> {
     let mut out = HashMap::new();
     let uses = ExplicitNominalCollector::collect(&resolved.def_table, &resolved.module);
     let type_lookup = ResolvedTypeLookup {
@@ -290,16 +289,12 @@ fn collect_explicit_nominal_keys(
         ) else {
             continue;
         };
-        let inst_name = match inst_ty {
-            Type::Struct { name, .. } | Type::Enum { name, .. } => name,
-            _ => continue,
-        };
         let key = NominalKey::new(usage.def_id, resolved_args);
-        if let Some(existing) = out.get(&inst_name) {
+        if let Some(existing) = out.get(&inst_ty) {
             debug_assert_eq!(existing, &key);
             continue;
         }
-        out.insert(inst_name, key);
+        out.insert(inst_ty, key);
     }
 
     out

@@ -256,6 +256,7 @@ impl<'a> Elaborator<'a> {
             .collect();
         let closure_ty = Type::Struct {
             name: type_name.clone(),
+            type_args: Vec::new(),
             fields: closure_fields,
         };
         let self_def_name = "env".to_string();

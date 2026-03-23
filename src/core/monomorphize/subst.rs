@@ -2,11 +2,9 @@
 
 use std::collections::HashMap;
 
-use crate::core::ast::visit_mut::{VisitorMut, walk_type_expr};
+use crate::core::ast::visit_mut::VisitorMut;
 use crate::core::ast::*;
 use crate::core::diag::Span;
-use crate::core::lexer::{LexError, Lexer, Token};
-use crate::core::parse::{ParseError, Parser};
 use crate::core::resolve::{DefId, DefKind, DefTable};
 use crate::core::typecheck::template_bind::bind_template_type_vars;
 use crate::core::typecheck::type_map::GenericInst;
@@ -302,7 +300,7 @@ impl<M: TypeDefLookup> VisitorMut for TypeExprSubstitutor<'_, M> {
             }
         }
 
-        walk_type_expr(self, type_expr);
+        crate::core::ast::visit_mut::walk_type_expr(self, type_expr);
     }
 }
 
@@ -502,20 +500,30 @@ fn type_expr_from_type(
                 .map(|ty| type_expr_from_type(ty, def_table, module, node_id_gen, span))
                 .collect::<Result<Vec<_>, _>>()?,
         },
-        Type::Struct { name, .. } | Type::Enum { name, .. } => {
-            let base_name = name.split('<').next().unwrap_or(name);
-            if let Some(type_expr) = nominal_type_expr_from_instance(
-                ty,
-                base_name,
-                def_table,
-                module,
-                node_id_gen,
-                span,
-            )? {
-                return Ok(type_expr);
+        Type::Struct {
+            name, type_args, ..
+        }
+        | Type::Enum {
+            name, type_args, ..
+        } => {
+            if !type_args.is_empty() {
+                let type_args = type_args
+                    .iter()
+                    .map(|arg| type_expr_from_type(arg, def_table, module, node_id_gen, span))
+                    .collect::<Result<Vec<_>, _>>()?;
+                return Ok(TypeExpr {
+                    id: node_id_gen.new_id(),
+                    kind: TypeExprKind::Named {
+                        ident: name.clone(),
+                        type_args,
+                    },
+                    span,
+                });
             }
-            if name.contains('<') {
-                return rendered_type_expr(name, def_table, module, node_id_gen, span);
+            if let Some(type_expr) =
+                nominal_type_expr_from_instance(ty, name, def_table, module, node_id_gen, span)?
+            {
+                return Ok(type_expr);
             }
             return named_type_expr(name, def_table, node_id_gen, span);
         }
@@ -526,107 +534,6 @@ fn type_expr_from_type(
     };
 
     Ok(TypeExpr { id, kind, span })
-}
-
-fn rendered_type_expr(
-    rendered: &str,
-    def_table: &DefTable,
-    module: &impl TypeDefLookup,
-    node_id_gen: &mut NodeIdGen,
-    span: Span,
-) -> Result<TypeExpr, MonomorphizeError> {
-    if let Some((ident, type_arg_strs)) = split_specialized_nominal_name(rendered) {
-        let type_args = type_arg_strs
-            .into_iter()
-            .map(|arg| rendered_type_expr(arg, def_table, module, node_id_gen, span))
-            .collect::<Result<Vec<_>, _>>()?;
-        return Ok(TypeExpr {
-            id: node_id_gen.new_id(),
-            kind: TypeExprKind::Named {
-                ident: ident.to_string(),
-                type_args,
-            },
-            span,
-        });
-    }
-    if !rendered.contains(['|', '(', ')', '[', ']', '&']) {
-        return named_type_expr(rendered, def_table, node_id_gen, span);
-    }
-
-    let source = format!("type __Monomorphize = {rendered}");
-    let tokens = Lexer::new(&source)
-        .tokenize()
-        .collect::<Result<Vec<Token>, LexError>>()
-        .map_err(|_| {
-            MonomorphizeErrorKind::UnknownType {
-                name: rendered.to_string(),
-            }
-            .at(span)
-        })?;
-    let mut parser = Parser::new(&tokens);
-    let module = parser.parse().map_err(|_: ParseError| {
-        MonomorphizeErrorKind::UnknownType {
-            name: rendered.to_string(),
-        }
-        .at(span)
-    })?;
-    let Some(type_def) = module.type_defs().into_iter().next() else {
-        return Err(MonomorphizeErrorKind::UnknownType {
-            name: rendered.to_string(),
-        }
-        .at(span));
-    };
-    let TypeDefKind::Alias { aliased_ty } = &type_def.kind else {
-        return Err(MonomorphizeErrorKind::UnknownType {
-            name: rendered.to_string(),
-        }
-        .at(span));
-    };
-    let mut type_expr = aliased_ty.clone();
-    FreshTypeExprIds { node_id_gen }.visit_type_expr(&mut type_expr);
-    Ok(type_expr)
-}
-
-struct FreshTypeExprIds<'a> {
-    node_id_gen: &'a mut NodeIdGen,
-}
-
-impl VisitorMut for FreshTypeExprIds<'_> {
-    fn visit_type_expr(&mut self, type_expr: &mut TypeExpr) {
-        type_expr.id = self.node_id_gen.new_id();
-        walk_type_expr(self, type_expr);
-    }
-}
-
-fn split_specialized_nominal_name(name: &str) -> Option<(&str, Vec<&str>)> {
-    let start = name.find('<')?;
-    if !name.ends_with('>') {
-        return None;
-    }
-    let ident = &name[..start];
-    let inner = &name[start + 1..name.len() - 1];
-    let mut args = Vec::new();
-    let mut depth_angles = 0usize;
-    let mut depth_parens = 0usize;
-    let mut depth_brackets = 0usize;
-    let mut arg_start = 0usize;
-    for (idx, ch) in inner.char_indices() {
-        match ch {
-            '<' => depth_angles += 1,
-            '>' => depth_angles = depth_angles.saturating_sub(1),
-            '(' => depth_parens += 1,
-            ')' => depth_parens = depth_parens.saturating_sub(1),
-            '[' => depth_brackets += 1,
-            ']' => depth_brackets = depth_brackets.saturating_sub(1),
-            ',' if depth_angles == 0 && depth_parens == 0 && depth_brackets == 0 => {
-                args.push(inner[arg_start..idx].trim());
-                arg_start = idx + 1;
-            }
-            _ => {}
-        }
-    }
-    args.push(inner[arg_start..].trim());
-    Some((ident, args))
 }
 
 fn response_set_type_arg_expr(

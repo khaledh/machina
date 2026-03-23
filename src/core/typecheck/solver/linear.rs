@@ -222,6 +222,7 @@ pub(super) fn try_check_expr_obligation_linear(
         .cloned()
         .unwrap_or(Type::Enum {
             name: "SessionError".to_string(),
+            type_args: Vec::new(),
             variants: Vec::new(),
         });
     let session_result_ty = Type::ErrorUnion {
@@ -327,6 +328,7 @@ fn check_linear_machine_deliver(
         .cloned()
         .unwrap_or(Type::Enum {
             name: "DeliverResult".to_string(),
+            type_args: Vec::new(),
             variants: Vec::new(),
         });
     if let Err(err) = unifier.unify(
@@ -538,6 +540,7 @@ fn check_linear_session_action(
         .cloned()
         .unwrap_or(Type::Enum {
             name: "SessionError".to_string(),
+            type_args: Vec::new(),
             variants: Vec::new(),
         });
     let session_result_ty = Type::ErrorUnion {
@@ -629,6 +632,7 @@ fn check_linear_machine_resume(
         .cloned()
         .unwrap_or(Type::Enum {
             name: "SessionError".to_string(),
+            type_args: Vec::new(),
             variants: Vec::new(),
         });
     let session_result_ty = Type::ErrorUnion {
@@ -718,6 +722,7 @@ fn check_linear_machine_lookup(
         .cloned()
         .unwrap_or(Type::Enum {
             name: "SessionError".to_string(),
+            type_args: Vec::new(),
             variants: Vec::new(),
         });
     let session_result_ty = Type::ErrorUnion {

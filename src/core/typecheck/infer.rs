@@ -243,10 +243,12 @@ impl InferUnifier {
             (
                 Type::Struct {
                     name: l_name,
+                    type_args: _,
                     fields: l_fields,
                 },
                 Type::Struct {
                     name: r_name,
+                    type_args: _,
                     fields: r_fields,
                 },
             ) => {
@@ -254,10 +256,12 @@ impl InferUnifier {
                     return Err(InferUnifyError::Mismatch(
                         Type::Struct {
                             name: l_name,
+                            type_args: Vec::new(),
                             fields: l_fields,
                         },
                         Type::Struct {
                             name: r_name,
+                            type_args: Vec::new(),
                             fields: r_fields,
                         },
                     ));
@@ -267,10 +271,12 @@ impl InferUnifier {
                         return Err(InferUnifyError::Mismatch(
                             Type::Struct {
                                 name: l_name.clone(),
+                                type_args: Vec::new(),
                                 fields: l_fields.clone(),
                             },
                             Type::Struct {
                                 name: r_name.clone(),
+                                type_args: Vec::new(),
                                 fields: r_fields.clone(),
                             },
                         ));
@@ -282,10 +288,12 @@ impl InferUnifier {
             (
                 Type::Enum {
                     name: l_name,
+                    type_args: _,
                     variants: l_variants,
                 },
                 Type::Enum {
                     name: r_name,
+                    type_args: _,
                     variants: r_variants,
                 },
             ) => {
@@ -293,10 +301,12 @@ impl InferUnifier {
                     return Err(InferUnifyError::Mismatch(
                         Type::Enum {
                             name: l_name,
+                            type_args: Vec::new(),
                             variants: l_variants,
                         },
                         Type::Enum {
                             name: r_name,
+                            type_args: Vec::new(),
                             variants: r_variants,
                         },
                     ));
@@ -308,10 +318,12 @@ impl InferUnifier {
                         return Err(InferUnifyError::Mismatch(
                             Type::Enum {
                                 name: l_name.clone(),
+                                type_args: Vec::new(),
                                 variants: l_variants.clone(),
                             },
                             Type::Enum {
                                 name: r_name.clone(),
+                                type_args: Vec::new(),
                                 variants: r_variants.clone(),
                             },
                         ));
@@ -495,10 +507,12 @@ impl InferUnifier {
             (
                 Type::Struct {
                     name: l_name,
+                    type_args: _,
                     fields: l_fields,
                 },
                 Type::Struct {
                     name: r_name,
+                    type_args: _,
                     fields: r_fields,
                 },
             ) => {
@@ -506,10 +520,12 @@ impl InferUnifier {
                     return Err(InferUnifyError::Mismatch(
                         Type::Struct {
                             name: l_name,
+                            type_args: Vec::new(),
                             fields: l_fields,
                         },
                         Type::Struct {
                             name: r_name,
+                            type_args: Vec::new(),
                             fields: r_fields,
                         },
                     ));
@@ -519,10 +535,12 @@ impl InferUnifier {
                         return Err(InferUnifyError::Mismatch(
                             Type::Struct {
                                 name: l_name.clone(),
+                                type_args: Vec::new(),
                                 fields: l_fields.clone(),
                             },
                             Type::Struct {
                                 name: r_name.clone(),
+                                type_args: Vec::new(),
                                 fields: r_fields.clone(),
                             },
                         ));
@@ -534,10 +552,12 @@ impl InferUnifier {
             (
                 Type::Enum {
                     name: l_name,
+                    type_args: _,
                     variants: l_variants,
                 },
                 Type::Enum {
                     name: r_name,
+                    type_args: _,
                     variants: r_variants,
                 },
             ) => {
@@ -545,10 +565,12 @@ impl InferUnifier {
                     return Err(InferUnifyError::Mismatch(
                         Type::Enum {
                             name: l_name,
+                            type_args: Vec::new(),
                             variants: l_variants,
                         },
                         Type::Enum {
                             name: r_name,
+                            type_args: Vec::new(),
                             variants: r_variants,
                         },
                     ));
@@ -560,10 +582,12 @@ impl InferUnifier {
                         return Err(InferUnifyError::Mismatch(
                             Type::Enum {
                                 name: l_name.clone(),
+                                type_args: Vec::new(),
                                 variants: l_variants.clone(),
                             },
                             Type::Enum {
                                 name: r_name.clone(),
+                                type_args: Vec::new(),
                                 variants: r_variants.clone(),
                             },
                         ));

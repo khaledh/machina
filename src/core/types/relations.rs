@@ -147,10 +147,12 @@ fn nominal_instance_assignable(from: &Type, to: &Type) -> Option<TypeAssignabili
         (
             Type::Struct {
                 name: from_name,
+                type_args: _,
                 fields: from_fields,
             },
             Type::Struct {
                 name: to_name,
+                type_args: _,
                 fields: to_fields,
             },
         ) if nominal_base_name(from_name) == nominal_base_name(to_name) => {
@@ -163,10 +165,12 @@ fn nominal_instance_assignable(from: &Type, to: &Type) -> Option<TypeAssignabili
         (
             Type::Enum {
                 name: from_name,
+                type_args: _,
                 variants: from_variants,
             },
             Type::Enum {
                 name: to_name,
+                type_args: _,
                 variants: to_variants,
             },
         ) if nominal_base_name(from_name) == nominal_base_name(to_name) => {
@@ -212,7 +216,7 @@ fn enum_variants_assignable(from_variants: &[EnumVariant], to_variants: &[EnumVa
 }
 
 fn nominal_base_name(name: &str) -> &str {
-    name.split('<').next().unwrap_or(name)
+    name
 }
 
 pub fn value_assignable(from_value: &Expr, from_ty: &Type, to_ty: &Type) -> ValueAssignability {
