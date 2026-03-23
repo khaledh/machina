@@ -2333,10 +2333,10 @@ fn test_typed_csv_rewrite_pipeline_uses_generic_map_adapter_builds_and_runs() {
         &format!(
             r#"
             requires {{
-                std::csv::CsvFormatOptions
-                std::csv::CsvParseOptions
-                std::csv::from_csv
-                std::csv::to_csv
+                std::format::csv::CsvFormatOptions
+                std::format::csv::CsvParseOptions
+                std::format::csv::from_csv
+                std::format::csv::to_csv
                 std::io::IoError
                 std::io::open_read
                 std::io::open_write
