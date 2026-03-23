@@ -48,27 +48,6 @@ fn csv_fields(lines: string[*], start_index: u64) -> CsvFieldIter {
     }
 }
 
-type InputRowIter = {
-    source: CsvFieldIter,
-}
-
-InputRowIter :: {
-    fn iter(self) -> InputRowIter {
-        self
-    }
-
-    fn next(inout self) -> InputRow | ParseError | IterDone {
-        match self.source.next() {
-            fields: CsvFields => parse_input_row(fields),
-            done: IterDone => IterDone {},
-        }
-    }
-}
-
-fn parse_rows(source: CsvFieldIter) -> InputRowIter {
-    InputRowIter { source }
-}
-
 fn parse_input_row(fields: CsvFields) -> InputRow | ParseError {
     let [name_text, score_text, ...] = fields.values;
     let score = parse::parse_u64(score_text.trim())?;
@@ -86,41 +65,61 @@ fn grade_of(score: u64) -> string {
     }
 }
 
-fn grade_row(row: InputRow) -> OutputRow {
-    OutputRow {
-        name: row.name,
-        grade: grade_of(row.score),
-    }
-}
-
-type MapIter<S, In, Out> = {
+type TryMapIter<S, In, Out, E> = {
     source: S,
-    f: fn(In) -> Out,
+    f: fn(In) -> Out | E,
 }
 
-MapIter<S, In, Out> :: {
-    fn iter(self) -> MapIter<S, In, Out> {
+TryMapIter<S, In, Out, E> :: {
+    fn iter(self) -> TryMapIter<S, In, Out, E> {
         self
     }
 
-    fn next(inout self) -> Out | ParseError | IterDone {
+    fn next(inout self) -> Out | E | IterDone {
         match self.source.next() {
-            row: In => {
+            item: In => {
                 let f = self.f;
-                f(row)
+                return f(item);
             }
+            done: IterDone => IterDone {},
+        }
+    }
+}
+
+fn try_map_values<S, In, Out, E>(
+    source: S,
+    f: fn(In) -> Out | E,
+) -> TryMapIter<S, In, Out, E> {
+    TryMapIter { source, f }
+}
+
+type GradeTransform = {
+    source: TryMapIter<CsvFieldIter, CsvFields, InputRow, ParseError>,
+}
+
+GradeTransform :: {
+    fn iter(self) -> GradeTransform {
+        self
+    }
+
+    fn next(inout self) -> OutputRow | ParseError | IterDone {
+        match self.source.next() {
+            row: InputRow => OutputRow {
+                name: row.name,
+                grade: grade_of(row.score),
+            },
             err: ParseError => err,
             done: IterDone => IterDone {},
         }
     }
 }
 
-fn map_values<S, In, Out>(source: S, f: fn(In) -> Out) -> MapIter<S, In, Out> {
-    MapIter { source, f }
+fn grade_rows(source: TryMapIter<CsvFieldIter, CsvFields, InputRow, ParseError>) -> GradeTransform {
+    GradeTransform { source }
 }
 
 type CsvEncoder = {
-    source: MapIter<InputRowIter, InputRow, OutputRow>,
+    source: GradeTransform,
     wrote_header: bool,
 }
 
@@ -143,7 +142,7 @@ CsvEncoder :: {
     }
 }
 
-fn csv_encode(source: MapIter<InputRowIter, InputRow, OutputRow>) -> CsvEncoder {
+fn csv_encode(source: GradeTransform) -> CsvEncoder {
     CsvEncoder {
         source,
         wrote_header: false,
@@ -170,12 +169,10 @@ fn main() -> () | IoError | ParseError {
 
     using reader = open_read(input_path)?.text() {
         let text = reader.read_all()?;
-        let pipeline = csv_encode(
-            map_values(
-                parse_rows(csv_fields(text.lines(), 1)),
-                grade_row,
-            ),
-        );
+        let pipeline = csv_encode(grade_rows(try_map_values(
+            csv_fields(text.lines(), 1),
+            parse_input_row,
+        )));
 
         using output_writer = open_write(output_path)?.text() {
             write_lines(output_writer, pipeline)?;

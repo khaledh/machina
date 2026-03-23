@@ -5,9 +5,13 @@ use std::collections::HashMap;
 use crate::core::ast::visit_mut::{VisitorMut, walk_type_expr};
 use crate::core::ast::*;
 use crate::core::diag::Span;
+use crate::core::lexer::{LexError, Lexer, Token};
+use crate::core::parse::{ParseError, Parser};
 use crate::core::resolve::{DefId, DefKind, DefTable};
+use crate::core::typecheck::template_bind::bind_template_type_vars;
 use crate::core::typecheck::type_map::GenericInst;
-use crate::core::types::{FnParamMode, Type};
+use crate::core::typecheck::type_map::{TypeDefLookup, resolve_type_def_with_args};
+use crate::core::types::{FnParamMode, TyVarId, Type};
 
 use super::{MonomorphizeError, MonomorphizeErrorKind};
 
@@ -15,12 +19,13 @@ pub(super) fn apply_inst_to_func_def(
     func_def: &mut FuncDef,
     inst: &GenericInst,
     def_table: &DefTable,
+    module: &impl TypeDefLookup,
     node_id_gen: &mut NodeIdGen,
 ) -> Result<(), MonomorphizeError> {
     let subst = build_subst(&func_def.sig.type_params, inst, def_table)?;
     func_def.sig.type_params.clear();
     {
-        let mut substituter = TypeExprSubstitutor::new(&subst, def_table, node_id_gen);
+        let mut substituter = TypeExprSubstitutor::new(&subst, def_table, module, node_id_gen);
         substituter.visit_func_def(func_def);
         substituter.finish()?;
     }
@@ -28,6 +33,7 @@ pub(super) fn apply_inst_to_func_def(
         &mut func_def.sig.params,
         &inst.iterable_param_tys,
         def_table,
+        module,
         node_id_gen,
     )
 }
@@ -36,12 +42,13 @@ pub(super) fn apply_inst_to_func_decl(
     func_decl: &mut FuncDecl,
     inst: &GenericInst,
     def_table: &DefTable,
+    module: &impl TypeDefLookup,
     node_id_gen: &mut NodeIdGen,
 ) -> Result<(), MonomorphizeError> {
     let subst = build_subst(&func_decl.sig.type_params, inst, def_table)?;
     func_decl.sig.type_params.clear();
     {
-        let mut substituter = TypeExprSubstitutor::new(&subst, def_table, node_id_gen);
+        let mut substituter = TypeExprSubstitutor::new(&subst, def_table, module, node_id_gen);
         substituter.visit_func_decl(func_decl);
         substituter.finish()?;
     }
@@ -49,6 +56,7 @@ pub(super) fn apply_inst_to_func_decl(
         &mut func_decl.sig.params,
         &inst.iterable_param_tys,
         def_table,
+        module,
         node_id_gen,
     )
 }
@@ -58,6 +66,7 @@ pub(super) fn apply_inst_to_method_def(
     method_def: &mut MethodDef,
     inst: &GenericInst,
     def_table: &DefTable,
+    module: &impl TypeDefLookup,
     node_id_gen: &mut NodeIdGen,
 ) -> Result<(), MonomorphizeError> {
     let type_params = method_block_type_params(def_table, receiver_type_args)
@@ -67,7 +76,7 @@ pub(super) fn apply_inst_to_method_def(
     let subst = build_subst(&type_params, inst, def_table)?;
     method_def.sig.type_params.clear();
     {
-        let mut substituter = TypeExprSubstitutor::new(&subst, def_table, node_id_gen);
+        let mut substituter = TypeExprSubstitutor::new(&subst, def_table, module, node_id_gen);
         substituter.visit_method_def(method_def);
         substituter.finish()?;
     }
@@ -75,6 +84,7 @@ pub(super) fn apply_inst_to_method_def(
         &mut method_def.sig.params,
         &inst.iterable_param_tys,
         def_table,
+        module,
         node_id_gen,
     )
 }
@@ -84,6 +94,7 @@ pub(super) fn apply_inst_to_method_decl(
     method_decl: &mut MethodDecl,
     inst: &GenericInst,
     def_table: &DefTable,
+    module: &impl TypeDefLookup,
     node_id_gen: &mut NodeIdGen,
 ) -> Result<(), MonomorphizeError> {
     let type_params = method_block_type_params(def_table, receiver_type_args)
@@ -93,7 +104,7 @@ pub(super) fn apply_inst_to_method_decl(
     let subst = build_subst(&type_params, inst, def_table)?;
     method_decl.sig.type_params.clear();
     {
-        let mut substituter = TypeExprSubstitutor::new(&subst, def_table, node_id_gen);
+        let mut substituter = TypeExprSubstitutor::new(&subst, def_table, module, node_id_gen);
         substituter.visit_method_decl(method_decl);
         substituter.finish()?;
     }
@@ -101,6 +112,7 @@ pub(super) fn apply_inst_to_method_decl(
         &mut method_decl.sig.params,
         &inst.iterable_param_tys,
         def_table,
+        module,
         node_id_gen,
     )
 }
@@ -109,6 +121,7 @@ pub(super) fn apply_inst_to_method_block(
     method_block: &mut MethodBlock,
     receiver_inst_args: &[Type],
     def_table: &DefTable,
+    module: &impl TypeDefLookup,
     node_id_gen: &mut NodeIdGen,
 ) -> Result<(), MonomorphizeError> {
     let type_params = method_block_type_params(def_table, &method_block.type_args);
@@ -129,7 +142,7 @@ pub(super) fn apply_inst_to_method_block(
         .zip(receiver_inst_args.iter().cloned())
         .map(|(param, ty)| (def_table.def_id(param.id), ty))
         .collect::<HashMap<_, _>>();
-    let mut substituter = TypeExprSubstitutor::new(&subst, def_table, node_id_gen);
+    let mut substituter = TypeExprSubstitutor::new(&subst, def_table, module, node_id_gen);
     for type_arg in &mut method_block.type_args {
         substituter.visit_type_expr(type_arg);
     }
@@ -197,6 +210,7 @@ fn apply_iterable_param_inst(
     params: &mut [Param],
     concrete_tys: &[Type],
     def_table: &DefTable,
+    module: &impl TypeDefLookup,
     node_id_gen: &mut NodeIdGen,
 ) -> Result<(), MonomorphizeError> {
     if concrete_tys.is_empty() {
@@ -217,7 +231,7 @@ fn apply_iterable_param_inst(
     }
 
     for (param, ty) in iterable_params.into_iter().zip(concrete_tys.iter()) {
-        param.typ = type_expr_from_type(ty, def_table, node_id_gen, param.typ.span)?;
+        param.typ = type_expr_from_type(ty, def_table, module, node_id_gen, param.typ.span)?;
     }
 
     Ok(())
@@ -227,22 +241,25 @@ fn type_expr_is_iterable(ty_expr: &TypeExpr) -> bool {
     matches!(&ty_expr.kind, TypeExprKind::Named { ident, type_args } if ident == "Iterable" && type_args.len() == 1)
 }
 
-struct TypeExprSubstitutor<'a> {
+struct TypeExprSubstitutor<'a, M: TypeDefLookup> {
     subst: &'a HashMap<DefId, Type>,
     def_table: &'a DefTable,
+    module: &'a M,
     node_id_gen: &'a mut NodeIdGen,
     error: Option<MonomorphizeError>,
 }
 
-impl<'a> TypeExprSubstitutor<'a> {
+impl<'a, M: TypeDefLookup> TypeExprSubstitutor<'a, M> {
     fn new(
         subst: &'a HashMap<DefId, Type>,
         def_table: &'a DefTable,
+        module: &'a M,
         node_id_gen: &'a mut NodeIdGen,
     ) -> Self {
         Self {
             subst,
             def_table,
+            module,
             node_id_gen,
             error: None,
         }
@@ -257,7 +274,7 @@ impl<'a> TypeExprSubstitutor<'a> {
     }
 }
 
-impl<'a> VisitorMut for TypeExprSubstitutor<'a> {
+impl<M: TypeDefLookup> VisitorMut for TypeExprSubstitutor<'_, M> {
     fn visit_type_expr(&mut self, type_expr: &mut TypeExpr) {
         if self.error.is_some() {
             return;
@@ -267,7 +284,13 @@ impl<'a> VisitorMut for TypeExprSubstitutor<'a> {
             && let Some(def_id) = self.def_table.lookup_node_def_id(type_expr.id)
             && let Some(ty) = self.subst.get(&def_id)
         {
-            match type_expr_from_type(ty, self.def_table, self.node_id_gen, type_expr.span) {
+            match type_expr_from_type(
+                ty,
+                self.def_table,
+                self.module,
+                self.node_id_gen,
+                type_expr.span,
+            ) {
                 Ok(new_expr) => {
                     *type_expr = new_expr;
                     return;
@@ -286,6 +309,7 @@ impl<'a> VisitorMut for TypeExprSubstitutor<'a> {
 fn type_expr_from_type(
     ty: &Type,
     def_table: &DefTable,
+    module: &impl TypeDefLookup,
     node_id_gen: &mut NodeIdGen,
     span: Span,
 ) -> Result<TypeExpr, MonomorphizeError> {
@@ -340,17 +364,30 @@ fn type_expr_from_type(
             return named_type_expr("string", def_table, node_id_gen, span);
         }
         Type::Array { elem_ty, dims } => TypeExprKind::Array {
-            elem_ty_expr: Box::new(type_expr_from_type(elem_ty, def_table, node_id_gen, span)?),
+            elem_ty_expr: Box::new(type_expr_from_type(
+                elem_ty,
+                def_table,
+                module,
+                node_id_gen,
+                span,
+            )?),
             dims: dims.clone(),
         },
         Type::DynArray { elem_ty } => TypeExprKind::DynArray {
-            elem_ty_expr: Box::new(type_expr_from_type(elem_ty, def_table, node_id_gen, span)?),
+            elem_ty_expr: Box::new(type_expr_from_type(
+                elem_ty,
+                def_table,
+                module,
+                node_id_gen,
+                span,
+            )?),
         },
         Type::Pending { response_tys } => TypeExprKind::Named {
             ident: "Pending".to_string(),
             type_args: vec![response_set_type_arg_expr(
                 response_tys,
                 def_table,
+                module,
                 node_id_gen,
                 span,
             )?],
@@ -360,40 +397,71 @@ fn type_expr_from_type(
             type_args: vec![response_set_type_arg_expr(
                 response_tys,
                 def_table,
+                module,
                 node_id_gen,
                 span,
             )?],
         },
         Type::Set { elem_ty } => TypeExprKind::Named {
             ident: "set".to_string(),
-            type_args: vec![type_expr_from_type(elem_ty, def_table, node_id_gen, span)?],
+            type_args: vec![type_expr_from_type(
+                elem_ty,
+                def_table,
+                module,
+                node_id_gen,
+                span,
+            )?],
         },
         Type::Iterable { item_ty } => TypeExprKind::Named {
             ident: "Iterable".to_string(),
-            type_args: vec![type_expr_from_type(item_ty, def_table, node_id_gen, span)?],
+            type_args: vec![type_expr_from_type(
+                item_ty,
+                def_table,
+                module,
+                node_id_gen,
+                span,
+            )?],
         },
         Type::Map { key_ty, value_ty } => TypeExprKind::Named {
             ident: "map".to_string(),
             type_args: vec![
-                type_expr_from_type(key_ty, def_table, node_id_gen, span)?,
-                type_expr_from_type(value_ty, def_table, node_id_gen, span)?,
+                type_expr_from_type(key_ty, def_table, module, node_id_gen, span)?,
+                type_expr_from_type(value_ty, def_table, module, node_id_gen, span)?,
             ],
         },
         Type::Tuple { field_tys } => TypeExprKind::Tuple {
             field_ty_exprs: field_tys
                 .iter()
-                .map(|ty| type_expr_from_type(ty, def_table, node_id_gen, span))
+                .map(|ty| type_expr_from_type(ty, def_table, module, node_id_gen, span))
                 .collect::<Result<Vec<_>, _>>()?,
         },
         Type::Slice { elem_ty } => TypeExprKind::Slice {
-            elem_ty_expr: Box::new(type_expr_from_type(elem_ty, def_table, node_id_gen, span)?),
+            elem_ty_expr: Box::new(type_expr_from_type(
+                elem_ty,
+                def_table,
+                module,
+                node_id_gen,
+                span,
+            )?),
         },
         Type::Heap { elem_ty } => TypeExprKind::Heap {
-            elem_ty_expr: Box::new(type_expr_from_type(elem_ty, def_table, node_id_gen, span)?),
+            elem_ty_expr: Box::new(type_expr_from_type(
+                elem_ty,
+                def_table,
+                module,
+                node_id_gen,
+                span,
+            )?),
         },
         Type::Ref { mutable, elem_ty } => TypeExprKind::Ref {
             mutable: *mutable,
-            elem_ty_expr: Box::new(type_expr_from_type(elem_ty, def_table, node_id_gen, span)?),
+            elem_ty_expr: Box::new(type_expr_from_type(
+                elem_ty,
+                def_table,
+                module,
+                node_id_gen,
+                span,
+            )?),
         },
         Type::Fn { params, ret_ty } => {
             let params = params
@@ -407,22 +475,48 @@ fn type_expr_from_type(
                     };
                     Ok(FnTypeParam {
                         mode,
-                        ty_expr: type_expr_from_type(&param.ty, def_table, node_id_gen, span)?,
+                        ty_expr: type_expr_from_type(
+                            &param.ty,
+                            def_table,
+                            module,
+                            node_id_gen,
+                            span,
+                        )?,
                     })
                 })
                 .collect::<Result<Vec<_>, _>>()?;
             TypeExprKind::Fn {
                 params,
-                ret_ty_expr: Box::new(type_expr_from_type(ret_ty, def_table, node_id_gen, span)?),
+                ret_ty_expr: Box::new(type_expr_from_type(
+                    ret_ty,
+                    def_table,
+                    module,
+                    node_id_gen,
+                    span,
+                )?),
             }
         }
         Type::ErrorUnion { ok_ty, err_tys } => TypeExprKind::Union {
             variants: std::iter::once(ok_ty.as_ref())
                 .chain(err_tys.iter())
-                .map(|ty| type_expr_from_type(ty, def_table, node_id_gen, span))
+                .map(|ty| type_expr_from_type(ty, def_table, module, node_id_gen, span))
                 .collect::<Result<Vec<_>, _>>()?,
         },
         Type::Struct { name, .. } | Type::Enum { name, .. } => {
+            let base_name = name.split('<').next().unwrap_or(name);
+            if let Some(type_expr) = nominal_type_expr_from_instance(
+                ty,
+                base_name,
+                def_table,
+                module,
+                node_id_gen,
+                span,
+            )? {
+                return Ok(type_expr);
+            }
+            if name.contains('<') {
+                return rendered_type_expr(name, def_table, module, node_id_gen, span);
+            }
             return named_type_expr(name, def_table, node_id_gen, span);
         }
         Type::Range { .. } => return Err(MonomorphizeErrorKind::UnsupportedType.at(span)),
@@ -434,9 +528,111 @@ fn type_expr_from_type(
     Ok(TypeExpr { id, kind, span })
 }
 
+fn rendered_type_expr(
+    rendered: &str,
+    def_table: &DefTable,
+    module: &impl TypeDefLookup,
+    node_id_gen: &mut NodeIdGen,
+    span: Span,
+) -> Result<TypeExpr, MonomorphizeError> {
+    if let Some((ident, type_arg_strs)) = split_specialized_nominal_name(rendered) {
+        let type_args = type_arg_strs
+            .into_iter()
+            .map(|arg| rendered_type_expr(arg, def_table, module, node_id_gen, span))
+            .collect::<Result<Vec<_>, _>>()?;
+        return Ok(TypeExpr {
+            id: node_id_gen.new_id(),
+            kind: TypeExprKind::Named {
+                ident: ident.to_string(),
+                type_args,
+            },
+            span,
+        });
+    }
+    if !rendered.contains(['|', '(', ')', '[', ']', '&']) {
+        return named_type_expr(rendered, def_table, node_id_gen, span);
+    }
+
+    let source = format!("type __Monomorphize = {rendered}");
+    let tokens = Lexer::new(&source)
+        .tokenize()
+        .collect::<Result<Vec<Token>, LexError>>()
+        .map_err(|_| {
+            MonomorphizeErrorKind::UnknownType {
+                name: rendered.to_string(),
+            }
+            .at(span)
+        })?;
+    let mut parser = Parser::new(&tokens);
+    let module = parser.parse().map_err(|_: ParseError| {
+        MonomorphizeErrorKind::UnknownType {
+            name: rendered.to_string(),
+        }
+        .at(span)
+    })?;
+    let Some(type_def) = module.type_defs().into_iter().next() else {
+        return Err(MonomorphizeErrorKind::UnknownType {
+            name: rendered.to_string(),
+        }
+        .at(span));
+    };
+    let TypeDefKind::Alias { aliased_ty } = &type_def.kind else {
+        return Err(MonomorphizeErrorKind::UnknownType {
+            name: rendered.to_string(),
+        }
+        .at(span));
+    };
+    let mut type_expr = aliased_ty.clone();
+    FreshTypeExprIds { node_id_gen }.visit_type_expr(&mut type_expr);
+    Ok(type_expr)
+}
+
+struct FreshTypeExprIds<'a> {
+    node_id_gen: &'a mut NodeIdGen,
+}
+
+impl VisitorMut for FreshTypeExprIds<'_> {
+    fn visit_type_expr(&mut self, type_expr: &mut TypeExpr) {
+        type_expr.id = self.node_id_gen.new_id();
+        walk_type_expr(self, type_expr);
+    }
+}
+
+fn split_specialized_nominal_name(name: &str) -> Option<(&str, Vec<&str>)> {
+    let start = name.find('<')?;
+    if !name.ends_with('>') {
+        return None;
+    }
+    let ident = &name[..start];
+    let inner = &name[start + 1..name.len() - 1];
+    let mut args = Vec::new();
+    let mut depth_angles = 0usize;
+    let mut depth_parens = 0usize;
+    let mut depth_brackets = 0usize;
+    let mut arg_start = 0usize;
+    for (idx, ch) in inner.char_indices() {
+        match ch {
+            '<' => depth_angles += 1,
+            '>' => depth_angles = depth_angles.saturating_sub(1),
+            '(' => depth_parens += 1,
+            ')' => depth_parens = depth_parens.saturating_sub(1),
+            '[' => depth_brackets += 1,
+            ']' => depth_brackets = depth_brackets.saturating_sub(1),
+            ',' if depth_angles == 0 && depth_parens == 0 && depth_brackets == 0 => {
+                args.push(inner[arg_start..idx].trim());
+                arg_start = idx + 1;
+            }
+            _ => {}
+        }
+    }
+    args.push(inner[arg_start..].trim());
+    Some((ident, args))
+}
+
 fn response_set_type_arg_expr(
     response_tys: &[Type],
     def_table: &DefTable,
+    module: &impl TypeDefLookup,
     node_id_gen: &mut NodeIdGen,
     span: Span,
 ) -> Result<TypeExpr, MonomorphizeError> {
@@ -446,6 +642,7 @@ fn response_set_type_arg_expr(
                 .first()
                 .ok_or(MonomorphizeErrorKind::UnsupportedType.at(span))?,
             def_table,
+            module,
             node_id_gen,
             span,
         );
@@ -455,11 +652,57 @@ fn response_set_type_arg_expr(
         kind: TypeExprKind::Union {
             variants: response_tys
                 .iter()
-                .map(|ty| type_expr_from_type(ty, def_table, node_id_gen, span))
+                .map(|ty| type_expr_from_type(ty, def_table, module, node_id_gen, span))
                 .collect::<Result<Vec<_>, _>>()?,
         },
         span,
     })
+}
+
+fn nominal_type_expr_from_instance(
+    ty: &Type,
+    base_name: &str,
+    def_table: &DefTable,
+    module: &impl TypeDefLookup,
+    node_id_gen: &mut NodeIdGen,
+    span: Span,
+) -> Result<Option<TypeExpr>, MonomorphizeError> {
+    let Some(def_id) = def_table.lookup_type_def_id(base_name) else {
+        return Ok(None);
+    };
+    let Some(type_def) = module.type_def_by_id(def_table, def_id) else {
+        return Ok(None);
+    };
+    if type_def.type_params.is_empty() {
+        return Ok(None);
+    }
+
+    let template_args = (0..type_def.type_params.len())
+        .map(|index| Type::Var(TyVarId::new(index as u32)))
+        .collect::<Vec<_>>();
+    let template_ty = resolve_type_def_with_args(def_table, module, def_id, &template_args)
+        .map_err(|_| MonomorphizeErrorKind::UnsupportedType.at(span))?;
+    let Some(bindings) = bind_template_type_vars(&template_ty, ty) else {
+        return Ok(None);
+    };
+    let type_args = (0..type_def.type_params.len())
+        .map(|index| bindings.get(&TyVarId::new(index as u32)).cloned())
+        .collect::<Option<Vec<_>>>()
+        .ok_or(MonomorphizeErrorKind::UnsupportedType.at(span))?;
+
+    let ident = def_table
+        .lookup_def(def_id)
+        .map(|def| def.name.clone())
+        .unwrap_or_else(|| base_name.to_string());
+    let type_args = type_args
+        .iter()
+        .map(|arg| type_expr_from_type(arg, def_table, module, node_id_gen, span))
+        .collect::<Result<Vec<_>, MonomorphizeError>>()?;
+    Ok(Some(TypeExpr {
+        id: node_id_gen.new_id(),
+        kind: TypeExprKind::Named { ident, type_args },
+        span,
+    }))
 }
 
 fn named_type_expr(

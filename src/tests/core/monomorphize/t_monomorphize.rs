@@ -318,6 +318,100 @@ fn test_monomorphize_nested_generic_receiver_method_call_specializes_adapter_blo
 }
 
 #[test]
+fn test_monomorphize_reconstructs_nested_generic_receiver_type_args() {
+    let source = r#"
+        type ParseError = {}
+
+        type CounterIter = { cur: u64, end: u64 }
+
+        type TryMapIter<S, In, Out, E> = {
+            source: S,
+            f: fn(In) -> Out | E,
+        }
+
+        fn try_map_values<S, In, Out, E>(
+            source: S,
+            f: fn(In) -> Out | E,
+        ) -> TryMapIter<S, In, Out, E> {
+            TryMapIter { source, f }
+        }
+
+        fn parse(n: u64) -> u64 | ParseError {
+            n
+        }
+
+        type Holder<T> = {
+            value: T,
+        }
+
+        Holder<T> :: {
+            fn value_of(self) -> T { self.value }
+        }
+
+        fn test() -> u64 {
+            let iter = CounterIter { cur: 1, end: 3 };
+            let holder = Holder {
+                value: try_map_values(iter, parse),
+            };
+            let _mapped = holder.value_of();
+            0
+        }
+    "#;
+
+    let (resolved_context, _def_table) = resolve_context(source);
+    let type_checked = type_check(resolved_context.clone()).expect("type check failed");
+    let monomorphized = monomorphize_resolved(resolved_context, &type_checked.generic_insts)
+        .expect("monomorphize failed");
+
+    let holder_blocks = monomorphized
+        .module
+        .top_level_items
+        .iter()
+        .filter_map(|item| match item {
+            TopLevelItem::MethodBlock(block) if block.type_name == "Holder" => Some(block),
+            _ => None,
+        })
+        .collect::<Vec<_>>();
+
+    assert!(
+        holder_blocks.iter().any(|block| {
+            block.type_args.len() == 1
+                && matches!(
+                    &block.type_args[0].kind,
+                    TypeExprKind::Named { ident, type_args }
+                        if ident == "TryMapIter"
+                            && type_args.len() == 4
+                            && matches!(
+                                &type_args[0].kind,
+                                TypeExprKind::Named { ident, type_args }
+                                    if ident == "CounterIter" && type_args.is_empty()
+                            )
+                            && matches!(
+                                &type_args[1].kind,
+                                TypeExprKind::Named { ident, type_args }
+                                    if ident == "u64" && type_args.is_empty()
+                            )
+                            && matches!(
+                                &type_args[2].kind,
+                                TypeExprKind::Named { ident, type_args }
+                                    if ident == "u64" && type_args.is_empty()
+                            )
+                            && matches!(
+                                &type_args[3].kind,
+                                TypeExprKind::Named { ident, type_args }
+                                    if ident == "ParseError" && type_args.is_empty()
+                            )
+                )
+        }),
+        "expected specialized Holder<TryMapIter<CounterIter, u64, u64, ParseError>> block, got {:?}",
+        holder_blocks
+            .iter()
+            .map(|block| format!("{:?}", block.type_args))
+            .collect::<Vec<_>>()
+    );
+}
+
+#[test]
 fn test_monomorphize_reuses_duplicate_instantiation_requests() {
     let source = r#"
         fn id<T>(x: T) -> T { x }

@@ -25,6 +25,15 @@ mod nominal;
 mod patterns;
 mod term_utils;
 
+#[cfg(test)]
+pub(crate) fn test_solve_assignable(
+    from: &Type,
+    to: &Type,
+    unifier: &mut TcUnifier,
+) -> Result<(), TcUnifyError> {
+    assignability::solve_assignable(from, to, unifier)
+}
+
 use std::collections::HashMap;
 use std::collections::HashSet;
 

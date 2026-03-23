@@ -47,6 +47,10 @@ pub(super) fn solve_assignable(
         return result;
     }
 
+    if let Some(result) = infer_error_union_widening(&from_applied, &to_applied, unifier) {
+        return result;
+    }
+
     if !super::term_utils::is_unresolved(&from_applied)
         && !super::term_utils::is_unresolved(&to_applied)
     {
@@ -149,6 +153,74 @@ fn infer_dyn_array_to_slice_assignability(
         return None;
     };
     Some(unifier.unify(dyn_elem_ty, slice_elem_ty))
+}
+
+fn infer_error_union_widening(
+    from: &Type,
+    to: &Type,
+    unifier: &mut TcUnifier,
+) -> Option<Result<(), TcUnifyError>> {
+    let (
+        Type::ErrorUnion {
+            ok_ty: from_ok,
+            err_tys: from_errs,
+        },
+        Type::ErrorUnion {
+            ok_ty: to_ok,
+            err_tys: to_errs,
+        },
+    ) = (from, to)
+    else {
+        return None;
+    };
+
+    let mut trial = unifier.clone();
+    if solve_assignable(from_ok, to_ok, &mut trial).is_err() {
+        return Some(Err(TcUnifyError::Mismatch(to.clone(), from.clone())));
+    }
+
+    let Some(matched) =
+        match_error_union_variants(from_errs, to_errs, 0, &vec![false; to_errs.len()], &trial)
+    else {
+        return Some(Err(TcUnifyError::Mismatch(to.clone(), from.clone())));
+    };
+
+    *unifier = matched;
+    Some(Ok(()))
+}
+
+fn match_error_union_variants(
+    from_errs: &[Type],
+    to_errs: &[Type],
+    from_index: usize,
+    used_targets: &[bool],
+    unifier: &TcUnifier,
+) -> Option<TcUnifier> {
+    if from_index == from_errs.len() {
+        return Some(unifier.clone());
+    }
+
+    let from_err = &from_errs[from_index];
+    for (target_index, to_err) in to_errs.iter().enumerate() {
+        if used_targets[target_index] {
+            continue;
+        }
+
+        let mut branch = unifier.clone();
+        if solve_assignable(from_err, to_err, &mut branch).is_err() {
+            continue;
+        }
+
+        let mut next_used = used_targets.to_vec();
+        next_used[target_index] = true;
+        if let Some(matched) =
+            match_error_union_variants(from_errs, to_errs, from_index + 1, &next_used, &branch)
+        {
+            return Some(matched);
+        }
+    }
+
+    None
 }
 
 fn int_repr_compatible(from: &Type, to: &Type) -> bool {

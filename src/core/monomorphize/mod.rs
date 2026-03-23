@@ -245,7 +245,9 @@ pub(crate) fn monomorphize_with_plan(
 
     let mut new_items = Vec::with_capacity(module.top_level_items.len());
 
-    for mut item in module.top_level_items.into_iter() {
+    let module_lookup = module.clone();
+    let top_level_items = std::mem::take(&mut module.top_level_items);
+    for mut item in top_level_items.into_iter() {
         match &mut item {
             TopLevelItem::FuncDef(func_def) => {
                 if func_def.sig.type_params.is_empty()
@@ -267,7 +269,13 @@ pub(crate) fn monomorphize_with_plan(
                                 iterable_param_tys: inst.iterable_param_tys.clone(),
                             })
                             .expect("compiler bug: missing instantiated def id for function");
-                        apply_inst_to_func_def(&mut cloned, inst, &def_table, &mut node_id_gen)?;
+                        apply_inst_to_func_def(
+                            &mut cloned,
+                            inst,
+                            &def_table,
+                            &module_lookup,
+                            &mut node_id_gen,
+                        )?;
 
                         let mut cloned_item = TopLevelItem::FuncDef(cloned);
                         cloned_item = remap_local_defs_in_item(cloned_item, &mut def_table);
@@ -304,7 +312,13 @@ pub(crate) fn monomorphize_with_plan(
                                 iterable_param_tys: inst.iterable_param_tys.clone(),
                             })
                             .expect("compiler bug: missing instantiated def id for function decl");
-                        apply_inst_to_func_decl(&mut cloned, inst, &def_table, &mut node_id_gen)?;
+                        apply_inst_to_func_decl(
+                            &mut cloned,
+                            inst,
+                            &def_table,
+                            &module_lookup,
+                            &mut node_id_gen,
+                        )?;
 
                         let mut cloned_item = TopLevelItem::FuncDecl(cloned);
                         cloned_item = remap_local_defs_in_item(cloned_item, &mut def_table);
@@ -357,6 +371,7 @@ pub(crate) fn monomorphize_with_plan(
                                         &mut cloned,
                                         inst,
                                         &def_table,
+                                        &module_lookup,
                                         &mut node_id_gen,
                                     )?;
 
@@ -403,6 +418,7 @@ pub(crate) fn monomorphize_with_plan(
                                                     &mut cloned_block,
                                                     &receiver_inst_args,
                                                     &def_table,
+                                                    &module_lookup,
                                                     &mut node_id_gen,
                                                 )
                                                 .expect(
@@ -445,6 +461,7 @@ pub(crate) fn monomorphize_with_plan(
                                         &mut cloned,
                                         inst,
                                         &def_table,
+                                        &module_lookup,
                                         &mut node_id_gen,
                                     )?;
 
@@ -491,6 +508,7 @@ pub(crate) fn monomorphize_with_plan(
                                                     &mut cloned_block,
                                                     &receiver_inst_args,
                                                     &def_table,
+                                                    &module_lookup,
                                                     &mut node_id_gen,
                                                 )
                                                 .expect(

@@ -2965,6 +2965,86 @@ fn test_fn_type_alias_with_error_union_return_typechecks() {
 }
 
 #[test]
+fn test_generic_error_union_fn_return_widens_in_broader_return_context() {
+    let source = r#"
+        type ParseError = { code: u64 }
+        type Done = {}
+
+        fn call_widen<In, Out, E>(f: fn(In) -> Out | E, item: In) -> Out | E | Done {
+            return f(item);
+        }
+
+        fn parse(n: u64) -> u64 | ParseError {
+            n
+        }
+
+        fn test() -> u64 {
+            let value = call_widen(parse, 2);
+            match value {
+                ok: u64 => ok,
+                err: ParseError => err.code,
+                done: Done => 0,
+            }
+        }
+    "#;
+
+    let _ctx = type_check_source(source).expect("Failed to type check");
+}
+
+#[test]
+fn test_error_union_widening_backtracks_across_ambiguous_targets() {
+    use crate::core::typecheck::solver::test_solve_assignable;
+    use crate::core::typecheck::typesys::TypeVarStore;
+    use crate::core::typecheck::unify::TcUnifier;
+    use crate::core::types::StructField;
+
+    let parse_error = Type::Struct {
+        name: "ParseError".to_string(),
+        fields: vec![StructField {
+            name: "code".to_string(),
+            ty: Type::uint(64),
+        }],
+    };
+    let wrap_u64 = Type::Struct {
+        name: "Wrap<u64>".to_string(),
+        fields: vec![StructField {
+            name: "value".to_string(),
+            ty: Type::uint(64),
+        }],
+    };
+    let wrap_parse_error = Type::Struct {
+        name: "Wrap<ParseError>".to_string(),
+        fields: vec![StructField {
+            name: "value".to_string(),
+            ty: parse_error.clone(),
+        }],
+    };
+    let wrap_num_or_err = Type::Struct {
+        name: "Wrap<NumOrErr>".to_string(),
+        fields: vec![StructField {
+            name: "value".to_string(),
+            ty: Type::ErrorUnion {
+                ok_ty: Box::new(Type::uint(64)),
+                err_tys: vec![parse_error],
+            },
+        }],
+    };
+
+    let from = Type::ErrorUnion {
+        ok_ty: Box::new(Type::uint(64)),
+        err_tys: vec![wrap_u64.clone(), wrap_parse_error],
+    };
+    let to = Type::ErrorUnion {
+        ok_ty: Box::new(Type::uint(64)),
+        err_tys: vec![wrap_num_or_err, wrap_u64],
+    };
+
+    let mut unifier = TcUnifier::new(TypeVarStore::default());
+    test_solve_assignable(&from, &to, &mut unifier)
+        .expect("ambiguous union widening should succeed via backtracking");
+}
+
+#[test]
 fn test_fn_type_annotation_mismatch_rejected() {
     let source = r#"
         fn test() -> u64 {
