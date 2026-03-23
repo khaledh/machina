@@ -8,7 +8,7 @@ use crate::core::diag::{Position, Span};
 use crate::core::types::Type;
 use crate::services::analysis::db::AnalysisDb;
 use crate::services::analysis::diagnostics::{
-    ANALYSIS_FILE_ID_KEY, DiagnosticPhase, DiagnosticValue,
+    ANALYSIS_FILE_ID_KEY, ANALYSIS_FILE_PATH_KEY, DiagnosticPhase, DiagnosticValue,
 };
 use crate::services::analysis::lookups::hover_for_resolved_target;
 use crate::services::analysis::module_graph::ModuleGraph;
@@ -3476,6 +3476,61 @@ fn main() -> u64 | ParseError {
     assert!(
         diagnostics.is_empty(),
         "expected module-qualified callable access to resolve cleanly in program mode, got: {diagnostics:#?}"
+    );
+}
+
+#[test]
+fn diagnostics_for_program_file_resolves_public_types_from_symbol_import_modules() {
+    let mut db = AnalysisDb::new();
+    let source = r#"
+requires {
+    std::io::open_write
+}
+
+fn write_lines(writer: TextWriter) -> u64 {
+    0
+}
+
+fn main() -> u64 {
+    0
+}
+"#;
+    let path =
+        Path::new(env!("CARGO_MANIFEST_DIR")).join("examples/analysis_symbol_import_types.mc");
+    let file_id = db.upsert_disk_text(path, source);
+
+    let diagnostics = db
+        .diagnostics_for_program_file(file_id)
+        .expect("program diagnostics query should succeed");
+    assert!(
+        diagnostics.is_empty(),
+        "expected public types from symbol-imported modules to resolve cleanly in program mode, got: {diagnostics:#?}"
+    );
+}
+
+#[test]
+fn diagnostics_for_program_file_csv_grade_rewrite_entry_file_is_clean() {
+    let mut db = AnalysisDb::new();
+
+    let path =
+        Path::new(env!("CARGO_MANIFEST_DIR")).join("examples/basics/csv_grade_rewrite_small.mc");
+    let source = fs::read_to_string(&path).expect("failed to read csv rewrite example");
+    let file_id = db.upsert_disk_text(path.clone(), source);
+    let entry_path = path.to_string_lossy().to_string();
+
+    let diagnostics = db
+        .diagnostics_for_program_file(file_id)
+        .expect("program diagnostics query should succeed");
+    let entry_diagnostics: Vec<_> = diagnostics
+        .into_iter()
+        .filter(|diag| {
+            diag.metadata.get(ANALYSIS_FILE_PATH_KEY)
+                == Some(&DiagnosticValue::String(entry_path.clone()))
+        })
+        .collect();
+    assert!(
+        entry_diagnostics.is_empty(),
+        "expected no entry-file diagnostics for csv rewrite example in program mode, got: {entry_diagnostics:#?}"
     );
 }
 

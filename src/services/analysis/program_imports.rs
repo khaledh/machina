@@ -1,6 +1,6 @@
 //! Program-aware imported symbol/type/trait fact helpers for analysis.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use crate::core::ast::{MethodSig, ParamMode, TopLevelItem};
 use crate::core::capsule::{ModuleId, ModulePath};
@@ -58,13 +58,45 @@ impl ProgramImportFactsCache {
         let mut out = HashMap::new();
         let import_env =
             import_env_from_requires(program_context, module_id, &self.export_facts_by_module);
+        let mut referenced_module_ids = HashSet::<ModuleId>::new();
+        for binding in import_env.module_aliases.values() {
+            referenced_module_ids.insert(binding.module_id);
+        }
         for (alias, binding) in import_env.symbol_aliases {
+            referenced_module_ids.insert(binding.module_id);
             if binding.is_empty() {
                 continue;
             }
 
             if let Some(imported) = self.materialize_imported_symbol_binding(&binding) {
                 out.insert(alias, imported);
+            }
+        }
+
+        let mut type_counts = HashMap::<String, usize>::new();
+        let mut imported_types = Vec::<(String, ImportedSymbol)>::new();
+        for dep_module_id in referenced_module_ids {
+            let Some(exports) = self.export_facts_by_module.get(&dep_module_id) else {
+                continue;
+            };
+            for type_name in exports.types.keys() {
+                *type_counts.entry(type_name.clone()).or_default() += 1;
+                let type_ty = exports
+                    .types
+                    .get(type_name)
+                    .and_then(|item| item.symbol_id.as_ref())
+                    .and_then(|symbol_id| self.type_tys_by_symbol.get(symbol_id))
+                    .cloned();
+                if let Some(imported) =
+                    ImportedSymbol::from_exports(exports, type_name, Vec::new(), type_ty, None)
+                {
+                    imported_types.push((type_name.clone(), imported));
+                }
+            }
+        }
+        for (type_name, imported) in imported_types {
+            if type_counts.get(&type_name).copied() == Some(1) {
+                out.entry(type_name).or_insert(imported);
             }
         }
 

@@ -334,6 +334,13 @@ impl SymbolResolver {
         })
     }
 
+    fn imported_struct_type_def_id(&self, def_id: DefId) -> Option<DefId> {
+        let imported = self.imported_defs.get(&def_id)?;
+        let symbol_id = imported.type_symbol.as_ref()?;
+        let ty = self.imported_type_defs.get(symbol_id)?;
+        matches!(ty, Type::Struct { .. }).then_some(def_id)
+    }
+
     fn enter_scope(&mut self) {
         self.scopes.push(Scope {
             defs: HashMap::new(),
@@ -1782,6 +1789,12 @@ impl Visitor for SymbolResolver {
                         kind: SymbolKind::StructDef { def_id, .. },
                         ..
                     }) => {
+                        self.def_table_builder.record_use(expr.id, *def_id);
+                    }
+                    Some(Symbol {
+                        kind: SymbolKind::TypeAlias { def_id, .. },
+                        ..
+                    }) if self.imported_struct_type_def_id(*def_id).is_some() => {
                         self.def_table_builder.record_use(expr.id, *def_id);
                     }
                     _ => self.err(expr.span, REK::StructUndefined(name.clone())),
