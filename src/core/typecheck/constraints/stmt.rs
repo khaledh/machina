@@ -1,6 +1,7 @@
 //! Statement and block-item constraint collection.
 
 use super::*;
+use crate::core::typecheck::TEK;
 
 impl<'a> ConstraintCollector<'a> {
     pub(super) fn collect_block_item(&mut self, item: &BlockItem) {
@@ -18,18 +19,64 @@ impl<'a> ConstraintCollector<'a> {
                 pattern,
                 decl_ty,
                 value,
-            }
-            | StmtExprKind::VarBind {
-                pattern,
-                decl_ty,
-                value,
             } => {
                 // For explicitly typed declarations, bind pattern variables to
                 // the declared type (not the raw value type) so refinements are
                 // preserved and runtime checks can be emitted downstream.
-                let expected_decl_ty = decl_ty
+                let expected_decl_ty = decl_ty.as_ref().and_then(|decl_ty| {
+                    match self.resolve_local_type_in_scope(decl_ty) {
+                        Ok(ty) => Some(ty),
+                        Err(err) => {
+                            self.out.immediate_errors.push(err);
+                            None
+                        }
+                    }
+                });
+                let opaque_decl_ty = expected_decl_ty
                     .as_ref()
-                    .and_then(|decl_ty| self.resolve_type_in_scope(decl_ty).ok());
+                    .filter(|ty| matches!(ty, Type::Iterable { .. }))
+                    .cloned();
+                let value_ty = if opaque_decl_ty.is_some() {
+                    self.collect_expr(value, None)
+                } else {
+                    self.collect_expr(value, expected_decl_ty.clone())
+                };
+                if let Some(decl_ty) = expected_decl_ty.clone() {
+                    if let Some(exposed_ty) = opaque_decl_ty {
+                        self.collect_bind_pattern(pattern, exposed_ty.clone());
+                        self.out.opaque_facts.push(OpaqueFact::LocalBinding {
+                            def_id: self.lookup_def_id(pattern.id),
+                            binding_node: pattern.id,
+                            witness_node: value.id,
+                            exposed_ty,
+                            span: stmt.span,
+                        });
+                        return;
+                    }
+                    self.push_assignable(
+                        value_ty.clone(),
+                        decl_ty.clone(),
+                        ConstraintReason::Stmt(stmt.id, stmt.span),
+                    );
+                    self.collect_bind_pattern(pattern, decl_ty);
+                } else {
+                    self.collect_bind_pattern(pattern, value_ty);
+                }
+            }
+            StmtExprKind::VarBind {
+                pattern,
+                decl_ty,
+                value,
+            } => {
+                let expected_decl_ty = decl_ty.as_ref().and_then(|decl_ty| {
+                    match self.resolve_type_in_scope(decl_ty) {
+                        Ok(ty) => Some(ty),
+                        Err(err) => {
+                            self.out.immediate_errors.push(err);
+                            None
+                        }
+                    }
+                });
                 let value_ty = self.collect_expr(value, expected_decl_ty.clone());
                 if let Some(decl_ty) = expected_decl_ty.clone() {
                     self.push_assignable(
@@ -45,8 +92,11 @@ impl<'a> ConstraintCollector<'a> {
             StmtExprKind::VarDecl { decl_ty, .. } => {
                 let def_id = self.ctx.def_table.def_id(stmt.id);
                 let def_term = self.def_term(def_id);
-                if let Ok(ty) = self.resolve_type_in_scope(decl_ty) {
-                    self.push_eq(def_term, ty, ConstraintReason::Decl(def_id, stmt.span));
+                match self.resolve_type_in_scope(decl_ty) {
+                    Ok(ty) => {
+                        self.push_eq(def_term, ty, ConstraintReason::Decl(def_id, stmt.span));
+                    }
+                    Err(err) => self.out.immediate_errors.push(err),
                 }
             }
             StmtExprKind::Assign {
@@ -55,6 +105,13 @@ impl<'a> ConstraintCollector<'a> {
                 // Property/field assignment has dedicated obligations so setter
                 // accessibility and field-level typing can be checked precisely.
                 if let ExprKind::StructField { target, field } = &assignee.kind {
+                    if let Some(exposed_ty) = self.expr_opaque_binding_type(target) {
+                        self.out.immediate_errors.push(
+                            TEK::OpaqueFieldAccess(exposed_ty.to_string(), field.clone())
+                                .at(stmt.span),
+                        );
+                        return;
+                    }
                     let target_ty = self.collect_expr(target, None);
                     let assignee_ty = self.node_term(assignee.id);
                     let value_ty = self.collect_expr(value, None);
@@ -120,6 +177,13 @@ impl<'a> ConstraintCollector<'a> {
                 });
 
                 if let ExprKind::StructField { target, field } = &assignee.kind {
+                    if let Some(exposed_ty) = self.expr_opaque_binding_type(target) {
+                        self.out.immediate_errors.push(
+                            TEK::OpaqueFieldAccess(exposed_ty.to_string(), field.clone())
+                                .at(stmt.span),
+                        );
+                        return;
+                    }
                     let target_ty = self.collect_expr(target, None);
                     let assignee_ty = self.node_term(assignee.id);
                     self.out

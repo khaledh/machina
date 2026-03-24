@@ -145,6 +145,8 @@ fn merge_typecheck_results(
     // The AST carries no type payload; keep the monomorphized module.
     monomorphized_context.clone().with_type_map(
         merged_type_map,
+        first_pass.opaque_bindings.clone(),
+        first_pass.exposed_types.clone(),
         merged_call_sigs,
         merged_generic_insts,
         merged_for_plans,

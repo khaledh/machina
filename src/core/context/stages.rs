@@ -11,6 +11,7 @@ use crate::core::resolve::{DefId, DefTable};
 use crate::core::semck::closure::capture::ClosureCapture;
 use crate::core::symbol_id::SymbolIdTable;
 use crate::core::typecheck::type_map::{CallSigMap, GenericInstMap, TypeMap};
+use crate::core::typecheck::{ExposedTypeMap, OpaqueBindingMap};
 
 #[derive(Debug, Clone)]
 pub struct ResolvedTables {
@@ -27,6 +28,8 @@ pub struct ResolvedTables {
 pub struct TypedTables {
     pub resolved: ResolvedTables,
     pub type_map: TypeMap,
+    pub opaque_bindings: OpaqueBindingMap,
+    pub exposed_types: ExposedTypeMap,
     pub call_sigs: CallSigMap,
     pub generic_insts: GenericInstMap,
     pub for_plans: ForPlanMap,
@@ -211,6 +214,8 @@ impl ResolvedContext {
     pub fn with_type_map(
         self,
         type_map: TypeMap,
+        opaque_bindings: OpaqueBindingMap,
+        exposed_types: ExposedTypeMap,
         call_sigs: CallSigMap,
         generic_insts: GenericInstMap,
         for_plans: ForPlanMap,
@@ -221,6 +226,8 @@ impl ResolvedContext {
             payload: TypedTables {
                 resolved: payload,
                 type_map,
+                opaque_bindings,
+                exposed_types,
                 call_sigs,
                 generic_insts,
                 for_plans,

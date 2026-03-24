@@ -26,6 +26,7 @@ use crate::core::typecheck::engine::{
 };
 use crate::core::typecheck::errors::TypeCheckError;
 use crate::core::typecheck::nominal_infer::NominalKeyResolver;
+use crate::core::typecheck::opaque::{ExposedTypeMap, OpaqueBindingMap};
 use crate::core::typecheck::property_access;
 use crate::core::typecheck::template_bind::bind_template_type_vars;
 use crate::core::typecheck::type_map::{
@@ -50,6 +51,8 @@ fn infer_type_args_from_instance(
 #[derive(Debug, Clone)]
 pub(crate) struct FinalizeOutput {
     pub(crate) type_map: TypeMap,
+    pub(crate) opaque_bindings: OpaqueBindingMap,
+    pub(crate) exposed_types: ExposedTypeMap,
     pub(crate) call_sigs: CallSigMap,
     pub(crate) generic_insts: GenericInstMap,
     pub(crate) for_plans: ForPlanMap,
@@ -84,6 +87,8 @@ pub(crate) fn materialize(
 
     let type_checked_context = engine.context().clone().with_type_map(
         finalized.type_map,
+        finalized.opaque_bindings,
+        finalized.exposed_types,
         finalized.call_sigs,
         finalized.generic_insts,
         finalized.for_plans,
@@ -152,9 +157,21 @@ fn build_outputs(engine: &TypecheckEngine) -> FinalizeOutput {
         let arg_types = obligation
             .arg_terms
             .iter()
-            .map(|term| resolve_term(term, engine))
+            .enumerate()
+            .map(|(index, term)| {
+                obligation
+                    .arg_witnesses
+                    .get(index)
+                    .and_then(|witness_ty| witness_ty.as_ref())
+                    .map(|witness_ty| resolve_term(witness_ty, engine))
+                    .unwrap_or_else(|| resolve_term(term, engine))
+            })
             .collect::<Vec<_>>();
         let expected_ret = resolve_term(&obligation.ret_ty, engine);
+        let receiver_ty = obligation
+            .receiver_witness
+            .as_ref()
+            .map(|witness_ty| resolve_term(witness_ty, engine));
         let selected_def_id = engine
             .state()
             .solve
@@ -180,7 +197,7 @@ fn build_outputs(engine: &TypecheckEngine) -> FinalizeOutput {
                 if let Some(def_id) = selected_def_id {
                     resolve_method_call_by_def_id(
                         engine,
-                        obligation.receiver.as_ref(),
+                        receiver_ty.as_ref().or(obligation.receiver.as_ref()),
                         name,
                         def_id,
                         &arg_types,
@@ -190,7 +207,7 @@ fn build_outputs(engine: &TypecheckEngine) -> FinalizeOutput {
                 } else {
                     resolve_method_call(
                         engine,
-                        obligation.receiver.as_ref(),
+                        receiver_ty.as_ref().or(obligation.receiver.as_ref()),
                         name,
                         &arg_types,
                         obligation.span,
@@ -201,9 +218,11 @@ fn build_outputs(engine: &TypecheckEngine) -> FinalizeOutput {
             CallCallee::Dynamic { .. } => None,
         };
         let builtin = match &obligation.callee {
-            CallCallee::Method { name } => {
-                resolve_builtin_method_call(engine, obligation.receiver.as_ref(), name)
-            }
+            CallCallee::Method { name } => resolve_builtin_method_call(
+                engine,
+                receiver_ty.as_ref().or(obligation.receiver.as_ref()),
+                name,
+            ),
             _ => None,
         };
         let (def_id, receiver, params, generic_inst) = if let Some(resolved) = resolved {
@@ -264,12 +283,76 @@ fn build_outputs(engine: &TypecheckEngine) -> FinalizeOutput {
 
     let (mut type_map, call_sigs, generic_insts) = builder.finish();
     nominal_keys.hydrate(&mut type_map);
+    let (opaque_bindings, exposed_types) = collect_opaque_tables(engine);
     FinalizeOutput {
         type_map,
+        opaque_bindings,
+        exposed_types,
         call_sigs,
         generic_insts,
         for_plans: collect_for_plans(engine),
     }
+}
+
+fn collect_opaque_tables(engine: &TypecheckEngine) -> (OpaqueBindingMap, ExposedTypeMap) {
+    let mut opaque_bindings = OpaqueBindingMap::default();
+    let mut exposed_types = ExposedTypeMap::default();
+
+    for fact in &engine.state().constrain.opaque_facts {
+        match fact {
+            crate::core::typecheck::constraints::OpaqueFact::CallableReturn {
+                def_id,
+                binding_node,
+                exposed_ty,
+                ..
+            } => {
+                if let Some(witness_ty) = engine
+                    .state()
+                    .solve
+                    .resolved_node_types
+                    .get(binding_node)
+                    .cloned()
+                {
+                    opaque_bindings.insert(
+                        *def_id,
+                        crate::core::typecheck::OpaqueBinding {
+                            exposed_ty: exposed_ty.clone(),
+                            witness_ty,
+                        },
+                    );
+                    exposed_types.insert(*binding_node, exposed_ty.clone());
+                }
+            }
+            crate::core::typecheck::constraints::OpaqueFact::LocalBinding {
+                def_id,
+                binding_node,
+                witness_node,
+                exposed_ty,
+                ..
+            } => {
+                if let Some(witness_ty) = engine
+                    .state()
+                    .solve
+                    .resolved_node_types
+                    .get(witness_node)
+                    .cloned()
+                {
+                    if let Some(def_id) = def_id {
+                        opaque_bindings.insert(
+                            *def_id,
+                            crate::core::typecheck::OpaqueBinding {
+                                exposed_ty: exposed_ty.clone(),
+                                witness_ty: witness_ty.clone(),
+                            },
+                        );
+                    }
+                    exposed_types.insert(*binding_node, exposed_ty.clone());
+                }
+            }
+        }
+    }
+
+    (opaque_bindings, exposed_types)
 }
 
 fn collect_for_plans(engine: &TypecheckEngine) -> ForPlanMap {

@@ -48,7 +48,7 @@ use crate::core::plans::{
 use crate::core::resolve::{DefId, DefKind, DefTable};
 use crate::core::typecheck::capability::ensure_hashable;
 use crate::core::typecheck::constraints::{
-    CallObligation, ConstrainOutput, Constraint, ConstraintReason, ExprObligation,
+    CallObligation, ConstrainOutput, Constraint, ConstraintReason, ExprObligation, OpaqueFact,
     PatternObligation,
 };
 use crate::core::typecheck::engine::{
@@ -155,6 +155,12 @@ pub(crate) fn run(engine: &mut TypecheckEngine) -> Result<(), Vec<TypeCheckError
     default_unresolved_int_vars(&mut unifier);
 
     let output = build_solve_output(&constrain, &unifier, resolved_call_defs, failed_constraints);
+
+    errors.extend(check_opaque_facts(
+        &constrain.opaque_facts,
+        &output,
+        &engine.env().method_sigs,
+    ));
 
     errors.extend(check_unresolved_local_infer_vars(
         &output.resolved_def_types,
@@ -412,12 +418,21 @@ fn call_state_signature(
         .iter()
         .map(|obligation| {
             let receiver_ty = obligation
-                .receiver
+                .receiver_witness
                 .as_ref()
+                .or(obligation.receiver.as_ref())
                 .map(|term| term_utils::canonicalize_type(term_utils::resolve_term(term, unifier)));
             let arg_tys = obligation
                 .arg_terms
                 .iter()
+                .enumerate()
+                .map(|(index, term)| {
+                    obligation
+                        .arg_witnesses
+                        .get(index)
+                        .and_then(|witness_ty| witness_ty.as_ref())
+                        .unwrap_or(term)
+                })
                 .map(|term| term_utils::canonicalize_type(term_utils::resolve_term(term, unifier)))
                 .collect::<Vec<_>>();
             let ret_ty = term_utils::canonicalize_type(term_utils::resolve_term(
@@ -541,6 +556,129 @@ fn build_solve_output(
     }
 
     output
+}
+
+fn check_opaque_facts(
+    facts: &[OpaqueFact],
+    output: &SolveOutput,
+    method_sigs: &HashMap<String, HashMap<String, Vec<CollectedCallableSig>>>,
+) -> Vec<TypeCheckError> {
+    let mut errors = Vec::new();
+
+    for fact in facts {
+        match fact {
+            OpaqueFact::CallableReturn {
+                binding_node,
+                exposed_ty,
+                span,
+                ..
+            } => {
+                let Some(witness_ty) = output.resolved_node_types.get(binding_node).cloned() else {
+                    continue;
+                };
+
+                if let Some(witnesses) =
+                    collect_distinct_iterable_witnesses(&witness_ty, exposed_ty, method_sigs)
+                    && witnesses.len() > 1
+                {
+                    errors.push(
+                        TEK::OpaqueIterableReturnMultipleWitnesses(exposed_ty.clone(), witnesses)
+                            .at(*span),
+                    );
+                    continue;
+                }
+
+                if !witness_satisfies_exposed_iterable(&witness_ty, exposed_ty, method_sigs) {
+                    errors.push(TEK::ReturnTypeMismatch(exposed_ty.clone(), witness_ty).at(*span));
+                }
+            }
+            OpaqueFact::LocalBinding {
+                witness_node,
+                exposed_ty,
+                span,
+                ..
+            } => {
+                let Some(witness_ty) = output.resolved_node_types.get(witness_node).cloned() else {
+                    continue;
+                };
+
+                if !witness_satisfies_exposed_iterable(&witness_ty, exposed_ty, method_sigs) {
+                    errors.push(TEK::DeclTypeMismatch(exposed_ty.clone(), witness_ty).at(*span));
+                }
+            }
+        }
+    }
+
+    errors
+}
+
+fn collect_distinct_iterable_witnesses(
+    witness_ty: &Type,
+    exposed_ty: &Type,
+    method_sigs: &HashMap<String, HashMap<String, Vec<CollectedCallableSig>>>,
+) -> Option<Vec<Type>> {
+    let Type::Iterable {
+        item_ty: expected_item_ty,
+    } = exposed_ty
+    else {
+        return None;
+    };
+
+    let mut variants = Vec::new();
+    collect_error_union_variants(witness_ty, &mut variants);
+    variants.sort_by(|left, right| format!("{left:?}").cmp(&format!("{right:?}")));
+    variants.dedup();
+
+    if variants.len() <= 1 {
+        return None;
+    }
+
+    variants
+        .iter()
+        .all(|variant| variant_matches_iterable_item(variant, expected_item_ty, method_sigs))
+        .then_some(variants)
+}
+
+fn collect_error_union_variants(ty: &Type, out: &mut Vec<Type>) {
+    match ty {
+        Type::ErrorUnion { ok_ty, err_tys } => {
+            collect_error_union_variants(ok_ty, out);
+            for err_ty in err_tys {
+                collect_error_union_variants(err_ty, out);
+            }
+        }
+        other => out.push(other.clone()),
+    }
+}
+
+fn witness_satisfies_exposed_iterable(
+    witness_ty: &Type,
+    exposed_ty: &Type,
+    method_sigs: &HashMap<String, HashMap<String, Vec<CollectedCallableSig>>>,
+) -> bool {
+    let Type::Iterable {
+        item_ty: expected_item_ty,
+    } = exposed_ty
+    else {
+        return false;
+    };
+
+    variant_matches_iterable_item(witness_ty, expected_item_ty, method_sigs)
+}
+
+fn variant_matches_iterable_item(
+    witness_ty: &Type,
+    expected_item_ty: &Type,
+    method_sigs: &HashMap<String, HashMap<String, Vec<CollectedCallableSig>>>,
+) -> bool {
+    let Some(plan) = plan_for_iterable_type_with_methods(witness_ty, method_sigs) else {
+        return false;
+    };
+
+    !matches!(
+        crate::core::types::type_assignable(&plan.item_ty, expected_item_ty),
+        crate::core::types::TypeAssignability::Incompatible
+    )
 }
 
 fn check_expr_obligations(

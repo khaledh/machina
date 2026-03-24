@@ -9,6 +9,10 @@ impl<'a> ConstraintCollector<'a> {
             .iter()
             .map(|arg| self.collect_expr(&arg.expr, None))
             .collect::<Vec<_>>();
+        let arg_witnesses = args
+            .iter()
+            .map(|arg| self.expr_opaque_binding_witness(&arg.expr))
+            .collect::<Vec<_>>();
         let ret_ty = self.node_term(call_expr.id);
         let callee_kind = match &callee.kind {
             ExprKind::Var { ident } => {
@@ -38,6 +42,8 @@ impl<'a> ConstraintCollector<'a> {
             callee_ty: Some(callee_ty),
             receiver: None,
             arg_terms,
+            arg_witnesses,
+            receiver_witness: None,
             ret_ty,
         });
     }

@@ -11,6 +11,7 @@ mod imported;
 mod infer;
 pub(crate) mod nominal;
 mod nominal_infer;
+pub mod opaque;
 mod property_access;
 mod solver;
 pub(crate) mod template_bind;
@@ -27,6 +28,7 @@ pub(crate) use engine::CollectedParamSig;
 pub use engine::TypecheckOutput;
 pub use errors::{TEK, TypeCheckError, TypeCheckErrorKind};
 pub use infer::{InferUnifier, InferUnifyError};
+pub use opaque::{ExposedTypeMap, OpaqueBinding, OpaqueBindingMap};
 
 use crate::core::context::{TypecheckStageInput, TypecheckStageOutput};
 use crate::core::resolve::ImportedFacts;

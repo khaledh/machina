@@ -147,8 +147,13 @@ pub enum TypeCheckErrorKind {
     #[error("Error union types are only allowed in return type position")]
     UnionNotAllowedHere,
 
-    #[error("`Iterable<T>` is only allowed in function and method parameter position")]
+    #[error("`Iterable<T>` is only allowed in function and method parameter or return position")]
     IterableNotAllowedHere,
+
+    #[error(
+        "opaque return {0} requires a single concrete witness type across all paths, found {1:?}"
+    )]
+    OpaqueIterableReturnMultipleWitnesses(Type, Vec<Type>),
 
     #[error("Pattern type mismatch: expected {0}, found {1}")]
     PatternTypeMismatch(BindPattern, Type),
@@ -200,6 +205,9 @@ pub enum TypeCheckErrorKind {
 
     #[error("Cannot access field {1} of opaque type {0} outside its defining module")]
     OpaqueFieldAccess(String, String),
+
+    #[error("Method {1} is not available on opaque iterable type {0}")]
+    OpaqueMethodAccess(Type, String),
 
     #[error("Property {0} is read-only")]
     PropertyNotWritable(String),

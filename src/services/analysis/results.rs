@@ -18,6 +18,7 @@ use crate::core::plans::ForPlanMap;
 use crate::core::resolve::{Def, DefId, DefTable};
 use crate::core::symbol_id::{SymbolId, SymbolIdTable};
 use crate::core::typecheck::type_map::{CallSig, CallSigMap, GenericInstMap, TypeMap};
+use crate::core::typecheck::{ExposedTypeMap, OpaqueBinding, OpaqueBindingMap};
 use crate::core::types::Type;
 use crate::services::analysis::snapshot::FileId;
 
@@ -102,6 +103,8 @@ pub struct TypedModuleResult {
     pub def_owners: HashMap<DefId, ModuleId>,
     pub symbol_ids: SymbolIdTable,
     pub type_map: TypeMap,
+    pub opaque_bindings: OpaqueBindingMap,
+    pub exposed_types: ExposedTypeMap,
     pub call_sigs: CallSigMap,
     pub generic_insts: GenericInstMap,
     pub for_plans: ForPlanMap,
@@ -259,6 +262,8 @@ impl TypedModuleResult {
         let TypedTables {
             resolved,
             type_map,
+            opaque_bindings,
+            exposed_types,
             call_sigs,
             generic_insts,
             for_plans,
@@ -280,6 +285,8 @@ impl TypedModuleResult {
             def_owners,
             symbol_ids,
             type_map,
+            opaque_bindings,
+            exposed_types,
             call_sigs,
             generic_insts,
             for_plans,
@@ -303,6 +310,8 @@ impl TypedModuleResult {
                     linear_index: self.linear_index,
                 },
                 type_map: self.type_map,
+                opaque_bindings: self.opaque_bindings,
+                exposed_types: self.exposed_types,
                 call_sigs: self.call_sigs,
                 generic_insts: self.generic_insts,
                 for_plans: self.for_plans,
@@ -332,6 +341,8 @@ pub trait SymbolLookup {
 /// Common type/call lookup surface shared by typed contexts and typed results.
 pub trait TypeLookup: SymbolLookup {
     fn type_map(&self) -> &TypeMap;
+    fn opaque_binding_map(&self) -> &OpaqueBindingMap;
+    fn exposed_type_map(&self) -> &ExposedTypeMap;
     fn call_sig_map(&self) -> &CallSigMap;
     fn generic_inst_map(&self) -> &GenericInstMap;
 
@@ -342,6 +353,14 @@ pub trait TypeLookup: SymbolLookup {
     fn lookup_def_type(&self, def_id: DefId) -> Option<Type> {
         let def = self.lookup_def(def_id)?;
         self.type_map().lookup_def_type(def)
+    }
+
+    fn lookup_opaque_binding(&self, def_id: DefId) -> Option<&OpaqueBinding> {
+        self.opaque_binding_map().get(&def_id)
+    }
+
+    fn lookup_exposed_node_type(&self, node_id: NodeId) -> Option<Type> {
+        self.exposed_type_map().get(&node_id).cloned()
     }
 
     fn lookup_call_sig(&self, node_id: NodeId) -> Option<&CallSig> {
@@ -378,6 +397,14 @@ impl TypeLookup for TypeCheckedContext {
         &self.type_map
     }
 
+    fn opaque_binding_map(&self) -> &OpaqueBindingMap {
+        &self.opaque_bindings
+    }
+
+    fn exposed_type_map(&self) -> &ExposedTypeMap {
+        &self.exposed_types
+    }
+
     fn call_sig_map(&self) -> &CallSigMap {
         &self.call_sigs
     }
@@ -390,6 +417,14 @@ impl TypeLookup for TypeCheckedContext {
 impl TypeLookup for TypedModuleResult {
     fn type_map(&self) -> &TypeMap {
         &self.type_map
+    }
+
+    fn opaque_binding_map(&self) -> &OpaqueBindingMap {
+        &self.opaque_bindings
+    }
+
+    fn exposed_type_map(&self) -> &ExposedTypeMap {
+        &self.exposed_types
     }
 
     fn call_sig_map(&self) -> &CallSigMap {

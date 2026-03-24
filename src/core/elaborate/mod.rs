@@ -69,6 +69,8 @@ pub fn elaborate(ctx: ElaborateStageInput) -> ElaborateStageOutput {
     let TypedTables {
         resolved,
         type_map,
+        opaque_bindings,
+        exposed_types,
         call_sigs,
         generic_insts,
         for_plans,
@@ -128,6 +130,8 @@ pub fn elaborate(ctx: ElaborateStageInput) -> ElaborateStageOutput {
                     linear_index,
                 },
                 type_map: type_map.into_inner(),
+                opaque_bindings,
+                exposed_types,
                 call_sigs,
                 generic_insts,
                 for_plans,

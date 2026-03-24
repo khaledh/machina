@@ -3,6 +3,10 @@
 use super::*;
 use crate::core::ast::{FuncDecl, MethodBlock, MethodDecl, MethodDef, MethodItem, TypeParam};
 
+fn as_opaque_iterable_type(ty: &Type) -> Option<Type> {
+    matches!(ty, Type::Iterable { .. }).then(|| ty.clone())
+}
+
 impl<'a> ConstraintCollector<'a> {
     pub(super) fn collect_module(&mut self) {
         // Declarations first so callable defs are available when encountered by
@@ -46,8 +50,10 @@ impl<'a> ConstraintCollector<'a> {
         self.with_type_params(&func_def.sig.type_params, |this| {
             let func_def_id = this.ctx.def_table.def_id(func_def.id);
             let mut declared_ret_ty = None;
+            let mut opaque_ret_ty = None;
             if let Some(fn_ty) = this.collect_function_signature(&func_def.sig) {
                 declared_ret_ty = fn_type_return(&fn_ty);
+                opaque_ret_ty = declared_ret_ty.as_ref().and_then(as_opaque_iterable_type);
                 let def_term = this.def_term(func_def_id);
                 this.push_eq(
                     def_term,
@@ -56,10 +62,17 @@ impl<'a> ConstraintCollector<'a> {
                 );
             }
             let ret_ty = this.resolve_return_type_in_scope(&func_def.sig.ret_ty_expr);
-            let return_term = ret_ty
-                .ok()
-                .or(declared_ret_ty)
-                .unwrap_or_else(|| this.fresh_var_term());
+            if opaque_ret_ty.is_none() {
+                opaque_ret_ty = ret_ty.as_ref().ok().and_then(as_opaque_iterable_type);
+            }
+            let return_term = if opaque_ret_ty.is_some() {
+                this.fresh_var_term()
+            } else {
+                ret_ty
+                    .ok()
+                    .or(declared_ret_ty)
+                    .unwrap_or_else(|| this.fresh_var_term())
+            };
             let func_node_term = this.node_term(func_def.id);
             this.push_eq(
                 func_node_term,
@@ -90,12 +103,24 @@ impl<'a> ConstraintCollector<'a> {
                 }
             }
 
-            let body_ty = this.collect_expr(&func_def.body, Some(return_term.clone()));
+            let body_ty = if opaque_ret_ty.is_some() {
+                this.collect_expr(&func_def.body, None)
+            } else {
+                this.collect_expr(&func_def.body, Some(return_term.clone()))
+            };
             this.push_assignable(
                 body_ty,
                 return_term,
                 ConstraintReason::Expr(func_def.body.id, func_def.body.span),
             );
+            if let Some(exposed_ty) = opaque_ret_ty {
+                this.out.opaque_facts.push(OpaqueFact::CallableReturn {
+                    def_id: func_def_id,
+                    binding_node: func_def.id,
+                    exposed_ty,
+                    span: func_def.sig.ret_ty_expr.span,
+                });
+            }
             this.exit_callable(func_def_id, func_def.span);
         });
     }
@@ -134,8 +159,10 @@ impl<'a> ConstraintCollector<'a> {
         self.with_type_params(receiver_type_params, |this| {
             this.with_type_params(&sig.type_params, |this| {
                 let mut declared_ret_ty = None;
+                let mut opaque_ret_ty = None;
                 if let Some(fn_ty) = this.collect_method_signature(method_block, sig) {
                     declared_ret_ty = fn_type_return(&fn_ty);
+                    opaque_ret_ty = declared_ret_ty.as_ref().and_then(as_opaque_iterable_type);
                     let def_term = this.def_term(method_def_id);
                     this.push_eq(
                         def_term,
@@ -144,10 +171,17 @@ impl<'a> ConstraintCollector<'a> {
                     );
                 }
                 let ret_ty = this.resolve_return_type_in_scope(&sig.ret_ty_expr);
-                let return_term = ret_ty
-                    .ok()
-                    .or(declared_ret_ty)
-                    .unwrap_or_else(|| this.fresh_var_term());
+                if opaque_ret_ty.is_none() {
+                    opaque_ret_ty = ret_ty.as_ref().ok().and_then(as_opaque_iterable_type);
+                }
+                let return_term = if opaque_ret_ty.is_some() {
+                    this.fresh_var_term()
+                } else {
+                    ret_ty
+                        .ok()
+                        .or(declared_ret_ty)
+                        .unwrap_or_else(|| this.fresh_var_term())
+                };
                 let method_node_term = this.node_term(method_def.id);
                 this.push_eq(
                     method_node_term,
@@ -201,12 +235,24 @@ impl<'a> ConstraintCollector<'a> {
                     }
                 }
 
-                let body_ty = this.collect_expr(&method_def.body, Some(return_term.clone()));
+                let body_ty = if opaque_ret_ty.is_some() {
+                    this.collect_expr(&method_def.body, None)
+                } else {
+                    this.collect_expr(&method_def.body, Some(return_term.clone()))
+                };
                 this.push_assignable(
                     body_ty,
                     return_term,
                     ConstraintReason::Expr(method_def.body.id, method_def.body.span),
                 );
+                if let Some(exposed_ty) = opaque_ret_ty {
+                    this.out.opaque_facts.push(OpaqueFact::CallableReturn {
+                        def_id: method_def_id,
+                        binding_node: method_def.id,
+                        exposed_ty,
+                        span: sig.ret_ty_expr.span,
+                    });
+                }
 
                 this.exit_callable(method_def_id, method_span);
             });

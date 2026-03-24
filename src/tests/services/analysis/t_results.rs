@@ -6,7 +6,7 @@ use crate::core::context::ResolvedContext;
 use crate::core::lexer::{LexError, Lexer};
 use crate::core::parse::Parser;
 use crate::core::resolve::ResolveError;
-use crate::core::typecheck::type_check;
+use crate::core::typecheck::{OpaqueBinding, type_check};
 use crate::services::analysis::results::{
     ResolvedModuleResult, SymbolLookup, TypeLookup, TypedModuleResult,
 };
@@ -117,6 +117,72 @@ fn main() -> u64 { id(1) }
 
     let roundtrip = result.into_context();
     assert_eq!(roundtrip.lookup_node_type(call_node), context_node_ty);
+}
+
+#[test]
+fn opaque_type_metadata_roundtrips_between_context_and_result() {
+    let source = r#"
+fn id(x: u64) -> u64 { x }
+fn main() -> u64 { id(1) }
+"#;
+
+    let resolved = resolve_source(source).expect("resolve should succeed");
+    let mut typed = type_check(resolved).expect("typecheck should succeed");
+
+    let id_func = typed
+        .module
+        .func_defs()
+        .into_iter()
+        .find(|f| f.sig.name == "id")
+        .expect("id function exists");
+    let id_def_id = typed
+        .lookup_def_id_by_node(id_func.id)
+        .expect("id node maps to def");
+    let call_node = *typed
+        .call_sigs
+        .keys()
+        .next()
+        .expect("expected at least one call signature");
+
+    typed.opaque_bindings.insert(
+        id_def_id,
+        OpaqueBinding {
+            exposed_ty: crate::core::types::Type::Iterable {
+                item_ty: Box::new(crate::core::types::Type::String),
+            },
+            witness_ty: crate::core::types::Type::Struct {
+                name: "HiddenIter".to_string(),
+                type_args: Vec::new(),
+                fields: Vec::new(),
+            },
+        },
+    );
+    typed.exposed_types.insert(
+        call_node,
+        crate::core::types::Type::Iterable {
+            item_ty: Box::new(crate::core::types::Type::String),
+        },
+    );
+
+    let result = TypedModuleResult::from_context(ModuleId(8), typed.clone());
+    assert_eq!(
+        result.lookup_opaque_binding(id_def_id),
+        typed.lookup_opaque_binding(id_def_id)
+    );
+    assert_eq!(
+        result.lookup_exposed_node_type(call_node),
+        typed.lookup_exposed_node_type(call_node)
+    );
+
+    let roundtrip = result.into_context();
+    assert_eq!(
+        roundtrip.lookup_opaque_binding(id_def_id),
+        typed.lookup_opaque_binding(id_def_id)
+    );
+    assert_eq!(
+        roundtrip.lookup_exposed_node_type(call_node),
+        typed.lookup_exposed_node_type(call_node)
+    );
 }
 
 #[test]

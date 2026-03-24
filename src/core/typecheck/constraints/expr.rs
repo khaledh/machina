@@ -3,6 +3,7 @@
 use super::*;
 use crate::core::ast::{ArrayLitInit, Param, StructLitField};
 use crate::core::linear::HostedActionExprInfo;
+use crate::core::typecheck::TEK;
 use crate::core::types::{FnParam, FnParamMode};
 
 impl<'a> ConstraintCollector<'a> {
@@ -157,7 +158,9 @@ impl<'a> ConstraintCollector<'a> {
             }
             ExprKind::Var { .. } => {
                 if let Some(def_id) = self.lookup_def_id(expr.id) {
-                    let def_ty = self.def_term(def_id);
+                    let def_ty = self
+                        .expr_opaque_binding_type(expr)
+                        .unwrap_or_else(|| self.def_term(def_id));
                     self.push_eq(
                         expr_ty.clone(),
                         def_ty,
@@ -363,6 +366,12 @@ impl<'a> ConstraintCollector<'a> {
                 });
             }
             ExprKind::StructField { target, field } => {
+                if let Some(exposed_ty) = self.expr_opaque_binding_type(target) {
+                    self.out.immediate_errors.push(
+                        TEK::OpaqueFieldAccess(exposed_ty.to_string(), field.clone()).at(expr.span),
+                    );
+                    return expr_ty;
+                }
                 let target_ty = self.collect_expr(target, None);
                 self.out.expr_obligations.push(ExprObligation::StructField {
                     expr_id: expr.id,
@@ -511,9 +520,20 @@ impl<'a> ConstraintCollector<'a> {
                 args,
             } => {
                 let receiver_ty = self.collect_expr(callee, None);
+                let receiver_witness = self.expr_opaque_binding_witness(callee);
+                if let Some(exposed_ty) = self.expr_opaque_binding_type(callee) {
+                    self.out.immediate_errors.push(
+                        TEK::OpaqueMethodAccess(exposed_ty, method_name.clone()).at(expr.span),
+                    );
+                    return expr_ty;
+                }
                 let arg_terms = args
                     .iter()
                     .map(|arg| self.collect_expr(&arg.expr, None))
+                    .collect::<Vec<_>>();
+                let arg_witnesses = args
+                    .iter()
+                    .map(|arg| self.expr_opaque_binding_witness(&arg.expr))
                     .collect::<Vec<_>>();
                 if let Some(hosted_action) = self.ctx.linear_index.hosted_action_exprs.get(&expr.id)
                 {
@@ -638,7 +658,9 @@ impl<'a> ConstraintCollector<'a> {
                     },
                     callee_ty: None,
                     receiver: Some(receiver_ty),
+                    receiver_witness,
                     arg_terms,
+                    arg_witnesses,
                     ret_ty: expr_ty.clone(),
                 });
             }
@@ -1009,7 +1031,9 @@ impl<'a> ConstraintCollector<'a> {
                 },
                 callee_ty: Some(handler_ty.clone()),
                 receiver: None,
+                receiver_witness: None,
                 arg_terms: vec![operand_ty.clone()],
+                arg_witnesses: vec![None],
                 ret_ty: expr_ty.clone(),
             });
         }

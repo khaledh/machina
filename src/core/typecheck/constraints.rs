@@ -22,8 +22,9 @@ use crate::core::resolve::{DefId, DefKind, DefTable, ImportedFacts};
 use crate::core::typecheck::engine::TypecheckEngine;
 use crate::core::typecheck::errors::TypeCheckError;
 use crate::core::typecheck::type_map::{
-    TypeDefLookup, resolve_param_type_expr_with_params, resolve_return_type_expr_with_params,
-    resolve_type_def_with_args, resolve_type_expr_with_params,
+    TypeDefLookup, resolve_local_type_expr_with_params, resolve_param_type_expr_with_params,
+    resolve_return_type_expr_with_params, resolve_type_def_with_args,
+    resolve_type_expr_with_params,
 };
 use crate::core::types::{TyVarId, Type};
 
@@ -270,7 +271,9 @@ pub(crate) struct CallObligation {
     pub(crate) callee: CallCallee,
     pub(crate) callee_ty: Option<Type>,
     pub(crate) receiver: Option<Type>,
+    pub(crate) receiver_witness: Option<Type>,
     pub(crate) arg_terms: Vec<Type>,
+    pub(crate) arg_witnesses: Vec<Option<Type>>,
     pub(crate) ret_ty: Type,
 }
 
@@ -325,13 +328,32 @@ pub(crate) enum ControlFact {
     },
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) enum OpaqueFact {
+    CallableReturn {
+        def_id: DefId,
+        binding_node: NodeId,
+        exposed_ty: Type,
+        span: Span,
+    },
+    LocalBinding {
+        def_id: Option<DefId>,
+        binding_node: NodeId,
+        witness_node: NodeId,
+        exposed_ty: Type,
+        span: Span,
+    },
+}
+
 #[derive(Debug, Clone, Default)]
 pub(crate) struct ConstrainOutput {
+    pub(crate) immediate_errors: Vec<TypeCheckError>,
     pub(crate) constraints: Vec<Constraint>,
     pub(crate) expr_obligations: Vec<ExprObligation>,
     pub(crate) call_obligations: Vec<CallObligation>,
     pub(crate) pattern_obligations: Vec<PatternObligation>,
     pub(crate) control_facts: Vec<ControlFact>,
+    pub(crate) opaque_facts: Vec<OpaqueFact>,
     pub(crate) node_terms: HashMap<NodeId, Type>,
     pub(crate) def_terms: HashMap<DefId, Type>,
     pub(crate) var_trait_bounds: HashMap<TyVarId, Vec<String>>,
@@ -389,6 +411,44 @@ impl<'a> ConstraintCollector<'a> {
         } else {
             Some(self.ctx.def_table.def_id(node_id))
         }
+    }
+
+    fn lookup_local_opaque_binding(&self, def_id: DefId) -> Option<&OpaqueFact> {
+        self.out.opaque_facts.iter().find(|fact| {
+            matches!(
+                fact,
+                OpaqueFact::LocalBinding {
+                    def_id: Some(candidate),
+                    ..
+                } if *candidate == def_id
+            )
+        })
+    }
+
+    fn expr_opaque_binding_type(&self, expr: &Expr) -> Option<Type> {
+        let ExprKind::Var { .. } = &expr.kind else {
+            return None;
+        };
+        let def_id = self.lookup_def_id(expr.id)?;
+        let OpaqueFact::LocalBinding { exposed_ty, .. } =
+            self.lookup_local_opaque_binding(def_id)?
+        else {
+            return None;
+        };
+        Some(exposed_ty.clone())
+    }
+
+    fn expr_opaque_binding_witness(&self, expr: &Expr) -> Option<Type> {
+        let ExprKind::Var { .. } = &expr.kind else {
+            return None;
+        };
+        let def_id = self.lookup_def_id(expr.id)?;
+        let OpaqueFact::LocalBinding { witness_node, .. } =
+            self.lookup_local_opaque_binding(def_id)?
+        else {
+            return None;
+        };
+        self.out.node_terms.get(witness_node).cloned()
     }
 
     fn with_type_params<F>(&mut self, type_params: &[TypeParam], f: F)
@@ -452,6 +512,16 @@ impl<'a> ConstraintCollector<'a> {
     fn resolve_return_type_in_scope(&self, ty_expr: &TypeExpr) -> Result<Type, TypeCheckError> {
         let type_lookup = ConstraintTypeLookup::new(self.ctx, self.imported_facts);
         resolve_return_type_expr_with_params(
+            &self.ctx.def_table,
+            &type_lookup,
+            ty_expr,
+            self.current_type_params(),
+        )
+    }
+
+    fn resolve_local_type_in_scope(&self, ty_expr: &TypeExpr) -> Result<Type, TypeCheckError> {
+        let type_lookup = ConstraintTypeLookup::new(self.ctx, self.imported_facts);
+        resolve_local_type_expr_with_params(
             &self.ctx.def_table,
             &type_lookup,
             ty_expr,
@@ -613,6 +683,10 @@ pub(crate) fn run(engine: &mut TypecheckEngine) -> Result<(), Vec<TypeCheckError
     }
 
     engine.state_mut().constrain = output;
+    let immediate_errors = engine.state().constrain.immediate_errors.clone();
+    if !immediate_errors.is_empty() {
+        engine.state_mut().diags.extend(immediate_errors);
+    }
 
     if engine.state().diags.is_empty() {
         Ok(())

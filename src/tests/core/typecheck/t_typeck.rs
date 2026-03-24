@@ -1,6 +1,7 @@
 use super::*;
 use std::collections::HashMap;
 
+use crate::core::ast::{BlockItem, ExprKind, StmtExprKind};
 use crate::core::capsule::ModuleId;
 use crate::core::context::{ParsedContext, TypeCheckedContext};
 use crate::core::lexer::{LexError, Lexer, Token};
@@ -3369,23 +3370,27 @@ fn test_iterable_allowed_in_param_type() {
 }
 
 #[test]
-fn test_iterable_not_allowed_in_return_type() {
+fn test_iterable_allowed_in_return_type() {
     let source = r#"
         fn make_lines() -> Iterable<string> {
-            ()
+            ["a", "b", "c"]
+        }
+
+        fn count(lines: Iterable<string>) -> u64 {
+            var count: u64 = 0;
+            for line in lines {
+                let _: string = line;
+                count = count + 1;
+            }
+            count
+        }
+
+        fn main() -> u64 {
+            count(make_lines())
         }
     "#;
 
-    let result = type_check_source(source);
-    assert!(result.is_err());
-
-    if let Err(errors) = result {
-        assert!(
-            errors
-                .iter()
-                .any(|e| matches!(e.kind(), TypeCheckErrorKind::IterableNotAllowedHere))
-        );
-    }
+    let _ctx = type_check_source(source).expect("Failed to type check");
 }
 
 #[test]
@@ -3410,6 +3415,292 @@ fn test_iterable_not_allowed_in_struct_field_type() {
                 .any(|e| matches!(e.kind(), TypeCheckErrorKind::IterableNotAllowedHere))
         );
     }
+}
+
+#[test]
+fn test_iterable_return_requires_single_concrete_witness() {
+    let source = r#"
+        type IterDone = {}
+
+        type CounterA = {}
+        type CounterAIter = {}
+
+        CounterA :: {
+            fn iter(self) -> CounterAIter {
+                CounterAIter {}
+            }
+        }
+
+        CounterAIter :: {
+            fn next(inout self) -> u64 | IterDone {
+                IterDone {}
+            }
+        }
+
+        type CounterB = {}
+        type CounterBIter = {}
+
+        CounterB :: {
+            fn iter(self) -> CounterBIter {
+                CounterBIter {}
+            }
+        }
+
+        CounterBIter :: {
+            fn next(inout self) -> u64 | IterDone {
+                IterDone {}
+            }
+        }
+
+        fn choose(flag: bool) -> Iterable<u64> {
+            if flag {
+                CounterA {}
+            } else {
+                CounterB {}
+            }
+        }
+    "#;
+
+    let result = type_check_source(source);
+    assert!(result.is_err());
+
+    if let Err(errors) = result {
+        assert!(
+            errors.iter().any(|e| {
+                matches!(
+                    e.kind(),
+                    TypeCheckErrorKind::OpaqueIterableReturnMultipleWitnesses(..)
+                )
+            }),
+            "expected same-witness diagnostic, got {errors:?}"
+        );
+    }
+}
+
+#[test]
+fn test_iterable_allowed_in_immutable_local_annotation() {
+    let source = r#"
+        fn main() -> u64 {
+            let lines: Iterable<string> = ["a", "b"];
+            var count: u64 = 0;
+            for line in lines {
+                let _: string = line;
+                count = count + 1;
+            }
+            count
+        }
+    "#;
+
+    let typed = type_check_source(source).expect("Failed to type check");
+    let main = typed
+        .module
+        .func_defs()
+        .into_iter()
+        .find(|f| f.sig.name == "main")
+        .expect("main function exists");
+    let ExprKind::Block { items, .. } = &main.body.kind else {
+        panic!("expected block body");
+    };
+    let BlockItem::Stmt(stmt) = &items[0] else {
+        panic!("expected first block item to be stmt");
+    };
+    let StmtExprKind::LetBind { pattern, .. } = &stmt.kind else {
+        panic!("expected let binding");
+    };
+
+    let def_id = typed
+        .def_table
+        .lookup_node_def_id(pattern.id)
+        .expect("let binding should define a symbol");
+    let opaque = typed
+        .opaque_bindings
+        .get(&def_id)
+        .expect("expected opaque iterable binding metadata");
+    assert_eq!(
+        opaque.exposed_ty,
+        Type::Iterable {
+            item_ty: Box::new(Type::String),
+        }
+    );
+    assert_eq!(
+        typed.exposed_types.get(&pattern.id),
+        Some(&Type::Iterable {
+            item_ty: Box::new(Type::String),
+        })
+    );
+    let concrete = typed
+        .def_table
+        .lookup_def(def_id)
+        .and_then(|def| typed.type_map.lookup_def_type(def))
+        .expect("binding should keep the exposed iterable type at source level");
+    assert_eq!(concrete, opaque.exposed_ty);
+    assert_ne!(opaque.witness_ty, opaque.exposed_ty);
+}
+
+#[test]
+fn test_iterable_not_allowed_in_mutable_local_annotation() {
+    let source = r#"
+        fn main() -> u64 {
+            var lines: Iterable<string> = ["a", "b"];
+            0
+        }
+    "#;
+
+    let result = type_check_source(source);
+    assert!(result.is_err());
+
+    if let Err(errors) = result {
+        assert!(
+            errors
+                .iter()
+                .any(|e| matches!(e.kind(), TypeCheckErrorKind::IterableNotAllowedHere)),
+            "expected IterableNotAllowedHere, got {errors:?}"
+        );
+    }
+}
+
+#[test]
+fn test_opaque_iterable_local_binding_rejects_field_access() {
+    let source = r#"
+        type IterDone = {}
+
+        type SecretIter = { secret: bool }
+
+        SecretIter :: {
+            fn iter(self) -> SecretIter { self }
+
+            fn next(inout self) -> string | IterDone {
+                IterDone {}
+            }
+        }
+
+        fn main() -> bool {
+            let lines: Iterable<string> = SecretIter { secret: true };
+            lines.secret
+        }
+    "#;
+
+    let result = type_check_source(source);
+    assert!(result.is_err());
+
+    if let Err(errors) = result {
+        assert!(
+            errors.iter().any(|e| {
+                matches!(
+                    e.kind(),
+                    TypeCheckErrorKind::OpaqueFieldAccess(type_name, field)
+                        if field == "secret" && type_name.contains("Iterable")
+                )
+            }),
+            "expected opaque field access error, got {errors:?}"
+        );
+    }
+}
+
+#[test]
+fn test_opaque_iterable_local_binding_rejects_method_access() {
+    let source = r#"
+        type IterDone = {}
+
+        type SecretIter = { secret: bool }
+
+        SecretIter :: {
+            fn iter(self) -> SecretIter { self }
+
+            fn next(inout self) -> string | IterDone {
+                IterDone {}
+            }
+
+            fn secret(self) -> bool {
+                self.secret
+            }
+        }
+
+        fn main() -> bool {
+            let lines: Iterable<string> = SecretIter { secret: true };
+            lines.secret()
+        }
+    "#;
+
+    let result = type_check_source(source);
+    assert!(result.is_err());
+
+    if let Err(errors) = result {
+        assert!(
+            errors.iter().any(|e| {
+                matches!(
+                    e.kind(),
+                    TypeCheckErrorKind::OpaqueMethodAccess(
+                        Type::Iterable { item_ty },
+                        method_name,
+                    ) if **item_ty == Type::String && method_name == "secret"
+                )
+            }),
+            "expected opaque method access error, got {errors:?}"
+        );
+    }
+}
+
+#[test]
+fn test_opaque_iterable_local_binding_not_assignable_to_concrete_annotation() {
+    let source = r#"
+        type IterDone = {}
+
+        type SecretIter = { secret: bool }
+
+        SecretIter :: {
+            fn iter(self) -> SecretIter { self }
+
+            fn next(inout self) -> string | IterDone {
+                IterDone {}
+            }
+        }
+
+        fn main() -> bool {
+            let lines: Iterable<string> = SecretIter { secret: true };
+            let concrete: SecretIter = lines;
+            concrete.secret
+        }
+    "#;
+
+    let result = type_check_source(source);
+    assert!(result.is_err());
+
+    if let Err(errors) = result {
+        assert!(
+            errors.iter().any(|e| {
+                matches!(
+                    e.kind(),
+                    TypeCheckErrorKind::DeclTypeMismatch(
+                        Type::Struct { name, .. },
+                        Type::Iterable { item_ty },
+                    ) if name == "SecretIter" && **item_ty == Type::String
+                )
+            }),
+            "expected concrete annotation mismatch, got {errors:?}"
+        );
+    }
+}
+
+#[test]
+fn test_opaque_iterable_local_binding_matches_iterable_param() {
+    let source = r#"
+        fn write_lines(lines: Iterable<string>) -> u64 {
+            var count: u64 = 0;
+            for line in lines {
+                let text: string = line;
+                count = count + 1;
+            }
+            count
+        }
+
+        fn main() -> u64 {
+            let lines: Iterable<string> = ["a", "b"];
+            write_lines(lines)
+        }
+    "#;
+
+    let _ctx = type_check_source(source).expect("Failed to type check");
 }
 
 #[test]

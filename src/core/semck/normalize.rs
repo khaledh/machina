@@ -19,6 +19,8 @@ pub fn normalize(ctx: SemCheckStageInput) -> SemCheckNormalizedContext {
     let TypedTables {
         resolved,
         type_map,
+        opaque_bindings,
+        exposed_types,
         call_sigs,
         generic_insts,
         for_plans,
@@ -60,6 +62,8 @@ pub fn normalize(ctx: SemCheckStageInput) -> SemCheckNormalizedContext {
                 linear_index,
             },
             type_map: type_map.into_inner(),
+            opaque_bindings,
+            exposed_types,
             call_sigs,
             generic_insts,
             for_plans,

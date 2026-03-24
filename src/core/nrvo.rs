@@ -33,6 +33,8 @@ impl NrvoAnalyzer {
         let TypedTables {
             resolved,
             type_map,
+            opaque_bindings,
+            exposed_types,
             call_sigs,
             generic_insts,
             for_plans,
@@ -67,6 +69,8 @@ impl NrvoAnalyzer {
                         linear_index,
                     },
                     type_map,
+                    opaque_bindings,
+                    exposed_types,
                     call_sigs,
                     generic_insts,
                     for_plans,

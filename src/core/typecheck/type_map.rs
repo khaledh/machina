@@ -97,7 +97,24 @@ pub(crate) fn resolve_return_type_expr_with_params(
         type_params,
         None,
         true,
-        false,
+        true,
+    )
+}
+
+pub(crate) fn resolve_local_type_expr_with_params(
+    def_table: &DefTable,
+    module: &impl TypeDefLookup,
+    type_expr: &TypeExpr,
+    type_params: Option<&TypeParamMap>,
+) -> Result<Type, TypeCheckError> {
+    resolve_type_expr_with_params_and_args(
+        def_table,
+        module,
+        type_expr,
+        type_params,
+        None,
+        true,
+        true,
     )
 }
 

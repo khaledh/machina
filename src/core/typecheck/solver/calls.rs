@@ -140,6 +140,21 @@ pub(super) fn check_call_obligations(
                     .receiver
                     .as_ref()
                     .map(|term| super::term_utils::resolve_term(term, unifier))
+                    .zip(obligation.receiver_witness.as_ref())
+                    .map(|(receiver_ty, witness_ty)| {
+                        let witness_ty = super::term_utils::resolve_term(witness_ty, unifier);
+                        if super::term_utils::is_unresolved(&witness_ty) {
+                            receiver_ty
+                        } else {
+                            witness_ty
+                        }
+                    })
+                    .or_else(|| {
+                        obligation
+                            .receiver
+                            .as_ref()
+                            .map(|term| super::term_utils::resolve_term(term, unifier))
+                    })
                     .map(super::term_utils::peel_heap);
                 method_call_candidates(
                     name,
@@ -204,7 +219,12 @@ pub(super) fn check_call_obligations(
             if let (Some(receiver_term), Some(expected_receiver_ty)) =
                 (&obligation.receiver, &instantiated.receiver_ty)
             {
-                let receiver_ty = super::term_utils::resolve_term(receiver_term, &trial);
+                let receiver_ty = obligation
+                    .receiver_witness
+                    .as_ref()
+                    .map(|witness_ty| super::term_utils::resolve_term(witness_ty, &trial))
+                    .filter(|witness_ty| !super::term_utils::is_unresolved(witness_ty))
+                    .unwrap_or_else(|| super::term_utils::resolve_term(receiver_term, &trial));
                 if solve_call_arg_assignable(
                     &receiver_ty,
                     expected_receiver_ty,
@@ -226,7 +246,13 @@ pub(super) fn check_call_obligations(
                 .zip(instantiated.params.iter())
                 .enumerate()
             {
-                let arg_ty = super::term_utils::resolve_term(arg_term, &trial);
+                let arg_ty = obligation
+                    .arg_witnesses
+                    .get(index)
+                    .and_then(|witness_ty| witness_ty.as_ref())
+                    .map(|witness_ty| super::term_utils::resolve_term(witness_ty, &trial))
+                    .filter(|witness_ty| !super::term_utils::is_unresolved(witness_ty))
+                    .unwrap_or_else(|| super::term_utils::resolve_term(arg_term, &trial));
                 if solve_call_arg_assignable(&arg_ty, param_ty, &mut trial, method_sigs).is_err() {
                     first_error.get_or_insert_with(|| {
                         TEK::ArgTypeMismatch(
