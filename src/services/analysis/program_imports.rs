@@ -1,16 +1,16 @@
 //! Program-aware imported symbol/type/trait fact helpers for analysis.
 
-use std::collections::{HashMap, HashSet};
+use std::collections::{BTreeMap, HashMap, HashSet};
 
-use crate::core::ast::{MethodSig, ParamMode, TopLevelItem};
+use crate::core::ast::{MethodBlock, MethodItem, MethodSig, ParamMode, TopLevelItem, TypeExpr, TypeExprKind, TypeParam};
 use crate::core::capsule::{ModuleId, ModulePath};
 use crate::core::context::{
     CapsuleParsedContext, ModuleExportFacts, ResolvedContext, TypeCheckedContext,
     import_env_from_requires, module_export_facts_from_def_table,
 };
 use crate::core::resolve::{
-    ImportedCallableSig, ImportedModule, ImportedParamSig, ImportedSymbol, ImportedTraitMethodSig,
-    ImportedTraitPropertySig, ImportedTraitSig,
+    ImportedCallableSig, ImportedMethodSig, ImportedModule, ImportedParamSig, ImportedSymbol,
+    ImportedTraitMethodSig, ImportedTraitPropertySig, ImportedTraitSig,
 };
 use crate::core::symbol_id::SymbolId;
 use crate::core::typecheck::type_map::{
@@ -23,6 +23,7 @@ pub(crate) struct ProgramImportFactsCache {
     export_facts_by_module: HashMap<ModuleId, ModuleExportFacts>,
     callable_sigs_by_symbol: HashMap<SymbolId, ImportedCallableSig>,
     type_tys_by_symbol: HashMap<SymbolId, Type>,
+    method_sigs_by_type_symbol: HashMap<SymbolId, HashMap<String, Vec<ImportedMethodSig>>>,
     trait_sigs_by_symbol: HashMap<SymbolId, ImportedTraitSig>,
 }
 
@@ -87,8 +88,22 @@ impl ProgramImportFactsCache {
                     .and_then(|item| item.symbol_id.as_ref())
                     .and_then(|symbol_id| self.type_tys_by_symbol.get(symbol_id))
                     .cloned();
-                if let Some(imported) =
-                    ImportedSymbol::from_exports(exports, type_name, Vec::new(), type_ty, None)
+                let method_sigs = exports
+                    .types
+                    .get(type_name)
+                    .and_then(|item| item.symbol_id.as_ref())
+                    .and_then(|symbol_id| self.method_sigs_by_type_symbol.get(symbol_id))
+                    .cloned()
+                    .unwrap_or_default();
+                if (type_ty.is_some() || !method_sigs.is_empty())
+                    && let Some(imported) = ImportedSymbol::from_exports(
+                        exports,
+                        type_name,
+                        Vec::new(),
+                        type_ty,
+                        method_sigs,
+                        None,
+                    )
                 {
                     imported_types.push((type_name.clone(), imported));
                 }
@@ -106,13 +121,35 @@ impl ProgramImportFactsCache {
     pub(crate) fn should_skip_typecheck(
         imported_symbols: &HashMap<String, ImportedSymbol>,
     ) -> bool {
-        imported_symbols.values().any(|imported| {
-            (imported.has_type() && imported.type_ty.is_none())
-                || (imported.has_trait() && imported.trait_sig.is_none())
-                || (imported.has_callable() && imported.callable_sigs.is_empty())
-        })
+        !Self::incomplete_imports(imported_symbols).is_empty()
     }
 
+    pub(crate) fn incomplete_imports(
+        imported_symbols: &HashMap<String, ImportedSymbol>,
+    ) -> Vec<String> {
+        let mut out = Vec::new();
+        let mut names: Vec<_> = imported_symbols.keys().cloned().collect();
+        names.sort();
+        for name in names {
+            let Some(imported) = imported_symbols.get(&name) else {
+                continue;
+            };
+            let mut reasons = Vec::new();
+            if imported.has_type() && imported.type_ty.is_none() && imported.method_sigs.is_empty() {
+                reasons.push("missing-type");
+            }
+            if imported.has_trait() && imported.trait_sig.is_none() {
+                reasons.push("missing-trait");
+            }
+            if imported.has_callable() && imported.callable_sigs.is_empty() {
+                reasons.push("missing-callable");
+            }
+            if !reasons.is_empty() {
+                out.push(format!("{name}[{}]", reasons.join(",")));
+            }
+        }
+        out
+    }
     pub(crate) fn ingest_resolved(
         &mut self,
         module_id: ModuleId,
@@ -145,6 +182,8 @@ impl ProgramImportFactsCache {
             .extend(collect_public_callable_sigs(module_id, typed));
         self.type_tys_by_symbol
             .extend(collect_public_type_tys(module_id, typed));
+        self.method_sigs_by_type_symbol
+            .extend(collect_public_method_sigs(typed));
         self.trait_sigs_by_symbol
             .extend(collect_public_trait_sigs(module_id, typed));
     }
@@ -166,13 +205,27 @@ impl ProgramImportFactsCache {
             .and_then(|item| item.symbol_id.as_ref())
             .and_then(|symbol_id| self.type_tys_by_symbol.get(symbol_id))
             .cloned();
+        let method_sigs = binding
+            .type_def
+            .as_ref()
+            .and_then(|item| item.symbol_id.as_ref())
+            .and_then(|symbol_id| self.method_sigs_by_type_symbol.get(symbol_id))
+            .cloned()
+            .unwrap_or_default();
         let trait_sig = binding
             .trait_def
             .as_ref()
             .and_then(|item| item.symbol_id.as_ref())
             .and_then(|symbol_id| self.trait_sigs_by_symbol.get(symbol_id))
             .cloned();
-        ImportedSymbol::from_binding(binding, callable_sigs, type_ty, trait_sig)
+        ImportedSymbol::from_binding(
+            binding,
+            callable_sigs,
+            None,
+            type_ty,
+            method_sigs,
+            trait_sig,
+        )
     }
 
     fn materialize_imported_symbol(
@@ -195,13 +248,20 @@ impl ProgramImportFactsCache {
             .and_then(|item| item.symbol_id.as_ref())
             .and_then(|symbol_id| self.type_tys_by_symbol.get(symbol_id))
             .cloned();
+        let method_sigs = exports
+            .types
+            .get(member)
+            .and_then(|item| item.symbol_id.as_ref())
+            .and_then(|symbol_id| self.method_sigs_by_type_symbol.get(symbol_id))
+            .cloned()
+            .unwrap_or_default();
         let trait_sig = exports
             .traits
             .get(member)
             .and_then(|item| item.symbol_id.as_ref())
             .and_then(|symbol_id| self.trait_sigs_by_symbol.get(symbol_id))
             .cloned();
-        ImportedSymbol::from_exports(exports, member, callable_sigs, type_ty, trait_sig)
+        ImportedSymbol::from_exports(exports, member, callable_sigs, type_ty, method_sigs, trait_sig)
     }
 }
 
@@ -212,11 +272,11 @@ fn collect_public_callable_sigs(
     let mut out = HashMap::<SymbolId, ImportedCallableSig>::new();
     for item in &typed.module.top_level_items {
         let callable = match item {
-            TopLevelItem::FuncDecl(decl) => Some(typed.def_table.def_id(decl.id)),
-            TopLevelItem::FuncDef(def) => Some(typed.def_table.def_id(def.id)),
+            TopLevelItem::FuncDecl(decl) => Some((typed.def_table.def_id(decl.id), &decl.sig)),
+            TopLevelItem::FuncDef(def) => Some((typed.def_table.def_id(def.id), &def.sig)),
             _ => None,
         };
-        let Some(def_id) = callable else {
+        let Some((def_id, sig)) = callable else {
             continue;
         };
         let Some(def) = typed.def_table.lookup_def(def_id) else {
@@ -245,6 +305,18 @@ fn collect_public_callable_sigs(
                     })
                     .collect(),
                 ret_ty: *ret_ty,
+                type_param_count: sig.type_params.len(),
+                type_param_var_names: sig
+                    .type_params
+                    .iter()
+                    .enumerate()
+                    .map(|(index, param)| (index as u32, param.ident.clone()))
+                    .collect(),
+                type_param_bounds: sig
+                    .type_params
+                    .iter()
+                    .map(|param| param.bound.as_ref().map(|bound| bound.name.clone()))
+                    .collect(),
             },
         );
     }
@@ -265,9 +337,6 @@ fn collect_public_callable_sigs_resolved(
         let Some((def_id, sig)) = callable else {
             continue;
         };
-        if !sig.type_params.is_empty() {
-            continue;
-        }
         let Some(def) = resolved.def_table.lookup_def(def_id) else {
             continue;
         };
@@ -275,10 +344,29 @@ fn collect_public_callable_sigs_resolved(
             continue;
         }
 
+        let type_param_map = if sig.type_params.is_empty() {
+            None
+        } else {
+            Some(
+                sig.type_params
+                    .iter()
+                    .enumerate()
+                    .map(|(index, param)| {
+                        (resolved.def_table.def_id(param.id), TyVarId::new(index as u32))
+                    })
+                    .collect::<HashMap<_, _>>(),
+            )
+        };
+
         let mut params = Vec::with_capacity(sig.params.len());
         let mut failed = false;
         for param in &sig.params {
-            match resolve_type_expr_with_params(&resolved.def_table, resolved, &param.typ, None) {
+            match resolve_type_expr_with_params(
+                &resolved.def_table,
+                resolved,
+                &param.typ,
+                type_param_map.as_ref(),
+            ) {
                 Ok(ty) => params.push(ImportedParamSig {
                     mode: param.mode.clone(),
                     ty,
@@ -297,7 +385,7 @@ fn collect_public_callable_sigs_resolved(
             &resolved.def_table,
             resolved,
             &sig.ret_ty_expr,
-            None,
+            type_param_map.as_ref(),
         ) else {
             continue;
         };
@@ -305,7 +393,25 @@ fn collect_public_callable_sigs_resolved(
         let Some(symbol_id) = resolved.symbol_ids.lookup_symbol_id(def_id).cloned() else {
             continue;
         };
-        out.insert(symbol_id, ImportedCallableSig { params, ret_ty });
+        out.insert(
+            symbol_id,
+            ImportedCallableSig {
+                params,
+                ret_ty,
+                type_param_count: sig.type_params.len(),
+                type_param_var_names: sig
+                    .type_params
+                    .iter()
+                    .enumerate()
+                    .map(|(index, param)| (index as u32, param.ident.clone()))
+                    .collect::<BTreeMap<_, _>>(),
+                type_param_bounds: sig
+                    .type_params
+                    .iter()
+                    .map(|param| param.bound.as_ref().map(|bound| bound.name.clone()))
+                    .collect(),
+            },
+        );
     }
     out
 }
@@ -336,6 +442,178 @@ fn collect_public_type_tys(
         out.insert(symbol_id, ty);
     }
     out
+}
+
+fn collect_public_method_sigs(
+    typed: &TypeCheckedContext,
+) -> HashMap<SymbolId, HashMap<String, Vec<ImportedMethodSig>>> {
+    let mut out = HashMap::<SymbolId, HashMap<String, Vec<ImportedMethodSig>>>::new();
+    for method_block in typed.module.method_blocks() {
+        let receiver_type_params = method_block_type_params(typed, method_block);
+        let Some(owner_symbol_id) = method_block_owner_symbol_id(typed, method_block) else {
+            continue;
+        };
+        let Some(self_ty) = resolve_method_block_self_type(typed, method_block, &receiver_type_params)
+        else {
+            continue;
+        };
+
+        for method_item in &method_block.method_items {
+            let (sig, def_id) = match method_item {
+                MethodItem::Decl(method_decl) => (&method_decl.sig, typed.def_table.def_id(method_decl.id)),
+                MethodItem::Def(method_def) => (&method_def.sig, typed.def_table.def_id(method_def.id)),
+            };
+            let Some(def) = typed.def_table.lookup_def(def_id) else {
+                continue;
+            };
+            if !def.is_public() {
+                continue;
+            }
+
+            let all_type_params = receiver_type_params
+                .iter()
+                .cloned()
+                .chain(sig.type_params.iter().cloned())
+                .collect::<Vec<_>>();
+            let type_param_map = if all_type_params.is_empty() {
+                None
+            } else {
+                Some(
+                    all_type_params
+                        .iter()
+                        .enumerate()
+                        .map(|(index, param)| {
+                            (typed.def_table.def_id(param.id), TyVarId::new(index as u32))
+                        })
+                        .collect::<HashMap<_, _>>(),
+                )
+            };
+
+            let mut params = Vec::with_capacity(sig.params.len());
+            let mut failed = false;
+            for param in &sig.params {
+                match resolve_type_expr_with_params(
+                    &typed.def_table,
+                    typed,
+                    &param.typ,
+                    type_param_map.as_ref(),
+                ) {
+                    Ok(ty) => params.push(ImportedParamSig {
+                        mode: param.mode.clone(),
+                        ty,
+                    }),
+                    Err(_) => {
+                        failed = true;
+                        break;
+                    }
+                }
+            }
+            if failed {
+                continue;
+            }
+
+            let Ok(ret_ty) = resolve_return_type_expr_with_params(
+                &typed.def_table,
+                typed,
+                &sig.ret_ty_expr,
+                type_param_map.as_ref(),
+            ) else {
+                continue;
+            };
+
+            out.entry(owner_symbol_id.clone())
+                .or_default()
+                .entry(sig.name.clone())
+                .or_default()
+                .push(ImportedMethodSig {
+                    self_ty: self_ty.clone(),
+                    self_mode: sig.self_param.mode.clone(),
+                    params,
+                    ret_ty,
+                    type_param_count: all_type_params.len(),
+                    type_param_var_names: all_type_params
+                        .iter()
+                        .enumerate()
+                        .map(|(index, param)| (index as u32, param.ident.clone()))
+                        .collect(),
+                    type_param_bounds: all_type_params
+                        .iter()
+                        .map(|param| param.bound.as_ref().map(|bound| bound.name.clone()))
+                        .collect(),
+                });
+        }
+    }
+    out
+}
+
+fn method_block_owner_symbol_id(
+    typed: &TypeCheckedContext,
+    method_block: &MethodBlock,
+) -> Option<SymbolId> {
+    let type_def = typed
+        .module
+        .type_defs()
+        .into_iter()
+        .find(|type_def| type_def.name == method_block.type_name)?;
+    let def_id = typed.def_table.def_id(type_def.id);
+    typed.symbol_ids.lookup_symbol_id(def_id).cloned()
+}
+
+fn method_block_type_params(
+    typed: &TypeCheckedContext,
+    method_block: &MethodBlock,
+) -> Vec<TypeParam> {
+    method_block
+        .type_args
+        .iter()
+        .filter_map(|type_arg| {
+            let TypeExprKind::Named { ident, type_args } = &type_arg.kind else {
+                return None;
+            };
+            if !type_args.is_empty() {
+                return None;
+            }
+            let def_id = typed.def_table.lookup_node_def_id(type_arg.id)?;
+            let def = typed.def_table.lookup_def(def_id)?;
+            if !matches!(def.kind, crate::core::resolve::DefKind::TypeParam) {
+                return None;
+            }
+            Some(TypeParam {
+                id: type_arg.id,
+                ident: ident.clone(),
+                bound: None,
+                span: type_arg.span,
+            })
+        })
+        .collect()
+}
+
+fn resolve_method_block_self_type(
+    typed: &TypeCheckedContext,
+    method_block: &MethodBlock,
+    receiver_type_params: &[TypeParam],
+) -> Option<Type> {
+    let type_param_map = if receiver_type_params.is_empty() {
+        None
+    } else {
+        Some(
+            receiver_type_params
+                .iter()
+                .enumerate()
+                .map(|(index, param)| (typed.def_table.def_id(param.id), TyVarId::new(index as u32)))
+                .collect::<HashMap<_, _>>(),
+        )
+    };
+    let self_ty_expr = TypeExpr {
+        id: method_block.id,
+        kind: TypeExprKind::Named {
+            ident: method_block.type_name.clone(),
+            type_args: method_block.type_args.clone(),
+        },
+        span: method_block.span,
+    };
+    resolve_type_expr_with_params(&typed.def_table, typed, &self_ty_expr, type_param_map.as_ref())
+        .ok()
 }
 
 fn collect_public_trait_sigs(

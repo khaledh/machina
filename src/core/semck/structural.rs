@@ -81,9 +81,25 @@ impl<'a> StructuralChecker<'a> {
         self.errors.push(err);
     }
 
-    fn check_struct_lit(&mut self, name: &str, fields: &[StructLitField], span: Span) {
+    fn check_struct_lit(
+        &mut self,
+        node_id: NodeId,
+        name: &str,
+        fields: &[StructLitField],
+        span: Span,
+    ) {
         // Enforce struct field existence, duplicates, and missing fields.
-        let Some(struct_fields) = self.struct_fields.get(name) else {
+        let Some(struct_fields) = self
+            .struct_fields
+            .get(name)
+            .cloned()
+            .or_else(|| {
+                self.ctx
+                    .type_map
+                    .lookup_node_type(node_id)
+                    .and_then(|ty| struct_field_names_from_type(&ty))
+            })
+        else {
             Self::push_err(
                 &mut self.errors,
                 span,
@@ -167,7 +183,17 @@ impl<'a> StructuralChecker<'a> {
                 .for_each_child_pattern(|pattern| self.check_pattern(pattern)),
             BindPatternKind::Struct { name, fields } => {
                 // Enforce struct pattern fields and recurse into subpatterns.
-                let Some(struct_fields) = self.struct_fields.get(name).cloned() else {
+                let Some(struct_fields) = self
+                    .struct_fields
+                    .get(name)
+                    .cloned()
+                    .or_else(|| {
+                        self.ctx
+                            .type_map
+                            .lookup_node_type(pattern.id)
+                            .and_then(|ty| struct_field_names_from_type(&ty))
+                    })
+                else {
                     Self::push_err(
                         &mut self.errors,
                         pattern.span,
@@ -394,6 +420,13 @@ impl<'a> StructuralChecker<'a> {
     }
 }
 
+fn struct_field_names_from_type(ty: &Type) -> Option<Vec<String>> {
+    let Type::Struct { fields, .. } = ty else {
+        return None;
+    };
+    Some(fields.iter().map(|field| field.name.clone()).collect())
+}
+
 impl Visitor for StructuralChecker<'_> {
     fn visit_func_sig(&mut self, func_sig: &FunctionSig) {
         self.check_param_modes(&func_sig.params);
@@ -428,7 +461,7 @@ impl Visitor for StructuralChecker<'_> {
     fn visit_expr(&mut self, expr: &Expr) {
         match &expr.kind {
             ExprKind::StructLit { name, fields, .. } => {
-                self.check_struct_lit(name, fields, expr.span);
+                self.check_struct_lit(expr.id, name, fields, expr.span);
             }
             ExprKind::StructUpdate { target, fields } => {
                 self.check_struct_update(target, fields);

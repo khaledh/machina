@@ -140,7 +140,10 @@ pub(super) fn format_source_callable_signature(
         });
         rendered_params.push(format!("{mode_prefix}{param_name}: {param_ty}"));
     }
-    let rendered_ret = render(&ret_ty);
+    let rendered_ret =
+        format_type_expr_for_signature(ret_ty_expr_for_callable(callable)).unwrap_or_else(|| {
+            render(&ret_ty)
+        });
     let rendered_tparams = if type_params.is_empty() {
         String::new()
     } else {
@@ -154,6 +157,16 @@ pub(super) fn format_source_callable_signature(
         label,
         parameters: rendered_params,
     })
+}
+
+fn ret_ty_expr_for_callable(callable: CallableRef<'_>) -> &TypeExpr {
+    match callable {
+        CallableRef::FuncDecl(func_decl) => &func_decl.sig.ret_ty_expr,
+        CallableRef::FuncDef(func_def) => &func_def.sig.ret_ty_expr,
+        CallableRef::MethodDecl { method_decl, .. } => &method_decl.sig.ret_ty_expr,
+        CallableRef::MethodDef { method_def, .. } => &method_def.sig.ret_ty_expr,
+        CallableRef::ClosureDef(closure_def) => &closure_def.sig.return_ty,
+    }
 }
 
 fn format_type_expr_for_signature(ty_expr: &TypeExpr) -> Option<String> {

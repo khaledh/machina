@@ -25,7 +25,9 @@ use crate::core::typecheck::engine::{
     CollectedTraitPropertySig, CollectedTraitSig, TypecheckEngine,
 };
 use crate::core::typecheck::errors::{TEK, TypeCheckError};
-use crate::core::typecheck::imported::{extend_imported_function_sigs, extend_imported_trait_sigs};
+use crate::core::typecheck::imported::{
+    extend_imported_function_sigs, extend_imported_method_sigs, extend_imported_trait_sigs,
+};
 use crate::core::typecheck::tc_push_error;
 use crate::core::typecheck::type_map::{
     TypeDefLookup, resolve_param_type_expr_with_params, resolve_return_type_expr_with_params,
@@ -116,6 +118,7 @@ pub(crate) fn run(engine: &mut TypecheckEngine) -> Result<(), Vec<TypeCheckError
         &mut generic_envs,
         &mut errors,
     );
+    extend_imported_method_sigs(&imported_facts, &mut method_sigs);
 
     // Publish the collected environment as the shared immutable phase input.
     let env = engine.env_mut();

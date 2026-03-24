@@ -17,6 +17,7 @@ use crate::services::analysis::results::{
     CompletionItem, DefTarget, HoverInfo, Location, SignatureHelp,
 };
 use crate::services::analysis::snapshot::AnalysisSnapshot;
+use crate::services::analysis::trace::AnalysisTraceCategory;
 use std::collections::HashMap;
 
 use crate::core::capsule::ModuleId;
@@ -79,13 +80,48 @@ impl super::AnalysisDb {
         query_span: Span,
     ) -> QueryResult<Option<HoverInfo>> {
         let program = self.program_pipeline_for_file(file_id)?;
-        let state = if let Some(state) = program
-            .entry_module_id
-            .and_then(|entry| program.module_states.get(&entry).cloned())
-        {
-            state
+        let state = if let Some(entry) = program.entry_module_id {
+            self.tracer().emit(
+                AnalysisTraceCategory::Hover,
+                format!(
+                    "program hover entry={entry:?} has_entry_state={} module_states={}",
+                    program.module_states.contains_key(&entry),
+                    program.module_states.len()
+                ),
+            );
+            if let Some(state) = program.module_states.get(&entry).cloned() {
+                self.tracer().emit(
+                    AnalysisTraceCategory::Hover,
+                    format!(
+                        "program hover using entry state typed={} resolved={}",
+                        state.typed.is_some(),
+                        state.resolved.is_some()
+                    ),
+                );
+                state
+            } else {
+                let fallback = self.lookup_state_for_file(file_id)?;
+                self.tracer().emit(
+                    AnalysisTraceCategory::Hover,
+                    format!(
+                        "program hover fallback lookup_state_for_file typed={} resolved={}",
+                        fallback.typed.is_some(),
+                        fallback.resolved.is_some()
+                    ),
+                );
+                fallback
+            }
         } else {
-            self.lookup_state_for_file(file_id)?
+            let fallback = self.lookup_state_for_file(file_id)?;
+            self.tracer().emit(
+                AnalysisTraceCategory::Hover,
+                format!(
+                    "program hover no entry module; fallback typed={} resolved={}",
+                    fallback.typed.is_some(),
+                    fallback.resolved.is_some()
+                ),
+            );
+            fallback
         };
         let snapshot = self.snapshot();
         let source = snapshot.text(file_id);

@@ -378,6 +378,7 @@ fn hash_imported_symbol(
     symbol.has_callable().hash(hasher);
     symbol.has_type().hash(hasher);
     symbol.has_trait().hash(hasher);
+    symbol.type_owner_name.hash(hasher);
     for symbol_id in &symbol.callable_symbols {
         symbol_id.hash(hasher);
     }
@@ -387,6 +388,9 @@ fn hash_imported_symbol(
         ty.hash(hasher);
     }
     for sig in canonicalize_callable_sigs(&symbol.callable_sigs) {
+        sig.hash(hasher);
+    }
+    for sig in canonicalize_method_sigs(&symbol.method_sigs) {
         sig.hash(hasher);
     }
     if let Some(trait_sig) = symbol.trait_sig.as_ref() {
@@ -400,6 +404,25 @@ fn canonicalize_callable_sigs(callable_sigs: &[ImportedCallableSig]) -> Vec<Stri
     rendered
 }
 
+fn canonicalize_method_sigs(
+    method_sigs: &HashMap<String, Vec<crate::core::resolve::ImportedMethodSig>>,
+) -> Vec<String> {
+    let mut rendered = Vec::new();
+    let mut names: Vec<_> = method_sigs.keys().collect();
+    names.sort();
+    for name in names {
+        if let Some(sigs) = method_sigs.get(name) {
+            let mut by_name = sigs
+                .iter()
+                .map(|sig| render_method_sig(name, sig))
+                .collect::<Vec<_>>();
+            by_name.sort();
+            rendered.extend(by_name);
+        }
+    }
+    rendered
+}
+
 fn render_callable_sig(sig: &ImportedCallableSig) -> String {
     let params = sig
         .params
@@ -407,7 +430,50 @@ fn render_callable_sig(sig: &ImportedCallableSig) -> String {
         .map(render_param_sig)
         .collect::<Vec<_>>()
         .join(",");
-    format!("({params})->{}", sig.ret_ty)
+    let generics = if sig.type_param_count == 0 {
+        String::new()
+    } else {
+        let names = (0..sig.type_param_count)
+            .map(|index| {
+                sig.type_param_var_names
+                    .get(&(index as u32))
+                    .cloned()
+                    .unwrap_or_else(|| format!("T{index}"))
+            })
+            .collect::<Vec<_>>()
+            .join(",");
+        format!("<{names}>")
+    };
+    format!("{generics}({params})->{}", sig.ret_ty)
+}
+
+fn render_method_sig(name: &str, sig: &crate::core::resolve::ImportedMethodSig) -> String {
+    let params = sig
+        .params
+        .iter()
+        .map(render_param_sig)
+        .collect::<Vec<_>>()
+        .join(",");
+    let generics = if sig.type_param_count == 0 {
+        String::new()
+    } else {
+        let names = (0..sig.type_param_count)
+            .map(|index| {
+                sig.type_param_var_names
+                    .get(&(index as u32))
+                    .cloned()
+                    .unwrap_or_else(|| format!("T{index}"))
+            })
+            .collect::<Vec<_>>()
+            .join(",");
+        format!("<{names}>")
+    };
+    format!(
+        "{name}{generics}({params})->{} self={}:{}",
+        sig.ret_ty,
+        param_mode_tag(&sig.self_mode),
+        sig.self_ty
+    )
 }
 
 fn render_param_sig(sig: &ImportedParamSig) -> String {

@@ -31,6 +31,7 @@ use crate::services::analysis::pipeline::{
 use crate::services::analysis::program_imports::ProgramImportFactsCache;
 use crate::services::analysis::query::{QueryKey, QueryResult, QueryRuntime};
 use crate::services::analysis::snapshot::{AnalysisSnapshot, FileId};
+use crate::services::analysis::trace::AnalysisTraceCategory;
 use std::fs;
 use std::sync::Arc;
 
@@ -105,6 +106,13 @@ pub(crate) fn run_program_pipeline_for_file_with_options(
         };
         let program_context = crate::core::context::CapsuleParsedContext::new(program);
         let entry_module_id = program_context.entry();
+        rt.tracer().emit(
+            AnalysisTraceCategory::Program,
+            format!(
+                "start entry={entry_module_id:?} module_count={}",
+                program_context.dependency_order_from_entry().len()
+            ),
+        );
         let mut import_facts = ProgramImportFactsCache::default();
         let parsed_prelude = parsed_prelude_decl_module(program_context.next_node_id_gen());
         let mut all_diagnostics = Vec::new();
@@ -128,7 +136,16 @@ pub(crate) fn run_program_pipeline_for_file_with_options(
                 .with_module_path(parsed.source.path.clone());
             let imported_modules = import_facts.imported_modules_for(&program_context, module_id);
             let imported_symbols = import_facts.imported_symbols_for(&program_context, module_id);
+            let incomplete_imports = ProgramImportFactsCache::incomplete_imports(&imported_symbols);
             let skip_typecheck = ProgramImportFactsCache::should_skip_typecheck(&imported_symbols);
+            rt.tracer().emit(
+                AnalysisTraceCategory::Program,
+                format!(
+                    "module={module_id:?} imported_modules={} imported_symbols={} skip_typecheck={skip_typecheck} incomplete={incomplete_imports:?}",
+                    imported_modules.len(),
+                    imported_symbols.len()
+                ),
+            );
             let mut state = run_module_pipeline_with_parsed_and_imports(
                 rt,
                 module_id,
@@ -156,6 +173,15 @@ pub(crate) fn run_program_pipeline_for_file_with_options(
             if let Some(typed) = &state.typechecked.product {
                 import_facts.ingest_typed(module_id, typed);
             }
+            rt.tracer().emit(
+                AnalysisTraceCategory::Program,
+                format!(
+                    "module={module_id:?} resolved={} typed={} semchecked={}",
+                    state.resolved.product.is_some(),
+                    state.typechecked.product.is_some(),
+                    state.semchecked.product.is_some()
+                ),
+            );
             let mut module_diags = collect_sorted_diagnostics(&state);
             let file_path = parsed.source.file_path.to_string_lossy().to_string();
             let file_id_meta = snapshot_file_id_for_path(&snapshot, &parsed.source.file_path)

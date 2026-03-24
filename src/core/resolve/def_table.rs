@@ -48,6 +48,10 @@ impl DefTableBuilder {
         self.node_def.insert(node_id, def_id);
     }
 
+    pub fn add_def_with_id(&mut self, id: DefId, name: String, kind: DefKind) {
+        self.defs.push(Def { id, name, kind });
+    }
+
     pub fn finish(self) -> DefTable {
         DefTable {
             defs: self.defs,

@@ -3535,6 +3535,34 @@ fn diagnostics_for_program_file_csv_grade_rewrite_entry_file_is_clean() {
 }
 
 #[test]
+fn hover_at_program_file_csv_grade_rewrite_local_function_definition_name_is_available() {
+    let mut db = AnalysisDb::new();
+
+    let path =
+        Path::new(env!("CARGO_MANIFEST_DIR")).join("examples/basics/csv_grade_rewrite_small.mc");
+    let source = fs::read_to_string(&path).expect("failed to read csv rewrite example");
+    let file_id = db.upsert_disk_text(path, source.clone());
+
+    let query_span = span_for_substring(&source, "parse_row");
+    let hover = db
+        .hover_at_program_file(file_id, query_span)
+        .expect("program hover query should succeed")
+        .expect("expected hover info for local function definition");
+
+    assert_eq!(hover.def_name.as_deref(), Some("parse_row"));
+    assert!(
+        hover.display.contains("parse_row"),
+        "expected hover display to mention parse_row, got: {}",
+        hover.display
+    );
+    assert!(
+        hover.display.contains("InputRow | ParseError"),
+        "expected hover display to show the source return type, got: {}",
+        hover.display
+    );
+}
+
+#[test]
 fn diagnostics_for_program_file_std_io_examples_ignore_unrelated_open_overlays() {
     let mut db = AnalysisDb::new();
 

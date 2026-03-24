@@ -18,17 +18,18 @@ use crate::core::ast::{
     StructFieldBindPattern, TypeExpr, TypeParam, UnaryOp,
 };
 use crate::core::diag::Span;
-use crate::core::resolve::{DefId, DefKind};
+use crate::core::resolve::{DefId, DefKind, DefTable, ImportedFacts};
 use crate::core::typecheck::engine::TypecheckEngine;
 use crate::core::typecheck::errors::TypeCheckError;
 use crate::core::typecheck::type_map::{
-    resolve_param_type_expr_with_params, resolve_return_type_expr_with_params,
+    TypeDefLookup, resolve_param_type_expr_with_params, resolve_return_type_expr_with_params,
     resolve_type_def_with_args, resolve_type_expr_with_params,
 };
 use crate::core::types::{TyVarId, Type};
 
 use super::typesys::TypeVarStore;
 use super::utils::fn_param_mode;
+use crate::core::ast::TypeDef;
 use crate::core::context::ResolvedContext;
 
 mod calls;
@@ -352,6 +353,7 @@ struct ClosureSigInfo {
 
 struct ConstraintCollector<'a> {
     ctx: &'a ResolvedContext,
+    imported_facts: &'a ImportedFacts,
     type_defs: &'a HashMap<String, Type>,
     allow_missing_def_ids: bool,
     vars: &'a mut TypeVarStore,
@@ -363,6 +365,7 @@ struct ConstraintCollector<'a> {
 impl<'a> ConstraintCollector<'a> {
     fn new(
         ctx: &'a ResolvedContext,
+        imported_facts: &'a ImportedFacts,
         type_defs: &'a HashMap<String, Type>,
         allow_missing_def_ids: bool,
         vars: &'a mut TypeVarStore,
@@ -370,6 +373,7 @@ impl<'a> ConstraintCollector<'a> {
     ) -> Self {
         Self {
             ctx,
+            imported_facts,
             type_defs,
             allow_missing_def_ids,
             vars,
@@ -426,27 +430,30 @@ impl<'a> ConstraintCollector<'a> {
     }
 
     fn resolve_type_in_scope(&self, ty_expr: &TypeExpr) -> Result<Type, TypeCheckError> {
+        let type_lookup = ConstraintTypeLookup::new(self.ctx, self.imported_facts);
         resolve_type_expr_with_params(
             &self.ctx.def_table,
-            self.ctx,
+            &type_lookup,
             ty_expr,
             self.current_type_params(),
         )
     }
 
     fn resolve_param_type_in_scope(&self, ty_expr: &TypeExpr) -> Result<Type, TypeCheckError> {
+        let type_lookup = ConstraintTypeLookup::new(self.ctx, self.imported_facts);
         resolve_param_type_expr_with_params(
             &self.ctx.def_table,
-            self.ctx,
+            &type_lookup,
             ty_expr,
             self.current_type_params(),
         )
     }
 
     fn resolve_return_type_in_scope(&self, ty_expr: &TypeExpr) -> Result<Type, TypeCheckError> {
+        let type_lookup = ConstraintTypeLookup::new(self.ctx, self.imported_facts);
         resolve_return_type_expr_with_params(
             &self.ctx.def_table,
-            self.ctx,
+            &type_lookup,
             ty_expr,
             self.current_type_params(),
         )
@@ -587,14 +594,21 @@ fn is_synthesized_missing_else(then_body: &Expr, else_body: &Expr) -> bool {
 /// Pass 2: collect typing constraints from AST traversal.
 pub(crate) fn run(engine: &mut TypecheckEngine) -> Result<(), Vec<TypeCheckError>> {
     let ctx = engine.context().clone();
+    let imported_facts = engine.env().imported_facts.clone();
     let type_defs = engine.env().type_defs.clone();
     let allow_missing_def_ids = engine.is_partial_mode();
     let mut output = ConstrainOutput::default();
 
     {
         let vars = engine.type_vars_mut();
-        let mut collector =
-            ConstraintCollector::new(&ctx, &type_defs, allow_missing_def_ids, vars, &mut output);
+        let mut collector = ConstraintCollector::new(
+            &ctx,
+            &imported_facts,
+            &type_defs,
+            allow_missing_def_ids,
+            vars,
+            &mut output,
+        );
         collector.collect_module();
     }
 
@@ -604,6 +618,32 @@ pub(crate) fn run(engine: &mut TypecheckEngine) -> Result<(), Vec<TypeCheckError
         Ok(())
     } else {
         Err(engine.state().diags.clone())
+    }
+}
+
+struct ConstraintTypeLookup<'a> {
+    context: &'a ResolvedContext,
+    imported_facts: &'a ImportedFacts,
+}
+
+impl<'a> ConstraintTypeLookup<'a> {
+    fn new(context: &'a ResolvedContext, imported_facts: &'a ImportedFacts) -> Self {
+        Self {
+            context,
+            imported_facts,
+        }
+    }
+}
+
+impl TypeDefLookup for ConstraintTypeLookup<'_> {
+    fn type_def_by_id(&self, _def_table: &DefTable, def_id: DefId) -> Option<&TypeDef> {
+        self.context
+            .module
+            .type_def_by_id(&self.context.def_table, def_id)
+    }
+
+    fn imported_type_by_id(&self, def_id: DefId) -> Option<&Type> {
+        self.imported_facts.imported_type(def_id)
     }
 }
 

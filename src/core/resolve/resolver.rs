@@ -1,4 +1,4 @@
-use std::collections::{HashMap, HashSet};
+use std::collections::{BTreeMap, HashMap, HashSet};
 
 use crate::core::ast::visit::*;
 use crate::core::ast::*;
@@ -29,8 +29,10 @@ pub struct ImportedModule {
 pub struct ImportedSymbol {
     pub callable_sigs: Vec<ImportedCallableSig>,
     pub callable_symbols: Vec<SymbolId>,
+    pub type_owner_name: Option<String>,
     pub type_ty: Option<Type>,
     pub type_symbol: Option<SymbolId>,
+    pub method_sigs: HashMap<String, Vec<ImportedMethodSig>>,
     pub trait_sig: Option<ImportedTraitSig>,
     pub trait_symbol: Option<SymbolId>,
 }
@@ -44,7 +46,14 @@ impl ImportedModule {
         let member_symbols = members
             .iter()
             .filter_map(|member| {
-                ImportedSymbol::from_exports(exports, member, Vec::new(), None, None)
+                ImportedSymbol::from_exports(
+                    exports,
+                    member,
+                    Vec::new(),
+                    None,
+                    HashMap::new(),
+                    None,
+                )
                     .map(|imported| (member.clone(), imported))
             })
             .collect();
@@ -64,6 +73,7 @@ impl ImportedSymbol {
         member: &str,
         callable_sigs: Vec<ImportedCallableSig>,
         type_ty: Option<Type>,
+        method_sigs: HashMap<String, Vec<ImportedMethodSig>>,
         trait_sig: Option<ImportedTraitSig>,
     ) -> Option<Self> {
         let has_callable = exports
@@ -89,11 +99,13 @@ impl ImportedSymbol {
                 .flat_map(|items| items.iter())
                 .filter_map(|item| item.symbol_id.clone())
                 .collect(),
+            type_owner_name: has_type.then(|| member.to_string()),
             type_ty: if has_type { type_ty } else { None },
             type_symbol: exports
                 .types
                 .get(member)
                 .and_then(|item| item.symbol_id.clone()),
+            method_sigs: if has_type { method_sigs } else { HashMap::new() },
             trait_sig: if has_trait { trait_sig } else { None },
             trait_symbol: exports
                 .traits
@@ -117,7 +129,9 @@ impl ImportedSymbol {
     pub fn from_binding(
         binding: &ImportedSymbolBinding,
         callable_sigs: Vec<ImportedCallableSig>,
+        type_owner_name: Option<String>,
         type_ty: Option<Type>,
+        method_sigs: HashMap<String, Vec<ImportedMethodSig>>,
         trait_sig: Option<ImportedTraitSig>,
     ) -> Option<Self> {
         if binding.is_empty() {
@@ -131,11 +145,13 @@ impl ImportedSymbol {
                 .iter()
                 .filter_map(|item| item.symbol_id.clone())
                 .collect(),
+            type_owner_name,
             type_ty,
             type_symbol: binding
                 .type_def
                 .as_ref()
                 .and_then(|item| item.symbol_id.clone()),
+            method_sigs,
             trait_sig,
             trait_symbol: binding
                 .trait_def
@@ -149,6 +165,32 @@ impl ImportedSymbol {
 pub struct ImportedCallableSig {
     pub params: Vec<ImportedParamSig>,
     pub ret_ty: Type,
+    pub type_param_count: usize,
+    pub type_param_var_names: BTreeMap<u32, String>,
+    pub type_param_bounds: Vec<Option<String>>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ImportedMethodSig {
+    pub self_ty: Type,
+    pub self_mode: ParamMode,
+    pub params: Vec<ImportedParamSig>,
+    pub ret_ty: Type,
+    pub type_param_count: usize,
+    pub type_param_var_names: BTreeMap<u32, String>,
+    pub type_param_bounds: Vec<Option<String>>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ImportedResolvedMethodSig {
+    pub def_id: DefId,
+    pub self_ty: Type,
+    pub self_mode: ParamMode,
+    pub params: Vec<ImportedParamSig>,
+    pub ret_ty: Type,
+    pub type_param_count: usize,
+    pub type_param_var_names: BTreeMap<u32, String>,
+    pub type_param_bounds: Vec<Option<String>>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -198,6 +240,7 @@ pub struct ImportedFacts {
     defs_by_local_def: HashMap<DefId, ImportedDefFacts>,
     callable_sigs_by_symbol: HashMap<SymbolId, ImportedCallableSig>,
     type_defs_by_symbol: HashMap<SymbolId, Type>,
+    method_sigs_by_owner: HashMap<String, HashMap<String, Vec<ImportedResolvedMethodSig>>>,
     trait_defs_by_symbol: HashMap<SymbolId, ImportedTraitSig>,
 }
 
@@ -248,6 +291,13 @@ impl ImportedFacts {
         })
     }
 
+    pub fn method_entries(
+        &self,
+    ) -> impl Iterator<Item = (&String, &HashMap<String, Vec<ImportedResolvedMethodSig>>)> + '_
+    {
+        self.method_sigs_by_owner.iter()
+    }
+
     pub fn type_entries(&self) -> impl Iterator<Item = (DefId, &Type)> + '_ {
         self.defs_by_local_def.iter().filter_map(|(def_id, facts)| {
             facts
@@ -269,6 +319,13 @@ impl ImportedFacts {
     }
 }
 
+fn nominal_owner_name(ty: &Type) -> Option<&str> {
+    match ty {
+        Type::Struct { name, .. } | Type::Enum { name, .. } => Some(name.as_str()),
+        _ => None,
+    }
+}
+
 pub struct SymbolResolver {
     scopes: Vec<Scope>,
     errors: Vec<ResolveError>,
@@ -284,6 +341,7 @@ pub struct SymbolResolver {
     imported_defs: HashMap<DefId, ImportedDefFacts>,
     imported_callable_sigs: HashMap<SymbolId, ImportedCallableSig>,
     imported_type_defs: HashMap<SymbolId, Type>,
+    imported_method_sigs_by_owner: HashMap<String, HashMap<String, Vec<ImportedResolvedMethodSig>>>,
     imported_trait_defs: HashMap<SymbolId, ImportedTraitSig>,
 }
 
@@ -319,6 +377,7 @@ impl SymbolResolver {
             imported_defs: HashMap::new(),
             imported_callable_sigs: HashMap::new(),
             imported_type_defs: HashMap::new(),
+            imported_method_sigs_by_owner: HashMap::new(),
             imported_trait_defs: HashMap::new(),
         }
     }
@@ -835,6 +894,41 @@ impl SymbolResolver {
             {
                 self.imported_type_defs.insert(symbol_id, type_ty);
             }
+            if let Some(owner_name) = imported
+                .type_ty
+                .as_ref()
+                .and_then(nominal_owner_name)
+                .map(str::to_string)
+                .or(imported.type_owner_name.clone())
+            {
+                for (method_name, method_sigs) in imported.method_sigs {
+                    let mut resolved_methods = Vec::with_capacity(method_sigs.len());
+                    for sig in method_sigs {
+                        let hidden_def_id = self.add_hidden_imported_callable_def(
+                            &format!("{owner_name}::{method_name}"),
+                            DefKind::FuncDef {
+                                attrs: FuncAttrs::default(),
+                            },
+                        );
+                        resolved_methods.push(ImportedResolvedMethodSig {
+                            def_id: hidden_def_id,
+                            self_ty: sig.self_ty,
+                            self_mode: sig.self_mode,
+                            params: sig.params,
+                            ret_ty: sig.ret_ty,
+                            type_param_count: sig.type_param_count,
+                            type_param_var_names: sig.type_param_var_names,
+                            type_param_bounds: sig.type_param_bounds,
+                        });
+                    }
+                    self.imported_method_sigs_by_owner
+                        .entry(owner_name.clone())
+                        .or_default()
+                        .entry(method_name)
+                        .or_default()
+                        .extend(resolved_methods);
+                }
+            }
             self.imported_defs.insert(
                 def_id,
                 ImportedDefFacts {
@@ -864,6 +958,13 @@ impl SymbolResolver {
                 },
             );
         }
+    }
+
+    fn add_hidden_imported_callable_def(&mut self, name: &str, kind: DefKind) -> DefId {
+        let def_id = self.def_id_gen.new_id();
+        self.def_table_builder
+            .add_def_with_id(def_id, name.to_string(), kind);
+        def_id
     }
 
     fn populate_trait_defs(&mut self, trait_defs: &[&TraitDef]) {
@@ -2044,6 +2145,7 @@ pub fn resolve_with_imports_and_symbols_partial(
         defs_by_local_def: std::mem::take(&mut resolver.imported_defs),
         callable_sigs_by_symbol: std::mem::take(&mut resolver.imported_callable_sigs),
         type_defs_by_symbol: std::mem::take(&mut resolver.imported_type_defs),
+        method_sigs_by_owner: std::mem::take(&mut resolver.imported_method_sigs_by_owner),
         trait_defs_by_symbol: std::mem::take(&mut resolver.imported_trait_defs),
     };
     let mut context = ast_context.with_def_table(def_table);
@@ -2112,7 +2214,14 @@ pub fn resolve_program(
                 continue;
             };
             if let Some(imported) =
-                ImportedSymbol::from_exports(dep_exports, member, Vec::new(), None, None)
+                ImportedSymbol::from_exports(
+                    dep_exports,
+                    member,
+                    Vec::new(),
+                    None,
+                    HashMap::new(),
+                    None,
+                )
             {
                 imported_symbols.insert(req.alias.clone(), imported);
             }
