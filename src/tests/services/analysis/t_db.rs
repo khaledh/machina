@@ -3586,6 +3586,71 @@ fn hover_at_program_file_csv_grade_rewrite_local_struct_type_reference_shows_sou
 }
 
 #[test]
+fn hover_at_program_file_csv_grade_rewrite_opaque_pipeline_binding_prefers_iterable_annotation() {
+    let mut db = AnalysisDb::new();
+
+    let path =
+        Path::new(env!("CARGO_MANIFEST_DIR")).join("examples/basics/csv_grade_rewrite_small.mc");
+    let source = fs::read_to_string(&path).expect("failed to read csv rewrite example");
+    let file_id = db.upsert_disk_text(path, source.clone());
+
+    let query_span = span_for_substring_with_len(
+        &source,
+        "pipeline: Iterable<string>",
+        "pipeline".len(),
+    );
+    let hover = db
+        .hover_at_program_file(file_id, query_span)
+        .expect("program hover query should succeed")
+        .expect("expected hover info for pipeline binding");
+
+    assert_eq!(hover.def_name.as_deref(), Some("pipeline"));
+    assert_eq!(hover.display, "pipeline: Iterable<string>");
+}
+
+#[test]
+fn hover_at_program_file_csv_grade_rewrite_opaque_pipeline_use_prefers_iterable_annotation() {
+    let mut db = AnalysisDb::new();
+
+    let path =
+        Path::new(env!("CARGO_MANIFEST_DIR")).join("examples/basics/csv_grade_rewrite_small.mc");
+    let source = fs::read_to_string(&path).expect("failed to read csv rewrite example");
+    let file_id = db.upsert_disk_text(path, source.clone());
+
+    let query_span = span_for_substring_with_len(&source, "pipeline)?", "pipeline".len());
+    let hover = db
+        .hover_at_program_file(file_id, query_span)
+        .expect("program hover query should succeed")
+        .expect("expected hover info for pipeline use");
+
+    assert_eq!(hover.def_name.as_deref(), Some("pipeline"));
+    assert_eq!(hover.display, "pipeline: Iterable<string>");
+}
+
+#[test]
+fn type_at_program_file_csv_grade_rewrite_opaque_pipeline_use_prefers_iterable_annotation() {
+    let mut db = AnalysisDb::new();
+
+    let path =
+        Path::new(env!("CARGO_MANIFEST_DIR")).join("examples/basics/csv_grade_rewrite_small.mc");
+    let source = fs::read_to_string(&path).expect("failed to read csv rewrite example");
+    let file_id = db.upsert_disk_text(path, source.clone());
+
+    let query_span = span_for_substring_with_len(&source, "pipeline)?", "pipeline".len());
+    let ty = db
+        .type_at_program_file(file_id, query_span)
+        .expect("program type query should succeed")
+        .expect("expected type info for pipeline use");
+
+    assert_eq!(
+        ty,
+        Type::Iterable {
+            item_ty: Box::new(Type::String),
+        }
+    );
+}
+
+#[test]
 fn hover_for_empty_struct_type_reference_renders_compact_braces() {
     let mut db = AnalysisDb::new();
     let source = r#"

@@ -27,12 +27,11 @@ use crate::core::ast::{
 };
 use crate::core::diag::{Position, Span};
 use crate::core::resolve::{DefId, DefTable};
-use crate::core::typecheck::type_map::TypeMap;
 use crate::core::types::Type;
 use crate::services::analysis::code_actions::code_actions_for_diagnostic_with_source;
 use crate::services::analysis::diagnostics::Diagnostic;
 use crate::services::analysis::pipeline::LookupState;
-use crate::services::analysis::results::CodeAction;
+use crate::services::analysis::results::{CodeAction, TypeLookup};
 use crate::services::analysis::syntax_index::{node_at_span, span_intersects_span};
 
 pub(crate) fn type_at_span(state: &LookupState, query_span: Span) -> Option<Type> {
@@ -41,26 +40,33 @@ pub(crate) fn type_at_span(state: &LookupState, query_span: Span) -> Option<Type
     if state.poisoned_nodes.contains(&node_id) {
         return None;
     }
-    typed
-        .type_map
-        .lookup_node_type(node_id)
+    displayed_node_type(typed, node_id)
         .filter(|ty| !matches!(ty, Type::Unknown))
 }
 
 pub(crate) fn resolved_binding_type_for_def(
     module: &Module,
-    type_map: &TypeMap,
+    typed: &impl TypeLookup,
     def_table: &DefTable,
     def_id: DefId,
     fallback: Option<Type>,
 ) -> Option<Type> {
+    if let Some(opaque) = typed.lookup_opaque_binding(def_id) {
+        return Some(opaque.exposed_ty.clone());
+    }
     match fallback {
         Some(ty) if !ty.contains_unresolved() => Some(ty),
         _ => binding_value_node_id_for_def(module, def_table, def_id)
-            .and_then(|node_id| type_map.lookup_node_type(node_id))
+            .and_then(|node_id| displayed_node_type(typed, node_id))
             .filter(|ty| !matches!(ty, Type::Unknown))
             .or(fallback),
     }
+}
+
+pub(crate) fn displayed_node_type(typed: &impl TypeLookup, node_id: NodeId) -> Option<Type> {
+    typed
+        .lookup_exposed_node_type(node_id)
+        .or_else(|| typed.lookup_node_type(node_id))
 }
 
 pub(crate) fn code_actions_for_range(

@@ -453,7 +453,7 @@ fn receiver_type_for_call(
     };
     let receiver_ty = resolved_binding_type_for_def(
         &typed.module,
-        &typed.type_map,
+        typed,
         &typed.def_table,
         def_id,
         receiver_ty,

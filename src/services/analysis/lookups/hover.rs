@@ -21,7 +21,7 @@ use crate::services::analysis::trace::{AnalysisTraceCategory, AnalysisTracer};
 
 use super::callable_signature::{format_source_callable_signature, format_source_type_signature};
 use super::definition::{linear_decl_target_at_span, machine_handle_def_at_span};
-use super::{identifier_token_at_span, resolved_binding_type_for_def};
+use super::{displayed_node_type, identifier_token_at_span, resolved_binding_type_for_def};
 
 pub(crate) fn hover_at_span_in_file(
     state: &LookupState,
@@ -162,7 +162,7 @@ pub(crate) fn hover_for_def_in_state(state: &LookupState, def_id: DefId) -> Opti
         .unwrap_or_default();
     let ty = resolved_binding_type_for_def(
         &typed.module,
-        &typed.type_map,
+        typed,
         &typed.def_table,
         def_id,
         typed.type_map.lookup_def_type(def),
@@ -207,7 +207,7 @@ fn try_call_site_hover(
     }
     let ty = resolved_binding_type_for_def(
         &typed.module,
-        &typed.type_map,
+        typed,
         &typed.def_table,
         def_id,
         typed.type_map.lookup_def_type(def),
@@ -273,15 +273,12 @@ fn try_node_hover(
         {
             continue;
         }
-        let node_ty = typed
-            .type_map
-            .lookup_node_type(node_id)
-            .filter(|ty| !matches!(ty, Type::Unknown));
+        let node_ty = displayed_node_type(typed, node_id).filter(|ty| !matches!(ty, Type::Unknown));
         let ty = def_id
             .map(|def_id| {
                 resolved_binding_type_for_def(
                     &typed.module,
-                    &typed.type_map,
+                    typed,
                     &typed.def_table,
                     def_id,
                     node_ty.clone(),
