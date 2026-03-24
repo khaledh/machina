@@ -43,7 +43,7 @@ impl<'a> ConstraintCollector<'a> {
                 };
                 if let Some(decl_ty) = expected_decl_ty.clone() {
                     if let Some(exposed_ty) = opaque_decl_ty {
-                        self.collect_bind_pattern(pattern, exposed_ty.clone());
+                        self.collect_bind_pattern(pattern, value_ty.clone());
                         self.out.opaque_facts.push(OpaqueFact::LocalBinding {
                             def_id: self.lookup_def_id(pattern.id),
                             binding_node: pattern.id,

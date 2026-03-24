@@ -69,7 +69,7 @@ fn main() -> () | IoError | ParseError {
 
     using reader = open_read(input_path)?.text() {
         let text = reader.read_all()?;
-        let pipeline = text.lines()
+        let pipeline: Iterable<string> = text.lines()
             |> from_csv(
                 parse_row,
                 CsvParseOptions {

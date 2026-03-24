@@ -3532,9 +3532,9 @@ fn test_iterable_allowed_in_immutable_local_annotation() {
         .def_table
         .lookup_def(def_id)
         .and_then(|def| typed.type_map.lookup_def_type(def))
-        .expect("binding should keep the exposed iterable type at source level");
-    assert_eq!(concrete, opaque.exposed_ty);
-    assert_ne!(opaque.witness_ty, opaque.exposed_ty);
+        .expect("binding should still keep its concrete witness type");
+    assert_ne!(concrete, opaque.exposed_ty);
+    assert_eq!(concrete, opaque.witness_ty);
 }
 
 #[test]
