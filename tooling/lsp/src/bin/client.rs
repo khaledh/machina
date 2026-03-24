@@ -2,8 +2,8 @@ use std::io::{self, BufRead, Write};
 use std::path::PathBuf;
 
 use clap::Parser as ClapParser;
-use machina_lsp::client::{ClientError, LspClient};
 use machina::services::analysis::trace::{AnalysisTraceCategory, AnalysisTracer};
+use machina_lsp::client::{ClientError, LspClient};
 use serde_json::Value;
 
 #[derive(ClapParser, Debug)]
@@ -23,25 +23,11 @@ struct Args {
 
 #[derive(clap::Subcommand, Debug, Clone, PartialEq, Eq)]
 enum Command {
-    Diagnostics {
-        file: PathBuf,
-    },
-    Hover {
-        file: PathBuf,
-        pos: String,
-    },
-    Definition {
-        file: PathBuf,
-        pos: String,
-    },
-    Completion {
-        file: PathBuf,
-        pos: String,
-    },
-    Signature {
-        file: PathBuf,
-        pos: String,
-    },
+    Diagnostics { file: PathBuf },
+    Hover { file: PathBuf, pos: String },
+    Definition { file: PathBuf, pos: String },
+    Completion { file: PathBuf, pos: String },
+    Signature { file: PathBuf, pos: String },
 }
 
 fn main() {
@@ -71,7 +57,8 @@ fn run_one_shot(
     match command {
         Command::Diagnostics { file } => {
             let response = client.diagnostics(&file)?;
-            print_diagnostics_response(&mut stdout, &response).expect("stdout write should succeed");
+            print_diagnostics_response(&mut stdout, &response)
+                .expect("stdout write should succeed");
         }
         Command::Hover { file, pos } => {
             let (line, col) = parse_position(&pos)?;
@@ -81,20 +68,17 @@ fn run_one_shot(
         Command::Definition { file, pos } => {
             let (line, col) = parse_position(&pos)?;
             let response = client.definition(&file, line, col)?;
-            print_definition_response(&mut stdout, &response)
-                .expect("stdout write should succeed");
+            print_definition_response(&mut stdout, &response).expect("stdout write should succeed");
         }
         Command::Completion { file, pos } => {
             let (line, col) = parse_position(&pos)?;
             let response = client.completion(&file, line, col)?;
-            print_completion_response(&mut stdout, &response)
-                .expect("stdout write should succeed");
+            print_completion_response(&mut stdout, &response).expect("stdout write should succeed");
         }
         Command::Signature { file, pos } => {
             let (line, col) = parse_position(&pos)?;
             let response = client.signature(&file, line, col)?;
-            print_signature_response(&mut stdout, &response)
-                .expect("stdout write should succeed");
+            print_signature_response(&mut stdout, &response).expect("stdout write should succeed");
         }
     }
     Ok(())
@@ -228,7 +212,11 @@ fn execute_repl_command(
         }
         "trace" => {
             let Some(spec) = parts.get(1).copied() else {
-                writeln!(stdout, "trace is {}", format_trace_categories(&state.trace_categories))?;
+                writeln!(
+                    stdout,
+                    "trace is {}",
+                    format_trace_categories(&state.trace_categories)
+                )?;
                 return Ok(true);
             };
             match parse_trace_categories(&[spec.to_string()]) {
@@ -256,26 +244,38 @@ fn execute_repl_command(
             }
             Ok(true)
         }
-        "hover" => {
-            run_repl_read_command(client, state, parts.get(1).copied(), stdout, |client, path, line, col| {
-                client.hover(path, line, col)
-            }, print_hover_response)
-        }
-        "definition" => {
-            run_repl_read_command(client, state, parts.get(1).copied(), stdout, |client, path, line, col| {
-                client.definition(path, line, col)
-            }, print_definition_response)
-        }
-        "completion" => {
-            run_repl_read_command(client, state, parts.get(1).copied(), stdout, |client, path, line, col| {
-                client.completion(path, line, col)
-            }, print_completion_response)
-        }
-        "signature" => {
-            run_repl_read_command(client, state, parts.get(1).copied(), stdout, |client, path, line, col| {
-                client.signature(path, line, col)
-            }, print_signature_response)
-        }
+        "hover" => run_repl_read_command(
+            client,
+            state,
+            parts.get(1).copied(),
+            stdout,
+            |client, path, line, col| client.hover(path, line, col),
+            print_hover_response,
+        ),
+        "definition" => run_repl_read_command(
+            client,
+            state,
+            parts.get(1).copied(),
+            stdout,
+            |client, path, line, col| client.definition(path, line, col),
+            print_definition_response,
+        ),
+        "completion" => run_repl_read_command(
+            client,
+            state,
+            parts.get(1).copied(),
+            stdout,
+            |client, path, line, col| client.completion(path, line, col),
+            print_completion_response,
+        ),
+        "signature" => run_repl_read_command(
+            client,
+            state,
+            parts.get(1).copied(),
+            stdout,
+            |client, path, line, col| client.signature(path, line, col),
+            print_signature_response,
+        ),
         _ => {
             writeln!(stdout, "Unknown command: {cmd}")?;
             writeln!(stdout, "Type `help` for commands.")?;
@@ -410,7 +410,9 @@ fn print_hover_response(stdout: &mut impl Write, response: &Value) -> io::Result
 }
 
 fn print_definition_response(stdout: &mut impl Write, response: &Value) -> io::Result<()> {
-    let items = response["result"].as_array().expect("definition result should be an array");
+    let items = response["result"]
+        .as_array()
+        .expect("definition result should be an array");
     if items.is_empty() {
         writeln!(stdout, "No definition.")?;
         return Ok(());
@@ -467,7 +469,10 @@ fn print_signature_response(stdout: &mut impl Write, response: &Value) -> io::Re
 
 #[cfg(test)]
 mod tests {
-    use super::{Args, Command, format_trace_categories, parse_position, parse_trace_categories, run_repl_with_io};
+    use super::{
+        Args, Command, format_trace_categories, parse_position, parse_trace_categories,
+        run_repl_with_io,
+    };
     use clap::Parser as _;
     use std::fs;
     use std::io::Cursor;

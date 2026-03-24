@@ -89,17 +89,12 @@ impl<'a> StructuralChecker<'a> {
         span: Span,
     ) {
         // Enforce struct field existence, duplicates, and missing fields.
-        let Some(struct_fields) = self
-            .struct_fields
-            .get(name)
-            .cloned()
-            .or_else(|| {
-                self.ctx
-                    .type_map
-                    .lookup_node_type(node_id)
-                    .and_then(|ty| struct_field_names_from_type(&ty))
-            })
-        else {
+        let Some(struct_fields) = self.struct_fields.get(name).cloned().or_else(|| {
+            self.ctx
+                .type_map
+                .lookup_node_type(node_id)
+                .and_then(|ty| struct_field_names_from_type(&ty))
+        }) else {
             Self::push_err(
                 &mut self.errors,
                 span,
@@ -183,17 +178,12 @@ impl<'a> StructuralChecker<'a> {
                 .for_each_child_pattern(|pattern| self.check_pattern(pattern)),
             BindPatternKind::Struct { name, fields } => {
                 // Enforce struct pattern fields and recurse into subpatterns.
-                let Some(struct_fields) = self
-                    .struct_fields
-                    .get(name)
-                    .cloned()
-                    .or_else(|| {
-                        self.ctx
-                            .type_map
-                            .lookup_node_type(pattern.id)
-                            .and_then(|ty| struct_field_names_from_type(&ty))
-                    })
-                else {
+                let Some(struct_fields) = self.struct_fields.get(name).cloned().or_else(|| {
+                    self.ctx
+                        .type_map
+                        .lookup_node_type(pattern.id)
+                        .and_then(|ty| struct_field_names_from_type(&ty))
+                }) else {
                     Self::push_err(
                         &mut self.errors,
                         pattern.span,

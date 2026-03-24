@@ -4,7 +4,10 @@
 //! - source-style labels (`fn foo<T>(x: T) -> T`)
 //! - source param names/modes/types
 
-use crate::core::ast::{CallableRef, Module, Param, ParamMode, TypeExpr, TypeExprKind, TypeParam};
+use crate::core::ast::{
+    CallableRef, EnumDefVariant, Module, Param, ParamMode, StructDefField, TypeDefKind, TypeExpr,
+    TypeExprKind, TypeParam,
+};
 use crate::core::resolve::{DefId, DefKind, DefTable};
 use crate::core::typecheck::type_map::TypeMap;
 use crate::core::types::{Type, TypeRenderConfig, render_type};
@@ -40,7 +43,7 @@ pub(super) fn format_source_callable_signature(
     let map_type_params = |params: &[TypeParam]| {
         params
             .iter()
-            .map(|param| param.ident.clone())
+            .map(format_type_param_for_signature)
             .collect::<Vec<_>>()
     };
     let map_params = |params: &[Param]| {
@@ -140,10 +143,8 @@ pub(super) fn format_source_callable_signature(
         });
         rendered_params.push(format!("{mode_prefix}{param_name}: {param_ty}"));
     }
-    let rendered_ret =
-        format_type_expr_for_signature(ret_ty_expr_for_callable(callable)).unwrap_or_else(|| {
-            render(&ret_ty)
-        });
+    let rendered_ret = format_type_expr_for_signature(ret_ty_expr_for_callable(callable))
+        .unwrap_or_else(|| render(&ret_ty));
     let rendered_tparams = if type_params.is_empty() {
         String::new()
     } else {
@@ -159,6 +160,91 @@ pub(super) fn format_source_callable_signature(
     })
 }
 
+pub(super) fn format_source_type_signature(
+    def_id: Option<DefId>,
+    typed_module: Option<&Module>,
+    def_table: &DefTable,
+) -> Option<String> {
+    let def_id = def_id?;
+    let typed_module = typed_module?;
+    let def = def_table.lookup_def(def_id)?;
+    if !matches!(def.kind, DefKind::TypeDef { .. }) {
+        return None;
+    }
+    let type_def = typed_module.type_def_by_id(def_table, def_id)?;
+    let rendered_tparams = if type_def.type_params.is_empty() {
+        String::new()
+    } else {
+        format!(
+            "<{}>",
+            type_def
+                .type_params
+                .iter()
+                .map(format_type_param_for_signature)
+                .collect::<Vec<_>>()
+                .join(", ")
+        )
+    };
+    let rendered_body = match &type_def.kind {
+        TypeDefKind::Alias { aliased_ty } => format_type_expr_for_signature(aliased_ty)?,
+        TypeDefKind::Struct { fields } => format_struct_body(fields),
+        TypeDefKind::Enum { variants } => format_enum_variants(variants),
+        TypeDefKind::Linear { .. } => {
+            return Some(format!("type {}{}", type_def.name, rendered_tparams));
+        }
+    };
+    Some(format!(
+        "type {}{} = {}",
+        type_def.name, rendered_tparams, rendered_body
+    ))
+}
+
+fn format_type_param_for_signature(param: &TypeParam) -> String {
+    if let Some(bound) = &param.bound {
+        format!("{}: {}", param.ident, bound.name)
+    } else {
+        param.ident.clone()
+    }
+}
+
+fn format_struct_body(fields: &[StructDefField]) -> String {
+    if fields.is_empty() {
+        "{}".to_string()
+    } else {
+        format!("{{ {} }}", format_struct_fields(fields))
+    }
+}
+
+fn format_struct_fields(fields: &[StructDefField]) -> String {
+    fields
+        .iter()
+        .map(|field| {
+            let ty = format_type_expr_for_signature(&field.ty).unwrap_or_else(|| "_".to_string());
+            format!("{}: {}", field.name, ty)
+        })
+        .collect::<Vec<_>>()
+        .join(", ")
+}
+
+fn format_enum_variants(variants: &[EnumDefVariant]) -> String {
+    variants
+        .iter()
+        .map(|variant| {
+            if variant.payload.is_empty() {
+                variant.name.clone()
+            } else {
+                let payload = variant
+                    .payload
+                    .iter()
+                    .filter_map(format_type_expr_for_signature)
+                    .collect::<Vec<_>>()
+                    .join(", ");
+                format!("{}({})", variant.name, payload)
+            }
+        })
+        .collect::<Vec<_>>()
+        .join(" | ")
+}
 fn ret_ty_expr_for_callable(callable: CallableRef<'_>) -> &TypeExpr {
     match callable {
         CallableRef::FuncDecl(func_decl) => &func_decl.sig.ret_ty_expr,
@@ -169,7 +255,7 @@ fn ret_ty_expr_for_callable(callable: CallableRef<'_>) -> &TypeExpr {
     }
 }
 
-fn format_type_expr_for_signature(ty_expr: &TypeExpr) -> Option<String> {
+pub(super) fn format_type_expr_for_signature(ty_expr: &TypeExpr) -> Option<String> {
     use TypeExprKind;
     Some(match &ty_expr.kind {
         TypeExprKind::Infer => "_".to_string(),

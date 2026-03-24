@@ -2,7 +2,9 @@
 
 use std::collections::{BTreeMap, HashMap, HashSet};
 
-use crate::core::ast::{MethodBlock, MethodItem, MethodSig, ParamMode, TopLevelItem, TypeExpr, TypeExprKind, TypeParam};
+use crate::core::ast::{
+    MethodBlock, MethodItem, MethodSig, ParamMode, TopLevelItem, TypeExpr, TypeExprKind, TypeParam,
+};
 use crate::core::capsule::{ModuleId, ModulePath};
 use crate::core::context::{
     CapsuleParsedContext, ModuleExportFacts, ResolvedContext, TypeCheckedContext,
@@ -40,7 +42,8 @@ impl ProgramImportFactsCache {
             let mut imported =
                 ImportedModule::from_exports(&binding.module_path.to_string(), &binding.exports);
             for member in imported.members.clone() {
-                if let Some(materialized) = self.materialize_imported_symbol(&binding.exports, &member)
+                if let Some(materialized) =
+                    self.materialize_imported_symbol(&binding.exports, &member)
                 {
                     imported.member_symbols.insert(member, materialized);
                 }
@@ -135,7 +138,8 @@ impl ProgramImportFactsCache {
                 continue;
             };
             let mut reasons = Vec::new();
-            if imported.has_type() && imported.type_ty.is_none() && imported.method_sigs.is_empty() {
+            if imported.has_type() && imported.type_ty.is_none() && imported.method_sigs.is_empty()
+            {
                 reasons.push("missing-type");
             }
             if imported.has_trait() && imported.trait_sig.is_none() {
@@ -261,7 +265,14 @@ impl ProgramImportFactsCache {
             .and_then(|item| item.symbol_id.as_ref())
             .and_then(|symbol_id| self.trait_sigs_by_symbol.get(symbol_id))
             .cloned();
-        ImportedSymbol::from_exports(exports, member, callable_sigs, type_ty, method_sigs, trait_sig)
+        ImportedSymbol::from_exports(
+            exports,
+            member,
+            callable_sigs,
+            type_ty,
+            method_sigs,
+            trait_sig,
+        )
     }
 }
 
@@ -352,7 +363,10 @@ fn collect_public_callable_sigs_resolved(
                     .iter()
                     .enumerate()
                     .map(|(index, param)| {
-                        (resolved.def_table.def_id(param.id), TyVarId::new(index as u32))
+                        (
+                            resolved.def_table.def_id(param.id),
+                            TyVarId::new(index as u32),
+                        )
                     })
                     .collect::<HashMap<_, _>>(),
             )
@@ -453,15 +467,20 @@ fn collect_public_method_sigs(
         let Some(owner_symbol_id) = method_block_owner_symbol_id(typed, method_block) else {
             continue;
         };
-        let Some(self_ty) = resolve_method_block_self_type(typed, method_block, &receiver_type_params)
+        let Some(self_ty) =
+            resolve_method_block_self_type(typed, method_block, &receiver_type_params)
         else {
             continue;
         };
 
         for method_item in &method_block.method_items {
             let (sig, def_id) = match method_item {
-                MethodItem::Decl(method_decl) => (&method_decl.sig, typed.def_table.def_id(method_decl.id)),
-                MethodItem::Def(method_def) => (&method_def.sig, typed.def_table.def_id(method_def.id)),
+                MethodItem::Decl(method_decl) => {
+                    (&method_decl.sig, typed.def_table.def_id(method_decl.id))
+                }
+                MethodItem::Def(method_def) => {
+                    (&method_def.sig, typed.def_table.def_id(method_def.id))
+                }
             };
             let Some(def) = typed.def_table.lookup_def(def_id) else {
                 continue;
@@ -600,7 +619,9 @@ fn resolve_method_block_self_type(
             receiver_type_params
                 .iter()
                 .enumerate()
-                .map(|(index, param)| (typed.def_table.def_id(param.id), TyVarId::new(index as u32)))
+                .map(|(index, param)| {
+                    (typed.def_table.def_id(param.id), TyVarId::new(index as u32))
+                })
                 .collect::<HashMap<_, _>>(),
         )
     };
@@ -612,8 +633,13 @@ fn resolve_method_block_self_type(
         },
         span: method_block.span,
     };
-    resolve_type_expr_with_params(&typed.def_table, typed, &self_ty_expr, type_param_map.as_ref())
-        .ok()
+    resolve_type_expr_with_params(
+        &typed.def_table,
+        typed,
+        &self_ty_expr,
+        type_param_map.as_ref(),
+    )
+    .ok()
 }
 
 fn collect_public_trait_sigs(

@@ -19,7 +19,7 @@ use crate::services::analysis::syntax_index::{
 };
 use crate::services::analysis::trace::{AnalysisTraceCategory, AnalysisTracer};
 
-use super::callable_signature::format_source_callable_signature;
+use super::callable_signature::{format_source_callable_signature, format_source_type_signature};
 use super::definition::{linear_decl_target_at_span, machine_handle_def_at_span};
 use super::{identifier_token_at_span, resolved_binding_type_for_def};
 
@@ -107,13 +107,15 @@ pub(crate) fn hover_at_span_in_file(
             })
         })
     } else {
-        try_strategy(tracer, "resolved", || try_resolved_hover(
-            state,
-            normalized_query_span,
-            current_file_path,
-            source_text,
-            query_ident.as_deref(),
-        ))
+        try_strategy(tracer, "resolved", || {
+            try_resolved_hover(
+                state,
+                normalized_query_span,
+                current_file_path,
+                source_text,
+                query_ident.as_deref(),
+            )
+        })
     };
     if result.is_none() {
         hover_trace(tracer, "final none");
@@ -711,6 +713,9 @@ fn format_hover_label(
 ) -> String {
     if let Some(signature) = format_source_callable_signature(def_id, module, type_map, def_table) {
         return signature.label;
+    }
+    if let Some(signature) = format_source_type_signature(def_id, module, def_table) {
+        return signature;
     }
     let render_type = |ty: &Type| format_type_for_hover(ty, def_id, type_map);
     match (def_name, ty) {

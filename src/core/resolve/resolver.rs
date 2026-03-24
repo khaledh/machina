@@ -54,7 +54,7 @@ impl ImportedModule {
                     HashMap::new(),
                     None,
                 )
-                    .map(|imported| (member.clone(), imported))
+                .map(|imported| (member.clone(), imported))
             })
             .collect();
         Self {
@@ -105,7 +105,11 @@ impl ImportedSymbol {
                 .types
                 .get(member)
                 .and_then(|item| item.symbol_id.clone()),
-            method_sigs: if has_type { method_sigs } else { HashMap::new() },
+            method_sigs: if has_type {
+                method_sigs
+            } else {
+                HashMap::new()
+            },
             trait_sig: if has_trait { trait_sig } else { None },
             trait_symbol: exports
                 .traits
@@ -855,10 +859,9 @@ impl SymbolResolver {
 
     fn populate_imported_symbol_alias(&mut self, alias: &str, imported: ImportedSymbol) {
         if imported.has_callable() {
-            let def_id =
-                self.add_built_in_symbol(alias, false, |def_id| SymbolKind::Func {
-                    overloads: vec![def_id],
-                });
+            let def_id = self.add_built_in_symbol(alias, false, |def_id| SymbolKind::Func {
+                overloads: vec![def_id],
+            });
             let callable_symbols = imported
                 .callable_symbols
                 .iter()
@@ -890,7 +893,8 @@ impl SymbolResolver {
                 },
             });
             let type_symbol = imported.type_symbol.clone();
-            if let (Some(symbol_id), Some(type_ty)) = (type_symbol.clone(), imported.type_ty.clone())
+            if let (Some(symbol_id), Some(type_ty)) =
+                (type_symbol.clone(), imported.type_ty.clone())
             {
                 self.imported_type_defs.insert(symbol_id, type_ty);
             }
@@ -2213,16 +2217,14 @@ pub fn resolve_program(
             let Some(member) = &req.member else {
                 continue;
             };
-            if let Some(imported) =
-                ImportedSymbol::from_exports(
-                    dep_exports,
-                    member,
-                    Vec::new(),
-                    None,
-                    HashMap::new(),
-                    None,
-                )
-            {
+            if let Some(imported) = ImportedSymbol::from_exports(
+                dep_exports,
+                member,
+                Vec::new(),
+                None,
+                HashMap::new(),
+                None,
+            ) {
                 imported_symbols.insert(req.alias.clone(), imported);
             }
         }

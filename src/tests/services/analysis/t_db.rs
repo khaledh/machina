@@ -3563,6 +3563,53 @@ fn hover_at_program_file_csv_grade_rewrite_local_function_definition_name_is_ava
 }
 
 #[test]
+fn hover_at_program_file_csv_grade_rewrite_local_struct_type_reference_shows_source_shape() {
+    let mut db = AnalysisDb::new();
+
+    let path =
+        Path::new(env!("CARGO_MANIFEST_DIR")).join("examples/basics/csv_grade_rewrite_small.mc");
+    let source = fs::read_to_string(&path).expect("failed to read csv rewrite example");
+    let file_id = db.upsert_disk_text(path, source.clone());
+
+    let query_span =
+        span_for_substring_with_len(&source, "OutputRow) -> string", "OutputRow".len());
+    let hover = db
+        .hover_at_program_file(file_id, query_span)
+        .expect("program hover query should succeed")
+        .expect("expected hover info for local struct type reference");
+
+    assert_eq!(hover.def_name.as_deref(), Some("OutputRow"));
+    assert_eq!(
+        hover.display,
+        "type OutputRow = { name: string, grade: string }"
+    );
+}
+
+#[test]
+fn hover_for_empty_struct_type_reference_renders_compact_braces() {
+    let mut db = AnalysisDb::new();
+    let source = r#"
+type Empty = {}
+
+fn wrap(value: Empty) -> Empty {
+    value
+}
+"#;
+    let file_id = db.upsert_disk_text(
+        Path::new(env!("CARGO_MANIFEST_DIR")).join("examples/analysis_hover_empty_struct.mc"),
+        source,
+    );
+
+    let query_span = span_for_substring_with_len(source, "Empty) -> Empty", "Empty".len());
+    let hover = db
+        .hover_at_file(file_id, query_span)
+        .expect("hover query should succeed")
+        .expect("expected hover info for empty struct type reference");
+
+    assert_eq!(hover.display, "type Empty = {}");
+}
+
+#[test]
 fn diagnostics_for_program_file_std_io_examples_ignore_unrelated_open_overlays() {
     let mut db = AnalysisDb::new();
 
