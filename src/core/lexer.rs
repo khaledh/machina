@@ -139,6 +139,8 @@ pub enum TokenKind {
     Question,
     #[display("|")]
     Pipe,
+    #[display("|>")]
+    PipeArrow,
     #[display("_")]
     Underscore,
 
@@ -658,7 +660,10 @@ impl<'a> Lexer<'a> {
             }
             Some(&'|') => {
                 self.advance();
-                if matches!(self.source.peek(), Some(&'|')) {
+                if matches!(self.source.peek(), Some(&'>')) {
+                    self.advance();
+                    Ok(TokenKind::PipeArrow)
+                } else if matches!(self.source.peek(), Some(&'|')) {
                     self.advance();
                     Ok(TokenKind::LogicalOr)
                 } else if matches!(self.source.peek(), Some(&'=')) {

@@ -175,6 +175,12 @@ impl<'a> Parser<'a> {
             };
         }
 
+        if min_bp == Self::TERNARY_BP {
+            while self.curr_token.kind == TK::PipeArrow {
+                lhs = self.parse_pipe_suffix(marker, lhs)?;
+            }
+        }
+
         Ok(lhs)
     }
 
@@ -211,6 +217,38 @@ impl<'a> Parser<'a> {
                 }
                 Self::is_expr_start_token(&token.kind)
             })
+    }
+
+    fn parse_pipe_suffix(&mut self, marker: Marker, lhs: Expr) -> Result<Expr, ParseError> {
+        self.consume(&TK::PipeArrow)?;
+        let rhs = self.parse_postfix()?;
+        let rhs_span = rhs.span;
+        match rhs.kind {
+            ExprKind::Call { callee, args } => {
+                if !matches!(callee.kind, ExprKind::Var { .. }) {
+                    return Err(PEK::PipeRhsMustBeCall.at(rhs_span));
+                }
+                let lhs_span = lhs.span;
+                let mut piped_args = Vec::with_capacity(args.len() + 1);
+                piped_args.push(CallArg {
+                    mode: CallArgMode::Default,
+                    expr: lhs,
+                    init: InitInfo::default(),
+                    span: lhs_span,
+                });
+                piped_args.extend(args);
+                Ok(Expr {
+                    id: self.id_gen.new_id(),
+                    kind: ExprKind::Call {
+                        callee,
+                        args: piped_args,
+                    },
+                    span: self.close(marker),
+                })
+            }
+            ExprKind::MethodCall { .. } => Err(PEK::UnsupportedPipeMethodCall.at(rhs_span)),
+            _ => Err(PEK::PipeRhsMustBeCall.at(rhs_span)),
+        }
     }
 
     pub(super) fn is_expr_start_token(token: &TokenKind) -> bool {

@@ -63,6 +63,12 @@ pub enum ParseErrorKind {
     #[error("Expected array index or slice range, found: {0}")]
     ExpectedArrayIndexOrRange(Token),
 
+    #[error("Pipe rhs must be a free function call like `f(...)`")]
+    PipeRhsMustBeCall,
+
+    #[error("Pipe rhs does not support method calls; use a free function call")]
+    UnsupportedPipeMethodCall,
+
     #[error("Expected refinement (bounds/nonzero), found: {0}")]
     ExpectedRefinement(Token),
 

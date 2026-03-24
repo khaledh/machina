@@ -65,6 +65,8 @@ pub(super) fn from_parse_error(error: &ParseError) -> Diagnostic {
             "MC-PARSE-TRAILING-SEMICOLON-AFTER-BLOCK-STMT"
         }
         ParseErrorKind::ExpectedArrayIndexOrRange(_) => "MC-PARSE-EXPECTED-INDEX-OR-RANGE",
+        ParseErrorKind::PipeRhsMustBeCall => "MC-PARSE-PIPE-RHS-MUST-BE-CALL",
+        ParseErrorKind::UnsupportedPipeMethodCall => "MC-PARSE-PIPE-METHOD-CALL-UNSUPPORTED",
         ParseErrorKind::ExpectedRefinement(_) => "MC-PARSE-EXPECTED-REFINEMENT",
         ParseErrorKind::UnknownAttribute(name) => {
             metadata.insert(

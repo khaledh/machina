@@ -117,6 +117,19 @@ fn test_lex_bitwise_operators() {
 }
 
 #[test]
+fn test_lex_pipe_arrow_operator() {
+    let mut lexer = Lexer::new("|> |");
+
+    let t1 = lexer.next_token().unwrap();
+    let t2 = lexer.next_token().unwrap();
+    let t3 = lexer.next_token().unwrap();
+
+    assert_eq!(t1.kind, TokenKind::PipeArrow);
+    assert_eq!(t2.kind, TokenKind::Pipe);
+    assert_eq!(t3.kind, TokenKind::Eof);
+}
+
+#[test]
 fn test_lex_compound_assignment_operators() {
     let mut lexer = Lexer::new("+= -= *= /= %= &= |= ^= <<= >>=");
 

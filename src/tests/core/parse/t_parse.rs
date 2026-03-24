@@ -349,6 +349,135 @@ fn test_parse_using_initializer_still_allows_non_block_ternary() {
 }
 
 #[test]
+fn test_parse_pipe_expr_desugars_to_call_with_prepended_arg() {
+    let source = r#"
+        fn main(value: u64) -> u64 {
+            value |> wrap(1, 2)
+        }
+    "#;
+
+    let funcs = parse_source(source).expect("Failed to parse");
+    let func = &funcs[0];
+
+    match &block_tail(&func.body).kind {
+        ExprKind::Call { callee, args } => {
+            match &callee.kind {
+                ExprKind::Var { ident } => assert_eq!(ident, "wrap"),
+                _ => panic!("Expected piped call callee var"),
+            }
+            assert_eq!(args.len(), 3);
+            match &args[0].expr.kind {
+                ExprKind::Var { ident } => assert_eq!(ident, "value"),
+                _ => panic!("Expected lhs to become first arg"),
+            }
+            assert!(matches!(args[1].expr.kind, ExprKind::IntLit(1)));
+            assert!(matches!(args[2].expr.kind, ExprKind::IntLit(2)));
+        }
+        _ => panic!("Expected pipe expression to desugar to Call"),
+    }
+}
+
+#[test]
+fn test_parse_pipe_expr_chains_left_associatively() {
+    let source = r#"
+        fn main(value: u64) -> u64 {
+            value |> f() |> g()
+        }
+    "#;
+
+    let funcs = parse_source(source).expect("Failed to parse");
+    let func = &funcs[0];
+
+    match &block_tail(&func.body).kind {
+        ExprKind::Call { callee, args } => {
+            match &callee.kind {
+                ExprKind::Var { ident } => assert_eq!(ident, "g"),
+                _ => panic!("Expected outer piped call callee var"),
+            }
+            assert_eq!(args.len(), 1);
+            match &args[0].expr.kind {
+                ExprKind::Call {
+                    callee: inner_callee,
+                    args: inner_args,
+                } => {
+                    match &inner_callee.kind {
+                        ExprKind::Var { ident } => assert_eq!(ident, "f"),
+                        _ => panic!("Expected inner piped callee var"),
+                    }
+                    assert_eq!(inner_args.len(), 1);
+                    match &inner_args[0].expr.kind {
+                        ExprKind::Var { ident } => assert_eq!(ident, "value"),
+                        _ => panic!("Expected lhs to flow into first pipe stage"),
+                    }
+                }
+                _ => panic!("Expected chained pipe stage to remain nested call"),
+            }
+        }
+        _ => panic!("Expected chained pipe expression to desugar to Call"),
+    }
+}
+
+#[test]
+fn test_parse_pipe_expr_has_lowest_precedence_in_let_binding() {
+    let source = r#"
+        fn main(value: u64) -> u64 {
+            let mapped = value + 1 |> wrap();
+            mapped
+        }
+    "#;
+
+    let funcs = parse_source(source).expect("Failed to parse");
+    let func = &funcs[0];
+    let (items, _) = block_parts(&func.body);
+    let stmt = block_stmt_at(items, 0);
+
+    match &stmt.kind {
+        StmtExprKind::LetBind { value, .. } => match &value.kind {
+            ExprKind::Call { callee, args } => {
+                match &callee.kind {
+                    ExprKind::Var { ident } => assert_eq!(ident, "wrap"),
+                    _ => panic!("Expected let initializer to be a piped call"),
+                }
+                assert_eq!(args.len(), 1);
+                match &args[0].expr.kind {
+                    ExprKind::BinOp { op, .. } => assert_eq!(*op, BinaryOp::Add),
+                    _ => panic!("Expected full lhs expr to become first arg"),
+                }
+            }
+            _ => panic!("Expected let initializer to parse as desugared call"),
+        },
+        _ => panic!("Expected let binding"),
+    }
+}
+
+#[test]
+fn test_parse_pipe_expr_requires_call_rhs() {
+    let source = r#"
+        fn main(value: u64) -> u64 {
+            value |> wrap
+        }
+    "#;
+
+    let err = parse_source(source).expect_err("Expected parse error");
+    assert!(matches!(err.kind(), ParseErrorKind::PipeRhsMustBeCall));
+}
+
+#[test]
+fn test_parse_pipe_expr_rejects_method_rhs() {
+    let source = r#"
+        fn main(value: u64, writer: TextWriter) -> () {
+            value |> writer.write_all()
+        }
+    "#;
+
+    let err = parse_source(source).expect_err("Expected parse error");
+    assert!(matches!(
+        err.kind(),
+        ParseErrorKind::UnsupportedPipeMethodCall
+    ));
+}
+
+#[test]
 fn test_parse_nested_array_literal() {
     let source = r#"
         fn test() -> u64 {

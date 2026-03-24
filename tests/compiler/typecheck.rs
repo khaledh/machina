@@ -2403,24 +2403,22 @@ fn test_typed_csv_rewrite_pipeline_uses_generic_map_adapter_builds_and_runs() {
 
                 using reader = open_read(input_path)?.text() {{
                     let text = reader.read_all()?;
-                    let pipeline = to_csv(
-                        map(
-                            from_csv(
-                                text.lines(),
-                                parse_row,
-                                CsvParseOptions {{
-                                    skip: 1,
-                                    delimiter: ",",
-                                }},
-                            ),
-                            grade_row,
-                        ),
-                        format_row,
-                        CsvFormatOptions {{
-                            header: "name,grade",
-                            delimiter: ",",
-                        }},
-                    );
+                    let pipeline = text.lines()
+                        |> from_csv(
+                            parse_row,
+                            CsvParseOptions {{
+                                skip: 1,
+                                delimiter: ",",
+                            }},
+                        )
+                        |> map(grade_row)
+                        |> to_csv(
+                            format_row,
+                            CsvFormatOptions {{
+                                header: "name,grade",
+                                delimiter: ",",
+                            }},
+                        );
 
                     using output_writer = open_write(output_path)?.text() {{
                         write_lines(output_writer, pipeline)?;
