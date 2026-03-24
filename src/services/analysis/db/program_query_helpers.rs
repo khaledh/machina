@@ -94,6 +94,7 @@ impl super::AnalysisDb {
             query_span,
             snapshot.path(file_id),
             source.as_deref(),
+            Some(self.tracer()),
         );
         if let (Some(entry_module_id), Some(hover)) = (program.entry_module_id, hover.as_ref())
             && let Some(target) = imported_hover_target(
@@ -117,6 +118,7 @@ impl super::AnalysisDb {
                 query_span,
                 snapshot.path(file_id),
                 source.as_deref(),
+                Some(self.tracer()),
             ));
         }
         Ok(hover)

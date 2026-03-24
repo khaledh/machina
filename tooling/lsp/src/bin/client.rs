@@ -3,6 +3,7 @@ use std::path::PathBuf;
 
 use clap::Parser as ClapParser;
 use machina_lsp::client::{ClientError, LspClient};
+use machina::services::analysis::trace::{AnalysisTraceCategory, AnalysisTracer};
 use serde_json::Value;
 
 #[derive(ClapParser, Debug)]
@@ -13,6 +14,9 @@ use serde_json::Value;
     long_about = None
 )]
 struct Args {
+    #[arg(long, value_delimiter = ',', global = true)]
+    trace: Vec<String>,
+
     #[command(subcommand)]
     command: Option<Command>,
 }
@@ -42,19 +46,27 @@ enum Command {
 
 fn main() {
     let args = Args::parse();
+    let trace_categories = parse_trace_categories(&args.trace).unwrap_or_else(|error| {
+        eprintln!("machina-lsp-client: {error}");
+        std::process::exit(1);
+    });
     if let Some(command) = args.command {
-        if let Err(error) = run_one_shot(command) {
+        if let Err(error) = run_one_shot(command, &trace_categories) {
             eprintln!("machina-lsp-client: {error}");
             std::process::exit(1);
         }
-    } else if let Err(error) = run_repl() {
+    } else if let Err(error) = run_repl(trace_categories) {
         eprintln!("machina-lsp-client: {error}");
         std::process::exit(1);
     }
 }
 
-fn run_one_shot(command: Command) -> Result<(), ClientError> {
+fn run_one_shot(
+    command: Command,
+    trace_categories: &[AnalysisTraceCategory],
+) -> Result<(), ClientError> {
     let mut client = LspClient::new();
+    client.set_tracer(tracer_for_categories(trace_categories));
     let mut stdout = io::stdout();
     match command {
         Command::Diagnostics { file } => {
@@ -88,10 +100,10 @@ fn run_one_shot(command: Command) -> Result<(), ClientError> {
     Ok(())
 }
 
-fn run_repl() -> io::Result<()> {
+fn run_repl(trace_categories: Vec<AnalysisTraceCategory>) -> io::Result<()> {
     let stdin = io::stdin();
     let mut stdout = io::stdout();
-    run_repl_with_io(stdin.lock(), &mut stdout)
+    run_repl_with_io(stdin.lock(), &mut stdout, trace_categories)
 }
 
 fn print_repl_help(stdout: &mut impl Write) -> io::Result<()> {
@@ -104,13 +116,22 @@ fn print_repl_help(stdout: &mut impl Write) -> io::Result<()> {
     writeln!(stdout, "  signature <line:col>")?;
     writeln!(stdout, "  change <file>")?;
     writeln!(stdout, "  close")?;
+    writeln!(stdout, "  trace <cats|off>")?;
     writeln!(stdout, "  quit | exit")?;
     Ok(())
 }
 
-fn run_repl_with_io(mut input: impl BufRead, stdout: &mut impl Write) -> io::Result<()> {
+fn run_repl_with_io(
+    mut input: impl BufRead,
+    stdout: &mut impl Write,
+    trace_categories: Vec<AnalysisTraceCategory>,
+) -> io::Result<()> {
     let mut client = LspClient::new();
-    let mut state = ReplState::default();
+    client.set_tracer(tracer_for_categories(&trace_categories));
+    let mut state = ReplState {
+        trace_categories,
+        ..ReplState::default()
+    };
     writeln!(
         stdout,
         "Machina LSP client REPL. Type `help` for commands, `exit` to quit."
@@ -137,6 +158,7 @@ fn run_repl_with_io(mut input: impl BufRead, stdout: &mut impl Write) -> io::Res
 #[derive(Default)]
 struct ReplState {
     current_file: Option<PathBuf>,
+    trace_categories: Vec<AnalysisTraceCategory>,
 }
 
 fn execute_repl_command(
@@ -200,6 +222,25 @@ fn execute_repl_command(
             };
             match client.close_path(&path) {
                 Ok(_) => writeln!(stdout, "Closed {}.", path.display())?,
+                Err(error) => writeln!(stdout, "Error: {error}")?,
+            }
+            Ok(true)
+        }
+        "trace" => {
+            let Some(spec) = parts.get(1).copied() else {
+                writeln!(stdout, "trace is {}", format_trace_categories(&state.trace_categories))?;
+                return Ok(true);
+            };
+            match parse_trace_categories(&[spec.to_string()]) {
+                Ok(categories) => {
+                    state.trace_categories = categories;
+                    client.set_tracer(tracer_for_categories(&state.trace_categories));
+                    writeln!(
+                        stdout,
+                        "trace set to {}",
+                        format_trace_categories(&state.trace_categories)
+                    )?;
+                }
                 Err(error) => writeln!(stdout, "Error: {error}")?,
             }
             Ok(true)
@@ -291,6 +332,53 @@ fn parse_position(pos: &str) -> Result<(usize, usize), ClientError> {
     Ok((line, col))
 }
 
+fn parse_trace_categories(specs: &[String]) -> Result<Vec<AnalysisTraceCategory>, ClientError> {
+    let mut out = Vec::new();
+    for spec in specs {
+        for part in spec.split(',') {
+            let item = part.trim();
+            if item.is_empty() {
+                continue;
+            }
+            if item.eq_ignore_ascii_case("off") {
+                return Ok(Vec::new());
+            }
+            let category = match item {
+                "query" => AnalysisTraceCategory::Query,
+                "pipeline" => AnalysisTraceCategory::Pipeline,
+                "program" => AnalysisTraceCategory::Program,
+                "hover" => AnalysisTraceCategory::Hover,
+                "session" => AnalysisTraceCategory::Session,
+                _ => return Err(ClientError::InvalidTraceCategory(item.to_string())),
+            };
+            if !out.contains(&category) {
+                out.push(category);
+            }
+        }
+    }
+    Ok(out)
+}
+
+fn tracer_for_categories(categories: &[AnalysisTraceCategory]) -> AnalysisTracer {
+    if categories.is_empty() {
+        AnalysisTracer::off()
+    } else {
+        AnalysisTracer::stderr(categories.iter().copied())
+    }
+}
+
+fn format_trace_categories(categories: &[AnalysisTraceCategory]) -> String {
+    if categories.is_empty() {
+        "off".to_string()
+    } else {
+        categories
+            .iter()
+            .map(ToString::to_string)
+            .collect::<Vec<_>>()
+            .join(",")
+    }
+}
+
 fn print_diagnostics_response(stdout: &mut impl Write, response: &Value) -> io::Result<()> {
     let diagnostics = response["params"]["diagnostics"]
         .as_array()
@@ -379,7 +467,7 @@ fn print_signature_response(stdout: &mut impl Write, response: &Value) -> io::Re
 
 #[cfg(test)]
 mod tests {
-    use super::{Args, Command, parse_position, run_repl_with_io};
+    use super::{Args, Command, format_trace_categories, parse_position, parse_trace_categories, run_repl_with_io};
     use clap::Parser as _;
     use std::fs;
     use std::io::Cursor;
@@ -447,12 +535,22 @@ mod tests {
         let input = format!("open {}\ndiagnostics\nexit\n", path.display());
         let mut output = Vec::new();
 
-        run_repl_with_io(Cursor::new(input), &mut output).expect("repl should succeed");
+        run_repl_with_io(Cursor::new(input), &mut output, Vec::new()).expect("repl should succeed");
 
         let text = String::from_utf8(output).expect("output should be utf8");
         assert!(text.contains("Opened"));
         assert!(text.contains("No diagnostics."));
 
         let _ = fs::remove_file(path);
+    }
+
+    #[test]
+    fn parse_trace_categories_supports_off_and_lists() {
+        assert_eq!(format_trace_categories(&[]), "off");
+        let categories = parse_trace_categories(&["query,hover".to_string()])
+            .expect("trace categories should parse");
+        assert_eq!(format_trace_categories(&categories), "query,hover");
+        let off = parse_trace_categories(&["off".to_string()]).expect("off should parse");
+        assert!(off.is_empty());
     }
 }

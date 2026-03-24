@@ -177,6 +177,7 @@ impl super::AnalysisDb {
             query_span,
             snapshot.path(file_id),
             source.as_deref(),
+            Some(self.tracer()),
         ))
     }
 

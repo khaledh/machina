@@ -13,6 +13,7 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 
 use crate::core::capsule::ModuleId;
+use crate::services::analysis::trace::{AnalysisTraceCategory, AnalysisTracer};
 
 /// Coarse query families used by the initial analysis runtime.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -101,6 +102,7 @@ pub struct QueryRuntime {
     active_stack: Vec<QueryKey>,
     stats: CacheStats,
     cancel: CancellationToken,
+    tracer: AnalysisTracer,
 }
 
 impl QueryRuntime {
@@ -115,6 +117,13 @@ impl QueryRuntime {
         }
     }
 
+    pub fn with_tracer(tracer: AnalysisTracer) -> Self {
+        Self {
+            tracer,
+            ..Self::default()
+        }
+    }
+
     pub fn cancellation_token(&self) -> CancellationToken {
         self.cancel.clone()
     }
@@ -123,8 +132,18 @@ impl QueryRuntime {
         self.cancel = cancel;
     }
 
+    pub fn tracer(&self) -> &AnalysisTracer {
+        &self.tracer
+    }
+
+    pub fn set_tracer(&mut self, tracer: AnalysisTracer) {
+        self.tracer = tracer;
+    }
+
     pub fn check_cancelled(&self) -> QueryResult<()> {
         if self.cancel.is_cancelled() {
+            self.tracer
+                .emit(AnalysisTraceCategory::Query, "cancelled active query");
             Err(QueryCancelled)
         } else {
             Ok(())
@@ -151,6 +170,10 @@ impl QueryRuntime {
 
     /// Invalidate a key and all direct/indirect dependents.
     pub fn invalidate(&mut self, root: QueryKey) {
+        self.tracer.emit(
+            AnalysisTraceCategory::Query,
+            format!("invalidate root={}", format_query_key(root)),
+        );
         let mut stack = vec![root];
         let mut seen = HashSet::new();
         while let Some(key) = stack.pop() {
@@ -179,6 +202,10 @@ impl QueryRuntime {
     /// Invalidate all cached and dependency-tracked queries whose key belongs
     /// to any module in `modules`, including their transitive dependents.
     pub fn invalidate_modules(&mut self, modules: &HashSet<ModuleId>) {
+        self.tracer.emit(
+            AnalysisTraceCategory::Query,
+            format!("invalidate_modules modules={modules:?}"),
+        );
         let mut roots = HashSet::new();
         for key in self.cache.keys() {
             if modules.contains(&key.module) {
@@ -210,9 +237,17 @@ impl QueryRuntime {
         F: FnOnce(&mut Self) -> QueryResult<T>,
     {
         self.check_cancelled()?;
+        self.tracer.emit(
+            AnalysisTraceCategory::Query,
+            format!("execute start key={}", format_query_key(key)),
+        );
         self.link_parent_dependency(key);
         if let Some(cached) = self.cache.get(&key) {
             self.stats.hits += 1;
+            self.tracer.emit(
+                AnalysisTraceCategory::Query,
+                format!("cache hit key={}", format_query_key(key)),
+            );
             let value = cached
                 .downcast_ref::<T>()
                 .expect("query cache type mismatch for key");
@@ -220,6 +255,10 @@ impl QueryRuntime {
         }
 
         self.stats.misses += 1;
+        self.tracer.emit(
+            AnalysisTraceCategory::Query,
+            format!("cache miss key={}", format_query_key(key)),
+        );
         self.active_stack.push(key);
         let computed = compute(self);
         let popped = self.active_stack.pop();
@@ -228,9 +267,19 @@ impl QueryRuntime {
         match computed {
             Ok(value) => {
                 self.cache.insert(key, Arc::new(value.clone()));
+                self.tracer.emit(
+                    AnalysisTraceCategory::Query,
+                    format!("execute success key={}", format_query_key(key)),
+                );
                 Ok(value)
             }
-            Err(err) => Err(err),
+            Err(err) => {
+                self.tracer.emit(
+                    AnalysisTraceCategory::Query,
+                    format!("execute cancelled key={}", format_query_key(key)),
+                );
+                Err(err)
+            }
         }
     }
 
@@ -238,9 +287,24 @@ impl QueryRuntime {
         let Some(parent) = self.active_stack.last().copied() else {
             return;
         };
+        self.tracer.emit(
+            AnalysisTraceCategory::Query,
+            format!(
+                "dependency parent={} child={}",
+                format_query_key(parent),
+                format_query_key(child)
+            ),
+        );
         self.deps.entry(parent).or_default().insert(child);
         self.reverse_deps.entry(child).or_default().insert(parent);
     }
+}
+
+fn format_query_key(key: QueryKey) -> String {
+    format!(
+        "{:?}(module={:?}, rev={}, input={})",
+        key.kind, key.module, key.revision, key.input
+    )
 }
 
 #[cfg(test)]

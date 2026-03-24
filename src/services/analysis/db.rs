@@ -29,6 +29,7 @@ use crate::services::analysis::query::{
     CacheStats, CancellationToken, QueryKey, QueryResult, QueryRuntime,
 };
 use crate::services::analysis::snapshot::{AnalysisSnapshot, FileId, SourceStore};
+use crate::services::analysis::trace::AnalysisTracer;
 use std::sync::Arc;
 
 #[derive(Default)]
@@ -50,12 +51,27 @@ impl AnalysisDb {
         }
     }
 
+    pub fn with_tracer(tracer: AnalysisTracer) -> Self {
+        Self {
+            runtime: QueryRuntime::with_tracer(tracer),
+            ..Self::default()
+        }
+    }
+
     pub fn cancellation_token(&self) -> CancellationToken {
         self.runtime.cancellation_token()
     }
 
     pub fn set_cancellation_token(&mut self, token: CancellationToken) {
         self.runtime.set_cancellation_token(token);
+    }
+
+    pub fn tracer(&self) -> &AnalysisTracer {
+        self.runtime.tracer()
+    }
+
+    pub fn set_tracer(&mut self, tracer: AnalysisTracer) {
+        self.runtime.set_tracer(tracer);
     }
 
     pub fn set_module_graph(&mut self, graph: ModuleGraph) {

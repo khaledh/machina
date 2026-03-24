@@ -17,6 +17,7 @@ use crate::services::analysis::results::HoverInfo;
 use crate::services::analysis::syntax_index::{
     call_site_at_span, node_at_span, node_span_map, span_contains_span,
 };
+use crate::services::analysis::trace::{AnalysisTraceCategory, AnalysisTracer};
 
 use super::callable_signature::format_source_callable_signature;
 use super::definition::{linear_decl_target_at_span, machine_handle_def_at_span};
@@ -27,6 +28,7 @@ pub(crate) fn hover_at_span_in_file(
     query_span: Span,
     current_file_path: Option<&Path>,
     source_text: Option<&str>,
+    tracer: Option<&AnalysisTracer>,
 ) -> Option<HoverInfo> {
     // Editor hover requests usually arrive as zero-width point spans. Expand
     // those points to the enclosing identifier token first so downstream node
@@ -35,13 +37,26 @@ pub(crate) fn hover_at_span_in_file(
     let token = identifier_token_at_span(source_text, query_span);
     let normalized_query_span = token.as_ref().map(|token| token.span).unwrap_or(query_span);
     let query_ident = token.as_ref().map(|token| token.ident.clone());
+    hover_trace(
+        tracer,
+        format!(
+            "start span={} ident={:?} typed={}",
+            format_span(normalized_query_span),
+            query_ident,
+            state.typed.is_some()
+        ),
+    );
     if source_text.is_some() && token.is_none() {
+        hover_trace(tracer, "no identifier token at query span");
         return None;
     }
 
-    if state.typed.is_some() {
-        try_call_site_hover(state, normalized_query_span, query_ident.as_deref())
-            .or_else(|| {
+    let result = if state.typed.is_some() {
+        try_strategy(tracer, "call_site", || {
+            try_call_site_hover(state, normalized_query_span, query_ident.as_deref())
+        })
+        .or_else(|| {
+            try_strategy(tracer, "node", || {
                 try_node_hover(
                     state,
                     normalized_query_span,
@@ -49,7 +64,9 @@ pub(crate) fn hover_at_span_in_file(
                     query_ident.as_deref(),
                 )
             })
-            .or_else(|| {
+        })
+        .or_else(|| {
+            try_strategy(tracer, "machine_handle", || {
                 try_machine_handle_hover(
                     state,
                     normalized_query_span,
@@ -58,7 +75,9 @@ pub(crate) fn hover_at_span_in_file(
                     query_ident.as_deref(),
                 )
             })
-            .or_else(|| {
+        })
+        .or_else(|| {
+            try_strategy(tracer, "linear_decl", || {
                 try_linear_decl_hover(
                     state,
                     normalized_query_span,
@@ -66,7 +85,9 @@ pub(crate) fn hover_at_span_in_file(
                     query_ident.as_deref(),
                 )
             })
-            .or_else(|| {
+        })
+        .or_else(|| {
+            try_strategy(tracer, "def_table", || {
                 try_def_table_hover(
                     state,
                     normalized_query_span,
@@ -74,7 +95,9 @@ pub(crate) fn hover_at_span_in_file(
                     query_ident.as_deref(),
                 )
             })
-            .or_else(|| {
+        })
+        .or_else(|| {
+            try_strategy(tracer, "syntactic_field", || {
                 try_syntactic_field_hover(
                     normalized_query_span,
                     source_text,
@@ -82,15 +105,49 @@ pub(crate) fn hover_at_span_in_file(
                     query_ident.as_deref(),
                 )
             })
+        })
     } else {
-        try_resolved_hover(
+        try_strategy(tracer, "resolved", || try_resolved_hover(
             state,
             normalized_query_span,
             current_file_path,
             source_text,
             query_ident.as_deref(),
-        )
+        ))
+    };
+    if result.is_none() {
+        hover_trace(tracer, "final none");
     }
+    result
+}
+
+fn try_strategy(
+    tracer: Option<&AnalysisTracer>,
+    name: &str,
+    f: impl FnOnce() -> Option<HoverInfo>,
+) -> Option<HoverInfo> {
+    let out = f();
+    match &out {
+        Some(info) => hover_trace(
+            tracer,
+            format!("strategy={name} result=hit display={}", info.display),
+        ),
+        None => hover_trace(tracer, format!("strategy={name} result=none")),
+    }
+    out
+}
+
+fn hover_trace(tracer: Option<&AnalysisTracer>, message: impl Into<String>) {
+    if let Some(tracer) = tracer {
+        tracer.emit(AnalysisTraceCategory::Hover, message.into());
+    }
+}
+
+fn format_span(span: Span) -> String {
+    format!(
+        "{}:{}-{}:{}",
+        span.start.line, span.start.column, span.end.line, span.end.column
+    )
 }
 
 pub(crate) fn hover_for_def_in_state(state: &LookupState, def_id: DefId) -> Option<HoverInfo> {

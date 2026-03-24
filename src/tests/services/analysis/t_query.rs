@@ -2,6 +2,35 @@ use crate::core::capsule::ModuleId;
 use crate::services::analysis::query::{
     CancellationToken, QueryCancelled, QueryKey, QueryKind, QueryRuntime,
 };
+use crate::services::analysis::trace::{
+    AnalysisTraceCategory, AnalysisTraceEvent, AnalysisTraceSink, AnalysisTracer,
+};
+use std::sync::{Arc, Mutex};
+
+#[derive(Default)]
+struct RecordingTraceSink {
+    events: Mutex<Vec<AnalysisTraceEvent>>,
+}
+
+impl RecordingTraceSink {
+    fn messages(&self) -> Vec<String> {
+        self.events
+            .lock()
+            .expect("trace events should lock")
+            .iter()
+            .map(|event| format!("{}:{}", event.category, event.message))
+            .collect()
+    }
+}
+
+impl AnalysisTraceSink for RecordingTraceSink {
+    fn emit(&self, event: &AnalysisTraceEvent) {
+        self.events
+            .lock()
+            .expect("trace events should lock")
+            .push(event.clone());
+    }
+}
 
 #[test]
 fn query_runtime_memoizes_by_key() {
@@ -130,4 +159,46 @@ fn query_runtime_distinguishes_query_input_keys() {
     assert_eq!(a_cached, 10);
     assert_eq!(b_cached, 20);
     assert_eq!(calls, 2);
+}
+
+#[test]
+fn query_runtime_emits_trace_events_when_enabled() {
+    let key = QueryKey::new(QueryKind::ParseModule, ModuleId(9), 3);
+    let sink = Arc::new(RecordingTraceSink::default());
+    let tracer = AnalysisTracer::with_sink([AnalysisTraceCategory::Query], sink.clone());
+    let mut runtime = QueryRuntime::with_tracer(tracer);
+
+    runtime
+        .execute(key, |_rt| Ok::<u64, QueryCancelled>(7))
+        .expect("first execute should succeed");
+    runtime
+        .execute(key, |_rt| Ok::<u64, QueryCancelled>(8))
+        .expect("cached execute should succeed");
+    runtime.invalidate(key);
+
+    let messages = sink.messages();
+    assert!(
+        messages
+            .iter()
+            .any(|message| message.contains("query:execute start")),
+        "expected execute start trace, got: {messages:#?}"
+    );
+    assert!(
+        messages
+            .iter()
+            .any(|message| message.contains("query:cache miss")),
+        "expected cache miss trace, got: {messages:#?}"
+    );
+    assert!(
+        messages
+            .iter()
+            .any(|message| message.contains("query:cache hit")),
+        "expected cache hit trace, got: {messages:#?}"
+    );
+    assert!(
+        messages
+            .iter()
+            .any(|message| message.contains("query:invalidate root")),
+        "expected invalidate trace, got: {messages:#?}"
+    );
 }

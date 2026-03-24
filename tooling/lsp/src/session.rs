@@ -16,6 +16,7 @@ use machina::services::analysis::diagnostics::{
 use machina::services::analysis::module_graph::ModuleGraph;
 use machina::services::analysis::query::{CancellationToken, QueryCancelled, QueryResult};
 use machina::services::analysis::snapshot::{AnalysisSnapshot, FileId};
+use machina::services::analysis::trace::{AnalysisTraceCategory, AnalysisTracer};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct DocumentState {
@@ -79,11 +80,19 @@ impl AnalysisSession {
         self.db.set_module_graph(graph);
     }
 
+    pub fn set_tracer(&mut self, tracer: AnalysisTracer) {
+        self.db.set_tracer(tracer);
+    }
+
     pub fn invalidate_changed_modules(&mut self, changed: &HashSet<ModuleId>) {
         self.db.invalidate_changed_modules(changed);
     }
 
     pub fn open_document(&mut self, uri: &str, version: i32, text: &str) -> SessionResult<FileId> {
+        self.db.tracer().emit(
+            AnalysisTraceCategory::Session,
+            format!("open uri={uri} version={version}"),
+        );
         let path = uri_to_path(uri)?;
         let file_id = self.db.upsert_disk_text(path.clone(), text);
         self.db.set_overlay(file_id, text);
@@ -104,6 +113,10 @@ impl AnalysisSession {
         version: i32,
         text: &str,
     ) -> SessionResult<FileId> {
+        self.db.tracer().emit(
+            AnalysisTraceCategory::Session,
+            format!("change uri={uri} version={version}"),
+        );
         let state = self
             .docs
             .get_mut(uri)
@@ -120,6 +133,9 @@ impl AnalysisSession {
     }
 
     pub fn close_document(&mut self, uri: &str) -> SessionResult<()> {
+        self.db
+            .tracer()
+            .emit(AnalysisTraceCategory::Session, format!("close uri={uri}"));
         let state = self
             .docs
             .remove(uri)
@@ -142,6 +158,10 @@ impl AnalysisSession {
         &mut self,
         uri: &str,
     ) -> SessionResult<Vec<machina::services::analysis::diagnostics::Diagnostic>> {
+        self.db.tracer().emit(
+            AnalysisTraceCategory::Session,
+            format!("diagnostics uri={uri}"),
+        );
         let state = self.lookup_document(uri)?.clone();
         let diagnostics = self
             .db
@@ -160,6 +180,10 @@ impl AnalysisSession {
         uri: &str,
         expected_version: i32,
     ) -> SessionResult<Option<Vec<machina::services::analysis::diagnostics::Diagnostic>>> {
+        self.db.tracer().emit(
+            AnalysisTraceCategory::Session,
+            format!("diagnostics_if_version uri={uri} version={expected_version}"),
+        );
         let state = self.lookup_document(uri)?.clone();
         if state.version != expected_version {
             return Ok(None);

@@ -11,6 +11,7 @@ use thiserror::Error;
 
 use crate::handlers::{HandlerAction, handle_message};
 use crate::session::{AnalysisSession, SessionError};
+use machina::services::analysis::trace::AnalysisTracer;
 
 #[derive(Debug, Error)]
 pub enum ClientError {
@@ -24,6 +25,8 @@ pub enum ClientError {
     UnexpectedExit { method: &'static str },
     #[error("position must be formatted as line:col")]
     InvalidPosition,
+    #[error("unknown trace category `{0}`")]
+    InvalidTraceCategory(String),
 }
 
 pub type ClientResult<T> = Result<T, ClientError>;
@@ -51,6 +54,10 @@ impl LspClient {
 
     pub fn initialize(&mut self) -> ClientResult<Value> {
         self.ensure_initialized_response()
+    }
+
+    pub fn set_tracer(&mut self, tracer: AnalysisTracer) {
+        self.session.set_tracer(tracer);
     }
 
     pub fn open_text(&mut self, uri: &str, text: &str, version: i32) -> ClientResult<Value> {

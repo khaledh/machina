@@ -17,3 +17,4 @@ pub mod results;
 pub mod signature_help;
 pub mod snapshot;
 pub mod syntax_index;
+pub mod trace;
