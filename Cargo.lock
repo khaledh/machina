@@ -203,6 +203,7 @@ dependencies = [
 name = "machina-lsp"
 version = "0.1.0"
 dependencies = [
+ "clap",
  "machina",
  "serde",
  "serde_json",
