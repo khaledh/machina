@@ -122,7 +122,7 @@ Block              ::= "{" BlockItem* (Expr ";"?)? "}"
 BlockItem          ::= StmtExpr | Expr ";"
 
 StmtExpr           ::= LetBind | VarBind | VarDecl | Assign
-                     | While | For | Break | Continue | Return
+                     | While | For | Using | Break | Continue | Return
 
 LetBind            ::= "let" Pattern (":" TypeExpr)? "=" Expr ";"
 VarBind            ::= "var" Pattern (":" TypeExpr)? "=" Expr ";"
@@ -133,6 +133,7 @@ While              ::= "while" Expr Block
 For                ::= "for" Pattern "in" (RangeExpr | Expr) Block
 RangeExpr          ::= IntLit ".." IntLit
 
+Using              ::= "using" Identifier "=" Expr Block
 Break              ::= "break" ";"
 Continue           ::= "continue" ";"
 Return             ::= "return" Expr? ";"
@@ -169,7 +170,8 @@ MatchBinding       ::= Identifier | "_"
 ## Operators and Postfix Forms
 
 ```bnf
-InfixExpr          ::= OrExpr
+InfixExpr          ::= PipeExpr
+PipeExpr           ::= OrExpr ("|>" PostfixExpr)*
 OrExpr             ::= AndExpr ("||" AndExpr)*
 AndExpr            ::= BitOrExpr ("&&" BitOrExpr)*
 BitOrExpr          ::= BitXorExpr ("|" BitXorExpr)*

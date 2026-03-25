@@ -8,6 +8,7 @@ From lowest to highest precedence:
 
 | Precedence   | Operators                    | Associativity | Description                                                |
 |--------------|------------------------------|---------------|------------------------------------------------------------|
+| 0 (lowest)   | `\|>`                        | Left          | Pipe (iterator/function composition)                       |
 | 1            | `\|\|`                       | Left          | Logical OR                                                 |
 | 2            | `&&`                         | Left          | Logical AND                                                |
 | 3            | `\|`                         | Left          | Bitwise OR / type unions (in type position)                |
@@ -81,6 +82,24 @@ Notes:
 - Properties are accessed as fields (`obj.len`), not as method calls.
 - `expr?` requires the operand to be an error union and propagates non-success
   variants to the caller.
+
+## Pipe Operator
+
+| Operator | Meaning              | Example                        |
+|----------|----------------------|--------------------------------|
+| `\|>`    | Pipe (first-arg composition) | `x \|> f(a, b)` desugars to `f(x, a, b)` |
+
+The pipe operator has the lowest precedence and is left-associative:
+
+```mc
+text.lines()
+    |> from_csv(parse_row, opts)
+    |> map(grade_row)
+    |> to_csv(format_row, fmt_opts)
+```
+
+The right side must be a function call with parentheses. Method calls are not
+supported on the right side.
 
 ## Other Syntax Operators
 

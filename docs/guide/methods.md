@@ -104,6 +104,25 @@ Point :: {
 }
 ```
 
+## Trait Implementations
+
+Methods can implement traits using `Type :: TraitName { ... }`:
+
+```
+trait Runnable {
+    fn run(self) -> u64;
+}
+
+Process :: Runnable {
+    fn run(self) -> u64 {
+        self.ticks + 1
+    }
+}
+```
+
+See [Traits](traits.md) for the full story on trait definitions, properties, and
+bounds.
+
 ## Constructors
 
 Method blocks require a `self` parameter. Use a free function for constructors:

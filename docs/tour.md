@@ -92,23 +92,39 @@ Point :: {
 }
 ```
 
+## Generics
+
+Functions and types can be parameterized over types:
+
+```mc
+fn id<T>(x: T) -> T { x }
+
+type Option<T> = Some(T) | None
+
+fn make_some<T>(x: T) -> Option<T> { Some(x) }
+```
+
+Type arguments are inferred from usage. See [Generics](guide/generics.md).
+
 ## Traits
 
 ```mc
 trait Runnable {
-    fn run(self);
+    fn run(self) -> u64;
 }
 
 type Job = { id: u64 }
 
 Job :: Runnable {
-    fn run(self) {
-        // ...
-    }
+    fn run(self) -> u64 { self.id }
+}
+
+fn execute<T: Runnable>(value: T) -> u64 {
+    value.run()
 }
 ```
 
-Traits can also declare properties.
+Traits can also declare properties. See [Traits](guide/traits.md).
 
 ## Error Unions and `?`
 
@@ -152,6 +168,37 @@ requires {
 ```
 
 Imported symbols are used directly (`println`, `Config`, `load_config`).
+
+## Resource Management
+
+The `using` block scopes a resource and closes it automatically on block exit:
+
+```mc
+requires { std::io::open_write, std::io::IoError }
+
+fn main() -> () | IoError {
+    using writer = open_write("/tmp/out.txt")?.text() {
+        writer.write_all("hello\n")?;
+    }
+    // writer is automatically closed here
+}
+```
+
+## Pipe Operator
+
+The pipe operator `|>` chains a value as the first argument to a function call:
+
+```mc
+requires { std::iter::map }
+
+let result = text.lines()
+    |> from_csv(parse_row, opts)
+    |> map(grade_row)
+    |> to_csv(format_row, fmt_opts);
+```
+
+`x |> f(a, b)` desugars to `f(x, a, b)`. See [Iterators and Pipe
+Operator](guide/iterators.md).
 
 ## Linear Types and Hosted Machines
 

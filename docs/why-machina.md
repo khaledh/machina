@@ -254,7 +254,7 @@ This is where the model really starts to separate itself.
 
 A real payment is not processed in one function call. It is created during
 checkout, authorized by a gateway, possibly flagged by a fraud service,
-captured by a merchant, and settled by a bank — each at a different time, often
+captured by a merchant, and settled by a bank -- each at a different time, often
 by a different service. The only thing connecting those stages is a payment key
 stored in a database or passed through a message queue.
 
@@ -269,7 +269,7 @@ coming back from a database row, queue message, or webhook payload re-enters the
 typed workflow.
 
 Here is the full program. Each stage is a separate helper function that takes a
-`Machine<PaymentService>` handle plus a payment key — the shape we wanted from
+`Machine<PaymentService>` handle plus a payment key -- the shape we wanted from
 the start for checkout, gateway, fraud, and merchant code paths.
 
 ```machina
@@ -391,12 +391,12 @@ declined
 Each stage uses only the payment key plus a typed `Machine<PaymentService>`
 handle. It resumes the payment, enters the typed world through `match`, and
 either acts or discovers that reality has changed. The merchant path does not
-crash or silently succeed — the type system and runtime together ensure it sees
+crash or silently succeed -- the type system and runtime together ensure it sees
 `Declined` and handles it.
 
-In a real system, these stages happen at different times — checkout during an
+In a real system, these stages happen at different times -- checkout during an
 order, authorization from a gateway callback, fraud detection from a background
-service — and the runtime loop naturally processes queued events between them. In
+service -- and the runtime loop naturally processes queued events between them. In
 this single-file demo, we force one runtime step so the fraud event is processed
 before the merchant resumes the payment.
 
@@ -433,7 +433,7 @@ That combination is the point.
 A payment workflow makes this concrete because the stakes are immediately
 obvious. Capturing before authorization, letting the wrong actor perform a
 sensitive transition, ignoring external fraud events, operating on stale state
-after the world has changed — these are not hypothetical. They are the bugs that
+after the world has changed -- these are not hypothetical. They are the bugs that
 cause real production incidents.
 
 Machina turns them from "things we should be careful about" into "things the

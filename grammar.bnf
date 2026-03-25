@@ -139,7 +139,7 @@ BlockItem          ::= StmtExpr | Expr ";"
 
 # Statement Expressions
 StmtExpr           ::= LetBind | VarBind | VarDecl | Assign
-                     | While | For | Break | Continue | Return
+                     | While | For | Using | Defer | Break | Continue | Return
 
 # Variable Binding/Declaration
 LetBind            ::= "let" Pattern ( ":" TypeExpr )? "=" Expr ";"
@@ -204,20 +204,22 @@ TuplePatternElem   ::= MatchBinding | TuplePattern
 MatchBinding       ::= Identifier | "_"
 
 # Operator Precedence (Lowest to Highest)
-# 0. Logical OR (||)
-# 1. Logical AND (&&)
-# 2. Bitwise OR (|)
-# 3. Bitwise XOR (^)
-# 4. Bitwise AND (&)
-# 5. Comparison (==, !=, <, <=, >, >=)
-# 6. Shift (<<, >>)
-# 7. Additive (+, -)
-# 8. Multiplicative (*, /, %)
-# 9. Unary (-, !, ~)
-# 10. Postfix
+# 0. Pipe (|>)
+# 1. Logical OR (||)
+# 2. Logical AND (&&)
+# 3. Bitwise OR (|)
+# 4. Bitwise XOR (^)
+# 5. Bitwise AND (&)
+# 6. Comparison (==, !=, <, <=, >, >=)
+# 7. Shift (<<, >>)
+# 8. Additive (+, -)
+# 9. Multiplicative (*, /, %)
+# 10. Unary (-, !, ~)
+# 11. Postfix
 
-InfixExpr          ::= OrExpr
+InfixExpr          ::= PipeExpr
 
+PipeExpr           ::= OrExpr ( "|>" PostfixExpr )*
 OrExpr             ::= AndExpr ( "||" AndExpr )*
 AndExpr            ::= BitOrExpr ( "&&" BitOrExpr )*
 BitOrExpr          ::= BitXorExpr ( "|" BitXorExpr )*

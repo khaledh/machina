@@ -92,6 +92,43 @@ for x in items {
 }
 ```
 
+### for over Custom Iterables
+
+Any type with `iter(self)` and `next(inout self) -> T | IterDone` methods can
+be used in a `for` loop:
+
+```
+type Counter = { start: u64, end: u64 }
+
+Counter :: {
+    fn iter(self) -> CounterIter {
+        CounterIter { cur: self.start, end: self.end }
+    }
+}
+
+type CounterIter = { cur: u64, end: u64 }
+
+CounterIter :: {
+    fn next(inout self) -> u64 | IterDone {
+        if self.cur < self.end {
+            let value = self.cur;
+            self.cur += 1;
+            value
+        } else {
+            IterDone {}
+        }
+    }
+}
+
+let counter = Counter { start: 0, end: 5 };
+for n in counter {
+    println(n);    // prints 0 through 4
+}
+```
+
+See [Iterators and Pipe Operator](iterators.md) for more on custom iterables
+and iterator composition.
+
 ### Loop with Destructuring
 
 Loop variables can use patterns:
@@ -265,6 +302,31 @@ fn to_num(c: Color) -> u64 {
         Color::Red => 1,
         Color::Green => 2,
         Color::Blue => 3,
+    }
+}
+```
+
+## Resource Blocks
+
+### using
+
+The `using` statement binds a resource to a variable and automatically closes it
+when the block exits:
+
+```
+using writer = open_write(path)?.text() {
+    writer.write_all("hello\n")?;
+}
+// writer is closed here, even if the block exits early via ? or return
+```
+
+`using` blocks can be nested:
+
+```
+using reader = open_read(input)?.text() {
+    let text = reader.read_all()?;
+    using writer = open_write(output)?.text() {
+        writer.write_all(text)?;
     }
 }
 ```
