@@ -1314,6 +1314,40 @@ fn test_match_target_not_enum() {
 }
 
 #[test]
+fn test_match_with_generic_unresolved_scrutinee_is_deferred() {
+    let source = r#"
+        type IterDone = {}
+
+        type CsvFormatIter<S, T> = {
+            source: S,
+            format: fn(T) -> string,
+            header: string,
+            wrote_header: bool,
+        }
+
+        CsvFormatIter<S, T> :: {
+            fn next(inout self) -> string | IterDone {
+                if !self.wrote_header {
+                    self.wrote_header = true;
+                    self.header
+                } else {
+                    match self.source.next() {
+                        item: T => {
+                            let format = self.format;
+                            format(item)
+                        }
+                        done: IterDone => IterDone {},
+                        other => other,
+                    }
+                }
+            }
+        }
+    "#;
+
+    sem_check_source(source).expect("Expected generic match to defer until specialization");
+}
+
+#[test]
 fn test_match_enum_through_heap() {
     let source = r#"
         type Msg = Ping(u64) | Pong(u64)

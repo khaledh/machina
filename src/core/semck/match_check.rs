@@ -32,6 +32,13 @@ pub(super) fn check_match(
         .type_map
         .type_table()
         .get(ctx.type_map.type_of(scrutinee.id));
+    if scrutinee_ty.contains_unresolved() {
+        // Generic/method-parameter-dependent matches can legitimately remain
+        // unresolved until a later specialization round. Structural semcheck
+        // should not reject those early just because the scrutinee is not yet
+        // concrete enough to classify as enum/union/tuple/bool/int.
+        return;
+    }
     let peeled_ty = scrutinee_ty.peel_heap();
 
     let rule = MatchRuleKind::for_type(&peeled_ty);
