@@ -67,24 +67,22 @@ fn main() -> () | IoError | ParseError {
         writer.write_all("cara,7\n")?;
     }
 
+    let csv_parse_opts = CsvParseOptions {
+        skip: 1,
+        delimiter: ",",
+    };
+    let csv_format_opts = CsvFormatOptions {
+        header: "name,grade",
+        delimiter: ",",
+    };
+
     using reader = open_read(input_path)?.text() {
         let text = reader.read_all()?;
-        let pipeline: Iterable<string> = text.lines()
-            |> from_csv(
-                parse_row,
-                CsvParseOptions {
-                    skip: 1,
-                    delimiter: ",",
-                },
-            )
+        let pipeline: Iterable<string> =
+            text.lines()
+            |> from_csv(parse_row, csv_parse_opts)
             |> map(grade_row)
-            |> to_csv(
-                format_row,
-                CsvFormatOptions {
-                    header: "name,grade",
-                    delimiter: ",",
-                },
-            );
+            |> to_csv(format_row, csv_format_opts);
 
         using output_writer = open_write(output_path)?.text() {
             write_lines(output_writer, pipeline)?;
