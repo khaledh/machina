@@ -44,7 +44,7 @@
         },
         {
           "name": "keyword.other.machina",
-          "match": "\\b(fn|type|trait|range|bounds|nonzero|let|var|in|inout|out|sink|move|self|prop|get|set|map|requires|role|flow|on|emit|reply)\\b"
+          "match": "\\b(fn|type|trait|range|bounds|nonzero|let|var|using|in|inout|out|sink|move|self|prop|get|set|requires|role|flow|on|emit|reply)\\b"
         },
         {
           "name": "constant.language.boolean.machina",
