@@ -7,8 +7,9 @@ use crate::core::types::Type;
 use crate::services::analysis::db::pipeline_helpers::def_target_for_symbol_id_in_states;
 use crate::services::analysis::lookups::{
     ResolvedSymbolTarget, binding_value_node_id_for_def, def_at_span, hover_at_span_in_file,
-    hover_for_resolved_target, identifier_token_at_span, location_for_resolved_target,
-    resolved_binding_type_for_def, signature_help_for_resolved_target_at_call_site, type_at_span,
+    hover_for_resolved_target, identifier_token_at_span, linear_decl_target_at_span,
+    location_for_resolved_target, resolved_binding_type_for_def,
+    signature_help_for_resolved_target_at_call_site, type_at_span,
 };
 use crate::services::analysis::pipeline::LookupState;
 use crate::services::analysis::program_pipeline::resolve_imported_symbol_id_from_import_env;
@@ -43,6 +44,22 @@ impl super::AnalysisDb {
             return Ok(None);
         };
         let source = snapshot.text(file_id);
+        let token = identifier_token_at_span(source.as_deref(), query_span);
+        let token_span = token.as_ref().map(|token| token.span).unwrap_or(query_span);
+        if let Some(resolved) = entry_state.resolved.as_ref()
+            && let Some(target) = linear_decl_target_at_span(
+                &resolved.module,
+                token_span,
+                source.as_deref(),
+                token.as_ref().map(|token| token.ident.as_str()),
+            )
+        {
+            return Ok(Some(Location {
+                file_id,
+                path: snapshot.path(file_id).map(std::path::Path::to_path_buf),
+                span: target.span,
+            }));
+        }
         let resolved_target = resolved_target_at_program_span(
             self,
             file_id,

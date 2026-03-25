@@ -126,10 +126,13 @@ fn inject_prelude_module(
 ) -> Result<(Module, NodeIdGen), Vec<CompileError>> {
     let prelude_path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
         .join("std")
-        .join("prelude_decl.mc");
+        .join("prelude.mc");
     let prelude_src = fs::read_to_string(&prelude_path)
         .map_err(|e| vec![CompileError::Io(prelude_path.clone(), e)])?;
-    let (prelude_module, id_gen) = parse_with_id_gen(&prelude_src, id_gen)?;
+    let (mut prelude_module, id_gen) = parse_with_id_gen(&prelude_src, id_gen)?;
+    // Prelude requires are injected earlier during capsule discovery. The
+    // implicit prelude merge only contributes declarations to the final module.
+    prelude_module.requires.clear();
     Ok((merge_modules(&prelude_module, &user_module), id_gen))
 }
 

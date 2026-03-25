@@ -12,7 +12,7 @@ mod signature_help;
 mod symbol_target;
 mod type_display;
 
-pub(crate) use definition::{def_at_span, def_location_at_span};
+pub(crate) use definition::{def_at_span, def_location_at_span, linear_decl_target_at_span};
 pub(crate) use document_symbols::document_symbols;
 pub(crate) use hover::hover_at_span_in_file;
 pub(crate) use semantic_tokens::semantic_tokens;

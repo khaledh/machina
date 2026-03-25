@@ -2446,7 +2446,7 @@ fn run() -> u64 { 1 }
 }
 
 #[test]
-fn diagnostics_for_program_file_injects_prelude_decl_for_runtime_intrinsics() {
+fn diagnostics_for_program_file_injects_prelude_for_runtime_intrinsics() {
     let run_id = ANALYSIS_TMP_COUNTER.fetch_add(1, Ordering::Relaxed);
     let temp_dir = std::env::temp_dir().join(format!(
         "machina_analysis_program_prelude_inject_{}_{}",
@@ -2478,7 +2478,7 @@ fn main() {
 }
 
 #[test]
-fn def_location_at_program_file_maps_runtime_intrinsic_to_prelude_decl() {
+fn def_location_at_program_file_maps_runtime_intrinsic_to_prelude() {
     let run_id = ANALYSIS_TMP_COUNTER.fetch_add(1, Ordering::Relaxed);
     let temp_dir = std::env::temp_dir().join(format!(
         "machina_analysis_runtime_defloc_{}_{}",
@@ -2507,7 +2507,7 @@ fn main() {
 
     let path = location.path.expect("expected definition path");
     assert!(
-        path.to_string_lossy().ends_with("std/prelude_decl.mc"),
+        path.to_string_lossy().ends_with("std/prelude.mc"),
         "expected prelude decl definition path, got: {}",
         path.display()
     );

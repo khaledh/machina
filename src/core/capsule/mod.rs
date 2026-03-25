@@ -102,7 +102,7 @@ pub struct ParsedModule {
 
 #[derive(Debug, Clone, Copy)]
 pub struct CapsuleParseOptions {
-    /// When true, auto-import symbols listed in `std/prelude_requires.mc`
+    /// When true, auto-import prelude requires listed in `std/prelude.mc`
     /// into every non-std module.
     pub inject_prelude_requires: bool,
 }
@@ -276,17 +276,17 @@ impl ModuleLoader for FsModuleLoader {
 // Prelude requires: auto-imported symbols for user modules
 // ---------------------------------------------------------------------------
 
-fn prelude_requires_path() -> PathBuf {
+fn prelude_path() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))
         .join("std")
-        .join("prelude_requires.mc")
+        .join("prelude.mc")
 }
 
-/// Cached prelude requires parsed once per process.
+/// Cached prelude requires parsed once per process from `std/prelude.mc`.
 fn prelude_require_entries() -> &'static [Require] {
     static CACHE: OnceLock<Vec<Require>> = OnceLock::new();
     CACHE.get_or_init(|| {
-        let path = prelude_requires_path();
+        let path = prelude_path();
         let Ok(src) = fs::read_to_string(&path) else {
             return Vec::new();
         };

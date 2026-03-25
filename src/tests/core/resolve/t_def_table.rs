@@ -27,7 +27,7 @@ fn def_location_uses_override_when_present() {
     assert_eq!(default_loc.path.as_deref(), Some(source_path.as_path()));
 
     let override_loc = DefLocation {
-        path: Some(PathBuf::from("std/prelude_decl.mc")),
+        path: Some(PathBuf::from("std/prelude.mc")),
         span: Span::default(),
     };
     table.set_def_location(def_id, override_loc.clone());

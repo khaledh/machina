@@ -3,6 +3,7 @@ use std::process::{Command, Output};
 use std::sync::atomic::{AtomicUsize, Ordering};
 
 use machina::driver::compile::{CompileOptions, compile_with_path};
+use machina::driver::native_support::{ensure_prelude_impl_object, ensure_runtime_archive};
 use std::fs;
 
 static TEST_COUNTER: AtomicUsize = AtomicUsize::new(0);
@@ -33,7 +34,6 @@ pub(crate) fn run_program_with_opts(
     opts: CompileOptions,
     args: &[&str],
 ) -> Output {
-    let repo_root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
     let run_id = TEST_COUNTER.fetch_add(1, Ordering::Relaxed);
     let temp_dir = std::env::temp_dir().join(format!(
         "machina_runtime_test_{}_{}_{}",
@@ -52,9 +52,10 @@ pub(crate) fn run_program_with_opts(
     let exe_path = temp_dir.join(name);
     fs::write(&asm_path, output.asm).expect("failed to write asm");
 
-    let prelude_obj = compile_prelude_impl(&repo_root, &temp_dir);
-    let runtime_sources = runtime_sources(&repo_root);
-    link_exe(&exe_path, &asm_path, &runtime_sources, &[prelude_obj]);
+    let prelude_obj = ensure_prelude_impl_object(&opts, Some(&temp_dir))
+        .expect("failed to build cached prelude support");
+    let runtime_archive = ensure_runtime_archive().expect("failed to build cached runtime archive");
+    link_exe(&exe_path, &asm_path, &runtime_archive, &[prelude_obj]);
 
     let run = Command::new(&exe_path)
         .args(args)
@@ -77,7 +78,7 @@ pub(crate) fn run_c_program(name: &str, source_path: &Path) -> Output {
 
     let exe_path = temp_dir.join(name);
     let runtime_dir = repo_root.join("runtime");
-    let runtime_sources = runtime_sources(&repo_root);
+    let runtime_archive = ensure_runtime_archive().expect("failed to build cached runtime archive");
 
     let status = Command::new("cc")
         .arg("-std=c11")
@@ -86,7 +87,7 @@ pub(crate) fn run_c_program(name: &str, source_path: &Path) -> Output {
         .arg("-o")
         .arg(&exe_path)
         .arg(source_path)
-        .args(&runtime_sources)
+        .arg(&runtime_archive)
         .status()
         .expect("failed to invoke cc");
     assert!(status.success(), "cc failed with status {status}");
@@ -106,73 +107,13 @@ fn compile_source_with_opts(
     compile_with_path(&source, Some(source_path), opts).expect("compile failed")
 }
 
-fn compile_prelude_impl(repo_root: &Path, temp_dir: &Path) -> PathBuf {
-    let prelude_path = repo_root.join("std").join("prelude_impl.mc");
-    let source = fs::read_to_string(&prelude_path).expect("failed to read prelude_impl");
-    let opts = CompileOptions {
-        dump: None,
-        emit_ir: false,
-        verify_ir: false,
-        trace_alloc: false,
-        trace_drops: false,
-        inject_prelude: true,
-    };
-    let prelude = compile_with_path(&source, Some(&prelude_path), &opts).expect("compile failed");
-
-    let asm_path = temp_dir.join("prelude_impl.s");
-    let obj_path = temp_dir.join("prelude_impl.o");
-    fs::write(&asm_path, prelude.asm).expect("failed to write prelude asm");
-
-    let status = Command::new("cc")
-        .arg("-c")
-        .arg("-o")
-        .arg(&obj_path)
-        .arg(&asm_path)
-        .status()
-        .expect("failed to invoke cc");
-    assert!(status.success(), "cc failed with status {status}");
-
-    obj_path
-}
-
-fn runtime_sources(repo_root: &Path) -> Vec<PathBuf> {
-    vec![
-        repo_root.join("runtime").join("alloc.c"),
-        repo_root.join("runtime").join("args.c"),
-        repo_root.join("runtime").join("conv.c"),
-        repo_root.join("runtime").join("dyn_array.c"),
-        repo_root.join("runtime").join("hash_table.c"),
-        repo_root.join("runtime").join("map_table.c"),
-        repo_root.join("runtime").join("machine").join("runtime.c"),
-        repo_root.join("runtime").join("machine").join("bridge.c"),
-        repo_root
-            .join("runtime")
-            .join("machine")
-            .join("descriptor.c"),
-        repo_root
-            .join("runtime")
-            .join("machine")
-            .join("hosted_instance.c"),
-        repo_root.join("runtime").join("machine").join("pending.c"),
-        repo_root.join("runtime").join("machine").join("emit.c"),
-        repo_root.join("runtime").join("set.c"),
-        repo_root.join("runtime").join("mem.c"),
-        repo_root.join("runtime").join("io.c"),
-        repo_root.join("runtime").join("print.c"),
-        repo_root.join("runtime").join("string.c"),
-        repo_root.join("runtime").join("trap.c"),
-    ]
-}
-
-fn link_exe(exe_path: &Path, asm_path: &Path, runtime_sources: &[PathBuf], extra_objs: &[PathBuf]) {
+fn link_exe(exe_path: &Path, asm_path: &Path, runtime_archive: &Path, extra_objs: &[PathBuf]) {
     let mut cmd = Command::new("cc");
     cmd.arg("-o").arg(exe_path).arg(asm_path);
     for obj in extra_objs {
         cmd.arg(obj);
     }
-    for runtime_path in runtime_sources {
-        cmd.arg(runtime_path);
-    }
+    cmd.arg(runtime_archive);
     let status = cmd.status().expect("failed to invoke cc");
     assert!(status.success(), "cc failed with status {status}");
 }

@@ -114,7 +114,7 @@ pub(crate) fn run_program_pipeline_for_file_with_options(
             ),
         );
         let mut import_facts = ProgramImportFactsCache::default();
-        let parsed_prelude = parsed_prelude_decl_module(program_context.next_node_id_gen());
+        let parsed_prelude = parsed_prelude_module(program_context.next_node_id_gen());
         let mut all_diagnostics = Vec::new();
         let mut module_states = HashMap::<ModuleId, LookupState>::new();
         let mut exports_by_module = HashMap::<ModuleId, ModuleExportFacts>::new();
@@ -280,45 +280,48 @@ fn module_with_implicit_prelude(
     let Some(prelude_module) = prelude_module else {
         return parsed.module.clone();
     };
-    if is_std_prelude_decl(parsed) {
+    if is_std_prelude_module(parsed) {
         parsed.module.clone()
     } else {
         merge_modules(prelude_module, &parsed.module)
     }
 }
 
-fn is_std_prelude_decl(parsed: &capsule::ParsedModule) -> bool {
+fn is_std_prelude_module(parsed: &capsule::ParsedModule) -> bool {
     matches!(
         parsed.source.path.segments(),
-        [std_seg, prelude_seg] if std_seg == "std" && prelude_seg == "prelude_decl"
+        [std_seg, prelude_seg] if std_seg == "std" && prelude_seg == "prelude"
     )
 }
 
-fn parsed_prelude_decl_module(id_gen: &NodeIdGen) -> Option<ParsedPrelude> {
-    let prelude_path = prelude_decl_path();
-    let prelude_src = fs::read_to_string(prelude_path).ok()?;
-    let (module, next_node_id_gen) =
+fn parsed_prelude_module(id_gen: &NodeIdGen) -> Option<ParsedPrelude> {
+    let path = prelude_path();
+    let prelude_src = fs::read_to_string(path).ok()?;
+    let (mut module, next_node_id_gen) =
         api::parse_module_with_id_gen(&prelude_src, id_gen.clone()).ok()?;
+    // Program discovery injects prelude requires separately. The implicit
+    // prelude merge only needs declaration items.
+    module.requires.clear();
     Some(ParsedPrelude {
         module,
         next_node_id_gen,
     })
 }
 
-fn prelude_decl_path() -> PathBuf {
+fn prelude_path() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))
         .join("std")
-        .join("prelude_decl.mc")
+        .join("prelude.mc")
 }
 
 fn apply_prelude_runtime_def_locations(
     parsed: &capsule::ParsedModule,
     resolved: &mut ResolvedContext,
 ) {
-    if is_std_prelude_decl(parsed) {
+    if is_std_prelude_module(parsed) {
         return;
     }
-    let runtime_locations = prelude_decl_runtime_locations();
+    let runtime_locations = prelude_runtime_locations();
     if runtime_locations.is_empty() {
         return;
     }
@@ -336,20 +339,20 @@ fn apply_prelude_runtime_def_locations(
     }
 }
 
-fn prelude_decl_runtime_locations() -> &'static HashMap<String, DefLocation> {
+fn prelude_runtime_locations() -> &'static HashMap<String, DefLocation> {
     static PRELUDE_RUNTIME_LOCATIONS: OnceLock<HashMap<String, DefLocation>> = OnceLock::new();
     PRELUDE_RUNTIME_LOCATIONS.get_or_init(build_prelude_runtime_locations)
 }
 
 fn build_prelude_runtime_locations() -> HashMap<String, DefLocation> {
-    let prelude_path = prelude_decl_path();
-    let Ok(prelude_src) = fs::read_to_string(prelude_path) else {
+    let path = prelude_path();
+    let Ok(prelude_src) = fs::read_to_string(path) else {
         return HashMap::new();
     };
     let Ok((module, id_gen)) = api::parse_module_with_id_gen(&prelude_src, NodeIdGen::new()) else {
         return HashMap::new();
     };
-    let parsed = ParsedContext::new(module, id_gen).with_source_path(prelude_decl_path());
+    let parsed = ParsedContext::new(module, id_gen).with_source_path(prelude_path());
     let resolved = api::resolve_stage_partial(parsed, HashMap::new(), HashMap::new());
     let mut locations = HashMap::new();
     for def in resolved.context.def_table.defs() {

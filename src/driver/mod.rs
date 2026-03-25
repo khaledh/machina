@@ -2,3 +2,5 @@
 
 pub mod compile;
 pub mod query;
+
+pub mod native_support;

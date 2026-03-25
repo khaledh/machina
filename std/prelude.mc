@@ -1,3 +1,8 @@
+requires {
+    std::io::print
+    std::io::println
+}
+
 // Runtime externs: implemented in runtime/*
 @runtime
 fn __rt_print(s: string, newline: u64);

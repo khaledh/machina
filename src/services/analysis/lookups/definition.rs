@@ -14,7 +14,7 @@ use super::identifier_token_at_span;
 use std::collections::HashSet;
 
 #[derive(Clone, Debug)]
-pub(super) struct LinearDeclTarget {
+pub(crate) struct LinearDeclTarget {
     pub node_id: NodeId,
     pub span: Span,
     pub display: String,
@@ -178,7 +178,7 @@ fn best_def_use_at_span(
     None
 }
 
-pub(super) fn linear_decl_target_at_span(
+pub(crate) fn linear_decl_target_at_span(
     module: &Module,
     query_span: Span,
     source: Option<&str>,

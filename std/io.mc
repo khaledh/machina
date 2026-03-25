@@ -1,4 +1,4 @@
-// I/O utilities backed by runtime intrinsics declared in prelude_decl.mc.
+// I/O utilities backed by runtime intrinsics declared in prelude.mc.
 //
 // Public surface:
 // - capability handles from `open_read/open_write/open_rw`

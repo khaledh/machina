@@ -2,6 +2,9 @@ use clap::Parser as ClapParser;
 use machina::core::capsule::CapsuleError;
 use machina::core::diag::{CompileError, Span, format_error};
 use machina::driver::compile::{CompileOptions, check_with_path, compile_with_path};
+use machina::driver::native_support::{
+    assemble_object, default_exe_path, ensure_prelude_impl_object, ensure_runtime_archive,
+};
 use machina::driver::query::{QueryLookupKind as DriverQueryLookupKind, run_query};
 use machina::services::analysis::diagnostics::Diagnostic;
 use machina::services::analysis::diagnostics::DiagnosticPhase;
@@ -268,18 +271,12 @@ fn main() {
                         .output
                         .clone()
                         .unwrap_or_else(|| default_exe_path(input_path));
-                    let result = compile_prelude_impl_object(
+                    let result = ensure_prelude_impl_object(
                         &opts,
-                        input_path.parent().unwrap_or_else(|| Path::new(".")),
+                        Some(input_path.parent().unwrap_or_else(|| Path::new("."))),
                     )
-                    .and_then(|(asm, obj)| {
-                        let link_result =
-                            link_executable(&asm_path, std::slice::from_ref(&obj), &exe_path);
-                        if link_result.is_ok() {
-                            let _ = std::fs::remove_file(&asm);
-                            let _ = std::fs::remove_file(&obj);
-                        }
-                        link_result
+                    .and_then(|obj| {
+                        link_executable(&asm_path, std::slice::from_ref(&obj), &exe_path)
                     });
                     if result.is_ok() {
                         println!("[SUCCESS] executable written to {}", exe_path.display());
@@ -289,18 +286,12 @@ fn main() {
                 }
                 DriverKind::Run => {
                     let exe_path = default_exe_path(input_path);
-                    let link_result = compile_prelude_impl_object(
+                    let link_result = ensure_prelude_impl_object(
                         &opts,
-                        input_path.parent().unwrap_or_else(|| Path::new(".")),
+                        Some(input_path.parent().unwrap_or_else(|| Path::new("."))),
                     )
-                    .and_then(|(asm, obj)| {
-                        let link_result =
-                            link_executable(&asm_path, std::slice::from_ref(&obj), &exe_path);
-                        if link_result.is_ok() {
-                            let _ = std::fs::remove_file(&asm);
-                            let _ = std::fs::remove_file(&obj);
-                        }
-                        link_result
+                    .and_then(|obj| {
+                        link_executable(&asm_path, std::slice::from_ref(&obj), &exe_path)
                     });
                     let remove_asm = link_result.is_ok();
                     let result = link_result.and_then(|_| run_executable(&exe_path));
@@ -458,13 +449,6 @@ fn print_structured_diag(source: &str, diag: Diagnostic) {
     println!("{}", format_error(source, diag.span, message));
 }
 
-fn default_exe_path(input_path: &Path) -> PathBuf {
-    let stem = input_path.file_stem().unwrap_or_else(|| OsStr::new("out"));
-    let mut path = input_path.to_path_buf();
-    path.set_file_name(stem);
-    path
-}
-
 fn temp_asm_path(input_path: &Path) -> PathBuf {
     let stem = input_path
         .file_stem()
@@ -476,37 +460,14 @@ fn temp_asm_path(input_path: &Path) -> PathBuf {
     path
 }
 
-fn assemble_object(asm_path: &Path, obj_path: &Path) -> Result<(), String> {
-    let status = ProcessCommand::new("cc")
-        .arg("-c")
-        .arg("-o")
-        .arg(obj_path)
-        .arg(asm_path)
-        .status()
-        .map_err(|e| format!("failed to invoke cc: {e}"))?;
-    if status.success() {
-        Ok(())
-    } else {
-        Err(format!("cc exited with status {}", status))
-    }
-}
-
 fn link_executable(asm_path: &Path, extra_objs: &[PathBuf], exe_path: &Path) -> Result<(), String> {
-    let runtime_paths = runtime_source_paths();
-    for runtime_path in &runtime_paths {
-        if !runtime_path.exists() {
-            return Err(format!(
-                "runtime source file not found at {}",
-                runtime_path.display()
-            ));
-        }
-    }
+    let runtime_archive = ensure_runtime_archive()?;
     let status = ProcessCommand::new("cc")
         .arg("-o")
         .arg(exe_path)
         .arg(asm_path)
         .args(extra_objs)
-        .args(&runtime_paths)
+        .arg(runtime_archive)
         .status()
         .map_err(|e| format!("failed to invoke cc: {e}"))?;
     if status.success() {
@@ -514,65 +475,6 @@ fn link_executable(asm_path: &Path, extra_objs: &[PathBuf], exe_path: &Path) -> 
     } else {
         Err(format!("cc exited with status {}", status))
     }
-}
-
-fn temp_obj_path(name: &str) -> PathBuf {
-    let pid = std::process::id();
-    let mut path = std::env::temp_dir();
-    path.push(format!("machina_{pid}_{name}.o"));
-    path
-}
-
-fn temp_named_asm_path(name: &str) -> PathBuf {
-    let pid = std::process::id();
-    let mut path = std::env::temp_dir();
-    path.push(format!("machina_{pid}_{name}.s"));
-    path
-}
-
-fn compile_prelude_impl_object(
-    opts: &CompileOptions,
-    ir_dir: &Path,
-) -> Result<(PathBuf, PathBuf), String> {
-    let prelude_path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .join("std")
-        .join("prelude_impl.mc");
-    let prelude_src = fs::read_to_string(&prelude_path)
-        .map_err(|e| format!("failed to read {}: {e}", prelude_path.display()))?;
-
-    let impl_opts = CompileOptions {
-        dump: None,
-        emit_ir: opts.emit_ir,
-        verify_ir: opts.verify_ir,
-        trace_alloc: opts.trace_alloc,
-        trace_drops: opts.trace_drops,
-        inject_prelude: true,
-    };
-
-    let output =
-        compile_with_path(&prelude_src, Some(&prelude_path), &impl_opts).map_err(|errs| {
-            let mut message = String::new();
-            for err in errs {
-                message.push_str(&format!("{err}\n"));
-            }
-            message
-        })?;
-
-    if let Some(ir) = output.ir.as_ref() {
-        let ir_path = ir_dir.join("prelude_impl.ir");
-        if let Err(e) = fs::write(&ir_path, ir) {
-            eprintln!("[WARN] failed to write {}: {e}", ir_path.display());
-        }
-    }
-
-    let asm_path = temp_named_asm_path("prelude_impl");
-    let obj_path = temp_obj_path("prelude_impl");
-
-    fs::write(&asm_path, output.asm)
-        .map_err(|e| format!("failed to write {}: {e}", asm_path.display()))?;
-    assemble_object(&asm_path, &obj_path)?;
-
-    Ok((asm_path, obj_path))
 }
 
 fn run_executable(exe_path: &Path) -> Result<i32, String> {
@@ -585,33 +487,4 @@ fn run_executable(exe_path: &Path) -> Result<i32, String> {
         .status()
         .map_err(|e| format!("failed to run {}: {e}", run_path.display()))?;
     Ok(status.code().unwrap_or(1))
-}
-
-const RUNTIME_SOURCE_FILES: &[&str] = &[
-    "alloc.c",
-    "args.c",
-    "conv.c",
-    "dyn_array.c",
-    "hash_table.c",
-    "map_table.c",
-    "machine/runtime.c",
-    "machine/bridge.c",
-    "machine/descriptor.c",
-    "machine/hosted_instance.c",
-    "machine/pending.c",
-    "machine/emit.c",
-    "mem.c",
-    "io.c",
-    "print.c",
-    "set.c",
-    "string.c",
-    "trap.c",
-];
-
-fn runtime_source_paths() -> Vec<PathBuf> {
-    let runtime_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("runtime");
-    RUNTIME_SOURCE_FILES
-        .iter()
-        .map(|f| runtime_dir.join(f))
-        .collect()
 }
