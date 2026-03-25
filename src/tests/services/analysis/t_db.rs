@@ -3563,6 +3563,33 @@ fn hover_at_program_file_csv_grade_rewrite_local_function_definition_name_is_ava
 }
 
 #[test]
+fn hover_at_program_file_csv_grade_rewrite_param_shows_source_type() {
+    let mut db = AnalysisDb::new();
+
+    let path =
+        Path::new(env!("CARGO_MANIFEST_DIR")).join("examples/basics/csv_grade_rewrite_small.mc");
+    let source = fs::read_to_string(&path).expect("failed to read csv rewrite example");
+    let file_id = db.upsert_disk_text(path, source.clone());
+
+    let query_span = span_for_substring_with_len(&source, "fields: string[*]", "fields".len());
+    let def_id = db
+        .def_at_program_file(file_id, query_span)
+        .expect("program def query should succeed");
+    assert!(def_id.is_some(), "expected def for parse_row parameter");
+    let strict_hover = db
+        .hover_at_file(file_id, query_span)
+        .expect("file hover query should succeed");
+    assert!(strict_hover.is_some(), "expected strict hover for parse_row parameter");
+    let hover = db
+        .hover_at_program_file(file_id, query_span)
+        .expect("program hover query should succeed")
+        .expect("expected hover info for parse_row parameter");
+
+    assert_eq!(hover.def_name.as_deref(), Some("fields"));
+    assert_eq!(hover.display, "fields: string[*]");
+}
+
+#[test]
 fn hover_at_program_file_csv_grade_rewrite_local_struct_type_reference_shows_source_shape() {
     let mut db = AnalysisDb::new();
 

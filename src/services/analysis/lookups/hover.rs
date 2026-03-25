@@ -25,7 +25,7 @@ use super::callable_signature::{
     format_source_binding_signature, format_source_callable_signature,
     format_source_struct_field_signature, format_source_type_signature,
 };
-use super::definition::{linear_decl_target_at_span, machine_handle_def_at_span};
+use super::definition::{def_at_span, linear_decl_target_at_span, machine_handle_def_at_span};
 use super::type_display::{format_type_for_display, hover_type_var_names};
 use super::{displayed_node_type, identifier_token_at_span, resolved_binding_type_for_def};
 
@@ -54,7 +54,13 @@ pub(crate) fn hover_at_span_in_file(
     );
     if source_text.is_some() && token.is_none() {
         hover_trace(tracer, "no identifier token at query span");
-        return None;
+        let fallback = try_strategy(tracer, "source_binding", || {
+            try_source_binding_hover(state, normalized_query_span, source_text)
+        });
+        if fallback.is_none() {
+            hover_trace(tracer, "final none");
+        }
+        return fallback;
     }
 
     let result = if state.typed.is_some() {
@@ -90,6 +96,16 @@ pub(crate) fn hover_at_span_in_file(
                     source_text,
                     query_ident.as_deref(),
                 )
+            })
+        })
+        .or_else(|| {
+            try_strategy(tracer, "source_binding", || {
+                try_source_binding_hover(state, normalized_query_span, source_text)
+            })
+        })
+        .or_else(|| {
+            try_strategy(tracer, "def_target", || {
+                try_def_target_hover(state, normalized_query_span, source_text)
             })
         })
         .or_else(|| {
@@ -443,6 +459,56 @@ fn enclosing_struct_field_expr<'a>(
     finder
         .best
         .map(|(field_node_id, target_node_id, _)| (field_node_id, target_node_id))
+}
+
+/// Try hover by scanning the def table for a matching definition name.
+fn try_def_target_hover(
+    state: &LookupState,
+    query_span: Span,
+    source_text: Option<&str>,
+) -> Option<HoverInfo> {
+    let def_id = def_at_span(state, query_span, source_text)?;
+    hover_for_def_in_state(state, def_id)
+}
+
+fn try_source_binding_hover(
+    state: &LookupState,
+    query_span: Span,
+    source_text: Option<&str>,
+) -> Option<HoverInfo> {
+    let def_id = def_at_span(state, query_span, source_text)?;
+    let (module, def_table) = if let Some(typed) = state.typed.as_ref() {
+        (&typed.module, &typed.def_table)
+    } else if let Some(resolved) = state.resolved.as_ref() {
+        (&resolved.module, &resolved.def_table)
+    } else {
+        return None;
+    };
+    let node_id = def_table.lookup_def_node_id(def_id)?;
+    let display = format_source_binding_signature(node_id, Some(def_id), Some(module), Some(def_table))?;
+    let def = def_table.lookup_def(def_id)?;
+    let ty = state
+        .typed
+        .as_ref()
+        .and_then(|typed| typed.type_map.lookup_def_type(def));
+    Some(HoverInfo {
+        node_id,
+        span: query_span,
+        def_id: Some(def_id),
+        symbol_id: state
+            .typed
+            .as_ref()
+            .and_then(|typed| typed.symbol_ids.lookup_symbol_id(def_id).cloned())
+            .or_else(|| {
+                state
+                    .resolved
+                    .as_ref()
+                    .and_then(|resolved| resolved.symbol_ids.lookup_symbol_id(def_id).cloned())
+            }),
+        def_name: Some(def.name.clone()),
+        ty,
+        display,
+    })
 }
 
 /// Try hover by scanning the def table for a matching definition name.
@@ -841,7 +907,7 @@ fn format_hover_label(
     if let Some(signature) = format_source_type_signature(def_id, module, def_table) {
         return signature;
     }
-    if let Some(signature) = format_source_binding_signature(node_id, module) {
+    if let Some(signature) = format_source_binding_signature(node_id, def_id, module, Some(def_table)) {
         return signature;
     }
     let render_type = |ty: &Type| format_type_for_display(ty, def_id, type_map, type_var_names);
