@@ -12,7 +12,7 @@ This creates several problems:
   code.
 - Flattening into one namespace requires name-mangling workarounds to avoid
   symbol collisions (the `prelude_only_keep_sets` mechanism in `compose.rs`).
-- The prelude system has three files (`prelude_decl.mc`, `prelude_impl.mc`,
+- The prelude system has three files (`prelude.mc`, `prelude_impl.mc`,
   `prelude_requires.mc`) with overlapping and unclear responsibilities.
 - Runtime C source files are recompiled on every build.
 - There is no path toward incremental compilation or user-defined libraries.
@@ -74,7 +74,7 @@ The prelude is:
 
 - Declarations only -- no implementations
 - Compiler-injected -- no `requires` needed by user code
-- A single file (`std/prelude.mc`, renamed from `prelude_decl.mc`)
+- A single file (`std/prelude.mc`, renamed from `prelude.mc`)
 
 The prelude is NOT a module. It is not separately compiled. It is merged into
 every compilation unit by the compiler frontend, the same way C compilers
@@ -495,7 +495,7 @@ how the module enters the compiler, not in how downstream passes consume it.
 1. **Build runtime as `libmachina_rt.a`.** Compile the 17 C files once, cache
    the archive. Only rebuild when source changes.
 
-2. **Collapse prelude to one file.** Merge `prelude_decl.mc` and
+2. **Collapse prelude to one file.** Merge `prelude.mc` and
    `prelude_requires.mc` into a single `prelude.mc` containing all
    declarations. Move `print`/`println` declarations into the prelude directly.
 
