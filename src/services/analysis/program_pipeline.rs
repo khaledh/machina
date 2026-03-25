@@ -26,7 +26,7 @@ use crate::services::analysis::frontend_support::{
 };
 use crate::services::analysis::pipeline::{
     LookupState, collect_sorted_diagnostics, run_module_pipeline_with_parsed_and_imports,
-    to_lookup_state,
+    to_lookup_state_with_source,
 };
 use crate::services::analysis::program_imports::ProgramImportFactsCache;
 use crate::services::analysis::query::{QueryKey, QueryResult, QueryRuntime};
@@ -150,7 +150,7 @@ pub(crate) fn run_program_pipeline_for_file_with_options(
                 rt,
                 module_id,
                 module_revision,
-                source,
+                source.clone(),
                 Some(parsed_context),
                 imported_modules,
                 imported_symbols,
@@ -197,7 +197,7 @@ pub(crate) fn run_program_pipeline_for_file_with_options(
                 }
             }
             all_diagnostics.extend(module_diags);
-            module_states.insert(module_id, to_lookup_state(&state));
+            module_states.insert(module_id, to_lookup_state_with_source(&state, Some(source.clone())));
         }
 
         all_diagnostics.sort_by_key(|diag| {

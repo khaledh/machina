@@ -60,6 +60,7 @@ impl super::AnalysisDb {
         let fallback_state = LookupState {
             resolved: state.resolved.clone(),
             typed: Some(fallback_typed),
+            source: state.source.clone(),
             poisoned_nodes: state.poisoned_nodes.clone(),
         };
         signature_help_at_span(&fallback_state, query_span, source)

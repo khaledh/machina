@@ -5,6 +5,7 @@
 
 use std::hash::{Hash, Hasher};
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 
 use crate::core::api::lookup_strict_frontend_with_path;
 use crate::core::capsule::{self, CapsuleError, ModuleLoader, ModulePath};
@@ -135,6 +136,7 @@ pub(crate) fn strict_frontend_lookup_state_with_path(
     Ok(LookupState {
         resolved: Some(resolved),
         typed: Some(typed),
+        source: Some(Arc::<str>::from(source)),
         poisoned_nodes: Default::default(),
     })
 }

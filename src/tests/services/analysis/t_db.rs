@@ -1807,6 +1807,54 @@ fn main() -> u64 { id(1) + id(2) }
 }
 
 #[test]
+fn semantic_tokens_narrow_param_defs_without_covering_type_annotations() {
+    let mut db = AnalysisDb::new();
+    let source = r#"
+type Writer = {}
+
+fn write_lines(writer: Writer, lines: Iterable<string>) -> () {
+    writer;
+}
+"#;
+    let file_id = db.upsert_disk_text(
+        Path::new(env!("CARGO_MANIFEST_DIR")).join("examples/semantic_tokens_params.mc"),
+        source,
+    );
+    let tokens = db
+        .semantic_tokens_at_file(file_id)
+        .expect("semantic token query should succeed");
+
+    let writer_name = span_for_substring_with_len(source, "writer: Writer", "writer".len());
+    let writer_type = span_for_substring_with_len(source, "Writer, lines", "Writer".len());
+    let lines_name = span_for_substring_with_len(source, "lines: Iterable<string>", "lines".len());
+
+    assert!(
+        tokens
+            .iter()
+            .any(|tok| tok.kind == SemanticTokenKind::Parameter && tok.span == writer_name),
+        "expected parameter token on writer name, got: {tokens:#?}"
+    );
+    assert!(
+        tokens
+            .iter()
+            .any(|tok| tok.kind == SemanticTokenKind::Type && tok.span == writer_type),
+        "expected type token on Writer, got: {tokens:#?}"
+    );
+    assert!(
+        !tokens
+            .iter()
+            .any(|tok| tok.kind == SemanticTokenKind::Parameter && tok.span == writer_type),
+        "parameter token should not cover Writer annotation, got: {tokens:#?}"
+    );
+    assert!(
+        tokens
+            .iter()
+            .any(|tok| tok.kind == SemanticTokenKind::Parameter && tok.span == lines_name),
+        "expected parameter token on lines name, got: {tokens:#?}"
+    );
+}
+
+#[test]
 fn semantic_tokens_include_linear_machine_defs() {
     let mut db = AnalysisDb::new();
     let source = r#"
@@ -1833,7 +1881,8 @@ machine PaymentService hosts Payment(key: id) {
     let tokens = db
         .semantic_tokens_at_file(file_id)
         .expect("semantic token query should succeed");
-    let machine_decl = span_for_substring(source, "machine PaymentService");
+    let machine_decl =
+        span_for_substring_with_len(source, "PaymentService hosts", "PaymentService".len());
 
     assert!(
         tokens.iter().any(|tok| {
@@ -3579,7 +3628,10 @@ fn hover_at_program_file_csv_grade_rewrite_param_shows_source_type() {
     let strict_hover = db
         .hover_at_file(file_id, query_span)
         .expect("file hover query should succeed");
-    assert!(strict_hover.is_some(), "expected strict hover for parse_row parameter");
+    assert!(
+        strict_hover.is_some(),
+        "expected strict hover for parse_row parameter"
+    );
     let hover = db
         .hover_at_program_file(file_id, query_span)
         .expect("program hover query should succeed")

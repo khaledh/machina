@@ -62,6 +62,7 @@ pub(crate) struct ModulePipelineState {
 pub(crate) struct LookupState {
     pub resolved: Option<ResolvedContext>,
     pub typed: Option<TypeCheckedContext>,
+    pub source: Option<Arc<str>>,
     pub poisoned_nodes: HashSet<NodeId>,
 }
 
@@ -554,7 +555,15 @@ pub(crate) fn collect_sorted_diagnostics(state: &ModulePipelineState) -> Vec<Dia
     diagnostics
 }
 
+#[cfg(test)]
 pub(crate) fn to_lookup_state(state: &ModulePipelineState) -> LookupState {
+    to_lookup_state_with_source(state, None)
+}
+
+pub(crate) fn to_lookup_state_with_source(
+    state: &ModulePipelineState,
+    source: Option<Arc<str>>,
+) -> LookupState {
     let mut poisoned_nodes = state.parsed.poisoned_nodes.clone();
     poisoned_nodes.extend(state.resolved.poisoned_nodes.iter().copied());
     poisoned_nodes.extend(state.typechecked.poisoned_nodes.iter().copied());
@@ -563,6 +572,7 @@ pub(crate) fn to_lookup_state(state: &ModulePipelineState) -> LookupState {
     LookupState {
         resolved: state.resolved.product.clone(),
         typed: state.typechecked.product.clone(),
+        source,
         poisoned_nodes,
     }
 }

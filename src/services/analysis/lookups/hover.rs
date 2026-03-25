@@ -485,7 +485,8 @@ fn try_source_binding_hover(
         return None;
     };
     let node_id = def_table.lookup_def_node_id(def_id)?;
-    let display = format_source_binding_signature(node_id, Some(def_id), Some(module), Some(def_table))?;
+    let display =
+        format_source_binding_signature(node_id, Some(def_id), Some(module), Some(def_table))?;
     let def = def_table.lookup_def(def_id)?;
     let ty = state
         .typed
@@ -907,7 +908,9 @@ fn format_hover_label(
     if let Some(signature) = format_source_type_signature(def_id, module, def_table) {
         return signature;
     }
-    if let Some(signature) = format_source_binding_signature(node_id, def_id, module, Some(def_table)) {
+    if let Some(signature) =
+        format_source_binding_signature(node_id, def_id, module, Some(def_table))
+    {
         return signature;
     }
     let render_type = |ty: &Type| format_type_for_display(ty, def_id, type_map, type_var_names);

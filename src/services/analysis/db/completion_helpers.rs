@@ -37,6 +37,7 @@ impl super::AnalysisDb {
         let LookupState {
             resolved,
             typed,
+            source: _,
             poisoned_nodes: _,
         } = state;
         let Some(resolved) = resolved else {

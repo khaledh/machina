@@ -7,8 +7,8 @@
 use crate::core::ast::visit::{Visitor, walk_module};
 use crate::core::ast::{BindPatternKind, NodeId};
 use crate::core::ast::{
-    CallableRef, EnumDefVariant, MatchPattern, Module, Param, ParamMode, SelfParam,
-    StmtExprKind, StructDefField, TypeDefKind, TypeExpr, TypeExprKind, TypeParam,
+    CallableRef, EnumDefVariant, MatchPattern, Module, Param, ParamMode, SelfParam, StmtExprKind,
+    StructDefField, TypeDefKind, TypeExpr, TypeExprKind, TypeParam,
 };
 use crate::core::resolve::{DefId, DefKind, DefTable};
 use crate::core::typecheck::type_map::TypeMap;

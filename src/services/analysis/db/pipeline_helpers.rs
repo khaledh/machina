@@ -11,7 +11,7 @@ use crate::services::analysis::frontend_support::{
 };
 use crate::services::analysis::lookups::{ResolvedSymbolTarget, resolved_target_def_id};
 use crate::services::analysis::pipeline::{
-    LookupState, run_module_pipeline_with_query_input, to_lookup_state,
+    LookupState, run_module_pipeline_with_query_input, to_lookup_state_with_source,
 };
 use crate::services::analysis::program_pipeline::{
     ProgramPipelineResult, run_program_pipeline_for_file_with_options,
@@ -86,9 +86,10 @@ impl super::AnalysisDb {
         let lookup_key =
             QueryKey::with_input(QueryKind::LookupState, module_id, revision, query_input);
         self.execute_query(lookup_key, move |rt| {
+            let lookup_source = source.clone();
             let state =
                 run_module_pipeline_with_query_input(rt, module_id, revision, source, query_input)?;
-            Ok(to_lookup_state(&state))
+            Ok(to_lookup_state_with_source(&state, Some(lookup_source)))
         })
     }
 
@@ -105,6 +106,7 @@ impl super::AnalysisDb {
         let revision = snapshot.revision();
         let query_input = stable_source_revision(&source).wrapping_add(1);
         let module_id = ModuleId(file_id.0);
+        let lookup_source = Arc::<str>::from(source.clone());
         let pipeline = run_module_pipeline_with_query_input(
             &mut self.runtime,
             module_id,
@@ -112,7 +114,10 @@ impl super::AnalysisDb {
             Arc::<str>::from(source),
             query_input,
         )?;
-        Ok(Some(to_lookup_state(&pipeline)))
+        Ok(Some(to_lookup_state_with_source(
+            &pipeline,
+            Some(lookup_source),
+        )))
     }
 
     pub(super) fn entry_lookup_state_for_program_file(
