@@ -451,13 +451,8 @@ fn receiver_type_for_call(
     let Some(def_id) = typed.def_table.lookup_node_def_id(call.callee_node_id) else {
         return receiver_ty;
     };
-    let receiver_ty = resolved_binding_type_for_def(
-        &typed.module,
-        typed,
-        &typed.def_table,
-        def_id,
-        receiver_ty,
-    );
+    let receiver_ty =
+        resolved_binding_type_for_def(&typed.module, typed, &typed.def_table, def_id, receiver_ty);
     if receiver_ty
         .as_ref()
         .is_some_and(|ty| !ty.contains_unresolved())

@@ -144,10 +144,13 @@ fn build_outputs(engine: &TypecheckEngine) -> FinalizeOutput {
         {
             ty = callable_ty.clone();
         }
+        let type_def_type_param_names = collect_type_def_type_param_names(engine, def_id, &ty);
         let nominal = nominal_keys.infer(&ty);
         builder.record_def_type_with_nominal(def, ty, nominal);
         if let Some(names) = callable_type_param_names.get(&def_id) {
             builder.record_def_type_param_names(def_id, names.clone());
+        } else if let Some(names) = type_def_type_param_names {
+            builder.record_def_type_param_names(def_id, names);
         }
     }
 
@@ -896,6 +899,34 @@ fn collect_callable_type_param_names(
         }
     }
     out
+}
+
+fn collect_type_def_type_param_names(
+    engine: &TypecheckEngine,
+    def_id: DefId,
+    ty: &Type,
+) -> Option<std::collections::BTreeMap<u32, String>> {
+    let type_def = engine
+        .context()
+        .module
+        .type_def_by_id(&engine.context().def_table, def_id)?;
+    if type_def.type_params.is_empty() {
+        return None;
+    }
+    let type_args = match ty {
+        Type::Struct { type_args, .. } | Type::Enum { type_args, .. } => type_args,
+        _ => return None,
+    };
+    if type_args.len() != type_def.type_params.len() {
+        return None;
+    }
+    let mut out = std::collections::BTreeMap::new();
+    for (type_arg, type_param) in type_args.iter().zip(type_def.type_params.iter()) {
+        if let Type::Var(var_id) = type_arg {
+            out.insert(var_id.index(), type_param.ident.clone());
+        }
+    }
+    if out.is_empty() { None } else { Some(out) }
 }
 
 fn callable_sig_to_fn_type(sig: &CollectedCallableSig) -> Type {

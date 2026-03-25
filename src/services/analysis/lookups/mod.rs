@@ -10,6 +10,7 @@ mod hover;
 mod semantic_tokens;
 mod signature_help;
 mod symbol_target;
+mod type_display;
 
 pub(crate) use definition::{def_at_span, def_location_at_span};
 pub(crate) use document_symbols::document_symbols;
@@ -40,8 +41,7 @@ pub(crate) fn type_at_span(state: &LookupState, query_span: Span) -> Option<Type
     if state.poisoned_nodes.contains(&node_id) {
         return None;
     }
-    displayed_node_type(typed, node_id)
-        .filter(|ty| !matches!(ty, Type::Unknown))
+    displayed_node_type(typed, node_id).filter(|ty| !matches!(ty, Type::Unknown))
 }
 
 pub(crate) fn resolved_binding_type_for_def(

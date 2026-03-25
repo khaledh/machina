@@ -4,9 +4,11 @@
 //! - source-style labels (`fn foo<T>(x: T) -> T`)
 //! - source param names/modes/types
 
+use crate::core::ast::visit::{Visitor, walk_module};
+use crate::core::ast::{BindPatternKind, NodeId};
 use crate::core::ast::{
-    CallableRef, EnumDefVariant, Module, Param, ParamMode, StructDefField, TypeDefKind, TypeExpr,
-    TypeExprKind, TypeParam,
+    CallableRef, EnumDefVariant, MatchPattern, Module, Param, ParamMode, StmtExprKind,
+    StructDefField, TypeDefKind, TypeExpr, TypeExprKind, TypeParam,
 };
 use crate::core::resolve::{DefId, DefKind, DefTable};
 use crate::core::typecheck::type_map::TypeMap;
@@ -197,6 +199,84 @@ pub(super) fn format_source_type_signature(
         "type {}{} = {}",
         type_def.name, rendered_tparams, rendered_body
     ))
+}
+
+pub(super) fn format_source_binding_signature(
+    node_id: NodeId,
+    typed_module: Option<&Module>,
+) -> Option<String> {
+    let typed_module = typed_module?;
+
+    struct Finder {
+        node_id: NodeId,
+        found: Option<String>,
+    }
+
+    impl Visitor for Finder {
+        fn visit_stmt_expr(&mut self, stmt: &crate::core::ast::StmtExpr) {
+            if let StmtExprKind::LetBind {
+                pattern,
+                decl_ty: Some(decl_ty),
+                ..
+            }
+            | StmtExprKind::VarBind {
+                pattern,
+                decl_ty: Some(decl_ty),
+                ..
+            } = &stmt.kind
+                && pattern.id == self.node_id
+                && let BindPatternKind::Name { ident } = &pattern.kind
+                && let Some(rendered_ty) = format_type_expr_for_signature(decl_ty)
+            {
+                self.found = Some(format!("{ident}: {rendered_ty}"));
+                return;
+            }
+            crate::core::ast::visit::walk_stmt_expr(self, stmt);
+        }
+
+        fn visit_match_pattern(&mut self, pattern: &MatchPattern) {
+            if let MatchPattern::TypedBinding {
+                id, ident, ty_expr, ..
+            } = pattern
+                && *id == self.node_id
+                && let Some(rendered_ty) = format_type_expr_for_signature(ty_expr)
+            {
+                self.found = Some(format!("{ident}: {rendered_ty}"));
+                return;
+            }
+            crate::core::ast::visit::walk_match_pattern(self, pattern);
+        }
+    }
+
+    let mut finder = Finder {
+        node_id,
+        found: None,
+    };
+    walk_module(&mut finder, typed_module);
+    finder.found
+}
+
+pub(super) fn format_source_struct_field_signature(
+    typed_module: Option<&Module>,
+    owner_ty: &Type,
+    field_name: &str,
+) -> Option<String> {
+    let typed_module = typed_module?;
+    let Type::Struct { name, .. } = owner_ty else {
+        return None;
+    };
+    let type_def = typed_module
+        .type_defs()
+        .into_iter()
+        .find(|type_def| type_def.name == *name)?;
+    let fields = match &type_def.kind {
+        TypeDefKind::Struct { fields } => fields,
+        TypeDefKind::Linear { linear } => &linear.fields,
+        TypeDefKind::Alias { .. } | TypeDefKind::Enum { .. } => return None,
+    };
+    let field = fields.iter().find(|field| field.name == field_name)?;
+    let rendered_ty = format_type_expr_for_signature(&field.ty).unwrap_or_else(|| "_".to_string());
+    Some(format!("{field_name}: {rendered_ty}"))
 }
 
 fn format_type_param_for_signature(param: &TypeParam) -> String {

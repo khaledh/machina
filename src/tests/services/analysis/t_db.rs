@@ -3594,11 +3594,8 @@ fn hover_at_program_file_csv_grade_rewrite_opaque_pipeline_binding_prefers_itera
     let source = fs::read_to_string(&path).expect("failed to read csv rewrite example");
     let file_id = db.upsert_disk_text(path, source.clone());
 
-    let query_span = span_for_substring_with_len(
-        &source,
-        "pipeline: Iterable<string>",
-        "pipeline".len(),
-    );
+    let query_span =
+        span_for_substring_with_len(&source, "pipeline: Iterable<string>", "pipeline".len());
     let hover = db
         .hover_at_program_file(file_id, query_span)
         .expect("program hover query should succeed")
@@ -3625,6 +3622,68 @@ fn hover_at_program_file_csv_grade_rewrite_opaque_pipeline_use_prefers_iterable_
 
     assert_eq!(hover.def_name.as_deref(), Some("pipeline"));
     assert_eq!(hover.display, "pipeline: Iterable<string>");
+}
+
+#[test]
+fn hover_at_program_file_std_format_csv_generic_field_use_prefers_source_type_param_name() {
+    let mut db = AnalysisDb::new();
+
+    let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("std/format/csv.mc");
+    let source = fs::read_to_string(&path).expect("failed to read std::format::csv module");
+    let file_id = db.upsert_disk_text(path, source.clone());
+
+    let query_span = span_for_substring_with_len(&source, "source.next()", "source".len());
+    let hover = db
+        .hover_at_program_file(file_id, query_span)
+        .expect("program hover query should succeed")
+        .expect("expected hover info for generic field use");
+
+    assert_eq!(hover.def_name.as_deref(), Some("source"));
+    assert_eq!(hover.display, "source: S");
+}
+
+#[test]
+fn hover_at_program_file_std_format_csv_generic_match_binding_prefers_source_type_param_name() {
+    let mut db = AnalysisDb::new();
+
+    let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("std/format/csv.mc");
+    let source = fs::read_to_string(&path).expect("failed to read std::format::csv module");
+    let file_id = db.upsert_disk_text(path, source.clone());
+
+    let query_span = span_for_substring_with_len(&source, "item: T =>", "item".len());
+    let hover = db
+        .hover_at_program_file(file_id, query_span)
+        .expect("program hover query should succeed")
+        .expect("expected hover info for generic match binding");
+
+    assert_eq!(hover.def_name.as_deref(), Some("item"));
+    assert_eq!(hover.display, "item: T");
+}
+
+#[test]
+fn hover_at_program_file_std_format_csv_generic_function_field_use_prefers_source_type_param_name()
+{
+    let mut db = AnalysisDb::new();
+
+    let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("std/format/csv.mc");
+    let source = fs::read_to_string(&path).expect("failed to read std::format::csv module");
+    let file_id = db.upsert_disk_text(path, source.clone());
+
+    let format_offset = source
+        .find("self.format;")
+        .expect("expected self.format field use")
+        + "self.".len();
+    let query_span = Span {
+        start: position_at(&source, format_offset),
+        end: position_at(&source, format_offset + "format".len()),
+    };
+    let hover = db
+        .hover_at_program_file(file_id, query_span)
+        .expect("program hover query should succeed")
+        .expect("expected hover info for generic function field use");
+
+    assert_eq!(hover.def_name.as_deref(), Some("format"));
+    assert_eq!(hover.display, "format: fn(T) -> string");
 }
 
 #[test]

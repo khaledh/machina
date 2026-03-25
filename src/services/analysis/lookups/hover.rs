@@ -5,13 +5,15 @@
 //! syntactic field). When only name-resolution (no types) is available, a
 //! simpler resolve-only path is used instead.
 
+use std::collections::BTreeMap;
 use std::path::Path;
 
-use crate::core::ast::{Module, NodeId};
+use crate::core::ast::visit::{Visitor, walk_expr};
+use crate::core::ast::{Expr, ExprKind, Module, NodeId};
 use crate::core::diag::Span;
 use crate::core::resolve::{DefId, DefTable, UNKNOWN_DEF_ID};
 use crate::core::typecheck::type_map::TypeMap;
-use crate::core::types::{Type, TypeRenderConfig, render_type};
+use crate::core::types::Type;
 use crate::services::analysis::pipeline::LookupState;
 use crate::services::analysis::results::HoverInfo;
 use crate::services::analysis::syntax_index::{
@@ -19,8 +21,12 @@ use crate::services::analysis::syntax_index::{
 };
 use crate::services::analysis::trace::{AnalysisTraceCategory, AnalysisTracer};
 
-use super::callable_signature::{format_source_callable_signature, format_source_type_signature};
+use super::callable_signature::{
+    format_source_binding_signature, format_source_callable_signature,
+    format_source_struct_field_signature, format_source_type_signature,
+};
 use super::definition::{linear_decl_target_at_span, machine_handle_def_at_span};
+use super::type_display::{format_type_for_display, hover_type_var_names};
 use super::{displayed_node_type, identifier_token_at_span, resolved_binding_type_for_def};
 
 pub(crate) fn hover_at_span_in_file(
@@ -170,9 +176,14 @@ pub(crate) fn hover_for_def_in_state(state: &LookupState, def_id: DefId) -> Opti
     let display = format_hover_label(
         Some(&def.name),
         ty.as_ref(),
+        typed
+            .def_table
+            .lookup_def_node_id(def_id)
+            .unwrap_or(NodeId(0)),
         Some(def_id),
         Some(&typed.module),
         Some(&typed.type_map),
+        None,
         &typed.def_table,
     );
     Some(HoverInfo {
@@ -215,9 +226,11 @@ fn try_call_site_hover(
     let display = format_hover_label(
         Some(&def.name),
         ty.as_ref(),
+        call.callee_node_id,
         Some(def_id),
         Some(&typed.module),
         Some(&typed.type_map),
+        None,
         &typed.def_table,
     );
     Some(HoverInfo {
@@ -240,6 +253,18 @@ fn try_node_hover(
     query_ident: Option<&str>,
 ) -> Option<HoverInfo> {
     let typed = state.typed.as_ref()?;
+    if let Some(query_ident) = query_ident
+        && let Some(info) = try_source_field_hover(
+            &typed.module,
+            &typed.def_table,
+            typed,
+            &typed.type_map,
+            query_span,
+            query_ident,
+        )
+    {
+        return Some(info);
+    }
     let mut candidates = Vec::new();
     for (node_id, span) in node_span_map(&typed.module) {
         if span_contains_span(span, query_span) {
@@ -273,6 +298,13 @@ fn try_node_hover(
         {
             continue;
         }
+        let hover_type_var_names = hover_type_var_names(
+            &typed.module,
+            &typed.def_table,
+            &typed.type_map,
+            def_id,
+            node_span,
+        );
         let node_ty = displayed_node_type(typed, node_id).filter(|ty| !matches!(ty, Type::Unknown));
         let ty = def_id
             .map(|def_id| {
@@ -292,7 +324,17 @@ fn try_node_hover(
         if let (Some(query_ident), Some(ty)) = (query_ident, ty.as_ref())
             && let Some(field_ty) = field_type_in_struct(ty, query_ident)
         {
-            let field_ty_display = format_type_for_hover(field_ty, None, Some(&typed.type_map));
+            let field_ty_display =
+                format_source_struct_field_signature(Some(&typed.module), ty, query_ident)
+                    .unwrap_or_else(|| {
+                        let field_ty_display = format_type_for_display(
+                            field_ty,
+                            None,
+                            Some(&typed.type_map),
+                            hover_type_var_names.as_ref(),
+                        );
+                        format!("{query_ident}: {field_ty_display}")
+                    });
             let info = HoverInfo {
                 node_id,
                 span: query_span,
@@ -300,7 +342,7 @@ fn try_node_hover(
                 symbol_id: None,
                 def_name: Some(query_ident.to_string()),
                 ty: Some(field_ty.clone()),
-                display: format!("{query_ident}: {field_ty_display}"),
+                display: field_ty_display,
             };
             update_best(&mut best, 6, &node_span, info);
             continue;
@@ -309,9 +351,11 @@ fn try_node_hover(
         let display = format_hover_label(
             def_name.as_deref(),
             ty.as_ref(),
+            node_id,
             def_id,
             Some(&typed.module),
             Some(&typed.type_map),
+            hover_type_var_names.as_ref(),
             &typed.def_table,
         );
         let score = hover_candidate_score(def_name.as_deref(), ty.is_some(), query_ident);
@@ -327,6 +371,78 @@ fn try_node_hover(
         update_best(&mut best, score, &node_span, info);
     }
     best.map(|(_, _, _, info)| info)
+}
+
+fn try_source_field_hover(
+    module: &Module,
+    def_table: &DefTable,
+    typed: &impl crate::services::analysis::results::TypeLookup,
+    type_map: &TypeMap,
+    query_span: Span,
+    query_ident: &str,
+) -> Option<HoverInfo> {
+    let (field_node_id, target_node_id) =
+        enclosing_struct_field_expr(module, query_span, query_ident)?;
+    let owner_ty =
+        displayed_node_type(typed, target_node_id).filter(|ty| !matches!(ty, Type::Unknown))?;
+    let field_ty = field_type_in_struct(&owner_ty, query_ident)?;
+    let display = format_source_struct_field_signature(Some(module), &owner_ty, query_ident)
+        .unwrap_or_else(|| {
+            let hover_names = hover_type_var_names(module, def_table, type_map, None, query_span);
+            let field_ty_display =
+                format_type_for_display(field_ty, None, Some(type_map), hover_names.as_ref());
+            format!("{query_ident}: {field_ty_display}")
+        });
+    Some(HoverInfo {
+        node_id: field_node_id,
+        span: query_span,
+        def_id: None,
+        symbol_id: None,
+        def_name: Some(query_ident.to_string()),
+        ty: Some(field_ty.clone()),
+        display,
+    })
+}
+
+fn enclosing_struct_field_expr<'a>(
+    module: &'a Module,
+    query_span: Span,
+    query_ident: &str,
+) -> Option<(NodeId, NodeId)> {
+    struct Finder<'a> {
+        query_span: Span,
+        query_ident: &'a str,
+        best: Option<(NodeId, NodeId, usize)>,
+    }
+
+    impl<'a> Visitor for Finder<'a> {
+        fn visit_expr(&mut self, expr: &Expr) {
+            if let ExprKind::StructField { target, field } = &expr.kind
+                && field == self.query_ident
+                && span_contains_span(expr.span, self.query_span)
+                && !span_contains_span(target.span, self.query_span)
+            {
+                let width = expr.span.end.offset.saturating_sub(expr.span.start.offset);
+                let replace = self
+                    .best
+                    .is_none_or(|(_, _, best_width)| width < best_width);
+                if replace {
+                    self.best = Some((expr.id, target.id, width));
+                }
+            }
+            walk_expr(self, expr);
+        }
+    }
+
+    let mut finder = Finder {
+        query_span,
+        query_ident,
+        best: None,
+    };
+    finder.visit_module(module);
+    finder
+        .best
+        .map(|(field_node_id, target_node_id, _)| (field_node_id, target_node_id))
 }
 
 /// Try hover by scanning the def table for a matching definition name.
@@ -374,7 +490,12 @@ fn try_machine_handle_hover(
         display: format_hover_label(
             Some(&def.name),
             None,
+            resolved
+                .def_table
+                .lookup_def_node_id(def_id)
+                .unwrap_or(NodeId(0)),
             Some(def_id),
+            None,
             None,
             None,
             &resolved.def_table,
@@ -472,7 +593,9 @@ fn try_resolved_hover(
     let display = format_hover_label(
         def_name.as_deref(),
         None,
+        node_id,
         Some(def_id),
+        None,
         None,
         None,
         &resolved.def_table,
@@ -613,9 +736,11 @@ fn fallback_hover_from_def_table(
         let display = format_hover_label(
             Some(&def.name),
             ty.as_ref(),
+            def_table.lookup_def_node_id(def.id).unwrap_or(NodeId(0)),
             Some(def.id),
             module,
             type_map,
+            None,
             def_table,
         );
         return Some(HoverInfo {
@@ -703,9 +828,11 @@ fn field_type_in_struct<'a>(ty: &'a Type, field_name: &str) -> Option<&'a Type> 
 fn format_hover_label(
     def_name: Option<&str>,
     ty: Option<&Type>,
+    node_id: NodeId,
     def_id: Option<DefId>,
     module: Option<&Module>,
     type_map: Option<&TypeMap>,
+    type_var_names: Option<&BTreeMap<u32, String>>,
     def_table: &DefTable,
 ) -> String {
     if let Some(signature) = format_source_callable_signature(def_id, module, type_map, def_table) {
@@ -714,7 +841,10 @@ fn format_hover_label(
     if let Some(signature) = format_source_type_signature(def_id, module, def_table) {
         return signature;
     }
-    let render_type = |ty: &Type| format_type_for_hover(ty, def_id, type_map);
+    if let Some(signature) = format_source_binding_signature(node_id, module) {
+        return signature;
+    }
+    let render_type = |ty: &Type| format_type_for_display(ty, def_id, type_map, type_var_names);
     match (def_name, ty) {
         (Some(name), Some(ty)) => {
             let ty = render_type(ty);
@@ -731,17 +861,4 @@ fn format_hover_label(
         (None, Some(ty)) => render_type(ty),
         (None, None) => String::new(),
     }
-}
-
-fn format_type_for_hover(ty: &Type, def_id: Option<DefId>, type_map: Option<&TypeMap>) -> String {
-    let type_var_names =
-        def_id.and_then(|id| type_map.and_then(|map| map.lookup_def_type_param_names(id)));
-    render_type(
-        ty,
-        &TypeRenderConfig {
-            show_in_mode: false,
-            type_var_names,
-            nominal_name_map: None,
-        },
-    )
 }
