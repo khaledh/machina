@@ -6,9 +6,11 @@ use crate::core::symbol_id::{SelectedCallable, SymbolNs};
 use crate::core::types::Type;
 use crate::services::analysis::db::pipeline_helpers::def_target_for_symbol_id_in_states;
 use crate::services::analysis::lookups::{
-    ResolvedSymbolTarget, binding_value_node_id_for_def, def_at_span, hover_at_span_in_file,
+    ResolvedSymbolTarget, active_parameter_index_at_call_site, binding_value_node_id_for_def,
+    def_at_span, hover_at_span_in_file, hover_for_imported_stdlib_symbol,
     hover_for_resolved_target, identifier_token_at_span, linear_decl_target_at_span,
-    location_for_resolved_target, resolved_binding_type_for_def,
+    location_for_imported_stdlib_symbol, location_for_resolved_target,
+    resolved_binding_type_for_def, signature_help_for_imported_stdlib_symbol,
     signature_help_for_resolved_target_at_call_site, type_at_span,
 };
 use crate::services::analysis::pipeline::LookupState;
@@ -75,6 +77,11 @@ impl super::AnalysisDb {
         let Some(resolved_target) = resolved_target else {
             return Ok(None);
         };
+        if let Some(symbol_id) = resolved_target.target.symbol_id.as_ref()
+            && let Some(location) = location_for_imported_stdlib_symbol(file_id, symbol_id)
+        {
+            return Ok(Some(location));
+        }
         Ok(location_for_resolved_target(&resolved_target))
     }
 
@@ -219,15 +226,29 @@ impl super::AnalysisDb {
             source.as_deref(),
             false,
             &program.module_states,
-        ) && let Some(resolved_target) = self.resolve_target_in_program(file_id, target)?
-            && let Some(sig) = signature_help_for_resolved_target_at_call_site(
-                &state,
-                query_span,
-                source.as_deref(),
-                &resolved_target,
-            )
-        {
-            return Ok(Some(sig));
+        ) {
+            if let Some(symbol_id) = target.symbol_id.as_ref()
+                && let Some(active_parameter) = active_parameter_index_at_call_site(
+                    &state,
+                    query_span,
+                    source.as_deref(),
+                    usize::MAX,
+                )
+                && let Some(sig) =
+                    signature_help_for_imported_stdlib_symbol(symbol_id, active_parameter)
+            {
+                return Ok(Some(sig));
+            }
+            if let Some(resolved_target) = self.resolve_target_in_program(file_id, target)?
+                && let Some(sig) = signature_help_for_resolved_target_at_call_site(
+                    &state,
+                    query_span,
+                    source.as_deref(),
+                    &resolved_target,
+                )
+            {
+                return Ok(Some(sig));
+            }
         }
         if let Some(sig) = self.signature_help_for_state(&state, query_span, source.as_deref()) {
             return Ok(Some(sig));
@@ -271,6 +292,12 @@ fn imported_hover_target(
             .resolve_target_in_program(origin_file_id, target)
             .ok()??;
         return hover_for_resolved_target(&resolved_target);
+    }
+
+    if let Some(symbol_id) = hover.symbol_id.as_ref()
+        && let Some(imported) = hover_for_imported_stdlib_symbol(symbol_id)
+    {
+        return Some(imported);
     }
 
     if let Some(symbol_id) = hover.symbol_id.as_ref()

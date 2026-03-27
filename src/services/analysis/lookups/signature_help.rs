@@ -141,6 +141,25 @@ pub(crate) fn signature_help_for_def_at_call_site(
     )
 }
 
+pub(crate) fn active_parameter_index_at_call_site(
+    caller_state: &LookupState,
+    query_span: Span,
+    source: Option<&str>,
+    param_count: usize,
+) -> Option<usize> {
+    let caller_typed = caller_state.typed.as_ref()?;
+    let call = call_site_at_span(&caller_typed.module, query_span).or_else(|| {
+        let nudged = nudge_span_left(query_span)?;
+        call_site_at_span(&caller_typed.module, nudged)
+    })?;
+    Some(active_param_index_with_comma_context(
+        &call.arg_spans,
+        query_span.start,
+        source,
+        param_count,
+    ))
+}
+
 fn source_signature_help<F>(
     typed: &TypeCheckedContext,
     render_def_id: Option<DefId>,

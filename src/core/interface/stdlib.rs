@@ -50,6 +50,8 @@ pub fn ensure_stdlib_module_interface_with_codec<C: ModuleInterfaceCodec>(
     let (parsed_entry, resolved_entry, input_paths) = stdlib_interface_inputs::<C>(module_path)?;
     if !artifact_is_stale(&artifact_paths.interface_path, &input_paths)
         .map_err(|e| StdlibInterfaceError::Io(artifact_paths.interface_path.clone(), e))?
+        && artifact_has_current_format::<C>(&artifact_paths.interface_path)
+            .map_err(|e| StdlibInterfaceError::Io(artifact_paths.interface_path.clone(), e))?
     {
         return Ok(artifact_paths.interface_path);
     }
@@ -167,6 +169,19 @@ fn stdlib_interface_artifact_root() -> Result<PathBuf, std::io::Error> {
     let root = interface_root_path();
     fs::create_dir_all(&root)?;
     Ok(root)
+}
+
+fn artifact_has_current_format<C: ModuleInterfaceCodec>(
+    artifact: &Path,
+) -> Result<bool, std::io::Error> {
+    if !artifact.exists() {
+        return Ok(false);
+    }
+    let bytes = fs::read(artifact)?;
+    let Ok(interface) = C::decode(&bytes) else {
+        return Ok(false);
+    };
+    Ok(interface.has_current_format_version())
 }
 
 fn interface_root_path() -> PathBuf {

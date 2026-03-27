@@ -27,8 +27,17 @@ pub use stdlib::{
     load_stdlib_module_interface_with_codec,
 };
 
+pub const MODULE_INTERFACE_FORMAT_VERSION: u32 = 1;
+
+struct SourceToolingContext {
+    path: PathBuf,
+    source: String,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ModuleInterface {
+    #[serde(default)]
+    pub format_version: u32,
     pub module_path: ModulePath,
     pub compiler_version: String,
     pub exports: Vec<ExportedDef>,
@@ -46,6 +55,7 @@ impl ModuleInterface {
         context: &ResolvedContext,
     ) -> Option<Self> {
         let module_path = context.module_path.clone()?;
+        let tooling_source = load_source_tooling_context(&context.def_table);
         let mut exports = Vec::new();
 
         for item in &module.top_level_items {
@@ -60,6 +70,7 @@ impl ModuleInterface {
                     &func_decl.sig.params,
                     None,
                     &func_decl.sig.ret_ty_expr,
+                    tooling_source.as_ref(),
                 ),
                 TopLevelItem::FuncDef(func_def) => push_callable_export(
                     &mut exports,
@@ -71,6 +82,7 @@ impl ModuleInterface {
                     &func_def.sig.params,
                     None,
                     &func_def.sig.ret_ty_expr,
+                    tooling_source.as_ref(),
                 ),
                 TopLevelItem::MethodBlock(block) => {
                     for method in &block.method_items {
@@ -88,6 +100,7 @@ impl ModuleInterface {
                                 &method_decl.sig.params,
                                 Some(&method_decl.sig.self_param),
                                 &method_decl.sig.ret_ty_expr,
+                                tooling_source.as_ref(),
                             ),
                             MethodItem::Def(method_def) => push_callable_export(
                                 &mut exports,
@@ -102,21 +115,28 @@ impl ModuleInterface {
                                 &method_def.sig.params,
                                 Some(&method_def.sig.self_param),
                                 &method_def.sig.ret_ty_expr,
+                                tooling_source.as_ref(),
                             ),
                         }
                     }
                 }
                 TopLevelItem::TypeDef(type_def) => {
-                    if let Some(export) =
-                        type_export_from_def(module_path.clone(), context, type_def)
-                    {
+                    if let Some(export) = type_export_from_def(
+                        module_path.clone(),
+                        context,
+                        type_def,
+                        tooling_source.as_ref(),
+                    ) {
                         exports.push(export);
                     }
                 }
                 TopLevelItem::TraitDef(trait_def) => {
-                    if let Some(export) =
-                        trait_export_from_def(module_path.clone(), context, trait_def)
-                    {
+                    if let Some(export) = trait_export_from_def(
+                        module_path.clone(),
+                        context,
+                        trait_def,
+                        tooling_source.as_ref(),
+                    ) {
                         exports.push(export);
                     }
                 }
@@ -127,6 +147,7 @@ impl ModuleInterface {
         exports.sort_by(|left, right| left.symbol_id.to_string().cmp(&right.symbol_id.to_string()));
 
         Some(Self {
+            format_version: MODULE_INTERFACE_FORMAT_VERSION,
             module_path,
             compiler_version: env!("CARGO_PKG_VERSION").to_string(),
             exports,
@@ -138,6 +159,10 @@ impl ModuleInterface {
                     source_file: Some(path.to_path_buf()),
                 }),
         })
+    }
+
+    pub fn has_current_format_version(&self) -> bool {
+        self.format_version == MODULE_INTERFACE_FORMAT_VERSION
     }
 }
 
@@ -443,6 +468,7 @@ fn push_callable_export(
     params: &[Param],
     self_param: Option<&SelfParam>,
     ret_ty: &crate::core::ast::TypeExpr,
+    tooling_source: Option<&SourceToolingContext>,
 ) {
     let Some(def_id) = context.def_table.lookup_node_def_id(node_id) else {
         return;
@@ -527,7 +553,7 @@ fn push_callable_export(
         symbol_id,
         visibility,
         kind,
-        tooling: None,
+        tooling: export_tooling_metadata(def, &context.def_table, tooling_source),
     });
 }
 
@@ -560,6 +586,7 @@ fn type_export_from_def(
     module_path: ModulePath,
     context: &ResolvedContext,
     type_def: &TypeDef,
+    tooling_source: Option<&SourceToolingContext>,
 ) -> Option<ExportedDef> {
     let def_id = context.def_table.lookup_node_def_id(type_def.id)?;
     let def = context.def_table.lookup_def(def_id)?;
@@ -733,7 +760,7 @@ fn type_export_from_def(
             type_params: type_param_names,
             kind,
         }),
-        tooling: None,
+        tooling: export_tooling_metadata(def, &context.def_table, tooling_source),
     })
 }
 
@@ -741,6 +768,7 @@ fn trait_export_from_def(
     module_path: ModulePath,
     context: &ResolvedContext,
     trait_def: &TraitDef,
+    tooling_source: Option<&SourceToolingContext>,
 ) -> Option<ExportedDef> {
     let def_id = context.def_table.lookup_node_def_id(trait_def.id)?;
     let def = context.def_table.lookup_def(def_id)?;
@@ -769,8 +797,75 @@ fn trait_export_from_def(
             methods,
             properties,
         }),
-        tooling: None,
+        tooling: export_tooling_metadata(def, &context.def_table, tooling_source),
     })
+}
+
+fn load_source_tooling_context(
+    def_table: &crate::core::resolve::DefTable,
+) -> Option<SourceToolingContext> {
+    let path = def_table.source_path()?.to_path_buf();
+    let source = std::fs::read_to_string(&path).ok()?;
+    Some(SourceToolingContext { path, source })
+}
+
+fn export_tooling_metadata(
+    def: &Def,
+    def_table: &crate::core::resolve::DefTable,
+    source_ctx: Option<&SourceToolingContext>,
+) -> Option<ExportToolingMetadata> {
+    let decl = def_table.lookup_def_location(def.id)?;
+    let file = decl
+        .path
+        .clone()
+        .or_else(|| source_ctx.map(|ctx| ctx.path.clone()))?;
+    let name_span = source_ctx
+        .and_then(|ctx| token_span_within(decl.span, &def.name, &ctx.source))
+        .unwrap_or(decl.span);
+    Some(ExportToolingMetadata {
+        doc: None,
+        source_location: Some(SourceLocation {
+            file,
+            name_span,
+            decl_span: decl.span,
+        }),
+    })
+}
+
+fn token_span_within(container: Span, ident: &str, source: &str) -> Option<Span> {
+    let start = container.start.offset.min(source.len());
+    let end = container.end.offset.min(source.len());
+    let snippet = source.get(start..end)?;
+    let rel = snippet.find(ident)?;
+    let abs_start = start + rel;
+    let abs_end = abs_start + ident.len();
+    Some(Span {
+        start: position_at_offset(source, abs_start),
+        end: position_at_offset(source, abs_end),
+    })
+}
+
+fn position_at_offset(source: &str, offset: usize) -> crate::core::diag::Position {
+    let mut line = 1usize;
+    let mut column = 1usize;
+    let mut index = 0usize;
+    for ch in source.chars() {
+        if index >= offset {
+            break;
+        }
+        index += ch.len_utf8();
+        if ch == '\n' {
+            line += 1;
+            column = 1;
+        } else {
+            column += 1;
+        }
+    }
+    crate::core::diag::Position {
+        offset,
+        line,
+        column,
+    }
 }
 
 fn trait_method_signature(

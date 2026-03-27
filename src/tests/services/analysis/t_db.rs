@@ -2625,6 +2625,31 @@ fn hover_at_program_file_uses_selected_imported_overload_signature() {
 }
 
 #[test]
+fn signature_help_at_program_file_for_imported_stdlib_generic_uses_interface_names() {
+    let entry_path = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("examples/basics/map_iter_small.mc")
+        .canonicalize()
+        .unwrap();
+    let entry_source = fs::read_to_string(&entry_path).expect("failed to read map_iter_small");
+
+    let mut db = AnalysisDb::new();
+    let entry_id = db.upsert_disk_text(entry_path, entry_source.clone());
+
+    let query_span = cursor_after_substring(&entry_source, "    let mapped = map(counter.iter(), ");
+    let sig = db
+        .signature_help_at_program_file(entry_id, query_span)
+        .expect("program signature help query should succeed")
+        .expect("expected signature help for imported std::iter::map");
+
+    assert!(
+        sig.label.contains("fn map<S, In, Out>("),
+        "expected source-facing generic names from interface metadata, got: {}",
+        sig.label
+    );
+    assert_eq!(sig.active_parameter, 1);
+}
+
+#[test]
 fn def_target_for_symbol_id_in_program_resolves_imported_overload_target() {
     let entry_path = Path::new(env!("CARGO_MANIFEST_DIR"))
         .join("examples/quickstart/hello.mc")

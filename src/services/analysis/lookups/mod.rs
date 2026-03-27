@@ -7,6 +7,7 @@ mod callable_signature;
 mod definition;
 mod document_symbols;
 mod hover;
+mod imported_interface;
 mod semantic_tokens;
 mod signature_help;
 mod symbol_target;
@@ -15,8 +16,12 @@ mod type_display;
 pub(crate) use definition::{def_at_span, def_location_at_span, linear_decl_target_at_span};
 pub(crate) use document_symbols::document_symbols;
 pub(crate) use hover::hover_at_span_in_file;
+pub(crate) use imported_interface::{
+    hover_for_imported_stdlib_symbol, location_for_imported_stdlib_symbol,
+    signature_help_for_imported_stdlib_symbol,
+};
 pub(crate) use semantic_tokens::semantic_tokens;
-pub(crate) use signature_help::signature_help_at_span;
+pub(crate) use signature_help::{active_parameter_index_at_call_site, signature_help_at_span};
 pub(crate) use symbol_target::{
     ResolvedSymbolTarget, hover_for_resolved_target, location_for_resolved_target,
     resolved_target_def_id, signature_help_for_resolved_target_at_call_site,
