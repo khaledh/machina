@@ -9,13 +9,18 @@ use crate::core::context::{
     CapsuleParsedContext, ParsedContext, module_export_facts_from_interface,
 };
 use crate::core::interface::{
-    CallableImplementation, ExportVisibility, ExportedDefKind, JsonModuleInterfaceCodec,
-    ModuleArtifactPaths, ModuleInterface, ModuleInterfaceCodec, emit_module_interface_with_codec,
-    interface_rel_path, load_stdlib_module_interface_with_codec, object_rel_path,
-    read_module_interface_with_codec,
+    CallableImplementation, CallableSignature, ExportVisibility, ExportedDefKind,
+    GenericClosureTemplate, GenericFunctionTemplate, GenericTemplateGraph,
+    JsonModuleInterfaceCodec, LinkTimeCallableTemplate, ModuleArtifactPaths, ModuleInterface,
+    ModuleInterfaceCodec, TemplateBinding, TemplateBindingId, TemplateBindingKind, TemplateBody,
+    TemplateCallSite, TemplateDef, TemplateDefId, TemplateDefKind, TemplateIterableParamSlot,
+    TemplateNestedClosure, TemplateReference, TemplateReferenceKind, TemplateReferenceTarget,
+    TemplateSiteId, TemplateTypeParam, TemplateTypeParamId, TemplateTypeSite, TemplateTypeSiteRole,
+    emit_module_interface_with_codec, interface_rel_path, load_stdlib_module_interface_with_codec,
+    object_rel_path, read_module_interface_with_codec,
 };
 use crate::core::resolve::resolve;
-use crate::core::symbol_id::TypeKey;
+use crate::core::symbol_id::{SymbolNs, SymbolPath, TypeKey};
 use indoc::indoc;
 use std::path::Path;
 use std::sync::atomic::{AtomicUsize, Ordering};
@@ -32,6 +37,181 @@ fn resolved_with_module_path(
         ModulePath::new(module_path.split("::").map(|s| s.to_string()).collect()).unwrap(),
     );
     resolve(parsed).expect("resolve should succeed")
+}
+
+#[test]
+fn generic_template_graph_separates_local_and_external_identity() {
+    let external_symbol = crate::core::symbol_id::SymbolId::new(
+        ModulePath::new(vec!["std".into(), "iter".into()]).unwrap(),
+        SymbolPath::from_names(["private_helper"]),
+        SymbolNs::Value,
+    );
+    let root = TemplateDef {
+        id: TemplateDefId(1),
+        symbol_id: Some(crate::core::symbol_id::SymbolId::new(
+            ModulePath::new(vec!["std".into(), "iter".into()]).unwrap(),
+            SymbolPath::from_names(["map"]),
+            SymbolNs::Value,
+        )),
+        kind: TemplateDefKind::Function(GenericFunctionTemplate {
+            signature: CallableSignature {
+                name: "map".to_string(),
+                type_params: vec!["S".to_string(), "In".to_string(), "Out".to_string()],
+                params: Vec::new(),
+                ret_ty: TypeKey::Named {
+                    module: ModulePath::new(vec!["std".into(), "iter".into()]).unwrap(),
+                    path: SymbolPath::from_names(["MapIter"]),
+                    args: Vec::new(),
+                },
+            },
+            type_params: vec![
+                TemplateTypeParam {
+                    id: TemplateTypeParamId(0),
+                    name: "S".to_string(),
+                    bound: None,
+                },
+                TemplateTypeParam {
+                    id: TemplateTypeParamId(1),
+                    name: "In".to_string(),
+                    bound: None,
+                },
+            ],
+            body: TemplateBody {
+                params: Vec::new(),
+                locals: Vec::new(),
+                nested_closures: Vec::new(),
+                call_sites: Vec::new(),
+                type_sites: Vec::new(),
+                iterable_param_slots: Vec::new(),
+                references: vec![
+                    TemplateReference {
+                        target: TemplateReferenceTarget::Local(TemplateDefId(2)),
+                        kind: TemplateReferenceKind::Type,
+                    },
+                    TemplateReference {
+                        target: TemplateReferenceTarget::External(external_symbol.clone()),
+                        kind: TemplateReferenceKind::Callable,
+                    },
+                ],
+            },
+        }),
+    };
+    let helper = TemplateDef {
+        id: TemplateDefId(2),
+        symbol_id: None,
+        kind: TemplateDefKind::LinkTimeCallable(LinkTimeCallableTemplate {
+            signature: CallableSignature {
+                name: "private_helper".to_string(),
+                type_params: Vec::new(),
+                params: Vec::new(),
+                ret_ty: TypeKey::Unit,
+            },
+            link_symbol: "__mc_std_iter_private_helper".to_string(),
+            references: Vec::new(),
+        }),
+    };
+
+    let graph = GenericTemplateGraph {
+        root: TemplateDefId(1),
+        defs: vec![root, helper],
+    };
+
+    assert_eq!(graph.root_def().map(|def| def.id), Some(TemplateDefId(1)));
+    assert_eq!(
+        graph.local_dependencies().collect::<Vec<_>>(),
+        vec![TemplateDefId(2)]
+    );
+    assert_eq!(
+        graph.external_dependencies().cloned().collect::<Vec<_>>(),
+        vec![external_symbol]
+    );
+}
+
+#[test]
+fn template_body_tracks_monomorphize_payload_anchors() {
+    let body = TemplateBody {
+        params: vec![TemplateBinding {
+            id: TemplateBindingId(1),
+            name: "source".to_string(),
+            kind: TemplateBindingKind::Param,
+            ty: Some(TypeKey::Named {
+                module: ModulePath::new(vec!["std".into(), "iter".into()]).unwrap(),
+                path: SymbolPath::from_names(["MapIter"]),
+                args: vec![TypeKey::GenericParam(0), TypeKey::GenericParam(1)],
+            }),
+        }],
+        locals: vec![TemplateBinding {
+            id: TemplateBindingId(2),
+            name: "value".to_string(),
+            kind: TemplateBindingKind::LocalVar,
+            ty: Some(TypeKey::GenericParam(1)),
+        }],
+        nested_closures: vec![TemplateNestedClosure {
+            def: TemplateDefId(9),
+            captures: vec![TemplateBindingId(2)],
+        }],
+        call_sites: vec![TemplateCallSite {
+            site: TemplateSiteId(3),
+            callee: TemplateReferenceTarget::External(crate::core::symbol_id::SymbolId::new(
+                ModulePath::new(vec!["std".into(), "iter".into()]).unwrap(),
+                SymbolPath::from_names(["map"]),
+                SymbolNs::Value,
+            )),
+            explicit_type_arg_count: 3,
+            iterable_arg_count: 1,
+        }],
+        type_sites: vec![TemplateTypeSite {
+            site: TemplateSiteId(4),
+            role: TemplateTypeSiteRole::Local,
+            ty: TypeKey::GenericParam(1),
+        }],
+        iterable_param_slots: vec![TemplateIterableParamSlot {
+            inst_index: 0,
+            binding: TemplateBindingId(1),
+            item_ty: TypeKey::GenericParam(1),
+        }],
+        references: vec![TemplateReference {
+            target: TemplateReferenceTarget::Local(TemplateDefId(9)),
+            kind: TemplateReferenceKind::Callable,
+        }],
+    };
+
+    assert_eq!(body.params.len(), 1);
+    assert_eq!(body.locals.len(), 1);
+    assert_eq!(body.nested_closures[0].def, TemplateDefId(9));
+    assert_eq!(body.nested_closures[0].captures, vec![TemplateBindingId(2)]);
+    assert_eq!(body.call_sites[0].site, TemplateSiteId(3));
+    assert_eq!(body.iterable_param_slots[0].binding, TemplateBindingId(1));
+    assert_eq!(body.iterable_param_slots[0].inst_index, 0);
+    assert_eq!(body.type_sites[0].role, TemplateTypeSiteRole::Local);
+}
+
+#[test]
+fn closure_template_uses_capture_bindings_from_parent_body() {
+    let closure = TemplateDef {
+        id: TemplateDefId(9),
+        symbol_id: None,
+        kind: TemplateDefKind::Closure(GenericClosureTemplate {
+            captures: vec![TemplateBindingId(2)],
+            body: TemplateBody {
+                params: Vec::new(),
+                locals: Vec::new(),
+                nested_closures: Vec::new(),
+                call_sites: Vec::new(),
+                type_sites: Vec::new(),
+                iterable_param_slots: Vec::new(),
+                references: Vec::new(),
+            },
+        }),
+    };
+
+    let captures = match &closure.kind {
+        TemplateDefKind::Closure(template) => template.captures.clone(),
+        other => panic!("expected closure template, got {other:?}"),
+    };
+
+    assert_eq!(captures, vec![TemplateBindingId(2)]);
+    assert!(closure.references().next().is_none());
 }
 
 #[test]

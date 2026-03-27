@@ -20,11 +20,20 @@ use crate::core::symbol_id::{SymbolId, TypeKey, type_key_for_type_expr};
 
 mod json_codec;
 mod stdlib;
+mod template;
 
 pub use json_codec::JsonModuleInterfaceCodec;
 pub use stdlib::{
     StdlibInterfaceError, ensure_stdlib_module_interface_with_codec,
     load_stdlib_module_interface_with_codec,
+};
+pub use template::{
+    GenericClosureTemplate, GenericFunctionTemplate, GenericMethodTemplate, GenericTemplateGraph,
+    GenericTraitTemplate, GenericTypeTemplate, LinkTimeCallableTemplate, TemplateBinding,
+    TemplateBindingId, TemplateBindingKind, TemplateBody, TemplateCallSite, TemplateDef,
+    TemplateDefId, TemplateDefKind, TemplateIterableParamSlot, TemplateNestedClosure,
+    TemplateReference, TemplateReferenceKind, TemplateReferenceTarget, TemplateSiteId,
+    TemplateTypeParam, TemplateTypeParamId, TemplateTypeSite, TemplateTypeSiteRole,
 };
 
 pub const MODULE_INTERFACE_FORMAT_VERSION: u32 = 1;
