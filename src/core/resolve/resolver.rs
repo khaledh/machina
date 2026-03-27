@@ -9,6 +9,10 @@ use crate::core::context::{
     import_env_from_requires, module_export_facts_from_def_table, stdlib_module_export_facts,
 };
 use crate::core::diag::Span;
+use crate::core::interface::{
+    CallableImplementation, ClosureDef, ExportedDefKind, GenericTemplateGraph,
+    JsonModuleInterfaceCodec, ModuleInterface, load_stdlib_module_interface_with_codec,
+};
 use crate::core::resolve::def_table::{DefTable, DefTableBuilder};
 use crate::core::resolve::errors::{ResolveError, ResolveErrorKind as REK};
 use crate::core::resolve::symbols::{Scope, Symbol, SymbolKind};
@@ -29,12 +33,14 @@ pub struct ImportedModule {
 pub struct ImportedSymbol {
     pub callable_sigs: Vec<ImportedCallableSig>,
     pub callable_symbols: Vec<SymbolId>,
+    pub callable_templates: HashMap<SymbolId, GenericTemplateGraph>,
     pub type_owner_name: Option<String>,
     pub type_ty: Option<Type>,
     pub type_symbol: Option<SymbolId>,
     pub method_sigs: HashMap<String, Vec<ImportedMethodSig>>,
     pub trait_sig: Option<ImportedTraitSig>,
     pub trait_symbol: Option<SymbolId>,
+    pub closure_defs: HashMap<SymbolId, ClosureDef>,
 }
 
 impl ImportedModule {
@@ -57,6 +63,30 @@ impl ImportedModule {
                 .map(|imported| (member.clone(), imported))
             })
             .collect();
+        Self {
+            path: module_path.to_string(),
+            members,
+            member_symbols,
+        }
+    }
+
+    pub fn from_interface(module_path: &str, interface: &ModuleInterface) -> Self {
+        let mut members = HashSet::new();
+        let mut member_symbols = HashMap::new();
+
+        for export in &interface.exports {
+            let member = match &export.kind {
+                ExportedDefKind::Func(func) => func.signature.name.clone(),
+                ExportedDefKind::Type(ty) => ty.name.clone(),
+                ExportedDefKind::Trait(trait_def) => trait_def.name.clone(),
+                ExportedDefKind::Method(_) => continue,
+            };
+            members.insert(member.clone());
+            if let Some(imported) = ImportedSymbol::from_interface_member(interface, &member) {
+                member_symbols.insert(member, imported);
+            }
+        }
+
         Self {
             path: module_path.to_string(),
             members,
@@ -99,6 +129,7 @@ impl ImportedSymbol {
                 .flat_map(|items| items.iter())
                 .filter_map(|item| item.symbol_id.clone())
                 .collect(),
+            callable_templates: HashMap::new(),
             type_owner_name: has_type.then(|| member.to_string()),
             type_ty: if has_type { type_ty } else { None },
             type_symbol: exports
@@ -115,6 +146,56 @@ impl ImportedSymbol {
                 .traits
                 .get(member)
                 .and_then(|item| item.symbol_id.clone()),
+            closure_defs: HashMap::new(),
+        })
+    }
+
+    pub fn from_interface_member(interface: &ModuleInterface, member: &str) -> Option<Self> {
+        let export = interface.exports.iter().find(|export| match &export.kind {
+            ExportedDefKind::Func(func) => func.signature.name == member,
+            ExportedDefKind::Type(ty) => ty.name == member,
+            ExportedDefKind::Trait(trait_def) => trait_def.name == member,
+            ExportedDefKind::Method(_) => false,
+        })?;
+
+        let mut callable_symbols = Vec::new();
+        let mut callable_templates = HashMap::new();
+        let mut type_owner_name = None;
+        let mut type_symbol = None;
+        let mut trait_symbol = None;
+
+        match &export.kind {
+            ExportedDefKind::Func(func) => {
+                callable_symbols.push(export.symbol_id.clone());
+                if let CallableImplementation::GenericTemplate(template) = &func.implementation {
+                    callable_templates.insert(export.symbol_id.clone(), template.clone());
+                }
+            }
+            ExportedDefKind::Type(ty) => {
+                type_owner_name = Some(ty.name.clone());
+                type_symbol = Some(export.symbol_id.clone());
+            }
+            ExportedDefKind::Trait(_) => {
+                trait_symbol = Some(export.symbol_id.clone());
+            }
+            ExportedDefKind::Method(_) => {}
+        }
+
+        Some(Self {
+            callable_sigs: Vec::new(),
+            callable_symbols,
+            callable_templates,
+            type_owner_name,
+            type_ty: None,
+            type_symbol,
+            method_sigs: HashMap::new(),
+            trait_sig: None,
+            trait_symbol,
+            closure_defs: interface
+                .closure_defs
+                .iter()
+                .map(|closure| (closure.symbol_id.clone(), closure.clone()))
+                .collect(),
         })
     }
 
@@ -149,6 +230,7 @@ impl ImportedSymbol {
                 .iter()
                 .filter_map(|item| item.symbol_id.clone())
                 .collect(),
+            callable_templates: HashMap::new(),
             type_owner_name,
             type_ty,
             type_symbol: binding
@@ -161,6 +243,7 @@ impl ImportedSymbol {
                 .trait_def
                 .as_ref()
                 .and_then(|item| item.symbol_id.clone()),
+            closure_defs: HashMap::new(),
         })
     }
 }
@@ -243,9 +326,11 @@ pub struct ImportedDefFacts {
 pub struct ImportedFacts {
     defs_by_local_def: HashMap<DefId, ImportedDefFacts>,
     callable_sigs_by_symbol: HashMap<SymbolId, ImportedCallableSig>,
+    callable_templates_by_symbol: HashMap<SymbolId, GenericTemplateGraph>,
     type_defs_by_symbol: HashMap<SymbolId, Type>,
     method_sigs_by_owner: HashMap<String, HashMap<String, Vec<ImportedResolvedMethodSig>>>,
     trait_defs_by_symbol: HashMap<SymbolId, ImportedTraitSig>,
+    closure_defs_by_symbol: HashMap<SymbolId, ClosureDef>,
 }
 
 impl ImportedFacts {
@@ -257,6 +342,17 @@ impl ImportedFacts {
 
     pub fn callable_sig_by_symbol(&self, symbol: &SymbolId) -> Option<&ImportedCallableSig> {
         self.callable_sigs_by_symbol.get(symbol)
+    }
+
+    pub fn callable_template_by_symbol(&self, symbol: &SymbolId) -> Option<&GenericTemplateGraph> {
+        self.callable_templates_by_symbol.get(symbol)
+    }
+
+    pub fn callable_template(&self, def_id: DefId) -> Option<&GenericTemplateGraph> {
+        self.defs_by_local_def
+            .get(&def_id)
+            .and_then(|facts| facts.callable_symbols.first())
+            .and_then(|symbol| self.callable_templates_by_symbol.get(symbol))
     }
 
     pub fn imported_symbol_id(&self, def_id: DefId) -> Option<&SymbolId> {
@@ -280,6 +376,10 @@ impl ImportedFacts {
             .get(&def_id)
             .and_then(|facts| facts.trait_symbol.as_ref())
             .and_then(|symbol| self.trait_defs_by_symbol.get(symbol))
+    }
+
+    pub fn closure_def_by_symbol(&self, symbol: &SymbolId) -> Option<&ClosureDef> {
+        self.closure_defs_by_symbol.get(symbol)
     }
 
     pub fn callable_entries(
@@ -344,9 +444,11 @@ pub struct SymbolResolver {
     imported_symbols: HashMap<String, ImportedSymbol>,
     imported_defs: HashMap<DefId, ImportedDefFacts>,
     imported_callable_sigs: HashMap<SymbolId, ImportedCallableSig>,
+    imported_callable_templates: HashMap<SymbolId, GenericTemplateGraph>,
     imported_type_defs: HashMap<SymbolId, Type>,
     imported_method_sigs_by_owner: HashMap<String, HashMap<String, Vec<ImportedResolvedMethodSig>>>,
     imported_trait_defs: HashMap<SymbolId, ImportedTraitSig>,
+    imported_closure_defs: HashMap<SymbolId, ClosureDef>,
 }
 
 #[derive(Clone)]
@@ -380,9 +482,11 @@ impl SymbolResolver {
             imported_symbols: HashMap::new(),
             imported_defs: HashMap::new(),
             imported_callable_sigs: HashMap::new(),
+            imported_callable_templates: HashMap::new(),
             imported_type_defs: HashMap::new(),
             imported_method_sigs_by_owner: HashMap::new(),
             imported_trait_defs: HashMap::new(),
+            imported_closure_defs: HashMap::new(),
         }
     }
 
@@ -862,16 +966,21 @@ impl SymbolResolver {
             let def_id = self.add_built_in_symbol(alias, false, |def_id| SymbolKind::Func {
                 overloads: vec![def_id],
             });
-            let callable_symbols = imported
+            for (symbol_id, sig) in imported
                 .callable_symbols
                 .iter()
                 .cloned()
                 .zip(imported.callable_sigs.iter().cloned())
-                .map(|(symbol_id, sig)| {
-                    self.imported_callable_sigs.insert(symbol_id.clone(), sig);
-                    symbol_id
-                })
-                .collect();
+            {
+                self.imported_callable_sigs.insert(symbol_id, sig);
+            }
+            let callable_symbols = imported.callable_symbols.clone();
+            for (symbol_id, template) in imported.callable_templates {
+                self.imported_callable_templates.insert(symbol_id, template);
+            }
+            for (symbol_id, closure_def) in imported.closure_defs {
+                self.imported_closure_defs.insert(symbol_id, closure_def);
+            }
             self.imported_defs.insert(
                 def_id,
                 ImportedDefFacts {
@@ -897,6 +1006,9 @@ impl SymbolResolver {
                 (type_symbol.clone(), imported.type_ty.clone())
             {
                 self.imported_type_defs.insert(symbol_id, type_ty);
+            }
+            for (symbol_id, closure_def) in imported.closure_defs {
+                self.imported_closure_defs.insert(symbol_id, closure_def);
             }
             if let Some(owner_name) = imported
                 .type_ty
@@ -952,6 +1064,9 @@ impl SymbolResolver {
                 (trait_symbol.clone(), imported.trait_sig.clone())
             {
                 self.imported_trait_defs.insert(symbol_id, trait_sig);
+            }
+            for (symbol_id, closure_def) in imported.closure_defs {
+                self.imported_closure_defs.insert(symbol_id, closure_def);
             }
             self.imported_defs.insert(
                 def_id,
@@ -2148,9 +2263,11 @@ pub fn resolve_with_imports_and_symbols_partial(
     let imported_facts = ImportedFacts {
         defs_by_local_def: std::mem::take(&mut resolver.imported_defs),
         callable_sigs_by_symbol: std::mem::take(&mut resolver.imported_callable_sigs),
+        callable_templates_by_symbol: std::mem::take(&mut resolver.imported_callable_templates),
         type_defs_by_symbol: std::mem::take(&mut resolver.imported_type_defs),
         method_sigs_by_owner: std::mem::take(&mut resolver.imported_method_sigs_by_owner),
         trait_defs_by_symbol: std::mem::take(&mut resolver.imported_trait_defs),
+        closure_defs_by_symbol: std::mem::take(&mut resolver.imported_closure_defs),
     };
     let mut context = ast_context.with_def_table(def_table);
     attach_imported_symbol_ids(&mut context, &imported_facts);
@@ -2170,6 +2287,32 @@ fn attach_imported_symbol_ids(context: &mut ResolveStageOutput, imported_facts: 
                 .record_alias_symbol(local_def_id, symbol_id);
         }
     }
+}
+
+fn stdlib_imported_module(
+    module_path: &crate::core::capsule::ModulePath,
+) -> Option<ImportedModule> {
+    if module_path.segments().first().map(String::as_str) != Some("std") {
+        return None;
+    }
+    let interface =
+        load_stdlib_module_interface_with_codec::<JsonModuleInterfaceCodec>(module_path).ok()?;
+    Some(ImportedModule::from_interface(
+        &module_path.to_string(),
+        &interface,
+    ))
+}
+
+fn stdlib_imported_symbol(
+    module_path: &crate::core::capsule::ModulePath,
+    member: &str,
+) -> Option<ImportedSymbol> {
+    if module_path.segments().first().map(String::as_str) != Some("std") {
+        return None;
+    }
+    let interface =
+        load_stdlib_module_interface_with_codec::<JsonModuleInterfaceCodec>(module_path).ok()?;
+    ImportedSymbol::from_interface_member(&interface, member)
 }
 
 pub fn resolve_program(
@@ -2217,10 +2360,14 @@ pub(crate) fn resolve_program_with_options(
             if let Some(dep_id) = program.capsule.by_path.get(&req.module_path)
                 && let Some(dep_exports) = export_facts_by_module.get(dep_id)
             {
-                imported_modules.insert(
-                    alias,
-                    ImportedModule::from_exports(&req.module_path.to_string(), dep_exports),
-                );
+                let imported_module = if opts.prefer_stdlib_interfaces {
+                    stdlib_imported_module(&req.module_path).unwrap_or_else(|| {
+                        ImportedModule::from_exports(&req.module_path.to_string(), dep_exports)
+                    })
+                } else {
+                    ImportedModule::from_exports(&req.module_path.to_string(), dep_exports)
+                };
+                imported_modules.insert(alias, imported_module);
             }
         }
         let mut imported_symbols = HashMap::<String, ImportedSymbol>::new();
@@ -2237,14 +2384,28 @@ pub(crate) fn resolve_program_with_options(
             let Some(member) = &req.member else {
                 continue;
             };
-            if let Some(imported) = ImportedSymbol::from_exports(
-                dep_exports,
-                member,
-                Vec::new(),
-                None,
-                HashMap::new(),
-                None,
-            ) {
+            let imported = if opts.prefer_stdlib_interfaces {
+                stdlib_imported_symbol(&req.module_path, member).or_else(|| {
+                    ImportedSymbol::from_exports(
+                        dep_exports,
+                        member,
+                        Vec::new(),
+                        None,
+                        HashMap::new(),
+                        None,
+                    )
+                })
+            } else {
+                ImportedSymbol::from_exports(
+                    dep_exports,
+                    member,
+                    Vec::new(),
+                    None,
+                    HashMap::new(),
+                    None,
+                )
+            };
+            if let Some(imported) = imported {
                 imported_symbols.insert(req.alias.clone(), imported);
             }
         }

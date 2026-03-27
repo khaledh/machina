@@ -7,10 +7,12 @@ use crate::core::capsule::{
     discover_and_parse_capsule_with_loader, discover_and_parse_capsule_with_loader_and_options,
 };
 use crate::core::context::{CapsuleParsedContext, ParsedContext, ResolvedContext};
+use crate::core::interface::ModuleInterface;
 use crate::core::lexer::{LexError, Lexer, Token};
 use crate::core::parse::Parser;
 use crate::core::resolve::{
-    DefKind, ResolveError, ResolveErrorKind, Visibility, resolve, resolve_partial, resolve_program,
+    DefKind, ImportedSymbol, ResolveError, ResolveErrorKind, Visibility, resolve, resolve_partial,
+    resolve_program, resolve_with_imports_and_symbols_partial,
 };
 
 struct MockLoader {
@@ -56,6 +58,20 @@ fn resolve_source_partial(source: &str) -> ResolveOutput {
 
     let ast_context = ParsedContext::new(module, id_gen);
     resolve_partial(ast_context)
+}
+
+fn parsed_context(source: &str) -> ParsedContext {
+    let lexer = Lexer::new(source);
+    let tokens = lexer
+        .tokenize()
+        .collect::<Result<Vec<Token>, LexError>>()
+        .expect("Failed to tokenize");
+
+    let mut parser = Parser::new(&tokens);
+    let module = parser.parse().expect("Failed to parse");
+    let id_gen = parser.into_id_gen();
+
+    ParsedContext::new(module, id_gen)
 }
 
 #[test]
@@ -195,6 +211,82 @@ fn test_resolve_program_can_import_stdlib_from_interface_metadata() {
     assert!(import_env.symbol_aliases.contains_key("IoError"));
 
     let _ = std::fs::remove_dir_all(&temp_dir);
+}
+
+#[test]
+fn test_imported_facts_expose_interface_templates_and_closure_defs() {
+    let producer = resolve(
+        parsed_context(
+            r#"
+            type Hidden<T> = { value: T }
+
+            fn helper<T>(value: T) -> Hidden<T> {
+                Hidden { value }
+            }
+
+            @public
+            fn wrap<T>(value: T) -> T {
+                let hidden = helper(value);
+                value
+            }
+        "#,
+        )
+        .with_module_path(ModulePath::new(vec!["demo".to_string()]).unwrap()),
+    )
+    .expect("producer should resolve");
+    let interface =
+        ModuleInterface::from_resolved_context(&producer).expect("interface should build");
+
+    let imported = ImportedSymbol::from_interface_member(&interface, "wrap")
+        .expect("wrap should be importable from interface");
+    let source = r#"
+        fn main() -> () {
+            ()
+        }
+    "#;
+    let resolved = resolve_with_imports_and_symbols_partial(
+        parsed_context(source),
+        HashMap::new(),
+        HashMap::from([("wrap".to_string(), imported)]),
+    );
+    assert!(
+        resolved.errors.is_empty(),
+        "resolve should succeed with imported interface symbol"
+    );
+
+    let wrap_def_id = resolved
+        .context
+        .def_table
+        .defs()
+        .iter()
+        .find(|def| def.name == "wrap")
+        .map(|def| def.id)
+        .expect("imported wrap alias should exist");
+    let template = resolved
+        .imported_facts
+        .callable_template(wrap_def_id)
+        .expect("imported callable should expose generic template");
+    assert_eq!(
+        template
+            .root_def()
+            .and_then(|def| def.symbol_id.as_ref())
+            .map(ToString::to_string),
+        Some("demo::wrap".to_string())
+    );
+
+    let helper_symbol = interface
+        .closure_defs
+        .iter()
+        .find(|closure| closure.symbol_id.to_string() == "demo::helper")
+        .map(|closure| closure.symbol_id.clone())
+        .expect("helper closure def should exist");
+    assert!(
+        resolved
+            .imported_facts
+            .closure_def_by_symbol(&helper_symbol)
+            .is_some(),
+        "imported closure defs should be available by symbol"
+    );
 }
 
 #[test]
