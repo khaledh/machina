@@ -13,10 +13,9 @@ use crate::core::interface::{
     GenericClosureTemplate, GenericFunctionTemplate, GenericTemplateGraph,
     JsonModuleInterfaceCodec, LinkTimeCallableTemplate, ModuleArtifactPaths, ModuleInterface,
     ModuleInterfaceCodec, TemplateBinding, TemplateBindingId, TemplateBindingKind, TemplateBody,
-    TemplateCallSite, TemplateCallTarget, TemplateDef, TemplateDefId, TemplateDefKind,
-    TemplateExpr, TemplateIterableParamSlot, TemplateNestedClosure, TemplateReference,
-    TemplateReferenceKind, TemplateReferenceTarget, TemplateSiteId, TemplateStructField,
-    TemplateTypeParam, TemplateTypeParamId, TemplateTypeSite, TemplateTypeSiteRole,
+    TemplateCallSite, TemplateDef, TemplateDefId, TemplateDefKind, TemplateIterableParamSlot,
+    TemplateNestedClosure, TemplateReference, TemplateReferenceKind, TemplateReferenceTarget,
+    TemplateSiteId, TemplateTypeParam, TemplateTypeParamId, TemplateTypeSite, TemplateTypeSiteRole,
     emit_module_interface_with_codec, interface_rel_path, load_stdlib_module_interface_with_codec,
     object_rel_path, read_module_interface_with_codec,
 };
@@ -78,7 +77,6 @@ fn generic_template_graph_separates_local_and_external_identity() {
                 },
             ],
             body: TemplateBody {
-                expr: None,
                 params: Vec::new(),
                 locals: Vec::new(),
                 nested_closures: Vec::new(),
@@ -132,7 +130,6 @@ fn generic_template_graph_separates_local_and_external_identity() {
 #[test]
 fn template_body_tracks_monomorphize_payload_anchors() {
     let body = TemplateBody {
-        expr: Some(TemplateExpr::BindingRef(TemplateBindingId(1))),
         params: vec![TemplateBinding {
             id: TemplateBindingId(1),
             name: "source".to_string(),
@@ -155,12 +152,10 @@ fn template_body_tracks_monomorphize_payload_anchors() {
         }],
         call_sites: vec![TemplateCallSite {
             site: TemplateSiteId(3),
-            callee: TemplateCallTarget::Def(TemplateReferenceTarget::External(
-                crate::core::symbol_id::SymbolId::new(
-                    ModulePath::new(vec!["std".into(), "iter".into()]).unwrap(),
-                    SymbolPath::from_names(["map"]),
-                    SymbolNs::Value,
-                ),
+            callee: TemplateReferenceTarget::External(crate::core::symbol_id::SymbolId::new(
+                ModulePath::new(vec!["std".into(), "iter".into()]).unwrap(),
+                SymbolPath::from_names(["map"]),
+                SymbolNs::Value,
             )),
             explicit_type_arg_count: 3,
             iterable_arg_count: 1,
@@ -181,10 +176,6 @@ fn template_body_tracks_monomorphize_payload_anchors() {
         }],
     };
 
-    assert_eq!(
-        body.expr,
-        Some(TemplateExpr::BindingRef(TemplateBindingId(1)))
-    );
     assert_eq!(body.params.len(), 1);
     assert_eq!(body.locals.len(), 1);
     assert_eq!(body.nested_closures[0].def, TemplateDefId(9));
@@ -203,18 +194,6 @@ fn closure_template_uses_capture_bindings_from_parent_body() {
         kind: TemplateDefKind::Closure(GenericClosureTemplate {
             captures: vec![TemplateBindingId(2)],
             body: TemplateBody {
-                expr: Some(TemplateExpr::StructLit {
-                    type_symbol: crate::core::symbol_id::SymbolId::new(
-                        ModulePath::new(vec!["std".into(), "demo".into()]).unwrap(),
-                        SymbolPath::from_names(["CaptureBox"]),
-                        SymbolNs::Type,
-                    ),
-                    explicit_type_args: Vec::new(),
-                    fields: vec![TemplateStructField {
-                        name: "value".to_string(),
-                        value: TemplateExpr::BindingRef(TemplateBindingId(2)),
-                    }],
-                }),
                 params: Vec::new(),
                 locals: Vec::new(),
                 nested_closures: Vec::new(),
@@ -348,28 +327,12 @@ fn module_interface_from_resolved_context_records_public_export_surface() {
     let ExportedDefKind::Func(map) = &map_export.kind else {
         panic!("expected function export");
     };
-    let CallableImplementation::GenericTemplate(template) = &map.implementation else {
-        panic!("expected emitted generic template");
-    };
+    assert_eq!(
+        map.implementation,
+        CallableImplementation::GenericBodyPending
+    );
     assert_eq!(map.signature.type_params, vec!["T"]);
     assert_eq!(map.signature.ret_ty, TypeKey::GenericParam(0));
-    assert_eq!(template.root, TemplateDefId(0));
-    let root = template
-        .root_def()
-        .expect("generic template should have root");
-    let TemplateDefKind::Function(function) = &root.kind else {
-        panic!("expected function template root");
-    };
-    assert_eq!(
-        function.body.expr,
-        Some(TemplateExpr::Block {
-            items: Vec::new(),
-            tail: Some(Box::new(TemplateExpr::BindingRef(TemplateBindingId(0))))
-        })
-    );
-    assert_eq!(function.body.params.len(), 1);
-    assert_eq!(function.body.params[0].name, "x");
-    assert!(function.body.locals.is_empty());
 
     let secret_export = interface
         .exports
@@ -424,80 +387,6 @@ fn module_interface_from_resolved_context_records_public_export_surface() {
             .as_ref()
             .and_then(|tooling| tooling.doc.as_deref()),
         Some("Writer contract.")
-    );
-}
-
-#[test]
-fn module_interface_emits_generic_function_struct_literal_template() {
-    let resolved = resolved_with_module_path(
-        indoc! {r#"
-            @public
-            type Box<T> = {
-                value: T,
-            }
-
-            @public
-            fn wrap<T>(value: T) -> Box<T> {
-                let inner = value;
-                Box { value: inner }
-            }
-        "#},
-        "std::demo",
-    );
-
-    let interface =
-        ModuleInterface::from_resolved_context(&resolved).expect("module path should exist");
-    let wrap_export = interface
-        .exports
-        .iter()
-        .find(|export| export.symbol_id.to_string() == "std::demo::wrap")
-        .expect("expected wrap export");
-    let ExportedDefKind::Func(wrap) = &wrap_export.kind else {
-        panic!("expected function export");
-    };
-    let CallableImplementation::GenericTemplate(template) = &wrap.implementation else {
-        panic!("expected emitted generic template");
-    };
-    let root = template
-        .root_def()
-        .expect("generic template should have root");
-    let TemplateDefKind::Function(function) = &root.kind else {
-        panic!("expected function template root");
-    };
-
-    assert_eq!(function.body.params.len(), 1);
-    assert_eq!(function.body.locals.len(), 1);
-    assert_eq!(function.body.locals[0].name, "inner");
-    assert!(function.body.references.iter().any(|reference| {
-        matches!(
-            reference.target,
-            TemplateReferenceTarget::External(ref symbol)
-                if symbol.to_string() == "std::demo::Box"
-        ) && reference.kind == TemplateReferenceKind::Type
-    }));
-
-    let Some(TemplateExpr::Block { items, tail }) = &function.body.expr else {
-        panic!("expected block template body");
-    };
-    assert_eq!(items.len(), 1);
-    let Some(tail) = tail else {
-        panic!("expected block tail expression");
-    };
-    let TemplateExpr::StructLit {
-        type_symbol,
-        explicit_type_args,
-        fields,
-    } = tail.as_ref()
-    else {
-        panic!("expected struct literal tail");
-    };
-    assert_eq!(type_symbol.to_string(), "std::demo::Box");
-    assert!(explicit_type_args.is_empty());
-    assert_eq!(fields.len(), 1);
-    assert_eq!(fields[0].name, "value");
-    assert_eq!(
-        fields[0].value,
-        TemplateExpr::BindingRef(TemplateBindingId(1))
     );
 }
 
