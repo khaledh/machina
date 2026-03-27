@@ -19,8 +19,13 @@ use crate::core::resolve::{Def, DefId};
 use crate::core::symbol_id::{SymbolId, TypeKey, type_key_for_type_expr};
 
 mod json_codec;
+mod stdlib;
 
 pub use json_codec::JsonModuleInterfaceCodec;
+pub use stdlib::{
+    StdlibInterfaceError, ensure_stdlib_module_interface_with_codec,
+    load_stdlib_module_interface_with_codec,
+};
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ModuleInterface {
@@ -33,10 +38,17 @@ pub struct ModuleInterface {
 
 impl ModuleInterface {
     pub fn from_resolved_context(context: &ResolvedContext) -> Option<Self> {
+        Self::from_module_and_resolved(&context.module, context)
+    }
+
+    pub fn from_module_and_resolved(
+        module: &crate::core::ast::Module,
+        context: &ResolvedContext,
+    ) -> Option<Self> {
         let module_path = context.module_path.clone()?;
         let mut exports = Vec::new();
 
-        for item in &context.module.top_level_items {
+        for item in &module.top_level_items {
             match item {
                 TopLevelItem::FuncDecl(func_decl) => push_callable_export(
                     &mut exports,
@@ -357,12 +369,21 @@ pub fn emit_module_interface_with_codec<C: ModuleInterfaceCodec>(
     artifact_root: &Path,
     context: &ResolvedContext,
 ) -> Result<PathBuf, ModuleInterfaceIoError<C::Error>> {
-    let interface = ModuleInterface::from_resolved_context(context).ok_or_else(|| {
-        ModuleInterfaceIoError::Io(std::io::Error::new(
-            std::io::ErrorKind::InvalidInput,
-            "resolved context is missing module_path for interface emission",
-        ))
-    })?;
+    emit_module_interface_from_module_with_codec::<C>(artifact_root, &context.module, context)
+}
+
+pub fn emit_module_interface_from_module_with_codec<C: ModuleInterfaceCodec>(
+    artifact_root: &Path,
+    module: &crate::core::ast::Module,
+    context: &ResolvedContext,
+) -> Result<PathBuf, ModuleInterfaceIoError<C::Error>> {
+    let interface =
+        ModuleInterface::from_module_and_resolved(module, context).ok_or_else(|| {
+            ModuleInterfaceIoError::Io(std::io::Error::new(
+                std::io::ErrorKind::InvalidInput,
+                "resolved context is missing module_path for interface emission",
+            ))
+        })?;
     let paths = ModuleArtifactPaths::for_module(artifact_root, &interface.module_path);
     write_module_interface_with_codec::<C>(&interface, &paths.interface_path)?;
     Ok(paths.interface_path)

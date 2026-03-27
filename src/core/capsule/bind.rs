@@ -12,6 +12,10 @@ use std::collections::HashMap;
 use crate::core::ast::{Attribute, Module, TopLevelItem};
 use crate::core::capsule::{ModuleId, ModulePath, RequireKind};
 use crate::core::context::CapsuleParsedContext;
+use crate::core::interface::{
+    ExportVisibility, ExportedDefKind, JsonModuleInterfaceCodec, ModuleInterface,
+    load_stdlib_module_interface_with_codec,
+};
 
 #[derive(Clone, Copy, Default)]
 pub(crate) struct MemberAttrs {
@@ -57,6 +61,34 @@ impl ModuleExports {
         }
         out
     }
+
+    fn from_interface(interface: &ModuleInterface) -> Self {
+        let mut out = Self::default();
+        for export in &interface.exports {
+            match &export.kind {
+                ExportedDefKind::Func(func) => {
+                    out.callables
+                        .entry(func.signature.name.clone())
+                        .or_default()
+                        .public = true;
+                }
+                ExportedDefKind::Type(ty) => {
+                    out.types.insert(
+                        ty.name.clone(),
+                        TypeMemberAttrs {
+                            public: true,
+                            opaque: export.visibility == ExportVisibility::Opaque,
+                        },
+                    );
+                }
+                ExportedDefKind::Trait(trait_def) => {
+                    out.traits.entry(trait_def.name.clone()).or_default().public = true;
+                }
+                ExportedDefKind::Method(_) => {}
+            }
+        }
+        out
+    }
 }
 
 #[derive(Clone)]
@@ -78,7 +110,11 @@ impl CapsuleBindings {
         let mut exports_by_module = HashMap::<ModuleId, ModuleExports>::new();
         for module_id in program.dependency_order_from_entry() {
             if let Some(parsed) = program.module(module_id) {
-                exports_by_module.insert(module_id, ModuleExports::from_module(&parsed.module));
+                exports_by_module.insert(
+                    module_id,
+                    stdlib_interface_exports(&parsed.source.path)
+                        .unwrap_or_else(|| ModuleExports::from_module(&parsed.module)),
+                );
             }
         }
 
@@ -125,6 +161,15 @@ impl CapsuleBindings {
     pub(crate) fn exports_for(&self, module_id: ModuleId) -> Option<&ModuleExports> {
         self.exports_by_module.get(&module_id)
     }
+}
+
+fn stdlib_interface_exports(module_path: &ModulePath) -> Option<ModuleExports> {
+    if module_path.segments().first().map(String::as_str) != Some("std") {
+        return None;
+    }
+    let interface =
+        load_stdlib_module_interface_with_codec::<JsonModuleInterfaceCodec>(module_path).ok()?;
+    Some(ModuleExports::from_interface(&interface))
 }
 
 fn has_public_attr(attrs: &[Attribute]) -> bool {

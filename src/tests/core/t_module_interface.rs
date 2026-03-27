@@ -1,11 +1,18 @@
 use crate::core::api::parse_module_with_id_gen;
 use crate::core::ast::NodeIdGen;
-use crate::core::capsule::{ModuleId, ModulePath};
-use crate::core::context::{ParsedContext, module_export_facts_from_interface};
+use crate::core::capsule::bind::CapsuleBindings;
+use crate::core::capsule::{
+    CapsuleParseOptions, FsModuleLoader, ModuleId, ModulePath,
+    discover_and_parse_capsule_with_loader_and_options,
+};
+use crate::core::context::{
+    CapsuleParsedContext, ParsedContext, module_export_facts_from_interface,
+};
 use crate::core::interface::{
     CallableImplementation, ExportVisibility, ExportedDefKind, JsonModuleInterfaceCodec,
     ModuleArtifactPaths, ModuleInterface, ModuleInterfaceCodec, emit_module_interface_with_codec,
-    interface_rel_path, object_rel_path, read_module_interface_with_codec,
+    interface_rel_path, load_stdlib_module_interface_with_codec, object_rel_path,
+    read_module_interface_with_codec,
 };
 use crate::core::resolve::resolve;
 use crate::core::symbol_id::TypeKey;
@@ -285,4 +292,80 @@ fn emit_module_interface_writes_artifact_at_module_path() {
     );
 
     let _ = std::fs::remove_dir_all(&artifact_root);
+}
+
+#[test]
+fn load_stdlib_module_interface_keeps_real_stdlib_surface() {
+    let module_path = ModulePath::new(vec!["std".into(), "io".into()]).unwrap();
+    let interface =
+        load_stdlib_module_interface_with_codec::<JsonModuleInterfaceCodec>(&module_path)
+            .expect("stdlib interface should load");
+
+    assert_eq!(interface.module_path, module_path);
+    let export_symbols = interface
+        .exports
+        .iter()
+        .map(|export| export.symbol_id.to_string())
+        .collect::<Vec<_>>();
+    assert!(export_symbols.iter().any(|name| name == "std::io::print"));
+    assert!(export_symbols.iter().any(|name| name == "std::io::IoError"));
+    assert!(
+        export_symbols
+            .iter()
+            .all(|name| name.starts_with("std::io::"))
+    );
+}
+
+#[test]
+fn capsule_bindings_can_rebuild_stdlib_exports_from_interface_metadata() {
+    let temp_dir = std::env::temp_dir().join(format!(
+        "machina_interface_bind_{}_{}",
+        std::process::id(),
+        INTERFACE_TMP_COUNTER.fetch_add(1, Ordering::Relaxed)
+    ));
+    std::fs::create_dir_all(&temp_dir).expect("temp dir should be created");
+    let entry_path = temp_dir.join("main.mc");
+    let entry_source = indoc! {r#"
+        requires {
+            std::io
+        }
+
+        fn main() {
+            io::print("hello");
+        }
+    "#};
+
+    let loader = FsModuleLoader::new(temp_dir.clone());
+    let entry_module_path = ModulePath::new(vec!["main".into()]).unwrap();
+    let mut capsule = discover_and_parse_capsule_with_loader_and_options(
+        entry_source,
+        &entry_path,
+        entry_module_path,
+        &loader,
+        CapsuleParseOptions {
+            inject_prelude_requires: false,
+        },
+    )
+    .expect("capsule parse should succeed");
+
+    let std_io_id = capsule
+        .by_path
+        .get(&ModulePath::new(vec!["std".into(), "io".into()]).unwrap())
+        .copied()
+        .expect("stdlib dependency should be discovered");
+    capsule
+        .modules
+        .get_mut(&std_io_id)
+        .expect("stdlib dependency should exist")
+        .module
+        .top_level_items
+        .clear();
+
+    let bindings = CapsuleBindings::build(&CapsuleParsedContext::new(capsule));
+    let entry_aliases = bindings.alias_symbols_for(ModuleId(0));
+    let io_alias = entry_aliases.get("io").expect("io alias should exist");
+    assert!(io_alias.callables.get("print").is_some());
+    assert!(io_alias.types.get("IoError").is_some());
+
+    let _ = std::fs::remove_dir_all(&temp_dir);
 }
