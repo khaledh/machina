@@ -28,14 +28,41 @@ Establish a compilation model where:
 4. The **user program** is the final compilation unit and owns generic
    monomorphization.
 
+## Current Boundary Decision
+
+For the current implementation phase:
+
+- `.mci` is a **metadata artifact**, not a generic-body transport format.
+- Generic monomorphization continues to use the **source file** containing the
+  generic definition when the body is needed.
+- Generic body serialization in `.mci` is explicitly **out of scope for now**.
+
+Rationale:
+
+- stdlib source already ships with the compiler and is already the source of
+  truth for generic bodies.
+- Serializing generic bodies into `.mci` would duplicate that source in a
+  second compiler-owned IR before we have removed the source dependency.
+- The metadata-only `.mci` path already pays for itself in resolve, tooling,
+  and exported-surface queries without taking on that extra complexity.
+
+Longer term, if Machina moves to source-independent compiled libraries, generic
+body transport can be revisited deliberately. That is a future step, not part
+of the current module-interface rollout.
+
 ## Artifact Model
 
 A compiled Machina module produces two artifacts:
 
 ### `.mci` -- Module Compiled Interface
 
-Contains everything a consumer needs to typecheck and monomorphize against the
-module without access to its source:
+Long-term target: contains everything a consumer needs to typecheck and
+monomorphize against the module without access to its source.
+
+Current phase: `.mci` carries metadata only and does **not** carry generic
+bodies.
+
+Long-term contents:
 
 - Public type definitions (structs, enums, traits, linear types)
 - Public function/method signatures
