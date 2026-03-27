@@ -4,13 +4,17 @@
 //! go-to-definition for imported stdlib symbols from cached `.mci` metadata
 //! without depending on source-backed module states.
 
+use crate::core::context::ResolvedContext;
 use crate::core::diag::Span;
 use crate::core::interface::{
     ExportedDef, ExportedDefKind, JsonModuleInterfaceCodec, MethodExport, TraitDefExport,
     TypeDefExport, TypeDefExportKind, load_stdlib_module_interface_with_codec,
 };
+use crate::core::resolve::{DefId, UNKNOWN_DEF_ID};
 use crate::core::symbol_id::{SymbolId, TypeKey};
-use crate::services::analysis::results::{HoverInfo, Location, SignatureHelp};
+use crate::services::analysis::results::{
+    CompletionItem, CompletionKind, HoverInfo, Location, SignatureHelp,
+};
 use crate::services::analysis::snapshot::FileId;
 
 pub(crate) fn hover_for_imported_stdlib_symbol(symbol_id: &SymbolId) -> Option<HoverInfo> {
@@ -82,6 +86,71 @@ pub(crate) fn signature_help_for_imported_stdlib_symbol(
     }
 }
 
+pub(crate) fn completion_for_imported_stdlib_symbol(
+    symbol_id: &SymbolId,
+    def_id: DefId,
+) -> Option<CompletionItem> {
+    let export = load_stdlib_export(symbol_id)?;
+    Some(CompletionItem {
+        label: export_name(&export).to_string(),
+        kind: completion_kind_for_export(&export),
+        def_id,
+        detail: Some(format_export_label(&export)),
+    })
+}
+
+pub(crate) fn qualified_path_completions_for_imported_stdlib_type(
+    resolved: &ResolvedContext,
+    path_segments: &[String],
+) -> Vec<CompletionItem> {
+    if path_segments.len() != 1 {
+        return Vec::new();
+    }
+    let Some(owner_name) = path_segments.first() else {
+        return Vec::new();
+    };
+    let Some(symbol_id) = resolved
+        .def_table
+        .defs()
+        .iter()
+        .find(|def| def.name == *owner_name)
+        .and_then(|def| resolved.symbol_ids.lookup_symbol_id(def.id))
+    else {
+        return Vec::new();
+    };
+    let Some(export) = load_stdlib_export(symbol_id) else {
+        return Vec::new();
+    };
+    let ExportedDefKind::Type(type_export) = &export.kind else {
+        return Vec::new();
+    };
+    let TypeDefExportKind::Enum { variants } = &type_export.kind else {
+        return Vec::new();
+    };
+    variants
+        .iter()
+        .map(|variant| CompletionItem {
+            label: variant.name.clone(),
+            kind: CompletionKind::EnumVariant,
+            def_id: UNKNOWN_DEF_ID,
+            detail: Some(if variant.payload.is_empty() {
+                "enum variant".to_string()
+            } else {
+                format!(
+                    "{}({})",
+                    variant.name,
+                    variant
+                        .payload
+                        .iter()
+                        .map(|ty| format_type_key_with_names(ty, &type_export.type_params))
+                        .collect::<Vec<_>>()
+                        .join(", ")
+                )
+            }),
+        })
+        .collect()
+}
+
 fn load_stdlib_export(symbol_id: &SymbolId) -> Option<ExportedDef> {
     if symbol_id.module.segments().first().map(String::as_str) != Some("std") {
         return None;
@@ -124,6 +193,14 @@ fn format_export_label(export: &ExportedDef) -> String {
         ExportedDefKind::Method(method) => format_method_label(method),
         ExportedDefKind::Type(ty) => format_type_label(ty),
         ExportedDefKind::Trait(trait_def) => format_trait_label(trait_def),
+    }
+}
+
+fn completion_kind_for_export(export: &ExportedDef) -> CompletionKind {
+    match &export.kind {
+        ExportedDefKind::Func(_) | ExportedDefKind::Method(_) => CompletionKind::Function,
+        ExportedDefKind::Type(_) => CompletionKind::Type,
+        ExportedDefKind::Trait(_) => CompletionKind::Trait,
     }
 }
 
@@ -272,7 +349,7 @@ fn format_type_key_with_names(ty: &TypeKey, type_param_names: &[String]) -> Stri
             let prefix = if module.segments().is_empty() {
                 String::new()
             } else {
-                format!("{}::", module)
+                format!("{}::", module.segments().join("::"))
             };
             if args.is_empty() {
                 format!("{prefix}{path}")
@@ -391,6 +468,21 @@ mod tests {
             sig.label.contains("fn map<S, In, Out>"),
             "expected source-facing generic names, got: {}",
             sig.label
+        );
+    }
+
+    #[test]
+    fn imported_stdlib_completion_uses_interface_signature_detail() {
+        let symbol = stdlib_symbol("std::iter", "std::iter::map");
+        let item = completion_for_imported_stdlib_symbol(&symbol, UNKNOWN_DEF_ID)
+            .expect("expected stdlib completion from interface");
+        assert_eq!(item.label, "map");
+        assert!(
+            item.detail
+                .as_deref()
+                .is_some_and(|detail| detail.contains("fn map<S, In, Out>(")),
+            "expected source-facing generic names, got: {:?}",
+            item.detail
         );
     }
 

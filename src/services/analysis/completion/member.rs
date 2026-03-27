@@ -10,6 +10,7 @@ use crate::core::context::ResolvedContext;
 use crate::core::linear::LinearHostInfo;
 use crate::core::resolve::{DefId, UNKNOWN_DEF_ID};
 use crate::core::types::Type;
+use crate::services::analysis::lookups::qualified_path_completions_for_imported_stdlib_type;
 use crate::services::analysis::results::{CompletionItem, CompletionKind};
 
 pub(super) fn member_completions(
@@ -84,7 +85,7 @@ pub(super) fn qualified_path_completions(
             _ => {}
         }
     }
-    Vec::new()
+    qualified_path_completions_for_imported_stdlib_type(resolved, path_segments)
 }
 
 fn builtin_member_completions(owner: &Type) -> Vec<CompletionItem> {

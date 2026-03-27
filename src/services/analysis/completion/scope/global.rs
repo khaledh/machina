@@ -8,6 +8,7 @@ use std::collections::{HashMap, HashSet};
 use crate::core::ast::{NodeId, TopLevelItem, TypeDefKind};
 use crate::core::context::ResolvedContext;
 use crate::core::resolve::DefKind;
+use crate::services::analysis::lookups::completion_for_imported_stdlib_symbol;
 use crate::services::analysis::results::{CompletionItem, CompletionKind};
 
 pub(super) fn global_scope(resolved: &ResolvedContext) -> HashMap<String, CompletionItem> {
@@ -57,15 +58,17 @@ pub(super) fn global_scope(resolved: &ResolvedContext) -> HashMap<String, Comple
         if !node_allowed {
             continue;
         }
-        out.insert(
-            def.name.clone(),
-            CompletionItem {
+        let item = resolved
+            .symbol_ids
+            .lookup_symbol_id(def.id)
+            .and_then(|symbol_id| completion_for_imported_stdlib_symbol(symbol_id, def.id))
+            .unwrap_or_else(|| CompletionItem {
                 label: def.name.clone(),
                 kind,
                 def_id: def.id,
                 detail: Some(def.kind.to_string()),
-            },
-        );
+            });
+        out.insert(def.name.clone(), item);
     }
     out
 }

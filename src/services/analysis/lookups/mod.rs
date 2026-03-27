@@ -17,7 +17,8 @@ pub(crate) use definition::{def_at_span, def_location_at_span, linear_decl_targe
 pub(crate) use document_symbols::document_symbols;
 pub(crate) use hover::hover_at_span_in_file;
 pub(crate) use imported_interface::{
-    hover_for_imported_stdlib_symbol, location_for_imported_stdlib_symbol,
+    completion_for_imported_stdlib_symbol, hover_for_imported_stdlib_symbol,
+    location_for_imported_stdlib_symbol, qualified_path_completions_for_imported_stdlib_type,
     signature_help_for_imported_stdlib_symbol,
 };
 pub(crate) use semantic_tokens::semantic_tokens;

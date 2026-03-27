@@ -14,7 +14,7 @@ use crate::services::analysis::lookups::hover_for_resolved_target;
 use crate::services::analysis::module_graph::ModuleGraph;
 use crate::services::analysis::pipeline::ROOT_POISON_NODE;
 use crate::services::analysis::query::{CancellationToken, QueryCancelled, QueryKey, QueryKind};
-use crate::services::analysis::results::SemanticTokenKind;
+use crate::services::analysis::results::{CompletionKind, SemanticTokenKind};
 
 static ANALYSIS_TMP_COUNTER: AtomicUsize = AtomicUsize::new(0);
 
@@ -3135,6 +3135,38 @@ fn run() -> u64 { 1 }
     );
 
     let _ = fs::remove_dir_all(&temp_dir);
+}
+
+#[test]
+fn completions_at_program_file_imported_stdlib_symbol_uses_interface_detail() {
+    let entry_path = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("examples/basics/map_iter_small.mc")
+        .canonicalize()
+        .unwrap();
+    let entry_source = fs::read_to_string(&entry_path).expect("failed to read map_iter_small");
+
+    let mut db = AnalysisDb::new();
+    let entry_id = db.upsert_disk_text(entry_path, entry_source.clone());
+
+    let mut query_span = span_for_last_substring(&entry_source, "ma");
+    query_span.start = query_span.end;
+    let completions = db
+        .completions_at_program_file(entry_id, query_span)
+        .expect("program completion query should succeed");
+
+    let map_item = completions
+        .iter()
+        .find(|item| item.label == "map")
+        .expect("expected imported std::iter::map completion");
+    assert_eq!(map_item.kind, CompletionKind::Function);
+    assert!(
+        map_item
+            .detail
+            .as_deref()
+            .is_some_and(|detail| detail.contains("fn map<S, In, Out>(")),
+        "expected source-facing generic names in completion detail, got: {:?}",
+        map_item.detail
+    );
 }
 
 #[test]
