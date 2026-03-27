@@ -3,7 +3,8 @@ use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
 use crate::core::capsule::{
-    CapsuleError, ModuleLoader, ModulePath, discover_and_parse_capsule_with_loader,
+    CapsuleError, CapsuleParseOptions, FsModuleLoader, ModuleLoader, ModulePath,
+    discover_and_parse_capsule_with_loader, discover_and_parse_capsule_with_loader_and_options,
 };
 use crate::core::context::{CapsuleParsedContext, ParsedContext, ResolvedContext};
 use crate::core::lexer::{LexError, Lexer, Token};
@@ -136,6 +137,64 @@ fn test_resolve_program_sets_def_table_source_paths() {
         .source_path()
         .expect("dependency def table should carry source path");
     assert_eq!(dep_source_path, Path::new("app.util.mc"));
+}
+
+#[test]
+fn test_resolve_program_can_import_stdlib_from_interface_metadata() {
+    let temp_dir =
+        std::env::temp_dir().join(format!("machina_resolve_std_iface_{}", std::process::id()));
+    std::fs::create_dir_all(&temp_dir).expect("temp dir should be created");
+    let entry_path = temp_dir.join("main.mc");
+    let entry_src = r#"
+        requires {
+            std::io::print
+            std::io::IoError
+        }
+
+        fn main() -> u64 {
+            print("hello");
+            0
+        }
+    "#;
+    let loader = FsModuleLoader::new(temp_dir.clone());
+    let entry_module_path = ModulePath::new(vec!["main".to_string()]).unwrap();
+    let mut program = discover_and_parse_capsule_with_loader_and_options(
+        entry_src,
+        &entry_path,
+        entry_module_path,
+        &loader,
+        CapsuleParseOptions {
+            inject_prelude_requires: false,
+        },
+    )
+    .expect("program should parse");
+    let std_io_path = ModulePath::new(vec!["std".to_string(), "io".to_string()]).unwrap();
+    let std_io_id = *program
+        .by_path
+        .get(&std_io_path)
+        .expect("stdlib dependency should exist");
+    program
+        .modules
+        .get_mut(&std_io_id)
+        .expect("stdlib dependency module should exist")
+        .module
+        .top_level_items
+        .clear();
+
+    let resolved = resolve_program(CapsuleParsedContext::new(program));
+    assert!(
+        resolved.is_ok(),
+        "resolve should succeed via stdlib interface"
+    );
+
+    let resolved = resolved.expect("program resolve should succeed");
+    let import_env = resolved
+        .import_env(resolved.entry)
+        .expect("entry import env should exist");
+    assert!(import_env.symbol_aliases.contains_key("print"));
+    assert!(import_env.symbol_aliases.contains_key("IoError"));
+
+    let _ = std::fs::remove_dir_all(&temp_dir);
 }
 
 #[test]

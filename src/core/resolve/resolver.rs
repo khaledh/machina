@@ -6,7 +6,7 @@ use crate::core::capsule::{ModuleId, RequireKind};
 use crate::core::context::{
     CapsuleResolveStageInput, CapsuleResolveStageOutput, ImportEnv, ImportedSymbolBinding,
     ModuleExportFacts, ParsedContext, ResolveStageInput, ResolveStageOutput,
-    import_env_from_requires, module_export_facts_from_def_table,
+    import_env_from_requires, module_export_facts_from_def_table, stdlib_module_export_facts,
 };
 use crate::core::diag::Span;
 use crate::core::resolve::def_table::{DefTable, DefTableBuilder};
@@ -2175,6 +2175,26 @@ fn attach_imported_symbol_ids(context: &mut ResolveStageOutput, imported_facts: 
 pub fn resolve_program(
     program: CapsuleResolveStageInput,
 ) -> Result<CapsuleResolveStageOutput, Vec<ResolveError>> {
+    resolve_program_with_options(program, ResolveProgramOptions::default())
+}
+
+#[derive(Clone, Copy)]
+pub(crate) struct ResolveProgramOptions {
+    pub prefer_stdlib_interfaces: bool,
+}
+
+impl Default for ResolveProgramOptions {
+    fn default() -> Self {
+        Self {
+            prefer_stdlib_interfaces: true,
+        }
+    }
+}
+
+pub(crate) fn resolve_program_with_options(
+    program: CapsuleResolveStageInput,
+    opts: ResolveProgramOptions,
+) -> Result<CapsuleResolveStageOutput, Vec<ResolveError>> {
     let mut modules = HashMap::new();
     let mut errors = Vec::new();
     let mut top_level_owners = HashMap::new();
@@ -2237,12 +2257,24 @@ pub fn resolve_program(
         .with_module_path(parsed_module.source.path.clone());
         match resolve_with_imports_and_symbols(parsed_context, imported_modules, imported_symbols) {
             Ok(resolved_context) => {
-                let module_exports = module_export_facts_from_def_table(
-                    module_id,
-                    Some(parsed_module.source.path.clone()),
-                    &resolved_context.def_table,
-                    &resolved_context.symbol_ids,
-                );
+                let module_exports = if opts.prefer_stdlib_interfaces {
+                    stdlib_module_export_facts(module_id, &parsed_module.source.path)
+                        .unwrap_or_else(|| {
+                            module_export_facts_from_def_table(
+                                module_id,
+                                Some(parsed_module.source.path.clone()),
+                                &resolved_context.def_table,
+                                &resolved_context.symbol_ids,
+                            )
+                        })
+                } else {
+                    module_export_facts_from_def_table(
+                        module_id,
+                        Some(parsed_module.source.path.clone()),
+                        &resolved_context.def_table,
+                        &resolved_context.symbol_ids,
+                    )
+                };
                 export_facts_by_module.insert(module_id, module_exports.clone());
                 modules.insert(module_id, resolved_context);
 

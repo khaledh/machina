@@ -14,7 +14,7 @@ use crate::core::api::{self, ParseModuleError};
 use crate::core::capsule::compose::merge_modules;
 use crate::core::capsule::{self, CapsuleParseOptions, FsModuleLoader, ModulePath, ParsedModule};
 use crate::core::context::{CapsuleParsedContext, ResolvedContext};
-use crate::core::resolve::resolve_program;
+use crate::core::resolve::{ResolveProgramOptions, resolve_program_with_options};
 
 use super::{
     ModuleArtifactPaths, ModuleInterface, ModuleInterfaceCodec, ModuleInterfaceIoError,
@@ -94,8 +94,13 @@ fn stdlib_interface_inputs<C: ModuleInterfaceCodec>(
 
     let capsule = capsule_with_implicit_prelude::<C>(capsule)?;
     let program = CapsuleParsedContext::new(capsule);
-    let resolved = resolve_program(program.clone())
-        .map_err(|errs| StdlibInterfaceError::Resolve(format_resolve_errors(&errs)))?;
+    let resolved = resolve_program_with_options(
+        program.clone(),
+        ResolveProgramOptions {
+            prefer_stdlib_interfaces: false,
+        },
+    )
+    .map_err(|errs| StdlibInterfaceError::Resolve(format_resolve_errors(&errs)))?;
     let parsed_entry = program.entry_module().clone();
     let resolved_entry = resolved.entry_module().clone();
     Ok((parsed_entry, resolved_entry, input_paths))

@@ -61,7 +61,6 @@ impl ModuleExports {
         }
         out
     }
-
     fn from_interface(interface: &ModuleInterface) -> Self {
         let mut out = Self::default();
         for export in &interface.exports {

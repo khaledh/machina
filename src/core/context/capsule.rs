@@ -4,7 +4,10 @@ use crate::core::ast::{NodeId, NodeIdGen};
 use crate::core::capsule::{
     CapsuleParsed, ModuleId, ModulePath, ParsedModule as CapsuleModule, RequireKind,
 };
-use crate::core::interface::{ExportedDefKind, ModuleInterface};
+use crate::core::interface::{
+    ExportedDefKind, JsonModuleInterfaceCodec, ModuleInterface,
+    load_stdlib_module_interface_with_codec,
+};
 use crate::core::resolve::{DefId, DefKind, DefTable, GlobalDefId};
 use crate::core::symbol_id::{SymbolId, SymbolIdTable};
 
@@ -286,6 +289,18 @@ pub fn module_export_facts_from_interface(
     }
 
     facts
+}
+
+pub fn stdlib_module_export_facts(
+    module_id: ModuleId,
+    module_path: &ModulePath,
+) -> Option<ModuleExportFacts> {
+    if module_path.segments().first().map(String::as_str) != Some("std") {
+        return None;
+    }
+    let interface =
+        load_stdlib_module_interface_with_codec::<JsonModuleInterfaceCodec>(module_path).ok()?;
+    Some(module_export_facts_from_interface(module_id, &interface))
 }
 
 pub fn imported_symbol_binding_from_exports(

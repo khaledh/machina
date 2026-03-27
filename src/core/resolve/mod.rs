@@ -19,6 +19,7 @@ pub use resolver::{
     resolve_partial, resolve_program, resolve_with_imports, resolve_with_imports_and_symbols,
     resolve_with_imports_and_symbols_partial, resolve_with_imports_partial,
 };
+pub(crate) use resolver::{ResolveProgramOptions, resolve_program_with_options};
 pub use symbols::SymbolKind;
 
 #[cfg(test)]
