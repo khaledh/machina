@@ -122,6 +122,7 @@ pub struct HoverInfo {
     pub def_name: Option<String>,
     pub ty: Option<Type>,
     pub display: String,
+    pub doc: Option<String>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -141,6 +142,7 @@ pub struct CompletionItem {
     pub kind: CompletionKind,
     pub def_id: DefId,
     pub detail: Option<String>,
+    pub doc: Option<String>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -150,6 +152,7 @@ pub struct SignatureHelp {
     pub symbol_id: Option<SymbolId>,
     pub active_parameter: usize,
     pub parameters: Vec<String>,
+    pub doc: Option<String>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]

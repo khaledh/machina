@@ -528,7 +528,7 @@ fn hover_response(
                 json!({
                     "contents": {
                         "kind": "markdown",
-                        "value": hover_markdown_value(&hover.display)
+                        "value": hover_markdown_value(&hover.display, hover.doc.as_deref())
                     },
                     // LSP hover ranges are interpreted in the current
                     // document, so only reuse the source definition span when
@@ -544,9 +544,12 @@ fn hover_response(
     }
 }
 
-fn hover_markdown_value(display: &str) -> String {
+fn hover_markdown_value(display: &str, doc: Option<&str>) -> String {
     let escaped = display.replace("```", "\\`\\`\\`");
-    format!("```machina\n{escaped}\n```")
+    match doc.filter(|doc| !doc.trim().is_empty()) {
+        Some(doc) => format!("```machina\n{escaped}\n```\n\n{doc}"),
+        None => format!("```machina\n{escaped}\n```"),
+    }
 }
 
 fn definition_response(
@@ -637,7 +640,8 @@ fn completion_response(
             json!({
                 "label": item.label,
                 "kind": kind,
-                "detail": item.detail
+                "detail": item.detail,
+                "documentation": item.doc.as_ref().map(|doc| json!({"kind": "markdown", "value": doc}))
             })
         })
         .collect();
@@ -686,6 +690,7 @@ fn signature_help_response(
                 json!({
                     "signatures": [{
                         "label": sig.label,
+                        "documentation": sig.doc.as_ref().map(|doc| json!({"kind": "markdown", "value": doc})),
                         "parameters": parameters
                     }],
                     "activeSignature": 0,

@@ -313,6 +313,7 @@ pub(crate) fn monomorphize_with_plan(
                     if !func_def.sig.type_params.is_empty() {
                         new_items.push(TopLevelItem::FuncDecl(FuncDecl {
                             id: func_def.id,
+                            doc: func_def.doc.clone(),
                             attrs: func_def.attrs.clone(),
                             sig: func_def.sig.clone(),
                             span: func_def.span,
@@ -452,6 +453,7 @@ pub(crate) fn monomorphize_with_plan(
                         .map(|method_item| match method_item {
                             MethodItem::Def(method_def) => MethodItem::Decl(MethodDecl {
                                 id: method_def.id,
+                                doc: method_def.doc,
                                 attrs: method_def.attrs,
                                 sig: method_def.sig,
                                 span: method_def.span,

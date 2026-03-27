@@ -199,12 +199,14 @@ impl<'a> Elaborator<'a> {
             TopLevelItem::MachineDef(_) => None,
             TopLevelItem::FuncDecl(decl) => Some(TopLevelItem::FuncDecl(FuncDecl {
                 id: decl.id,
+                doc: decl.doc.clone(),
                 attrs: decl.attrs.clone(),
                 sig: decl.sig.clone(),
                 span: decl.span,
             })),
             TopLevelItem::FuncDef(def) => Some(TopLevelItem::FuncDef(FuncDef {
                 id: def.id,
+                doc: def.doc.clone(),
                 attrs: def.attrs.clone(),
                 sig: def.sig.clone(),
                 body: self.elab_value(&def.body),
@@ -238,6 +240,7 @@ impl<'a> Elaborator<'a> {
     fn elab_method_def(&mut self, def: &MethodDef) -> MethodDef {
         MethodDef {
             id: def.id,
+            doc: def.doc.clone(),
             attrs: def.attrs.clone(),
             sig: def.sig.clone(),
             body: self.elab_value(&def.body),
@@ -248,6 +251,7 @@ impl<'a> Elaborator<'a> {
     fn elab_method_decl(&mut self, decl: &MethodDecl) -> MethodDecl {
         MethodDecl {
             id: decl.id,
+            doc: decl.doc.clone(),
             attrs: decl.attrs.clone(),
             sig: decl.sig.clone(),
             span: decl.span,

@@ -58,12 +58,14 @@ fn module_artifact_paths_follow_module_hierarchy() {
 fn module_interface_from_resolved_context_records_public_export_surface() {
     let resolved = resolved_with_module_path(
         indoc! {r#"
+            /// Writes output.
             @public
             fn write(s: string) {}
 
             @public
             fn map<T>(x: T) -> T { x }
 
+            /// Secret handle.
             @opaque
             @public
             type Secret = { value: u64 }
@@ -72,10 +74,12 @@ fn module_interface_from_resolved_context_records_public_export_surface() {
             type Conn = {}
 
             Conn :: {
+                /// Ping the connection.
                 @public
                 fn ping(self) -> u64 { 1 }
             }
 
+            /// Writer contract.
             @public
             trait Writer {
                 fn write(self, s: string) -> ();
@@ -127,6 +131,13 @@ fn module_interface_from_resolved_context_records_public_export_surface() {
         CallableImplementation::LinkSymbol("write".to_string())
     );
     assert_eq!(write.signature.params.len(), 1);
+    assert_eq!(
+        write_export
+            .tooling
+            .as_ref()
+            .and_then(|tooling| tooling.doc.as_deref()),
+        Some("Writes output.")
+    );
 
     let map_export = interface
         .exports
@@ -149,6 +160,13 @@ fn module_interface_from_resolved_context_records_public_export_surface() {
         .find(|export| export.symbol_id.to_string() == "std::demo::Secret")
         .expect("expected opaque type export");
     assert_eq!(secret_export.visibility, ExportVisibility::Opaque);
+    assert_eq!(
+        secret_export
+            .tooling
+            .as_ref()
+            .and_then(|tooling| tooling.doc.as_deref()),
+        Some("Secret handle.")
+    );
 
     let method_export = interface
         .exports
@@ -163,6 +181,13 @@ fn module_interface_from_resolved_context_records_public_export_surface() {
         method.implementation,
         CallableImplementation::LinkSymbol("Conn$ping".to_string())
     );
+    assert_eq!(
+        method_export
+            .tooling
+            .as_ref()
+            .and_then(|tooling| tooling.doc.as_deref()),
+        Some("Ping the connection.")
+    );
 
     let trait_export = interface
         .exports
@@ -176,6 +201,13 @@ fn module_interface_from_resolved_context_records_public_export_surface() {
     assert_eq!(writer.properties.len(), 1);
     assert_eq!(writer.properties[0].name, "open");
     assert_eq!(writer.properties[0].ty, TypeKey::Bool);
+    assert_eq!(
+        trait_export
+            .tooling
+            .as_ref()
+            .and_then(|tooling| tooling.doc.as_deref()),
+        Some("Writer contract.")
+    );
 }
 
 #[test]
@@ -242,6 +274,7 @@ fn module_export_facts_can_be_rebuilt_from_interface_surface() {
 fn json_codec_roundtrips_module_interface() {
     let resolved = resolved_with_module_path(
         indoc! {r#"
+            /// Writes output.
             @public
             fn write(s: string) {}
 
@@ -257,6 +290,18 @@ fn json_codec_roundtrips_module_interface() {
     let decoded = JsonModuleInterfaceCodec::decode(&bytes).expect("json decode should succeed");
 
     assert_eq!(decoded, interface);
+    let write_export = decoded
+        .exports
+        .iter()
+        .find(|export| export.symbol_id.to_string() == "std::demo::write")
+        .expect("expected public function export");
+    assert_eq!(
+        write_export
+            .tooling
+            .as_ref()
+            .and_then(|tooling| tooling.doc.as_deref()),
+        Some("Writes output.")
+    );
 }
 
 #[test]

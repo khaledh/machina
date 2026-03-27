@@ -260,6 +260,45 @@ impl<'a> Parser<'a> {
         Ok(attrs)
     }
 
+    fn parse_doc_comment_block(&mut self) -> Option<DocComment> {
+        let mut lines = Vec::new();
+        let mut span: Option<Span> = None;
+
+        while let TK::DocComment(text) = &self.curr_token.kind {
+            lines.push((text.clone(), self.curr_token.span));
+            span = Some(match span {
+                Some(existing) => Span::new(existing.start, self.curr_token.span.end),
+                None => self.curr_token.span,
+            });
+            self.advance();
+        }
+
+        if lines.is_empty() {
+            return None;
+        }
+
+        let attach_line = self.curr_token.span.start.line;
+        let mut prev_end_line = lines[0].1.end.line;
+        for (_, line_span) in lines.iter().skip(1) {
+            if line_span.start.line != prev_end_line + 1 {
+                return None;
+            }
+            prev_end_line = line_span.end.line;
+        }
+        if prev_end_line + 1 != attach_line {
+            return None;
+        }
+
+        Some(DocComment {
+            raw: lines
+                .into_iter()
+                .map(|(text, _)| text)
+                .collect::<Vec<_>>()
+                .join("\n"),
+            span: span.expect("doc comment span should exist"),
+        })
+    }
+
     fn parse_requires_block(&mut self) -> Result<Vec<Require>, ParseError> {
         self.consume_keyword(TK::KwRequires)?;
         self.consume(&TK::LBrace)?;

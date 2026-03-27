@@ -20,6 +20,9 @@ impl Display for Token {
 
 #[derive(Debug, PartialEq, Eq, Hash, Clone, EnumDisplay)]
 pub enum TokenKind {
+    #[display("DocComment({0:?})")]
+    DocComment(String),
+
     // Identifiers
     #[display("Ident({0})")]
     Ident(String),
@@ -302,6 +305,10 @@ impl<'a> Lexer<'a> {
                 self.advance();
             }
 
+            if self.peek_doc_comment() {
+                break;
+            }
+
             if self.peek_line_comment() {
                 // Consume '//' and skip until the end of the line.
                 self.advance();
@@ -321,9 +328,38 @@ impl<'a> Lexer<'a> {
         }
     }
 
+    fn peek_doc_comment(&mut self) -> bool {
+        let mut iter = self.source.clone();
+        matches!(
+            (iter.next(), iter.next(), iter.next()),
+            (Some('/'), Some('/'), Some('/'))
+        )
+    }
+
     fn peek_line_comment(&mut self) -> bool {
         let mut iter = self.source.clone();
-        matches!((iter.next(), iter.next()), (Some('/'), Some('/')))
+        match (iter.next(), iter.next(), iter.next()) {
+            (Some('/'), Some('/'), Some(ch)) => ch != '/',
+            (Some('/'), Some('/'), None) => true,
+            _ => false,
+        }
+    }
+
+    fn lex_doc_comment(&mut self) -> TokenKind {
+        self.advance();
+        self.advance();
+        self.advance();
+        if matches!(self.source.peek(), Some(' ')) {
+            self.advance();
+        }
+        let mut text = String::new();
+        while let Some(&ch) = self.source.peek()
+            && ch != '\n'
+        {
+            text.push(ch);
+            self.advance();
+        }
+        TokenKind::DocComment(text)
     }
 
     fn lex_char_lit(&mut self, start: Position) -> Result<TokenKind, LexError> {
@@ -539,6 +575,13 @@ impl<'a> Lexer<'a> {
             line: self.pos.line,
             column: self.pos.column,
         };
+        if self.peek_doc_comment() {
+            let kind = self.lex_doc_comment();
+            return Ok(Token {
+                kind,
+                span: Span::new(start, self.pos),
+            });
+        }
         let kind = match self.source.peek() {
             Some(&ch) if ch.is_alphabetic() || ch == '_' => {
                 let mut ident = String::new();

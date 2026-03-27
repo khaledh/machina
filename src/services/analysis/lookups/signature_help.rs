@@ -11,7 +11,7 @@ use crate::services::analysis::syntax_index::{
     active_param_index, call_site_at_span, position_leq,
 };
 
-use super::callable_signature::format_source_callable_signature;
+use super::callable_signature::{format_source_callable_signature, source_doc_for_def};
 use crate::core::context::TypeCheckedContext;
 
 /// Build signature help at a call site. First tries call-site resolution
@@ -62,6 +62,7 @@ pub(crate) fn signature_help_at_span(
                 .and_then(|id| typed.symbol_ids.lookup_symbol_id(id).cloned()),
             active_parameter: active_parameter_for(params.len()),
             parameters: params,
+            doc: source_doc_for_def(sig.def_id, Some(&typed.module), &typed.def_table),
         };
         if help.def_id.is_some() {
             return Some(help);
@@ -101,6 +102,7 @@ pub(crate) fn signature_help_at_span(
             symbol_id: def_id.and_then(|id| typed.symbol_ids.lookup_symbol_id(id).cloned()),
             active_parameter: active_parameter_for(parameters.len()),
             parameters,
+            doc: source_doc_for_def(def_id, Some(&typed.module), &typed.def_table),
         });
     }
     provisional.or(Some(SignatureHelp {
@@ -109,6 +111,7 @@ pub(crate) fn signature_help_at_span(
         symbol_id: def_id.and_then(|id| typed.symbol_ids.lookup_symbol_id(id).cloned()),
         active_parameter: active_parameter_for(parameters.len()),
         parameters,
+        doc: source_doc_for_def(def_id, Some(&typed.module), &typed.def_table),
     }))
 }
 
@@ -180,6 +183,7 @@ where
         symbol_id: render_def_id.and_then(|id| typed.symbol_ids.lookup_symbol_id(id).cloned()),
         active_parameter: active_parameter_for(rendered.parameters.len()),
         parameters: rendered.parameters,
+        doc: source_doc_for_def(render_def_id, Some(&typed.module), &typed.def_table),
     })
 }
 

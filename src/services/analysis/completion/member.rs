@@ -33,6 +33,7 @@ pub(super) fn member_completions(
                 kind: CompletionKind::Variable,
                 def_id: UNKNOWN_DEF_ID,
                 detail: Some(field.ty.to_string()),
+                doc: None,
             });
         }
     }
@@ -77,6 +78,7 @@ pub(super) fn qualified_path_completions(
                                 .lookup_node_def_id(variant.id)
                                 .unwrap_or(UNKNOWN_DEF_ID),
                             detail: Some("enum variant".to_string()),
+                            doc: None,
                         })
                         .collect();
                 }
@@ -198,6 +200,7 @@ fn synthetic_function_completion(label: &str, detail: &str) -> CompletionItem {
         kind: CompletionKind::Function,
         def_id: UNKNOWN_DEF_ID,
         detail: Some(detail.to_string()),
+        doc: None,
     }
 }
 
@@ -207,6 +210,7 @@ fn push_builtin_prop(out: &mut Vec<CompletionItem>, label: &str, detail: &str) {
         kind: CompletionKind::Variable,
         def_id: UNKNOWN_DEF_ID,
         detail: Some(detail.to_string()),
+        doc: None,
     });
 }
 
@@ -216,6 +220,7 @@ fn push_builtin_method(out: &mut Vec<CompletionItem>, label: &str, detail: &str)
         kind: CompletionKind::Function,
         def_id: UNKNOWN_DEF_ID,
         detail: Some(detail.to_string()),
+        doc: None,
     });
 }
 
@@ -267,6 +272,7 @@ fn nominal_method_completions(
                         .lookup_def(def_id)
                         .map_or_else(|| "member".to_string(), |d| d.kind.to_string()),
                 ),
+                doc: None,
             });
         }
     }

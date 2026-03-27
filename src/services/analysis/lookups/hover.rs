@@ -23,7 +23,7 @@ use crate::services::analysis::trace::{AnalysisTraceCategory, AnalysisTracer};
 
 use super::callable_signature::{
     format_source_binding_signature, format_source_callable_signature,
-    format_source_struct_field_signature, format_source_type_signature,
+    format_source_struct_field_signature, format_source_type_signature, source_doc_for_def,
 };
 use super::definition::{def_at_span, linear_decl_target_at_span, machine_handle_def_at_span};
 use super::type_display::{format_type_for_display, hover_type_var_names};
@@ -142,7 +142,7 @@ pub(crate) fn hover_at_span_in_file(
     if result.is_none() {
         hover_trace(tracer, "final none");
     }
-    result
+    result.map(|info| enrich_hover_doc(state, info))
 }
 
 fn try_strategy(
@@ -172,6 +172,18 @@ fn format_span(span: Span) -> String {
         "{}:{}-{}:{}",
         span.start.line, span.start.column, span.end.line, span.end.column
     )
+}
+
+fn enrich_hover_doc(state: &LookupState, mut info: HoverInfo) -> HoverInfo {
+    if info.doc.is_some() {
+        return info;
+    }
+    if let Some(typed) = state.typed.as_ref() {
+        info.doc = source_doc_for_def(info.def_id, Some(&typed.module), &typed.def_table);
+    } else if let Some(resolved) = state.resolved.as_ref() {
+        info.doc = source_doc_for_def(info.def_id, Some(&resolved.module), &resolved.def_table);
+    }
+    info
 }
 
 pub(crate) fn hover_for_def_in_state(state: &LookupState, def_id: DefId) -> Option<HoverInfo> {
@@ -213,6 +225,7 @@ pub(crate) fn hover_for_def_in_state(state: &LookupState, def_id: DefId) -> Opti
         def_name: Some(def.name.clone()),
         ty,
         display,
+        doc: source_doc_for_def(Some(def_id), Some(&typed.module), &typed.def_table),
     })
 }
 
@@ -257,6 +270,7 @@ fn try_call_site_hover(
         def_name: Some(def.name.clone()),
         ty,
         display,
+        doc: None,
     })
 }
 
@@ -359,6 +373,7 @@ fn try_node_hover(
                 def_name: Some(query_ident.to_string()),
                 ty: Some(field_ty.clone()),
                 display: field_ty_display,
+                doc: None,
             };
             update_best(&mut best, 6, &node_span, info);
             continue;
@@ -383,6 +398,7 @@ fn try_node_hover(
             def_name,
             ty,
             display,
+            doc: None,
         };
         update_best(&mut best, score, &node_span, info);
     }
@@ -417,6 +433,7 @@ fn try_source_field_hover(
         def_name: Some(query_ident.to_string()),
         ty: Some(field_ty.clone()),
         display,
+        doc: None,
     })
 }
 
@@ -509,6 +526,7 @@ fn try_source_binding_hover(
         def_name: Some(def.name.clone()),
         ty,
         display,
+        doc: None,
     })
 }
 
@@ -567,6 +585,7 @@ fn try_machine_handle_hover(
             None,
             &resolved.def_table,
         ),
+        doc: None,
     })
 }
 
@@ -587,6 +606,7 @@ fn try_linear_decl_hover(
         def_name: query_ident.map(str::to_string),
         ty: None,
         display: target.display,
+        doc: None,
     })
 }
 
@@ -609,6 +629,7 @@ fn try_syntactic_field_hover(
         def_name: Some(query_ident.to_string()),
         ty: None,
         display,
+        doc: None,
     })
 }
 
@@ -632,6 +653,7 @@ fn try_resolved_hover(
             def_name: query_ident.map(str::to_string),
             ty: None,
             display: target.display,
+            doc: None,
         });
     }
     let node_id = node_at_span(&resolved.module, query_span)?;
@@ -675,6 +697,7 @@ fn try_resolved_hover(
         def_name,
         ty: None,
         display,
+        doc: None,
     })
     .or_else(|| {
         fallback_hover_from_def_table(
@@ -818,6 +841,7 @@ fn fallback_hover_from_def_table(
             def_name: Some(def.name.clone()),
             ty,
             display,
+            doc: None,
         });
     }
     None

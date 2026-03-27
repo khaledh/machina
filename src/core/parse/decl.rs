@@ -2,18 +2,19 @@ use super::*;
 
 impl<'a> Parser<'a> {
     pub(super) fn parse_top_level_item(&mut self) -> Result<TopLevelItem, ParseError> {
+        let doc = self.parse_doc_comment_block();
         let attrs = self.parse_attribute_list()?;
         match &self.curr_token.kind {
-            TK::KwType => self.parse_type_def(attrs).map(TopLevelItem::TypeDef),
-            TK::KwTrait => self.parse_trait_def(attrs).map(TopLevelItem::TraitDef),
+            TK::KwType => self.parse_type_def(doc, attrs).map(TopLevelItem::TypeDef),
+            TK::KwTrait => self.parse_trait_def(doc, attrs).map(TopLevelItem::TraitDef),
             TK::Ident(ident) if ident == "machine" => {
                 if attrs.is_empty() {
-                    self.parse_machine_def().map(TopLevelItem::MachineDef)
+                    self.parse_machine_def(doc).map(TopLevelItem::MachineDef)
                 } else {
                     Err(PEK::AttributeNotAllowed.at(attrs[0].span))
                 }
             }
-            TK::KwFn => self.parse_func(attrs),
+            TK::KwFn => self.parse_func(doc, attrs),
             TK::Ident(_) if self.is_method_block_start() => {
                 if attrs.is_empty() {
                     self.parse_method_block()
@@ -48,7 +49,11 @@ impl<'a> Parser<'a> {
         self.tokens.get(index).map(|t| &t.kind) == Some(&TK::DoubleColon)
     }
 
-    fn parse_type_def(&mut self, attrs: Vec<Attribute>) -> Result<TypeDef, ParseError> {
+    fn parse_type_def(
+        &mut self,
+        doc: Option<DocComment>,
+        attrs: Vec<Attribute>,
+    ) -> Result<TypeDef, ParseError> {
         let marker = self.mark();
 
         self.consume_keyword(TK::KwType)?;
@@ -84,6 +89,7 @@ impl<'a> Parser<'a> {
 
         Ok(TypeDef {
             id: self.id_gen.new_id(),
+            doc,
             attrs,
             name,
             type_params,
@@ -92,7 +98,7 @@ impl<'a> Parser<'a> {
         })
     }
 
-    fn parse_machine_def(&mut self) -> Result<MachineDef, ParseError> {
+    fn parse_machine_def(&mut self, doc: Option<DocComment>) -> Result<MachineDef, ParseError> {
         let marker = self.mark();
         self.consume_contextual_keyword("machine")?;
         let name = self.parse_ident()?;
@@ -135,6 +141,7 @@ impl<'a> Parser<'a> {
         self.consume(&TK::RBrace)?;
         Ok(MachineDef {
             id: self.id_gen.new_id(),
+            doc,
             name,
             host,
             items,
@@ -190,6 +197,7 @@ impl<'a> Parser<'a> {
 
         Ok(FuncDef {
             id: self.id_gen.new_id(),
+            doc: None,
             attrs: Vec::new(),
             sig,
             body,
@@ -279,7 +287,11 @@ impl<'a> Parser<'a> {
         })
     }
 
-    fn parse_trait_def(&mut self, attrs: Vec<Attribute>) -> Result<TraitDef, ParseError> {
+    fn parse_trait_def(
+        &mut self,
+        doc: Option<DocComment>,
+        attrs: Vec<Attribute>,
+    ) -> Result<TraitDef, ParseError> {
         let marker = self.mark();
         self.consume_keyword(TK::KwTrait)?;
         let name = self.parse_ident()?;
@@ -342,6 +354,7 @@ impl<'a> Parser<'a> {
         self.consume(&TK::RBrace)?;
         Ok(TraitDef {
             id: self.id_gen.new_id(),
+            doc,
             attrs,
             name,
             methods,

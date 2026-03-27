@@ -195,6 +195,7 @@ impl<'a> Elaborator<'a> {
         self.def_table.record_use(func_id, def_id);
         let func_def = FuncDef {
             id: func_id,
+            doc: None,
             attrs: Vec::new(),
             sig: FunctionSig {
                 name: ident.to_string(),
@@ -237,6 +238,7 @@ impl<'a> Elaborator<'a> {
             .collect();
         let type_def = TypeDef {
             id: self.node_id_gen.new_id(),
+            doc: None,
             attrs: Vec::new(),
             name: type_name.clone(),
             type_params: Vec::new(),
@@ -344,6 +346,7 @@ impl<'a> Elaborator<'a> {
         self.def_table.record_use(method_id, def_id);
         let method_def = MethodDef {
             id: method_id,
+            doc: None,
             attrs: Vec::new(),
             sig: MethodSig {
                 name: "invoke".to_string(),

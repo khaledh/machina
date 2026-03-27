@@ -39,6 +39,64 @@ fn block_stmt_at(items: &[BlockItem], index: usize) -> &StmtExpr {
 }
 
 #[test]
+fn test_parse_doc_comment_attaches_to_func_def() {
+    let source = r#"
+        /// Add two numbers.
+        fn add(a: u64, b: u64) -> u64 { a + b }
+    "#;
+
+    let funcs = parse_source(source).expect("Failed to parse");
+    let func = &funcs[0];
+    let doc = func.doc.as_ref().expect("expected doc comment");
+    assert_eq!(doc.raw, "Add two numbers.");
+}
+
+#[test]
+fn test_parse_doc_comment_attaches_through_attributes() {
+    let source = r#"
+        /// Public adder.
+        @public
+        fn add(a: u64, b: u64) -> u64 { a + b }
+    "#;
+
+    let funcs = parse_source(source).expect("Failed to parse");
+    let func = &funcs[0];
+    let doc = func.doc.as_ref().expect("expected doc comment");
+    assert_eq!(doc.raw, "Public adder.");
+}
+
+#[test]
+fn test_parse_doc_comment_attaches_to_method_decl() {
+    let source = r#"
+        Thing :: {
+            /// Start the thing.
+            fn start(self);
+        }
+    "#;
+
+    let module = parse_module(source).expect("Failed to parse");
+    let block = module.method_blocks()[0];
+    let MethodItem::Decl(method_decl) = &block.method_items[0] else {
+        panic!("Expected method decl");
+    };
+    let doc = method_decl.doc.as_ref().expect("expected doc comment");
+    assert_eq!(doc.raw, "Start the thing.");
+}
+
+#[test]
+fn test_parse_doc_comment_with_blank_line_does_not_attach() {
+    let source = r#"
+        /// Detached docs.
+
+        fn add(a: u64, b: u64) -> u64 { a + b }
+    "#;
+
+    let funcs = parse_source(source).expect("Failed to parse");
+    let func = &funcs[0];
+    assert!(func.doc.is_none(), "expected blank-line doc to be ignored");
+}
+
+#[test]
 fn test_parse_send_statement_as_emit_send() {
     let source = r#"
         fn test(target: u64) {

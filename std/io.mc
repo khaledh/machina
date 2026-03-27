@@ -11,6 +11,7 @@ fn print(s: string) {
     __rt_print(s, 0);
 }
 
+/// Writes a string followed by a newline.
 @public
 fn println(s: string) {
     __rt_print(s, 1);
@@ -246,6 +247,7 @@ ReadWriteFile :: {
 }
 
 TextReader :: {
+    /// Read all text from the file.
     @public
     fn read_all(self) -> string | IoError {
         var text: string;

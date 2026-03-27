@@ -19,6 +19,12 @@ pub struct Attribute {
     pub span: Span,
 }
 
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct DocComment {
+    pub raw: String,
+    pub span: Span,
+}
+
 // -- Module ---
 
 #[derive(Clone, Debug)]
@@ -166,6 +172,7 @@ pub enum TopLevelItem {
 #[derive(Clone, Debug)]
 pub struct MachineDef {
     pub id: NodeId,
+    pub doc: Option<DocComment>,
     pub name: String,
     pub host: MachineHost,
     pub items: Vec<MachineItem>,
@@ -227,6 +234,7 @@ pub struct OnHandlerProvenance {
 #[derive(Clone, Debug)]
 pub struct TraitDef {
     pub id: NodeId,
+    pub doc: Option<DocComment>,
     pub attrs: Vec<Attribute>,
     pub name: String,
     pub methods: Vec<TraitMethod>,
@@ -323,6 +331,7 @@ impl<'a> CallableRef<'a> {
 #[derive(Clone, Debug)]
 pub struct TypeDef {
     pub id: NodeId,
+    pub doc: Option<DocComment>,
     pub attrs: Vec<Attribute>,
     pub name: String,
     pub type_params: Vec<TypeParam>,
@@ -473,6 +482,7 @@ pub enum StringFmtSegment {
 #[derive(Clone, Debug)]
 pub struct FuncDecl {
     pub id: NodeId,
+    pub doc: Option<DocComment>,
     pub attrs: Vec<Attribute>,
     pub sig: FunctionSig,
     pub span: Span,
@@ -481,6 +491,7 @@ pub struct FuncDecl {
 #[derive(Clone, Debug)]
 pub struct FuncDef {
     pub id: NodeId,
+    pub doc: Option<DocComment>,
     pub attrs: Vec<Attribute>,
     pub sig: FunctionSig,
     pub body: Expr,
@@ -533,6 +544,7 @@ pub enum MethodItem {
 #[derive(Clone, Debug)]
 pub struct MethodDecl {
     pub id: NodeId,
+    pub doc: Option<DocComment>,
     pub attrs: Vec<Attribute>,
     pub sig: MethodSig,
     pub span: Span,
@@ -541,6 +553,7 @@ pub struct MethodDecl {
 #[derive(Clone, Debug)]
 pub struct MethodDef {
     pub id: NodeId,
+    pub doc: Option<DocComment>,
     pub attrs: Vec<Attribute>,
     pub sig: MethodSig,
     pub body: Expr,

@@ -3,7 +3,11 @@ use super::*;
 impl<'a> Parser<'a> {
     // --- Functions ---
 
-    pub(super) fn parse_func(&mut self, attrs: Vec<Attribute>) -> Result<TopLevelItem, ParseError> {
+    pub(super) fn parse_func(
+        &mut self,
+        doc: Option<DocComment>,
+        attrs: Vec<Attribute>,
+    ) -> Result<TopLevelItem, ParseError> {
         let marker = self.mark();
 
         let sig = self.parse_func_sig()?;
@@ -12,6 +16,7 @@ impl<'a> Parser<'a> {
             self.advance();
             Ok(TopLevelItem::FuncDecl(FuncDecl {
                 id: self.id_gen.new_id(),
+                doc,
                 attrs,
                 sig,
                 span: self.close(marker),
@@ -29,6 +34,7 @@ impl<'a> Parser<'a> {
 
             Ok(TopLevelItem::FuncDef(FuncDef {
                 id: self.id_gen.new_id(),
+                doc,
                 attrs,
                 sig,
                 body,
@@ -138,6 +144,7 @@ impl<'a> Parser<'a> {
 
     fn parse_method_item(&mut self, type_name: &str) -> Result<Vec<MethodItem>, ParseError> {
         let marker = self.mark();
+        let doc = self.parse_doc_comment_block();
         let attrs = self.parse_attribute_list()?;
         if self.curr_token.kind == TK::KwProp {
             return self.parse_property_def(type_name, marker, attrs);
@@ -149,6 +156,7 @@ impl<'a> Parser<'a> {
             self.advance();
             Ok(vec![MethodItem::Decl(MethodDecl {
                 id: self.id_gen.new_id(),
+                doc,
                 attrs,
                 sig,
                 span: self.close(marker),
@@ -166,6 +174,7 @@ impl<'a> Parser<'a> {
 
             Ok(vec![MethodItem::Def(MethodDef {
                 id: self.id_gen.new_id(),
+                doc,
                 attrs,
                 sig,
                 body,
@@ -275,6 +284,7 @@ impl<'a> Parser<'a> {
                         self.advance();
                         getter = Some(MethodItem::Decl(MethodDecl {
                             id: self.id_gen.new_id(),
+                            doc: None,
                             attrs: accessor_attrs,
                             sig,
                             span: self.close(accessor_marker),
@@ -293,6 +303,7 @@ impl<'a> Parser<'a> {
 
                         getter = Some(MethodItem::Def(MethodDef {
                             id: self.id_gen.new_id(),
+                            doc: None,
                             attrs: accessor_attrs,
                             sig,
                             body,
@@ -344,6 +355,7 @@ impl<'a> Parser<'a> {
                         self.advance();
                         setter = Some(MethodItem::Decl(MethodDecl {
                             id: self.id_gen.new_id(),
+                            doc: None,
                             attrs: accessor_attrs,
                             sig,
                             span: self.close(accessor_marker),
@@ -362,6 +374,7 @@ impl<'a> Parser<'a> {
 
                         setter = Some(MethodItem::Def(MethodDef {
                             id: self.id_gen.new_id(),
+                            doc: None,
                             attrs: accessor_attrs,
                             sig,
                             body,

@@ -304,6 +304,7 @@ impl<'a> LocalScopeCollector<'a> {
                 kind,
                 def_id: def.id,
                 detail: Some(def.kind.to_string()),
+                doc: None,
             },
         );
     }

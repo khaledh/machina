@@ -1422,7 +1422,7 @@ fn main() {
     let query_span = cursor_after_substring(source, "    let q = pair(");
 
     let sig = db
-        .signature_help_at_program_file(file_id, query_span)
+        .signature_help_at_file(file_id, query_span)
         .expect("signature help query should succeed")
         .expect("expected signature help with cursor inside empty let-call");
 
@@ -2622,6 +2622,159 @@ fn hover_at_program_file_uses_selected_imported_overload_signature() {
         Some("std::io::println")
     );
     assert_eq!(hover.display, "fn println(s: string) -> ()");
+}
+
+#[test]
+fn hover_at_program_file_uses_imported_stdlib_interface_doc() {
+    let entry_path = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("examples/quickstart/hello.mc")
+        .canonicalize()
+        .unwrap();
+    let entry_source = fs::read_to_string(&entry_path).expect("failed to read entry source");
+
+    let mut db = AnalysisDb::new();
+    let entry_id = db.upsert_disk_text(entry_path, entry_source.clone());
+
+    let query_span = span_for_last_substring(&entry_source, "println");
+    let hover = db
+        .hover_at_program_file(entry_id, query_span)
+        .expect("program hover query should succeed")
+        .expect("expected hover info for imported println call");
+
+    assert_eq!(
+        hover.doc.as_deref(),
+        Some("Writes a string followed by a newline.")
+    );
+}
+
+#[test]
+fn completions_at_program_file_imported_stdlib_symbol_includes_interface_doc() {
+    let entry_path = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("examples/basics/map_iter_small.mc")
+        .canonicalize()
+        .unwrap();
+    let entry_source = fs::read_to_string(&entry_path).expect("failed to read map_iter_small");
+
+    let mut db = AnalysisDb::new();
+    let entry_id = db.upsert_disk_text(entry_path, entry_source.clone());
+
+    let mut query_span = span_for_last_substring(&entry_source, "ma");
+    query_span.start = query_span.end;
+    let completions = db
+        .completions_at_program_file(entry_id, query_span)
+        .expect("program completion query should succeed");
+
+    let map_item = completions
+        .iter()
+        .find(|item| item.label == "map")
+        .expect("expected imported std::iter::map completion");
+    assert_eq!(
+        map_item.doc.as_deref(),
+        Some("Lazily maps each item from `source` through `f`.")
+    );
+}
+
+#[test]
+fn signature_help_at_program_file_for_imported_stdlib_generic_includes_interface_doc() {
+    let entry_path = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("examples/basics/map_iter_small.mc")
+        .canonicalize()
+        .unwrap();
+    let entry_source = fs::read_to_string(&entry_path).expect("failed to read map_iter_small");
+
+    let mut db = AnalysisDb::new();
+    let entry_id = db.upsert_disk_text(entry_path, entry_source.clone());
+
+    let query_span = cursor_after_substring(&entry_source, "    let mapped = map(counter.iter(), ");
+    let sig = db
+        .signature_help_at_program_file(entry_id, query_span)
+        .expect("program signature help query should succeed")
+        .expect("expected signature help for imported std::iter::map");
+
+    assert_eq!(
+        sig.doc.as_deref(),
+        Some("Lazily maps each item from `source` through `f`.")
+    );
+}
+
+#[test]
+fn hover_at_program_file_source_doc_comment_is_available() {
+    let mut db = AnalysisDb::new();
+    let source = r#"
+/// Adds one to the input.
+fn add(x: u64) -> u64 { x + 1 }
+
+fn main() -> u64 {
+    add(1)
+}
+"#;
+    let file_id = db.upsert_disk_text(
+        Path::new(env!("CARGO_MANIFEST_DIR")).join("examples/analysis_hover_source_docs.mc"),
+        source,
+    );
+
+    let query_span = span_for_last_substring(source, "add");
+    let hover = db
+        .hover_at_file(file_id, query_span)
+        .expect("hover query should succeed")
+        .expect("expected hover info for local function call");
+
+    assert_eq!(hover.doc.as_deref(), Some("Adds one to the input."));
+}
+
+#[test]
+fn completions_at_program_file_source_symbol_includes_doc_comment() {
+    let mut db = AnalysisDb::new();
+    let source = r#"
+/// Adds one to the input.
+fn add(x: u64) -> u64 { x + 1 }
+
+fn main() -> u64 {
+    ad
+}
+"#;
+    let file_id = db.upsert_disk_text(
+        Path::new(env!("CARGO_MANIFEST_DIR")).join("examples/analysis_completion_source_docs.mc"),
+        source,
+    );
+
+    let mut query_span = span_for_last_substring(source, "ad");
+    query_span.start = query_span.end;
+    let completions = db
+        .completions_at_file(file_id, query_span)
+        .expect("completion query should succeed");
+
+    let add_item = completions
+        .iter()
+        .find(|item| item.label == "add")
+        .expect("expected add completion");
+    assert_eq!(add_item.doc.as_deref(), Some("Adds one to the input."));
+}
+
+#[test]
+fn signature_help_at_program_file_source_symbol_includes_doc_comment() {
+    let mut db = AnalysisDb::new();
+    let source = r#"
+/// Adds one to the input.
+fn add(x: u64) -> u64 { x + 1 }
+
+fn main() -> u64 {
+    add(1)
+}
+"#;
+    let file_id = db.upsert_disk_text(
+        Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("examples/analysis_signature_help_source_docs.mc"),
+        source,
+    );
+
+    let query_span = cursor_after_substring(source, "    add(");
+    let sig = db
+        .signature_help_at_file(file_id, query_span)
+        .expect("signature help query should succeed")
+        .expect("expected signature help for local function");
+
+    assert_eq!(sig.doc.as_deref(), Some("Adds one to the input."));
 }
 
 #[test]

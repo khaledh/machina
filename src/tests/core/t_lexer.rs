@@ -221,6 +221,29 @@ fn test_lex_comment_at_end() {
 }
 
 #[test]
+fn test_lex_doc_comment_emits_token() {
+    let mut lexer = Lexer::new("/// hello\nfn main() {}");
+
+    let t1 = lexer.next_token().unwrap();
+    let t2 = lexer.next_token().unwrap();
+
+    assert_eq!(t1.kind, TokenKind::DocComment("hello".to_string()));
+    assert_span_eq(t1.span, (1, 1), (1, 10));
+    assert_eq!(t2.kind, TokenKind::KwFn);
+}
+
+#[test]
+fn test_lex_doc_comment_preserves_empty_line_text() {
+    let mut lexer = Lexer::new("///\nfn main() {}");
+
+    let t1 = lexer.next_token().unwrap();
+    let t2 = lexer.next_token().unwrap();
+
+    assert_eq!(t1.kind, TokenKind::DocComment(String::new()));
+    assert_eq!(t2.kind, TokenKind::KwFn);
+}
+
+#[test]
 fn test_lex_char_literal() {
     let mut lexer = Lexer::new("'a'");
     let token = lexer.next_token().unwrap();

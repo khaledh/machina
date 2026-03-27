@@ -36,6 +36,7 @@ pub(crate) fn ensure_u64_runtime_intrinsics(
         }
         append.push(TopLevelItem::FuncDecl(FuncDecl {
             id: node_id_gen.new_id(),
+            doc: None,
             attrs: Vec::new(),
             sig: FunctionSig {
                 name: name.to_string(),

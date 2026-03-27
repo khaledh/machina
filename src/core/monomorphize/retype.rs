@@ -75,6 +75,7 @@ fn retype_sparse_item(
             } else {
                 TopLevelItem::FuncDecl(FuncDecl {
                     id: func_def.id,
+                    doc: func_def.doc,
                     attrs: func_def.attrs,
                     sig: func_def.sig,
                     span: func_def.span,
@@ -91,6 +92,7 @@ fn retype_sparse_item(
                     {
                         MethodItem::Decl(MethodDecl {
                             id: method_def.id,
+                            doc: method_def.doc,
                             attrs: method_def.attrs,
                             sig: method_def.sig,
                             span: method_def.span,

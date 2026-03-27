@@ -9,8 +9,8 @@ use std::path::{Path, PathBuf};
 use serde::{Deserialize, Serialize};
 
 use crate::core::ast::{
-    MethodItem, MethodSig, Param, SelfParam, TopLevelItem, TraitDef, TraitProperty, TypeDef,
-    TypeDefKind,
+    DocComment, MethodItem, MethodSig, Param, SelfParam, TopLevelItem, TraitDef, TraitProperty,
+    TypeDef, TypeDefKind,
 };
 use crate::core::capsule::ModulePath;
 use crate::core::context::ResolvedContext;
@@ -65,6 +65,7 @@ impl ModuleInterface {
                     &module_path,
                     context,
                     func_decl.id,
+                    func_decl.doc.as_ref(),
                     CallableOwner::Function,
                     &func_decl.sig.type_params,
                     &func_decl.sig.params,
@@ -77,6 +78,7 @@ impl ModuleInterface {
                     &module_path,
                     context,
                     func_def.id,
+                    func_def.doc.as_ref(),
                     CallableOwner::Function,
                     &func_def.sig.type_params,
                     &func_def.sig.params,
@@ -92,6 +94,7 @@ impl ModuleInterface {
                                 &module_path,
                                 context,
                                 method_decl.id,
+                                method_decl.doc.as_ref(),
                                 CallableOwner::Method {
                                     owner_type: block.type_name.clone(),
                                     owner_type_args: !block.type_args.is_empty(),
@@ -107,6 +110,7 @@ impl ModuleInterface {
                                 &module_path,
                                 context,
                                 method_def.id,
+                                method_def.doc.as_ref(),
                                 CallableOwner::Method {
                                     owner_type: block.type_name.clone(),
                                     owner_type_args: !block.type_args.is_empty(),
@@ -125,6 +129,7 @@ impl ModuleInterface {
                         module_path.clone(),
                         context,
                         type_def,
+                        type_def.doc.as_ref(),
                         tooling_source.as_ref(),
                     ) {
                         exports.push(export);
@@ -135,6 +140,7 @@ impl ModuleInterface {
                         module_path.clone(),
                         context,
                         trait_def,
+                        trait_def.doc.as_ref(),
                         tooling_source.as_ref(),
                     ) {
                         exports.push(export);
@@ -463,6 +469,7 @@ fn push_callable_export(
     module_path: &ModulePath,
     context: &ResolvedContext,
     node_id: crate::core::ast::NodeId,
+    doc: Option<&DocComment>,
     owner: CallableOwner,
     type_params: &[crate::core::ast::TypeParam],
     params: &[Param],
@@ -553,7 +560,7 @@ fn push_callable_export(
         symbol_id,
         visibility,
         kind,
-        tooling: export_tooling_metadata(def, &context.def_table, tooling_source),
+        tooling: export_tooling_metadata(def, &context.def_table, doc, tooling_source),
     });
 }
 
@@ -586,6 +593,7 @@ fn type_export_from_def(
     module_path: ModulePath,
     context: &ResolvedContext,
     type_def: &TypeDef,
+    doc: Option<&DocComment>,
     tooling_source: Option<&SourceToolingContext>,
 ) -> Option<ExportedDef> {
     let def_id = context.def_table.lookup_node_def_id(type_def.id)?;
@@ -760,7 +768,7 @@ fn type_export_from_def(
             type_params: type_param_names,
             kind,
         }),
-        tooling: export_tooling_metadata(def, &context.def_table, tooling_source),
+        tooling: export_tooling_metadata(def, &context.def_table, doc, tooling_source),
     })
 }
 
@@ -768,6 +776,7 @@ fn trait_export_from_def(
     module_path: ModulePath,
     context: &ResolvedContext,
     trait_def: &TraitDef,
+    doc: Option<&DocComment>,
     tooling_source: Option<&SourceToolingContext>,
 ) -> Option<ExportedDef> {
     let def_id = context.def_table.lookup_node_def_id(trait_def.id)?;
@@ -797,7 +806,7 @@ fn trait_export_from_def(
             methods,
             properties,
         }),
-        tooling: export_tooling_metadata(def, &context.def_table, tooling_source),
+        tooling: export_tooling_metadata(def, &context.def_table, doc, tooling_source),
     })
 }
 
@@ -812,23 +821,32 @@ fn load_source_tooling_context(
 fn export_tooling_metadata(
     def: &Def,
     def_table: &crate::core::resolve::DefTable,
+    doc: Option<&DocComment>,
     source_ctx: Option<&SourceToolingContext>,
 ) -> Option<ExportToolingMetadata> {
-    let decl = def_table.lookup_def_location(def.id)?;
-    let file = decl
-        .path
-        .clone()
-        .or_else(|| source_ctx.map(|ctx| ctx.path.clone()))?;
-    let name_span = source_ctx
-        .and_then(|ctx| token_span_within(decl.span, &def.name, &ctx.source))
-        .unwrap_or(decl.span);
-    Some(ExportToolingMetadata {
-        doc: None,
-        source_location: Some(SourceLocation {
+    let doc = doc.map(|doc| doc.raw.clone());
+    let source_location = def_table.lookup_def_location(def.id).and_then(|decl| {
+        let file = decl
+            .path
+            .clone()
+            .or_else(|| source_ctx.map(|ctx| ctx.path.clone()))?;
+        let name_span = source_ctx
+            .and_then(|ctx| token_span_within(decl.span, &def.name, &ctx.source))
+            .unwrap_or(decl.span);
+        Some(SourceLocation {
             file,
             name_span,
             decl_span: decl.span,
-        }),
+        })
+    });
+
+    if doc.is_none() && source_location.is_none() {
+        return None;
+    }
+
+    Some(ExportToolingMetadata {
+        doc,
+        source_location,
     })
 }
 

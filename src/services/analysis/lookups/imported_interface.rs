@@ -27,6 +27,7 @@ pub(crate) fn hover_for_imported_stdlib_symbol(symbol_id: &SymbolId) -> Option<H
         def_name: Some(export_name(&export).to_string()),
         ty: None,
         display: format_export_label(&export),
+        doc: export_doc(&export),
     })
 }
 
@@ -67,6 +68,7 @@ pub(crate) fn signature_help_for_imported_stdlib_symbol(
                     format_param_for_display_with_names(param, &func.signature.type_params)
                 })
                 .collect(),
+            doc: export_doc(&export),
         }),
         ExportedDefKind::Method(method) => Some(SignatureHelp {
             label: format_method_label(method),
@@ -81,6 +83,7 @@ pub(crate) fn signature_help_for_imported_stdlib_symbol(
                     format_param_for_display_with_names(param, &method.signature.type_params)
                 })
                 .collect(),
+            doc: export_doc(&export),
         }),
         _ => None,
     }
@@ -96,6 +99,7 @@ pub(crate) fn completion_for_imported_stdlib_symbol(
         kind: completion_kind_for_export(&export),
         def_id,
         detail: Some(format_export_label(&export)),
+        doc: export_doc(&export),
     })
 }
 
@@ -147,6 +151,7 @@ pub(crate) fn qualified_path_completions_for_imported_stdlib_type(
                         .join(", ")
                 )
             }),
+            doc: None,
         })
         .collect()
 }
@@ -171,6 +176,10 @@ fn export_source_span(export: &ExportedDef) -> Option<Span> {
         .source_location
         .as_ref()
         .map(|loc| loc.name_span)
+}
+
+fn export_doc(export: &ExportedDef) -> Option<String> {
+    export.tooling.as_ref()?.doc.clone()
 }
 
 fn export_name(export: &ExportedDef) -> &str {
@@ -457,6 +466,10 @@ mod tests {
             .expect("expected stdlib hover from interface");
         assert_eq!(hover.def_name.as_deref(), Some("println"));
         assert!(hover.display.starts_with("fn println("));
+        assert_eq!(
+            hover.doc.as_deref(),
+            Some("Writes a string followed by a newline.")
+        );
     }
 
     #[test]
@@ -468,6 +481,10 @@ mod tests {
             sig.label.contains("fn map<S, In, Out>"),
             "expected source-facing generic names, got: {}",
             sig.label
+        );
+        assert_eq!(
+            sig.doc.as_deref(),
+            Some("Lazily maps each item from `source` through `f`.")
         );
     }
 
@@ -483,6 +500,10 @@ mod tests {
                 .is_some_and(|detail| detail.contains("fn map<S, In, Out>(")),
             "expected source-facing generic names, got: {:?}",
             item.detail
+        );
+        assert_eq!(
+            item.doc.as_deref(),
+            Some("Lazily maps each item from `source` through `f`.")
         );
     }
 

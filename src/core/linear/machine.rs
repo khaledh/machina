@@ -756,6 +756,7 @@ pub(super) fn ensure_hosted_support_types(module: &mut Module, node_id_gen: &mut
         "MachineError",
         TopLevelItem::TypeDef(TypeDef {
             id: node_id_gen.new_id(),
+            doc: None,
             attrs: Vec::new(),
             name: "MachineError".to_string(),
             type_params: Vec::new(),
@@ -787,6 +788,7 @@ pub(super) fn ensure_hosted_support_types(module: &mut Module, node_id_gen: &mut
         "SessionError",
         TopLevelItem::TypeDef(TypeDef {
             id: node_id_gen.new_id(),
+            doc: None,
             attrs: Vec::new(),
             name: "SessionError".to_string(),
             type_params: Vec::new(),
@@ -814,6 +816,7 @@ pub(super) fn ensure_hosted_support_types(module: &mut Module, node_id_gen: &mut
         "DeliverResult",
         TopLevelItem::TypeDef(TypeDef {
             id: node_id_gen.new_id(),
+            doc: None,
             attrs: Vec::new(),
             name: "DeliverResult".to_string(),
             type_params: Vec::new(),
@@ -1154,6 +1157,7 @@ fn build_machine_handle_type_def(
 
     TopLevelItem::TypeDef(TypeDef {
         id: node_id_gen.new_id(),
+        doc: None,
         attrs: Vec::new(),
         name: info.handle_type_name.clone(),
         type_params: Vec::new(),
@@ -1213,6 +1217,7 @@ fn build_machine_handle_send_method(
 
     MethodDef {
         id: node_id_gen.new_id(),
+        doc: None,
         attrs: Vec::new(),
         sig: MethodSig {
             name: "send".to_string(),
@@ -1315,6 +1320,7 @@ fn build_machine_on_dispatch_wrapper_func(
     }
     FuncDef {
         id: node_id_gen.new_id(),
+        doc: None,
         attrs: Vec::new(),
         sig: FunctionSig {
             name: info.dispatch_wrapper_fn_name.clone(),
@@ -1422,6 +1428,7 @@ fn build_hosted_linear_on_dispatch_func(
 
     FuncDef {
         id: node_id_gen.new_id(),
+        doc: None,
         attrs: Vec::new(),
         sig: FunctionSig {
             name: HOSTED_LINEAR_ON_DISPATCH_FN.to_string(),
@@ -1523,6 +1530,7 @@ fn build_machine_trigger_dispatch_wrapper_func(
     }
     FuncDef {
         id: node_id_gen.new_id(),
+        doc: None,
         attrs: Vec::new(),
         sig: FunctionSig {
             name: info.dispatch_wrapper_fn_name.clone(),
@@ -1633,6 +1641,7 @@ fn build_hosted_linear_trigger_dispatch_func(
 
     FuncDef {
         id: node_id_gen.new_id(),
+        doc: None,
         attrs: Vec::new(),
         sig: FunctionSig {
             name: HOSTED_LINEAR_TRIGGER_DISPATCH_FN.to_string(),
@@ -1740,6 +1749,7 @@ fn build_machine_spawn_func(
 
     FuncDef {
         id: node_id_gen.new_id(),
+        doc: None,
         attrs: Vec::new(),
         sig: FunctionSig {
             name: info.spawn_fn_name.clone(),
@@ -1800,6 +1810,7 @@ fn build_machine_create_func(
         .expect("hosted linear types must have an initial state");
     FuncDef {
         id: node_id_gen.new_id(),
+        doc: None,
         attrs: Vec::new(),
         sig: FunctionSig {
             name: machine_create_fn_name(&info.machine_name, &info.hosted_type_name, role_name),
@@ -1919,6 +1930,7 @@ fn build_machine_resume_func(
     let span = Span::default();
     FuncDef {
         id: node_id_gen.new_id(),
+        doc: None,
         attrs: Vec::new(),
         sig: FunctionSig {
             name: machine_resume_fn_name(&info.machine_name, &info.hosted_type_name, role_name),
@@ -2032,6 +2044,7 @@ fn build_machine_lookup_func(info: &MachineSpawnInfo, node_id_gen: &mut NodeIdGe
     let span = Span::default();
     FuncDef {
         id: node_id_gen.new_id(),
+        doc: None,
         attrs: Vec::new(),
         sig: FunctionSig {
             name: machine_lookup_fn_name(&info.machine_name, &info.hosted_type_name),
@@ -2145,6 +2158,7 @@ fn build_machine_action_override_func(
     let span = Span::default();
     FuncDef {
         id: node_id_gen.new_id(),
+        doc: None,
         attrs: Vec::new(),
         sig: FunctionSig {
             name: info.fn_name.clone(),
@@ -2302,6 +2316,7 @@ fn build_machine_action_session_func(
     }
     FuncDef {
         id: node_id_gen.new_id(),
+        doc: None,
         attrs: Vec::new(),
         sig: FunctionSig {
             name: info.fn_name.clone(),
@@ -2367,6 +2382,7 @@ fn build_machine_trigger_handler_func(
     let span = Span::default();
     FuncDef {
         id: node_id_gen.new_id(),
+        doc: None,
         attrs: Vec::new(),
         sig: FunctionSig {
             name: info.fn_name.clone(),
@@ -2425,6 +2441,7 @@ fn build_machine_on_handler_func(
     let span = Span::default();
     FuncDef {
         id: node_id_gen.new_id(),
+        doc: None,
         attrs: Vec::new(),
         sig: FunctionSig {
             name: info.fn_name.clone(),
@@ -2476,6 +2493,7 @@ fn build_machine_deliver_func(info: &MachineDeliverInfo, node_id_gen: &mut NodeI
         .unwrap_or_else(|| int_expr(0, node_id_gen, span));
     FuncDef {
         id: node_id_gen.new_id(),
+        doc: None,
         attrs: Vec::new(),
         sig: FunctionSig {
             name: info.fn_name.clone(),
@@ -2580,6 +2598,7 @@ fn build_machine_wait_func(info: &MachineWaitInfo, node_id_gen: &mut NodeIdGen) 
     let span = Span::default();
     FuncDef {
         id: node_id_gen.new_id(),
+        doc: None,
         attrs: Vec::new(),
         sig: FunctionSig {
             name: info.fn_name.clone(),
@@ -2933,6 +2952,7 @@ fn build_hosted_linear_reply_trigger_kind_func(
 
     FuncDef {
         id: node_id_gen.new_id(),
+        doc: None,
         attrs: Vec::new(),
         sig: FunctionSig {
             name: HOSTED_LINEAR_REPLY_TRIGGER_KIND_FN.to_string(),

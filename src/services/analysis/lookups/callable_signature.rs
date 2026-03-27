@@ -7,8 +7,8 @@
 use crate::core::ast::visit::{Visitor, walk_module};
 use crate::core::ast::{BindPatternKind, NodeId};
 use crate::core::ast::{
-    CallableRef, EnumDefVariant, MatchPattern, Module, Param, ParamMode, SelfParam, StmtExprKind,
-    StructDefField, TypeDefKind, TypeExpr, TypeExprKind, TypeParam,
+    CallableRef, EnumDefVariant, MatchPattern, MethodItem, Module, Param, ParamMode, SelfParam,
+    StmtExprKind, StructDefField, TopLevelItem, TypeDefKind, TypeExpr, TypeExprKind, TypeParam,
 };
 use crate::core::resolve::{DefId, DefKind, DefTable};
 use crate::core::typecheck::type_map::TypeMap;
@@ -463,4 +463,51 @@ pub(super) fn format_type_expr_for_signature(ty_expr: &TypeExpr) -> Option<Strin
             }
         }
     })
+}
+
+pub(crate) fn source_doc_for_def(
+    def_id: Option<DefId>,
+    module: Option<&Module>,
+    def_table: &DefTable,
+) -> Option<String> {
+    let def_id = def_id?;
+    let module = module?;
+
+    let matches = |node_id| def_table.lookup_node_def_id(node_id) == Some(def_id);
+
+    for item in &module.top_level_items {
+        match item {
+            TopLevelItem::MachineDef(machine_def) if matches(machine_def.id) => {
+                return machine_def.doc.as_ref().map(|doc| doc.raw.clone());
+            }
+            TopLevelItem::TraitDef(trait_def) if matches(trait_def.id) => {
+                return trait_def.doc.as_ref().map(|doc| doc.raw.clone());
+            }
+            TopLevelItem::TypeDef(type_def) if matches(type_def.id) => {
+                return type_def.doc.as_ref().map(|doc| doc.raw.clone());
+            }
+            TopLevelItem::FuncDecl(func_decl) if matches(func_decl.id) => {
+                return func_decl.doc.as_ref().map(|doc| doc.raw.clone());
+            }
+            TopLevelItem::FuncDef(func_def) if matches(func_def.id) => {
+                return func_def.doc.as_ref().map(|doc| doc.raw.clone());
+            }
+            TopLevelItem::MethodBlock(method_block) => {
+                for method_item in &method_block.method_items {
+                    match method_item {
+                        MethodItem::Decl(method_decl) if matches(method_decl.id) => {
+                            return method_decl.doc.as_ref().map(|doc| doc.raw.clone());
+                        }
+                        MethodItem::Def(method_def) if matches(method_def.id) => {
+                            return method_def.doc.as_ref().map(|doc| doc.raw.clone());
+                        }
+                        _ => {}
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+
+    None
 }

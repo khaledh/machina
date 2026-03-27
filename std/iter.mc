@@ -56,6 +56,7 @@ MapIter<S, In, Out> :: {
     }
 }
 
+/// Lazily maps each item from `source` through `f`.
 @public
 fn map<S, In, Out>(source: S, f: fn(In) -> Out) -> MapIter<S, In, Out> {
     MapIter { source, f }
