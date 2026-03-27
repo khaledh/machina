@@ -12,6 +12,7 @@ use std::fmt;
 use std::fs;
 use std::path::{Path, PathBuf};
 
+use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
 use std::sync::OnceLock;
@@ -21,7 +22,7 @@ use crate::core::diag::Span;
 use crate::core::lexer::{LexError, Lexer, Token};
 use crate::core::parse::{ParseError, Parser};
 
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct ModulePath {
     segments: Vec<String>,
 }

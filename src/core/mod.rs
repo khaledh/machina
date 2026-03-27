@@ -9,6 +9,7 @@ pub mod codegen_names;
 pub mod context;
 pub mod diag;
 pub mod elaborate;
+pub mod interface;
 pub mod ir;
 pub mod lexer;
 pub mod linear;

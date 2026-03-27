@@ -9,6 +9,7 @@ use crate::core::parse::ParseError;
 use crate::core::resolve::ResolveError;
 use crate::core::semck::SemCheckError;
 use crate::core::typecheck::TypeCheckError;
+use serde::{Deserialize, Serialize};
 use std::fmt::{Display, Formatter, Result};
 use thiserror::Error;
 
@@ -48,7 +49,7 @@ pub enum CompileError {
     Io(PathBuf, std::io::Error),
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Position {
     pub offset: usize,
     pub line: usize,
@@ -61,7 +62,7 @@ impl Display for Position {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Span {
     pub start: Position,
     pub end: Position,

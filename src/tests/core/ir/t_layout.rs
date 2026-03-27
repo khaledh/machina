@@ -79,7 +79,7 @@ fn test_layout_array_stride() {
 
     assert_eq!(layout.size(), 24);
     assert_eq!(layout.align(), 8);
-    assert_eq!(layout.field_offsets(), &[]);
+    assert_eq!(layout.field_offsets(), &[] as &[u64]);
     assert_eq!(layout.stride(), 8);
 }
 
@@ -92,7 +92,7 @@ fn test_layout_blob() {
 
     assert_eq!(layout.size(), 24);
     assert_eq!(layout.align(), 8);
-    assert_eq!(layout.field_offsets(), &[]);
+    assert_eq!(layout.field_offsets(), &[] as &[u64]);
     assert_eq!(layout.stride(), 24);
 }
 

@@ -12,6 +12,8 @@
 use std::collections::HashMap;
 use std::fmt;
 
+use serde::{Deserialize, Serialize};
+
 use crate::core::ast::ParamMode;
 use crate::core::ast::{
     FunctionSig, MethodItem, MethodSig, Module, RefinementKind, TopLevelItem, TypeExpr,
@@ -20,7 +22,7 @@ use crate::core::ast::{
 use crate::core::capsule::ModulePath;
 use crate::core::resolve::{DefId, DefTable};
 
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct SymbolId {
     /// Owning source module, e.g. `std::io`.
     pub module: ModulePath,
@@ -32,7 +34,7 @@ pub struct SymbolId {
     pub disambiguator: Option<SymbolDisambiguator>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Hash, Default)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Default, Serialize, Deserialize)]
 pub struct SymbolPath {
     /// Source-level path segments below the module path.
     pub segments: Vec<SymbolSegment>,
@@ -57,13 +59,13 @@ impl SymbolPath {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct SymbolSegment {
     /// User-facing segment text as written in source.
     pub name: String,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum SymbolNs {
     /// Functions, locals, globals, and other value-level defs.
     Value,
@@ -85,7 +87,7 @@ pub enum SymbolNs {
     Handler,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum SymbolDisambiguator {
     /// Callable overload identity derived from the declared signature shape.
     Callable(CallableSigKey),
@@ -105,7 +107,7 @@ pub enum SelectedCallable {
     Canonical(SymbolId),
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Hash, Default)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Default, Serialize, Deserialize)]
 pub struct CallableSigKey {
     /// Declared generic parameter count, normalized away from source names.
     pub type_param_count: u16,
@@ -115,14 +117,14 @@ pub struct CallableSigKey {
     pub params: Vec<ParamKey>,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum CallableSelfKey {
     In,
     InOut,
     Sink,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct ParamKey {
     /// Parameter passing mode (`in`, `out`, `sink`, ...).
     pub mode: ParamMode,
@@ -130,7 +132,7 @@ pub struct ParamKey {
     pub ty: TypeKey,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum TypeKey {
     /// Primitive/unit-like type identities.
     Unit,
@@ -389,6 +391,16 @@ fn callable_param_keys(
             ty: type_key_from_expr(&param.typ, def_table, module_path, &generic_param_indexes),
         })
         .collect()
+}
+
+pub(crate) fn type_key_for_type_expr(
+    type_expr: &TypeExpr,
+    type_params: &[TypeParam],
+    def_table: &DefTable,
+    module_path: &ModulePath,
+) -> TypeKey {
+    let generic_param_indexes = generic_param_index_map(type_params, def_table);
+    type_key_from_expr(type_expr, def_table, module_path, &generic_param_indexes)
 }
 
 fn generic_param_index_map(type_params: &[TypeParam], def_table: &DefTable) -> HashMap<DefId, u32> {

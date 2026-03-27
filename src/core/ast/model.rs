@@ -3,6 +3,7 @@
 use crate::core::ast::NodeId;
 use crate::core::diag::Span;
 use crate::core::resolve::{DefId, DefTable};
+use serde::{Deserialize, Serialize};
 
 // -- Attributes --
 
@@ -407,7 +408,7 @@ pub struct TypeExpr {
     pub span: Span,
 }
 
-#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+#[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum RefinementKind {
     Bounds { min: i128, max: i128 },
     NonZero,
@@ -1119,7 +1120,7 @@ pub struct StructUpdateField {
 
 // -- Parameter / call modes ---
 
-#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+#[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum ParamMode {
     In,
     InOut,

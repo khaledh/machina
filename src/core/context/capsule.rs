@@ -4,6 +4,7 @@ use crate::core::ast::{NodeId, NodeIdGen};
 use crate::core::capsule::{
     CapsuleParsed, ModuleId, ModulePath, ParsedModule as CapsuleModule, RequireKind,
 };
+use crate::core::interface::{ExportedDefKind, ModuleInterface};
 use crate::core::resolve::{DefId, DefKind, DefTable, GlobalDefId};
 use crate::core::symbol_id::{SymbolId, SymbolIdTable};
 
@@ -110,19 +111,19 @@ impl ImportedSymbolBinding {
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ExportedCallable {
-    pub source: GlobalDefId,
+    pub source: Option<GlobalDefId>,
     pub symbol_id: Option<SymbolId>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ExportedType {
-    pub source: GlobalDefId,
+    pub source: Option<GlobalDefId>,
     pub symbol_id: Option<SymbolId>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ExportedTrait {
-    pub source: GlobalDefId,
+    pub source: Option<GlobalDefId>,
     pub symbol_id: Option<SymbolId>,
 }
 
@@ -174,13 +175,13 @@ pub fn module_export_facts_from_def_table(
                     .entry(def.name.clone())
                     .or_default()
                     .push(ExportedCallable {
-                        source: global_def_id,
+                        source: Some(global_def_id),
                         symbol_id,
                     });
             }
             DefKind::TypeDef { .. } => {
                 facts.types.entry(def.name.clone()).or_insert(ExportedType {
-                    source: global_def_id,
+                    source: Some(global_def_id),
                     symbol_id,
                 });
             }
@@ -189,7 +190,7 @@ pub fn module_export_facts_from_def_table(
                     .traits
                     .entry(def.name.clone())
                     .or_insert(ExportedTrait {
-                        source: global_def_id,
+                        source: Some(global_def_id),
                         symbol_id,
                     });
             }
@@ -197,9 +198,93 @@ pub fn module_export_facts_from_def_table(
         }
     }
     for overloads in facts.callables.values_mut() {
-        overloads.sort_by_key(|item| item.source.def_id);
+        overloads.sort_by(|left, right| {
+            let left_key = left
+                .source
+                .map(|source| format!("src:{source}"))
+                .or_else(|| {
+                    left.symbol_id
+                        .as_ref()
+                        .map(|symbol| format!("sym:{symbol}"))
+                })
+                .unwrap_or_default();
+            let right_key = right
+                .source
+                .map(|source| format!("src:{source}"))
+                .or_else(|| {
+                    right
+                        .symbol_id
+                        .as_ref()
+                        .map(|symbol| format!("sym:{symbol}"))
+                })
+                .unwrap_or_default();
+            left_key.cmp(&right_key)
+        });
         overloads.dedup();
     }
+    facts
+}
+
+pub fn module_export_facts_from_interface(
+    module_id: ModuleId,
+    interface: &ModuleInterface,
+) -> ModuleExportFacts {
+    let mut facts = ModuleExportFacts {
+        module_id,
+        module_path: Some(interface.module_path.clone()),
+        callables: HashMap::new(),
+        types: HashMap::new(),
+        traits: HashMap::new(),
+    };
+
+    for export in &interface.exports {
+        match &export.kind {
+            ExportedDefKind::Func(func) => {
+                facts
+                    .callables
+                    .entry(func.signature.name.clone())
+                    .or_default()
+                    .push(ExportedCallable {
+                        source: None,
+                        symbol_id: Some(export.symbol_id.clone()),
+                    });
+            }
+            ExportedDefKind::Type(ty) => {
+                facts.types.entry(ty.name.clone()).or_insert(ExportedType {
+                    source: None,
+                    symbol_id: Some(export.symbol_id.clone()),
+                });
+            }
+            ExportedDefKind::Trait(trait_def) => {
+                facts
+                    .traits
+                    .entry(trait_def.name.clone())
+                    .or_insert(ExportedTrait {
+                        source: None,
+                        symbol_id: Some(export.symbol_id.clone()),
+                    });
+            }
+            ExportedDefKind::Method(_) => {}
+        }
+    }
+
+    for overloads in facts.callables.values_mut() {
+        overloads.sort_by(|left, right| {
+            let left_key = left
+                .symbol_id
+                .as_ref()
+                .map(ToString::to_string)
+                .unwrap_or_default();
+            let right_key = right
+                .symbol_id
+                .as_ref()
+                .map(ToString::to_string)
+                .unwrap_or_default();
+            left_key.cmp(&right_key)
+        });
+        overloads.dedup();
+    }
+
     facts
 }
 
