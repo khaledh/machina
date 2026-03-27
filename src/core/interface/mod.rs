@@ -148,6 +148,7 @@ impl ModuleInterface {
                         type_def,
                         type_def.doc.as_ref(),
                         tooling_source.as_ref(),
+                        false,
                     ) {
                         exports.push(export);
                     }
@@ -159,6 +160,7 @@ impl ModuleInterface {
                         trait_def,
                         trait_def.doc.as_ref(),
                         tooling_source.as_ref(),
+                        false,
                     ) {
                         exports.push(export);
                     }
@@ -168,13 +170,22 @@ impl ModuleInterface {
         }
 
         exports.sort_by(|left, right| left.symbol_id.to_string().cmp(&right.symbol_id.to_string()));
+        let mut closure_defs = collect_closure_defs(
+            module,
+            &module_path,
+            context,
+            &exports,
+            tooling_source.as_ref(),
+        );
+        closure_defs
+            .sort_by(|left, right| left.symbol_id.to_string().cmp(&right.symbol_id.to_string()));
 
         Some(Self {
             format_version: MODULE_INTERFACE_FORMAT_VERSION,
             module_path,
             compiler_version: env!("CARGO_PKG_VERSION").to_string(),
             exports,
-            closure_defs: Vec::new(),
+            closure_defs,
             tooling: context
                 .def_table
                 .source_path()
@@ -187,6 +198,244 @@ impl ModuleInterface {
     pub fn has_current_format_version(&self) -> bool {
         self.format_version == MODULE_INTERFACE_FORMAT_VERSION
     }
+}
+
+fn collect_closure_defs(
+    module: &crate::core::ast::Module,
+    module_path: &ModulePath,
+    context: &ResolvedContext,
+    exports: &[ExportedDef],
+    tooling_source: Option<&SourceToolingContext>,
+) -> Vec<ClosureDef> {
+    let mut out = Vec::new();
+    let mut seen = HashSet::new();
+    let mut queue = Vec::new();
+
+    for export in exports {
+        enqueue_external_template_dependencies_from_kind(&export.kind, &mut queue);
+    }
+
+    while let Some(symbol_id) = queue.pop() {
+        if symbol_id.module != *module_path || !seen.insert(symbol_id.clone()) {
+            continue;
+        }
+        let Some(def_id) = context
+            .symbol_ids
+            .lookup_local_def_ids(&symbol_id)
+            .and_then(|ids| ids.first())
+            .copied()
+        else {
+            continue;
+        };
+        let Some(def) = context.def_table.lookup_def(def_id) else {
+            continue;
+        };
+        if def.is_public() {
+            continue;
+        }
+        let Some(closure_def) =
+            closure_def_from_local_def(module, module_path, context, def_id, tooling_source)
+        else {
+            continue;
+        };
+        enqueue_external_template_dependencies_from_closure(&closure_def, &mut queue);
+        out.push(closure_def);
+    }
+
+    out
+}
+
+fn enqueue_external_template_dependencies_from_kind(
+    kind: &ExportedDefKind,
+    queue: &mut Vec<SymbolId>,
+) {
+    match kind {
+        ExportedDefKind::Func(callable) => {
+            if let CallableImplementation::GenericTemplate(template) = &callable.implementation {
+                queue.extend(template.external_dependencies().cloned());
+            }
+        }
+        ExportedDefKind::Method(method) => {
+            if let CallableImplementation::GenericTemplate(template) = &method.implementation {
+                queue.extend(template.external_dependencies().cloned());
+            }
+        }
+        ExportedDefKind::Type(_) | ExportedDefKind::Trait(_) => {}
+    }
+}
+
+fn enqueue_external_template_dependencies_from_closure(
+    closure_def: &ClosureDef,
+    queue: &mut Vec<SymbolId>,
+) {
+    match &closure_def.kind {
+        ClosureDefKind::Func(callable) => {
+            if let CallableImplementation::GenericTemplate(template) = &callable.implementation {
+                queue.extend(template.external_dependencies().cloned());
+            }
+        }
+        ClosureDefKind::Method(method) => {
+            if let CallableImplementation::GenericTemplate(template) = &method.implementation {
+                queue.extend(template.external_dependencies().cloned());
+            }
+        }
+        ClosureDefKind::Type(_) | ClosureDefKind::Trait(_) => {}
+    }
+}
+
+fn closure_def_from_local_def(
+    module: &crate::core::ast::Module,
+    module_path: &ModulePath,
+    context: &ResolvedContext,
+    def_id: DefId,
+    tooling_source: Option<&SourceToolingContext>,
+) -> Option<ClosureDef> {
+    for item in &module.top_level_items {
+        match item {
+            TopLevelItem::FuncDecl(func_decl)
+                if context.def_table.lookup_node_def_id(func_decl.id) == Some(def_id) =>
+            {
+                let symbol_id = context.symbol_ids.lookup_symbol_id(def_id)?.clone();
+                let export = callable_export_from_function(
+                    module_path,
+                    context,
+                    def_id,
+                    &func_decl.sig.type_params,
+                    &func_decl.sig.params,
+                    &func_decl.sig.ret_ty_expr,
+                    None,
+                )?;
+                let dependency_kind = match &export.implementation {
+                    CallableImplementation::LinkSymbol(_) => ClosureDependencyKind::LinkTime,
+                    CallableImplementation::GenericTemplate(_)
+                    | CallableImplementation::GenericBodyPending => {
+                        ClosureDependencyKind::CompileTime
+                    }
+                };
+                return Some(ClosureDef {
+                    symbol_id,
+                    dependency_kind,
+                    kind: ClosureDefKind::Func(export),
+                });
+            }
+            TopLevelItem::FuncDef(func_def)
+                if context.def_table.lookup_node_def_id(func_def.id) == Some(def_id) =>
+            {
+                let symbol_id = context.symbol_ids.lookup_symbol_id(def_id)?.clone();
+                let export = callable_export_from_function(
+                    module_path,
+                    context,
+                    def_id,
+                    &func_def.sig.type_params,
+                    &func_def.sig.params,
+                    &func_def.sig.ret_ty_expr,
+                    Some(&func_def.body),
+                )?;
+                let dependency_kind = match &export.implementation {
+                    CallableImplementation::LinkSymbol(_) => ClosureDependencyKind::LinkTime,
+                    CallableImplementation::GenericTemplate(_)
+                    | CallableImplementation::GenericBodyPending => {
+                        ClosureDependencyKind::CompileTime
+                    }
+                };
+                return Some(ClosureDef {
+                    symbol_id,
+                    dependency_kind,
+                    kind: ClosureDefKind::Func(export),
+                });
+            }
+            TopLevelItem::TypeDef(type_def)
+                if context.def_table.lookup_node_def_id(type_def.id) == Some(def_id) =>
+            {
+                let export = type_export_from_def(
+                    module_path.clone(),
+                    context,
+                    type_def,
+                    type_def.doc.as_ref(),
+                    tooling_source,
+                    true,
+                )?;
+                let ExportedDefKind::Type(kind) = export.kind else {
+                    return None;
+                };
+                return Some(ClosureDef {
+                    symbol_id: export.symbol_id,
+                    dependency_kind: ClosureDependencyKind::CompileTime,
+                    kind: ClosureDefKind::Type(kind),
+                });
+            }
+            TopLevelItem::TraitDef(trait_def)
+                if context.def_table.lookup_node_def_id(trait_def.id) == Some(def_id) =>
+            {
+                let export = trait_export_from_def(
+                    module_path.clone(),
+                    context,
+                    trait_def,
+                    trait_def.doc.as_ref(),
+                    tooling_source,
+                    true,
+                )?;
+                let ExportedDefKind::Trait(kind) = export.kind else {
+                    return None;
+                };
+                return Some(ClosureDef {
+                    symbol_id: export.symbol_id,
+                    dependency_kind: ClosureDependencyKind::CompileTime,
+                    kind: ClosureDefKind::Trait(kind),
+                });
+            }
+            _ => {}
+        }
+    }
+    None
+}
+
+fn callable_export_from_function(
+    module_path: &ModulePath,
+    context: &ResolvedContext,
+    def_id: DefId,
+    type_params: &[crate::core::ast::TypeParam],
+    params: &[Param],
+    ret_ty: &crate::core::ast::TypeExpr,
+    body: Option<&Expr>,
+) -> Option<CallableExport> {
+    let def = context.def_table.lookup_def(def_id)?;
+    let signature = CallableSignature {
+        name: def.name.clone(),
+        type_params: type_params
+            .iter()
+            .map(|param| param.ident.clone())
+            .collect(),
+        params: params
+            .iter()
+            .map(|param| InterfaceParam {
+                name: param.ident.clone(),
+                mode: param.mode.clone(),
+                ty: type_key_for_type_expr(
+                    &param.typ,
+                    type_params,
+                    &context.def_table,
+                    module_path,
+                ),
+            })
+            .collect(),
+        ret_ty: type_key_for_type_expr(ret_ty, type_params, &context.def_table, module_path),
+    };
+    Some(CallableExport {
+        implementation: callable_implementation(
+            def,
+            &context.symbols.def_names,
+            &context.def_table,
+            &context.symbol_ids,
+            module_path,
+            &CallableOwner::Function,
+            type_params,
+            params,
+            &signature,
+            body,
+        ),
+        signature,
+    })
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
@@ -993,10 +1242,11 @@ fn type_export_from_def(
     type_def: &TypeDef,
     doc: Option<&DocComment>,
     tooling_source: Option<&SourceToolingContext>,
+    allow_private: bool,
 ) -> Option<ExportedDef> {
     let def_id = context.def_table.lookup_node_def_id(type_def.id)?;
     let def = context.def_table.lookup_def(def_id)?;
-    if !def.is_public() {
+    if !allow_private && !def.is_public() {
         return None;
     }
     let symbol_id = context.symbol_ids.lookup_symbol_id(def_id)?.clone();
@@ -1176,10 +1426,11 @@ fn trait_export_from_def(
     trait_def: &TraitDef,
     doc: Option<&DocComment>,
     tooling_source: Option<&SourceToolingContext>,
+    allow_private: bool,
 ) -> Option<ExportedDef> {
     let def_id = context.def_table.lookup_node_def_id(trait_def.id)?;
     let def = context.def_table.lookup_def(def_id)?;
-    if !def.is_public() {
+    if !allow_private && !def.is_public() {
         return None;
     }
     let symbol_id = context.symbol_ids.lookup_symbol_id(def_id)?.clone();

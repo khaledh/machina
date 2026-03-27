@@ -502,6 +502,105 @@ fn module_interface_emits_generic_function_struct_literal_template() {
 }
 
 #[test]
+fn module_interface_collects_private_generic_closure_dependencies() {
+    let resolved = resolved_with_module_path(
+        indoc! {r#"
+            type Hidden<T> = {
+                value: T,
+            }
+
+            fn helper<T>(value: T) -> Hidden<T> {
+                Hidden { value }
+            }
+
+            fn concrete() -> u64 {
+                7
+            }
+
+            @public
+            fn wrap<T>(value: T) -> T {
+                let hidden = helper(value);
+                let number = concrete();
+                value
+            }
+        "#},
+        "std::demo",
+    );
+
+    let interface =
+        ModuleInterface::from_resolved_context(&resolved).expect("module path should exist");
+
+    let closure_symbols = interface
+        .closure_defs
+        .iter()
+        .map(|closure| closure.symbol_id.to_string())
+        .collect::<Vec<_>>();
+    assert!(
+        closure_symbols
+            .iter()
+            .any(|symbol| symbol == "std::demo::helper")
+    );
+    assert!(
+        closure_symbols
+            .iter()
+            .any(|symbol| symbol == "std::demo::concrete")
+    );
+    assert!(
+        closure_symbols
+            .iter()
+            .any(|symbol| symbol == "std::demo::Hidden")
+    );
+
+    let helper = interface
+        .closure_defs
+        .iter()
+        .find(|closure| closure.symbol_id.to_string() == "std::demo::helper")
+        .expect("expected helper closure def");
+    assert_eq!(
+        helper.dependency_kind,
+        crate::core::interface::ClosureDependencyKind::CompileTime
+    );
+    let crate::core::interface::ClosureDefKind::Func(helper_export) = &helper.kind else {
+        panic!("expected function closure def");
+    };
+    assert!(matches!(
+        helper_export.implementation,
+        CallableImplementation::GenericTemplate(_)
+    ));
+
+    let concrete = interface
+        .closure_defs
+        .iter()
+        .find(|closure| closure.symbol_id.to_string() == "std::demo::concrete")
+        .expect("expected concrete closure def");
+    assert_eq!(
+        concrete.dependency_kind,
+        crate::core::interface::ClosureDependencyKind::LinkTime
+    );
+    let crate::core::interface::ClosureDefKind::Func(concrete_export) = &concrete.kind else {
+        panic!("expected function closure def");
+    };
+    assert!(matches!(
+        concrete_export.implementation,
+        CallableImplementation::LinkSymbol(_)
+    ));
+
+    let hidden = interface
+        .closure_defs
+        .iter()
+        .find(|closure| closure.symbol_id.to_string() == "std::demo::Hidden")
+        .expect("expected hidden type closure def");
+    assert_eq!(
+        hidden.dependency_kind,
+        crate::core::interface::ClosureDependencyKind::CompileTime
+    );
+    assert!(matches!(
+        hidden.kind,
+        crate::core::interface::ClosureDefKind::Type(_)
+    ));
+}
+
+#[test]
 fn module_export_facts_can_be_rebuilt_from_interface_surface() {
     let resolved = resolved_with_module_path(
         indoc! {r#"
