@@ -4,12 +4,14 @@
 //! interfaces before choosing an on-disk encoding. The types in this module are
 //! the compiler-owned shape that later `.mci` readers/writers will encode.
 
+use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
 
 use crate::core::ast::{
-    DocComment, MethodItem, MethodSig, Param, SelfParam, TopLevelItem, TraitDef, TraitProperty,
+    BindPattern, BindPatternKind, BlockItem, CallArgMode, DocComment, Expr, ExprKind, MethodItem,
+    MethodSig, Param, SelfParam, StmtExpr, StmtExprKind, TopLevelItem, TraitDef, TraitProperty,
     TypeDef, TypeDefKind,
 };
 use crate::core::capsule::ModulePath;
@@ -30,13 +32,15 @@ pub use stdlib::{
 pub use template::{
     GenericClosureTemplate, GenericFunctionTemplate, GenericMethodTemplate, GenericTemplateGraph,
     GenericTraitTemplate, GenericTypeTemplate, LinkTimeCallableTemplate, TemplateBinding,
-    TemplateBindingId, TemplateBindingKind, TemplateBody, TemplateCallSite, TemplateDef,
-    TemplateDefId, TemplateDefKind, TemplateIterableParamSlot, TemplateNestedClosure,
-    TemplateReference, TemplateReferenceKind, TemplateReferenceTarget, TemplateSiteId,
-    TemplateTypeParam, TemplateTypeParamId, TemplateTypeSite, TemplateTypeSiteRole,
+    TemplateBindingId, TemplateBindingKind, TemplateBody, TemplateCallArg, TemplateCallArgMode,
+    TemplateCallSite, TemplateCallTarget, TemplateDef, TemplateDefId, TemplateDefKind,
+    TemplateExpr, TemplateIterableParamSlot, TemplateNestedClosure, TemplateReference,
+    TemplateReferenceKind, TemplateReferenceTarget, TemplateSiteId, TemplateStmt,
+    TemplateStructField, TemplateTypeParam, TemplateTypeParamId, TemplateTypeSite,
+    TemplateTypeSiteRole,
 };
 
-pub const MODULE_INTERFACE_FORMAT_VERSION: u32 = 1;
+pub const MODULE_INTERFACE_FORMAT_VERSION: u32 = 2;
 
 struct SourceToolingContext {
     path: PathBuf,
@@ -80,6 +84,7 @@ impl ModuleInterface {
                     &func_decl.sig.params,
                     None,
                     &func_decl.sig.ret_ty_expr,
+                    None,
                     tooling_source.as_ref(),
                 ),
                 TopLevelItem::FuncDef(func_def) => push_callable_export(
@@ -93,6 +98,7 @@ impl ModuleInterface {
                     &func_def.sig.params,
                     None,
                     &func_def.sig.ret_ty_expr,
+                    Some(&func_def.body),
                     tooling_source.as_ref(),
                 ),
                 TopLevelItem::MethodBlock(block) => {
@@ -112,6 +118,7 @@ impl ModuleInterface {
                                 &method_decl.sig.params,
                                 Some(&method_decl.sig.self_param),
                                 &method_decl.sig.ret_ty_expr,
+                                None,
                                 tooling_source.as_ref(),
                             ),
                             MethodItem::Def(method_def) => push_callable_export(
@@ -128,6 +135,7 @@ impl ModuleInterface {
                                 &method_def.sig.params,
                                 Some(&method_def.sig.self_param),
                                 &method_def.sig.ret_ty_expr,
+                                Some(&method_def.body),
                                 tooling_source.as_ref(),
                             ),
                         }
@@ -224,6 +232,7 @@ pub struct MethodExport {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum CallableImplementation {
     LinkSymbol(String),
+    GenericTemplate(GenericTemplateGraph),
     GenericBodyPending,
 }
 
@@ -484,6 +493,7 @@ fn push_callable_export(
     params: &[Param],
     self_param: Option<&SelfParam>,
     ret_ty: &crate::core::ast::TypeExpr,
+    body: Option<&Expr>,
     tooling_source: Option<&SourceToolingContext>,
 ) {
     let Some(def_id) = context.def_table.lookup_node_def_id(node_id) else {
@@ -502,7 +512,7 @@ fn push_callable_export(
         .iter()
         .map(|param| param.ident.clone())
         .collect::<Vec<_>>();
-    let params = params
+    let interface_params = params
         .iter()
         .map(|param| InterfaceParam {
             name: param.ident.clone(),
@@ -510,8 +520,6 @@ fn push_callable_export(
             ty: type_key_for_type_expr(&param.typ, type_params, &context.def_table, module_path),
         })
         .collect::<Vec<_>>();
-    let implementation =
-        callable_implementation(def, &context.symbols.def_names, &owner, type_params);
     let visibility = if def.is_opaque() {
         ExportVisibility::Opaque
     } else {
@@ -519,22 +527,37 @@ fn push_callable_export(
     };
 
     let kind = match owner {
-        CallableOwner::Function => ExportedDefKind::Func(CallableExport {
-            signature: CallableSignature {
+        CallableOwner::Function => {
+            let signature = CallableSignature {
                 name: def.name.clone(),
                 type_params: type_param_names,
-                params,
+                params: interface_params,
                 ret_ty: type_key_for_type_expr(
                     ret_ty,
                     type_params,
                     &context.def_table,
                     module_path,
                 ),
-            },
-            implementation,
-        }),
-        CallableOwner::Method { owner_type, .. } => ExportedDefKind::Method(MethodExport {
-            owner_type,
+            };
+            let implementation = callable_implementation(
+                def,
+                &context.symbols.def_names,
+                &context.def_table,
+                &context.symbol_ids,
+                module_path,
+                &owner,
+                type_params,
+                params,
+                &signature,
+                body,
+            );
+            ExportedDefKind::Func(CallableExport {
+                signature,
+                implementation,
+            })
+        }
+        CallableOwner::Method { ref owner_type, .. } => ExportedDefKind::Method(MethodExport {
+            owner_type: owner_type.clone(),
             signature: MethodSignature {
                 name: def.name.clone(),
                 type_params: type_param_names,
@@ -553,7 +576,7 @@ fn push_callable_export(
                         })
                     }),
                 },
-                params,
+                params: interface_params,
                 ret_ty: type_key_for_type_expr(
                     ret_ty,
                     type_params,
@@ -561,7 +584,23 @@ fn push_callable_export(
                     module_path,
                 ),
             },
-            implementation,
+            implementation: callable_implementation(
+                def,
+                &context.symbols.def_names,
+                &context.def_table,
+                &context.symbol_ids,
+                module_path,
+                &owner,
+                type_params,
+                params,
+                &CallableSignature {
+                    name: def.name.clone(),
+                    type_params: Vec::new(),
+                    params: Vec::new(),
+                    ret_ty: TypeKey::Unit,
+                },
+                body,
+            ),
         }),
     };
 
@@ -576,8 +615,14 @@ fn push_callable_export(
 fn callable_implementation(
     def: &Def,
     emitted_names: &std::collections::HashMap<DefId, String>,
+    def_table: &crate::core::resolve::DefTable,
+    symbol_ids: &crate::core::symbol_id::SymbolIdTable,
+    module_path: &ModulePath,
     owner: &CallableOwner,
     type_params: &[crate::core::ast::TypeParam],
+    params: &[Param],
+    signature: &CallableSignature,
+    body: Option<&Expr>,
 ) -> CallableImplementation {
     let is_generic = !type_params.is_empty()
         || matches!(
@@ -588,6 +633,21 @@ fn callable_implementation(
             }
         );
     if is_generic {
+        if matches!(owner, CallableOwner::Function)
+            && let Some(body) = body
+            && let Some(template) = generic_function_template_graph(
+                def,
+                signature,
+                params,
+                type_params,
+                body,
+                def_table,
+                symbol_ids,
+                module_path,
+            )
+        {
+            return CallableImplementation::GenericTemplate(template);
+        }
         CallableImplementation::GenericBodyPending
     } else {
         let emitted_name = emitted_names
@@ -595,6 +655,335 @@ fn callable_implementation(
             .cloned()
             .unwrap_or_else(|| def.name.clone());
         CallableImplementation::LinkSymbol(emitted_name)
+    }
+}
+
+fn generic_function_template_graph(
+    def: &Def,
+    signature: &CallableSignature,
+    params: &[Param],
+    type_params: &[crate::core::ast::TypeParam],
+    body: &Expr,
+    def_table: &crate::core::resolve::DefTable,
+    symbol_ids: &crate::core::symbol_id::SymbolIdTable,
+    module_path: &ModulePath,
+) -> Option<GenericTemplateGraph> {
+    let symbol_id = symbol_ids.lookup_symbol_id(def.id)?.clone();
+    let mut builder =
+        FunctionTemplateBodyBuilder::new(type_params, def_table, symbol_ids, module_path);
+    builder.register_params(params, signature);
+    let expr = builder.build_expr(body)?;
+    let template = GenericFunctionTemplate {
+        signature: signature.clone(),
+        type_params: type_params
+            .iter()
+            .enumerate()
+            .map(|(index, param)| TemplateTypeParam {
+                id: TemplateTypeParamId(index as u32),
+                name: param.ident.clone(),
+                bound: param.bound.as_ref().map(|bound| bound.name.clone()),
+            })
+            .collect(),
+        body: builder.finish(expr),
+    };
+    Some(GenericTemplateGraph {
+        root: TemplateDefId(0),
+        defs: vec![TemplateDef {
+            id: TemplateDefId(0),
+            symbol_id: Some(symbol_id),
+            kind: TemplateDefKind::Function(template),
+        }],
+    })
+}
+
+struct FunctionTemplateBodyBuilder<'a> {
+    type_params: &'a [crate::core::ast::TypeParam],
+    def_table: &'a crate::core::resolve::DefTable,
+    symbol_ids: &'a crate::core::symbol_id::SymbolIdTable,
+    module_path: &'a ModulePath,
+    next_binding_id: u32,
+    next_site_id: u32,
+    binding_ids_by_def: HashMap<DefId, TemplateBindingId>,
+    params: Vec<TemplateBinding>,
+    locals: Vec<TemplateBinding>,
+    call_sites: Vec<TemplateCallSite>,
+    type_sites: Vec<TemplateTypeSite>,
+    iterable_param_slots: Vec<TemplateIterableParamSlot>,
+    references: Vec<TemplateReference>,
+    seen_references: HashSet<(TemplateReferenceKind, String)>,
+}
+
+impl<'a> FunctionTemplateBodyBuilder<'a> {
+    fn new(
+        type_params: &'a [crate::core::ast::TypeParam],
+        def_table: &'a crate::core::resolve::DefTable,
+        symbol_ids: &'a crate::core::symbol_id::SymbolIdTable,
+        module_path: &'a ModulePath,
+    ) -> Self {
+        Self {
+            type_params,
+            def_table,
+            symbol_ids,
+            module_path,
+            next_binding_id: 0,
+            next_site_id: 0,
+            binding_ids_by_def: HashMap::new(),
+            params: Vec::new(),
+            locals: Vec::new(),
+            call_sites: Vec::new(),
+            type_sites: Vec::new(),
+            iterable_param_slots: Vec::new(),
+            references: Vec::new(),
+            seen_references: HashSet::new(),
+        }
+    }
+
+    fn register_params(&mut self, params: &[Param], signature: &CallableSignature) {
+        for (param_index, param) in params.iter().enumerate() {
+            if let Some(def_id) = self.def_table.lookup_node_def_id(param.id) {
+                let binding_id = self.alloc_binding_id();
+                self.binding_ids_by_def.insert(def_id, binding_id);
+                self.params.push(TemplateBinding {
+                    id: binding_id,
+                    name: param.ident.clone(),
+                    kind: TemplateBindingKind::Param,
+                    ty: Some(signature.params[param_index].ty.clone()),
+                });
+                if let Some(item_ty) = iterable_item_type_key(&signature.params[param_index].ty) {
+                    self.iterable_param_slots.push(TemplateIterableParamSlot {
+                        inst_index: param_index,
+                        binding: binding_id,
+                        item_ty,
+                    });
+                }
+            }
+        }
+    }
+
+    fn finish(self, expr: TemplateExpr) -> TemplateBody {
+        TemplateBody {
+            expr: Some(expr),
+            params: self.params,
+            locals: self.locals,
+            nested_closures: Vec::new(),
+            call_sites: self.call_sites,
+            type_sites: self.type_sites,
+            iterable_param_slots: self.iterable_param_slots,
+            references: self.references,
+        }
+    }
+
+    fn build_expr(&mut self, expr: &Expr) -> Option<TemplateExpr> {
+        match &expr.kind {
+            ExprKind::Block { items, tail } => {
+                let items = items
+                    .iter()
+                    .map(|item| match item {
+                        BlockItem::Stmt(stmt) => self.build_stmt(stmt),
+                        BlockItem::Expr(expr) => self.build_expr(expr).map(TemplateStmt::Expr),
+                    })
+                    .collect::<Option<Vec<_>>>()?;
+                let tail = match tail.as_ref() {
+                    Some(expr) => Some(Box::new(self.build_expr(expr)?)),
+                    None => None,
+                };
+                Some(TemplateExpr::Block { items, tail })
+            }
+            ExprKind::UnitLit => Some(TemplateExpr::UnitLit),
+            ExprKind::IntLit(value) => Some(TemplateExpr::IntLit(*value)),
+            ExprKind::BoolLit(value) => Some(TemplateExpr::BoolLit(*value)),
+            ExprKind::CharLit(value) => Some(TemplateExpr::CharLit(*value)),
+            ExprKind::StringLit { value } => Some(TemplateExpr::StringLit(value.clone())),
+            ExprKind::TupleLit(items) => Some(TemplateExpr::TupleLit(
+                items
+                    .iter()
+                    .map(|item| self.build_expr(item))
+                    .collect::<Option<Vec<_>>>()?,
+            )),
+            ExprKind::Var { ident: _ } => self.build_var_expr(expr),
+            ExprKind::StructLit {
+                name,
+                type_args,
+                fields,
+            } => {
+                let type_def_id = self.def_table.lookup_type_def_id(name)?;
+                let type_symbol = self.symbol_ids.lookup_symbol_id(type_def_id)?.clone();
+                self.record_reference(
+                    TemplateReferenceKind::Type,
+                    TemplateReferenceTarget::External(type_symbol.clone()),
+                );
+                let explicit_type_args = type_args
+                    .iter()
+                    .map(|arg| {
+                        let ty = type_key_for_type_expr(
+                            arg,
+                            self.type_params,
+                            self.def_table,
+                            self.module_path,
+                        );
+                        self.record_type_site(TemplateTypeSiteRole::Expr, ty.clone());
+                        ty
+                    })
+                    .collect::<Vec<_>>();
+                let fields = fields
+                    .iter()
+                    .map(|field| {
+                        Some(TemplateStructField {
+                            name: field.name.clone(),
+                            value: self.build_expr(&field.value)?,
+                        })
+                    })
+                    .collect::<Option<Vec<_>>>()?;
+                Some(TemplateExpr::StructLit {
+                    type_symbol,
+                    explicit_type_args,
+                    fields,
+                })
+            }
+            ExprKind::Call { callee, args } => {
+                let callee_expr = self.build_expr(callee)?;
+                let site = self.alloc_site_id();
+                let call_target = match &callee_expr {
+                    TemplateExpr::BindingRef(binding) => TemplateCallTarget::Binding(*binding),
+                    TemplateExpr::SymbolRef(symbol) => {
+                        TemplateCallTarget::Def(TemplateReferenceTarget::External(symbol.clone()))
+                    }
+                    _ => TemplateCallTarget::Dynamic,
+                };
+                self.call_sites.push(TemplateCallSite {
+                    site,
+                    callee: call_target,
+                    explicit_type_arg_count: 0,
+                    iterable_arg_count: 0,
+                });
+                let args = args
+                    .iter()
+                    .map(|arg| {
+                        Some(TemplateCallArg {
+                            mode: template_call_arg_mode(arg.mode),
+                            expr: self.build_expr(&arg.expr)?,
+                        })
+                    })
+                    .collect::<Option<Vec<_>>>()?;
+                Some(TemplateExpr::Call {
+                    site,
+                    callee: Box::new(callee_expr),
+                    args,
+                })
+            }
+            _ => None,
+        }
+    }
+
+    fn build_stmt(&mut self, stmt: &StmtExpr) -> Option<TemplateStmt> {
+        match &stmt.kind {
+            StmtExprKind::LetBind {
+                pattern,
+                decl_ty,
+                value,
+            } => self.build_bind_stmt(pattern, false, decl_ty.as_ref(), value),
+            StmtExprKind::VarBind {
+                pattern,
+                decl_ty,
+                value,
+            } => self.build_bind_stmt(pattern, true, decl_ty.as_ref(), value),
+            StmtExprKind::Return { value } => Some(TemplateStmt::Return(match value.as_ref() {
+                Some(expr) => Some(self.build_expr(expr)?),
+                None => None,
+            })),
+            _ => None,
+        }
+    }
+
+    fn build_bind_stmt(
+        &mut self,
+        pattern: &BindPattern,
+        mutable: bool,
+        decl_ty: Option<&crate::core::ast::TypeExpr>,
+        value: &Expr,
+    ) -> Option<TemplateStmt> {
+        let BindPatternKind::Name { ident } = &pattern.kind else {
+            return None;
+        };
+        let def_id = self.def_table.lookup_node_def_id(pattern.id)?;
+        let binding_id = self.alloc_binding_id();
+        self.binding_ids_by_def.insert(def_id, binding_id);
+        let decl_ty = decl_ty.map(|ty_expr| {
+            let ty =
+                type_key_for_type_expr(ty_expr, self.type_params, self.def_table, self.module_path);
+            self.record_type_site(TemplateTypeSiteRole::Local, ty.clone());
+            ty
+        });
+        self.locals.push(TemplateBinding {
+            id: binding_id,
+            name: ident.clone(),
+            kind: TemplateBindingKind::LocalVar,
+            ty: decl_ty.clone(),
+        });
+        Some(TemplateStmt::Let {
+            binding: binding_id,
+            mutable,
+            decl_ty,
+            value: Box::new(self.build_expr(value)?),
+        })
+    }
+
+    fn build_var_expr(&mut self, expr: &Expr) -> Option<TemplateExpr> {
+        let def_id = self.def_table.lookup_node_def_id(expr.id)?;
+        if let Some(binding_id) = self.binding_ids_by_def.get(&def_id).copied() {
+            return Some(TemplateExpr::BindingRef(binding_id));
+        }
+        let symbol = self.symbol_ids.lookup_symbol_id(def_id)?.clone();
+        self.record_reference(
+            TemplateReferenceKind::Value,
+            TemplateReferenceTarget::External(symbol.clone()),
+        );
+        Some(TemplateExpr::SymbolRef(symbol))
+    }
+
+    fn record_reference(&mut self, kind: TemplateReferenceKind, target: TemplateReferenceTarget) {
+        let key = match &target {
+            TemplateReferenceTarget::Local(id) => format!("local:{}", id.0),
+            TemplateReferenceTarget::External(symbol) => format!("sym:{symbol}"),
+        };
+        if self.seen_references.insert((kind, key)) {
+            self.references.push(TemplateReference { target, kind });
+        }
+    }
+
+    fn record_type_site(&mut self, role: TemplateTypeSiteRole, ty: TypeKey) {
+        let site = self.alloc_site_id();
+        self.type_sites.push(TemplateTypeSite { site, role, ty });
+    }
+
+    fn alloc_binding_id(&mut self) -> TemplateBindingId {
+        let id = TemplateBindingId(self.next_binding_id);
+        self.next_binding_id += 1;
+        id
+    }
+
+    fn alloc_site_id(&mut self) -> TemplateSiteId {
+        let id = TemplateSiteId(self.next_site_id);
+        self.next_site_id += 1;
+        id
+    }
+}
+
+fn iterable_item_type_key(ty: &TypeKey) -> Option<TypeKey> {
+    match ty {
+        TypeKey::Named { path, args, .. } if path.to_string() == "Iterable" && args.len() == 1 => {
+            Some(args[0].clone())
+        }
+        _ => None,
+    }
+}
+
+fn template_call_arg_mode(mode: CallArgMode) -> TemplateCallArgMode {
+    match mode {
+        CallArgMode::Default => TemplateCallArgMode::Default,
+        CallArgMode::InOut => TemplateCallArgMode::InOut,
+        CallArgMode::Out => TemplateCallArgMode::Out,
+        CallArgMode::Move => TemplateCallArgMode::Move,
     }
 }
 

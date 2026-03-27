@@ -18,7 +18,7 @@
 
 use serde::{Deserialize, Serialize};
 
-use crate::core::symbol_id::SymbolId;
+use crate::core::symbol_id::{SymbolId, TypeKey};
 
 use super::{CallableSignature, MethodSignature, TraitDefExport, TypeDefExport};
 
@@ -171,6 +171,7 @@ pub struct LinkTimeCallableTemplate {
 /// to grow into.
 #[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
 pub struct TemplateBody {
+    pub expr: Option<TemplateExpr>,
     pub params: Vec<TemplateBinding>,
     pub locals: Vec<TemplateBinding>,
     pub nested_closures: Vec<TemplateNestedClosure>,
@@ -204,16 +205,23 @@ pub struct TemplateNestedClosure {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct TemplateCallSite {
     pub site: TemplateSiteId,
-    pub callee: TemplateReferenceTarget,
+    pub callee: TemplateCallTarget,
     pub explicit_type_arg_count: usize,
     pub iterable_arg_count: usize,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub enum TemplateCallTarget {
+    Def(TemplateReferenceTarget),
+    Binding(TemplateBindingId),
+    Dynamic,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct TemplateTypeSite {
     pub site: TemplateSiteId,
     pub role: TemplateTypeSiteRole,
-    pub ty: super::TypeKey,
+    pub ty: TypeKey,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -233,7 +241,65 @@ pub struct TemplateIterableParamSlot {
     /// Parameter binding that receives the concrete iterable witness type.
     pub binding: TemplateBindingId,
     /// Exposed item type recorded at the source surface.
-    pub item_ty: super::TypeKey,
+    pub item_ty: TypeKey,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub enum TemplateExpr {
+    Block {
+        items: Vec<TemplateStmt>,
+        tail: Option<Box<TemplateExpr>>,
+    },
+    UnitLit,
+    IntLit(u64),
+    BoolLit(bool),
+    CharLit(char),
+    StringLit(String),
+    BindingRef(TemplateBindingId),
+    SymbolRef(SymbolId),
+    TupleLit(Vec<TemplateExpr>),
+    StructLit {
+        type_symbol: SymbolId,
+        explicit_type_args: Vec<TypeKey>,
+        fields: Vec<TemplateStructField>,
+    },
+    Call {
+        site: TemplateSiteId,
+        callee: Box<TemplateExpr>,
+        args: Vec<TemplateCallArg>,
+    },
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub enum TemplateStmt {
+    Let {
+        binding: TemplateBindingId,
+        mutable: bool,
+        decl_ty: Option<TypeKey>,
+        value: Box<TemplateExpr>,
+    },
+    Expr(TemplateExpr),
+    Return(Option<TemplateExpr>),
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct TemplateStructField {
+    pub name: String,
+    pub value: TemplateExpr,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct TemplateCallArg {
+    pub mode: TemplateCallArgMode,
+    pub expr: TemplateExpr,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum TemplateCallArgMode {
+    Default,
+    InOut,
+    Out,
+    Move,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -248,7 +314,7 @@ pub enum TemplateReferenceTarget {
     External(SymbolId),
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum TemplateReferenceKind {
     Callable,
     Type,
