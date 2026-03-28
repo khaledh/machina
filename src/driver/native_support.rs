@@ -175,9 +175,7 @@ pub fn ensure_stdlib_archive_for_modules(
     }
 
     let archive_path = archive_dir.join("libmachina_std.a");
-    if artifact_is_stale(&archive_path, &objects)? {
-        archive_objects(&archive_path, &objects)?;
-    }
+    archive_objects(&archive_path, &objects)?;
 
     Ok(Some(StdlibArtifacts {
         archive_path,
@@ -289,15 +287,24 @@ fn prelude_impl_source_path() -> PathBuf {
 }
 
 fn supported_stdlib_object_modules(module_paths: &HashSet<ModulePath>) -> HashSet<ModulePath> {
-    module_paths
+    let referenced_supported = module_paths
         .iter()
-        .filter(|path| is_object_backed_stdlib_module(path))
-        .cloned()
-        .collect()
+        .any(|path| is_object_backed_stdlib_module(path));
+    if !referenced_supported {
+        return HashSet::new();
+    }
+
+    let mut modules = HashSet::new();
+    modules.insert(ModulePath::new(vec!["std".to_string(), "parse".to_string()]).unwrap());
+    modules.insert(ModulePath::new(vec!["std".to_string(), "env".to_string()]).unwrap());
+    modules
 }
 
 fn is_object_backed_stdlib_module(module_path: &ModulePath) -> bool {
-    matches!(module_path.segments(), [std_seg, parse_seg] if std_seg == "std" && parse_seg == "parse")
+    matches!(
+        module_path.segments(),
+        [std_seg, name] if std_seg == "std" && (name == "parse" || name == "env")
+    )
 }
 
 fn ensure_stdlib_module_object(

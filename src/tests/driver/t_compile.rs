@@ -833,6 +833,49 @@ fn compile_with_path_links_stdlib_parse_archive_and_suppresses_local_body() {
 }
 
 #[test]
+fn compile_with_path_links_stdlib_env_archive_and_suppresses_local_body() {
+    let temp_dir =
+        std::env::temp_dir().join(format!("machina_driver_env_archive_{}", std::process::id()));
+    std::fs::create_dir_all(&temp_dir).expect("failed to create temp dir");
+    let source_path = temp_dir.join("env_archive.mc");
+    let source = r#"
+        requires {
+            std::env::args
+        }
+
+        fn main() -> u64 {
+            let argv = args();
+            argv.len
+        }
+    "#;
+    std::fs::write(&source_path, source).expect("failed to write source");
+
+    let output = compile_with_path(source, Some(&source_path), &deterministic_compile_opts())
+        .expect("compile");
+
+    assert_eq!(
+        output.extra_link_paths.len(),
+        1,
+        "expected stdlib archive link path for std::env"
+    );
+    assert!(
+        output.extra_link_paths[0].ends_with("libmachina_std.a"),
+        "expected stdlib archive path, got {}",
+        output.extra_link_paths[0].display()
+    );
+    assert!(
+        output.asm.contains("_args"),
+        "expected callsite to reference external args symbol"
+    );
+    assert!(
+        !output.asm.contains("\n_args:\n"),
+        "std::env body should come from the cached stdlib archive, not local asm"
+    );
+
+    let _ = std::fs::remove_dir_all(&temp_dir);
+}
+
+#[test]
 fn compile_ir_dump_is_deterministic() {
     let source = r#"
 type IoError = {
