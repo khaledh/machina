@@ -1,5 +1,7 @@
+pub mod backend;
 pub mod core;
 pub mod driver;
+pub mod ir;
 pub mod services;
 
 #[cfg(test)]

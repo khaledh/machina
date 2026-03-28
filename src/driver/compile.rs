@@ -2,22 +2,22 @@ use std::collections::HashMap;
 use std::collections::HashSet;
 use std::path::Path;
 
+use crate::backend;
+use crate::backend::regalloc::arm64::Arm64Target;
 use crate::core::api::{
     StrictFrontendOptions, build_strict_frontend_input, elaborate_stage, run_strict_frontend,
     semcheck_stage,
 };
 use crate::core::ast::Module;
 use crate::core::ast::{MethodItem, NodeId, TopLevelItem};
-use crate::core::backend;
-use crate::core::backend::regalloc::arm64::Arm64Target;
 use crate::core::capsule::{ModuleId, ModulePath};
 use crate::core::context::{AnalyzedContext, ResolvedContext, TypeCheckedContext};
 use crate::core::diag::CompileError;
-use crate::core::ir::format::{format_func_with_comments_and_names, format_globals};
 use crate::core::lexer::{LexError, Lexer, Token};
 use crate::core::nrvo::NrvoAnalyzer;
 use crate::core::resolve::DefId;
 use crate::driver::native_support::ensure_stdlib_archive_for_modules;
+use crate::ir::format::{format_func_with_comments_and_names, format_globals};
 
 #[derive(Debug)]
 pub struct CompileOptions {

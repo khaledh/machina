@@ -1,0 +1,566 @@
+//! Type lowering from semantic types to SSA IR types.
+
+use crate::core::ast::Module;
+use crate::core::resolve::DefTable;
+use crate::core::typecheck::nominal::{NominalKey, TypeView};
+use crate::core::typecheck::type_map::TypeMap;
+use crate::core::typecheck::type_view::TypeViewResolver;
+use crate::core::types::{EnumVariant, FnParamMode, StructField, Type, TypeId};
+use crate::ir::{IrStructField, IrTypeCache, IrTypeId, IrTypeKind};
+use std::collections::HashMap;
+
+/// Lowers type-checker types to SSA IR types with caching.
+///
+/// Converts semantic types into SSA IR types, caching results to avoid
+/// redundant allocations. Maintains two caches:
+/// - `type_cache`: Maps type-checker type IDs to SSA type IDs
+/// - `type_cache_by_kind`: Maps type structures to SSA type IDs (for structural dedup)
+pub(super) struct TypeLowerer<'a> {
+    type_map: &'a TypeMap,
+    type_view_resolver: Option<TypeViewResolver<'a, Module>>,
+    pub(super) ir_type_cache: IrTypeCache,
+    by_type_id: HashMap<TypeId, IrTypeId>,
+    by_type: HashMap<Type, IrTypeId>,
+    ptr_cache: HashMap<IrTypeId, IrTypeId>,
+    enum_layouts: HashMap<TypeId, EnumLayout>,
+    fmt_ty: Option<IrTypeId>,
+}
+
+impl<'a> TypeLowerer<'a> {
+    pub(super) fn new(type_map: &'a TypeMap) -> Self {
+        Self::new_with_type_defs(type_map, None, None)
+    }
+
+    pub(super) fn new_with_type_defs(
+        type_map: &'a TypeMap,
+        def_table: Option<&'a DefTable>,
+        module: Option<&'a Module>,
+    ) -> Self {
+        Self {
+            type_map,
+            type_view_resolver: module.map(|module| {
+                let def_table = def_table
+                    .expect("backend type lowering: def table is required when module is provided");
+                TypeViewResolver::new(def_table, module)
+            }),
+            ir_type_cache: IrTypeCache::new(),
+            by_type_id: HashMap::new(),
+            by_type: HashMap::new(),
+            ptr_cache: HashMap::new(),
+            enum_layouts: HashMap::new(),
+            fmt_ty: None,
+        }
+    }
+
+    /// Converts a type-checker type ID to an SSA type ID, caching the result.
+    pub(super) fn lower_type_id(&mut self, ty_id: TypeId) -> IrTypeId {
+        // Check cache first to avoid redundant type creation.
+        if let Some(id) = self.by_type_id.get(&ty_id) {
+            return *id;
+        }
+
+        // Look up the type structure and convert it.
+        let ty = self.type_map.type_table().get(ty_id);
+        let id = self.lower_type(ty);
+
+        // Cache the mapping for future lookups.
+        self.by_type_id.insert(ty_id, id);
+        id
+    }
+
+    /// Converts a type-checker Type to an SSA TypeId.
+    ///
+    /// Handles primitive types directly, and recursively converts compound types
+    /// (tuples, arrays, structs). Pointer types (Heap, Ref) become SSA Ptr types.
+    pub(super) fn lower_type(&mut self, ty: &Type) -> IrTypeId {
+        // Check structural cache to deduplicate identical type structures.
+        if let Some(id) = self.by_type.get(ty) {
+            return *id;
+        }
+
+        let id = match ty {
+            // Primitive types map directly to their SSA equivalents.
+            Type::Unit => self.ir_type_cache.add(IrTypeKind::Unit),
+            Type::Bool => self.ir_type_cache.add(IrTypeKind::Bool),
+            Type::Int {
+                signed,
+                bits,
+                bounds: _,
+                nonzero: _,
+            } => self.ir_type_cache.add(IrTypeKind::Int {
+                signed: *signed,
+                bits: *bits,
+            }),
+            Type::Char => self.ir_type_cache.add(IrTypeKind::Int {
+                signed: false,
+                bits: 32,
+            }),
+            Type::Range { elem_ty } => self.lower_type(elem_ty),
+            Type::Fn { params, ret_ty } => {
+                let params = params
+                    .iter()
+                    .map(|param| {
+                        let param_ty = self.lower_type(&param.ty);
+                        match param.mode {
+                            FnParamMode::In | FnParamMode::Sink => {
+                                if param.ty.is_scalar() {
+                                    param_ty
+                                } else {
+                                    self.ptr_to(param_ty)
+                                }
+                            }
+                            FnParamMode::Out | FnParamMode::InOut => self.ptr_to(param_ty),
+                        }
+                    })
+                    .collect();
+                let ret = self.lower_type(ret_ty);
+                self.ir_type_cache.add(IrTypeKind::Fn { params, ret })
+            }
+
+            // String is lowered as a struct with pointer, length, and capacity.
+            Type::String => {
+                let byte = self.lower_type(&Type::uint(8));
+                let ptr = self.ptr_to(byte);
+                let u32 = self.lower_type(&Type::uint(32));
+                self.lower_ptr_len_cap_struct(Some("string"), ptr, u32)
+            }
+
+            // Slice is lowered as a struct { ptr, len } with a typed pointer.
+            Type::Slice { elem_ty } => {
+                let elem = self.lower_type(elem_ty);
+                let ptr = self.ptr_to(elem);
+                let u64 = self.lower_type(&Type::uint(64));
+                self.lower_ptr_len_struct(ptr, u64)
+            }
+
+            // Dyn-array is lowered as { ptr, len, cap } with string-like u32 len/cap.
+            Type::DynArray { elem_ty } => {
+                let elem = self.lower_type(elem_ty);
+                let ptr = self.ptr_to(elem);
+                let u32 = self.lower_type(&Type::uint(32));
+                self.lower_ptr_len_cap_struct(None, ptr, u32)
+            }
+            // Set is lowered as { ptr, len, cap } like dyn-array storage.
+            Type::Set { elem_ty } => {
+                let elem = self.lower_type(elem_ty);
+                let ptr = self.ptr_to(elem);
+                let u32 = self.lower_type(&Type::uint(32));
+                self.lower_ptr_len_cap_struct(None, ptr, u32)
+            }
+            // Map is lowered as { ptr, len, cap } with pointer to key/value pairs.
+            Type::Map { key_ty, value_ty } => {
+                let key = self.lower_type(key_ty);
+                let value = self.lower_type(value_ty);
+                let pair = self.ir_type_cache.add(IrTypeKind::Tuple {
+                    fields: vec![key, value],
+                });
+                let ptr = self.ptr_to(pair);
+                let u32 = self.lower_type(&Type::uint(32));
+                self.lower_ptr_len_cap_struct(None, ptr, u32)
+            }
+
+            // Compound types: recursively convert element/field types.
+            Type::Tuple { field_tys } => {
+                let fields = field_tys
+                    .iter()
+                    .map(|field| self.lower_type(field))
+                    .collect();
+                self.ir_type_cache.add(IrTypeKind::Tuple { fields })
+            }
+            Type::Array { elem_ty, dims } => {
+                let elem = self.lower_type(elem_ty);
+                let dims = dims.iter().map(|dim| *dim as u64).collect();
+                self.ir_type_cache.add(IrTypeKind::Array { elem, dims })
+            }
+            Type::Struct { name, fields, .. } => {
+                let placeholder = self.ir_type_cache.add_placeholder_named(name.clone());
+                self.by_type.insert(ty.clone(), placeholder);
+
+                let fields = self
+                    .struct_fields_from_view(ty)
+                    .unwrap_or_else(|| fields.clone())
+                    .iter()
+                    .map(|field| IrStructField {
+                        name: field.name.clone(),
+                        ty: self.lower_type(&field.ty),
+                    })
+                    .collect();
+
+                self.ir_type_cache
+                    .update_kind(placeholder, IrTypeKind::Struct { fields });
+                placeholder
+            }
+            Type::Enum { name, .. } => {
+                let placeholder = self.ir_type_cache.add_placeholder_named(name.clone());
+                self.by_type.insert(ty.clone(), placeholder);
+                let layout = self.enum_layout_for_type(ty);
+                self.ir_type_cache.update_kind(
+                    placeholder,
+                    IrTypeKind::Struct {
+                        fields: self.tagged_payload_fields(layout.tag_ty, layout.blob_ty),
+                    },
+                );
+                placeholder
+            }
+            Type::ErrorUnion { .. } => {
+                let name = format!("error_union$h{:016x}", stable_type_hash(ty));
+                let placeholder = self.ir_type_cache.add_placeholder_named(name);
+                self.by_type.insert(ty.clone(), placeholder);
+                let layout = self.enum_layout_for_type(ty);
+                self.ir_type_cache.update_kind(
+                    placeholder,
+                    IrTypeKind::Struct {
+                        fields: self.tagged_payload_fields(layout.tag_ty, layout.blob_ty),
+                    },
+                );
+                placeholder
+            }
+
+            // Capability/correlation wrappers currently lower as plain u64 ids.
+            // The type arguments are compile-time metadata and do not
+            // change runtime representation.
+            Type::Pending { .. } | Type::ReplyCap { .. } => self.lower_type(&Type::uint(64)),
+
+            // Pointer-like types (heap allocations, references) become SSA pointers.
+            Type::Heap { elem_ty }
+            | Type::Ref {
+                elem_ty,
+                mutable: _,
+            } => {
+                let elem = self.lower_type(elem_ty);
+                self.ir_type_cache.add(IrTypeKind::Ptr { elem })
+            }
+            other => panic!("backend type lowering: unsupported type {:?}", other),
+        };
+
+        // Cache the result for structural deduplication.
+        self.by_type.insert(ty.clone(), id);
+        id
+    }
+
+    /// Returns a pointer type to the given SSA type, caching per element type.
+    pub(super) fn ptr_to(&mut self, elem: IrTypeId) -> IrTypeId {
+        if let Some(id) = self.ptr_cache.get(&elem) {
+            return *id;
+        }
+
+        let id = self.ir_type_cache.add(IrTypeKind::Ptr { elem });
+        self.ptr_cache.insert(elem, id);
+        id
+    }
+
+    fn lower_ptr_len_struct(&mut self, ptr_ty: IrTypeId, len_ty: IrTypeId) -> IrTypeId {
+        self.ir_type_cache.add(IrTypeKind::Struct {
+            fields: vec![
+                IrStructField {
+                    name: "ptr".to_string(),
+                    ty: ptr_ty,
+                },
+                IrStructField {
+                    name: "len".to_string(),
+                    ty: len_ty,
+                },
+            ],
+        })
+    }
+
+    fn lower_ptr_len_cap_struct(
+        &mut self,
+        name: Option<&str>,
+        ptr_ty: IrTypeId,
+        len_ty: IrTypeId,
+    ) -> IrTypeId {
+        let fields = vec![
+            IrStructField {
+                name: "ptr".to_string(),
+                ty: ptr_ty,
+            },
+            IrStructField {
+                name: "len".to_string(),
+                ty: len_ty,
+            },
+            IrStructField {
+                name: "cap".to_string(),
+                ty: len_ty,
+            },
+        ];
+        if let Some(name) = name {
+            self.ir_type_cache
+                .add_named(IrTypeKind::Struct { fields }, name.to_string())
+        } else {
+            self.ir_type_cache.add(IrTypeKind::Struct { fields })
+        }
+    }
+
+    fn tagged_payload_fields(&self, tag_ty: IrTypeId, blob_ty: IrTypeId) -> Vec<IrStructField> {
+        vec![
+            IrStructField {
+                name: "tag".to_string(),
+                ty: tag_ty,
+            },
+            IrStructField {
+                name: "payload".to_string(),
+                ty: blob_ty,
+            },
+        ]
+    }
+
+    /// Returns the internal formatter struct type (fmt { ptr, len, cap }).
+    pub(super) fn fmt_type(&mut self) -> IrTypeId {
+        if let Some(id) = self.fmt_ty {
+            return id;
+        }
+
+        let u64_ty = self.lower_type(&Type::uint(64));
+        let fields = vec![
+            IrStructField {
+                name: "ptr".to_string(),
+                ty: u64_ty,
+            },
+            IrStructField {
+                name: "len".to_string(),
+                ty: u64_ty,
+            },
+            IrStructField {
+                name: "cap".to_string(),
+                ty: u64_ty,
+            },
+        ];
+        let id = self
+            .ir_type_cache
+            .add_named(IrTypeKind::Struct { fields }, "fmt".to_string());
+        self.fmt_ty = Some(id);
+        id
+    }
+
+    /// Returns signedness and bit-width for an integer type.
+    pub(super) fn int_info(&self, ty_id: TypeId) -> (bool, u8) {
+        match self.type_map.type_table().get(ty_id) {
+            Type::Int { signed, bits, .. } => (*signed, *bits),
+            other => panic!(
+                "backend type lowering: expected int type, found {:?}",
+                other
+            ),
+        }
+    }
+
+    pub(super) fn enum_layout(&mut self, ty_id: TypeId) -> &EnumLayout {
+        if self.enum_layouts.contains_key(&ty_id) {
+            return self.enum_layouts.get(&ty_id).unwrap();
+        }
+
+        let enum_ty = self.type_map.type_table().get(ty_id).clone();
+        let variants = self.enum_variants_for_type(&enum_ty);
+        let layout = self.build_enum_layout_from_variants(&variants);
+        self.enum_layouts.insert(ty_id, layout);
+        self.enum_layouts.get(&ty_id).unwrap()
+    }
+
+    /// Returns enum-like layout for a semantic type, even when that type does
+    /// not have a canonical `TypeId` entry in the type table.
+    pub(super) fn enum_layout_for_type(&mut self, enum_ty: &Type) -> EnumLayout {
+        if let Some(ty_id) = self.type_map.type_table().lookup_id(enum_ty) {
+            return self.enum_layout(ty_id).clone();
+        }
+
+        let variants = self.enum_variants_for_type(enum_ty);
+        self.build_enum_layout_from_variants(&variants)
+    }
+
+    fn enum_variants_for_type(&mut self, enum_ty: &Type) -> Vec<EnumVariant> {
+        match enum_ty {
+            Type::Enum { variants, .. } => self
+                .enum_variants_from_view(enum_ty)
+                .unwrap_or_else(|| variants.clone()),
+            Type::ErrorUnion { ok_ty, err_tys } => {
+                let mut variants = Vec::with_capacity(err_tys.len() + 1);
+                variants.push(EnumVariant {
+                    name: "Ok".to_string(),
+                    payload: vec![*ok_ty.clone()],
+                });
+                for (index, err_ty) in err_tys.iter().enumerate() {
+                    variants.push(EnumVariant {
+                        name: format!("Err{}", index),
+                        payload: vec![err_ty.clone()],
+                    });
+                }
+                variants
+            }
+            _ => {
+                panic!(
+                    "backend type lowering: expected enum/error-union type, found {:?}",
+                    enum_ty
+                );
+            }
+        }
+    }
+
+    fn build_enum_layout_from_variants(&mut self, variants: &[EnumVariant]) -> EnumLayout {
+        let tag_ty = self.lower_type(&Type::Int {
+            signed: false,
+            bits: 32,
+            bounds: None,
+            nonzero: false,
+        });
+
+        let mut max_payload_size = 0u64;
+        let mut max_payload_align = 1u64;
+        let mut variant_layouts = Vec::new();
+
+        for (i, variant) in variants.iter().enumerate() {
+            let tag_value = i as u32;
+            if variant.payload.is_empty() {
+                variant_layouts.push(EnumVariantLayout {
+                    name: variant.name.clone(),
+                    tag: tag_value,
+                    field_tys: vec![],
+                    field_offsets: vec![],
+                    payload_size: 0,
+                    payload_align: 1,
+                });
+                continue;
+            }
+            if variant.payload.len() == 1 {
+                let payload_ty = self.lower_type(&variant.payload[0]);
+                let payload_layout = self.ir_type_cache.layout(payload_ty);
+                let payload_size = payload_layout.size();
+                let payload_align = payload_layout.align();
+                variant_layouts.push(EnumVariantLayout {
+                    name: variant.name.clone(),
+                    tag: tag_value,
+                    field_tys: vec![payload_ty],
+                    field_offsets: vec![0],
+                    payload_size,
+                    payload_align,
+                });
+                max_payload_size = max_payload_size.max(payload_size);
+                max_payload_align = max_payload_align.max(payload_align);
+                continue;
+            }
+
+            // Payload size > 1: create a tuple type and use its layout offsets.
+            let payload_field_tys: Vec<_> = variant
+                .payload
+                .iter()
+                .map(|field| self.lower_type(field))
+                .collect();
+
+            let tuple_ty = self.ir_type_cache.add(IrTypeKind::Tuple {
+                fields: payload_field_tys.clone(),
+            });
+            let payload_layout = self.ir_type_cache.layout(tuple_ty);
+            let payload_size = payload_layout.size();
+            let payload_align = payload_layout.align();
+            let field_offsets = payload_layout.field_offsets().to_vec();
+
+            variant_layouts.push(EnumVariantLayout {
+                name: variant.name.clone(),
+                tag: tag_value,
+                field_tys: payload_field_tys,
+                field_offsets,
+                payload_size,
+                payload_align,
+            });
+            max_payload_size = max_payload_size.max(payload_size);
+            max_payload_align = max_payload_align.max(payload_align);
+        }
+
+        let blob_ty = self.ir_type_cache.add(IrTypeKind::Blob {
+            size: max_payload_size,
+            align: max_payload_align,
+        });
+        EnumLayout {
+            tag_ty,
+            blob_ty,
+            variants: variant_layouts,
+        }
+    }
+
+    fn struct_fields_from_view(&mut self, ty: &Type) -> Option<Vec<StructField>> {
+        let key = self.nominal_key_for_type(ty)?;
+        let view = self.type_view_resolver.as_mut()?.view_of_key(&key)?;
+        let TypeView::Struct(struct_view) = view else {
+            return None;
+        };
+        if struct_view.fields.is_empty() {
+            return None;
+        }
+        Some(
+            struct_view
+                .fields
+                .into_iter()
+                .map(|field| StructField {
+                    name: field.name,
+                    ty: field.ty,
+                })
+                .collect(),
+        )
+    }
+
+    fn enum_variants_from_view(&mut self, enum_ty: &Type) -> Option<Vec<EnumVariant>> {
+        let key = self.nominal_key_for_type(enum_ty)?;
+        let view = self.type_view_resolver.as_mut()?.view_of_key(&key)?;
+        let TypeView::Enum(enum_view) = view else {
+            return None;
+        };
+        if enum_view.variants.is_empty() {
+            return None;
+        }
+        Some(
+            enum_view
+                .variants
+                .into_iter()
+                .map(|variant| EnumVariant {
+                    name: variant.name,
+                    payload: variant.payload,
+                })
+                .collect(),
+        )
+    }
+
+    fn nominal_key_for_type(&self, ty: &Type) -> Option<NominalKey> {
+        let type_id = self.type_map.type_table().lookup_id(ty)?;
+        self.type_map
+            .lookup_nominal_key_for_type_id(type_id)
+            .cloned()
+    }
+}
+
+fn stable_type_hash(ty: &Type) -> u64 {
+    // Deterministic hash for synthetic dump names so IR/ASM artifacts remain
+    // byte-stable across runs with different hash-map insertion orders.
+    let mut hash: u64 = 0xcbf29ce484222325;
+    for byte in format!("{ty:?}").bytes() {
+        hash ^= u64::from(byte);
+        hash = hash.wrapping_mul(0x100000001b3);
+    }
+    hash
+}
+
+#[derive(Clone)]
+pub struct EnumLayout {
+    pub tag_ty: IrTypeId,  // u32 tag type
+    pub blob_ty: IrTypeId, // blob of bytes for the payload
+    pub variants: Vec<EnumVariantLayout>,
+}
+
+#[derive(Clone)]
+pub struct EnumVariantLayout {
+    pub name: String,
+    pub tag: u32,                 // index of the variant
+    pub field_tys: Vec<IrTypeId>, // lowered field types
+    pub field_offsets: Vec<u64>,  // offsets of the fields in the blob
+    #[allow(dead_code)]
+    pub payload_size: u64,
+    #[allow(dead_code)]
+    pub payload_align: u64,
+}
+
+impl EnumLayout {
+    pub(super) fn variant_by_name(&self, name: &str) -> &EnumVariantLayout {
+        self.variants
+            .iter()
+            .find(|variant| variant.name == name)
+            .unwrap_or_else(|| panic!("backend enum layout missing variant {name}"))
+    }
+}

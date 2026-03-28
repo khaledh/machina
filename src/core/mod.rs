@@ -3,14 +3,12 @@
 pub mod analysis;
 pub mod api;
 pub mod ast;
-pub mod backend;
 pub mod capsule;
 pub mod codegen_names;
 pub mod context;
 pub mod diag;
 pub mod elaborate;
 pub mod interface;
-pub mod ir;
 pub mod lexer;
 pub mod linear;
 pub mod machine;

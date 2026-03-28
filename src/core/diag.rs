@@ -1,7 +1,7 @@
 use std::path::PathBuf;
 
-use crate::core::backend::lower::LowerToIrError as SsaLoweringError;
-use crate::core::backend::verify::VerifyIrError as SsaVerifyError;
+use crate::backend::lower::LowerToIrError as SsaLoweringError;
+use crate::backend::verify::VerifyIrError as SsaVerifyError;
 use crate::core::capsule::CapsuleError;
 use crate::core::lexer::LexError;
 use crate::core::monomorphize::MonomorphizeError;
