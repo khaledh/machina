@@ -50,6 +50,53 @@ Longer term, if Machina moves to source-independent compiled libraries, generic
 body transport can be revisited deliberately. That is a future step, not part
 of the current module-interface rollout.
 
+## Current Transitional State
+
+The implementation is now intentionally split into three active paths:
+
+1. **Runtime archive**: native C support in `libmachina_rt.a`
+2. **Stdlib archive**: concrete Machina stdlib code in `libmachina_std_<subset>.a`
+3. **Source flattening**: remaining stdlib/user source still merged for strict
+   frontend stages that need AST-level access
+
+Today, the stdlib archive always includes `std::builtin`, and may also include
+referenced concrete modules such as `std::parse`, `std::env`, and `std::io`.
+At the same time, `.mci` already serves as the metadata boundary for exported
+surface queries, resolve import facts, and tooling.
+
+This is a deliberate transition state, not the final architecture. In
+particular:
+
+- `.mci` is already authoritative for metadata
+- the stdlib archive already owns some concrete code
+- source flattening still remains for generic bodies and a few semantic hooks
+
+## Why Flattening Still Exists
+
+Stdlib source flattening remains in the strict compile path for a small number
+of real reasons:
+
+- generic body access for source-backed monomorphization
+- semantic/elaboration hooks that still inspect stdlib AST shape
+- the current strict frontend still hands later stages one merged module
+
+This means flattening is no longer the ownership mechanism for all stdlib code;
+it is currently a frontend compatibility mechanism.
+
+## Revisit Triggers
+
+The strict frontend should only be reworked into a more capsule-aware,
+less-flattened shape when there is a concrete driver, for example:
+
+- stdlib or package growth makes source flattening measurably costly
+- third-party libraries make the current model awkward to scale
+- distribution goals require reducing source participation in normal builds
+- generic-body transport becomes necessary for source-independent libraries
+
+Until one of those triggers exists, the current split is considered acceptable:
+keep improving artifact ownership and metadata boundaries, but do not force a
+large strict-frontend refactor just for architectural tidiness.
+
 ## Artifact Model
 
 A compiled Machina module produces two artifacts:
