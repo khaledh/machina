@@ -1036,6 +1036,7 @@ fn typecheck_with_modules(
             trace_alloc: false,
             trace_drops: false,
             inject_prelude: false,
+            use_stdlib_objects: true,
         },
     )
 }

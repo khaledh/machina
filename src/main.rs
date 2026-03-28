@@ -231,6 +231,7 @@ fn main() {
         trace_alloc,
         trace_drops,
         inject_prelude: true,
+        use_stdlib_objects: true,
     };
     let output = compile_with_path(&source, Some(input_path), &opts);
 
@@ -276,7 +277,9 @@ fn main() {
                         Some(input_path.parent().unwrap_or_else(|| Path::new("."))),
                     )
                     .and_then(|obj| {
-                        link_executable(&asm_path, std::slice::from_ref(&obj), &exe_path)
+                        let mut extra_objs = output.extra_link_paths.clone();
+                        extra_objs.push(obj);
+                        link_executable(&asm_path, &extra_objs, &exe_path)
                     });
                     if result.is_ok() {
                         println!("[SUCCESS] executable written to {}", exe_path.display());
@@ -291,7 +294,9 @@ fn main() {
                         Some(input_path.parent().unwrap_or_else(|| Path::new("."))),
                     )
                     .and_then(|obj| {
-                        link_executable(&asm_path, std::slice::from_ref(&obj), &exe_path)
+                        let mut extra_objs = output.extra_link_paths.clone();
+                        extra_objs.push(obj);
+                        link_executable(&asm_path, &extra_objs, &exe_path)
                     });
                     let remove_asm = link_result.is_ok();
                     let result = link_result.and_then(|_| run_executable(&exe_path));

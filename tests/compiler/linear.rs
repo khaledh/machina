@@ -15,6 +15,7 @@ fn linear_opts() -> CompileOptions {
         trace_alloc: false,
         trace_drops: false,
         inject_prelude: true,
+        use_stdlib_objects: true,
     }
 }
 

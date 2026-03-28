@@ -16,7 +16,7 @@ use crate::core::monomorphize::{build_retype_context, monomorphize_with_plan};
 use crate::core::parse::Parser;
 use crate::core::resolve::resolve;
 use crate::core::typecheck::type_check;
-use crate::driver::compile::{CompileOptions, compile};
+use crate::driver::compile::{CompileOptions, compile, compile_with_path};
 
 struct MockLoader {
     modules: HashMap<String, String>,
@@ -783,7 +783,53 @@ fn deterministic_compile_opts() -> CompileOptions {
         trace_alloc: false,
         trace_drops: false,
         inject_prelude: true,
+        use_stdlib_objects: true,
     }
+}
+
+#[test]
+fn compile_with_path_links_stdlib_parse_archive_and_suppresses_local_body() {
+    let temp_dir = std::env::temp_dir().join(format!(
+        "machina_driver_parse_archive_{}",
+        std::process::id()
+    ));
+    std::fs::create_dir_all(&temp_dir).expect("failed to create temp dir");
+    let source_path = temp_dir.join("parse_archive.mc");
+    let source = r#"
+        requires {
+            std::parse as parse
+            std::parse::ParseError
+        }
+
+        fn main() -> u64 | ParseError {
+            parse::parse_u64("42")
+        }
+    "#;
+    std::fs::write(&source_path, source).expect("failed to write source");
+
+    let output = compile_with_path(source, Some(&source_path), &deterministic_compile_opts())
+        .expect("compile");
+
+    assert_eq!(
+        output.extra_link_paths.len(),
+        1,
+        "expected stdlib archive link path for std::parse"
+    );
+    assert!(
+        output.extra_link_paths[0].ends_with("libmachina_std.a"),
+        "expected stdlib archive path, got {}",
+        output.extra_link_paths[0].display()
+    );
+    assert!(
+        output.asm.contains("_parse_u64"),
+        "expected callsite to reference external parse_u64 symbol"
+    );
+    assert!(
+        !output.asm.contains("\n_parse_u64:\n"),
+        "std::parse body should come from the cached stdlib archive, not local asm"
+    );
+
+    let _ = std::fs::remove_dir_all(&temp_dir);
 }
 
 #[test]

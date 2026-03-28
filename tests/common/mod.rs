@@ -23,6 +23,7 @@ pub(crate) fn run_program_with_args(name: &str, source: &str, args: &[&str]) -> 
             trace_alloc: false,
             trace_drops: false,
             inject_prelude: true,
+            use_stdlib_objects: true,
         },
         args,
     )
@@ -55,7 +56,9 @@ pub(crate) fn run_program_with_opts(
     let prelude_obj = ensure_prelude_impl_object(&opts, Some(&temp_dir))
         .expect("failed to build cached prelude support");
     let runtime_archive = ensure_runtime_archive().expect("failed to build cached runtime archive");
-    link_exe(&exe_path, &asm_path, &runtime_archive, &[prelude_obj]);
+    let mut extra_objs = output.extra_link_paths.clone();
+    extra_objs.push(prelude_obj);
+    link_exe(&exe_path, &asm_path, &runtime_archive, &extra_objs);
 
     let run = Command::new(&exe_path)
         .args(args)

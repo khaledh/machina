@@ -1,4 +1,5 @@
 use std::collections::HashMap;
+use std::collections::HashSet;
 use std::path::Path;
 
 use crate::core::api::{
@@ -6,14 +7,17 @@ use crate::core::api::{
     semcheck_stage,
 };
 use crate::core::ast::Module;
+use crate::core::ast::{NodeId, TopLevelItem};
 use crate::core::backend;
 use crate::core::backend::regalloc::arm64::Arm64Target;
+use crate::core::capsule::{ModuleId, ModulePath};
 use crate::core::context::{AnalyzedContext, ResolvedContext, TypeCheckedContext};
 use crate::core::diag::CompileError;
 use crate::core::ir::format::{format_func_with_comments_and_names, format_globals};
 use crate::core::lexer::{LexError, Lexer, Token};
 use crate::core::nrvo::NrvoAnalyzer;
 use crate::core::resolve::DefId;
+use crate::driver::native_support::ensure_stdlib_archive_for_modules;
 
 #[derive(Debug)]
 pub struct CompileOptions {
@@ -23,11 +27,13 @@ pub struct CompileOptions {
     pub trace_alloc: bool,
     pub trace_drops: bool,
     pub inject_prelude: bool,
+    pub use_stdlib_objects: bool,
 }
 
 pub struct CompileOutput {
     pub asm: String,
     pub ir: Option<String>,
+    pub extra_link_paths: Vec<std::path::PathBuf>,
 }
 
 #[derive(Debug, Clone, Copy, Default)]
@@ -106,6 +112,32 @@ pub fn compile_with_path(
         },
     )?;
 
+    let object_backed_stdlib = if opts.use_stdlib_objects {
+        let referenced_modules = parsed
+            .module_paths_by_id
+            .values()
+            .cloned()
+            .collect::<HashSet<_>>();
+        ensure_stdlib_archive_for_modules(&referenced_modules).map_err(|message| {
+            vec![CompileError::Io(
+                Path::new("stdlib").to_path_buf(),
+                std::io::Error::other(message),
+            )]
+        })?
+    } else {
+        None
+    };
+    let object_backed_module_ids = object_backed_stdlib
+        .as_ref()
+        .map(|artifacts| {
+            collect_object_backed_module_ids(
+                &parsed.module_paths_by_id,
+                &artifacts.object_backed_modules,
+            )
+        })
+        .unwrap_or_default();
+    let top_level_owners = parsed.top_level_owners.clone();
+
     dump_ast_stage(&parsed.module, dump);
 
     let (resolved_context, typed_context) = run_strict_frontend(parsed)?;
@@ -117,7 +149,12 @@ pub fn compile_with_path(
     dump_def_table_stage(&typed.resolved_context, dump);
     dump_type_map_stage(&typed.typed_context, dump);
 
-    let analyzed = run_semantic_stage(typed)?;
+    let mut analyzed = run_semantic_stage(typed)?;
+    suppress_object_backed_stdlib_items(
+        &mut analyzed.module,
+        &top_level_owners,
+        &object_backed_module_ids,
+    );
 
     dump_nrvo_stage(&analyzed, dump);
 
@@ -138,7 +175,14 @@ pub fn compile_with_path(
 
     dump_asm_stage(&asm, dump);
 
-    Ok(CompileOutput { asm, ir })
+    Ok(CompileOutput {
+        asm,
+        ir,
+        extra_link_paths: object_backed_stdlib
+            .into_iter()
+            .map(|artifacts| artifacts.archive_path)
+            .collect(),
+    })
 }
 
 fn dump_tokens_stage(source: &str, dump: DumpFlags) -> Result<(), Vec<CompileError>> {
@@ -260,6 +304,53 @@ fn run_lower_stage(
         },
     )
     .map_err(|e| vec![e.into()])
+}
+
+fn collect_object_backed_module_ids(
+    module_paths_by_id: &HashMap<ModuleId, ModulePath>,
+    object_backed_modules: &HashSet<ModulePath>,
+) -> HashSet<ModuleId> {
+    module_paths_by_id
+        .iter()
+        .filter_map(|(module_id, module_path)| {
+            object_backed_modules
+                .contains(module_path)
+                .then_some(*module_id)
+        })
+        .collect()
+}
+
+fn suppress_object_backed_stdlib_items(
+    module: &mut Module,
+    top_level_owners: &HashMap<NodeId, ModuleId>,
+    object_backed_module_ids: &HashSet<ModuleId>,
+) {
+    if object_backed_module_ids.is_empty() {
+        return;
+    }
+
+    module.top_level_items.retain(|item| {
+        let owner = top_level_owners.get(&top_level_item_id(item));
+        let Some(owner) = owner else {
+            return true;
+        };
+        if !object_backed_module_ids.contains(owner) {
+            return true;
+        }
+        !matches!(item, TopLevelItem::FuncDef(_) | TopLevelItem::FuncDecl(_))
+    });
+}
+
+fn top_level_item_id(item: &TopLevelItem) -> NodeId {
+    match item {
+        TopLevelItem::TraitDef(trait_def) => trait_def.id,
+        TopLevelItem::TypeDef(type_def) => type_def.id,
+        TopLevelItem::MachineDef(machine_def) => machine_def.id,
+        TopLevelItem::FuncDecl(func_decl) => func_decl.id,
+        TopLevelItem::FuncDef(func_def) => func_def.id,
+        TopLevelItem::MethodBlock(method_block) => method_block.id,
+        TopLevelItem::ClosureDef(closure_def) => closure_def.id,
+    }
 }
 
 fn run_optimize_stage(lowered: backend::lower::LoweredModule) -> backend::lower::LoweredModule {

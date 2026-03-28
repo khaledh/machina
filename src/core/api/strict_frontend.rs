@@ -33,6 +33,7 @@ pub(crate) struct StrictFrontendParsed {
     pub module: Module,
     pub id_gen: NodeIdGen,
     pub top_level_owners: HashMap<NodeId, ModuleId>,
+    pub module_paths_by_id: HashMap<ModuleId, crate::core::capsule::ModulePath>,
 }
 
 pub fn check_strict_frontend_with_path(
@@ -67,28 +68,36 @@ pub(crate) fn build_strict_frontend_input(
     source_path: Option<&Path>,
     opts: StrictFrontendOptions,
 ) -> Result<StrictFrontendParsed, Vec<CompileError>> {
-    let (user_module, id_gen, top_level_owners) = if let Some(path) = source_path {
-        let capsule = capsule::discover_and_parse_capsule_with_options(
-            source,
-            path,
-            capsule::CapsuleParseOptions {
-                inject_prelude_requires: opts.inject_prelude,
-            },
-        )
-        .map_err(|e| vec![e.into()])?;
-        let capsule_context = CapsuleParsedContext::new(capsule);
-        let flattened = flatten_capsule(&capsule_context)
-            .map_err(|errs| errs.into_iter().map(CompileError::from).collect::<Vec<_>>())?;
-        (
-            flattened.module,
-            capsule_context.next_node_id_gen().clone(),
-            flattened.top_level_owners,
-        )
-    } else {
-        let id_gen = NodeIdGen::new();
-        let (module, id_gen) = parse_with_id_gen(source, id_gen)?;
-        (module, id_gen, HashMap::new())
-    };
+    let (user_module, id_gen, top_level_owners, module_paths_by_id) =
+        if let Some(path) = source_path {
+            let capsule = capsule::discover_and_parse_capsule_with_options(
+                source,
+                path,
+                capsule::CapsuleParseOptions {
+                    inject_prelude_requires: opts.inject_prelude,
+                },
+            )
+            .map_err(|e| vec![e.into()])?;
+            let capsule_context = CapsuleParsedContext::new(capsule);
+            let module_paths_by_id = capsule_context
+                .capsule
+                .modules
+                .iter()
+                .map(|(id, parsed)| (*id, parsed.source.path.clone()))
+                .collect::<HashMap<_, _>>();
+            let flattened = flatten_capsule(&capsule_context)
+                .map_err(|errs| errs.into_iter().map(CompileError::from).collect::<Vec<_>>())?;
+            (
+                flattened.module,
+                capsule_context.next_node_id_gen().clone(),
+                flattened.top_level_owners,
+                module_paths_by_id,
+            )
+        } else {
+            let id_gen = NodeIdGen::new();
+            let (module, id_gen) = parse_with_id_gen(source, id_gen)?;
+            (module, id_gen, HashMap::new(), HashMap::new())
+        };
 
     let (module, id_gen) = if opts.inject_prelude {
         inject_prelude_module(user_module, id_gen)?
@@ -100,6 +109,7 @@ pub(crate) fn build_strict_frontend_input(
         module,
         id_gen,
         top_level_owners,
+        module_paths_by_id,
     })
 }
 
