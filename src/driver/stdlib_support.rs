@@ -28,8 +28,10 @@ pub fn ensure_stdlib_archive_for_modules(
     fs::create_dir_all(&archive_dir)
         .map_err(|e| format!("failed to create {}: {e}", archive_dir.display()))?;
 
-    let object_path = ensure_flattened_stdlib_object(&object_backed_modules, &archive_dir)?;
-    let archive_path = archive_dir.join("libmachina_std.a");
+    let subset_tag = stdlib_subset_tag(&object_backed_modules);
+    let object_path =
+        ensure_flattened_stdlib_object(&object_backed_modules, &archive_dir, &subset_tag)?;
+    let archive_path = archive_dir.join(format!("libmachina_std_{subset_tag}.a"));
     if artifact_is_stale(&archive_path, std::slice::from_ref(&object_path))? {
         archive_objects(&archive_path, &[object_path.clone()])?;
     }
@@ -41,18 +43,11 @@ pub fn ensure_stdlib_archive_for_modules(
 }
 
 fn supported_stdlib_object_modules(module_paths: &HashSet<ModulePath>) -> HashSet<ModulePath> {
-    let referenced_supported = module_paths
+    module_paths
         .iter()
-        .any(|path| is_object_backed_stdlib_module(path));
-    if !referenced_supported {
-        return HashSet::new();
-    }
-
-    let mut modules = HashSet::new();
-    modules.insert(ModulePath::new(vec!["std".to_string(), "parse".to_string()]).unwrap());
-    modules.insert(ModulePath::new(vec!["std".to_string(), "env".to_string()]).unwrap());
-    modules.insert(ModulePath::new(vec!["std".to_string(), "io".to_string()]).unwrap());
-    modules
+        .filter(|path| is_object_backed_stdlib_module(path))
+        .cloned()
+        .collect()
 }
 
 fn is_object_backed_stdlib_module(module_path: &ModulePath) -> bool {
@@ -65,8 +60,9 @@ fn is_object_backed_stdlib_module(module_path: &ModulePath) -> bool {
 fn ensure_flattened_stdlib_object(
     object_backed_modules: &HashSet<ModulePath>,
     archive_dir: &PathBuf,
+    subset_tag: &str,
 ) -> Result<PathBuf, String> {
-    let object_path = archive_dir.join("stdlib.o");
+    let object_path = archive_dir.join(format!("stdlib_{subset_tag}.o"));
     let prelude_path = prelude_source_path();
     let mut sources = object_backed_modules
         .iter()
@@ -99,7 +95,7 @@ fn ensure_flattened_stdlib_object(
             .join("\n")
     })?;
 
-    let asm_path = archive_dir.join("stdlib.s");
+    let asm_path = archive_dir.join(format!("stdlib_{subset_tag}.s"));
     fs::write(&asm_path, output.asm)
         .map_err(|e| format!("failed to write {}: {e}", asm_path.display()))?;
     let assemble_result = assemble_object(&asm_path, &object_path);
@@ -148,4 +144,43 @@ fn synthetic_stdlib_entry_path() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))
         .join("std")
         .join("__stdlib_archive_entry.mc")
+}
+
+fn stdlib_subset_tag(modules: &HashSet<ModulePath>) -> String {
+    let mut module_paths = modules
+        .iter()
+        .map(|path| path.segments().join("_"))
+        .collect::<Vec<_>>();
+    module_paths.sort();
+    module_paths.join("__")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{stdlib_subset_tag, supported_stdlib_object_modules};
+    use crate::core::capsule::ModulePath;
+    use std::collections::HashSet;
+
+    #[test]
+    fn supported_stdlib_object_modules_keeps_only_referenced_supported_modules() {
+        let mut referenced = HashSet::new();
+        referenced.insert(ModulePath::new(vec!["std".into(), "parse".into()]).unwrap());
+        referenced.insert(ModulePath::new(vec!["std".into(), "io".into()]).unwrap());
+        referenced.insert(ModulePath::new(vec!["app".into(), "util".into()]).unwrap());
+
+        let selected = supported_stdlib_object_modules(&referenced);
+
+        assert_eq!(selected.len(), 2);
+        assert!(selected.contains(&ModulePath::new(vec!["std".into(), "parse".into()]).unwrap()));
+        assert!(selected.contains(&ModulePath::new(vec!["std".into(), "io".into()]).unwrap()));
+    }
+
+    #[test]
+    fn stdlib_subset_tag_is_stable_and_subset_specific() {
+        let mut modules = HashSet::new();
+        modules.insert(ModulePath::new(vec!["std".into(), "io".into()]).unwrap());
+        modules.insert(ModulePath::new(vec!["std".into(), "parse".into()]).unwrap());
+
+        assert_eq!(stdlib_subset_tag(&modules), "std_io__std_parse");
+    }
 }

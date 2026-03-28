@@ -816,7 +816,10 @@ fn compile_with_path_links_stdlib_parse_archive_and_suppresses_local_body() {
         "expected stdlib archive link path for std::parse"
     );
     assert!(
-        output.extra_link_paths[0].ends_with("libmachina_std.a"),
+        output.extra_link_paths[0]
+            .file_name()
+            .and_then(|name| name.to_str())
+            .is_some_and(|name| name.starts_with("libmachina_std_") && name.ends_with(".a")),
         "expected stdlib archive path, got {}",
         output.extra_link_paths[0].display()
     );
@@ -859,7 +862,10 @@ fn compile_with_path_links_stdlib_env_archive_and_suppresses_local_body() {
         "expected stdlib archive link path for std::env"
     );
     assert!(
-        output.extra_link_paths[0].ends_with("libmachina_std.a"),
+        output.extra_link_paths[0]
+            .file_name()
+            .and_then(|name| name.to_str())
+            .is_some_and(|name| name.starts_with("libmachina_std_") && name.ends_with(".a")),
         "expected stdlib archive path, got {}",
         output.extra_link_paths[0].display()
     );
@@ -909,7 +915,10 @@ fn compile_with_path_links_stdlib_io_archive_and_suppresses_local_bodies() {
         "expected stdlib archive link path for std::io"
     );
     assert!(
-        output.extra_link_paths[0].ends_with("libmachina_std.a"),
+        output.extra_link_paths[0]
+            .file_name()
+            .and_then(|name| name.to_str())
+            .is_some_and(|name| name.starts_with("libmachina_std_") && name.ends_with(".a")),
         "expected stdlib archive path, got {}",
         output.extra_link_paths[0].display()
     );
