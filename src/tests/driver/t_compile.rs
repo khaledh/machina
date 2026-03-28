@@ -876,6 +876,64 @@ fn compile_with_path_links_stdlib_env_archive_and_suppresses_local_body() {
 }
 
 #[test]
+fn compile_with_path_links_stdlib_io_archive_and_suppresses_local_bodies() {
+    let temp_dir =
+        std::env::temp_dir().join(format!("machina_driver_io_archive_{}", std::process::id()));
+    std::fs::create_dir_all(&temp_dir).expect("failed to create temp dir");
+    let source_path = temp_dir.join("io_archive.mc");
+    let output_path = temp_dir.join("out.txt");
+    let source = format!(
+        r#"
+        requires {{
+            std::io::open_write
+            std::io::IoError
+        }}
+
+        fn main() -> () | IoError {{
+            let raw = open_write("{output_path}")?;
+            let writer = raw.text();
+            writer.write_all("hi")?;
+            writer.close()
+        }}
+    "#,
+        output_path = output_path.display()
+    );
+    std::fs::write(&source_path, &source).expect("failed to write source");
+
+    let output = compile_with_path(&source, Some(&source_path), &deterministic_compile_opts())
+        .expect("compile");
+
+    assert_eq!(
+        output.extra_link_paths.len(),
+        1,
+        "expected stdlib archive link path for std::io"
+    );
+    assert!(
+        output.extra_link_paths[0].ends_with("libmachina_std.a"),
+        "expected stdlib archive path, got {}",
+        output.extra_link_paths[0].display()
+    );
+    assert!(
+        output.asm.contains("_open_write"),
+        "expected callsite to reference external open_write symbol"
+    );
+    assert!(
+        output.asm.contains("_TextWriter$write_all"),
+        "expected callsite to reference external TextWriter::write_all symbol"
+    );
+    assert!(
+        !output.asm.contains("\n_open_write:\n"),
+        "std::io open_write body should come from the cached stdlib archive, not local asm"
+    );
+    assert!(
+        !output.asm.contains("\n_TextWriter$write_all:\n"),
+        "std::io TextWriter::write_all body should come from the cached stdlib archive, not local asm"
+    );
+
+    let _ = std::fs::remove_dir_all(&temp_dir);
+}
+
+#[test]
 fn compile_ir_dump_is_deterministic() {
     let source = r#"
 type IoError = {

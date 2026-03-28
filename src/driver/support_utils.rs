@@ -25,8 +25,16 @@ pub(crate) fn compile_c_object(source: &Path, object: &Path) -> Result<(), Strin
 
 pub(crate) fn archive_objects(archive: &Path, objects: &[PathBuf]) -> Result<(), String> {
     if archive.exists() {
-        fs::remove_file(archive)
-            .map_err(|e| format!("failed to remove stale {}: {e}", archive.display()))?;
+        match fs::remove_file(archive) {
+            Ok(()) => {}
+            Err(err) if err.kind() == std::io::ErrorKind::NotFound => {}
+            Err(err) => {
+                return Err(format!(
+                    "failed to remove stale {}: {err}",
+                    archive.display()
+                ));
+            }
+        }
     }
     let status = Command::new("ar")
         .arg("rcs")

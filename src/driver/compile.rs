@@ -7,7 +7,7 @@ use crate::core::api::{
     semcheck_stage,
 };
 use crate::core::ast::Module;
-use crate::core::ast::{NodeId, TopLevelItem};
+use crate::core::ast::{MethodItem, NodeId, TopLevelItem};
 use crate::core::backend;
 use crate::core::backend::regalloc::arm64::Arm64Target;
 use crate::core::capsule::{ModuleId, ModulePath};
@@ -137,6 +137,11 @@ pub fn compile_with_path(
         })
         .unwrap_or_default();
     let top_level_owners = parsed.top_level_owners.clone();
+    let suppression_sets = collect_object_backed_suppression_sets(
+        &parsed.module,
+        &top_level_owners,
+        &object_backed_module_ids,
+    );
 
     dump_ast_stage(&parsed.module, dump);
 
@@ -150,11 +155,7 @@ pub fn compile_with_path(
     dump_type_map_stage(&typed.typed_context, dump);
 
     let mut analyzed = run_semantic_stage(typed)?;
-    suppress_object_backed_stdlib_items(
-        &mut analyzed.module,
-        &top_level_owners,
-        &object_backed_module_ids,
-    );
+    suppress_object_backed_stdlib_items(&mut analyzed.module, &suppression_sets);
 
     dump_nrvo_stage(&analyzed, dump);
 
@@ -320,24 +321,74 @@ fn collect_object_backed_module_ids(
         .collect()
 }
 
-fn suppress_object_backed_stdlib_items(
-    module: &mut Module,
+#[derive(Default)]
+struct ObjectBackedSuppressionSets {
+    callable_names: HashSet<String>,
+    method_type_names: HashSet<String>,
+}
+
+fn collect_object_backed_suppression_sets(
+    module: &Module,
     top_level_owners: &HashMap<NodeId, ModuleId>,
     object_backed_module_ids: &HashSet<ModuleId>,
-) {
+) -> ObjectBackedSuppressionSets {
+    let mut sets = ObjectBackedSuppressionSets::default();
     if object_backed_module_ids.is_empty() {
+        return sets;
+    }
+
+    for item in &module.top_level_items {
+        let Some(owner) = top_level_owners.get(&top_level_item_id(item)) else {
+            continue;
+        };
+        if !object_backed_module_ids.contains(owner) {
+            continue;
+        }
+        match item {
+            TopLevelItem::FuncDecl(func_decl) => {
+                sets.callable_names.insert(func_decl.sig.name.clone());
+            }
+            TopLevelItem::FuncDef(func_def) => {
+                sets.callable_names.insert(func_def.sig.name.clone());
+            }
+            TopLevelItem::MethodBlock(method_block) => {
+                sets.method_type_names
+                    .insert(method_block.type_name.clone());
+                for item in &method_block.method_items {
+                    let method_name = match item {
+                        MethodItem::Decl(method_decl) => &method_decl.sig.name,
+                        MethodItem::Def(method_def) => &method_def.sig.name,
+                    };
+                    sets.callable_names
+                        .insert(format!("{}${}", method_block.type_name, method_name));
+                }
+            }
+            _ => {}
+        }
+    }
+
+    sets
+}
+
+fn suppress_object_backed_stdlib_items(
+    module: &mut Module,
+    suppression_sets: &ObjectBackedSuppressionSets,
+) {
+    if suppression_sets.callable_names.is_empty() && suppression_sets.method_type_names.is_empty() {
         return;
     }
 
-    module.top_level_items.retain(|item| {
-        let owner = top_level_owners.get(&top_level_item_id(item));
-        let Some(owner) = owner else {
-            return true;
-        };
-        if !object_backed_module_ids.contains(owner) {
-            return true;
+    module.top_level_items.retain(|item| match item {
+        TopLevelItem::FuncDecl(func_decl) => !suppression_sets
+            .callable_names
+            .contains(&func_decl.sig.name),
+        TopLevelItem::FuncDef(func_def) => {
+            !suppression_sets.callable_names.contains(&func_def.sig.name)
         }
-        !matches!(item, TopLevelItem::FuncDef(_) | TopLevelItem::FuncDecl(_))
+        TopLevelItem::MethodBlock(method_block) => !suppression_sets
+            .method_type_names
+            .contains(&method_block.type_name),
+        _ => true,
     });
 }
 
