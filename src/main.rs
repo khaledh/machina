@@ -2,9 +2,7 @@ use clap::Parser as ClapParser;
 use machina::core::capsule::CapsuleError;
 use machina::core::diag::{CompileError, Span, format_error};
 use machina::driver::compile::{CompileOptions, check_with_path, compile_with_path};
-use machina::driver::native_support::{
-    assemble_object, default_exe_path, ensure_prelude_impl_object, ensure_runtime_archive,
-};
+use machina::driver::native_support::{assemble_object, default_exe_path, ensure_runtime_archive};
 use machina::driver::query::{QueryLookupKind as DriverQueryLookupKind, run_query};
 use machina::services::analysis::diagnostics::Diagnostic;
 use machina::services::analysis::diagnostics::DiagnosticPhase;
@@ -272,15 +270,7 @@ fn main() {
                         .output
                         .clone()
                         .unwrap_or_else(|| default_exe_path(input_path));
-                    let result = ensure_prelude_impl_object(
-                        &opts,
-                        Some(input_path.parent().unwrap_or_else(|| Path::new("."))),
-                    )
-                    .and_then(|obj| {
-                        let mut extra_objs = output.extra_link_paths.clone();
-                        extra_objs.push(obj);
-                        link_executable(&asm_path, &extra_objs, &exe_path)
-                    });
+                    let result = link_executable(&asm_path, &output.extra_link_paths, &exe_path);
                     if result.is_ok() {
                         println!("[SUCCESS] executable written to {}", exe_path.display());
                     }
@@ -289,15 +279,8 @@ fn main() {
                 }
                 DriverKind::Run => {
                     let exe_path = default_exe_path(input_path);
-                    let link_result = ensure_prelude_impl_object(
-                        &opts,
-                        Some(input_path.parent().unwrap_or_else(|| Path::new("."))),
-                    )
-                    .and_then(|obj| {
-                        let mut extra_objs = output.extra_link_paths.clone();
-                        extra_objs.push(obj);
-                        link_executable(&asm_path, &extra_objs, &exe_path)
-                    });
+                    let link_result =
+                        link_executable(&asm_path, &output.extra_link_paths, &exe_path);
                     let remove_asm = link_result.is_ok();
                     let result = link_result.and_then(|_| run_executable(&exe_path));
                     result.map(|exit_code| DriverResult::RunExit {

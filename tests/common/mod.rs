@@ -3,7 +3,7 @@ use std::process::{Command, Output};
 use std::sync::atomic::{AtomicUsize, Ordering};
 
 use machina::driver::compile::{CompileOptions, compile_with_path};
-use machina::driver::native_support::{ensure_prelude_impl_object, ensure_runtime_archive};
+use machina::driver::native_support::ensure_runtime_archive;
 use std::fs;
 
 static TEST_COUNTER: AtomicUsize = AtomicUsize::new(0);
@@ -53,12 +53,13 @@ pub(crate) fn run_program_with_opts(
     let exe_path = temp_dir.join(name);
     fs::write(&asm_path, output.asm).expect("failed to write asm");
 
-    let prelude_obj = ensure_prelude_impl_object(&opts, Some(&temp_dir))
-        .expect("failed to build cached prelude support");
     let runtime_archive = ensure_runtime_archive().expect("failed to build cached runtime archive");
-    let mut extra_objs = output.extra_link_paths.clone();
-    extra_objs.push(prelude_obj);
-    link_exe(&exe_path, &asm_path, &runtime_archive, &extra_objs);
+    link_exe(
+        &exe_path,
+        &asm_path,
+        &runtime_archive,
+        &output.extra_link_paths,
+    );
 
     let run = Command::new(&exe_path)
         .args(args)

@@ -943,6 +943,59 @@ fn compile_with_path_links_stdlib_io_archive_and_suppresses_local_bodies() {
 }
 
 #[test]
+fn compile_with_path_links_builtin_archive_for_prelude_string_methods() {
+    let temp_dir = std::env::temp_dir().join(format!(
+        "machina_driver_builtin_archive_{}",
+        std::process::id()
+    ));
+    std::fs::create_dir_all(&temp_dir).expect("failed to create temp dir");
+    let source_path = temp_dir.join("builtin_archive.mc");
+    let source = r#"
+        fn main() -> () {
+            let trimmed = "  hello  ".trim();
+            let ok = trimmed.contains("ell");
+            if ok { () } else { () }
+        }
+    "#;
+    std::fs::write(&source_path, source).expect("failed to write source");
+
+    let output = compile_with_path(source, Some(&source_path), &deterministic_compile_opts())
+        .expect("compile");
+
+    assert_eq!(
+        output.extra_link_paths.len(),
+        1,
+        "expected stdlib archive link path for builtin support"
+    );
+    assert!(
+        output.extra_link_paths[0]
+            .file_name()
+            .and_then(|name| name.to_str())
+            .is_some_and(|name| name.starts_with("libmachina_std_") && name.ends_with(".a")),
+        "expected stdlib archive path, got {}",
+        output.extra_link_paths[0].display()
+    );
+    assert!(
+        output.asm.contains("_string_trim_impl"),
+        "expected callsite to reference external string_trim_impl symbol"
+    );
+    assert!(
+        output.asm.contains("_string_contains_impl"),
+        "expected callsite to reference external string_contains_impl symbol"
+    );
+    assert!(
+        !output.asm.contains("\n_string_trim_impl:\n"),
+        "builtin string_trim_impl should come from the stdlib archive, not local asm"
+    );
+    assert!(
+        !output.asm.contains("\n_string_contains_impl:\n"),
+        "builtin string_contains_impl should come from the stdlib archive, not local asm"
+    );
+
+    let _ = std::fs::remove_dir_all(&temp_dir);
+}
+
+#[test]
 fn compile_ir_dump_is_deterministic() {
     let source = r#"
 type IoError = {

@@ -43,17 +43,20 @@ pub fn ensure_stdlib_archive_for_modules(
 }
 
 fn supported_stdlib_object_modules(module_paths: &HashSet<ModulePath>) -> HashSet<ModulePath> {
-    module_paths
+    let mut modules = module_paths
         .iter()
         .filter(|path| is_object_backed_stdlib_module(path))
         .cloned()
-        .collect()
+        .collect::<HashSet<_>>();
+    modules.insert(ModulePath::new(vec!["std".into(), "builtin".into()]).unwrap());
+    modules
 }
 
 fn is_object_backed_stdlib_module(module_path: &ModulePath) -> bool {
     matches!(
         module_path.segments(),
-        [std_seg, name] if std_seg == "std" && (name == "parse" || name == "env" || name == "io")
+        [std_seg, name]
+            if std_seg == "std" && (name == "parse" || name == "env" || name == "io")
     )
 }
 
@@ -170,7 +173,8 @@ mod tests {
 
         let selected = supported_stdlib_object_modules(&referenced);
 
-        assert_eq!(selected.len(), 2);
+        assert_eq!(selected.len(), 3);
+        assert!(selected.contains(&ModulePath::new(vec!["std".into(), "builtin".into()]).unwrap()));
         assert!(selected.contains(&ModulePath::new(vec!["std".into(), "parse".into()]).unwrap()));
         assert!(selected.contains(&ModulePath::new(vec!["std".into(), "io".into()]).unwrap()));
     }
@@ -178,9 +182,13 @@ mod tests {
     #[test]
     fn stdlib_subset_tag_is_stable_and_subset_specific() {
         let mut modules = HashSet::new();
+        modules.insert(ModulePath::new(vec!["std".into(), "builtin".into()]).unwrap());
         modules.insert(ModulePath::new(vec!["std".into(), "io".into()]).unwrap());
         modules.insert(ModulePath::new(vec!["std".into(), "parse".into()]).unwrap());
 
-        assert_eq!(stdlib_subset_tag(&modules), "std_io__std_parse");
+        assert_eq!(
+            stdlib_subset_tag(&modules),
+            "std_builtin__std_io__std_parse"
+        );
     }
 }
