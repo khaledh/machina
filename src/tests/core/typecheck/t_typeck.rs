@@ -797,6 +797,77 @@ fn test_method_named_call_args_typecheck() {
 }
 
 #[test]
+fn test_default_args_typecheck_records_sparse_arg_order_for_trailing_omission() {
+    let source = r#"
+        fn connect(host: string, port: u64 = 443, timeout: u64 = 30) -> u64 {
+            port + timeout
+        }
+
+        fn main() -> u64 {
+            connect("example.com")
+        }
+    "#;
+
+    let ctx = type_check_source(source).expect("Failed to type check");
+    let main = ctx
+        .module
+        .func_defs()
+        .into_iter()
+        .find(|func| func.sig.name == "main")
+        .expect("missing main");
+    let tail = block_tail(&main.body);
+    let call_sig = ctx.call_sigs.get(&tail.id).expect("missing call sig");
+    assert_eq!(call_sig.params.len(), 3);
+    assert_eq!(call_sig.arg_order, vec![0]);
+}
+
+#[test]
+fn test_default_args_typecheck_records_sparse_arg_order_for_named_skip() {
+    let source = r#"
+        fn connect(host: string, port: u64 = 443, timeout: u64 = 30) -> u64 {
+            port + timeout
+        }
+
+        fn main() -> u64 {
+            connect("example.com", timeout: 5)
+        }
+    "#;
+
+    let ctx = type_check_source(source).expect("Failed to type check");
+    let main = ctx
+        .module
+        .func_defs()
+        .into_iter()
+        .find(|func| func.sig.name == "main")
+        .expect("missing main");
+    let tail = block_tail(&main.body);
+    let call_sig = ctx.call_sigs.get(&tail.id).expect("missing call sig");
+    assert_eq!(call_sig.params.len(), 3);
+    assert_eq!(call_sig.arg_order, vec![0, 2]);
+}
+
+#[test]
+fn test_default_args_overload_arity_overlap_error() {
+    let source = r#"
+        fn choose(x: u64, y: u64 = 0) -> u64 { x + y }
+        fn choose(x: u64) -> u64 { x }
+
+        fn main() -> u64 {
+            choose(1)
+        }
+    "#;
+
+    let result = type_check_source(source);
+    assert!(result.is_err());
+    if let Err(errors) = result {
+        assert!(errors.iter().any(|error| matches!(
+            error.kind(),
+            TypeCheckErrorKind::OverloadArityOverlap(name) if name == "choose"
+        )));
+    }
+}
+
+#[test]
 fn test_named_call_args_unknown_label_error() {
     let source = r#"
         fn connect(host: string, port: u64) -> u64 { port }

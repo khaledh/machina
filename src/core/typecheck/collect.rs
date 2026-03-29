@@ -779,7 +779,11 @@ fn validate_trait_method_impl(
             .params
             .iter()
             .zip(expected.params.iter())
-            .all(|(actual, expected)| actual.mode == expected.mode && actual.ty == expected.ty);
+            .all(|(actual, expected)| {
+                actual.mode == expected.mode
+                    && actual.ty == expected.ty
+                    && actual.has_default == expected.has_default
+            });
 
     if !matches {
         tc_push_error!(
@@ -819,6 +823,7 @@ fn build_param_sigs(
             name,
             ty,
             mode: param.mode.clone(),
+            has_default: param.default.is_some(),
         });
     }
     Ok(out)

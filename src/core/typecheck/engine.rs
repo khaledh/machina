@@ -64,6 +64,7 @@ pub(crate) struct CollectedParamSig {
     pub(crate) name: String,
     pub(crate) ty: Type,
     pub(crate) mode: ParamMode,
+    pub(crate) has_default: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

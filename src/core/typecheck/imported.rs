@@ -153,6 +153,7 @@ fn imported_params_to_collected(params: &[ImportedParamSig]) -> Vec<CollectedPar
             name: format!("arg{index}"),
             ty: param.ty.clone(),
             mode: param.mode.clone(),
+            has_default: false,
         })
         .collect()
 }

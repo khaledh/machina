@@ -20,12 +20,12 @@ use crate::core::symbol_id::SelectedCallable;
 use crate::core::typecheck::InferUnifier;
 use crate::core::typecheck::builtin_methods;
 use crate::core::typecheck::call_args::{
-    identity_arg_order, match_arg_labels_to_param_names, reorder_values_by_arg_order,
+    identity_arg_order, match_arg_labels_to_param_names,
 };
 use crate::core::typecheck::constraints::{CallCallee, ExprObligation};
 use crate::core::typecheck::engine::TypecheckEngine;
 use crate::core::typecheck::engine::{
-    CollectedCallableSig, CollectedPropertySig, CollectedTraitSig,
+    CollectedCallableSig, CollectedParamSig, CollectedPropertySig, CollectedTraitSig,
 };
 use crate::core::typecheck::errors::TypeCheckError;
 use crate::core::typecheck::nominal_infer::NominalKeyResolver;
@@ -202,7 +202,6 @@ fn build_outputs(engine: &TypecheckEngine) -> FinalizeOutput {
                 _ => None,
             })
             .unwrap_or_else(|| identity_arg_order(arg_types.len()));
-        let ordered_arg_types = reorder_values_by_arg_order(&arg_types, &source_arg_order);
         let resolved = match &obligation.callee {
             CallCallee::NamedFunction { name, .. } => {
                 if let Some(def_id) = selected_def_id {
@@ -210,7 +209,8 @@ fn build_outputs(engine: &TypecheckEngine) -> FinalizeOutput {
                         engine,
                         name,
                         def_id,
-                        &ordered_arg_types,
+                        &arg_types,
+                        &source_arg_order,
                         obligation.span,
                         &expected_ret,
                     )
@@ -218,7 +218,8 @@ fn build_outputs(engine: &TypecheckEngine) -> FinalizeOutput {
                     resolve_named_call(
                         engine,
                         name,
-                        &ordered_arg_types,
+                        &arg_types,
+                        &source_arg_order,
                         obligation.span,
                         &expected_ret,
                     )
@@ -231,7 +232,8 @@ fn build_outputs(engine: &TypecheckEngine) -> FinalizeOutput {
                         receiver_ty.as_ref().or(obligation.receiver.as_ref()),
                         name,
                         def_id,
-                        &ordered_arg_types,
+                        &arg_types,
+                        &source_arg_order,
                         obligation.span,
                         &expected_ret,
                     )
@@ -240,7 +242,8 @@ fn build_outputs(engine: &TypecheckEngine) -> FinalizeOutput {
                         engine,
                         receiver_ty.as_ref().or(obligation.receiver.as_ref()),
                         name,
-                        &ordered_arg_types,
+                        &arg_types,
+                        &source_arg_order,
                         obligation.span,
                         &expected_ret,
                     )
@@ -996,15 +999,22 @@ fn call_arg_order_for_selected_def(
     match &obligation.callee {
         CallCallee::NamedFunction { name, .. } => {
             let overloads = engine.env().func_sigs.get(name)?;
-            let sig = overloads.iter().find(|sig| {
-                sig.def_id == def_id && sig.params.len() == obligation.arg_labels.len()
-            })?;
+            let sig = overloads
+                .iter()
+                .find(|sig| sig.def_id == def_id && callable_accepts_arity(sig, obligation.arg_labels.len()))?;
             let param_names = sig
                 .params
                 .iter()
                 .map(|param| param.name.clone())
                 .collect::<Vec<_>>();
-            match_arg_labels_to_param_names(&obligation.arg_labels, &param_names).ok()
+            let has_default = sig
+                .params
+                .iter()
+                .map(|param| param.has_default)
+                .collect::<Vec<_>>();
+            match_arg_labels_to_param_names(&obligation.arg_labels, &param_names, &has_default)
+                .ok()
+                .map(|matched| matched.arg_order)
         }
         CallCallee::Method { name } => {
             let receiver_ty = receiver.map(|term| resolve_term(term, engine))?;
@@ -1014,15 +1024,22 @@ fn call_arg_order_for_selected_def(
                 _ => return None,
             };
             let overloads = engine.env().method_sigs.get(&owner)?.get(name)?;
-            let sig = overloads.iter().find(|sig| {
-                sig.def_id == def_id && sig.params.len() == obligation.arg_labels.len()
-            })?;
+            let sig = overloads
+                .iter()
+                .find(|sig| sig.def_id == def_id && callable_accepts_arity(sig, obligation.arg_labels.len()))?;
             let param_names = sig
                 .params
                 .iter()
                 .map(|param| param.name.clone())
                 .collect::<Vec<_>>();
-            match_arg_labels_to_param_names(&obligation.arg_labels, &param_names).ok()
+            let has_default = sig
+                .params
+                .iter()
+                .map(|param| param.has_default)
+                .collect::<Vec<_>>();
+            match_arg_labels_to_param_names(&obligation.arg_labels, &param_names, &has_default)
+                .ok()
+                .map(|matched| matched.arg_order)
         }
         CallCallee::Dynamic { .. } => None,
     }
@@ -1037,25 +1054,23 @@ fn call_arg_order_for_builtin_method(
         .iter()
         .map(|param| param.name.clone())
         .collect::<Vec<_>>();
-    match_arg_labels_to_param_names(&obligation.arg_labels, &param_names).ok()
+    let has_default = params.iter().map(|_| false).collect::<Vec<_>>();
+    match_arg_labels_to_param_names(&obligation.arg_labels, &param_names, &has_default)
+        .ok()
+        .map(|matched| matched.arg_order)
 }
 
 fn resolve_named_call(
     engine: &TypecheckEngine,
     name: &str,
     arg_types: &[Type],
+    arg_order: &[usize],
     span: Span,
     expected_ret: &Type,
 ) -> Option<ResolvedCall> {
     let overloads = engine.env().func_sigs.get(name)?;
     let sig = pick_overload(overloads, arg_types.len())?;
-    Some(instantiate_call_sig(
-        sig,
-        arg_types,
-        None,
-        span,
-        expected_ret,
-    ))
+    Some(instantiate_call_sig(sig, arg_types, arg_order, None, span, expected_ret))
 }
 
 fn resolve_named_call_by_def_id(
@@ -1063,18 +1078,13 @@ fn resolve_named_call_by_def_id(
     name: &str,
     def_id: DefId,
     arg_types: &[Type],
+    arg_order: &[usize],
     span: Span,
     expected_ret: &Type,
 ) -> Option<ResolvedCall> {
     let overloads = engine.env().func_sigs.get(name)?;
-    let sig = pick_def_id_overload(overloads, def_id, arg_types, expected_ret)?;
-    Some(instantiate_call_sig(
-        sig,
-        arg_types,
-        None,
-        span,
-        expected_ret,
-    ))
+    let sig = pick_def_id_overload(overloads, def_id, arg_types, arg_order, expected_ret)?;
+    Some(instantiate_call_sig(sig, arg_types, arg_order, None, span, expected_ret))
 }
 
 fn resolve_method_call(
@@ -1082,6 +1092,7 @@ fn resolve_method_call(
     receiver: Option<&Type>,
     method_name: &str,
     arg_types: &[Type],
+    arg_order: &[usize],
     span: Span,
     expected_ret: &Type,
 ) -> Option<ResolvedCall> {
@@ -1099,11 +1110,7 @@ fn resolve_method_call(
         ty: receiver_ty,
     });
     Some(instantiate_call_sig(
-        sig,
-        arg_types,
-        receiver,
-        span,
-        expected_ret,
+        sig, arg_types, arg_order, receiver, span, expected_ret,
     ))
 }
 
@@ -1139,6 +1146,7 @@ fn resolve_method_call_by_def_id(
     method_name: &str,
     def_id: DefId,
     arg_types: &[Type],
+    arg_order: &[usize],
     span: Span,
     expected_ret: &Type,
 ) -> Option<ResolvedCall> {
@@ -1150,17 +1158,13 @@ fn resolve_method_call_by_def_id(
     };
     let by_name = engine.env().method_sigs.get(&owner)?;
     let overloads = by_name.get(method_name)?;
-    let sig = pick_def_id_overload(overloads, def_id, arg_types, expected_ret)?;
+    let sig = pick_def_id_overload(overloads, def_id, arg_types, arg_order, expected_ret)?;
     let receiver = Some(CallParam {
         mode: sig.self_mode.clone().unwrap_or(ParamMode::In),
         ty: receiver_ty,
     });
     Some(instantiate_call_sig(
-        sig,
-        arg_types,
-        receiver,
-        span,
-        expected_ret,
+        sig, arg_types, arg_order, receiver, span, expected_ret,
     ))
 }
 
@@ -1168,31 +1172,28 @@ fn pick_def_id_overload<'a>(
     overloads: &'a [CollectedCallableSig],
     def_id: DefId,
     arg_types: &[Type],
+    arg_order: &[usize],
     expected_ret: &Type,
 ) -> Option<&'a CollectedCallableSig> {
     let mut matches = overloads.iter().filter(|sig| {
         sig.def_id == def_id
-            && sig.params.len() == arg_types.len()
+            && callable_accepts_arity(sig, arg_types.len())
             && sig.ret_ty == *expected_ret
-            && sig
-                .params
-                .iter()
-                .zip(arg_types)
-                .all(|(param, arg_ty)| param.ty == *arg_ty)
+            && explicit_args_match(sig, arg_types, arg_order)
     });
     if let Some(sig) = matches.next() {
         return Some(sig);
     }
     overloads
         .iter()
-        .find(|sig| sig.def_id == def_id && sig.params.len() == arg_types.len())
+        .find(|sig| sig.def_id == def_id && callable_accepts_arity(sig, arg_types.len()))
 }
 
 fn pick_overload(
     overloads: &[CollectedCallableSig],
     arity: usize,
 ) -> Option<&CollectedCallableSig> {
-    let mut matches = overloads.iter().filter(|sig| sig.params.len() == arity);
+    let mut matches = overloads.iter().filter(|sig| callable_accepts_arity(sig, arity));
     let first = matches.next()?;
     if matches.next().is_some() {
         // Ambiguous arity-only match: let caller handle as unresolved.
@@ -1201,14 +1202,35 @@ fn pick_overload(
     Some(first)
 }
 
+fn callable_accepts_arity(sig: &CollectedCallableSig, arity: usize) -> bool {
+    required_param_count(&sig.params) <= arity && arity <= sig.params.len()
+}
+
+fn required_param_count(params: &[CollectedParamSig]) -> usize {
+    params.iter().filter(|param| !param.has_default).count()
+}
+
+fn explicit_args_match(sig: &CollectedCallableSig, arg_types: &[Type], arg_order: &[usize]) -> bool {
+    arg_order
+        .iter()
+        .copied()
+        .enumerate()
+        .all(|(arg_index, param_index)| {
+            sig.params
+                .get(param_index)
+                .is_some_and(|param| param.ty == arg_types[arg_index])
+        })
+}
+
 fn instantiate_call_sig(
     sig: &CollectedCallableSig,
     arg_types: &[Type],
+    arg_order: &[usize],
     receiver: Option<CallParam>,
     span: Span,
     expected_ret: &Type,
 ) -> ResolvedCall {
-    let iterable_param_tys = instantiate_iterable_param_types(sig, arg_types);
+    let iterable_param_tys = instantiate_iterable_param_types(sig, arg_types, arg_order);
     if sig.type_param_count == 0 {
         let params = sig
             .params
@@ -1244,8 +1266,8 @@ fn instantiate_call_sig(
         }
         let _ = unifier.unify(self_ty, &receiver.ty);
     }
-    for (param, arg_ty) in sig.params.iter().zip(arg_types.iter()) {
-        let _ = unifier.unify(&param.ty, arg_ty);
+    for (arg_index, param_index) in arg_order.iter().copied().enumerate() {
+        let _ = unifier.unify(&sig.params[param_index].ty, &arg_types[arg_index]);
     }
     let _ = unifier.unify(&sig.ret_ty, expected_ret);
 
@@ -1288,16 +1310,23 @@ fn instantiate_call_sig(
     }
 }
 
-fn instantiate_iterable_param_types(sig: &CollectedCallableSig, arg_types: &[Type]) -> Vec<Type> {
-    sig.params
+fn instantiate_iterable_param_types(
+    sig: &CollectedCallableSig,
+    arg_types: &[Type],
+    arg_order: &[usize],
+) -> Vec<Type> {
+    arg_order
         .iter()
-        .zip(arg_types.iter())
-        .filter_map(|(param, arg_ty)| match &param.ty {
+        .copied()
+        .enumerate()
+        .filter_map(|(arg_index, param_index)| {
+            let arg_ty = &arg_types[arg_index];
+            match &sig.params[param_index].ty {
             Type::Iterable { .. } if !matches!(arg_ty, Type::Iterable { .. }) => {
                 Some(arg_ty.clone())
             }
             _ => None,
-        })
+        }})
         .collect()
 }
 

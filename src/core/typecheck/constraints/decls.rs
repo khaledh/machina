@@ -1,7 +1,10 @@
 //! Module/function/method declaration orchestration.
 
+use std::collections::HashMap;
+
 use super::*;
-use crate::core::ast::{FuncDecl, MethodBlock, MethodDecl, MethodDef, MethodItem, TypeParam};
+use crate::core::ast::{FuncDecl, MethodBlock, MethodDecl, MethodDef, MethodItem, Param, TypeParam};
+use crate::core::typecheck::errors::TEK;
 
 fn as_opaque_iterable_type(ty: &Type) -> Option<Type> {
     matches!(ty, Type::Iterable { .. }).then(|| ty.clone())
@@ -9,6 +12,8 @@ fn as_opaque_iterable_type(ty: &Type) -> Option<Type> {
 
 impl<'a> ConstraintCollector<'a> {
     pub(super) fn collect_module(&mut self) {
+        self.check_local_function_overload_arity_ranges();
+        self.check_local_method_overload_arity_ranges();
         // Declarations first so callable defs are available when encountered by
         // later expressions in the same module.
         for func_decl in self.ctx.module.func_decls() {
@@ -43,6 +48,7 @@ impl<'a> ConstraintCollector<'a> {
                     ConstraintReason::Decl(func_def_id, func_decl.span),
                 );
             }
+            this.collect_param_default_constraints(&func_decl.sig.params);
         });
     }
 
@@ -65,6 +71,7 @@ impl<'a> ConstraintCollector<'a> {
             if opaque_ret_ty.is_none() {
                 opaque_ret_ty = ret_ty.as_ref().ok().and_then(as_opaque_iterable_type);
             }
+            this.collect_param_default_constraints(&func_def.sig.params);
             let return_term = if opaque_ret_ty.is_some() {
                 this.fresh_var_term()
             } else {
@@ -142,6 +149,7 @@ impl<'a> ConstraintCollector<'a> {
                         ConstraintReason::Decl(method_def_id, method_decl.span),
                     );
                 }
+                this.collect_param_default_constraints(&method_decl.sig.params);
             });
         });
     }
@@ -174,6 +182,7 @@ impl<'a> ConstraintCollector<'a> {
                 if opaque_ret_ty.is_none() {
                     opaque_ret_ty = ret_ty.as_ref().ok().and_then(as_opaque_iterable_type);
                 }
+                this.collect_param_default_constraints(&sig.params);
                 let return_term = if opaque_ret_ty.is_some() {
                     this.fresh_var_term()
                 } else {
@@ -258,6 +267,91 @@ impl<'a> ConstraintCollector<'a> {
             });
         });
     }
+
+    fn collect_param_default_constraints(&mut self, params: &[Param]) {
+        for param in params {
+            let Some(default) = &param.default else {
+                continue;
+            };
+            let Some(param_ty) = self.resolve_param_type_in_scope(&param.typ).ok() else {
+                continue;
+            };
+            let default_ty = self.collect_expr(default, Some(param_ty.clone()));
+            self.push_assignable(
+                default_ty,
+                param_ty,
+                ConstraintReason::Expr(default.id, default.span),
+            );
+        }
+    }
+
+    fn check_local_function_overload_arity_ranges(&mut self) {
+        let mut by_name: HashMap<String, Vec<(&[Param], Span)>> = HashMap::new();
+        for func_decl in self.ctx.module.func_decls() {
+            by_name
+                .entry(func_decl.sig.name.clone())
+                .or_default()
+                .push((&func_decl.sig.params, func_decl.span));
+        }
+        for func_def in self.ctx.module.func_defs() {
+            by_name
+                .entry(func_def.sig.name.clone())
+                .or_default()
+                .push((&func_def.sig.params, func_def.span));
+        }
+        for (name, overloads) in by_name {
+            self.check_overload_arity_ranges(&name, &overloads);
+        }
+    }
+
+    fn check_local_method_overload_arity_ranges(&mut self) {
+        let mut by_name: HashMap<String, Vec<(&[Param], Span)>> = HashMap::new();
+        for method_block in self.ctx.module.method_blocks() {
+            for method_item in &method_block.method_items {
+                let (label, params, span) = match method_item {
+                    MethodItem::Decl(method_decl) => (
+                        format!("{}::{}", method_block.type_name, method_decl.sig.name),
+                        method_decl.sig.params.as_slice(),
+                        method_decl.span,
+                    ),
+                    MethodItem::Def(method_def) => (
+                        format!("{}::{}", method_block.type_name, method_def.sig.name),
+                        method_def.sig.params.as_slice(),
+                        method_def.span,
+                    ),
+                };
+                by_name.entry(label).or_default().push((params, span));
+            }
+        }
+        for (name, overloads) in by_name {
+            self.check_overload_arity_ranges(&name, &overloads);
+        }
+    }
+
+    fn check_overload_arity_ranges(&mut self, name: &str, overloads: &[(&[Param], Span)]) {
+        for (index, (left_params, _)) in overloads.iter().enumerate() {
+            let left_has_defaults = left_params.iter().any(|param| param.default.is_some());
+            let left_required = required_param_count(left_params);
+            let left_total = left_params.len();
+            for (right_params, right_span) in overloads.iter().skip(index + 1) {
+                let right_has_defaults = right_params.iter().any(|param| param.default.is_some());
+                if !left_has_defaults && !right_has_defaults {
+                    continue;
+                }
+                let right_required = required_param_count(right_params);
+                let right_total = right_params.len();
+                if left_required <= right_total && right_required <= left_total {
+                    self.out
+                        .immediate_errors
+                        .push(TEK::OverloadArityOverlap(name.to_string()).at(*right_span));
+                }
+            }
+        }
+    }
+}
+
+fn required_param_count(params: &[Param]) -> usize {
+    params.iter().filter(|param| param.default.is_none()).count()
 }
 
 fn method_block_type_params(

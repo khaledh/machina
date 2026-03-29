@@ -436,6 +436,9 @@ pub fn walk_self_param<V: Visitor + ?Sized>(_v: &mut V, _self_param: &SelfParam)
 
 pub fn walk_param<V: Visitor + ?Sized>(v: &mut V, param: &Param) {
     v.visit_type_expr(&param.typ);
+    if let Some(default) = &param.default {
+        v.visit_expr(default);
+    }
 }
 
 // --- Method Blocks ---

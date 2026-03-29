@@ -73,6 +73,12 @@ fn populate_typecheck_metadata(kind: &TypeCheckErrorKind, metadata: &mut Diagnos
                 DiagnosticValue::String(param.clone()),
             );
         }
+        TypeCheckErrorKind::OverloadArityOverlap(callable, ..) => {
+            metadata.insert(
+                "callable".to_string(),
+                DiagnosticValue::String(callable.clone()),
+            );
+        }
         TypeCheckErrorKind::DeclTypeMismatch(expected, found, ..) => {
             metadata.insert(
                 "expected".to_string(),
@@ -153,6 +159,7 @@ macro_rules! with_typecheck_variants {
             ArgProvidedMoreThanOnce,
             MissingArgumentForParameter,
             NamedArgsNotSupportedForFunctionValues,
+            OverloadArityOverlap,
             TypeArgCountMismatch,
             InvalidCallee,
             EmptyArrayLiteral,

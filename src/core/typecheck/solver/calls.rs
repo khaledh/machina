@@ -10,7 +10,7 @@ use crate::core::capsule::ModuleId;
 use crate::core::resolve::{DefId, DefTable};
 use crate::core::typecheck::builtin_methods;
 use crate::core::typecheck::builtin_methods::BuiltinMethodRet;
-use crate::core::typecheck::call_args::{CallArgMatchError, match_arg_labels_to_param_names};
+use crate::core::typecheck::call_args::{CallArgMatch, CallArgMatchError, match_arg_labels_to_param_names};
 use crate::core::typecheck::constraints::{CallCallee, CallObligation};
 use crate::core::typecheck::engine::{
     CollectedCallableSig, CollectedPropertySig, CollectedTraitSig, lookup_property,
@@ -219,8 +219,8 @@ pub(super) fn check_call_obligations(
         let mut ambiguous_best = false;
         let mut first_error = None;
         for sig in candidates.drain(..) {
-            let arg_order = match match_args_to_params_for_sig(obligation, &sig) {
-                Ok(arg_order) => arg_order,
+            let arg_match = match match_args_to_params_for_sig(obligation, &sig) {
+                Ok(arg_match) => arg_match,
                 Err(err) => {
                     first_error.get_or_insert_with(|| {
                         named_arg_match_error_to_diag(err, obligation, &callable_name(obligation))
@@ -258,7 +258,7 @@ pub(super) fn check_call_obligations(
                     &super::term_utils::canonicalize_type(trial.apply(expected_receiver_ty)),
                 );
             }
-            for (index, param_index) in arg_order.iter().copied().enumerate() {
+            for (index, param_index) in arg_match.arg_order.iter().copied().enumerate() {
                 let arg_term = &obligation.arg_terms[index];
                 let param_ty = &instantiated.params[param_index];
                 let arg_ty = obligation
@@ -477,7 +477,7 @@ fn named_call_candidates(
         .map(|overloads| {
             overloads
                 .iter()
-                .filter(|sig| sig.params.len() == arity)
+                .filter(|sig| callable_accepts_arity(sig, arity))
                 .cloned()
                 .collect::<Vec<_>>()
         })
@@ -495,13 +495,18 @@ fn callable_name(obligation: &CallObligation) -> String {
 fn match_args_to_params_for_sig(
     obligation: &CallObligation,
     sig: &CollectedCallableSig,
-) -> Result<Vec<usize>, CallArgMatchError> {
+) -> Result<CallArgMatch, CallArgMatchError> {
     let param_names = sig
         .params
         .iter()
         .map(|param| param.name.clone())
         .collect::<Vec<_>>();
-    match_arg_labels_to_param_names(&obligation.arg_labels, &param_names)
+    let has_default = sig
+        .params
+        .iter()
+        .map(|param| param.has_default)
+        .collect::<Vec<_>>();
+    match_arg_labels_to_param_names(&obligation.arg_labels, &param_names, &has_default)
 }
 
 fn named_arg_match_error_to_diag(
@@ -540,7 +545,7 @@ fn method_call_candidates(
             .map(|overloads| {
                 overloads
                     .iter()
-                    .filter(|sig| sig.params.len() == arity)
+                    .filter(|sig| callable_accepts_arity(sig, arity))
                     .cloned()
                     .collect::<Vec<_>>()
             })
@@ -551,7 +556,7 @@ fn method_call_candidates(
             .map(|overloads| {
                 overloads
                     .iter()
-                    .filter(|sig| sig.params.len() == arity)
+                    .filter(|sig| callable_accepts_arity(sig, arity))
                     .cloned()
                     .collect::<Vec<_>>()
             })
@@ -565,7 +570,7 @@ fn method_call_candidates(
                 let Some(method) = trait_sig.methods.get(method_name) else {
                     continue;
                 };
-                if method.params.len() != arity {
+                if !trait_method_accepts_arity(method, arity) {
                     continue;
                 }
                 candidates.push(CollectedCallableSig {
@@ -584,6 +589,18 @@ fn method_call_candidates(
         }
         _ => Vec::new(),
     }
+}
+
+fn callable_accepts_arity(sig: &CollectedCallableSig, arity: usize) -> bool {
+    required_param_count(&sig.params) <= arity && arity <= sig.params.len()
+}
+
+fn trait_method_accepts_arity(sig: &crate::core::typecheck::engine::CollectedTraitMethodSig, arity: usize) -> bool {
+    required_param_count(&sig.params) <= arity && arity <= sig.params.len()
+}
+
+fn required_param_count(params: &[crate::core::typecheck::engine::CollectedParamSig]) -> usize {
+    params.iter().filter(|param| !param.has_default).count()
 }
 
 fn called_property_name(
@@ -655,8 +672,13 @@ fn try_solve_builtin_method(
         .iter()
         .map(|param| param.name.clone())
         .collect::<Vec<_>>();
-    let arg_order = match match_arg_labels_to_param_names(&obligation.arg_labels, &param_names) {
-        Ok(arg_order) => arg_order,
+    let has_default = params.iter().map(|_| false).collect::<Vec<_>>();
+    let arg_match = match match_arg_labels_to_param_names(
+        &obligation.arg_labels,
+        &param_names,
+        &has_default,
+    ) {
+        Ok(arg_match) => arg_match,
         Err(err) => {
             return Some(Err(named_arg_match_error_to_diag(
                 err,
@@ -665,7 +687,7 @@ fn try_solve_builtin_method(
             )));
         }
     };
-    for (index, param_index) in arg_order.iter().copied().enumerate() {
+    for (index, param_index) in arg_match.arg_order.iter().copied().enumerate() {
         let arg_term = &obligation.arg_terms[index];
         let expected_ty = &params[param_index];
         let arg_ty = super::term_utils::resolve_term(arg_term, unifier);

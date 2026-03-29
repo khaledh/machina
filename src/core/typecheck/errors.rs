@@ -364,6 +364,9 @@ pub enum TypeCheckErrorKind {
     #[error("Function overload is ambiguous: {0}")]
     OverloadAmbiguous(String),
 
+    #[error("Overloads of '{0}' have overlapping arity ranges")]
+    OverloadArityOverlap(String),
+
     #[error("Machine {0} hosts linear type {1}, not {2}")]
     LinearSessionHostMismatch(String, String, String),
 

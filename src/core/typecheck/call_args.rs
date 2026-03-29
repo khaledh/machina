@@ -9,6 +9,12 @@ pub(crate) enum CallArgMatchError {
     MissingParam(String),
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct CallArgMatch {
+    pub(crate) arg_order: Vec<usize>,
+    pub(crate) missing_params: Vec<usize>,
+}
+
 pub(crate) fn identity_arg_order(arity: usize) -> Vec<usize> {
     (0..arity).collect()
 }
@@ -16,9 +22,28 @@ pub(crate) fn identity_arg_order(arity: usize) -> Vec<usize> {
 pub(crate) fn match_arg_labels_to_param_names(
     arg_labels: &[Option<ArgLabel>],
     param_names: &[String],
-) -> Result<Vec<usize>, CallArgMatchError> {
+    has_default: &[bool],
+) -> Result<CallArgMatch, CallArgMatchError> {
     if arg_labels.is_empty() {
-        return Ok(Vec::new());
+        if arg_labels.len() > param_names.len() {
+            return Err(CallArgMatchError::MissingParam(
+                param_names.last().cloned().unwrap_or_default(),
+            ));
+        }
+        let missing_params = (arg_labels.len()..param_names.len())
+            .filter(|index| has_default.get(*index).copied().unwrap_or(false))
+            .collect::<Vec<_>>();
+        if let Some(missing_index) = (arg_labels.len()..param_names.len())
+            .find(|index| !has_default.get(*index).copied().unwrap_or(false))
+        {
+            return Err(CallArgMatchError::MissingParam(
+                param_names[missing_index].clone(),
+            ));
+        }
+        return Ok(CallArgMatch {
+            arg_order: identity_arg_order(arg_labels.len()),
+            missing_params,
+        });
     }
 
     let mut next_positional = 0usize;
@@ -49,26 +74,20 @@ pub(crate) fn match_arg_labels_to_param_names(
         arg_order.push(param_index);
     }
 
-    if let Some((missing_index, _)) = used.iter().enumerate().find(|(_, used)| !**used) {
-        return Err(CallArgMatchError::MissingParam(
-            param_names[missing_index].clone(),
-        ));
+    let mut missing_params = Vec::new();
+    for (index, assigned) in used.iter().enumerate() {
+        if *assigned {
+            continue;
+        }
+        if has_default.get(index).copied().unwrap_or(false) {
+            missing_params.push(index);
+            continue;
+        }
+        return Err(CallArgMatchError::MissingParam(param_names[index].clone()));
     }
 
-    Ok(arg_order)
-}
-
-pub(crate) fn reorder_values_by_arg_order<T: Clone>(values: &[T], arg_order: &[usize]) -> Vec<T> {
-    if values.is_empty() {
-        return Vec::new();
-    }
-    if arg_order.is_empty() {
-        return values.to_vec();
-    }
-
-    let mut ordered = vec![values[0].clone(); values.len()];
-    for (arg_index, param_index) in arg_order.iter().copied().enumerate() {
-        ordered[param_index] = values[arg_index].clone();
-    }
-    ordered
+    Ok(CallArgMatch {
+        arg_order,
+        missing_params,
+    })
 }

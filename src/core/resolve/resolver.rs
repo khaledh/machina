@@ -1496,6 +1496,9 @@ impl SymbolResolver {
             resolver.visit_type_expr(&method_decl.sig.ret_ty_expr);
             for param in &method_decl.sig.params {
                 resolver.visit_type_expr(&param.typ);
+                if let Some(default) = &param.default {
+                    resolver.visit_expr(default);
+                }
             }
 
             resolver.register_param(
@@ -1589,6 +1592,9 @@ impl Visitor for SymbolResolver {
             resolver.visit_type_expr(&func_decl.sig.ret_ty_expr);
             for param in &func_decl.sig.params {
                 resolver.visit_type_expr(&param.typ);
+                if let Some(default) = &param.default {
+                    resolver.visit_expr(default);
+                }
             }
 
             for (index, param) in func_decl.sig.params.iter().enumerate() {
@@ -1612,6 +1618,9 @@ impl Visitor for SymbolResolver {
             resolver.visit_type_expr(&func_def.sig.ret_ty_expr);
             for param in &func_def.sig.params {
                 resolver.visit_type_expr(&param.typ);
+                if let Some(default) = &param.default {
+                    resolver.visit_expr(default);
+                }
             }
 
             for (index, param) in func_def.sig.params.iter().enumerate() {
@@ -1664,6 +1673,9 @@ impl Visitor for SymbolResolver {
                 resolver.visit_type_expr(&method.sig.ret_ty_expr);
                 for param in &method.sig.params {
                     resolver.visit_type_expr(&param.typ);
+                    if let Some(default) = &param.default {
+                        resolver.visit_expr(default);
+                    }
                 }
 
                 resolver.register_param(
@@ -1701,6 +1713,9 @@ impl Visitor for SymbolResolver {
             resolver.visit_type_expr(&method_def.sig.ret_ty_expr);
             for param in &method_def.sig.params {
                 resolver.visit_type_expr(&param.typ);
+                if let Some(default) = &param.default {
+                    resolver.visit_expr(default);
+                }
             }
 
             resolver.register_param(
