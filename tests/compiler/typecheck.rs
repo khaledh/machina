@@ -1,4 +1,4 @@
-use crate::common::{run_program, run_program_with_args};
+use crate::common::{run_program, run_program_with_args, run_program_with_stdin};
 use machina::core::capsule::CapsuleError;
 use machina::core::diag::CompileError;
 use machina::core::typecheck::TypeCheckErrorKind;
@@ -2681,6 +2681,68 @@ fn test_typed_csv_iterator_pipeline_builds_and_runs() {
 
     let stdout = String::from_utf8_lossy(&run.stdout);
     assert_eq!(stdout, "alice\nbob\n", "unexpected stdout: {stdout}");
+}
+
+#[test]
+fn test_stdin_read_all_reads_piped_input() {
+    let run = run_program_with_stdin(
+        "stdin_read_all_reads_piped_input",
+        r#"
+            requires {
+                std::io::IoError
+                std::io::print
+                std::io::stdin
+            }
+
+            fn main() -> () | IoError {
+                let text = stdin().read_all()?;
+                print(text);
+            }
+        "#,
+        b"alpha\nbeta\n",
+    );
+
+    assert!(run.status.success(), "program failed: {run:?}");
+    let stdout = String::from_utf8_lossy(&run.stdout);
+    assert_eq!(stdout, "alpha\nbeta\n", "unexpected stdout: {stdout}");
+}
+
+#[test]
+fn test_stdin_read_line_strips_newlines_and_reports_eof() {
+    let run = run_program_with_stdin(
+        "stdin_read_line_strips_newlines_and_reports_eof",
+        r#"
+            requires {
+                std::io::EndOfInput
+                std::io::IoError
+                std::io::println
+                std::io::stdin
+            }
+
+            fn main() -> () | IoError {
+                while true {
+                    match stdin().read_line() {
+                        line: string => println(line),
+                        done: EndOfInput => {
+                            println("done");
+                            return ();
+                        }
+                        err: IoError => {
+                            return err;
+                        }
+                    }
+                }
+            }
+        "#,
+        b"alpha\r\nbeta\n\ntail",
+    );
+
+    assert!(run.status.success(), "program failed: {run:?}");
+    let stdout = String::from_utf8_lossy(&run.stdout);
+    assert_eq!(
+        stdout, "alpha\nbeta\n\ntail\ndone\n",
+        "unexpected stdout: {stdout}"
+    );
 }
 
 #[test]

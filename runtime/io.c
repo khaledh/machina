@@ -152,6 +152,58 @@ uint64_t __rt_file_read(uint64_t fd_raw, uint64_t buf_ref) {
     return (uint64_t)n + 1;
 }
 
+// Reads a single line from stdin into an owned Machina string.
+// Returns:
+// - 0 on I/O error
+// - 1 on EOF before any bytes are read
+// - 2 on success (including EOF after a partial line)
+uint64_t __rt_stdin_read_line(uint64_t out_ptr) {
+    mc_string_t *out = (mc_string_t *)out_ptr;
+    out->ptr = 0;
+    out->len = 0;
+    out->cap = 0;
+
+    uint8_t byte = 0;
+    for (;;) {
+        ssize_t n;
+        for (;;) {
+            n = read(STDIN_FILENO, &byte, 1);
+            if (n < 0 && errno == EINTR) {
+                continue;
+            }
+            break;
+        }
+
+        if (n < 0) {
+            mc_file_set_last_errno(errno);
+            __mc_string_drop(out);
+            return 0;
+        }
+
+        if (n == 0) {
+            if (out->len == 0) {
+                mc_file_set_last_errno(0);
+                return 1;
+            }
+            mc_file_set_last_errno(0);
+            return 2;
+        }
+
+        if (byte == '\n') {
+            if (out->len > 0) {
+                uint8_t *buf = (uint8_t *)(uintptr_t)out->ptr;
+                if (buf[out->len - 1] == '\r') {
+                    out->len -= 1;
+                }
+            }
+            mc_file_set_last_errno(0);
+            return 2;
+        }
+
+        __mc_string_append_bytes(out, (uint64_t)(uintptr_t)&byte, 1);
+    }
+}
+
 // Reads the full file contents into an owned Machina string.
 // The bytes are treated as text without UTF-8 validation; std::io owns the
 // higher-level contract for when this is appropriate to call.

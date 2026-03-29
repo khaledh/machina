@@ -41,6 +41,9 @@ fn __rt_file_read(fd: u64, inout buf: u8[]) -> u64;
 fn __rt_file_read_all_text(out dst: string, fd: u64);
 
 @runtime
+fn __rt_stdin_read_line(out dst: string) -> u64;
+
+@runtime
 fn __rt_file_write(fd: u64, data: u8[]) -> u64;
 
 @runtime

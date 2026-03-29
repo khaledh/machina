@@ -54,6 +54,9 @@ type IoError = {
     code: u64,
 }
 
+@public
+type EndOfInput = {}
+
 @opaque
 type ReadFile = {
     _fd: u64,
@@ -76,6 +79,11 @@ type TextReader = {
 
 @opaque
 type BinaryReader = {
+    _fd: u64,
+}
+
+@opaque
+type Stdin = {
     _fd: u64,
 }
 
@@ -149,6 +157,20 @@ fn read_all_text_from_fd(out dst: string, fd: u64) -> () | IoError {
     }
 }
 
+fn stdin_read_line(out dst: string) -> () | IoError | EndOfInput {
+    dst = "";
+    let status: u64 = __rt_stdin_read_line(out dst);
+    if status == 0 {
+        return IoError {
+            code: __rt_file_last_errno(),
+        };
+    } else if status == 1 {
+        return EndOfInput {};
+    } else {
+        ()
+    }
+}
+
 fn write_all_binary_to_fd(fd: u64, data: u8[]) -> () | IoError {
     var off: u64 = 0;
     while off < data.len {
@@ -181,6 +203,11 @@ fn open_write(path: string) -> WriteFile | IoError {
 fn open_rw(path: string) -> ReadWriteFile | IoError {
     let fd = decode_file_result(__rt_file_open_rw(path))?;
     ReadWriteFile { _fd: fd }
+}
+
+@public
+fn stdin() -> Stdin {
+    Stdin { _fd: 0 }
 }
 
 ReadFile :: {
@@ -278,6 +305,27 @@ BinaryReader :: {
 
     fn close_ignore_error(sink self) {
         file_close_ignore_error(self._fd);
+    }
+}
+
+Stdin :: {
+    @public
+    fn read(self, inout buf: u8[]) -> u64 | IoError {
+        file_read(self._fd, inout buf)
+    }
+
+    @public
+    fn read_all(self) -> string | IoError {
+        var text: string;
+        read_all_text_from_fd(out text, self._fd)?;
+        text
+    }
+
+    @public
+    fn read_line(self) -> string | IoError | EndOfInput {
+        var text: string;
+        stdin_read_line(out text)?;
+        text
     }
 }
 

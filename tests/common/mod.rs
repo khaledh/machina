@@ -1,3 +1,4 @@
+use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Output};
 use std::sync::atomic::{AtomicUsize, Ordering};
@@ -27,6 +28,60 @@ pub(crate) fn run_program_with_args(name: &str, source: &str, args: &[&str]) -> 
         },
         args,
     )
+}
+
+pub(crate) fn run_program_with_stdin(name: &str, source: &str, stdin: &[u8]) -> Output {
+    let run_id = TEST_COUNTER.fetch_add(1, Ordering::Relaxed);
+    let temp_dir = std::env::temp_dir().join(format!(
+        "machina_runtime_test_{}_{}_{}",
+        name,
+        std::process::id(),
+        run_id
+    ));
+    fs::create_dir_all(&temp_dir).expect("failed to create temp dir");
+
+    let source_path = temp_dir.join(format!("{name}.mc"));
+    fs::write(&source_path, source).expect("failed to write temp source");
+
+    let output = compile_source_with_opts(
+        &source_path,
+        &CompileOptions {
+            dump: None,
+            emit_ir: false,
+            verify_ir: false,
+            trace_alloc: false,
+            trace_drops: false,
+            inject_prelude: true,
+            use_stdlib_objects: true,
+        },
+    );
+
+    let asm_path = temp_dir.join(format!("{name}.s"));
+    let exe_path = temp_dir.join(name);
+    fs::write(&asm_path, output.asm).expect("failed to write asm");
+
+    let runtime_archive = ensure_runtime_archive().expect("failed to build cached runtime archive");
+    link_exe(
+        &exe_path,
+        &asm_path,
+        &runtime_archive,
+        &output.extra_link_paths,
+    );
+
+    let mut child = Command::new(&exe_path)
+        .stdin(std::process::Stdio::piped())
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped())
+        .spawn()
+        .expect("failed to run executable");
+    if let Some(mut child_stdin) = child.stdin.take() {
+        child_stdin.write_all(stdin).expect("failed to write stdin");
+    }
+    let run = child
+        .wait_with_output()
+        .expect("failed to wait for executable");
+    let _ = fs::remove_dir_all(&temp_dir);
+    run
 }
 
 pub(crate) fn run_program_with_opts(
