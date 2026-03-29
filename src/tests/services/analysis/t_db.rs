@@ -3572,6 +3572,51 @@ fn run(x: u64) -> u64 { x }
 }
 
 #[test]
+fn diagnostics_for_program_file_typechecks_symbol_import_named_default_calls() {
+    let run_id = ANALYSIS_TMP_COUNTER.fetch_add(1, Ordering::Relaxed);
+    let temp_dir = std::env::temp_dir().join(format!(
+        "machina_analysis_program_symbol_import_default_args_{}_{}",
+        std::process::id(),
+        run_id
+    ));
+    let app_dir = temp_dir.join("app");
+    fs::create_dir_all(&app_dir).expect("failed to create temp module ast");
+
+    let entry_path = temp_dir.join("main.mc");
+    let dep_path = app_dir.join("dep.mc");
+    let entry_source = r#"
+requires {
+    app::dep::connect
+}
+
+fn main() -> u64 {
+    connect("example.com", timeout: 5)
+}
+"#;
+    let dep_source = r#"
+@public
+fn connect(host: string, port: u64 = 443, timeout: u64 = 30) -> u64 { port + timeout }
+"#;
+
+    fs::write(&entry_path, entry_source).expect("failed to write entry source");
+    fs::write(&dep_path, dep_source).expect("failed to write dependency source");
+
+    let mut db = AnalysisDb::new();
+    let entry_id = db.upsert_disk_text(entry_path.clone(), entry_source);
+    db.upsert_disk_text(dep_path.clone(), dep_source);
+
+    let diagnostics = db
+        .diagnostics_for_program_file(entry_id)
+        .expect("program diagnostics query should succeed");
+    assert!(
+        diagnostics.is_empty(),
+        "expected imported callable named/default call to typecheck cleanly, got: {diagnostics:#?}"
+    );
+
+    let _ = fs::remove_dir_all(&temp_dir);
+}
+
+#[test]
 fn diagnostics_for_program_file_typechecks_symbol_import_types() {
     let run_id = ANALYSIS_TMP_COUNTER.fetch_add(1, Ordering::Relaxed);
     let temp_dir = std::env::temp_dir().join(format!(

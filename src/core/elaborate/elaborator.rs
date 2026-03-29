@@ -273,22 +273,30 @@ impl<'a> Elaborator<'a> {
         &self,
         def_id: DefId,
     ) -> Option<&'a [crate::core::ast::Param]> {
-        self.source_module.callables().into_iter().find_map(|callable| {
-            (self.def_table.lookup_node_def_id(callable.id()) == Some(def_id)).then(|| match callable
-            {
-                crate::core::ast::CallableRef::FuncDecl(func_decl) => func_decl.sig.params.as_slice(),
-                crate::core::ast::CallableRef::FuncDef(func_def) => func_def.sig.params.as_slice(),
-                crate::core::ast::CallableRef::MethodDecl { method_decl, .. } => {
-                    method_decl.sig.params.as_slice()
-                }
-                crate::core::ast::CallableRef::MethodDef { method_def, .. } => {
-                    method_def.sig.params.as_slice()
-                }
-                crate::core::ast::CallableRef::ClosureDef(closure_def) => {
-                    closure_def.sig.params.as_slice()
-                }
+        self.source_module
+            .callables()
+            .into_iter()
+            .find_map(|callable| {
+                (self.def_table.lookup_node_def_id(callable.id()) == Some(def_id)).then(|| {
+                    match callable {
+                        crate::core::ast::CallableRef::FuncDecl(func_decl) => {
+                            func_decl.sig.params.as_slice()
+                        }
+                        crate::core::ast::CallableRef::FuncDef(func_def) => {
+                            func_def.sig.params.as_slice()
+                        }
+                        crate::core::ast::CallableRef::MethodDecl { method_decl, .. } => {
+                            method_decl.sig.params.as_slice()
+                        }
+                        crate::core::ast::CallableRef::MethodDef { method_def, .. } => {
+                            method_def.sig.params.as_slice()
+                        }
+                        crate::core::ast::CallableRef::ClosureDef(closure_def) => {
+                            closure_def.sig.params.as_slice()
+                        }
+                    }
+                })
             })
-        })
     }
 
     pub(super) fn for_plan_or_panic(

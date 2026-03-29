@@ -10,7 +10,9 @@ use crate::core::capsule::ModuleId;
 use crate::core::resolve::{DefId, DefTable};
 use crate::core::typecheck::builtin_methods;
 use crate::core::typecheck::builtin_methods::BuiltinMethodRet;
-use crate::core::typecheck::call_args::{CallArgMatch, CallArgMatchError, match_arg_labels_to_param_names};
+use crate::core::typecheck::call_args::{
+    CallArgMatch, CallArgMatchError, match_arg_labels_to_param_names,
+};
 use crate::core::typecheck::constraints::{CallCallee, CallObligation};
 use crate::core::typecheck::engine::{
     CollectedCallableSig, CollectedPropertySig, CollectedTraitSig, lookup_property,
@@ -595,7 +597,10 @@ fn callable_accepts_arity(sig: &CollectedCallableSig, arity: usize) -> bool {
     required_param_count(&sig.params) <= arity && arity <= sig.params.len()
 }
 
-fn trait_method_accepts_arity(sig: &crate::core::typecheck::engine::CollectedTraitMethodSig, arity: usize) -> bool {
+fn trait_method_accepts_arity(
+    sig: &crate::core::typecheck::engine::CollectedTraitMethodSig,
+    arity: usize,
+) -> bool {
     required_param_count(&sig.params) <= arity && arity <= sig.params.len()
 }
 
@@ -673,20 +678,17 @@ fn try_solve_builtin_method(
         .map(|param| param.name.clone())
         .collect::<Vec<_>>();
     let has_default = params.iter().map(|_| false).collect::<Vec<_>>();
-    let arg_match = match match_arg_labels_to_param_names(
-        &obligation.arg_labels,
-        &param_names,
-        &has_default,
-    ) {
-        Ok(arg_match) => arg_match,
-        Err(err) => {
-            return Some(Err(named_arg_match_error_to_diag(
-                err,
-                obligation,
-                method_name,
-            )));
-        }
-    };
+    let arg_match =
+        match match_arg_labels_to_param_names(&obligation.arg_labels, &param_names, &has_default) {
+            Ok(arg_match) => arg_match,
+            Err(err) => {
+                return Some(Err(named_arg_match_error_to_diag(
+                    err,
+                    obligation,
+                    method_name,
+                )));
+            }
+        };
     for (index, param_index) in arg_match.arg_order.iter().copied().enumerate() {
         let arg_term = &obligation.arg_terms[index];
         let expected_ty = &params[param_index];

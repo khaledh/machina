@@ -308,11 +308,15 @@ fn collect_public_callable_sigs(
         out.insert(
             symbol_id,
             ImportedCallableSig {
-                params: params
-                    .into_iter()
-                    .map(|param| ImportedParamSig {
-                        mode: param_mode_from_fn_param(param.mode),
-                        ty: param.ty,
+                params: sig
+                    .params
+                    .iter()
+                    .zip(params.into_iter())
+                    .map(|(param_sig, param_ty)| ImportedParamSig {
+                        name: param_sig.ident.clone(),
+                        mode: param_mode_from_fn_param(param_ty.mode),
+                        has_default: param_sig.default.is_some(),
+                        ty: param_ty.ty,
                     })
                     .collect(),
                 ret_ty: *ret_ty,
@@ -382,7 +386,9 @@ fn collect_public_callable_sigs_resolved(
                 type_param_map.as_ref(),
             ) {
                 Ok(ty) => params.push(ImportedParamSig {
+                    name: param.ident.clone(),
                     mode: param.mode.clone(),
+                    has_default: param.default.is_some(),
                     ty,
                 }),
                 Err(_) => {
@@ -518,7 +524,9 @@ fn collect_public_method_sigs(
                     type_param_map.as_ref(),
                 ) {
                     Ok(ty) => params.push(ImportedParamSig {
+                        name: param.ident.clone(),
                         mode: param.mode.clone(),
+                        has_default: param.default.is_some(),
                         ty,
                     }),
                     Err(_) => {
@@ -724,7 +732,9 @@ fn collect_imported_trait_method_sig(
             return None;
         };
         params.push(ImportedParamSig {
+            name: param.ident.clone(),
             mode: param.mode.clone(),
+            has_default: false,
             ty,
         });
     }

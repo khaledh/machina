@@ -3,7 +3,9 @@
 use std::collections::HashMap;
 
 use super::*;
-use crate::core::ast::{FuncDecl, MethodBlock, MethodDecl, MethodDef, MethodItem, Param, TypeParam};
+use crate::core::ast::{
+    FuncDecl, MethodBlock, MethodDecl, MethodDef, MethodItem, Param, TypeParam,
+};
 use crate::core::typecheck::errors::TEK;
 
 fn as_opaque_iterable_type(ty: &Type) -> Option<Type> {
@@ -351,7 +353,10 @@ impl<'a> ConstraintCollector<'a> {
 }
 
 fn required_param_count(params: &[Param]) -> usize {
-    params.iter().filter(|param| param.default.is_none()).count()
+    params
+        .iter()
+        .filter(|param| param.default.is_none())
+        .count()
 }
 
 fn method_block_type_params(

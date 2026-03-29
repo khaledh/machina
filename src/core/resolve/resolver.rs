@@ -199,7 +199,9 @@ pub struct ImportedResolvedMethodSig {
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ImportedParamSig {
+    pub name: String,
     pub mode: ParamMode,
+    pub has_default: bool,
     pub ty: Type,
 }
 

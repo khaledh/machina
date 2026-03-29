@@ -222,9 +222,7 @@ impl<'a> Elaborator<'a> {
 
         if ordered.iter().any(Option::is_none) {
             let def_id = call_sig.def_id.unwrap_or_else(|| {
-                panic!(
-                    "compiler bug: call {call_id:?} omitted args but has no selected def id"
-                )
+                panic!("compiler bug: call {call_id:?} omitted args but has no selected def id")
             });
             let params = self.callable_params_for_def_id(def_id).unwrap_or_else(|| {
                 panic!(

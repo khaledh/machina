@@ -27,7 +27,7 @@ pub use stdlib::{
     load_stdlib_module_interface_with_codec,
 };
 
-pub const MODULE_INTERFACE_FORMAT_VERSION: u32 = 1;
+pub const MODULE_INTERFACE_FORMAT_VERSION: u32 = 2;
 
 struct SourceToolingContext {
     path: PathBuf,
@@ -245,6 +245,7 @@ pub struct InterfaceSelfParam {
 pub struct InterfaceParam {
     pub name: String,
     pub mode: crate::core::ast::ParamMode,
+    pub has_default: bool,
     pub ty: TypeKey,
 }
 
@@ -498,6 +499,7 @@ fn push_callable_export(
         .map(|param| InterfaceParam {
             name: param.ident.clone(),
             mode: param.mode.clone(),
+            has_default: param.default.is_some(),
             ty: type_key_for_type_expr(&param.typ, type_params, &context.def_table, module_path),
         })
         .collect::<Vec<_>>();
@@ -694,6 +696,7 @@ fn type_export_from_def(
                         .map(|param| InterfaceParam {
                             name: param.name.clone(),
                             mode: crate::core::ast::ParamMode::In,
+                            has_default: false,
                             ty: type_key_for_type_expr(
                                 &param.ty,
                                 &type_def.type_params,
@@ -725,6 +728,7 @@ fn type_export_from_def(
                         .map(|param| InterfaceParam {
                             name: param.name.clone(),
                             mode: crate::core::ast::ParamMode::In,
+                            has_default: false,
                             ty: type_key_for_type_expr(
                                 &param.ty,
                                 &type_def.type_params,
@@ -912,6 +916,7 @@ fn trait_method_signature(
             .map(|param| InterfaceParam {
                 name: param.ident.clone(),
                 mode: param.mode.clone(),
+                has_default: param.default.is_some(),
                 ty: type_key_for_type_expr(&param.typ, &sig.type_params, def_table, module_path),
             })
             .collect(),

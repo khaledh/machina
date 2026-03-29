@@ -148,12 +148,11 @@ fn imported_trait_sig_to_collected(
 fn imported_params_to_collected(params: &[ImportedParamSig]) -> Vec<CollectedParamSig> {
     params
         .iter()
-        .enumerate()
-        .map(|(index, param)| CollectedParamSig {
-            name: format!("arg{index}"),
+        .map(|param| CollectedParamSig {
+            name: param.name.clone(),
             ty: param.ty.clone(),
             mode: param.mode.clone(),
-            has_default: false,
+            has_default: param.has_default,
         })
         .collect()
 }

@@ -19,9 +19,7 @@ use crate::core::resolve::{DefId, DefKind};
 use crate::core::symbol_id::SelectedCallable;
 use crate::core::typecheck::InferUnifier;
 use crate::core::typecheck::builtin_methods;
-use crate::core::typecheck::call_args::{
-    identity_arg_order, match_arg_labels_to_param_names,
-};
+use crate::core::typecheck::call_args::{identity_arg_order, match_arg_labels_to_param_names};
 use crate::core::typecheck::constraints::{CallCallee, ExprObligation};
 use crate::core::typecheck::engine::TypecheckEngine;
 use crate::core::typecheck::engine::{
@@ -999,9 +997,9 @@ fn call_arg_order_for_selected_def(
     match &obligation.callee {
         CallCallee::NamedFunction { name, .. } => {
             let overloads = engine.env().func_sigs.get(name)?;
-            let sig = overloads
-                .iter()
-                .find(|sig| sig.def_id == def_id && callable_accepts_arity(sig, obligation.arg_labels.len()))?;
+            let sig = overloads.iter().find(|sig| {
+                sig.def_id == def_id && callable_accepts_arity(sig, obligation.arg_labels.len())
+            })?;
             let param_names = sig
                 .params
                 .iter()
@@ -1024,9 +1022,9 @@ fn call_arg_order_for_selected_def(
                 _ => return None,
             };
             let overloads = engine.env().method_sigs.get(&owner)?.get(name)?;
-            let sig = overloads
-                .iter()
-                .find(|sig| sig.def_id == def_id && callable_accepts_arity(sig, obligation.arg_labels.len()))?;
+            let sig = overloads.iter().find(|sig| {
+                sig.def_id == def_id && callable_accepts_arity(sig, obligation.arg_labels.len())
+            })?;
             let param_names = sig
                 .params
                 .iter()
@@ -1070,7 +1068,14 @@ fn resolve_named_call(
 ) -> Option<ResolvedCall> {
     let overloads = engine.env().func_sigs.get(name)?;
     let sig = pick_overload(overloads, arg_types.len())?;
-    Some(instantiate_call_sig(sig, arg_types, arg_order, None, span, expected_ret))
+    Some(instantiate_call_sig(
+        sig,
+        arg_types,
+        arg_order,
+        None,
+        span,
+        expected_ret,
+    ))
 }
 
 fn resolve_named_call_by_def_id(
@@ -1084,7 +1089,14 @@ fn resolve_named_call_by_def_id(
 ) -> Option<ResolvedCall> {
     let overloads = engine.env().func_sigs.get(name)?;
     let sig = pick_def_id_overload(overloads, def_id, arg_types, arg_order, expected_ret)?;
-    Some(instantiate_call_sig(sig, arg_types, arg_order, None, span, expected_ret))
+    Some(instantiate_call_sig(
+        sig,
+        arg_types,
+        arg_order,
+        None,
+        span,
+        expected_ret,
+    ))
 }
 
 fn resolve_method_call(
@@ -1110,7 +1122,12 @@ fn resolve_method_call(
         ty: receiver_ty,
     });
     Some(instantiate_call_sig(
-        sig, arg_types, arg_order, receiver, span, expected_ret,
+        sig,
+        arg_types,
+        arg_order,
+        receiver,
+        span,
+        expected_ret,
     ))
 }
 
@@ -1164,7 +1181,12 @@ fn resolve_method_call_by_def_id(
         ty: receiver_ty,
     });
     Some(instantiate_call_sig(
-        sig, arg_types, arg_order, receiver, span, expected_ret,
+        sig,
+        arg_types,
+        arg_order,
+        receiver,
+        span,
+        expected_ret,
     ))
 }
 
@@ -1193,7 +1215,9 @@ fn pick_overload(
     overloads: &[CollectedCallableSig],
     arity: usize,
 ) -> Option<&CollectedCallableSig> {
-    let mut matches = overloads.iter().filter(|sig| callable_accepts_arity(sig, arity));
+    let mut matches = overloads
+        .iter()
+        .filter(|sig| callable_accepts_arity(sig, arity));
     let first = matches.next()?;
     if matches.next().is_some() {
         // Ambiguous arity-only match: let caller handle as unresolved.
@@ -1210,7 +1234,11 @@ fn required_param_count(params: &[CollectedParamSig]) -> usize {
     params.iter().filter(|param| !param.has_default).count()
 }
 
-fn explicit_args_match(sig: &CollectedCallableSig, arg_types: &[Type], arg_order: &[usize]) -> bool {
+fn explicit_args_match(
+    sig: &CollectedCallableSig,
+    arg_types: &[Type],
+    arg_order: &[usize],
+) -> bool {
     arg_order
         .iter()
         .copied()
@@ -1322,11 +1350,12 @@ fn instantiate_iterable_param_types(
         .filter_map(|(arg_index, param_index)| {
             let arg_ty = &arg_types[arg_index];
             match &sig.params[param_index].ty {
-            Type::Iterable { .. } if !matches!(arg_ty, Type::Iterable { .. }) => {
-                Some(arg_ty.clone())
+                Type::Iterable { .. } if !matches!(arg_ty, Type::Iterable { .. }) => {
+                    Some(arg_ty.clone())
+                }
+                _ => None,
             }
-            _ => None,
-        }})
+        })
         .collect()
 }
 

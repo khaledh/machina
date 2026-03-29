@@ -305,6 +305,66 @@ fn json_codec_roundtrips_module_interface() {
 }
 
 #[test]
+fn json_codec_roundtrips_interface_param_default_flags() {
+    let resolved = resolved_with_module_path(
+        indoc! {r#"
+            @public
+            fn connect(host: string, port: u64 = 443, timeout: u64 = 30) -> u64 { port + timeout }
+
+            @public
+            type Client = {}
+
+            Client :: {
+                @public
+                fn request(self, path: string, method: string = "GET") -> string { path }
+            }
+        "#},
+        "std::demo",
+    );
+
+    let interface =
+        ModuleInterface::from_resolved_context(&resolved).expect("module path should exist");
+    let encoded = JsonModuleInterfaceCodec::encode(&interface).expect("interface should encode");
+    let decoded = JsonModuleInterfaceCodec::decode(&encoded).expect("interface should decode");
+
+    let connect = decoded
+        .exports
+        .iter()
+        .find(|export| export.symbol_id.to_string() == "std::demo::connect")
+        .expect("expected connect export");
+    let ExportedDefKind::Func(connect) = &connect.kind else {
+        panic!("expected function export");
+    };
+    assert_eq!(
+        connect
+            .signature
+            .params
+            .iter()
+            .map(|param| param.has_default)
+            .collect::<Vec<_>>(),
+        vec![false, true, true]
+    );
+
+    let request = decoded
+        .exports
+        .iter()
+        .find(|export| export.symbol_id.to_string() == "std::demo::Client::request")
+        .expect("expected request method export");
+    let ExportedDefKind::Method(request) = &request.kind else {
+        panic!("expected method export");
+    };
+    assert_eq!(
+        request
+            .signature
+            .params
+            .iter()
+            .map(|param| param.has_default)
+            .collect::<Vec<_>>(),
+        vec![false, true]
+    );
+}
+
+#[test]
 fn emit_module_interface_writes_artifact_at_module_path() {
     let resolved = resolved_with_module_path(
         indoc! {r#"
