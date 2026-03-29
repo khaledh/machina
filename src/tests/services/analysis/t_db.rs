@@ -2778,6 +2778,35 @@ fn main() -> u64 {
 }
 
 #[test]
+fn hover_at_file_shows_default_argument_values_in_signature() {
+    let mut db = AnalysisDb::new();
+    let source = r#"
+fn connect(host: string, port: u64 = 443, timeout: u64 = 30) -> u64 {
+    port + timeout
+}
+
+fn main() -> u64 {
+    connect("example.com")
+}
+"#;
+    let file_id = db.upsert_disk_text(
+        Path::new(env!("CARGO_MANIFEST_DIR")).join("examples/analysis_hover_default_args.mc"),
+        source,
+    );
+
+    let query_span = span_for_last_substring(source, "connect");
+    let hover = db
+        .hover_at_file(file_id, query_span)
+        .expect("hover query should succeed")
+        .expect("expected hover info for local function call");
+
+    assert_eq!(
+        hover.display,
+        "fn connect(host: string, port: u64 = 443, timeout: u64 = 30) -> u64"
+    );
+}
+
+#[test]
 fn completions_at_program_file_source_symbol_includes_doc_comment() {
     let mut db = AnalysisDb::new();
     let source = r#"

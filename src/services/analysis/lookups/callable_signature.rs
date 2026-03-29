@@ -4,6 +4,7 @@
 //! - source-style labels (`fn foo<T>(x: T) -> T`)
 //! - source param names/modes/types
 
+use crate::core::ast::format_compact::format_semantic_value_expr_compact;
 use crate::core::ast::visit::{Visitor, walk_module};
 use crate::core::ast::{BindPatternKind, NodeId};
 use crate::core::ast::{
@@ -57,6 +58,7 @@ pub(super) fn format_source_callable_signature(
                     param.mode.clone(),
                     def_table.def_id(param.id),
                     param.typ.clone(),
+                    param.default.clone(),
                 )
             })
             .collect::<Vec<_>>()
@@ -66,7 +68,13 @@ pub(super) fn format_source_callable_signature(
         String,
         Vec<String>,
         Option<ParamMode>,
-        Vec<(String, ParamMode, DefId, TypeExpr)>,
+        Vec<(
+            String,
+            ParamMode,
+            DefId,
+            TypeExpr,
+            Option<crate::core::ast::Expr>,
+        )>,
     ) = match callable {
         CallableRef::FuncDecl(func_decl) => (
             func_decl.sig.name.clone(),
@@ -123,7 +131,8 @@ pub(super) fn format_source_callable_signature(
         };
         rendered_params.push(format!("{mode_prefix}self"));
     }
-    for (idx, (param_name, mode, param_def_id, param_ty_expr)) in params_src.into_iter().enumerate()
+    for (idx, (param_name, mode, param_def_id, param_ty_expr, default_expr)) in
+        params_src.into_iter().enumerate()
     {
         let mode_prefix = match mode {
             ParamMode::In => "",
@@ -143,7 +152,13 @@ pub(super) fn format_source_callable_signature(
                 .unwrap_or(Type::Unknown);
             render(&param_ty)
         });
-        rendered_params.push(format!("{mode_prefix}{param_name}: {param_ty}"));
+        let default_suffix = default_expr
+            .as_ref()
+            .map(|expr| format!(" = {}", format_semantic_value_expr_compact(expr)))
+            .unwrap_or_default();
+        rendered_params.push(format!(
+            "{mode_prefix}{param_name}: {param_ty}{default_suffix}"
+        ));
     }
     let rendered_ret = format_type_expr_for_signature(ret_ty_expr_for_callable(callable))
         .unwrap_or_else(|| render(&ret_ty));

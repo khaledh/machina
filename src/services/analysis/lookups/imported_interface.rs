@@ -327,9 +327,10 @@ fn format_param_for_display_with_names(
         crate::core::ast::ParamMode::Sink => "sink ",
     };
     format!(
-        "{mode}{}: {}",
+        "{mode}{}: {}{}",
         param.name,
-        format_type_key_with_names(&param.ty, type_param_names)
+        format_type_key_with_names(&param.ty, type_param_names),
+        if param.has_default { " = ..." } else { "" }
     )
 }
 
