@@ -206,11 +206,8 @@ impl<'a> Elaborator<'a> {
         &self,
         call_id: NodeId,
         call_sig: &CallSig,
-        args: &'b [CallArg],
-    ) -> Vec<&'b CallArg> {
-        if call_sig.arg_order.is_empty() {
-            return args.iter().collect();
-        }
+        args: &[CallArg],
+    ) -> Vec<CallArg> {
         if call_sig.arg_order.len() != args.len() {
             panic!(
                 "compiler bug: call {call_id:?} has {} args but arg order has {} entries",
@@ -218,11 +215,57 @@ impl<'a> Elaborator<'a> {
                 call_sig.arg_order.len()
             );
         }
-        let mut ordered = vec![args.first().unwrap(); args.len()];
+        let mut ordered = vec![None; call_sig.params.len()];
         for (arg_index, param_index) in call_sig.arg_order.iter().copied().enumerate() {
-            ordered[param_index] = &args[arg_index];
+            ordered[param_index] = Some(args[arg_index].clone());
         }
+
+        if ordered.iter().any(Option::is_none) {
+            let def_id = call_sig.def_id.unwrap_or_else(|| {
+                panic!(
+                    "compiler bug: call {call_id:?} omitted args but has no selected def id"
+                )
+            });
+            let params = self.callable_params_for_def_id(def_id).unwrap_or_else(|| {
+                panic!(
+                    "compiler bug: missing callable params for defaulted call {call_id:?} ({def_id})"
+                )
+            });
+            if params.len() != call_sig.params.len() {
+                panic!(
+                    "compiler bug: call {call_id:?} expects {} params but source callable has {}",
+                    call_sig.params.len(),
+                    params.len()
+                );
+            }
+            for (param_index, slot) in ordered.iter_mut().enumerate() {
+                if slot.is_some() {
+                    continue;
+                }
+                let default = params[param_index].default.clone().unwrap_or_else(|| {
+                    panic!(
+                        "compiler bug: call {call_id:?} omitted param {} without a default",
+                        param_index
+                    )
+                });
+                *slot = Some(CallArg {
+                    label: None,
+                    mode: crate::core::ast::CallArgMode::Default,
+                    expr: default.clone(),
+                    init: crate::core::ast::InitInfo::default(),
+                    span: default.span,
+                });
+            }
+        }
+
         ordered
+            .into_iter()
+            .map(|arg| {
+                arg.unwrap_or_else(|| {
+                    panic!("compiler bug: call {call_id:?} missing elaborated argument slot")
+                })
+            })
+            .collect()
     }
 
     fn elab_call_expr(&mut self, expr: &Expr, callee: &Expr, args: &[CallArg]) -> ExprKind {
@@ -262,7 +305,7 @@ impl<'a> Elaborator<'a> {
             let args = info
                 .param_modes
                 .iter()
-                .zip(ordered_args.into_iter())
+                .zip(ordered_args.iter())
                 .map(|(mode, arg)| self.elab_call_arg_mode(mode.clone(), arg))
                 .collect();
 
@@ -279,7 +322,7 @@ impl<'a> Elaborator<'a> {
             let args = call_sig
                 .params
                 .iter()
-                .zip(ordered_args.into_iter())
+                .zip(ordered_args.iter())
                 .map(|(param, arg)| self.elab_call_arg(param, arg))
                 .collect();
 
@@ -326,22 +369,12 @@ impl<'a> Elaborator<'a> {
         } else {
             args
         };
-        let ordered_runtime_args = if call_sig.arg_order.is_empty() {
-            runtime_args.iter().collect::<Vec<_>>()
-        } else if call_sig.arg_order.len() == runtime_args.len() {
-            self.reorder_call_args_for_call_sig(expr.id, &call_sig, runtime_args)
-        } else {
-            panic!(
-                "compiler bug: method call {call_id:?} has {} runtime args but arg order has {} entries",
-                runtime_args.len(),
-                call_sig.arg_order.len(),
-                call_id = expr.id,
-            );
-        };
+        let ordered_runtime_args =
+            self.reorder_call_args_for_call_sig(expr.id, &call_sig, runtime_args);
         let args = call_sig
             .params
             .iter()
-            .zip(ordered_runtime_args.into_iter())
+            .zip(ordered_runtime_args.iter())
             .map(|(param, arg)| self.elab_call_arg(param, arg))
             .collect();
         let plan = self.build_call_plan(expr.id, Some(method_name), &call_sig);

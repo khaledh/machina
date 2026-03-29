@@ -128,6 +128,31 @@ fn test_lower_named_call_matches_positional_ir() {
 }
 
 #[test]
+fn test_lower_defaulted_call_matches_explicit_ir() {
+    let explicit = lower_main_text(indoc! {"
+        fn connect(host: string, port: u64 = 443, timeout: u64 = 30) -> u64 {
+            port + timeout
+        }
+
+        fn main() -> u64 {
+            connect(\"example.com\", 443, 30)
+        }
+    "});
+
+    let defaulted = lower_main_text(indoc! {"
+        fn connect(host: string, port: u64 = 443, timeout: u64 = 30) -> u64 {
+            port + timeout
+        }
+
+        fn main() -> u64 {
+            connect(\"example.com\")
+        }
+    "});
+
+    assert_ir_eq(defaulted, explicit);
+}
+
+#[test]
 fn test_lower_method_call_param() {
     let ctx = analyze(indoc! {"
         type Pair = { a: u64, b: u64 }
@@ -224,6 +249,39 @@ fn test_lower_named_method_call_matches_positional_ir() {
     "});
 
     assert_ir_eq(named, positional);
+}
+
+#[test]
+fn test_lower_defaulted_named_method_call_matches_explicit_ir() {
+    let explicit = lower_main_text(indoc! {"
+        type Config = {}
+
+        Config :: {
+            fn connect(self, host: string, port: u64 = 443, timeout: u64 = 30) -> u64 {
+                port + timeout
+            }
+        }
+
+        fn main(cfg: Config) -> u64 {
+            cfg.connect(\"example.com\", 443, 5)
+        }
+    "});
+
+    let defaulted = lower_main_text(indoc! {"
+        type Config = {}
+
+        Config :: {
+            fn connect(self, host: string, port: u64 = 443, timeout: u64 = 30) -> u64 {
+                port + timeout
+            }
+        }
+
+        fn main(cfg: Config) -> u64 {
+            cfg.connect(\"example.com\", timeout: 5)
+        }
+    "});
+
+    assert_ir_eq(defaulted, explicit);
 }
 
 #[test]

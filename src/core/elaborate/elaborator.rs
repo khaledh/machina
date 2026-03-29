@@ -91,6 +91,7 @@ impl ClosureContext {
 /// defined in the submodules.
 pub struct Elaborator<'a> {
     // Shared compiler state (borrowed)
+    pub(super) source_module: &'a Module,
     pub(super) def_table: &'a mut DefTableOverlay,
     pub(super) type_map: &'a mut TypeMapOverlay,
     pub(super) call_sigs: &'a CallSigMap,
@@ -126,6 +127,7 @@ pub struct Elaborator<'a> {
 impl<'a> Elaborator<'a> {
     #[allow(clippy::too_many_arguments)]
     pub fn new(
+        source_module: &'a Module,
         def_table: &'a mut DefTableOverlay,
         type_map: &'a mut TypeMapOverlay,
         call_sigs: &'a CallSigMap,
@@ -137,6 +139,7 @@ impl<'a> Elaborator<'a> {
         closure_captures: &'a HashMap<DefId, Vec<ClosureCapture>>,
     ) -> Self {
         Self {
+            source_module,
             def_table,
             type_map,
             call_sigs,
@@ -264,6 +267,28 @@ impl<'a> Elaborator<'a> {
 
     pub(super) fn def_id_for(&self, node_id: NodeId) -> DefId {
         self.def_table.def_id(node_id)
+    }
+
+    pub(super) fn callable_params_for_def_id(
+        &self,
+        def_id: DefId,
+    ) -> Option<&'a [crate::core::ast::Param]> {
+        self.source_module.callables().into_iter().find_map(|callable| {
+            (self.def_table.lookup_node_def_id(callable.id()) == Some(def_id)).then(|| match callable
+            {
+                crate::core::ast::CallableRef::FuncDecl(func_decl) => func_decl.sig.params.as_slice(),
+                crate::core::ast::CallableRef::FuncDef(func_def) => func_def.sig.params.as_slice(),
+                crate::core::ast::CallableRef::MethodDecl { method_decl, .. } => {
+                    method_decl.sig.params.as_slice()
+                }
+                crate::core::ast::CallableRef::MethodDef { method_def, .. } => {
+                    method_def.sig.params.as_slice()
+                }
+                crate::core::ast::CallableRef::ClosureDef(closure_def) => {
+                    closure_def.sig.params.as_slice()
+                }
+            })
+        })
     }
 
     pub(super) fn for_plan_or_panic(

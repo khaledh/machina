@@ -88,6 +88,7 @@ pub fn elaborate(ctx: ElaborateStageInput) -> ElaborateStageOutput {
     let mut def_table = DefTableOverlay::new(def_table);
     let mut type_map = TypeMapOverlay::new(type_map);
     let mut elaborator = Elaborator::new(
+        &module,
         &mut def_table,
         &mut type_map,
         &call_sigs,
