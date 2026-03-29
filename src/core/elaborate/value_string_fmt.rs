@@ -3,13 +3,11 @@
 //! Pre-computes the strategy for formatting f-strings (`f"..."`) so that
 //! lowering can emit efficient code without re-analyzing segment types.
 //!
-//! ## Formatting strategies
+//! ## Formatting strategy
 //!
-//! - **View formatting**: When all segments are literals or integers, we can
-//!   write directly into a pre-sized buffer. This is the fast path.
-//!
-//! - **Owned formatting**: When any segment is a string value, we need to
-//!   handle potential allocation and ownership. This uses a different code path.
+//! Dynamic f-strings currently lower through the owned-string path. A previous
+//! stack-backed view optimization was unsound for values that escaped the local
+//! expression context (for example by being returned from a function).
 //!
 //! ## Reserve length calculation
 //!
@@ -90,15 +88,11 @@ impl<'a> Elaborator<'a> {
             }
         }
 
-        // Any dynamic string segment forces the owned formatter path.
-        let kind = if plan_segments
-            .iter()
-            .any(|segment| matches!(segment, SegmentKind::StringValue { .. }))
-        {
-            FmtKind::Owned
-        } else {
-            FmtKind::View
-        };
+        // Dynamic f-strings must produce owned strings. The old stack-backed
+        // view path was fine for immediate intra-function use, but returning
+        // or otherwise letting the value escape could leave the string pointing
+        // at dead stack storage.
+        let kind = FmtKind::Owned;
 
         StringFmtPlan {
             kind,

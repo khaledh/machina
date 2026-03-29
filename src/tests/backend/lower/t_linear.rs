@@ -366,7 +366,7 @@ fn test_lower_string_lit() {
 }
 
 #[test]
-fn test_lower_string_fmt_view() {
+fn test_lower_string_fmt_numeric_owned() {
     let ctx = analyze(indoc! {r#"
         fn main(a: u64) -> string {
             f"{a}"
@@ -383,9 +383,9 @@ fn test_lower_string_fmt_view() {
     .expect("failed to lower");
     let text = format_func(&lowered.func, &lowered.types);
 
-    assert!(text.contains("__rt_fmt_init"));
-    assert!(text.contains("__rt_fmt_append_u64"));
-    assert!(text.contains("__rt_fmt_finish"));
+    assert!(text.contains("__rt_string_ensure"));
+    assert!(text.contains("__rt_u64_to_dec"));
+    assert!(text.contains("__rt_string_append_bytes"));
 }
 
 #[test]
@@ -411,7 +411,7 @@ fn test_lower_string_fmt_owned() {
 }
 
 #[test]
-fn test_lower_string_fmt_view_bool() {
+fn test_lower_string_fmt_bool_owned() {
     let ctx = analyze(indoc! {r#"
         fn main(b: bool) -> string {
             f"{b}"
@@ -428,7 +428,8 @@ fn test_lower_string_fmt_view_bool() {
     .expect("failed to lower");
     let text = format_func(&lowered.func, &lowered.types);
 
-    assert!(text.contains("__rt_fmt_append_bool"));
+    assert!(text.contains("__rt_string_ensure"));
+    assert!(text.contains("__rt_string_append_bool"));
 }
 
 #[test]
