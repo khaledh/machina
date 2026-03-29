@@ -384,6 +384,7 @@ impl<'a> Parser<'a> {
                 ident: binding,
                 typ: request_ty,
                 mode: ParamMode::In,
+                default: None,
                 span: self.close(marker),
             },
             request_site_label,
@@ -425,6 +426,7 @@ impl<'a> Parser<'a> {
                         span: pending_span,
                     },
                     mode: ParamMode::In,
+                    default: None,
                     span: pending_span,
                 },
                 Param {
@@ -432,6 +434,7 @@ impl<'a> Parser<'a> {
                     ident: "__response".to_string(),
                     typ: response_ty,
                     mode: ParamMode::In,
+                    default: None,
                     span: response_span,
                 },
             ]);
@@ -455,6 +458,7 @@ impl<'a> Parser<'a> {
                 // `on Ping(p)` shorthand: payload type defaults to selector type.
                 typ: self.clone_type_expr_with_new_ids(selector_ty),
                 mode: ParamMode::In,
+                default: None,
                 span,
             });
         }

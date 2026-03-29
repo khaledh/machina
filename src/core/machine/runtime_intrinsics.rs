@@ -48,6 +48,7 @@ pub(crate) fn ensure_u64_runtime_intrinsics(
                         ident: (*param_name).to_string(),
                         typ: u64_type_expr(node_id_gen, span),
                         mode: ParamMode::In,
+                        default: None,
                         span,
                     })
                     .collect(),

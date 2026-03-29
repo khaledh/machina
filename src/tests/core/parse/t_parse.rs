@@ -1552,6 +1552,81 @@ fn test_parse_rejects_positional_arg_after_named_arg() {
 }
 
 #[test]
+fn test_parse_function_param_default_value() {
+    let source = r#"
+        fn connect(host: string, port: u64 = 443, timeout: u64 = 30) -> u64 {
+            port + timeout
+        }
+    "#;
+
+    let funcs = parse_source(source).expect("Failed to parse");
+    let sig = &funcs[0].sig;
+
+    assert_eq!(sig.params.len(), 3);
+    assert!(sig.params[0].default.is_none());
+    assert!(matches!(
+        sig.params[1].default.as_ref().map(|expr| &expr.kind),
+        Some(ExprKind::IntLit(443))
+    ));
+    assert!(matches!(
+        sig.params[2].default.as_ref().map(|expr| &expr.kind),
+        Some(ExprKind::IntLit(30))
+    ));
+}
+
+#[test]
+fn test_parse_method_param_default_value() {
+    let source = r#"
+        Config :: {
+            fn connect(self, port: u64 = 443) -> u64 {
+                port
+            }
+        }
+    "#;
+
+    let module = parse_module(source).expect("Failed to parse");
+    let method_block = module.method_blocks()[0];
+    let method = match &method_block.method_items[0] {
+        MethodItem::Def(def) => def,
+        _ => panic!("Expected method def"),
+    };
+
+    assert_eq!(method.sig.params.len(), 1);
+    assert!(matches!(
+        method.sig.params[0].default.as_ref().map(|expr| &expr.kind),
+        Some(ExprKind::IntLit(443))
+    ));
+}
+
+#[test]
+fn test_parse_rejects_default_on_non_in_param() {
+    let source = r#"
+        fn fill(out dst: u64 = 0) -> () {}
+    "#;
+
+    let err = parse_source(source).expect_err("expected parse failure");
+    assert!(matches!(
+        err.kind(),
+        ParseErrorKind::DefaultValueRequiresInParam
+    ));
+}
+
+#[test]
+fn test_parse_rejects_nondefault_param_after_default() {
+    let source = r#"
+        fn connect(host: string = "example.com", port: u64) -> u64 {
+            port
+        }
+    "#;
+
+    let err = parse_source(source).expect_err("expected parse failure");
+    assert!(matches!(
+        err.kind(),
+        ParseErrorKind::NonDefaultParamAfterDefault { .. }
+    ));
+}
+
+#[test]
 fn test_parse_tuple_with_array_indexing() {
     let source = r#"
         fn test() -> u64 {

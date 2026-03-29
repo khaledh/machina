@@ -68,6 +68,8 @@ pub(super) fn from_parse_error(error: &ParseError) -> Diagnostic {
         ParseErrorKind::PipeRhsMustBeCall => "MC-PARSE-PIPE-RHS-MUST-BE-CALL",
         ParseErrorKind::UnsupportedPipeMethodCall => "MC-PARSE-PIPE-METHOD-CALL-UNSUPPORTED",
         ParseErrorKind::PositionalArgAfterNamedArg => "MC-PARSE-POSITIONAL-AFTER-NAMED",
+        ParseErrorKind::DefaultValueRequiresInParam => "MC-PARSE-DEFAULT-REQUIRES-IN-PARAM",
+        ParseErrorKind::NonDefaultParamAfterDefault { .. } => "MC-PARSE-NONDEFAULT-AFTER-DEFAULT",
         ParseErrorKind::ExpectedRefinement(_) => "MC-PARSE-EXPECTED-REFINEMENT",
         ParseErrorKind::UnknownAttribute(name) => {
             metadata.insert(

@@ -72,6 +72,14 @@ pub enum ParseErrorKind {
     #[error("Positional argument after named argument")]
     PositionalArgAfterNamedArg,
 
+    #[error("Default values are only allowed for `in` parameters")]
+    DefaultValueRequiresInParam,
+
+    #[error(
+        "Parameter `{param}` has no default value but follows parameter `{previous}` which does"
+    )]
+    NonDefaultParamAfterDefault { param: String, previous: String },
+
     #[error("Expected refinement (bounds/nonzero), found: {0}")]
     ExpectedRefinement(Token),
 

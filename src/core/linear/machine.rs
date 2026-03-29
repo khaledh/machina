@@ -442,6 +442,7 @@ pub(super) fn collect_machine_action_session_infos(
                                 ident: param.name.clone(),
                                 typ: param.ty.clone(),
                                 mode: ParamMode::In,
+                                default: None,
                                 span: param.span,
                             })
                             .collect::<Vec<_>>();
@@ -1233,6 +1234,7 @@ fn build_machine_handle_send_method(
                 ident: "payload".to_string(),
                 typ: payload_ty,
                 mode: ParamMode::In,
+                default: None,
                 span,
             }],
             ret_ty_expr: machine_send_result_union_type(node_id_gen, span),
@@ -1827,6 +1829,7 @@ fn build_machine_create_func(
                     },
                     span,
                 },
+                default: None,
                 span,
             }],
             ret_ty_expr: TypeExpr {
@@ -1948,6 +1951,7 @@ fn build_machine_resume_func(
                         },
                         span,
                     },
+                    default: None,
                     span,
                 },
                 Param {
@@ -1955,6 +1959,7 @@ fn build_machine_resume_func(
                     ident: "key".to_string(),
                     mode: ParamMode::In,
                     typ: info.key_ty.clone(),
+                    default: None,
                     span,
                 },
             ],
@@ -2062,6 +2067,7 @@ fn build_machine_lookup_func(info: &MachineSpawnInfo, node_id_gen: &mut NodeIdGe
                         },
                         span,
                     },
+                    default: None,
                     span,
                 },
                 Param {
@@ -2069,6 +2075,7 @@ fn build_machine_lookup_func(info: &MachineSpawnInfo, node_id_gen: &mut NodeIdGe
                     ident: "key".to_string(),
                     mode: ParamMode::In,
                     typ: info.key_ty.clone(),
+                    default: None,
                     span,
                 },
             ],
@@ -2175,6 +2182,7 @@ fn build_machine_action_override_func(
                     },
                     span,
                 },
+                default: None,
                 span,
             })
             .chain(std::iter::once(Param {
@@ -2193,6 +2201,7 @@ fn build_machine_action_override_func(
                     },
                     span,
                 },
+                default: None,
                 span,
             }))
             .chain(info.params.iter().cloned())
@@ -2333,6 +2342,7 @@ fn build_machine_action_session_func(
                     },
                     span,
                 },
+                default: None,
                 span,
             })
             .chain(std::iter::once(Param {
@@ -2347,6 +2357,7 @@ fn build_machine_action_session_func(
                     },
                     span,
                 },
+                default: None,
                 span,
             }))
             .chain(session_params)
@@ -2399,6 +2410,7 @@ fn build_machine_trigger_handler_func(
                     },
                     span,
                 },
+                default: None,
                 span,
             })
             .chain(std::iter::once(Param {
@@ -2413,6 +2425,7 @@ fn build_machine_trigger_handler_func(
                     },
                     span,
                 },
+                default: None,
                 span,
             }))
             .chain(info.params.iter().cloned())
@@ -2458,6 +2471,7 @@ fn build_machine_on_handler_func(
                     },
                     span,
                 },
+                default: None,
                 span,
             })
             .chain(info.params.iter().cloned())
@@ -2511,6 +2525,7 @@ fn build_machine_deliver_func(info: &MachineDeliverInfo, node_id_gen: &mut NodeI
                         },
                         span,
                     },
+                    default: None,
                     span,
                 },
                 Param {
@@ -2518,6 +2533,7 @@ fn build_machine_deliver_func(info: &MachineDeliverInfo, node_id_gen: &mut NodeI
                     ident: "key".to_string(),
                     mode: ParamMode::In,
                     typ: info.key_ty.clone(),
+                    default: None,
                     span,
                 },
                 Param {
@@ -2532,6 +2548,7 @@ fn build_machine_deliver_func(info: &MachineDeliverInfo, node_id_gen: &mut NodeI
                         },
                         span,
                     },
+                    default: None,
                     span,
                 },
             ],
@@ -2616,6 +2633,7 @@ fn build_machine_wait_func(info: &MachineWaitInfo, node_id_gen: &mut NodeIdGen) 
                         },
                         span,
                     },
+                    default: None,
                     span,
                 },
                 Param {
@@ -2630,6 +2648,7 @@ fn build_machine_wait_func(info: &MachineWaitInfo, node_id_gen: &mut NodeIdGen) 
                         },
                         span,
                     },
+                    default: None,
                     span,
                 },
             ],
@@ -2752,6 +2771,7 @@ fn u64_param(name: &str, node_id_gen: &mut NodeIdGen, span: Span) -> Param {
         ident: name.to_string(),
         typ: u64_type_expr(node_id_gen, span),
         mode: ParamMode::In,
+        default: None,
         span,
     }
 }

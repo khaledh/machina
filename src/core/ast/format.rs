@@ -532,7 +532,11 @@ impl fmt::Display for Param {
                 write!(f, "sink ")?;
             }
         }
-        write!(f, "{}: {} [{}]", self.ident, self.typ, self.id)?;
+        write!(f, "{}: {}", self.ident, self.typ)?;
+        if let Some(default) = &self.default {
+            write!(f, " = {}", default)?;
+        }
+        write!(f, " [{}]", self.id)?;
         Ok(())
     }
 }

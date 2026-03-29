@@ -53,6 +53,7 @@ impl<'a> Parser<'a> {
 
         self.consume(&TK::LParen)?;
         let params = self.parse_list(TK::Comma, TK::RParen, |parser| parser.parse_param())?;
+        self.validate_default_param_sequence(&params)?;
         self.consume(&TK::RParen)?;
 
         let ret_ty_expr = self.parse_ret_type()?;
@@ -211,7 +212,9 @@ impl<'a> Parser<'a> {
 
         let params = if self.curr_token.kind == TK::Comma {
             self.advance();
-            self.parse_list(TK::Comma, TK::RParen, |parser| parser.parse_param())?
+            let params = self.parse_list(TK::Comma, TK::RParen, |parser| parser.parse_param())?;
+            self.validate_default_param_sequence(&params)?;
+            params
         } else {
             Vec::new()
         };
@@ -327,6 +330,7 @@ impl<'a> Parser<'a> {
                         ident: param_name,
                         mode: ParamMode::In,
                         typ: self.clone_type_expr_with_new_ids(&prop_ty),
+                        default: None,
                         span: self.close(accessor_marker),
                     };
 
@@ -619,12 +623,22 @@ impl<'a> Parser<'a> {
         let name = self.parse_ident()?;
         self.consume(&TK::Colon)?;
         let typ = self.parse_type_expr()?;
+        let default = if self.curr_token.kind == TK::Equals {
+            if mode != ParamMode::In {
+                return self.err_here(PEK::DefaultValueRequiresInParam);
+            }
+            self.advance();
+            Some(self.parse_expr(0)?)
+        } else {
+            None
+        };
 
         Ok(Param {
             id: self.id_gen.new_id(),
             ident: name,
             typ,
             mode,
+            default,
             span: self.close(marker),
         })
     }
@@ -645,8 +659,27 @@ impl<'a> Parser<'a> {
             ident: name,
             typ,
             mode,
+            default: None,
             span: self.close(marker),
         })
+    }
+
+    fn validate_default_param_sequence(&self, params: &[Param]) -> Result<(), ParseError> {
+        let mut previous_default_param = None;
+        for param in params {
+            if param.default.is_some() {
+                previous_default_param = Some(param.ident.as_str());
+                continue;
+            }
+            if let Some(previous) = previous_default_param {
+                return Err(PEK::NonDefaultParamAfterDefault {
+                    param: param.ident.clone(),
+                    previous: previous.to_string(),
+                }
+                .at(param.span));
+            }
+        }
+        Ok(())
     }
 
     pub(super) fn parse_param_mode(&mut self) -> ParamMode {

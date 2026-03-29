@@ -903,6 +903,7 @@ impl<'a> Parser<'a> {
                 span,
             },
             mode: ParamMode::In,
+            default: None,
             span,
         };
 

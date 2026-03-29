@@ -613,6 +613,7 @@ pub struct Param {
     pub ident: String,
     pub typ: TypeExpr,
     pub mode: ParamMode,
+    pub default: Option<Expr>,
     pub span: Span,
 }
 
