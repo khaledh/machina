@@ -372,11 +372,15 @@ pub fn format_semantic_value_expr_compact(expr: &Expr) -> String {
 
 fn format_semantic_call_arg_compact(arg: &CallArg) -> String {
     let value = format_semantic_value_expr_compact(&arg.expr);
-    match arg.mode {
+    let value = match arg.mode {
         CallArgMode::InOut => format!("inout {value}"),
         CallArgMode::Out => format!("out {value}"),
         CallArgMode::Move => format!("sink {value}"),
         CallArgMode::Default => value,
+    };
+    match &arg.label {
+        Some(label) => format!("{}: {value}", label.name),
+        None => value,
     }
 }
 

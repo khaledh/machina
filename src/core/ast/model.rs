@@ -619,7 +619,14 @@ pub struct Param {
 // -- Call Args --
 
 #[derive(Clone, Debug)]
+pub struct ArgLabel {
+    pub name: String,
+    pub span: Span,
+}
+
+#[derive(Clone, Debug)]
 pub struct CallArg {
+    pub label: Option<ArgLabel>,
     pub mode: CallArgMode,
     pub expr: Expr,
     pub init: InitInfo,

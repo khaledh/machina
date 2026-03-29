@@ -491,6 +491,7 @@ impl<'a> Elaborator<'a> {
             ParamMode::In => {
                 let expr = self.elab_value(&arg.expr);
                 CallArg {
+                    label: arg.label.clone(),
                     mode: CallArgMode::Default,
                     expr,
                     init: InitInfo::default(),
@@ -500,6 +501,7 @@ impl<'a> Elaborator<'a> {
             ParamMode::InOut => {
                 if matches!(arg.expr.kind, ExprKind::Slice { .. }) {
                     return CallArg {
+                        label: arg.label.clone(),
                         mode: CallArgMode::Default,
                         expr: self.elab_value(&arg.expr),
                         init: InitInfo::default(),
@@ -507,6 +509,7 @@ impl<'a> Elaborator<'a> {
                     };
                 }
                 CallArg {
+                    label: arg.label.clone(),
                     mode: CallArgMode::InOut,
                     expr: self.elab_place(&arg.expr),
                     init: InitInfo::default(),
@@ -517,6 +520,7 @@ impl<'a> Elaborator<'a> {
                 let place = self.elab_place(&arg.expr);
                 let init = self.init_info_for_id(place.id);
                 CallArg {
+                    label: arg.label.clone(),
                     mode: CallArgMode::Out,
                     expr: place,
                     init,
@@ -537,6 +541,7 @@ impl<'a> Elaborator<'a> {
                     self.elab_value(&arg.expr)
                 };
                 CallArg {
+                    label: arg.label.clone(),
                     mode: CallArgMode::Move,
                     expr,
                     init: InitInfo::default(),

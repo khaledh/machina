@@ -1337,20 +1337,28 @@ impl Expr {
     ) -> fmt::Result {
         for arg in args {
             let pad = indent(level);
+            let label = arg
+                .label
+                .as_ref()
+                .map(|label| format!("{}: ", label.name))
+                .unwrap_or_default();
             match arg.mode {
                 CallArgMode::Default => {
+                    if !label.is_empty() {
+                        writeln!(f, "{}ArgLabel: {}", pad, label.trim_end())?;
+                    }
                     arg.expr.fmt_with_indent(f, level)?;
                 }
                 CallArgMode::InOut => {
-                    writeln!(f, "{}InOutArg:", pad)?;
+                    writeln!(f, "{}InOutArg: {}", pad, label.trim_end())?;
                     arg.expr.fmt_with_indent(f, level + 1)?;
                 }
                 CallArgMode::Out => {
-                    writeln!(f, "{}OutArg:", pad)?;
+                    writeln!(f, "{}OutArg: {}", pad, label.trim_end())?;
                     arg.expr.fmt_with_indent(f, level + 1)?;
                 }
                 CallArgMode::Move => {
-                    writeln!(f, "{}MoveArg:", pad)?;
+                    writeln!(f, "{}MoveArg: {}", pad, label.trim_end())?;
                     arg.expr.fmt_with_indent(f, level + 1)?;
                 }
             }

@@ -69,6 +69,9 @@ pub enum ParseErrorKind {
     #[error("Pipe rhs does not support method calls; use a free function call")]
     UnsupportedPipeMethodCall,
 
+    #[error("Positional argument after named argument")]
+    PositionalArgAfterNamedArg,
+
     #[error("Expected refinement (bounds/nonzero), found: {0}")]
     ExpectedRefinement(Token),
 

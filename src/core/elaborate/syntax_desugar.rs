@@ -1164,6 +1164,7 @@ impl<'a, 'b> SyntaxDesugarCtx<'a, 'b> {
             InitInfo::default()
         };
         CallArg {
+            label: None,
             mode,
             expr,
             init,

@@ -220,6 +220,7 @@ fn call_expr(callee_name: &str, args: Vec<Expr>, node_id_gen: &mut NodeIdGen, sp
             args: args
                 .into_iter()
                 .map(|expr| CallArg {
+                    label: None,
                     mode: CallArgMode::Default,
                     expr,
                     init: InitInfo::default(),

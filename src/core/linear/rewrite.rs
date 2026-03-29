@@ -801,6 +801,7 @@ fn rewrite_expr_in_scope(
                         }),
                         args: vec![
                             CallArg {
+                                label: None,
                                 mode: CallArgMode::Default,
                                 expr: Expr {
                                     id: node_id_gen.new_id(),
@@ -813,6 +814,7 @@ fn rewrite_expr_in_scope(
                                 span: expr.span,
                             },
                             CallArg {
+                                label: None,
                                 mode: CallArgMode::Default,
                                 expr: (**callee).clone(),
                                 init: InitInfo::default(),
@@ -846,12 +848,14 @@ fn rewrite_expr_in_scope(
                     }),
                     args: vec![
                         CallArg {
+                            label: None,
                             mode: CallArgMode::Default,
                             expr: (**callee).clone(),
                             init: InitInfo::default(),
                             span: expr.span,
                         },
                         CallArg {
+                            label: None,
                             mode: CallArgMode::Default,
                             expr: key_expr,
                             init: InitInfo::default(),
@@ -887,6 +891,7 @@ fn rewrite_expr_in_scope(
             {
                 let mut helper_args = Vec::with_capacity(args.len() + 2);
                 helper_args.push(CallArg {
+                    label: None,
                     mode: CallArgMode::Default,
                     expr: Expr {
                         id: node_id_gen.new_id(),
@@ -899,6 +904,7 @@ fn rewrite_expr_in_scope(
                     span: expr.span,
                 });
                 helper_args.push(CallArg {
+                    label: None,
                     mode: CallArgMode::Default,
                     expr: (**callee).clone(),
                     init: InitInfo::default(),

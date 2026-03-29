@@ -1490,6 +1490,68 @@ fn test_parse_method_call() {
 }
 
 #[test]
+fn test_parse_named_call_args() {
+    let source = r#"
+        fn test() -> u64 {
+            connect("example.com", timeout: 30, port: 8080)
+        }
+    "#;
+
+    let funcs = parse_source(source).expect("Failed to parse");
+    let func = &funcs[0];
+    let tail = block_tail(&func.body);
+
+    let ExprKind::Call { callee, args } = &tail.kind else {
+        panic!("Expected Call");
+    };
+    match &callee.kind {
+        ExprKind::Var { ident, .. } => assert_eq!(ident, "connect"),
+        _ => panic!("Expected call callee var"),
+    }
+    assert_eq!(args.len(), 3);
+    assert!(args[0].label.is_none());
+    assert_eq!(args[1].label.as_ref().unwrap().name, "timeout");
+    assert_eq!(args[2].label.as_ref().unwrap().name, "port");
+}
+
+#[test]
+fn test_parse_named_call_arg_with_mode() {
+    let source = r#"
+        fn test(x: u64, y: u64) -> () {
+            swap(a: inout x, b: inout y)
+        }
+    "#;
+
+    let funcs = parse_source(source).expect("Failed to parse");
+    let func = &funcs[0];
+    let tail = block_tail(&func.body);
+
+    let ExprKind::Call { args, .. } = &tail.kind else {
+        panic!("Expected Call");
+    };
+    assert_eq!(args.len(), 2);
+    assert_eq!(args[0].label.as_ref().unwrap().name, "a");
+    assert_eq!(args[1].label.as_ref().unwrap().name, "b");
+    assert!(matches!(args[0].mode, CallArgMode::InOut));
+    assert!(matches!(args[1].mode, CallArgMode::InOut));
+}
+
+#[test]
+fn test_parse_rejects_positional_arg_after_named_arg() {
+    let source = r#"
+        fn test() -> u64 {
+            connect(host: "example.com", 8080)
+        }
+    "#;
+
+    let err = parse_source(source).expect_err("expected parse failure");
+    assert!(matches!(
+        err.kind(),
+        ParseErrorKind::PositionalArgAfterNamedArg
+    ));
+}
+
+#[test]
 fn test_parse_tuple_with_array_indexing() {
     let source = r#"
         fn test() -> u64 {

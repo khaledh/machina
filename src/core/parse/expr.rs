@@ -231,6 +231,7 @@ impl<'a> Parser<'a> {
                 let lhs_span = lhs.span;
                 let mut piped_args = Vec::with_capacity(args.len() + 1);
                 piped_args.push(CallArg {
+                    label: None,
                     mode: CallArgMode::Default,
                     expr: lhs,
                     init: InitInfo::default(),
@@ -573,7 +574,7 @@ impl<'a> Parser<'a> {
 
     fn parse_call_postfix(&mut self, expr: Expr, marker: Marker) -> Result<Expr, ParseError> {
         self.advance();
-        let args = self.parse_list(TK::Comma, TK::RParen, |parser| parser.parse_call_arg())?;
+        let args = self.parse_call_args()?;
         self.consume(&TK::RParen)?;
         Ok(Expr {
             id: self.id_gen.new_id(),
@@ -601,7 +602,7 @@ impl<'a> Parser<'a> {
         self.consume(&TK::Colon)?;
         let label = self.parse_ident()?;
         self.consume(&TK::LParen)?;
-        let args = self.parse_list(TK::Comma, TK::RParen, |parser| parser.parse_call_arg())?;
+        let args = self.parse_call_args()?;
         self.consume(&TK::RParen)?;
 
         let callee = Expr {
@@ -632,6 +633,15 @@ impl<'a> Parser<'a> {
 
     fn parse_call_arg(&mut self) -> Result<CallArg, ParseError> {
         let marker = self.mark();
+        let label = if self.can_start_named_call_arg() {
+            let name = self.parse_ident()?;
+            let span = Span::new(marker.pos, self.tokens[self.pos - 1].span.end);
+            self.consume(&TK::Colon)?;
+            Some(ArgLabel { name, span })
+        } else {
+            None
+        };
+
         let mode = match &self.curr_token.kind {
             TK::KwInOut => {
                 self.advance();
@@ -651,11 +661,35 @@ impl<'a> Parser<'a> {
         let expr = self.parse_expr(0)?;
 
         Ok(CallArg {
+            label,
             mode,
             expr,
             init: InitInfo::default(),
             span: self.close(marker),
         })
+    }
+
+    fn parse_call_args(&mut self) -> Result<Vec<CallArg>, ParseError> {
+        let args = self.parse_list(TK::Comma, TK::RParen, |parser| parser.parse_call_arg())?;
+        self.validate_call_arg_order(&args)?;
+        Ok(args)
+    }
+
+    fn validate_call_arg_order(&self, args: &[CallArg]) -> Result<(), ParseError> {
+        let mut saw_named = false;
+        for arg in args {
+            if arg.label.is_some() {
+                saw_named = true;
+            } else if saw_named {
+                return Err(PEK::PositionalArgAfterNamedArg.at(arg.span));
+            }
+        }
+        Ok(())
+    }
+
+    fn can_start_named_call_arg(&self) -> bool {
+        matches!(self.curr_token.kind, TK::Ident(_) | TK::KwMap)
+            && matches!(self.peek().map(|tok| &tok.kind), Some(TK::Colon))
     }
 
     fn parse_index_or_slice_postfix(
@@ -761,7 +795,7 @@ impl<'a> Parser<'a> {
     ) -> Result<Expr, ParseError> {
         if self.curr_token.kind == TK::LParen {
             self.advance();
-            let args = self.parse_list(TK::Comma, TK::RParen, |parser| parser.parse_call_arg())?;
+            let args = self.parse_call_args()?;
             self.consume(&TK::RParen)?;
             Ok(Expr {
                 id: self.id_gen.new_id(),

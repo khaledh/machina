@@ -2852,6 +2852,7 @@ fn call_expr(callee_name: &str, args: Vec<Expr>, node_id_gen: &mut NodeIdGen, sp
             args: args
                 .into_iter()
                 .map(|expr| CallArg {
+                    label: None,
                     mode: CallArgMode::Default,
                     expr,
                     init: InitInfo::default(),
@@ -4363,6 +4364,7 @@ impl VisitorMut for MachineSpawnCallRewriter<'_> {
             let args = std::mem::take(payload)
                 .into_iter()
                 .map(|arg| CallArg {
+                    label: None,
                     mode: CallArgMode::Default,
                     expr: arg,
                     init: InitInfo::default(),

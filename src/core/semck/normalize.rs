@@ -381,6 +381,7 @@ impl VisitorMut for Normalizer<'_> {
                     callee: target.clone(),
                     method_name: field.clone(),
                     args: vec![CallArg {
+                        label: None,
                         mode: CallArgMode::Default,
                         expr: *value.clone(),
                         init: InitInfo::default(),
