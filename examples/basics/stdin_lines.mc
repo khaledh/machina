@@ -10,7 +10,7 @@ fn main() -> () | IoError {
         match stdin().read_line() {
             line: string => println(line),
             done: EndOfInput => {
-                return ();
+                return;
             }
             err: IoError => {
                 return err;

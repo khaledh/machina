@@ -9,7 +9,7 @@ fn main() -> () | IoError {
     let argv = args();
     if argv.len < 2 {
         println("usage: freq_small <path>");
-        return ();
+        return;
     }
 
     let [_, path, ...] = argv;

@@ -8,7 +8,7 @@ fn main() -> () | IoError {
     let argv = args();
     if argv.len < 2 {
         println("usage: uniq_small <path>");
-        return ();
+        return;
     }
 
     let [_, path, ...] = argv;

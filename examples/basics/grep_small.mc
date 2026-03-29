@@ -8,7 +8,7 @@ fn main() -> () | IoError {
     let argv = args();
     if argv.len < 3 {
         println("usage: grep_small <path> <needle>");
-        return ();
+        return;
     }
 
     let [_, path, needle, ...] = argv;

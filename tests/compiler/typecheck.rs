@@ -2746,6 +2746,28 @@ fn test_stdin_read_line_strips_newlines_and_reports_eof() {
 }
 
 #[test]
+fn test_bare_return_allowed_for_unit_error_union_main() {
+    let run = run_program(
+        "bare_return_unit_error_union_main",
+        r#"
+            requires {
+                std::io::IoError
+                std::io::println
+            }
+
+            fn main() -> () | IoError {
+                println("ok");
+                return;
+            }
+        "#,
+    );
+
+    assert!(run.status.success(), "program failed: {run:?}");
+    let stdout = String::from_utf8_lossy(&run.stdout);
+    assert_eq!(stdout, "ok\n", "unexpected stdout: {stdout}");
+}
+
+#[test]
 fn test_for_protocol_reports_missing_iter_method() {
     let entry_source = r#"
         type Counter = {

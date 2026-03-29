@@ -481,7 +481,19 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
                         }
                         BranchResult::Return => return Ok(StmtOutcome::Return),
                     },
-                    None => None,
+                    None => {
+                        if let Type::ErrorUnion { ok_ty, .. } = &self.ret_ty {
+                            if matches!(ok_ty.as_ref(), Type::Unit) {
+                                let unit_ir_ty = self.type_lowerer.lower_type(&Type::Unit);
+                                let unit_value = self.builder.const_unit(unit_ir_ty);
+                                Some(self.coerce_return_value(unit_value, &Type::Unit))
+                            } else {
+                                None
+                            }
+                        } else {
+                            None
+                        }
+                    }
                 };
                 self.emit_drops_for_stmt(stmt.id)?;
                 self.builder.terminate(Terminator::Return { value });

@@ -53,9 +53,17 @@ fn return_fact_error(
 
     if has_value && expected_ty == Type::Unit {
         Some(TEK::ReturnValueUnexpected.at(span))
-    } else if !has_value && expected_ty != Type::Unit {
+    } else if !has_value && !allows_empty_return(&expected_ty) {
         Some(TEK::ReturnValueMissing(expected_ty).at(span))
     } else {
         None
+    }
+}
+
+fn allows_empty_return(expected_ty: &Type) -> bool {
+    match expected_ty {
+        Type::Unit => true,
+        Type::ErrorUnion { ok_ty, .. } => matches!(ok_ty.as_ref(), Type::Unit),
+        _ => false,
     }
 }

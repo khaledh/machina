@@ -104,7 +104,7 @@ fn main() -> () | IoError {
             }
             done: EndOfInput => {
                 println("Goodbye.");
-                return ();
+                return;
             }
             err: IoError => {
                 return err;
@@ -118,13 +118,13 @@ fn main() -> () | IoError {
         if has_winner(board, player) {
             print_board(board);
             println(f"Player {player_mark(player)} wins!");
-            return ();
+            return;
         }
 
         if is_draw(board) {
             print_board(board);
             println("It's a draw.");
-            return ();
+            return;
         }
 
         player = player == 1 ? 2 : 1;

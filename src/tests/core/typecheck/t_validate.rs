@@ -84,6 +84,25 @@ fn test_validate_return_value_missing() {
 }
 
 #[test]
+fn test_validate_empty_return_allowed_for_unit_error_union() {
+    let source = r#"
+        type IoError = {
+            code: u64,
+        }
+
+        fn test() -> () | IoError {
+            return;
+        }
+    "#;
+
+    let result = run_validate(source);
+    assert!(
+        result.is_ok(),
+        "expected bare return to be accepted for () | IoError"
+    );
+}
+
+#[test]
 fn test_validate_defer_rejects_fallible_expression() {
     let source = r#"
         type IoError = {
