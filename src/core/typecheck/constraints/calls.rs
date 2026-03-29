@@ -9,6 +9,7 @@ impl<'a> ConstraintCollector<'a> {
             .iter()
             .map(|arg| self.collect_expr(&arg.expr, None))
             .collect::<Vec<_>>();
+        let arg_labels = args.iter().map(|arg| arg.label.clone()).collect::<Vec<_>>();
         let arg_witnesses = args
             .iter()
             .map(|arg| self.expr_opaque_binding_witness(&arg.expr))
@@ -41,6 +42,7 @@ impl<'a> ConstraintCollector<'a> {
             callee: callee_kind,
             callee_ty: Some(callee_ty),
             receiver: None,
+            arg_labels,
             arg_terms,
             arg_witnesses,
             receiver_witness: None,

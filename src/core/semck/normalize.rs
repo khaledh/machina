@@ -299,6 +299,7 @@ impl<'a> Normalizer<'a> {
                         selected: None,
                         receiver: setter_sig.receiver,
                         params: Vec::new(),
+                        arg_order: Vec::new(),
                     },
                 );
             }

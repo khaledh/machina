@@ -1279,6 +1279,61 @@ fn main() -> u64 { pair(1, 2) }
 }
 
 #[test]
+fn signature_help_remaps_active_parameter_for_named_args() {
+    let mut db = AnalysisDb::new();
+    let source = r#"
+fn connect(host: string, port: u64, timeout: u64) -> u64 { port + timeout }
+fn main() -> u64 { connect("example.com", timeout: 30, port: 8080) }
+"#;
+    let file_id = db.upsert_disk_text(
+        Path::new(env!("CARGO_MANIFEST_DIR")).join("examples/signature_help_named_args.mc"),
+        source,
+    );
+
+    let query_span = span_for_substring(source, "30");
+    let sig = db
+        .signature_help_at_file(file_id, query_span)
+        .expect("signature help query should succeed")
+        .expect("expected signature help at named-arg call site");
+
+    assert!(
+        sig.label.contains("connect("),
+        "unexpected label: {}",
+        sig.label
+    );
+    assert_eq!(sig.parameters.len(), 3);
+    assert_eq!(sig.active_parameter, 2);
+}
+
+#[test]
+fn signature_help_remaps_active_parameter_for_reordered_named_args() {
+    let mut db = AnalysisDb::new();
+    let source = r#"
+fn connect(host: string, port: u64, timeout: u64) -> u64 { port + timeout }
+fn main() -> u64 { connect(timeout: 30, host: "example.com", port: 8080) }
+"#;
+    let file_id = db.upsert_disk_text(
+        Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("examples/signature_help_reordered_named_args.mc"),
+        source,
+    );
+
+    let query_span = span_for_substring(source, "\"example.com\"");
+    let sig = db
+        .signature_help_at_file(file_id, query_span)
+        .expect("signature help query should succeed")
+        .expect("expected signature help at reordered named-arg call site");
+
+    assert!(
+        sig.label.contains("connect("),
+        "unexpected label: {}",
+        sig.label
+    );
+    assert_eq!(sig.parameters.len(), 3);
+    assert_eq!(sig.active_parameter, 0);
+}
+
+#[test]
 fn signature_help_survives_incomplete_call_before_next_statement() {
     let mut db = AnalysisDb::new();
     let source = r#"

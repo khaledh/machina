@@ -10,6 +10,7 @@ use crate::core::capsule::ModuleId;
 use crate::core::resolve::{DefId, DefTable};
 use crate::core::typecheck::builtin_methods;
 use crate::core::typecheck::builtin_methods::BuiltinMethodRet;
+use crate::core::typecheck::call_args::{CallArgMatchError, match_arg_labels_to_param_names};
 use crate::core::typecheck::constraints::{CallCallee, CallObligation};
 use crate::core::typecheck::engine::{
     CollectedCallableSig, CollectedPropertySig, CollectedTraitSig, lookup_property,
@@ -42,6 +43,14 @@ pub(super) fn check_call_obligations(
     let mut deferred = Vec::new();
     for obligation in obligations {
         if let CallCallee::Dynamic { expr_id } = &obligation.callee {
+            if obligation.arg_labels.iter().any(|label| label.is_some()) {
+                tc_push_error!(
+                    errors,
+                    obligation.span,
+                    TEK::NamedArgsNotSupportedForFunctionValues
+                );
+                continue;
+            }
             if let Some(callee_term) = &obligation.callee_ty {
                 let callee_ty = super::term_utils::resolve_term(callee_term, unifier);
                 if let Type::Fn { params, ret_ty } = callee_ty {
@@ -210,6 +219,15 @@ pub(super) fn check_call_obligations(
         let mut ambiguous_best = false;
         let mut first_error = None;
         for sig in candidates.drain(..) {
+            let arg_order = match match_args_to_params_for_sig(obligation, &sig) {
+                Ok(arg_order) => arg_order,
+                Err(err) => {
+                    first_error.get_or_insert_with(|| {
+                        named_arg_match_error_to_diag(err, obligation, &callable_name(obligation))
+                    });
+                    continue;
+                }
+            };
             let mut trial = unifier.clone();
             let instantiated = instantiate_sig(&sig, &mut trial);
             let mut failed = false;
@@ -240,12 +258,9 @@ pub(super) fn check_call_obligations(
                     &super::term_utils::canonicalize_type(trial.apply(expected_receiver_ty)),
                 );
             }
-            for (index, (arg_term, param_ty)) in obligation
-                .arg_terms
-                .iter()
-                .zip(instantiated.params.iter())
-                .enumerate()
-            {
+            for (index, param_index) in arg_order.iter().copied().enumerate() {
+                let arg_term = &obligation.arg_terms[index];
+                let param_ty = &instantiated.params[param_index];
                 let arg_ty = obligation
                     .arg_witnesses
                     .get(index)
@@ -255,12 +270,19 @@ pub(super) fn check_call_obligations(
                     .unwrap_or_else(|| super::term_utils::resolve_term(arg_term, &trial));
                 if solve_call_arg_assignable(&arg_ty, param_ty, &mut trial, method_sigs).is_err() {
                     first_error.get_or_insert_with(|| {
-                        TEK::ArgTypeMismatch(
-                            index + 1,
-                            super::term_utils::canonicalize_type(trial.apply(param_ty)),
-                            super::term_utils::canonicalize_type(trial.apply(&arg_ty)),
-                        )
-                        .at(obligation.span)
+                        let expected = super::term_utils::canonicalize_type(trial.apply(param_ty));
+                        let found = super::term_utils::canonicalize_type(trial.apply(&arg_ty));
+                        obligation.arg_labels[index]
+                            .as_ref()
+                            .map(|label| {
+                                TEK::ArgTypeMismatchForParam(
+                                    label.name.clone(),
+                                    expected.clone(),
+                                    found.clone(),
+                                )
+                            })
+                            .unwrap_or_else(|| TEK::ArgTypeMismatch(index + 1, expected, found))
+                            .at(obligation.span)
                     });
                     failed = true;
                     break;
@@ -462,6 +484,44 @@ fn named_call_candidates(
         .unwrap_or_default()
 }
 
+fn callable_name(obligation: &CallObligation) -> String {
+    match &obligation.callee {
+        CallCallee::NamedFunction { name, .. } => name.clone(),
+        CallCallee::Method { name } => name.clone(),
+        CallCallee::Dynamic { expr_id } => format!("<dynamic:{expr_id}>"),
+    }
+}
+
+fn match_args_to_params_for_sig(
+    obligation: &CallObligation,
+    sig: &CollectedCallableSig,
+) -> Result<Vec<usize>, CallArgMatchError> {
+    let param_names = sig
+        .params
+        .iter()
+        .map(|param| param.name.clone())
+        .collect::<Vec<_>>();
+    match_arg_labels_to_param_names(&obligation.arg_labels, &param_names)
+}
+
+fn named_arg_match_error_to_diag(
+    err: CallArgMatchError,
+    obligation: &CallObligation,
+    callable_name: &str,
+) -> TypeCheckError {
+    match err {
+        CallArgMatchError::UnknownLabel(label) => {
+            TEK::NoParameterNamed(label, callable_name.to_string()).at(obligation.span)
+        }
+        CallArgMatchError::DuplicateParam(label) => {
+            TEK::ArgProvidedMoreThanOnce(label).at(obligation.span)
+        }
+        CallArgMatchError::MissingParam(label) => {
+            TEK::MissingArgumentForParameter(label).at(obligation.span)
+        }
+    }
+}
+
 fn method_call_candidates(
     method_name: &str,
     receiver_ty: Option<&Type>,
@@ -591,17 +651,36 @@ fn try_solve_builtin_method(
         )
         .at(obligation.span)));
     }
-    for (index, (arg_term, expected_ty)) in
-        obligation.arg_terms.iter().zip(params.iter()).enumerate()
-    {
+    let param_names = params
+        .iter()
+        .map(|param| param.name.clone())
+        .collect::<Vec<_>>();
+    let arg_order = match match_arg_labels_to_param_names(&obligation.arg_labels, &param_names) {
+        Ok(arg_order) => arg_order,
+        Err(err) => {
+            return Some(Err(named_arg_match_error_to_diag(
+                err,
+                obligation,
+                method_name,
+            )));
+        }
+    };
+    for (index, param_index) in arg_order.iter().copied().enumerate() {
+        let arg_term = &obligation.arg_terms[index];
+        let expected_ty = &params[param_index];
         let arg_ty = super::term_utils::resolve_term(arg_term, unifier);
         if super::assignability::solve_assignable(&arg_ty, &expected_ty.ty, unifier).is_err() {
-            return Some(Err(TEK::ArgTypeMismatch(
-                index + 1,
-                expected_ty.ty.clone(),
-                arg_ty,
-            )
-            .at(obligation.span)));
+            let err = obligation.arg_labels[index]
+                .as_ref()
+                .map(|label| {
+                    TEK::ArgTypeMismatchForParam(
+                        label.name.clone(),
+                        expected_ty.ty.clone(),
+                        arg_ty.clone(),
+                    )
+                })
+                .unwrap_or_else(|| TEK::ArgTypeMismatch(index + 1, expected_ty.ty.clone(), arg_ty));
+            return Some(Err(err.at(obligation.span)));
         }
     }
 

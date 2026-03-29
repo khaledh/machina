@@ -32,10 +32,18 @@ pub(crate) fn signature_help_at_span(
         call_site_at_span(&typed.module, nudged)
     })?;
     let active_parameter_for = |param_count: usize| {
-        active_param_index_with_comma_context(
+        let source_arg_index = active_param_index_with_comma_context(
             &call.arg_spans,
             query_span.start,
             source,
+            param_count,
+        );
+        remap_active_parameter_index(
+            typed
+                .call_sigs
+                .get(&call.node_id)
+                .map(|sig| sig.arg_order.as_slice()),
+            source_arg_index,
             param_count,
         )
     };
@@ -130,10 +138,18 @@ pub(crate) fn signature_help_for_def_at_call_site(
         call_site_at_span(&caller_typed.module, nudged)
     })?;
     let active_parameter_for = |param_count: usize| {
-        active_param_index_with_comma_context(
+        let source_arg_index = active_param_index_with_comma_context(
             &call.arg_spans,
             query_span.start,
             source,
+            param_count,
+        );
+        remap_active_parameter_index(
+            caller_typed
+                .call_sigs
+                .get(&call.node_id)
+                .map(|sig| sig.arg_order.as_slice()),
+            source_arg_index,
             param_count,
         )
     };
@@ -155,10 +171,18 @@ pub(crate) fn active_parameter_index_at_call_site(
         let nudged = nudge_span_left(query_span)?;
         call_site_at_span(&caller_typed.module, nudged)
     })?;
-    Some(active_param_index_with_comma_context(
+    let source_arg_index = active_param_index_with_comma_context(
         &call.arg_spans,
         query_span.start,
         source,
+        param_count,
+    );
+    Some(remap_active_parameter_index(
+        caller_typed
+            .call_sigs
+            .get(&call.node_id)
+            .map(|sig| sig.arg_order.as_slice()),
+        source_arg_index,
         param_count,
     ))
 }
@@ -223,6 +247,28 @@ fn active_param_index_with_comma_context(
         active = active.max(arg_spans.len().min(param_count.saturating_sub(1)));
     }
     active
+}
+
+fn remap_active_parameter_index(
+    arg_order: Option<&[usize]>,
+    source_arg_index: usize,
+    param_count: usize,
+) -> usize {
+    if param_count == 0 {
+        return 0;
+    }
+
+    let source_arg_index = source_arg_index.min(param_count.saturating_sub(1));
+    let Some(arg_order) = arg_order else {
+        return source_arg_index;
+    };
+    if arg_order.is_empty() {
+        return source_arg_index;
+    }
+    if let Some(param_index) = arg_order.get(source_arg_index) {
+        return (*param_index).min(param_count.saturating_sub(1));
+    }
+    source_arg_index
 }
 
 fn nudge_span_left(span: Span) -> Option<Span> {

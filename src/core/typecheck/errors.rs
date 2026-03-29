@@ -108,6 +108,21 @@ pub enum TypeCheckErrorKind {
     #[error("Type mismatch in arg {0}: expected {1}, found {2}")]
     ArgTypeMismatch(usize, Type, Type),
 
+    #[error("Argument for parameter '{0}' has type {1}, expected {2}")]
+    ArgTypeMismatchForParam(String, Type, Type),
+
+    #[error("No parameter named '{0}' in function '{1}'")]
+    NoParameterNamed(String, String),
+
+    #[error("Argument for parameter '{0}' provided more than once")]
+    ArgProvidedMoreThanOnce(String),
+
+    #[error("Missing argument for parameter '{0}'")]
+    MissingArgumentForParameter(String),
+
+    #[error("Named arguments not supported for function values")]
+    NamedArgsNotSupportedForFunctionValues,
+
     #[error("Invalid type argument count for type {0}: expected {1}, found {2}")]
     TypeArgCountMismatch(String, usize, usize),
 

@@ -1,7 +1,7 @@
 use super::*;
 use std::collections::HashMap;
 
-use crate::core::ast::{BlockItem, ExprKind, StmtExprKind};
+use crate::core::ast::{BlockItem, Expr, ExprKind, StmtExprKind};
 use crate::core::capsule::ModuleId;
 use crate::core::context::{ParsedContext, TypeCheckedContext};
 use crate::core::lexer::{LexError, Lexer, Token};
@@ -54,6 +54,18 @@ fn type_check_source_with_def_owners(
     }
 
     type_check(resolved_context.with_def_owners(def_owners))
+}
+
+fn block_parts(expr: &Expr) -> (&[BlockItem], Option<&Expr>) {
+    match &expr.kind {
+        ExprKind::Block { items, tail } => (&items[..], tail.as_deref()),
+        _ => panic!("Expected Block"),
+    }
+}
+
+fn block_tail(expr: &Expr) -> &Expr {
+    let (_, tail) = block_parts(expr);
+    tail.expect("Expected block to have a tail expr")
 }
 
 #[test]
@@ -724,6 +736,126 @@ fn test_generic_overload_prefers_concrete() {
     "#;
 
     let _ctx = type_check_source(source).expect("Failed to type check");
+}
+
+#[test]
+fn test_named_call_args_typecheck_and_record_arg_order() {
+    let source = r#"
+        fn connect(host: string, port: u64, timeout: u64) -> u64 {
+            timeout
+        }
+
+        fn main() -> u64 {
+            connect("example.com", timeout: 30, port: 8080)
+        }
+    "#;
+
+    let ctx = type_check_source(source).expect("Failed to type check");
+    let main = ctx
+        .module
+        .func_defs()
+        .into_iter()
+        .find(|func| func.sig.name == "main")
+        .expect("missing main");
+    let tail = block_tail(&main.body);
+    let call_sig = ctx.call_sigs.get(&tail.id).expect("missing call sig");
+    assert_eq!(call_sig.arg_order, vec![0, 2, 1]);
+}
+
+#[test]
+fn test_named_call_args_typecheck_with_overload_selection() {
+    let source = r#"
+        fn choose(x: u64, y: bool) -> bool { y }
+        fn choose(x: u64, y: string) -> string { y }
+
+        fn main() -> bool {
+            choose(y: true, x: 1)
+        }
+    "#;
+
+    let _ctx = type_check_source(source).expect("Failed to type check");
+}
+
+#[test]
+fn test_method_named_call_args_typecheck() {
+    let source = r#"
+        type Point = { x: u64, y: u64 }
+
+        Point :: {
+            fn add(self, dx: u64, dy: u64) -> u64 {
+                self.x + self.y + dx + dy
+            }
+        }
+
+        fn main() -> u64 {
+            let p = Point { x: 1, y: 2 };
+            p.add(dy: 3, dx: 4)
+        }
+    "#;
+
+    let _ctx = type_check_source(source).expect("Failed to type check");
+}
+
+#[test]
+fn test_named_call_args_unknown_label_error() {
+    let source = r#"
+        fn connect(host: string, port: u64) -> u64 { port }
+
+        fn main() -> u64 {
+            connect(host: "example.com", timeout: 30)
+        }
+    "#;
+
+    let result = type_check_source(source);
+    assert!(result.is_err());
+    if let Err(errors) = result {
+        assert!(errors.iter().any(|error| matches!(
+            error.kind(),
+            TypeCheckErrorKind::NoParameterNamed(name, func)
+                if name == "timeout" && func == "connect"
+        )));
+    }
+}
+
+#[test]
+fn test_named_call_args_duplicate_label_error() {
+    let source = r#"
+        fn connect(host: string, port: u64) -> u64 { port }
+
+        fn main() -> u64 {
+            connect(host: "example.com", host: "again")
+        }
+    "#;
+
+    let result = type_check_source(source);
+    assert!(result.is_err());
+    if let Err(errors) = result {
+        assert!(errors.iter().any(|error| matches!(
+            error.kind(),
+            TypeCheckErrorKind::ArgProvidedMoreThanOnce(name) if name == "host"
+        )));
+    }
+}
+
+#[test]
+fn test_named_call_args_not_supported_for_function_values() {
+    let source = r#"
+        fn add(a: u64, b: u64) -> u64 { a + b }
+
+        fn main() -> u64 {
+            let f: fn(u64, u64) -> u64 = add;
+            f(a: 1, b: 2)
+        }
+    "#;
+
+    let result = type_check_source(source);
+    assert!(result.is_err());
+    if let Err(errors) = result {
+        assert!(errors.iter().any(|error| matches!(
+            error.kind(),
+            TypeCheckErrorKind::NamedArgsNotSupportedForFunctionValues
+        )));
+    }
 }
 
 #[test]

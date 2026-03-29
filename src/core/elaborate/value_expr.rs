@@ -15,8 +15,8 @@
 //!    control flow, etc.
 
 use crate::core::ast::{
-    ArrayLitInit, CallArg, CoerceKind, EmitKind, Expr, ExprKind, MapLitEntry, MatchArm, ParamMode,
-    StructLitField, StructUpdateField,
+    ArrayLitInit, CallArg, CoerceKind, EmitKind, Expr, ExprKind, MapLitEntry, MatchArm, NodeId,
+    ParamMode, StructLitField, StructUpdateField,
 };
 use crate::core::elaborate::elaborator::Elaborator;
 use crate::core::machine::request_site::labeled_request_site_key;
@@ -202,6 +202,29 @@ impl<'a> Elaborator<'a> {
         }
     }
 
+    fn reorder_call_args_for_call_sig<'b>(
+        &self,
+        call_id: NodeId,
+        call_sig: &CallSig,
+        args: &'b [CallArg],
+    ) -> Vec<&'b CallArg> {
+        if call_sig.arg_order.is_empty() {
+            return args.iter().collect();
+        }
+        if call_sig.arg_order.len() != args.len() {
+            panic!(
+                "compiler bug: call {call_id:?} has {} args but arg order has {} entries",
+                args.len(),
+                call_sig.arg_order.len()
+            );
+        }
+        let mut ordered = vec![args.first().unwrap(); args.len()];
+        for (arg_index, param_index) in call_sig.arg_order.iter().copied().enumerate() {
+            ordered[param_index] = &args[arg_index];
+        }
+        ordered
+    }
+
     fn elab_call_expr(&mut self, expr: &Expr, callee: &Expr, args: &[CallArg]) -> ExprKind {
         let call_sig = self.get_call_sig(expr.id);
 
@@ -225,6 +248,7 @@ impl<'a> Elaborator<'a> {
                     ty: info.ty.clone(),
                 }),
                 params: call_sig.params.clone(),
+                arg_order: call_sig.arg_order.clone(),
             };
 
             let plan = self.build_call_plan(expr.id, Some("invoke"), &plan_sig);
@@ -234,10 +258,11 @@ impl<'a> Elaborator<'a> {
             // Re-record the callee's type as the closure struct type so the lowerer
             // sees a non-scalar struct and materializes it properly.
             self.record_expr_type(elab_callee.id, info.type_id);
+            let ordered_args = self.reorder_call_args_for_call_sig(expr.id, &call_sig, args);
             let args = info
                 .param_modes
                 .iter()
-                .zip(args.iter())
+                .zip(ordered_args.into_iter())
                 .map(|(mode, arg)| self.elab_call_arg_mode(mode.clone(), arg))
                 .collect();
 
@@ -250,10 +275,11 @@ impl<'a> Elaborator<'a> {
             let plan = self.build_call_plan(expr.id, None, &call_sig);
             self.record_call_plan(expr.id, plan);
 
+            let ordered_args = self.reorder_call_args_for_call_sig(expr.id, &call_sig, args);
             let args = call_sig
                 .params
                 .iter()
-                .zip(args.iter())
+                .zip(ordered_args.into_iter())
                 .map(|(param, arg)| self.elab_call_arg(param, arg))
                 .collect();
 
@@ -300,10 +326,22 @@ impl<'a> Elaborator<'a> {
         } else {
             args
         };
+        let ordered_runtime_args = if call_sig.arg_order.is_empty() {
+            runtime_args.iter().collect::<Vec<_>>()
+        } else if call_sig.arg_order.len() == runtime_args.len() {
+            self.reorder_call_args_for_call_sig(expr.id, &call_sig, runtime_args)
+        } else {
+            panic!(
+                "compiler bug: method call {call_id:?} has {} runtime args but arg order has {} entries",
+                runtime_args.len(),
+                call_sig.arg_order.len(),
+                call_id = expr.id,
+            );
+        };
         let args = call_sig
             .params
             .iter()
-            .zip(runtime_args.iter())
+            .zip(ordered_runtime_args.into_iter())
             .map(|(param, arg)| self.elab_call_arg(param, arg))
             .collect();
         let plan = self.build_call_plan(expr.id, Some(method_name), &call_sig);

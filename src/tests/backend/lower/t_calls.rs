@@ -1,6 +1,25 @@
 use super::{analyze, assert_ir_eq, format_func, indoc, lower_func};
 use crate::core::ast::MethodItem;
 
+fn lower_main_text(source: &str) -> String {
+    let ctx = analyze(source);
+    let main_def = ctx
+        .module
+        .func_defs()
+        .into_iter()
+        .find(|def| def.sig.name == "main")
+        .expect("missing main");
+    let lowered = lower_func(
+        main_def,
+        &ctx.def_table,
+        &ctx.type_map,
+        &ctx.lowering_plans,
+        &ctx.drop_plans,
+    )
+    .expect("failed to lower");
+    format_func(&lowered.func, &lowered.types)
+}
+
 #[test]
 fn test_lower_call_with_params() {
     let ctx = analyze(indoc! {"
@@ -84,6 +103,31 @@ fn test_lower_call_stmt() {
 }
 
 #[test]
+fn test_lower_named_call_matches_positional_ir() {
+    let positional = lower_main_text(indoc! {"
+        fn connect(host: string, port: u64, timeout: u64) -> u64 {
+            port + timeout
+        }
+
+        fn main() -> u64 {
+            connect(\"example.com\", 8080, 30)
+        }
+    "});
+
+    let named = lower_main_text(indoc! {"
+        fn connect(host: string, port: u64, timeout: u64) -> u64 {
+            port + timeout
+        }
+
+        fn main() -> u64 {
+            connect(\"example.com\", timeout: 30, port: 8080)
+        }
+    "});
+
+    assert_ir_eq(named, positional);
+}
+
+#[test]
 fn test_lower_method_call_param() {
     let ctx = analyze(indoc! {"
         type Pair = { a: u64, b: u64 }
@@ -147,6 +191,39 @@ fn test_lower_method_call_param() {
         method_def_id
     );
     assert_ir_eq(&text, expected);
+}
+
+#[test]
+fn test_lower_named_method_call_matches_positional_ir() {
+    let positional = lower_main_text(indoc! {"
+        type Config = {}
+
+        Config :: {
+            fn connect(self, host: string, port: u64, timeout: u64) -> u64 {
+                port + timeout
+            }
+        }
+
+        fn main(cfg: Config) -> u64 {
+            cfg.connect(\"example.com\", 8080, 30)
+        }
+    "});
+
+    let named = lower_main_text(indoc! {"
+        type Config = {}
+
+        Config :: {
+            fn connect(self, host: string, port: u64, timeout: u64) -> u64 {
+                port + timeout
+            }
+        }
+
+        fn main(cfg: Config) -> u64 {
+            cfg.connect(\"example.com\", timeout: 30, port: 8080)
+        }
+    "});
+
+    assert_ir_eq(named, positional);
 }
 
 #[test]

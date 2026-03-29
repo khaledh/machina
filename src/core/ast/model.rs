@@ -618,7 +618,7 @@ pub struct Param {
 
 // -- Call Args --
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ArgLabel {
     pub name: String,
     pub span: Span,

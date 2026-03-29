@@ -19,6 +19,9 @@ use crate::core::resolve::{DefId, DefKind};
 use crate::core::symbol_id::SelectedCallable;
 use crate::core::typecheck::InferUnifier;
 use crate::core::typecheck::builtin_methods;
+use crate::core::typecheck::call_args::{
+    identity_arg_order, match_arg_labels_to_param_names, reorder_values_by_arg_order,
+};
 use crate::core::typecheck::constraints::{CallCallee, ExprObligation};
 use crate::core::typecheck::engine::TypecheckEngine;
 use crate::core::typecheck::engine::{
@@ -181,6 +184,25 @@ fn build_outputs(engine: &TypecheckEngine) -> FinalizeOutput {
             .resolved_call_defs
             .get(&obligation.call_node)
             .copied();
+        let source_arg_order = selected_def_id
+            .and_then(|def_id| {
+                call_arg_order_for_selected_def(
+                    engine,
+                    obligation,
+                    receiver_ty.as_ref().or(obligation.receiver.as_ref()),
+                    def_id,
+                )
+            })
+            .or_else(|| match &obligation.callee {
+                CallCallee::Method { name } => builtin_methods::resolve_builtin_method(
+                    receiver_ty.as_ref().or(obligation.receiver.as_ref())?,
+                    name,
+                )
+                .and_then(|builtin| call_arg_order_for_builtin_method(obligation, &builtin)),
+                _ => None,
+            })
+            .unwrap_or_else(|| identity_arg_order(arg_types.len()));
+        let ordered_arg_types = reorder_values_by_arg_order(&arg_types, &source_arg_order);
         let resolved = match &obligation.callee {
             CallCallee::NamedFunction { name, .. } => {
                 if let Some(def_id) = selected_def_id {
@@ -188,12 +210,18 @@ fn build_outputs(engine: &TypecheckEngine) -> FinalizeOutput {
                         engine,
                         name,
                         def_id,
-                        &arg_types,
+                        &ordered_arg_types,
                         obligation.span,
                         &expected_ret,
                     )
                 } else {
-                    resolve_named_call(engine, name, &arg_types, obligation.span, &expected_ret)
+                    resolve_named_call(
+                        engine,
+                        name,
+                        &ordered_arg_types,
+                        obligation.span,
+                        &expected_ret,
+                    )
                 }
             }
             CallCallee::Method { name } => {
@@ -203,7 +231,7 @@ fn build_outputs(engine: &TypecheckEngine) -> FinalizeOutput {
                         receiver_ty.as_ref().or(obligation.receiver.as_ref()),
                         name,
                         def_id,
-                        &arg_types,
+                        &ordered_arg_types,
                         obligation.span,
                         &expected_ret,
                     )
@@ -212,7 +240,7 @@ fn build_outputs(engine: &TypecheckEngine) -> FinalizeOutput {
                         engine,
                         receiver_ty.as_ref().or(obligation.receiver.as_ref()),
                         name,
-                        &arg_types,
+                        &ordered_arg_types,
                         obligation.span,
                         &expected_ret,
                     )
@@ -260,6 +288,7 @@ fn build_outputs(engine: &TypecheckEngine) -> FinalizeOutput {
                 selected,
                 receiver,
                 params,
+                arg_order: source_arg_order,
             },
         );
         if let Some(inst) = generic_inst {
@@ -440,6 +469,7 @@ fn record_property_access_call_sigs(engine: &TypecheckEngine, builder: &mut Type
                             ty: target_ty,
                         }),
                         params: Vec::new(),
+                        arg_order: Vec::new(),
                     },
                 );
             }
@@ -477,6 +507,7 @@ fn record_property_access_call_sigs(engine: &TypecheckEngine, builder: &mut Type
                             mode: ParamMode::In,
                             ty: resolve_term(value, engine),
                         }],
+                        arg_order: identity_arg_order(1),
                     },
                 );
             }
@@ -536,6 +567,7 @@ fn record_linear_session_call_sigs(engine: &TypecheckEngine, builder: &mut TypeM
                     ty: receiver_ty,
                 }),
                 params,
+                arg_order: identity_arg_order(arg_terms.len()),
             },
         );
         builder.record_node_type(*expr_id, expected_ret);
@@ -578,6 +610,7 @@ fn record_linear_machine_create_call_sigs(engine: &TypecheckEngine, builder: &mu
                     ty: receiver_ty,
                 }),
                 params: Vec::new(),
+                arg_order: Vec::new(),
             },
         );
         builder.record_node_type(*expr_id, expected_ret);
@@ -626,6 +659,7 @@ fn record_linear_machine_resume_call_sigs(engine: &TypecheckEngine, builder: &mu
                     mode: ParamMode::In,
                     ty: key_ty,
                 }],
+                arg_order: identity_arg_order(1),
             },
         );
         builder.record_node_type(*expr_id, expected_ret);
@@ -672,6 +706,7 @@ fn record_linear_machine_lookup_call_sigs(engine: &TypecheckEngine, builder: &mu
                     mode: ParamMode::In,
                     ty: key_ty,
                 }],
+                arg_order: identity_arg_order(1),
             },
         );
         builder.record_node_type(*expr_id, expected_ret);
@@ -730,6 +765,7 @@ fn record_linear_machine_deliver_call_sigs(engine: &TypecheckEngine, builder: &m
                         ty: event_ty,
                     },
                 ],
+                arg_order: identity_arg_order(2),
             },
         );
         builder.record_node_type(*expr_id, expected_ret);
@@ -949,6 +985,59 @@ struct ResolvedCall {
     receiver: Option<CallParam>,
     params: Vec<CallParam>,
     inst: Option<GenericInst>,
+}
+
+fn call_arg_order_for_selected_def(
+    engine: &TypecheckEngine,
+    obligation: &crate::core::typecheck::constraints::CallObligation,
+    receiver: Option<&Type>,
+    def_id: DefId,
+) -> Option<Vec<usize>> {
+    match &obligation.callee {
+        CallCallee::NamedFunction { name, .. } => {
+            let overloads = engine.env().func_sigs.get(name)?;
+            let sig = overloads.iter().find(|sig| {
+                sig.def_id == def_id && sig.params.len() == obligation.arg_labels.len()
+            })?;
+            let param_names = sig
+                .params
+                .iter()
+                .map(|param| param.name.clone())
+                .collect::<Vec<_>>();
+            match_arg_labels_to_param_names(&obligation.arg_labels, &param_names).ok()
+        }
+        CallCallee::Method { name } => {
+            let receiver_ty = receiver.map(|term| resolve_term(term, engine))?;
+            let owner = match &receiver_ty {
+                Type::Struct { name, .. } | Type::Enum { name, .. } => name.clone(),
+                Type::String => "string".to_string(),
+                _ => return None,
+            };
+            let overloads = engine.env().method_sigs.get(&owner)?.get(name)?;
+            let sig = overloads.iter().find(|sig| {
+                sig.def_id == def_id && sig.params.len() == obligation.arg_labels.len()
+            })?;
+            let param_names = sig
+                .params
+                .iter()
+                .map(|param| param.name.clone())
+                .collect::<Vec<_>>();
+            match_arg_labels_to_param_names(&obligation.arg_labels, &param_names).ok()
+        }
+        CallCallee::Dynamic { .. } => None,
+    }
+}
+
+fn call_arg_order_for_builtin_method(
+    obligation: &crate::core::typecheck::constraints::CallObligation,
+    builtin: &builtin_methods::BuiltinMethod,
+) -> Option<Vec<usize>> {
+    let params = builtin.params();
+    let param_names = params
+        .iter()
+        .map(|param| param.name.clone())
+        .collect::<Vec<_>>();
+    match_arg_labels_to_param_names(&obligation.arg_labels, &param_names).ok()
 }
 
 fn resolve_named_call(

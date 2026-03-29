@@ -13,8 +13,8 @@ use std::collections::HashMap;
 
 use crate::core::ast::NodeId;
 use crate::core::ast::{
-    BinaryOp, BindPattern, BindPatternKind, BlockItem, CallArg, EmitKind, Expr, ExprKind, FuncDef,
-    MatchArm, MatchPattern, MethodSig, StmtExpr, StmtExprKind, StringFmtSegment,
+    ArgLabel, BinaryOp, BindPattern, BindPatternKind, BlockItem, CallArg, EmitKind, Expr, ExprKind,
+    FuncDef, MatchArm, MatchPattern, MethodSig, StmtExpr, StmtExprKind, StringFmtSegment,
     StructFieldBindPattern, TypeExpr, TypeParam, UnaryOp,
 };
 use crate::core::diag::Span;
@@ -272,6 +272,7 @@ pub(crate) struct CallObligation {
     pub(crate) callee_ty: Option<Type>,
     pub(crate) receiver: Option<Type>,
     pub(crate) receiver_witness: Option<Type>,
+    pub(crate) arg_labels: Vec<Option<ArgLabel>>,
     pub(crate) arg_terms: Vec<Type>,
     pub(crate) arg_witnesses: Vec<Option<Type>>,
     pub(crate) ret_ty: Type,

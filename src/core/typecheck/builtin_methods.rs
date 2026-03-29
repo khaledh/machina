@@ -9,6 +9,7 @@ use crate::core::types::Type;
 
 #[derive(Clone, Debug)]
 pub(crate) struct BuiltinMethodParam {
+    pub(crate) name: String,
     pub(crate) mode: ParamMode,
     pub(crate) ty: Type,
 }
@@ -59,22 +60,26 @@ impl BuiltinMethod {
     pub(crate) fn params(&self) -> Vec<BuiltinMethodParam> {
         match self {
             BuiltinMethod::DynArrayAppend { elem_ty, elem_mode } => vec![BuiltinMethodParam {
+                name: "value".to_string(),
                 mode: elem_mode.clone(),
                 ty: elem_ty.clone(),
             }],
             BuiltinMethod::SetInsert { elem_ty }
             | BuiltinMethod::SetRemove { elem_ty }
             | BuiltinMethod::SetContains { elem_ty } => vec![BuiltinMethodParam {
+                name: "value".to_string(),
                 mode: ParamMode::In,
                 ty: elem_ty.clone(),
             }],
             BuiltinMethod::SetClear { .. } => Vec::new(),
             BuiltinMethod::MapInsert { key_ty, value_ty } => vec![
                 BuiltinMethodParam {
+                    name: "key".to_string(),
                     mode: ParamMode::In,
                     ty: key_ty.clone(),
                 },
                 BuiltinMethodParam {
+                    name: "value".to_string(),
                     mode: ParamMode::In,
                     ty: value_ty.clone(),
                 },
@@ -82,6 +87,7 @@ impl BuiltinMethod {
             BuiltinMethod::MapRemove { key_ty }
             | BuiltinMethod::MapContainsKey { key_ty }
             | BuiltinMethod::MapGet { key_ty, .. } => vec![BuiltinMethodParam {
+                name: "key".to_string(),
                 mode: ParamMode::In,
                 ty: key_ty.clone(),
             }],

@@ -42,6 +42,37 @@ fn populate_typecheck_metadata(kind: &TypeCheckErrorKind, metadata: &mut Diagnos
                 DiagnosticValue::String(found.to_string()),
             );
         }
+        TypeCheckErrorKind::ArgTypeMismatchForParam(param, expected, found, ..) => {
+            metadata.insert(
+                "parameter".to_string(),
+                DiagnosticValue::String(param.clone()),
+            );
+            metadata.insert(
+                "expected".to_string(),
+                DiagnosticValue::String(expected.to_string()),
+            );
+            metadata.insert(
+                "found".to_string(),
+                DiagnosticValue::String(found.to_string()),
+            );
+        }
+        TypeCheckErrorKind::NoParameterNamed(param, callable, ..) => {
+            metadata.insert(
+                "parameter".to_string(),
+                DiagnosticValue::String(param.clone()),
+            );
+            metadata.insert(
+                "callable".to_string(),
+                DiagnosticValue::String(callable.clone()),
+            );
+        }
+        TypeCheckErrorKind::ArgProvidedMoreThanOnce(param, ..)
+        | TypeCheckErrorKind::MissingArgumentForParameter(param, ..) => {
+            metadata.insert(
+                "parameter".to_string(),
+                DiagnosticValue::String(param.clone()),
+            );
+        }
         TypeCheckErrorKind::DeclTypeMismatch(expected, found, ..) => {
             metadata.insert(
                 "expected".to_string(),
@@ -117,6 +148,11 @@ macro_rules! with_typecheck_variants {
             AssignTypeMismatch,
             ArgCountMismatch,
             ArgTypeMismatch,
+            ArgTypeMismatchForParam,
+            NoParameterNamed,
+            ArgProvidedMoreThanOnce,
+            MissingArgumentForParameter,
+            NamedArgsNotSupportedForFunctionValues,
             TypeArgCountMismatch,
             InvalidCallee,
             EmptyArrayLiteral,

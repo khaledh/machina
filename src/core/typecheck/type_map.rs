@@ -1229,6 +1229,9 @@ pub struct CallSig {
     pub selected: Option<SelectedCallable>,
     pub receiver: Option<CallParam>,
     pub params: Vec<CallParam>,
+    /// Maps source call-arg index to parameter index after named-argument
+    /// matching. Positional-only calls use identity ordering.
+    pub arg_order: Vec<usize>,
 }
 
 pub type CallSigMap = HashMap<NodeId, CallSig>;
