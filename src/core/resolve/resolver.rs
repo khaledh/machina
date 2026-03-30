@@ -588,6 +588,57 @@ impl SymbolResolver {
         }
     }
 
+    fn attr_arg_ident<'a>(&mut self, attr: &'a Attribute, index: usize) -> Option<&'a str> {
+        match attr.args.get(index) {
+            Some(AttrArg::Ident(value)) => Some(value.as_str()),
+            _ => {
+                self.err(attr.span, REK::AttrWrongArgType(attr.name.clone()));
+                None
+            }
+        }
+    }
+
+    fn attr_arg_int(&mut self, attr: &Attribute, index: usize) -> Option<u64> {
+        match attr.args.get(index) {
+            Some(AttrArg::Int(value)) => Some(*value),
+            _ => {
+                self.err(attr.span, REK::AttrWrongArgType(attr.name.clone()));
+                None
+            }
+        }
+    }
+
+    fn attr_named_int_arg(&mut self, attr: &Attribute, name: &str) -> Option<Option<u64>> {
+        let mut found = None;
+        for arg in &attr.args {
+            let AttrArg::Named {
+                name: arg_name,
+                value,
+            } = arg
+            else {
+                continue;
+            };
+            if arg_name != name {
+                continue;
+            }
+            if found.is_some() {
+                self.err(
+                    attr.span,
+                    REK::AttrWrongArgCount(attr.name.clone(), 0, attr.args.len()),
+                );
+                return None;
+            }
+            match value.as_ref() {
+                AttrArg::Int(value) => found = Some(*value),
+                _ => {
+                    self.err(attr.span, REK::AttrWrongArgType(attr.name.clone()));
+                    return None;
+                }
+            }
+        }
+        Some(found)
+    }
+
     fn resolve_type_attrs(&mut self, attrs: &[Attribute]) -> TypeAttrs {
         let mut resolved = TypeAttrs::default();
         let mut seen = HashSet::new();
@@ -637,6 +688,52 @@ impl SymbolResolver {
                         );
                     }
                 }
+                "layout" => {
+                    if attr.args.is_empty() || attr.args.len() > 2 {
+                        self.err(
+                            attr.span,
+                            REK::AttrWrongArgCount(attr.name.clone(), 1, attr.args.len()),
+                        );
+                        continue;
+                    }
+
+                    let Some(layout_kind) = self.attr_arg_ident(attr, 0) else {
+                        continue;
+                    };
+                    if layout_kind != "fixed" {
+                        self.err(attr.span, REK::AttrWrongArgType(attr.name.clone()));
+                        continue;
+                    }
+
+                    if attr
+                        .args
+                        .iter()
+                        .skip(1)
+                        .any(|arg| !matches!(arg, AttrArg::Named { name, .. } if name == "size"))
+                    {
+                        self.err(attr.span, REK::AttrWrongArgType(attr.name.clone()));
+                        continue;
+                    }
+
+                    let Some(size) = self.attr_named_int_arg(attr, "size") else {
+                        continue;
+                    };
+                    resolved.fixed_layout = true;
+                    resolved.fixed_size = size;
+                }
+                "align" => {
+                    if attr.args.len() != 1 {
+                        self.err(
+                            attr.span,
+                            REK::AttrWrongArgCount(attr.name.clone(), 1, attr.args.len()),
+                        );
+                        continue;
+                    }
+                    let Some(align) = self.attr_arg_int(attr, 0) else {
+                        continue;
+                    };
+                    resolved.fixed_align = Some(align);
+                }
                 "link_name" => {
                     self.err(
                         attr.span,
@@ -671,7 +768,7 @@ impl SymbolResolver {
                         resolved.visibility = Visibility::Public;
                     }
                 }
-                "intrinsic" | "runtime" | "link_name" | "opaque" => {
+                "intrinsic" | "runtime" | "link_name" | "opaque" | "layout" | "align" => {
                     self.err(
                         attr.span,
                         REK::AttrNotAllowed(attr.name.clone(), "trait definition"),
@@ -751,7 +848,7 @@ impl SymbolResolver {
                 "__property_get" | "__property_set" => {
                     // Internal marker attributes emitted by the parser for properties.
                 }
-                "opaque" => {
+                "opaque" | "layout" | "align" => {
                     self.err(
                         attr.span,
                         REK::AttrNotAllowed(attr.name.clone(), "function"),

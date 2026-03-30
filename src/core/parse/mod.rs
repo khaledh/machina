@@ -244,10 +244,8 @@ impl<'a> Parser<'a> {
             let mut args = Vec::new();
             if self.curr_token.kind == TK::LParen {
                 self.advance();
-                args = self.parse_list(TK::Comma, TK::RParen, |parser| {
-                    let value = parser.parse_string_lit()?;
-                    Ok(AttrArg::String(value))
-                })?;
+                args =
+                    self.parse_list(TK::Comma, TK::RParen, |parser| parser.parse_attribute_arg())?;
                 self.consume(&TK::RParen)?;
             }
             attrs.push(Attribute {
@@ -258,6 +256,36 @@ impl<'a> Parser<'a> {
         }
 
         Ok(attrs)
+    }
+
+    fn parse_attribute_arg(&mut self) -> Result<AttrArg, ParseError> {
+        match &self.curr_token.kind {
+            TK::StringLit(_) => self.parse_string_lit().map(AttrArg::String),
+            TK::IntLit(_) => self.parse_int_lit().map(AttrArg::Int),
+            TK::Ident(_) | TK::KwMap => {
+                let name = self.parse_ident()?;
+                if self.curr_token.kind == TK::Colon {
+                    self.advance();
+                    let value = self.parse_attribute_arg_value()?;
+                    Ok(AttrArg::Named {
+                        name,
+                        value: Box::new(value),
+                    })
+                } else {
+                    Ok(AttrArg::Ident(name))
+                }
+            }
+            _ => self.err_here(PEK::ExpectedAttributeArg(self.curr_token.clone())),
+        }
+    }
+
+    fn parse_attribute_arg_value(&mut self) -> Result<AttrArg, ParseError> {
+        match &self.curr_token.kind {
+            TK::StringLit(_) => self.parse_string_lit().map(AttrArg::String),
+            TK::IntLit(_) => self.parse_int_lit().map(AttrArg::Int),
+            TK::Ident(_) | TK::KwMap => self.parse_ident().map(AttrArg::Ident),
+            _ => self.err_here(PEK::ExpectedAttributeArg(self.curr_token.clone())),
+        }
     }
 
     fn parse_doc_comment_block(&mut self) -> Option<DocComment> {

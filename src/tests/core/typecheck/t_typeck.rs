@@ -132,6 +132,95 @@ fn test_typed_array_repeat_literal_type_mismatch() {
 }
 
 #[test]
+fn test_fixed_layout_struct_typechecks_with_explicit_padding() {
+    let source = r#"
+        @layout(fixed, size: 16)
+        type Header = {
+            lo: u32,
+            hi: u32,
+            _pad: u8[8],
+        }
+
+        fn size() -> u64 {
+            16
+        }
+    "#;
+
+    let _ctx = type_check_source(source).expect("fixed-layout struct should type check");
+}
+
+#[test]
+fn test_fixed_layout_rejects_implicit_padding() {
+    let source = r#"
+        @layout(fixed)
+        type Header = {
+            tag: u8,
+            value: u64,
+        }
+    "#;
+
+    let result = type_check_source(source);
+    assert!(result.is_err());
+    let Err(errors) = result else {
+        panic!("expected fixed-layout padding error");
+    };
+    assert!(errors.iter().any(|err| {
+        matches!(
+            err.kind(),
+            TypeCheckErrorKind::FixedLayoutImplicitPadding { field, padding, .. }
+                if field == "value" && *padding == 7
+        )
+    }));
+}
+
+#[test]
+fn test_fixed_layout_size_mismatch_reports_error() {
+    let source = r#"
+        @layout(fixed, size: 8)
+        type Header = {
+            value: u64,
+            extra: u64,
+        }
+    "#;
+
+    let result = type_check_source(source);
+    assert!(result.is_err());
+    let Err(errors) = result else {
+        panic!("expected fixed-layout size error");
+    };
+    assert!(errors.iter().any(|err| {
+        matches!(
+            err.kind(),
+            TypeCheckErrorKind::FixedLayoutSizeMismatch { type_name, expected, actual }
+                if type_name == "Header" && *expected == 8 && *actual == 16
+        )
+    }));
+}
+
+#[test]
+fn test_type_align_requires_fixed_layout() {
+    let source = r#"
+        @align(16)
+        type Header = {
+            value: u64,
+        }
+    "#;
+
+    let result = type_check_source(source);
+    assert!(result.is_err());
+    let Err(errors) = result else {
+        panic!("expected align-without-layout error");
+    };
+    assert!(errors.iter().any(|err| {
+        matches!(
+            err.kind(),
+            TypeCheckErrorKind::FixedLayoutAlignRequiresFixedLayout(type_name)
+                if type_name == "Header"
+        )
+    }));
+}
+
+#[test]
 fn test_function_call_arg_errors_in_stmt_position() {
     let source = r#"
         fn foo(n: u64, fact: bool) {
@@ -160,6 +249,104 @@ fn test_function_call_arg_errors_in_stmt_position() {
             )
         }));
     }
+}
+
+#[test]
+fn test_address_types_typecheck_in_signatures_and_structs() {
+    let source = r#"
+        type BootInfo = {
+            mem_base: paddr,
+            response: vaddr?,
+        }
+
+        fn keep(base: paddr, response: vaddr?) -> paddr {
+            let info = BootInfo { mem_base: base, response: response };
+            info.mem_base
+        }
+    "#;
+
+    let _ctx = type_check_source(source).expect("Failed to type check");
+}
+
+#[test]
+fn test_address_types_are_equatable() {
+    let source = r#"
+        fn same_addr(a: vaddr, b: vaddr) -> bool {
+            a == b
+        }
+
+        fn same_maybe_addr(a: vaddr?, b: vaddr?) -> bool {
+            a == b
+        }
+    "#;
+
+    let _ctx = type_check_source(source).expect("Failed to type check");
+}
+
+#[test]
+fn test_address_helper_methods_typecheck() {
+    let source = r#"
+        fn normalize(base: vaddr, frame: u64) -> vaddr {
+            base.align_down(frame).align_up(4096)
+        }
+
+        fn is_page_aligned(base: paddr) -> bool {
+            base.is_aligned(4096)
+        }
+
+        fn raw(base: vaddr) -> u64 {
+            base.offset()
+        }
+    "#;
+
+    let _ctx = type_check_source(source).expect("Failed to type check");
+}
+
+#[test]
+fn test_address_arithmetic_operators_typecheck() {
+    let source = r#"
+        fn advance(base: vaddr, delta: u64) -> vaddr {
+            base + delta
+        }
+
+        fn retreat(base: paddr, delta: u64) -> paddr {
+            base - delta
+        }
+
+        fn distance(a: vaddr, b: vaddr) -> u64 {
+            a - b
+        }
+    "#;
+
+    let _ctx = type_check_source(source).expect("Failed to type check");
+}
+
+#[test]
+fn test_address_arithmetic_rejects_invalid_operands() {
+    let source = r#"
+        fn bad_add(base: vaddr, other: vaddr) -> vaddr {
+            base + other
+        }
+
+        fn bad_mix(base: vaddr, other: paddr) -> u64 {
+            base - other
+        }
+
+        fn bad_order(base: vaddr, delta: u64) -> vaddr {
+            delta + base
+        }
+    "#;
+
+    let errors = match type_check_source(source) {
+        Ok(_) => panic!("expected invalid address arithmetic"),
+        Err(errors) => errors,
+    };
+    assert!(errors.iter().any(|e| {
+        matches!(
+            e.kind(),
+            TypeCheckErrorKind::ArithTypeMismatch(_, _) | TypeCheckErrorKind::ArithOperandNotInt(_)
+        )
+    }));
 }
 
 #[test]

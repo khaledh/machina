@@ -60,7 +60,14 @@ impl EqPlan {
     fn build(ty: &Type) -> Self {
         match ty {
             Type::Unit => Self::AlwaysTrue,
-            Type::Int { .. } | Type::Bool | Type::Char | Type::Range { .. } => Self::LeafCmp,
+            Type::PAddr
+            | Type::NullablePAddr
+            | Type::VAddr
+            | Type::NullableVAddr
+            | Type::Int { .. }
+            | Type::Bool
+            | Type::Char
+            | Type::Range { .. } => Self::LeafCmp,
             Type::String => Self::StringEq,
             Type::Tuple { field_tys } => {
                 let field_plans = field_tys.iter().map(Self::build).collect();

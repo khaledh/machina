@@ -82,6 +82,12 @@ impl<'a> TypeLowerer<'a> {
             // Primitive types map directly to their SSA equivalents.
             Type::Unit => self.ir_type_cache.add(IrTypeKind::Unit),
             Type::Bool => self.ir_type_cache.add(IrTypeKind::Bool),
+            Type::PAddr | Type::NullablePAddr | Type::VAddr | Type::NullableVAddr => {
+                self.ir_type_cache.add(IrTypeKind::Int {
+                    signed: false,
+                    bits: 64,
+                })
+            }
             Type::Int {
                 signed,
                 bits,

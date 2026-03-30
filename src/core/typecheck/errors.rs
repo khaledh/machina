@@ -165,6 +165,53 @@ pub enum TypeCheckErrorKind {
     #[error("`Iterable<T>` is only allowed in function and method parameter or return position")]
     IterableNotAllowedHere,
 
+    #[error("Fixed layout is only supported on struct definitions, found {0}")]
+    FixedLayoutRequiresStruct(String),
+
+    #[error("Type `{0}` uses `@align` but is not marked `@layout(fixed)`")]
+    FixedLayoutAlignRequiresFixedLayout(String),
+
+    #[error(
+        "Struct field `{field}` uses `@align` but type `{type_name}` is not marked `@layout(fixed)`"
+    )]
+    FixedLayoutFieldAlignRequiresFixedLayout { type_name: String, field: String },
+
+    #[error("Unknown fixed-layout field attribute `{attr}` on field `{field}`")]
+    FixedLayoutUnknownFieldAttr { field: String, attr: String },
+
+    #[error("Alignment must be a non-zero power of two, found {0}")]
+    FixedLayoutInvalidAlign(u64),
+
+    #[error("Type `{type_name}` alignment {actual} is smaller than required alignment {required}")]
+    FixedLayoutTypeAlignTooSmall {
+        type_name: String,
+        actual: u64,
+        required: u64,
+    },
+
+    #[error("Field `{field}` alignment {actual} is smaller than natural alignment {required}")]
+    FixedLayoutFieldAlignTooSmall {
+        field: String,
+        actual: u64,
+        required: u64,
+    },
+
+    #[error(
+        "Field `{field}` requires {padding} bytes of implicit padding before it in fixed-layout type `{type_name}`"
+    )]
+    FixedLayoutImplicitPadding {
+        type_name: String,
+        field: String,
+        padding: u64,
+    },
+
+    #[error("Fixed-layout type `{type_name}` has size {actual}, expected {expected}")]
+    FixedLayoutSizeMismatch {
+        type_name: String,
+        expected: u64,
+        actual: u64,
+    },
+
     #[error(
         "opaque return {0} requires a single concrete witness type across all paths, found {1:?}"
     )]

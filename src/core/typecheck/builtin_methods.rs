@@ -18,6 +18,7 @@ pub(crate) struct BuiltinMethodParam {
 pub(crate) enum BuiltinMethodRet {
     Unit,
     Bool,
+    Value(Type),
     MapGet { value_ty: Type },
 }
 
@@ -31,6 +32,10 @@ pub(crate) struct BuiltinProperty {
 #[derive(Clone, Debug)]
 pub(crate) enum BuiltinMethod {
     DynArrayAppend { elem_ty: Type, elem_mode: ParamMode },
+    AddrOffset,
+    AddrAlignDown { addr_ty: Type },
+    AddrAlignUp { addr_ty: Type },
+    AddrIsAligned,
     SetInsert { elem_ty: Type },
     SetRemove { elem_ty: Type },
     SetContains { elem_ty: Type },
@@ -46,6 +51,10 @@ impl BuiltinMethod {
     pub(crate) fn receiver_mode(&self) -> ParamMode {
         match self {
             BuiltinMethod::DynArrayAppend { .. } => ParamMode::InOut,
+            BuiltinMethod::AddrOffset
+            | BuiltinMethod::AddrAlignDown { .. }
+            | BuiltinMethod::AddrAlignUp { .. }
+            | BuiltinMethod::AddrIsAligned => ParamMode::In,
             BuiltinMethod::SetInsert { .. }
             | BuiltinMethod::SetRemove { .. }
             | BuiltinMethod::SetClear { .. } => ParamMode::InOut,
@@ -63,6 +72,14 @@ impl BuiltinMethod {
                 name: "value".to_string(),
                 mode: elem_mode.clone(),
                 ty: elem_ty.clone(),
+            }],
+            BuiltinMethod::AddrOffset => Vec::new(),
+            BuiltinMethod::AddrAlignDown { .. }
+            | BuiltinMethod::AddrAlignUp { .. }
+            | BuiltinMethod::AddrIsAligned => vec![BuiltinMethodParam {
+                name: "alignment".to_string(),
+                mode: ParamMode::In,
+                ty: Type::uint(64),
             }],
             BuiltinMethod::SetInsert { elem_ty }
             | BuiltinMethod::SetRemove { elem_ty }
@@ -98,6 +115,11 @@ impl BuiltinMethod {
     pub(crate) fn ret_kind(&self) -> BuiltinMethodRet {
         match self {
             BuiltinMethod::DynArrayAppend { .. } => BuiltinMethodRet::Unit,
+            BuiltinMethod::AddrOffset => BuiltinMethodRet::Value(Type::uint(64)),
+            BuiltinMethod::AddrAlignDown { addr_ty } | BuiltinMethod::AddrAlignUp { addr_ty } => {
+                BuiltinMethodRet::Value(addr_ty.clone())
+            }
+            BuiltinMethod::AddrIsAligned => BuiltinMethodRet::Bool,
             BuiltinMethod::SetInsert { .. }
             | BuiltinMethod::SetRemove { .. }
             | BuiltinMethod::SetContains { .. } => BuiltinMethodRet::Bool,
@@ -118,6 +140,10 @@ impl BuiltinMethod {
             | BuiltinMethod::SetRemove { elem_ty }
             | BuiltinMethod::SetContains { elem_ty }
             | BuiltinMethod::SetClear { elem_ty } => Some(elem_ty),
+            BuiltinMethod::AddrOffset
+            | BuiltinMethod::AddrAlignDown { .. }
+            | BuiltinMethod::AddrAlignUp { .. }
+            | BuiltinMethod::AddrIsAligned => None,
             BuiltinMethod::MapInsert { key_ty, .. }
             | BuiltinMethod::MapRemove { key_ty }
             | BuiltinMethod::MapContainsKey { key_ty }
@@ -128,10 +154,10 @@ impl BuiltinMethod {
     }
 }
 
-pub(crate) fn is_builtin_collection_receiver(ty: &Type) -> bool {
+pub(crate) fn has_builtin_surface(ty: &Type) -> bool {
     matches!(
         ty.peel_heap(),
-        Type::DynArray { .. } | Type::Set { .. } | Type::Map { .. }
+        Type::PAddr | Type::VAddr | Type::DynArray { .. } | Type::Set { .. } | Type::Map { .. }
     )
 }
 
@@ -200,6 +226,22 @@ pub(crate) fn resolve_builtin_method(
                 elem_mode,
             })
         }
+        (Type::PAddr, "offset") => Some(BuiltinMethod::AddrOffset),
+        (Type::PAddr, "align_down") => Some(BuiltinMethod::AddrAlignDown {
+            addr_ty: Type::PAddr,
+        }),
+        (Type::PAddr, "align_up") => Some(BuiltinMethod::AddrAlignUp {
+            addr_ty: Type::PAddr,
+        }),
+        (Type::PAddr, "is_aligned") => Some(BuiltinMethod::AddrIsAligned),
+        (Type::VAddr, "offset") => Some(BuiltinMethod::AddrOffset),
+        (Type::VAddr, "align_down") => Some(BuiltinMethod::AddrAlignDown {
+            addr_ty: Type::VAddr,
+        }),
+        (Type::VAddr, "align_up") => Some(BuiltinMethod::AddrAlignUp {
+            addr_ty: Type::VAddr,
+        }),
+        (Type::VAddr, "is_aligned") => Some(BuiltinMethod::AddrIsAligned),
         (Type::Set { elem_ty }, "insert") => Some(BuiltinMethod::SetInsert {
             elem_ty: (**elem_ty).clone(),
         }),

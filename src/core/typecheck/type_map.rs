@@ -27,6 +27,10 @@ type TypeArgMap = HashMap<DefId, Type>;
 fn builtin_type(name: &str) -> Option<Type> {
     match name {
         "()" => Some(Type::Unit),
+        "paddr" => Some(Type::PAddr),
+        "paddr?" => Some(Type::NullablePAddr),
+        "vaddr" => Some(Type::VAddr),
+        "vaddr?" => Some(Type::NullableVAddr),
         "u8" => Some(Type::uint(8)),
         "u16" => Some(Type::uint(16)),
         "u32" => Some(Type::uint(32)),

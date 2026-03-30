@@ -220,6 +220,31 @@ fn test_parse_multidim_array_type_3d() {
 }
 
 #[test]
+fn test_parse_nullable_address_types() {
+    let source = r#"
+        fn boot(base: paddr, next: vaddr?) -> paddr? {
+            ()
+        }
+    "#;
+
+    let funcs = parse_source(source).expect("Failed to parse");
+    let func = &funcs[0];
+
+    match &func.sig.params[0].typ.kind {
+        TypeExprKind::Named { ident, .. } => assert_eq!(ident, "paddr"),
+        other => panic!("expected paddr param type, got {other:?}"),
+    }
+    match &func.sig.params[1].typ.kind {
+        TypeExprKind::Named { ident, .. } => assert_eq!(ident, "vaddr?"),
+        other => panic!("expected vaddr? param type, got {other:?}"),
+    }
+    match &func.sig.ret_ty_expr.kind {
+        TypeExprKind::Named { ident, .. } => assert_eq!(ident, "paddr?"),
+        other => panic!("expected paddr? return type, got {other:?}"),
+    }
+}
+
+#[test]
 fn test_parse_dyn_array_type() {
     let source = r#"
         fn test() -> u64[*] {
@@ -3001,7 +3026,59 @@ fn test_parse_link_name_attr() {
     assert_eq!(funcs[0].attrs[0].args.len(), 1);
     match &funcs[0].attrs[0].args[0] {
         AttrArg::String(value) => assert_eq!(value, "__mc_foo"),
+        _ => panic!("Expected string attribute arg"),
     }
+}
+
+#[test]
+fn test_parse_layout_attr_with_named_size_arg() {
+    let source = r#"
+        @layout(fixed, size: 24)
+        type Foo = {
+            a: u64,
+            b: u64,
+            c: u64,
+        }
+    "#;
+
+    let module = parse_module(source).expect("Failed to parse");
+    let type_def = module.type_defs()[0];
+    assert_eq!(type_def.attrs.len(), 1);
+    assert_eq!(type_def.attrs[0].name, "layout");
+    assert_eq!(type_def.attrs[0].args.len(), 2);
+    assert!(matches!(
+        &type_def.attrs[0].args[0],
+        AttrArg::Ident(value) if value == "fixed"
+    ));
+    assert!(matches!(
+        &type_def.attrs[0].args[1],
+        AttrArg::Named { name, value }
+            if name == "size" && matches!(value.as_ref(), AttrArg::Int(24))
+    ));
+}
+
+#[test]
+fn test_parse_struct_field_align_attr() {
+    let source = r#"
+        @layout(fixed)
+        type Foo = {
+            @align(8)
+            data: u64,
+        }
+    "#;
+
+    let module = parse_module(source).expect("Failed to parse");
+    let type_def = module.type_defs()[0];
+    let TypeDefKind::Struct { fields } = &type_def.kind else {
+        panic!("Expected struct type");
+    };
+    assert_eq!(fields.len(), 1);
+    assert_eq!(fields[0].attrs.len(), 1);
+    assert_eq!(fields[0].attrs[0].name, "align");
+    assert!(matches!(
+        fields[0].attrs[0].args.as_slice(),
+        [AttrArg::Int(8)]
+    ));
 }
 
 #[test]

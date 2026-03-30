@@ -64,9 +64,11 @@ impl<'a> ConstraintCollector<'a> {
             span: expr.span,
         });
         match op {
-            BinaryOp::Add
-            | BinaryOp::Sub
-            | BinaryOp::Mul
+            BinaryOp::Add => {
+                self.push_eq(expr_ty, left_ty, ConstraintReason::Expr(expr.id, expr.span));
+            }
+            BinaryOp::Sub => {}
+            BinaryOp::Mul
             | BinaryOp::Div
             | BinaryOp::Mod
             | BinaryOp::BitOr

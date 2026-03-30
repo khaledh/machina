@@ -96,7 +96,15 @@ fn check_capability_at_path(
             }
             Ok(())
         }
-        Type::Int { .. } | Type::Bool | Type::Char | Type::Unknown | Type::Var(_) => Ok(()),
+        Type::Int { .. }
+        | Type::PAddr
+        | Type::NullablePAddr
+        | Type::VAddr
+        | Type::NullableVAddr
+        | Type::Bool
+        | Type::Char
+        | Type::Unknown
+        | Type::Var(_) => Ok(()),
         Type::Fn { .. }
         | Type::ErrorUnion { .. }
         | Type::String
@@ -121,13 +129,27 @@ fn supports_capability_leaf_v1(ty: &Type, capability: Capability) -> bool {
         Capability::Equatable => {
             matches!(
                 ty,
-                Type::Int { .. } | Type::Bool | Type::Char | Type::String
+                Type::Int { .. }
+                    | Type::PAddr
+                    | Type::NullablePAddr
+                    | Type::VAddr
+                    | Type::NullableVAddr
+                    | Type::Bool
+                    | Type::Char
+                    | Type::String
             )
         }
         Capability::Hashable => {
             matches!(
                 ty,
-                Type::Int { .. } | Type::Bool | Type::Char | Type::String
+                Type::Int { .. }
+                    | Type::PAddr
+                    | Type::NullablePAddr
+                    | Type::VAddr
+                    | Type::NullableVAddr
+                    | Type::Bool
+                    | Type::Char
+                    | Type::String
             )
         }
     }

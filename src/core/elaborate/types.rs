@@ -32,6 +32,10 @@ impl<'a> Elaborator<'a> {
                 )
             }
             Type::Unit => self.named_type_expr("()"),
+            Type::PAddr => self.named_type_expr("paddr"),
+            Type::NullablePAddr => self.named_type_expr("paddr?"),
+            Type::VAddr => self.named_type_expr("vaddr"),
+            Type::NullableVAddr => self.named_type_expr("vaddr?"),
             Type::Int {
                 signed,
                 bits,

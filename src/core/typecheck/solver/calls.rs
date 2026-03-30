@@ -638,7 +638,7 @@ fn try_solve_builtin_method(
 ) -> Option<Result<(), TypeCheckError>> {
     let receiver_term = obligation.receiver.as_ref()?;
     let receiver_ty = super::term_utils::resolve_term(receiver_term, unifier);
-    if !builtin_methods::is_builtin_collection_receiver(&receiver_ty) {
+    if !builtin_methods::has_builtin_surface(&receiver_ty) {
         return None;
     }
 
@@ -711,6 +711,7 @@ fn try_solve_builtin_method(
     let ret_ty = match builtin.ret_kind() {
         BuiltinMethodRet::Unit => Type::Unit,
         BuiltinMethodRet::Bool => Type::Bool,
+        BuiltinMethodRet::Value(value_ty) => value_ty,
         BuiltinMethodRet::MapGet { value_ty } => {
             if value_ty.needs_drop() && !super::term_utils::is_unresolved(&value_ty) {
                 return Some(Err(

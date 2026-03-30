@@ -37,7 +37,15 @@ fn push_unique_join_variant(variants: &mut Vec<Type>, candidate: Type) {
 fn join_variant_rank(ty: &Type) -> u8 {
     match ty {
         Type::Unit => 0,
-        Type::Int { .. } | Type::Bool | Type::Char | Type::String | Type::Range { .. } => 1,
+        Type::PAddr
+        | Type::NullablePAddr
+        | Type::VAddr
+        | Type::NullableVAddr
+        | Type::Int { .. }
+        | Type::Bool
+        | Type::Char
+        | Type::String
+        | Type::Range { .. } => 1,
         Type::Tuple { .. }
         | Type::Array { .. }
         | Type::DynArray { .. }

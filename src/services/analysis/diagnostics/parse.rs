@@ -53,6 +53,7 @@ pub(super) fn from_parse_error(error: &ParseError) -> Diagnostic {
         ParseErrorKind::ExpectedPrimary(_) => "MC-PARSE-EXPECTED-PRIMARY",
         ParseErrorKind::ExpectedIntLit(_) => "MC-PARSE-EXPECTED-INT-LIT",
         ParseErrorKind::ExpectedStringLit(_) => "MC-PARSE-EXPECTED-STRING-LIT",
+        ParseErrorKind::ExpectedAttributeArg(_) => "MC-PARSE-EXPECTED-ATTRIBUTE-ARG",
         ParseErrorKind::ExpectedPattern(_) => "MC-PARSE-EXPECTED-PATTERN",
         ParseErrorKind::DuplicateArrayRestPattern => "MC-PARSE-DUPLICATE-ARRAY-REST-PATTERN",
         ParseErrorKind::InvalidArrayRestPattern => "MC-PARSE-INVALID-ARRAY-REST-PATTERN",

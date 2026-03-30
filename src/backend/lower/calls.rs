@@ -466,6 +466,12 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
                 IntrinsicCall::StringSplit => {
                     panic!("backend call expr cannot lower string split without a receiver");
                 }
+                IntrinsicCall::AddressOffset
+                | IntrinsicCall::AddressAlignDown
+                | IntrinsicCall::AddressAlignUp
+                | IntrinsicCall::AddressIsAligned => {
+                    panic!("backend call expr cannot lower address intrinsic without a receiver");
+                }
                 IntrinsicCall::TypeOf => {
                     return self.lower_type_of_intrinsic(expr, args, &call_plan);
                 }
@@ -643,6 +649,74 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
                 call_plan,
                 receiver_value,
             ),
+            IntrinsicCall::AddressOffset => {
+                let Some(arg_values) = self.lower_call_arg_values(args)? else {
+                    return Ok(None);
+                };
+                if !arg_values.is_empty() {
+                    panic!(
+                        "backend address offset expects zero args, got {}",
+                        arg_values.len()
+                    );
+                }
+                Ok(Some(
+                    self.load_receiver_scalar(receiver_is_place, receiver_value),
+                ))
+            }
+            IntrinsicCall::AddressAlignDown => {
+                let Some(arg_values) = self.lower_call_arg_values(args)? else {
+                    return Ok(None);
+                };
+                if arg_values.len() != 1 {
+                    panic!(
+                        "backend address align_down expects 1 arg, got {}",
+                        arg_values.len()
+                    );
+                }
+                let receiver = self.load_receiver_scalar(receiver_is_place, receiver_value);
+                let alignment = self.load_call_input_scalar(&arg_values[0]);
+                Ok(Some(self.lower_align_down(
+                    receiver,
+                    alignment,
+                    &receiver_value.ty,
+                )))
+            }
+            IntrinsicCall::AddressAlignUp => {
+                let Some(arg_values) = self.lower_call_arg_values(args)? else {
+                    return Ok(None);
+                };
+                if arg_values.len() != 1 {
+                    panic!(
+                        "backend address align_up expects 1 arg, got {}",
+                        arg_values.len()
+                    );
+                }
+                let receiver = self.load_receiver_scalar(receiver_is_place, receiver_value);
+                let alignment = self.load_call_input_scalar(&arg_values[0]);
+                Ok(Some(self.lower_align_up(
+                    receiver,
+                    alignment,
+                    &receiver_value.ty,
+                )))
+            }
+            IntrinsicCall::AddressIsAligned => {
+                let Some(arg_values) = self.lower_call_arg_values(args)? else {
+                    return Ok(None);
+                };
+                if arg_values.len() != 1 {
+                    panic!(
+                        "backend address is_aligned expects 1 arg, got {}",
+                        arg_values.len()
+                    );
+                }
+                let receiver = self.load_receiver_scalar(receiver_is_place, receiver_value);
+                let alignment = self.load_call_input_scalar(&arg_values[0]);
+                Ok(Some(self.lower_is_aligned(
+                    receiver,
+                    alignment,
+                    &receiver_value.ty,
+                )))
+            }
             IntrinsicCall::TypeOf => {
                 panic!("backend type_of intrinsic cannot lower with a method receiver");
             }
@@ -1016,6 +1090,83 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
 
     fn resolve_map_receiver(&mut self, receiver_value: &CallInputValue) -> (ValueId, Type) {
         self.resolve_collection_receiver(receiver_value, CollectionReceiverKind::Map)
+    }
+
+    fn load_receiver_scalar(
+        &mut self,
+        receiver_is_place: bool,
+        receiver_value: &CallInputValue,
+    ) -> LinearValue {
+        if receiver_is_place {
+            let ir_ty = self.type_lowerer.lower_type(&receiver_value.ty);
+            self.builder.load(receiver_value.value, ir_ty)
+        } else {
+            receiver_value.value
+        }
+    }
+
+    fn load_call_input_scalar(&mut self, arg_value: &CallInputValue) -> LinearValue {
+        if arg_value.is_addr {
+            let ir_ty = self.type_lowerer.lower_type(&arg_value.ty);
+            self.builder.load(arg_value.value, ir_ty)
+        } else {
+            arg_value.value
+        }
+    }
+
+    fn lower_align_mask(
+        &mut self,
+        alignment: ValueId,
+        addr_ty: &Type,
+    ) -> (ValueId, crate::ir::IrTypeId, ValueId) {
+        let ir_ty = self.type_lowerer.lower_type(addr_ty);
+        let one = self.builder.const_int(1, false, 64, ir_ty);
+        let alignment_minus_one = self
+            .builder
+            .binop(crate::ir::BinOp::Sub, alignment, one, ir_ty);
+        let mask = self
+            .builder
+            .unop(crate::ir::UnOp::BitNot, alignment_minus_one, ir_ty);
+        (mask, ir_ty, alignment_minus_one)
+    }
+
+    fn lower_align_down(
+        &mut self,
+        addr: ValueId,
+        alignment: ValueId,
+        addr_ty: &Type,
+    ) -> LinearValue {
+        let (mask, ir_ty, _) = self.lower_align_mask(alignment, addr_ty);
+        self.builder.binop(crate::ir::BinOp::And, addr, mask, ir_ty)
+    }
+
+    fn lower_align_up(&mut self, addr: ValueId, alignment: ValueId, addr_ty: &Type) -> LinearValue {
+        let (mask, ir_ty, alignment_minus_one) = self.lower_align_mask(alignment, addr_ty);
+        let rounded = self
+            .builder
+            .binop(crate::ir::BinOp::Add, addr, alignment_minus_one, ir_ty);
+        self.builder
+            .binop(crate::ir::BinOp::And, rounded, mask, ir_ty)
+    }
+
+    fn lower_is_aligned(
+        &mut self,
+        addr: ValueId,
+        alignment: ValueId,
+        addr_ty: &Type,
+    ) -> LinearValue {
+        let ir_ty = self.type_lowerer.lower_type(addr_ty);
+        let one = self.builder.const_int(1, false, 64, ir_ty);
+        let zero = self.builder.const_int(0, false, 64, ir_ty);
+        let alignment_minus_one = self
+            .builder
+            .binop(crate::ir::BinOp::Sub, alignment, one, ir_ty);
+        let remainder = self
+            .builder
+            .binop(crate::ir::BinOp::And, addr, alignment_minus_one, ir_ty);
+        let bool_ty = self.type_lowerer.lower_type(&Type::Bool);
+        self.builder
+            .cmp(crate::ir::CmpOp::Eq, remainder, zero, bool_ty)
     }
 
     pub(super) fn lower_call_args_from_plan(

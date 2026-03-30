@@ -10,6 +10,9 @@ use serde::{Deserialize, Serialize};
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum AttrArg {
     String(String),
+    Int(u64),
+    Ident(String),
+    Named { name: String, value: Box<AttrArg> },
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -350,6 +353,7 @@ pub enum TypeDefKind {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct StructDefField {
     pub id: NodeId,
+    pub attrs: Vec<Attribute>,
     pub name: String,
     pub ty: TypeExpr,
     pub span: Span,

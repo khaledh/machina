@@ -363,7 +363,21 @@ impl ArrayLitInit {
 impl StructDefField {
     fn fmt_with_indent(&self, f: &mut fmt::Formatter<'_>, level: usize) -> fmt::Result {
         let pad1 = indent(level + 1);
-        writeln!(f, "{}{}: {} [{}]", pad1, self.name, self.ty, self.id)?;
+        if self.attrs.is_empty() {
+            writeln!(f, "{}{}: {} [{}]", pad1, self.name, self.ty, self.id)?;
+        } else {
+            let attrs = self
+                .attrs
+                .iter()
+                .map(|attr| attr.name.as_str())
+                .collect::<Vec<_>>()
+                .join(", @");
+            writeln!(
+                f,
+                "{}{}: {} @{} [{}]",
+                pad1, self.name, self.ty, attrs, self.id
+            )?;
+        }
         Ok(())
     }
 }

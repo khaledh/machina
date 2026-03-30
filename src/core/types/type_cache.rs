@@ -70,7 +70,15 @@ fn should_upgrade_interned_type(existing: Type, incoming: &Type) -> bool {
 fn type_info_score(ty: &Type) -> usize {
     match ty {
         Type::Unknown | Type::Var(_) => 0,
-        Type::Unit | Type::Int { .. } | Type::Bool | Type::Char | Type::String => 1,
+        Type::Unit
+        | Type::PAddr
+        | Type::NullablePAddr
+        | Type::VAddr
+        | Type::NullableVAddr
+        | Type::Int { .. }
+        | Type::Bool
+        | Type::Char
+        | Type::String => 1,
         Type::Fn { params, ret_ty } => {
             1 + params
                 .iter()

@@ -285,6 +285,87 @@ fn test_lower_defaulted_named_method_call_matches_explicit_ir() {
 }
 
 #[test]
+fn test_lower_address_align_down_builtin_method() {
+    let text = lower_main_text(indoc! {"
+        fn main(base: vaddr) -> vaddr {
+            base.align_down(4096)
+        }
+    "});
+
+    let expected = indoc! {"
+        fn main(u64) -> u64 {
+          bb0(%v0: u64):
+            %v1: u64 = const 4096:u64
+            %v2: u64 = const 1:u64
+            %v3: u64 = sub %v1, %v2
+            %v4: u64 = bitnot %v3
+            %v5: u64 = and %v0, %v4
+            ret %v5
+        }
+    "};
+
+    assert_ir_eq(text, expected);
+}
+
+#[test]
+fn test_lower_address_equality_builtin_scalar() {
+    let text = lower_main_text(indoc! {"
+        fn main(a: vaddr, b: vaddr) -> bool {
+            a == b
+        }
+    "});
+
+    let expected = indoc! {"
+        fn main(u64, u64) -> bool {
+          bb0(%v0: u64, %v1: u64):
+            %v2: bool = const true
+            %v3: bool = cmp.eq %v0, %v1
+            ret %v3
+        }
+    "};
+
+    assert_ir_eq(text, expected);
+}
+
+#[test]
+fn test_lower_address_add_operator() {
+    let text = lower_main_text(indoc! {"
+        fn main(base: vaddr, delta: u64) -> vaddr {
+            base + delta
+        }
+    "});
+
+    let expected = indoc! {"
+        fn main(u64, u64) -> u64 {
+          bb0(%v0: u64, %v1: u64):
+            %v2: u64 = add %v0, %v1
+            ret %v2
+        }
+    "};
+
+    assert_ir_eq(text, expected);
+}
+
+#[test]
+fn test_lower_address_distance_operator() {
+    let text = lower_main_text(indoc! {"
+        fn main(a: vaddr, b: vaddr) -> u64 {
+            a - b
+        }
+    "});
+
+    let expected = indoc! {"
+        fn main(u64, u64) -> u64 {
+          bb0(%v0: u64, %v1: u64):
+            %v2: u64 = sub %v0, %v1
+            ret %v2
+        }
+    "};
+
+    assert_ir_eq(text, expected);
+}
+
+#[test]
 fn test_lower_call_drops_in_arg() {
     let ctx = analyze(indoc! {"
         fn take(s: string) -> u64 {

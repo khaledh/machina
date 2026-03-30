@@ -316,6 +316,18 @@ pub(crate) fn type_expr_from_type(
         Type::Unit => {
             return named_type_expr("()", def_table, node_id_gen, span);
         }
+        Type::PAddr => {
+            return named_type_expr("paddr", def_table, node_id_gen, span);
+        }
+        Type::NullablePAddr => {
+            return named_type_expr("paddr?", def_table, node_id_gen, span);
+        }
+        Type::VAddr => {
+            return named_type_expr("vaddr", def_table, node_id_gen, span);
+        }
+        Type::NullableVAddr => {
+            return named_type_expr("vaddr?", def_table, node_id_gen, span);
+        }
         Type::Int {
             signed,
             bits,

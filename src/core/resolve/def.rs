@@ -103,6 +103,9 @@ pub struct TypeAttrs {
     pub intrinsic: bool,
     pub visibility: Visibility,
     pub opaque: bool,
+    pub fixed_layout: bool,
+    pub fixed_size: Option<u64>,
+    pub fixed_align: Option<u64>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Default)]

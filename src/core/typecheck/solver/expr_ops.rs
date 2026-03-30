@@ -26,14 +26,17 @@ pub(super) fn try_check_expr_obligation_ops(
             op,
             left,
             right,
+            result,
             ..
         } => {
-            let left_ty = term_utils::resolve_term_for_diagnostics(left, unifier);
-            let right_ty = term_utils::resolve_term_for_diagnostics(right, unifier);
             match op {
-                BinaryOp::Add
-                | BinaryOp::Sub
-                | BinaryOp::Mul
+                BinaryOp::Add | BinaryOp::Sub => {
+                    if let Some(err) = solve_add_sub_obligation(*op, left, right, result, unifier) {
+                        errors.push(err.at(op_span(obligation)));
+                        covered_exprs.insert(*expr_id);
+                    }
+                }
+                BinaryOp::Mul
                 | BinaryOp::Div
                 | BinaryOp::Mod
                 | BinaryOp::BitOr
@@ -41,6 +44,8 @@ pub(super) fn try_check_expr_obligation_ops(
                 | BinaryOp::BitAnd
                 | BinaryOp::Shl
                 | BinaryOp::Shr => {
+                    let left_ty = term_utils::resolve_term_for_diagnostics(left, unifier);
+                    let right_ty = term_utils::resolve_term_for_diagnostics(right, unifier);
                     if let Some(err) =
                         first_non_int_operand(&left_ty, &right_ty, op_span(obligation))
                     {
@@ -49,6 +54,8 @@ pub(super) fn try_check_expr_obligation_ops(
                     }
                 }
                 BinaryOp::Eq | BinaryOp::Ne => {
+                    let left_ty = term_utils::resolve_term_for_diagnostics(left, unifier);
+                    let right_ty = term_utils::resolve_term_for_diagnostics(right, unifier);
                     if let Some(err) =
                         first_non_equatable_cmp_operand(&left_ty, &right_ty, op_span(obligation))
                     {
@@ -57,6 +64,8 @@ pub(super) fn try_check_expr_obligation_ops(
                     }
                 }
                 BinaryOp::Lt | BinaryOp::Gt | BinaryOp::LtEq | BinaryOp::GtEq => {
+                    let left_ty = term_utils::resolve_term_for_diagnostics(left, unifier);
+                    let right_ty = term_utils::resolve_term_for_diagnostics(right, unifier);
                     if let Some(err) =
                         first_non_int_cmp_operand(&left_ty, &right_ty, op_span(obligation))
                     {
@@ -65,6 +74,8 @@ pub(super) fn try_check_expr_obligation_ops(
                     }
                 }
                 BinaryOp::LogicalAnd | BinaryOp::LogicalOr => {
+                    let left_ty = term_utils::resolve_term_for_diagnostics(left, unifier);
+                    let right_ty = term_utils::resolve_term_for_diagnostics(right, unifier);
                     if let Some(err) =
                         first_non_bool_operand(&left_ty, &right_ty, op_span(obligation))
                     {
@@ -111,6 +122,81 @@ pub(super) fn try_check_expr_obligation_ops(
         }
         _ => false,
     }
+}
+
+fn solve_add_sub_obligation(
+    op: BinaryOp,
+    left: &Type,
+    right: &Type,
+    result: &Type,
+    unifier: &mut TcUnifier,
+) -> Option<TEK> {
+    let left_ty = term_utils::resolve_term(left, unifier);
+    let right_ty = term_utils::resolve_term(right, unifier);
+    let result_ty = term_utils::resolve_term(result, unifier);
+
+    if left_ty.is_address() && right_ty.is_address() {
+        if !left_ty.shape_eq(&right_ty) {
+            return Some(TEK::ArithTypeMismatch(left_ty, right_ty));
+        }
+        if op != BinaryOp::Sub {
+            return Some(TEK::ArithTypeMismatch(left_ty, right_ty));
+        }
+        let _ = unifier.unify(left, &left_ty);
+        let _ = unifier.unify(right, &right_ty);
+        let _ = unifier.unify(result, &Type::uint(64));
+        return None;
+    }
+
+    let address_anchor = if left_ty.is_address() {
+        Some(left_ty.clone())
+    } else if result_ty.is_address() {
+        Some(result_ty.clone())
+    } else {
+        None
+    };
+
+    if let Some(addr_ty) = address_anchor {
+        if right_ty.is_address() {
+            return Some(TEK::ArithTypeMismatch(addr_ty, right_ty));
+        }
+        let _ = unifier.unify(left, &addr_ty);
+        let _ = unifier.unify(result, &addr_ty);
+        let _ = unifier.unify(right, &Type::uint(64));
+
+        let left_diag = term_utils::resolve_term_for_diagnostics(left, unifier);
+        let right_diag = term_utils::resolve_term_for_diagnostics(right, unifier);
+        let result_diag = term_utils::resolve_term_for_diagnostics(result, unifier);
+        if !left_diag.is_address() {
+            return Some(TEK::ArithTypeMismatch(left_diag, right_diag));
+        }
+        if !matches!(
+            right_diag,
+            Type::Int {
+                signed: false,
+                bits: 64,
+                ..
+            }
+        ) {
+            return Some(TEK::ArithTypeMismatch(left_diag, right_diag));
+        }
+        if !result_diag.is_address() {
+            return Some(TEK::ArithTypeMismatch(result_diag, addr_ty));
+        }
+        return None;
+    }
+
+    let _ = unifier.unify(left, right);
+    let _ = unifier.unify(result, left);
+    let left_diag = term_utils::resolve_term_for_diagnostics(left, unifier);
+    let right_diag = term_utils::resolve_term_for_diagnostics(right, unifier);
+    if !term_utils::is_int_like(&left_diag) && !term_utils::is_unresolved(&left_diag) {
+        return Some(TEK::ArithOperandNotInt(left_diag));
+    }
+    if !term_utils::is_int_like(&right_diag) && !term_utils::is_unresolved(&right_diag) {
+        return Some(TEK::ArithOperandNotInt(right_diag));
+    }
+    None
 }
 
 fn op_span(obligation: &ExprObligation) -> Span {

@@ -478,11 +478,13 @@ impl<'a> Parser<'a> {
 
     fn parse_struct_def_field(&mut self) -> Result<StructDefField, ParseError> {
         let marker = self.mark();
+        let attrs = self.parse_attribute_list()?;
         let name = self.parse_ident()?;
         self.consume(&TK::Colon)?;
         let ty = self.parse_type_expr()?;
         Ok(StructDefField {
             id: self.id_gen.new_id(),
+            attrs,
             name,
             ty,
             span: self.close(marker),

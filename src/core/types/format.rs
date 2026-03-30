@@ -7,6 +7,10 @@ impl fmt::Display for Type {
         match self {
             Type::Unknown => write!(f, "unknown"),
             Type::Unit => write!(f, "()"),
+            Type::PAddr => write!(f, "paddr"),
+            Type::NullablePAddr => write!(f, "paddr?"),
+            Type::VAddr => write!(f, "vaddr"),
+            Type::NullableVAddr => write!(f, "vaddr?"),
             Type::Int {
                 signed,
                 bits,

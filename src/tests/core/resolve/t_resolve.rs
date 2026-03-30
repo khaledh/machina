@@ -618,6 +618,47 @@ fn test_resolve_attr_duplicate() {
 }
 
 #[test]
+fn test_resolve_layout_attr_records_fixed_layout_metadata() {
+    let source = r#"
+        @layout(fixed, size: 24)
+        @align(8)
+        type Foo = {
+            a: u64,
+            b: u64,
+            c: u64,
+        }
+    "#;
+
+    let resolved = resolve_source(source).expect("expected resolve success");
+    let type_def = resolved.module.type_defs()[0];
+    let def_id = resolved.def_table.def_id(type_def.id);
+    let def = resolved
+        .def_table
+        .lookup_def(def_id)
+        .expect("type def should be recorded");
+    let DefKind::TypeDef { attrs } = &def.kind else {
+        panic!("expected type def attrs");
+    };
+
+    assert!(attrs.fixed_layout);
+    assert_eq!(attrs.fixed_size, Some(24));
+    assert_eq!(attrs.fixed_align, Some(8));
+}
+
+#[test]
+fn test_resolve_layout_attr_rejects_string_arg_form() {
+    let source = r#"@layout("fixed") type Foo = { a: u64 }"#;
+    let result = resolve_source(source);
+    assert!(result.is_err());
+
+    if let Err(errors) = result {
+        assert!(errors.iter().any(
+            |e| matches!(e.kind(), ResolveErrorKind::AttrWrongArgType(name) if name == "layout")
+        ));
+    }
+}
+
+#[test]
 fn test_resolve_attr_machines_allowed_on_main() {
     let source = "@machines fn main() {}";
     let result = resolve_source(source);
@@ -922,4 +963,17 @@ fn test_resolve_opaque_attr_not_allowed_on_function() {
             )
         ));
     }
+}
+
+#[test]
+fn test_resolve_builtin_address_types() {
+    let source = r#"
+        type BootInfo = {
+            mem_base: paddr,
+            response: vaddr?,
+        }
+    "#;
+
+    let resolved = resolve_source(source);
+    assert!(resolved.is_ok(), "expected address builtins to resolve");
 }

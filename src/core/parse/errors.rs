@@ -30,6 +30,9 @@ pub enum ParseErrorKind {
     #[error("Expected string literal, found: {0}")]
     ExpectedStringLit(Token),
 
+    #[error("Expected attribute argument, found: {0}")]
+    ExpectedAttributeArg(Token),
+
     #[error("Expected pattern, found: {0}")]
     ExpectedPattern(Token),
 

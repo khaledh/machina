@@ -231,6 +231,7 @@ impl<'a> Elaborator<'a> {
             .iter()
             .map(|capture| StructDefField {
                 id: self.node_id_gen.new_id(),
+                attrs: Vec::new(),
                 name: capture.name.clone(),
                 ty: capture.field_ty_expr.clone(),
                 span,

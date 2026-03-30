@@ -19,7 +19,7 @@ use crate::core::ast::{
 };
 use crate::core::context::ResolvedContext;
 use crate::core::diag::Span;
-use crate::core::resolve::{DefId, DefTable, ImportedFacts};
+use crate::core::resolve::{DefId, DefKind, DefTable, ImportedFacts, TypeAttrs};
 use crate::core::typecheck::engine::{
     CollectedCallableSig, CollectedParamSig, CollectedPropertySig, CollectedTraitMethodSig,
     CollectedTraitPropertySig, CollectedTraitSig, TypecheckEngine,
@@ -152,6 +152,14 @@ fn collect_type_defs(
         let Some(type_def_id) = ctx.def_table.lookup_node_def_id(type_def.id) else {
             continue;
         };
+        let type_attrs = ctx
+            .def_table
+            .lookup_def(type_def_id)
+            .and_then(|def| match &def.kind {
+                DefKind::TypeDef { attrs } => Some(attrs.clone()),
+                _ => None,
+            })
+            .unwrap_or_default();
         type_symbols.insert(type_def.name.clone(), type_def_id);
         record_generic_env(
             type_def_id,
@@ -189,11 +197,246 @@ fn collect_type_defs(
 
         match resolved {
             Ok(ty) => {
+                validate_fixed_layout_type(ctx, type_def, &type_attrs, &ty, errors);
                 type_defs.insert(type_def.name.clone(), ty);
             }
             Err(err) => errors.push(err),
         }
     }
+}
+
+#[derive(Default)]
+struct FixedFieldAttrs {
+    align: Option<u64>,
+}
+
+fn validate_fixed_layout_type(
+    _ctx: &ResolvedContext,
+    type_def: &TypeDef,
+    type_attrs: &TypeAttrs,
+    ty: &Type,
+    errors: &mut Vec<TypeCheckError>,
+) {
+    let wants_fixed_layout = type_attrs.fixed_layout || type_attrs.fixed_align.is_some();
+    if !wants_fixed_layout {
+        if let TypeDefKind::Struct { fields } = &type_def.kind {
+            for field in fields {
+                validate_fixed_layout_field_attrs(field, &type_def.name, false, errors);
+            }
+        }
+        return;
+    }
+
+    let TypeDefKind::Struct { fields } = &type_def.kind else {
+        tc_push_error!(
+            errors,
+            type_def.span,
+            TEK::FixedLayoutRequiresStruct(type_def.name.clone())
+        );
+        return;
+    };
+
+    if !type_attrs.fixed_layout && type_attrs.fixed_align.is_some() {
+        tc_push_error!(
+            errors,
+            type_def.span,
+            TEK::FixedLayoutAlignRequiresFixedLayout(type_def.name.clone())
+        );
+        return;
+    }
+
+    let Type::Struct {
+        fields: resolved_fields,
+        ..
+    } = ty
+    else {
+        return;
+    };
+
+    let mut resolved_field_attrs = Vec::with_capacity(fields.len());
+    for field in fields {
+        resolved_field_attrs.push(validate_fixed_layout_field_attrs(
+            field,
+            &type_def.name,
+            true,
+            errors,
+        ));
+    }
+
+    let mut offset = 0u64;
+    let mut max_align = 1u64;
+    for ((field, resolved_field), field_attrs) in fields
+        .iter()
+        .zip(resolved_fields.iter())
+        .zip(resolved_field_attrs.iter())
+    {
+        let natural_align = resolved_field.ty.align_of() as u64;
+        let field_align = field_attrs.align.unwrap_or(natural_align);
+
+        if let Some(explicit_align) = field_attrs.align {
+            if !is_valid_fixed_layout_align(explicit_align) {
+                tc_push_error!(
+                    errors,
+                    field.span,
+                    TEK::FixedLayoutInvalidAlign(explicit_align)
+                );
+                continue;
+            }
+            if explicit_align < natural_align {
+                tc_push_error!(
+                    errors,
+                    field.span,
+                    TEK::FixedLayoutFieldAlignTooSmall {
+                        field: field.name.clone(),
+                        actual: explicit_align,
+                        required: natural_align,
+                    }
+                );
+                continue;
+            }
+        }
+
+        let aligned_offset = align_to(offset, field_align);
+        if aligned_offset != offset {
+            tc_push_error!(
+                errors,
+                field.span,
+                TEK::FixedLayoutImplicitPadding {
+                    type_name: type_def.name.clone(),
+                    field: field.name.clone(),
+                    padding: aligned_offset - offset,
+                }
+            );
+        }
+        offset = aligned_offset + resolved_field.ty.size_of() as u64;
+        max_align = max_align.max(field_align);
+    }
+
+    let type_align = type_attrs.fixed_align.unwrap_or(max_align);
+    if let Some(explicit_align) = type_attrs.fixed_align {
+        if !is_valid_fixed_layout_align(explicit_align) {
+            tc_push_error!(
+                errors,
+                type_def.span,
+                TEK::FixedLayoutInvalidAlign(explicit_align)
+            );
+            return;
+        }
+        if explicit_align < max_align {
+            tc_push_error!(
+                errors,
+                type_def.span,
+                TEK::FixedLayoutTypeAlignTooSmall {
+                    type_name: type_def.name.clone(),
+                    actual: explicit_align,
+                    required: max_align,
+                }
+            );
+            return;
+        }
+    }
+
+    let actual_size = align_to(offset, type_align);
+    if let Some(expected_size) = type_attrs.fixed_size
+        && actual_size != expected_size
+    {
+        tc_push_error!(
+            errors,
+            type_def.span,
+            TEK::FixedLayoutSizeMismatch {
+                type_name: type_def.name.clone(),
+                expected: expected_size,
+                actual: actual_size,
+            }
+        );
+    }
+}
+
+fn validate_fixed_layout_field_attrs(
+    field: &StructDefField,
+    type_name: &str,
+    fixed_layout_enabled: bool,
+    errors: &mut Vec<TypeCheckError>,
+) -> FixedFieldAttrs {
+    let mut out = FixedFieldAttrs::default();
+    let mut seen = HashSet::new();
+
+    for attr in &field.attrs {
+        if !seen.insert(attr.name.clone()) {
+            tc_push_error!(
+                errors,
+                attr.span,
+                TEK::FixedLayoutUnknownFieldAttr {
+                    field: field.name.clone(),
+                    attr: attr.name.clone(),
+                }
+            );
+            continue;
+        }
+
+        match attr.name.as_str() {
+            "align" => {
+                if !fixed_layout_enabled {
+                    tc_push_error!(
+                        errors,
+                        attr.span,
+                        TEK::FixedLayoutFieldAlignRequiresFixedLayout {
+                            type_name: type_name.to_string(),
+                            field: field.name.clone(),
+                        }
+                    );
+                    continue;
+                }
+                if attr.args.len() != 1 {
+                    tc_push_error!(
+                        errors,
+                        attr.span,
+                        TEK::FixedLayoutUnknownFieldAttr {
+                            field: field.name.clone(),
+                            attr: attr.name.clone(),
+                        }
+                    );
+                    continue;
+                }
+                match attr.args.first() {
+                    Some(crate::core::ast::AttrArg::Int(value)) => out.align = Some(*value),
+                    _ => {
+                        tc_push_error!(
+                            errors,
+                            attr.span,
+                            TEK::FixedLayoutUnknownFieldAttr {
+                                field: field.name.clone(),
+                                attr: attr.name.clone(),
+                            }
+                        );
+                    }
+                }
+            }
+            _ => {
+                tc_push_error!(
+                    errors,
+                    attr.span,
+                    TEK::FixedLayoutUnknownFieldAttr {
+                        field: field.name.clone(),
+                        attr: attr.name.clone(),
+                    }
+                );
+            }
+        }
+    }
+
+    out
+}
+
+fn is_valid_fixed_layout_align(value: u64) -> bool {
+    value != 0 && value.is_power_of_two()
+}
+
+fn align_to(value: u64, align: u64) -> u64 {
+    if align <= 1 {
+        return value;
+    }
+    ((value + align - 1) / align) * align
 }
 
 fn resolve_struct_type(

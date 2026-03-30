@@ -19,6 +19,10 @@ pub enum Type {
 
     // Scalar Types
     Unit,
+    PAddr,
+    NullablePAddr,
+    VAddr,
+    NullableVAddr,
     Int {
         signed: bool,
         bits: u8,
@@ -190,6 +194,10 @@ impl PartialEq for Type {
             ) => lok == rok && lerrs == rerrs,
             (Type::Unknown, Type::Unknown) => true,
             (Type::Unit, Type::Unit) => true,
+            (Type::PAddr, Type::PAddr) => true,
+            (Type::NullablePAddr, Type::NullablePAddr) => true,
+            (Type::VAddr, Type::VAddr) => true,
+            (Type::NullableVAddr, Type::NullableVAddr) => true,
             (Type::Bool, Type::Bool) => true,
             (Type::Char, Type::Char) => true,
             (Type::String, Type::String) => true,
@@ -269,6 +277,18 @@ impl Hash for Type {
             }
             Type::Unit => {
                 1u8.hash(state);
+            }
+            Type::PAddr => {
+                24u8.hash(state);
+            }
+            Type::NullablePAddr => {
+                25u8.hash(state);
+            }
+            Type::VAddr => {
+                26u8.hash(state);
+            }
+            Type::NullableVAddr => {
+                27u8.hash(state);
             }
             Type::Int {
                 signed,
@@ -376,6 +396,10 @@ impl Hash for Type {
 
 pub const BUILTIN_TYPES: &[Type] = &[
     Type::Unit,
+    Type::PAddr,
+    Type::NullablePAddr,
+    Type::VAddr,
+    Type::NullableVAddr,
     Type::Int {
         signed: false,
         bits: 8,
@@ -432,7 +456,11 @@ pub const BUILTIN_TYPES: &[Type] = &[
 pub fn is_builtin_type_name(name: &str) -> bool {
     matches!(
         name,
-        "()" | "u8"
+        "()" | "paddr"
+            | "paddr?"
+            | "vaddr"
+            | "vaddr?"
+            | "u8"
             | "u16"
             | "u32"
             | "u64"
@@ -469,10 +497,22 @@ impl Type {
         matches!(self, Type::Int { .. })
     }
 
+    pub fn is_address(&self) -> bool {
+        matches!(self, Type::PAddr | Type::VAddr)
+    }
+
+    pub fn is_nullable_address(&self) -> bool {
+        matches!(self, Type::NullablePAddr | Type::NullableVAddr)
+    }
+
     pub fn shape_eq(&self, other: &Type) -> bool {
         match (self, other) {
             (Type::Unknown, Type::Unknown) => true,
             (Type::Unit, Type::Unit) => true,
+            (Type::PAddr, Type::PAddr) => true,
+            (Type::NullablePAddr, Type::NullablePAddr) => true,
+            (Type::VAddr, Type::VAddr) => true,
+            (Type::NullableVAddr, Type::NullableVAddr) => true,
             (
                 Type::Int {
                     signed: l_signed,
@@ -654,6 +694,7 @@ impl Type {
     pub fn size_of(&self) -> usize {
         match self {
             Type::Unit => 0,
+            Type::PAddr | Type::NullablePAddr | Type::VAddr | Type::NullableVAddr => 8,
             Type::Int { bits, .. } => (*bits as usize) / 8,
             Type::Bool => 1,
             Type::Char => 4,
@@ -700,6 +741,7 @@ impl Type {
     pub fn align_of(&self) -> usize {
         match self {
             Type::Unit => 1,
+            Type::PAddr | Type::NullablePAddr | Type::VAddr | Type::NullableVAddr => 8,
             Type::Int { bits, .. } => (*bits as usize) / 8,
             Type::Bool => 1,
             Type::Char => 4,
@@ -987,6 +1029,7 @@ impl Type {
 
     pub fn min_value(&self) -> i128 {
         match self {
+            Type::PAddr | Type::NullablePAddr | Type::VAddr | Type::NullableVAddr => 0,
             Type::Int { signed: false, .. } => 0,
             Type::Int {
                 signed: true, bits, ..
@@ -997,6 +1040,9 @@ impl Type {
 
     pub fn max_value(&self) -> i128 {
         match self {
+            Type::PAddr | Type::NullablePAddr | Type::VAddr | Type::NullableVAddr => {
+                u64::MAX as i128
+            }
             Type::Int {
                 signed: false,
                 bits,

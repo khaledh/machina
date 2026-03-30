@@ -1143,6 +1143,7 @@ fn build_machine_handle_type_def(
 ) -> TopLevelItem {
     let mut fields = vec![StructDefField {
         id: node_id_gen.new_id(),
+        attrs: Vec::new(),
         name: "_id".to_string(),
         ty: TypeExpr {
             id: node_id_gen.new_id(),

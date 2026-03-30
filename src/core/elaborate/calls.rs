@@ -44,6 +44,24 @@ impl<'a> Elaborator<'a> {
                     .receiver
                     .as_ref()
                     .map(|receiver| receiver.ty.peel_heap()),
+                Some(Type::PAddr | Type::VAddr)
+            )
+        {
+            target = match method_name {
+                "offset" => CallTarget::Intrinsic(IntrinsicCall::AddressOffset),
+                "align_down" => CallTarget::Intrinsic(IntrinsicCall::AddressAlignDown),
+                "align_up" => CallTarget::Intrinsic(IntrinsicCall::AddressAlignUp),
+                "is_aligned" => CallTarget::Intrinsic(IntrinsicCall::AddressIsAligned),
+                _ => target,
+            };
+        }
+        if def_id.is_none()
+            && let Some(method_name) = method_name
+            && matches!(
+                call_sig
+                    .receiver
+                    .as_ref()
+                    .map(|receiver| receiver.ty.peel_heap()),
                 Some(Type::DynArray { .. })
             )
         {
@@ -331,6 +349,35 @@ impl<'a> Elaborator<'a> {
                     );
                 }
                 vec![ArgLowering::Direct(CallInput::Receiver)]
+            }
+            CallTarget::Intrinsic(IntrinsicCall::AddressOffset) => {
+                if !has_receiver {
+                    panic!("compiler bug: intrinsic address offset missing receiver");
+                }
+                if !call_sig.params.is_empty() {
+                    panic!(
+                        "compiler bug: intrinsic address offset expects 0 args, got {}",
+                        call_sig.params.len()
+                    );
+                }
+                vec![ArgLowering::Direct(CallInput::Receiver)]
+            }
+            CallTarget::Intrinsic(IntrinsicCall::AddressAlignDown)
+            | CallTarget::Intrinsic(IntrinsicCall::AddressAlignUp)
+            | CallTarget::Intrinsic(IntrinsicCall::AddressIsAligned) => {
+                if !has_receiver {
+                    panic!("compiler bug: intrinsic address helper missing receiver");
+                }
+                if call_sig.params.len() != 1 {
+                    panic!(
+                        "compiler bug: intrinsic address helper expects 1 arg, got {}",
+                        call_sig.params.len()
+                    );
+                }
+                vec![
+                    ArgLowering::Direct(CallInput::Receiver),
+                    ArgLowering::Direct(CallInput::Arg(0)),
+                ]
             }
             CallTarget::Intrinsic(IntrinsicCall::TypeOf) => {
                 if has_receiver {
