@@ -105,6 +105,7 @@ impl DropGlueRegistry {
         let mut funcs = Vec::new();
         let empty_plans = LoweringPlanMap::default();
         let empty_linear_index = LinearIndex::default();
+        let empty_static_globals = HashMap::new();
         let mut pending: Vec<(NominalKey, Type)> = self.tys.drain().collect();
         while let Some((nominal_key, ty)) = pending.pop() {
             let def_id =
@@ -132,6 +133,7 @@ impl DropGlueRegistry {
                 &empty_plans,
                 self,
                 globals,
+                &empty_static_globals,
                 trace_drops,
             );
 

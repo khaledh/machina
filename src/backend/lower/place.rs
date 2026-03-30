@@ -23,7 +23,12 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
                 let def_id = self.def_table.def_id(place.id);
                 let sem_ty = self.def_type(def_id);
                 let value_ty = self.type_lowerer.lower_type(&sem_ty);
-                let addr = self.ensure_local_addr(def_id, value_ty);
+                let addr = if let Some(global_id) = self.static_globals.get(&def_id) {
+                    let ptr_ty = self.type_lowerer.ptr_to(value_ty);
+                    self.builder.const_global_addr(*global_id, ptr_ty)
+                } else {
+                    self.ensure_local_addr(def_id, value_ty)
+                };
                 Ok(PlaceAddr {
                     addr,
                     value_ty,

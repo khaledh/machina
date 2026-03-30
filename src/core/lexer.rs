@@ -54,6 +54,8 @@ pub enum TokenKind {
     KwLet,
     #[display("var")]
     KwVar,
+    #[display("static")]
+    KwStatic,
     #[display("if")]
     KwIf,
     #[display("else")]
@@ -603,6 +605,7 @@ impl<'a> Lexer<'a> {
                         "nonzero" => TokenKind::KwNonzero,
                         "let" => TokenKind::KwLet,
                         "var" => TokenKind::KwVar,
+                        "static" => TokenKind::KwStatic,
                         "if" => TokenKind::KwIf,
                         "else" => TokenKind::KwElse,
                         "match" => TokenKind::KwMatch,

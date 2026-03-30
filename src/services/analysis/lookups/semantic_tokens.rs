@@ -88,6 +88,7 @@ fn semantic_token_kind_for_def(kind: &DefKind) -> Option<SemanticTokenKind> {
         DefKind::FuncDef { .. } | DefKind::FuncDecl { .. } => Some(SemanticTokenKind::Function),
         DefKind::TypeParam => Some(SemanticTokenKind::TypeParameter),
         DefKind::EnumVariantName => Some(SemanticTokenKind::EnumVariant),
+        DefKind::Static { .. } => Some(SemanticTokenKind::Variable),
         DefKind::LocalVar { .. } => Some(SemanticTokenKind::Variable),
         DefKind::Param { .. } => Some(SemanticTokenKind::Parameter),
     }

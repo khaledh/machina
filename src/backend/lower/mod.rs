@@ -22,6 +22,7 @@ mod r#match;
 mod place;
 mod proj;
 mod slots;
+mod statics;
 mod types;
 mod util;
 
@@ -31,12 +32,13 @@ use crate::backend::lower::lowerer::BranchResult;
 use crate::core::ast::{FuncDef, MethodBlock, MethodDef, MethodItem, Module};
 use crate::core::linear::LinearIndex;
 use crate::core::plans::{DropPlanMap, LoweringPlanMap};
-use crate::core::resolve::DefTable;
+use crate::core::resolve::{DefId, DefTable};
 use crate::core::typecheck::type_map::TypeMap;
 use crate::core::types::Type;
 use crate::ir::IrTypeCache;
-use crate::ir::{Function, GlobalData};
+use crate::ir::{Function, GlobalData, GlobalId};
 use lowerer::FuncLowerer;
+use std::collections::HashMap;
 
 pub struct LoweredFunction {
     pub func: Function,
@@ -78,6 +80,7 @@ pub fn lower_func(
     let mut globals = GlobalArena::new();
     let mut drop_glue = DropGlueRegistry::new(def_table, type_map);
     let empty_linear_index = LinearIndex::default();
+    let static_globals = HashMap::new();
     lower_func_with_globals(
         func,
         def_table,
@@ -90,6 +93,7 @@ pub fn lower_func(
         false,
         &mut drop_glue,
         &mut globals,
+        &static_globals,
     )
 }
 
@@ -150,6 +154,7 @@ fn lower_module_impl(
     let mut globals = GlobalArena::new();
     let mut funcs = Vec::new();
     let mut drop_glue = DropGlueRegistry::from_module(def_table, module, type_map);
+    let static_globals = statics::lower_static_defs(module, def_table, type_map, &mut globals)?;
 
     for func_def in module.func_defs() {
         let lowered = lower_func_with_globals(
@@ -164,6 +169,7 @@ fn lower_module_impl(
             trace_drops,
             &mut drop_glue,
             &mut globals,
+            &static_globals,
         )?;
         funcs.push(lowered);
     }
@@ -186,6 +192,7 @@ fn lower_module_impl(
                 trace_drops,
                 &mut drop_glue,
                 &mut globals,
+                &static_globals,
             )?;
             funcs.push(lowered);
         }
@@ -224,6 +231,7 @@ fn lower_func_with_globals(
     trace_drops: bool,
     drop_glue: &mut DropGlueRegistry,
     globals: &mut GlobalArena,
+    static_globals: &HashMap<DefId, GlobalId>,
 ) -> Result<LoweredFunction, LowerToIrError> {
     let globals_start = globals.len();
     let ret_ty = {
@@ -252,6 +260,7 @@ fn lower_func_with_globals(
         lowering_plans,
         drop_glue,
         globals,
+        static_globals,
         trace_drops,
     );
     lowerer.init_root_drop_scope(drop_plans, func.id);
@@ -309,6 +318,7 @@ fn lower_method_def_with_globals(
     trace_drops: bool,
     drop_glue: &mut DropGlueRegistry,
     globals: &mut GlobalArena,
+    static_globals: &HashMap<DefId, GlobalId>,
 ) -> Result<LoweredFunction, LowerToIrError> {
     let globals_start = globals.len();
     let ret_ty = type_map.lookup_node_type(method_def.id).unwrap_or_else(|| {
@@ -331,6 +341,7 @@ fn lower_method_def_with_globals(
         lowering_plans,
         drop_glue,
         globals,
+        static_globals,
         trace_drops,
     );
     lowerer.init_root_drop_scope(drop_plans, method_def.id);

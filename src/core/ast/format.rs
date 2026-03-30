@@ -31,6 +31,7 @@ impl fmt::Display for Module {
                 TopLevelItem::TraitDef(trait_def) => trait_def.fmt_with_indent(f, 0)?,
                 TopLevelItem::TypeDef(type_def) => type_def.fmt_with_indent(f, 0)?,
                 TopLevelItem::MachineDef(machine_def) => machine_def.fmt_with_indent(f, 0)?,
+                TopLevelItem::StaticDef(static_def) => static_def.fmt_with_indent(f, 0)?,
                 TopLevelItem::FuncDecl(func_decl) => func_decl.fmt_with_indent(f, 0)?,
                 TopLevelItem::FuncDef(func_def) => func_def.fmt_with_indent(f, 0)?,
                 TopLevelItem::MethodBlock(method_block) => method_block.fmt_with_indent(f, 0)?,
@@ -89,6 +90,24 @@ impl TraitProperty {
             self.ty,
             accessors.join(", ")
         )
+    }
+}
+
+impl StaticDef {
+    fn fmt_with_indent(&self, f: &mut fmt::Formatter<'_>, level: usize) -> fmt::Result {
+        let pad = indent(level);
+        let kind = match self.mutability {
+            StaticMutability::Let => "StaticLet",
+            StaticMutability::Var => "StaticVar",
+        };
+        writeln!(f, "{}{} [{}]", pad, kind, self.id)?;
+        let pad1 = indent(level + 1);
+        writeln!(f, "{}Name: {}", pad1, self.name)?;
+        if let Some(ty) = &self.ty {
+            writeln!(f, "{}Type: {}", pad1, ty)?;
+        }
+        writeln!(f, "{}Init:", pad1)?;
+        self.init.fmt_with_indent(f, level + 2)
     }
 }
 

@@ -205,6 +205,57 @@ fn test_returned_dyn_array_keeps_elements_alive() {
 }
 
 #[test]
+fn test_static_let_and_var_roundtrip_at_runtime() {
+    let run = run_program(
+        "static_let_var_roundtrip",
+        r#"
+            requires {
+                std::io::println
+            }
+
+            static let base: u64 = 41;
+            static var counter: u64 = 1;
+
+            fn main() {
+                println(base + 1);
+                counter = counter + 1;
+                println(counter);
+            }
+        "#,
+    );
+    assert_eq!(run.status.code(), Some(0));
+
+    let stdout = String::from_utf8_lossy(&run.stdout);
+    assert_eq!(stdout, "42\n2\n", "unexpected stdout: {stdout}");
+}
+
+#[test]
+fn test_static_struct_fields_load_and_store() {
+    let run = run_program(
+        "static_struct_fields",
+        r#"
+            requires {
+                std::io::println
+            }
+
+            type Pair = { left: u64, right: u64 }
+
+            static var pair = Pair { left: 7, right: 9 };
+
+            fn main() {
+                println(pair.left);
+                pair.right = pair.left + pair.right;
+                println(pair.right);
+            }
+        "#,
+    );
+    assert_eq!(run.status.code(), Some(0));
+
+    let stdout = String::from_utf8_lossy(&run.stdout);
+    assert_eq!(stdout, "7\n16\n", "unexpected stdout: {stdout}");
+}
+
+#[test]
 fn test_args_error_union_early_return_builds_and_runs() {
     let run = run_program(
         "args_error_union_early_return",

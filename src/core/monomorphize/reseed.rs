@@ -88,6 +88,7 @@ pub(super) fn collect_node_ids_in_top_level_item(item: &TopLevelItem) -> Vec<Nod
         TopLevelItem::TraitDef(trait_def) => collector.visit_trait_def(trait_def),
         TopLevelItem::TypeDef(type_def) => collector.visit_type_def(type_def),
         TopLevelItem::MachineDef(machine_def) => collector.visit_machine_def(machine_def),
+        TopLevelItem::StaticDef(static_def) => collector.visit_static_def(static_def),
         TopLevelItem::FuncDecl(func_decl) => collector.visit_func_decl(func_decl),
         TopLevelItem::FuncDef(func_def) => collector.visit_func_def(func_def),
         TopLevelItem::MethodBlock(method_block) => collector.visit_method_block(method_block),
@@ -180,7 +181,10 @@ pub(super) fn rewrite_calls_in_item(
         TopLevelItem::FuncDecl(func_decl) => rewriter.visit_func_decl(func_decl),
         TopLevelItem::MethodBlock(method_block) => rewriter.visit_method_block(method_block),
         TopLevelItem::ClosureDef(closure_def) => rewriter.visit_closure_def(closure_def),
-        TopLevelItem::TypeDef(_) | TopLevelItem::TraitDef(_) | TopLevelItem::MachineDef(_) => {}
+        TopLevelItem::TypeDef(_)
+        | TopLevelItem::TraitDef(_)
+        | TopLevelItem::MachineDef(_)
+        | TopLevelItem::StaticDef(_) => {}
     }
 }
 
@@ -264,6 +268,7 @@ pub(super) fn reseed_ids_in_item(item: &mut TopLevelItem, node_id_gen: &mut Node
         TopLevelItem::TraitDef(trait_def) => reseeder.visit_trait_def(trait_def),
         TopLevelItem::TypeDef(type_def) => reseeder.visit_type_def(type_def),
         TopLevelItem::MachineDef(machine_def) => reseeder.visit_machine_def(machine_def),
+        TopLevelItem::StaticDef(static_def) => reseeder.visit_static_def(static_def),
         TopLevelItem::FuncDecl(func_decl) => reseeder.visit_func_decl(func_decl),
         TopLevelItem::FuncDef(func_def) => reseeder.visit_func_def(func_def),
         TopLevelItem::MethodBlock(method_block) => reseeder.visit_method_block(method_block),

@@ -438,6 +438,7 @@ fn test_arm64_emitter_global_bytes() {
         id: GlobalId(0),
         bytes: vec![1, 2, 3],
         align: 4,
+        section: None,
     };
     emitter.emit_global(&data);
     let asm = emitter.finish();
@@ -490,6 +491,7 @@ fn test_arm64_emit_module() {
             id: GlobalId(0),
             bytes: vec![9],
             align: 1,
+            section: None,
         }],
     };
 

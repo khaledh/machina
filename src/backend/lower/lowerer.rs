@@ -1,5 +1,7 @@
 //! SSA lowering state and shared helpers.
 
+use std::collections::HashMap;
+
 use crate::backend::lower::LowerToIrError;
 use crate::backend::lower::drop_glue::DropGlueRegistry;
 use crate::backend::lower::drops::DropManager;
@@ -81,6 +83,7 @@ pub(super) struct FuncLowerer<'a, 'g> {
     pub(super) drop_manager: DropManager<'a>,
     pub(super) drop_glue: &'g mut DropGlueRegistry,
     pub(super) globals: &'g mut GlobalArena,
+    pub(super) static_globals: &'a HashMap<DefId, GlobalId>,
     pub(super) trace_drops: bool,
 }
 
@@ -177,6 +180,7 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
         lowering_plans: &'a LoweringPlanMap,
         drop_glue: &'g mut DropGlueRegistry,
         globals: &'g mut GlobalArena,
+        static_globals: &'a HashMap<DefId, GlobalId>,
         trace_drops: bool,
     ) -> Self {
         let mut type_lowerer = TypeLowerer::new_with_type_defs(type_map, Some(def_table), module);
@@ -256,6 +260,7 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
             drop_manager: DropManager::new(),
             drop_glue,
             globals,
+            static_globals,
             trace_drops,
         }
     }
@@ -275,6 +280,7 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
         lowering_plans: &'a LoweringPlanMap,
         drop_glue: &'g mut DropGlueRegistry,
         globals: &'g mut GlobalArena,
+        static_globals: &'a HashMap<DefId, GlobalId>,
         trace_drops: bool,
     ) -> Self {
         let mut type_lowerer =
@@ -384,6 +390,7 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
             drop_manager: DropManager::new(),
             drop_glue,
             globals,
+            static_globals,
             trace_drops,
         }
     }
@@ -399,6 +406,7 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
         lowering_plans: &'a LoweringPlanMap,
         drop_glue: &'g mut DropGlueRegistry,
         globals: &'g mut GlobalArena,
+        static_globals: &'a HashMap<DefId, GlobalId>,
         trace_drops: bool,
     ) -> Self {
         let mut type_lowerer = TypeLowerer::new(type_map);
@@ -428,6 +436,7 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
             drop_manager: DropManager::new(),
             drop_glue,
             globals,
+            static_globals,
             trace_drops,
         }
     }

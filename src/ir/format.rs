@@ -41,6 +41,9 @@ pub fn format_func_with_comments_and_names(
 pub fn format_globals(globals: &[GlobalData]) -> String {
     let mut out = String::new();
     for global in globals {
+        if let Some(section) = &global.section {
+            let _ = write!(&mut out, "section {} ", section);
+        }
         if let Some(text) = format_bytes_as_string(&global.bytes) {
             let _ = writeln!(&mut out, "global _g{} = \"{}\"", global.id.0, text);
             continue;

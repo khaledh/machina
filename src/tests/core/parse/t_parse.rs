@@ -3103,6 +3103,46 @@ fn test_parse_method_decl() {
 }
 
 #[test]
+fn test_parse_static_var_with_section_attr() {
+    let source = r#"
+        @section(".limine_requests")
+        static var request = 42;
+    "#;
+
+    let module = parse_module(source).expect("Failed to parse");
+    let TopLevelItem::StaticDef(static_def) = &module.top_level_items[0] else {
+        panic!("Expected static def");
+    };
+    assert_eq!(static_def.name, "request");
+    assert_eq!(static_def.mutability, StaticMutability::Var);
+    assert_eq!(static_def.attrs.len(), 1);
+    assert_eq!(static_def.attrs[0].name, "section");
+    assert_eq!(
+        static_def.attrs[0].args,
+        vec![AttrArg::String(".limine_requests".to_string())]
+    );
+}
+
+#[test]
+fn test_parse_static_let_with_explicit_type() {
+    let source = r#"
+        static let max_entries: u64 = 256;
+    "#;
+
+    let module = parse_module(source).expect("Failed to parse");
+    let TopLevelItem::StaticDef(static_def) = &module.top_level_items[0] else {
+        panic!("Expected static def");
+    };
+    assert_eq!(static_def.name, "max_entries");
+    assert_eq!(static_def.mutability, StaticMutability::Let);
+    let ty = static_def.ty.as_ref().expect("expected explicit type");
+    match &ty.kind {
+        TypeExprKind::Named { ident, .. } => assert_eq!(ident, "u64"),
+        _ => panic!("Expected named type"),
+    }
+}
+
+#[test]
 fn test_parse_generic_method_block() {
     let source = r#"
         type Box<T> = { value: T }

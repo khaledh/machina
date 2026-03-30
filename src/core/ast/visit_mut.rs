@@ -93,6 +93,10 @@ pub trait VisitorMut {
         walk_func_decl(self, func_decl)
     }
 
+    fn visit_static_def(&mut self, static_def: &mut StaticDef) {
+        walk_static_def(self, static_def)
+    }
+
     // --- Functions ---
 
     fn visit_func_def(&mut self, func_def: &mut FuncDef) {
@@ -200,6 +204,7 @@ pub fn walk_module<V: VisitorMut + ?Sized>(v: &mut V, module: &mut Module) {
             TopLevelItem::TraitDef(trait_def) => v.visit_trait_def(trait_def),
             TopLevelItem::TypeDef(type_def) => v.visit_type_def(type_def),
             TopLevelItem::MachineDef(machine_def) => v.visit_machine_def(machine_def),
+            TopLevelItem::StaticDef(static_def) => v.visit_static_def(static_def),
             TopLevelItem::FuncDecl(func_decl) => v.visit_func_decl(func_decl),
             TopLevelItem::FuncDef(func_def) => v.visit_func_def(func_def),
             TopLevelItem::MethodBlock(method_block) => v.visit_method_block(method_block),
@@ -270,6 +275,13 @@ pub fn walk_trait_method<V: VisitorMut + ?Sized>(v: &mut V, method: &mut TraitMe
 
 pub fn walk_trait_property<V: VisitorMut + ?Sized>(v: &mut V, property: &mut TraitProperty) {
     v.visit_type_expr(&mut property.ty);
+}
+
+pub fn walk_static_def<V: VisitorMut + ?Sized>(v: &mut V, static_def: &mut StaticDef) {
+    if let Some(ty) = &mut static_def.ty {
+        v.visit_type_expr(ty);
+    }
+    v.visit_expr(&mut static_def.init);
 }
 
 pub fn walk_type_def<V: VisitorMut + ?Sized>(v: &mut V, type_def: &mut TypeDef) {

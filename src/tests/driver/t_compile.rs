@@ -996,6 +996,43 @@ fn compile_with_path_links_builtin_archive_for_prelude_string_methods() {
 }
 
 #[test]
+fn compile_with_path_emits_custom_section_for_static_global() {
+    let temp_dir = std::env::temp_dir().join(format!(
+        "machina_driver_static_section_{}",
+        std::process::id()
+    ));
+    std::fs::create_dir_all(&temp_dir).expect("failed to create temp dir");
+    let source_path = temp_dir.join("static_section.mc");
+    let source = r#"
+        @layout(fixed, size: 24)
+        type Header = {
+            a: u64,
+            b: u64,
+            c: u64,
+        }
+
+        @section(".limine_requests")
+        static var header = Header { a: 1, b: 2, c: 3 };
+
+        fn main() -> u64 {
+            header.a + header.b + header.c
+        }
+    "#;
+    std::fs::write(&source_path, source).expect("failed to write source");
+
+    let output = compile_with_path(source, Some(&source_path), &deterministic_compile_opts())
+        .expect("compile");
+
+    assert!(
+        output.asm.contains(".section .limine_requests"),
+        "expected custom section directive in asm:\n{}",
+        output.asm
+    );
+
+    let _ = std::fs::remove_dir_all(&temp_dir);
+}
+
+#[test]
 fn compile_ir_dump_is_deterministic() {
     let source = r#"
 type IoError = {

@@ -76,6 +76,10 @@ pub enum DefKind {
     FuncDecl {
         attrs: FuncAttrs,
     },
+    Static {
+        attrs: StaticAttrs,
+        is_mutable: bool,
+    },
     LocalVar {
         nrvo_eligible: bool,
         is_mutable: bool,
@@ -117,6 +121,11 @@ pub struct FuncAttrs {
     pub visibility: Visibility,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct StaticAttrs {
+    pub section: Option<String>,
+}
+
 impl fmt::Display for DefKind {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
@@ -127,6 +136,13 @@ impl fmt::Display for DefKind {
             DefKind::EnumVariantName => write!(f, "EnumVariantName"),
             DefKind::FuncDef { .. } => write!(f, "FuncDef"),
             DefKind::FuncDecl { .. } => write!(f, "FuncDecl"),
+            DefKind::Static { is_mutable, .. } => {
+                if *is_mutable {
+                    write!(f, "StaticVar")
+                } else {
+                    write!(f, "StaticLet")
+                }
+            }
             DefKind::LocalVar {
                 nrvo_eligible,
                 is_mutable,
@@ -221,6 +237,13 @@ impl Def {
     pub fn link_name(&self) -> Option<&str> {
         match &self.kind {
             DefKind::FuncDef { attrs } | DefKind::FuncDecl { attrs } => attrs.link_name.as_deref(),
+            _ => None,
+        }
+    }
+
+    pub fn static_section(&self) -> Option<&str> {
+        match &self.kind {
+            DefKind::Static { attrs, .. } => attrs.section.as_deref(),
             _ => None,
         }
     }

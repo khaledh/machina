@@ -4,7 +4,7 @@ use std::collections::HashMap;
 
 use super::*;
 use crate::core::ast::{
-    FuncDecl, MethodBlock, MethodDecl, MethodDef, MethodItem, Param, TypeParam,
+    FuncDecl, MethodBlock, MethodDecl, MethodDef, MethodItem, Param, StaticDef, TypeParam,
 };
 use crate::core::typecheck::errors::TEK;
 
@@ -18,6 +18,9 @@ impl<'a> ConstraintCollector<'a> {
         self.check_local_method_overload_arity_ranges();
         // Declarations first so callable defs are available when encountered by
         // later expressions in the same module.
+        for static_def in self.ctx.module.static_defs() {
+            self.collect_static_def(static_def);
+        }
         for func_decl in self.ctx.module.func_decls() {
             self.collect_func_decl(func_decl);
         }
@@ -37,6 +40,34 @@ impl<'a> ConstraintCollector<'a> {
                 }
             }
         }
+    }
+
+    fn collect_static_def(&mut self, static_def: &StaticDef) {
+        let static_def_id = self.ctx.def_table.def_id(static_def.id);
+        let def_term = self.def_term(static_def_id);
+        let node_term = self.node_term(static_def.id);
+        self.push_eq(
+            node_term,
+            def_term.clone(),
+            ConstraintReason::Decl(static_def_id, static_def.span),
+        );
+
+        if let Some(ty_expr) = &static_def.ty {
+            if let Ok(explicit_ty) = self.resolve_type_in_scope(ty_expr) {
+                self.push_eq(
+                    def_term.clone(),
+                    explicit_ty,
+                    ConstraintReason::Decl(static_def_id, static_def.span),
+                );
+            }
+        }
+
+        let init_term = self.collect_expr(&static_def.init, Some(def_term.clone()));
+        self.push_assignable(
+            init_term,
+            def_term,
+            ConstraintReason::Expr(static_def.init.id, static_def.init.span),
+        );
     }
 
     fn collect_func_decl(&mut self, func_decl: &FuncDecl) {

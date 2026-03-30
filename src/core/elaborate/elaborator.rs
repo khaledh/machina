@@ -11,7 +11,7 @@ use std::collections::{HashMap, HashSet};
 use crate::core::analysis::facts::{DefTableOverlay, SyntheticReason, TypeMapOverlay};
 use crate::core::ast::{
     Expr, ExprKind, FuncDecl, FuncDef, InitInfo, MethodBlock, MethodDecl, MethodDef, MethodItem,
-    Module, NodeId, NodeIdGen, ParamMode, TopLevelItem, TypeDef, TypeExpr,
+    Module, NodeId, NodeIdGen, ParamMode, StaticDef, TopLevelItem, TypeDef, TypeExpr,
 };
 use crate::core::diag::Span;
 use crate::core::plans::{
@@ -200,6 +200,16 @@ impl<'a> Elaborator<'a> {
             TopLevelItem::TraitDef(def) => Some(TopLevelItem::TraitDef(def.clone())),
             TopLevelItem::TypeDef(def) => Some(TopLevelItem::TypeDef(def.clone())),
             TopLevelItem::MachineDef(_) => None,
+            TopLevelItem::StaticDef(def) => Some(TopLevelItem::StaticDef(StaticDef {
+                id: def.id,
+                doc: def.doc.clone(),
+                attrs: def.attrs.clone(),
+                name: def.name.clone(),
+                mutability: def.mutability.clone(),
+                ty: def.ty.clone(),
+                init: self.elab_value(&def.init),
+                span: def.span,
+            })),
             TopLevelItem::FuncDecl(decl) => Some(TopLevelItem::FuncDecl(FuncDecl {
                 id: decl.id,
                 doc: decl.doc.clone(),

@@ -61,6 +61,7 @@ impl<'a> LoweringPlanBuilder<'a> {
                 }
                 TopLevelItem::TypeDef(_)
                 | TopLevelItem::TraitDef(_)
+                | TopLevelItem::StaticDef(_)
                 | TopLevelItem::FuncDecl(_)
                 | TopLevelItem::MachineDef(_)
                 | TopLevelItem::ClosureDef(_) => {}

@@ -14,6 +14,9 @@ impl<'a> Parser<'a> {
                     Err(PEK::AttributeNotAllowed.at(attrs[0].span))
                 }
             }
+            TK::KwStatic => self
+                .parse_static_def(doc, attrs)
+                .map(TopLevelItem::StaticDef),
             TK::KwFn => self.parse_func(doc, attrs),
             TK::Ident(_) if self.is_method_block_start() => {
                 if attrs.is_empty() {
@@ -24,6 +27,54 @@ impl<'a> Parser<'a> {
             }
             _ => self.err_here(PEK::ExpectedDecl(self.curr_token.clone())),
         }
+    }
+
+    fn parse_static_def(
+        &mut self,
+        doc: Option<DocComment>,
+        attrs: Vec<Attribute>,
+    ) -> Result<StaticDef, ParseError> {
+        let marker = self.mark();
+        self.consume_keyword(TK::KwStatic)?;
+        let mutability = match self.curr_token.kind {
+            TK::KwLet => {
+                self.advance();
+                StaticMutability::Let
+            }
+            TK::KwVar => {
+                self.advance();
+                StaticMutability::Var
+            }
+            _ => {
+                return Err(
+                    PEK::ExpectedToken(TK::KwLet, self.curr_token.clone()).at(self.curr_token.span)
+                );
+            }
+        };
+
+        let name = self.parse_ident()?;
+        let ty = if self.curr_token.kind == TK::Colon {
+            self.advance();
+            Some(self.parse_type_expr()?)
+        } else {
+            None
+        };
+        self.consume(&TK::Equals)?;
+        let init = self.parse_expr(0)?;
+        if self.curr_token.kind == TK::Semicolon {
+            self.advance();
+        }
+
+        Ok(StaticDef {
+            id: self.id_gen.new_id(),
+            doc,
+            attrs,
+            name,
+            mutability,
+            ty,
+            init,
+            span: self.close(marker),
+        })
     }
 
     fn is_method_block_start(&self) -> bool {

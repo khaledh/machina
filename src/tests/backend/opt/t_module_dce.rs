@@ -117,11 +117,13 @@ fn test_module_dce_prunes_unused_globals() {
                 id: GlobalId(0),
                 bytes: vec![0],
                 align: 1,
+                section: None,
             },
             GlobalData {
                 id: GlobalId(1),
                 bytes: vec![1],
                 align: 1,
+                section: None,
             },
         ],
     };
@@ -133,11 +135,13 @@ fn test_module_dce_prunes_unused_globals() {
                 id: GlobalId(0),
                 bytes: vec![0],
                 align: 1,
+                section: None,
             },
             GlobalData {
                 id: GlobalId(1),
                 bytes: vec![1],
                 align: 1,
+                section: None,
             },
         ],
     };

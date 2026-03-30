@@ -5,6 +5,14 @@ use crate::ir::{GlobalData, GlobalId};
 use super::{Arm64Emitter, AsmSection};
 
 impl Arm64Emitter {
+    pub(super) fn ensure_named_section(&mut self, section: &str) {
+        if !self.output.is_empty() {
+            let _ = writeln!(self.output);
+        }
+        let _ = writeln!(self.output, ".section {}", section);
+        self.section = AsmSection::Data;
+    }
+
     pub(super) fn ensure_text(&mut self) {
         if self.section != AsmSection::Text {
             if !self.output.is_empty() {
@@ -30,7 +38,11 @@ impl Arm64Emitter {
     }
 
     pub(super) fn emit_global_impl(&mut self, global: &GlobalData) {
-        self.ensure_data();
+        if let Some(section) = &global.section {
+            self.ensure_named_section(section);
+        } else {
+            self.ensure_data();
+        }
         if !self.output.is_empty() {
             let _ = writeln!(self.output);
         }

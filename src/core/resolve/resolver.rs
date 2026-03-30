@@ -9,6 +9,7 @@ use crate::core::context::{
     import_env_from_requires, module_export_facts_from_def_table, stdlib_module_export_facts,
 };
 use crate::core::diag::Span;
+use crate::core::resolve::def::StaticAttrs;
 use crate::core::resolve::def_table::{DefTable, DefTableBuilder};
 use crate::core::resolve::errors::{ResolveError, ResolveErrorKind as REK};
 use crate::core::resolve::symbols::{Scope, Symbol, SymbolKind};
@@ -854,6 +855,47 @@ impl SymbolResolver {
                         REK::AttrNotAllowed(attr.name.clone(), "function"),
                     );
                 }
+                "section" => {
+                    self.err(
+                        attr.span,
+                        REK::AttrNotAllowed(attr.name.clone(), "function"),
+                    );
+                }
+                _ => self.err(attr.span, REK::UnknownAttribute(attr.name.clone())),
+            }
+        }
+
+        resolved
+    }
+
+    fn resolve_static_attrs(&mut self, attrs: &[Attribute]) -> StaticAttrs {
+        let mut resolved = StaticAttrs::default();
+        let mut seen = HashSet::new();
+
+        for attr in attrs {
+            if !seen.insert(attr.name.clone()) {
+                self.err(attr.span, REK::AttrDuplicate(attr.name.clone()));
+                continue;
+            }
+            match attr.name.as_str() {
+                "section" => {
+                    if attr.args.len() != 1 {
+                        self.err(
+                            attr.span,
+                            REK::AttrWrongArgCount(attr.name.clone(), 1, attr.args.len()),
+                        );
+                        continue;
+                    }
+                    let Some(AttrArg::String(name)) = attr.args.first() else {
+                        self.err(attr.span, REK::AttrWrongArgType(attr.name.clone()));
+                        continue;
+                    };
+                    resolved.section = Some(name.clone());
+                }
+                "public" | "opaque" | "intrinsic" | "runtime" | "machines" | "link_name"
+                | "layout" | "align" | "linear" => {
+                    self.err(attr.span, REK::AttrNotAllowed(attr.name.clone(), "static"));
+                }
                 _ => self.err(attr.span, REK::UnknownAttribute(attr.name.clone())),
             }
         }
@@ -929,6 +971,9 @@ impl SymbolResolver {
 
         // Populate machine definitions
         self.populate_machine_defs(&module.machine_defs());
+
+        // Populate static definitions
+        self.populate_static_defs(&module.static_defs());
 
         // Populate callable declarations
         self.populate_callables(&module.callables());
@@ -1175,6 +1220,29 @@ impl SymbolResolver {
                     kind: SymbolKind::MachineDef { def_id },
                 },
                 machine_def.span,
+            );
+        }
+    }
+
+    fn populate_static_defs(&mut self, static_defs: &[&StaticDef]) {
+        for &static_def in static_defs {
+            let def_id = self.def_id_gen.new_id();
+            let attrs = self.resolve_static_attrs(&static_def.attrs);
+            let is_mutable = matches!(static_def.mutability, StaticMutability::Var);
+            let def = Def {
+                id: def_id,
+                name: static_def.name.clone(),
+                kind: DefKind::Static { attrs, is_mutable },
+            };
+            self.def_table_builder
+                .record_def(def, static_def.id, static_def.span);
+            self.insert_symbol(
+                &static_def.name,
+                Symbol {
+                    name: static_def.name.clone(),
+                    kind: SymbolKind::Var { def_id, is_mutable },
+                },
+                static_def.span,
             );
         }
     }
@@ -1706,6 +1774,13 @@ impl Visitor for SymbolResolver {
                 );
             }
         });
+    }
+
+    fn visit_static_def(&mut self, static_def: &StaticDef) {
+        if let Some(ty) = &static_def.ty {
+            self.visit_type_expr(ty);
+        }
+        self.visit_expr(&static_def.init);
     }
 
     fn visit_func_def(&mut self, func_def: &FuncDef) {
@@ -2424,6 +2499,7 @@ fn top_level_item_id(item: &TopLevelItem) -> NodeId {
         TopLevelItem::TraitDef(trait_def) => trait_def.id,
         TopLevelItem::TypeDef(type_def) => type_def.id,
         TopLevelItem::MachineDef(machine_def) => machine_def.id,
+        TopLevelItem::StaticDef(static_def) => static_def.id,
         TopLevelItem::FuncDecl(func_decl) => func_decl.id,
         TopLevelItem::FuncDef(func_def) => func_def.id,
         TopLevelItem::MethodBlock(method_block) => method_block.id,

@@ -35,6 +35,7 @@ pub fn attach_def_owners(
             TopLevelItem::TraitDef(trait_def) => collector.visit_trait_def(trait_def),
             TopLevelItem::TypeDef(type_def) => collector.visit_type_def(type_def),
             TopLevelItem::MachineDef(machine_def) => collector.visit_machine_def(machine_def),
+            TopLevelItem::StaticDef(static_def) => collector.visit_static_def(static_def),
             TopLevelItem::FuncDecl(func_decl) => collector.visit_func_decl(func_decl),
             TopLevelItem::FuncDef(func_def) => collector.visit_func_def(func_def),
             TopLevelItem::MethodBlock(method_block) => collector.visit_method_block(method_block),
@@ -50,6 +51,7 @@ fn top_level_item_id(item: &TopLevelItem) -> NodeId {
         TopLevelItem::TraitDef(trait_def) => trait_def.id,
         TopLevelItem::TypeDef(type_def) => type_def.id,
         TopLevelItem::MachineDef(machine_def) => machine_def.id,
+        TopLevelItem::StaticDef(static_def) => static_def.id,
         TopLevelItem::FuncDecl(func_decl) => func_decl.id,
         TopLevelItem::FuncDef(func_def) => func_def.id,
         TopLevelItem::MethodBlock(method_block) => method_block.id,
@@ -101,6 +103,11 @@ impl Visitor for DefOwnerCollector<'_> {
     fn visit_func_decl(&mut self, func_decl: &FuncDecl) {
         self.record_node(func_decl.id);
         visit::walk_func_decl(self, func_decl);
+    }
+
+    fn visit_static_def(&mut self, static_def: &StaticDef) {
+        self.record_node(static_def.id);
+        visit::walk_static_def(self, static_def);
     }
 
     fn visit_func_def(&mut self, func_def: &FuncDef) {

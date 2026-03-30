@@ -25,14 +25,39 @@ impl GlobalArena {
         if let Some(id) = self.by_bytes.get(&bytes).copied() {
             return id;
         }
+        self.add_data(bytes, 1, None, true)
+    }
+
+    pub fn add_data(
+        &mut self,
+        bytes: Vec<u8>,
+        align: u32,
+        section: Option<String>,
+        dedup_by_bytes: bool,
+    ) -> GlobalId {
+        if dedup_by_bytes
+            && section.is_none()
+            && align == 1
+            && let Some(id) = self.by_bytes.get(&bytes).copied()
+        {
+            return id;
+        }
         let id = GlobalId(self.next_id);
         self.next_id += 1;
         self.globals.push(GlobalData {
             id,
             bytes,
-            align: 1,
+            align,
+            section,
         });
-        if let Some(global) = self.globals.last() {
+        if dedup_by_bytes
+            && align == 1
+            && self
+                .globals
+                .last()
+                .is_some_and(|global| global.section.is_none())
+            && let Some(global) = self.globals.last()
+        {
             self.by_bytes.insert(global.bytes.clone(), id);
         }
         id

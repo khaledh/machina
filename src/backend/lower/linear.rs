@@ -200,8 +200,13 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
                 let value = match &place.kind {
                     ExprKind::Var { .. } => {
                         let def_id = self.def_table.def_id(place.id);
-                        self.set_drop_flag_for_def(def_id, false);
-                        self.load_local_value(def_id)
+                        if self.static_globals.contains_key(&def_id) {
+                            let place_addr = self.lower_place_addr(place)?;
+                            self.builder.load(place_addr.addr, place_addr.value_ty)
+                        } else {
+                            self.set_drop_flag_for_def(def_id, false);
+                            self.load_local_value(def_id)
+                        }
                     }
                     _ => {
                         let place_addr = self.lower_place_addr(place)?;
@@ -247,6 +252,17 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
                             .get(self.type_map.type_of(expr.id))
                             .clone();
                         Ok(self.coerce_value(value, &place_sem_ty, &expr_sem_ty).into())
+                    } else if self.static_globals.contains_key(&def_id) {
+                        let place_addr = self.lower_place_addr(place)?;
+                        let value = self.builder.load(place_addr.addr, place_addr.value_ty);
+                        let expr_sem_ty = self
+                            .type_map
+                            .type_table()
+                            .get(self.type_map.type_of(expr.id))
+                            .clone();
+                        Ok(self
+                            .coerce_value(value, &place_addr.sem_ty, &expr_sem_ty)
+                            .into())
                     } else {
                         let def = self.def(def_id);
                         match def.kind {
@@ -401,6 +417,12 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
                         let def_id = self.def_table.def_id(assignee.id);
                         let dest_ty = self.def_type(def_id);
                         self.emit_conversion_check(&value_ty, &dest_ty, value);
+                        if self.static_globals.contains_key(&def_id) {
+                            let place_addr = self.lower_place_addr(assignee)?;
+                            let ir_ty = self.type_lowerer.lower_type_id(value_expr_ty);
+                            self.store_value_into_addr(place_addr.addr, value, &dest_ty, ir_ty);
+                            return Ok(StmtOutcome::Continue);
+                        }
                         if let Some(mode) = self.param_mode_for(def_id)
                             && matches!(mode, ParamMode::Out | ParamMode::InOut)
                         {

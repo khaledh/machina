@@ -87,6 +87,7 @@ pub struct GlobalData {
     pub id: GlobalId,
     pub bytes: Vec<u8>,
     pub align: u32,
+    pub section: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

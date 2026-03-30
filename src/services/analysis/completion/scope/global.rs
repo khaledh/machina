@@ -31,6 +31,9 @@ pub(super) fn global_scope(resolved: &ResolvedContext) -> HashMap<String, Comple
             TopLevelItem::MachineDef(machine_def) => {
                 allowed_nodes.insert(machine_def.id);
             }
+            TopLevelItem::StaticDef(static_def) => {
+                allowed_nodes.insert(static_def.id);
+            }
             TopLevelItem::FuncDecl(func_decl) => {
                 allowed_nodes.insert(func_decl.id);
             }
@@ -79,6 +82,7 @@ pub(super) fn global_scope(resolved: &ResolvedContext) -> HashMap<String, Comple
 pub(super) fn completion_kind_for_def(kind: &DefKind) -> Option<CompletionKind> {
     match kind {
         DefKind::FuncDef { .. } | DefKind::FuncDecl { .. } => Some(CompletionKind::Function),
+        DefKind::Static { .. } => Some(CompletionKind::Variable),
         DefKind::TypeDef { .. } => Some(CompletionKind::Type),
         DefKind::TraitDef { .. } => Some(CompletionKind::Trait),
         DefKind::MachineDef => Some(CompletionKind::Type),

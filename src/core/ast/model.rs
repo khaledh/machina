@@ -114,6 +114,16 @@ impl Module {
             .collect()
     }
 
+    pub fn static_defs(&self) -> Vec<&StaticDef> {
+        self.top_level_items
+            .iter()
+            .filter_map(|item| match item {
+                TopLevelItem::StaticDef(static_def) => Some(static_def),
+                _ => None,
+            })
+            .collect()
+    }
+
     pub fn method_blocks(&self) -> Vec<&MethodBlock> {
         self.top_level_items
             .iter()
@@ -151,7 +161,8 @@ impl Module {
                 TopLevelItem::ClosureDef(closure_decl) => {
                     vec![CallableRef::ClosureDef(closure_decl)]
                 }
-                TopLevelItem::TypeDef(_)
+                TopLevelItem::StaticDef(_)
+                | TopLevelItem::TypeDef(_)
                 | TopLevelItem::TraitDef(_)
                 | TopLevelItem::MachineDef(_) => vec![],
             })
@@ -166,6 +177,7 @@ pub enum TopLevelItem {
     TraitDef(TraitDef),
     TypeDef(TypeDef),
     MachineDef(MachineDef),
+    StaticDef(StaticDef),     // top-level static definition
     FuncDecl(FuncDecl),       // function declaration
     FuncDef(FuncDef),         // function definition
     MethodBlock(MethodBlock), // method declarations/definitions
@@ -499,6 +511,24 @@ pub struct FuncDef {
     pub attrs: Vec<Attribute>,
     pub sig: FunctionSig,
     pub body: Expr,
+    pub span: Span,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum StaticMutability {
+    Let,
+    Var,
+}
+
+#[derive(Clone, Debug)]
+pub struct StaticDef {
+    pub id: NodeId,
+    pub doc: Option<DocComment>,
+    pub attrs: Vec<Attribute>,
+    pub name: String,
+    pub mutability: StaticMutability,
+    pub ty: Option<TypeExpr>,
+    pub init: Expr,
     pub span: Span,
 }
 
