@@ -92,6 +92,9 @@ fn type_info_score(ty: &Type) -> usize {
         Type::Range { elem_ty }
         | Type::Slice { elem_ty }
         | Type::DynArray { elem_ty }
+        | Type::View { elem_ty }
+        | Type::ViewSlice { elem_ty }
+        | Type::ViewArray { elem_ty }
         | Type::Set { elem_ty }
         | Type::Iterable { item_ty: elem_ty }
         | Type::Heap { elem_ty }

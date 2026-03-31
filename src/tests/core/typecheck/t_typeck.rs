@@ -350,6 +350,214 @@ fn test_address_arithmetic_rejects_invalid_operands() {
 }
 
 #[test]
+fn test_foreign_view_types_typecheck_with_fixed_layout_structs() {
+    let source = r#"
+        @intrinsic
+        fn view_at<T>(addr: vaddr) -> view<T>;
+
+        @intrinsic
+        fn view_slice_at<T>(addr: vaddr, count: u64) -> view_slice<T>;
+
+        @intrinsic
+        fn view_array_at<T>(addr: vaddr, count: u64) -> view_array<T>;
+
+        @layout(fixed)
+        type Header = {
+            magic: u64,
+        }
+
+        fn keep(
+            one: view<Header>,
+            many: view_slice<Header>,
+            flat: view_array<Header>,
+        ) -> view<Header> {
+            one
+        }
+    "#;
+
+    let _ctx = type_check_source(source).expect("Failed to type check");
+}
+
+#[test]
+fn test_foreign_view_requires_fixed_layout_struct_element() {
+    let source = r#"
+        type Header = {
+            magic: u64,
+        }
+
+        fn keep(one: view<Header>) -> view<Header> {
+            one
+        }
+    "#;
+
+    let errors = match type_check_source(source) {
+        Ok(_) => panic!("expected invalid foreign view element type"),
+        Err(errors) => errors,
+    };
+    assert!(errors.iter().any(|e| {
+        matches!(
+            e.kind(),
+            TypeCheckErrorKind::ForeignViewElementMustBeFixedLayout { .. }
+        )
+    }));
+}
+
+#[test]
+fn test_fixed_layout_rejects_foreign_view_field_types() {
+    let source = r#"
+        @layout(fixed)
+        type Header = {
+            magic: u64,
+        }
+
+        @layout(fixed)
+        type Wrapper = {
+            inner: view<Header>,
+        }
+    "#;
+
+    let errors = match type_check_source(source) {
+        Ok(_) => panic!("expected invalid fixed-layout view field"),
+        Err(errors) => errors,
+    };
+    assert!(errors.iter().any(|e| {
+        matches!(
+            e.kind(),
+            TypeCheckErrorKind::FixedLayoutAbstractFieldType { .. }
+        )
+    }));
+}
+
+#[test]
+fn test_foreign_view_constructors_typecheck() {
+    let source = r#"
+        @intrinsic
+        fn view_at<T>(addr: vaddr) -> view<T>;
+
+        @intrinsic
+        fn view_slice_at<T>(addr: vaddr, count: u64) -> view_slice<T>;
+
+        @intrinsic
+        fn view_array_at<T>(addr: vaddr, count: u64) -> view_array<T>;
+
+        @layout(fixed)
+        type Header = {
+            magic: u64,
+        }
+
+        fn one(addr: vaddr) -> view<Header> {
+            view_at(addr)
+        }
+
+        fn many(addr: vaddr, count: u64) -> view_slice<Header> {
+            view_slice_at(addr, count)
+        }
+
+        fn flat(addr: vaddr, count: u64) -> view_array<Header> {
+            view_array_at(addr, count)
+        }
+    "#;
+
+    let _ctx = type_check_source(source).expect("Failed to type check");
+}
+
+#[test]
+fn test_foreign_view_struct_field_read_typechecks() {
+    let source = r#"
+        @layout(fixed)
+        type Header = {
+            magic: u64,
+        }
+
+        fn read(header: view<Header>) -> u64 {
+            header.magic
+        }
+    "#;
+
+    let _ctx = type_check_source(source).expect("Failed to type check");
+}
+
+#[test]
+fn test_foreign_view_struct_field_assign_is_rejected() {
+    let source = r#"
+        @layout(fixed)
+        type Header = {
+            magic: u64,
+        }
+
+        fn write(header: view<Header>) {
+            var slot = header;
+            slot.magic = 1;
+        }
+    "#;
+
+    let errors = match type_check_source(source) {
+        Ok(_) => panic!("expected invalid foreign view field assignment"),
+        Err(errors) => errors,
+    };
+    assert!(errors.iter().any(|e| {
+        matches!(
+            e.kind(),
+            TypeCheckErrorKind::InvalidStructFieldTarget(Type::View { .. })
+        )
+    }));
+}
+
+#[test]
+fn test_foreign_view_sequence_index_and_for_typecheck() {
+    let source = r#"
+        @layout(fixed)
+        type Header = {
+            magic: u64,
+        }
+
+        fn sum_slice(headers: view_slice<Header>) -> u64 {
+            var acc: u64 = headers[0].magic;
+            for header in headers {
+                acc = acc + header.magic;
+            }
+            acc + headers.len
+        }
+
+        fn sum_array(headers: view_array<Header>) -> u64 {
+            var acc: u64 = 0;
+            for header in headers {
+                acc = acc + header.magic;
+            }
+            acc + headers[0].magic + headers.len
+        }
+    "#;
+
+    let _ctx = type_check_source(source).expect("Failed to type check");
+}
+
+#[test]
+fn test_foreign_view_index_assign_is_rejected() {
+    let source = r#"
+        @layout(fixed)
+        type Header = {
+            magic: u64,
+        }
+
+        fn write(headers: view_slice<Header>) {
+            var items = headers;
+            items[0] = Header { magic: 1 };
+        }
+    "#;
+
+    let errors = match type_check_source(source) {
+        Ok(_) => panic!("expected invalid foreign view index assignment"),
+        Err(errors) => errors,
+    };
+    assert!(errors.iter().any(|e| {
+        matches!(
+            e.kind(),
+            TypeCheckErrorKind::ForeignViewIndexAssignUnsupported
+        )
+    }));
+}
+
+#[test]
 fn test_set_literal_type() {
     let source = r#"
         fn test() -> u64 {

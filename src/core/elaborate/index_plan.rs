@@ -15,7 +15,9 @@ impl<'a> Elaborator<'a> {
                 deref_count,
             },
             Type::DynArray { .. } => IndexBaseKind::DynArray { deref_count },
-            Type::Slice { .. } => IndexBaseKind::Slice { deref_count },
+            Type::Slice { .. } | Type::ViewSlice { .. } | Type::ViewArray { .. } => {
+                IndexBaseKind::Slice { deref_count }
+            }
             Type::String => IndexBaseKind::String { deref_count },
             _ => {
                 panic!("compiler bug: invalid index target type (type checker should catch this)");

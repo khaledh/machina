@@ -172,6 +172,8 @@ pub(crate) fn resolve_builtin_property(owner_ty: &Type, field: &str) -> Option<B
                     | Type::Set { .. }
                     | Type::Map { .. }
                     | Type::Slice { .. }
+                    | Type::ViewSlice { .. }
+                    | Type::ViewArray { .. }
                     | Type::String
             ) =>
         {

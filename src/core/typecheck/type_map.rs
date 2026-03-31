@@ -290,6 +290,62 @@ fn resolve_type_expr_impl(
             ident,
             type_args: type_arg_exprs,
         } => {
+            if ident == "Iterable" {
+                return resolve_iterable_type(
+                    def_table,
+                    module,
+                    type_expr,
+                    type_arg_exprs,
+                    type_params,
+                    type_args,
+                    in_progress,
+                    allow_iterable,
+                );
+            }
+            if matches!(ident.as_str(), "view" | "view_slice" | "view_array") {
+                return resolve_foreign_view_type(
+                    def_table,
+                    module,
+                    type_expr,
+                    ident,
+                    type_arg_exprs,
+                    type_params,
+                    type_args,
+                    in_progress,
+                );
+            }
+            if ident == "map" {
+                if type_arg_exprs.len() != 2 {
+                    return Err(
+                        TEK::TypeArgCountMismatch(ident.clone(), 2, type_arg_exprs.len())
+                            .at(type_expr.span),
+                    );
+                }
+                let key_ty = resolve_type_expr_impl(
+                    def_table,
+                    module,
+                    &type_arg_exprs[0],
+                    type_params,
+                    type_args,
+                    in_progress,
+                    allow_error_union,
+                    false,
+                )?;
+                let value_ty = resolve_type_expr_impl(
+                    def_table,
+                    module,
+                    &type_arg_exprs[1],
+                    type_params,
+                    type_args,
+                    in_progress,
+                    allow_error_union,
+                    false,
+                )?;
+                return Ok(Type::Map {
+                    key_ty: Box::new(key_ty),
+                    value_ty: Box::new(value_ty),
+                });
+            }
             let def_id = if let Some(def_id) = def_table.lookup_node_def_id(type_expr.id) {
                 def_id
             } else if let Some(type_params) = type_params {
@@ -304,52 +360,6 @@ fn resolve_type_expr_impl(
                     .or_else(|| def_table.lookup_type_def_id(ident))
                     .ok_or_else(|| TEK::UnknownType.at(type_expr.span))?
             } else {
-                if ident == "Iterable" {
-                    return resolve_iterable_type(
-                        def_table,
-                        module,
-                        type_expr,
-                        type_arg_exprs,
-                        type_params,
-                        type_args,
-                        in_progress,
-                        allow_iterable,
-                    );
-                }
-                if ident == "map" {
-                    if type_arg_exprs.len() != 2 {
-                        return Err(TEK::TypeArgCountMismatch(
-                            ident.clone(),
-                            2,
-                            type_arg_exprs.len(),
-                        )
-                        .at(type_expr.span));
-                    }
-                    let key_ty = resolve_type_expr_impl(
-                        def_table,
-                        module,
-                        &type_arg_exprs[0],
-                        type_params,
-                        type_args,
-                        in_progress,
-                        allow_error_union,
-                        false,
-                    )?;
-                    let value_ty = resolve_type_expr_impl(
-                        def_table,
-                        module,
-                        &type_arg_exprs[1],
-                        type_params,
-                        type_args,
-                        in_progress,
-                        allow_error_union,
-                        false,
-                    )?;
-                    return Ok(Type::Map {
-                        key_ty: Box::new(key_ty),
-                        value_ty: Box::new(value_ty),
-                    });
-                }
                 def_table
                     .lookup_type_def_id(ident)
                     .ok_or_else(|| TEK::UnknownType.at(type_expr.span))?
@@ -905,6 +915,116 @@ fn resolve_iterable_type(
     Ok(Type::Iterable {
         item_ty: Box::new(item_ty),
     })
+}
+
+fn resolve_foreign_view_type(
+    def_table: &DefTable,
+    module: &impl TypeDefLookup,
+    type_expr: &TypeExpr,
+    ident: &str,
+    type_arg_exprs: &[TypeExpr],
+    type_params: Option<&TypeParamMap>,
+    type_args: Option<&TypeArgMap>,
+    in_progress: &mut HashSet<DefId>,
+) -> Result<Type, TypeCheckError> {
+    if type_arg_exprs.len() != 1 {
+        return Err(
+            TEK::TypeArgCountMismatch(ident.to_string(), 1, type_arg_exprs.len())
+                .at(type_expr.span),
+        );
+    }
+    let elem_ty = resolve_type_expr_impl(
+        def_table,
+        module,
+        &type_arg_exprs[0],
+        type_params,
+        type_args,
+        in_progress,
+        false,
+        false,
+    )?;
+    ensure_foreign_view_element_is_fixed_layout(
+        def_table,
+        module,
+        ident,
+        &type_arg_exprs[0],
+        &elem_ty,
+        type_params,
+    )?;
+    Ok(match ident {
+        "view" => Type::View {
+            elem_ty: Box::new(elem_ty),
+        },
+        "view_slice" => Type::ViewSlice {
+            elem_ty: Box::new(elem_ty),
+        },
+        "view_array" => Type::ViewArray {
+            elem_ty: Box::new(elem_ty),
+        },
+        other => unreachable!("unexpected foreign view type {other}"),
+    })
+}
+
+fn ensure_foreign_view_element_is_fixed_layout(
+    def_table: &DefTable,
+    module: &impl TypeDefLookup,
+    view_name: &str,
+    elem_ty_expr: &TypeExpr,
+    elem_ty: &Type,
+    type_params: Option<&TypeParamMap>,
+) -> Result<(), TypeCheckError> {
+    let TypeExprKind::Named { ident, .. } = &elem_ty_expr.kind else {
+        return Err(TEK::ForeignViewElementMustBeFixedLayout {
+            view_name: view_name.to_string(),
+            elem_ty: elem_ty.clone(),
+        }
+        .at(elem_ty_expr.span));
+    };
+    if type_params.is_some_and(|params| {
+        params.keys().copied().any(|def_id| {
+            def_table
+                .lookup_def(def_id)
+                .is_some_and(|def| def.name == *ident)
+        })
+    }) {
+        return Ok(());
+    }
+    let Some(def_id) = def_table.lookup_type_def_id(ident) else {
+        return Err(TEK::ForeignViewElementMustBeFixedLayout {
+            view_name: view_name.to_string(),
+            elem_ty: elem_ty.clone(),
+        }
+        .at(elem_ty_expr.span));
+    };
+    let Some(type_def) = module.type_def_by_id(def_table, def_id) else {
+        return Err(TEK::ForeignViewElementMustBeFixedLayout {
+            view_name: view_name.to_string(),
+            elem_ty: elem_ty.clone(),
+        }
+        .at(elem_ty_expr.span));
+    };
+    let Some(def) = def_table.lookup_def(def_id) else {
+        return Err(TEK::ForeignViewElementMustBeFixedLayout {
+            view_name: view_name.to_string(),
+            elem_ty: elem_ty.clone(),
+        }
+        .at(elem_ty_expr.span));
+    };
+    let DefKind::TypeDef { attrs } = &def.kind else {
+        return Err(TEK::ForeignViewElementMustBeFixedLayout {
+            view_name: view_name.to_string(),
+            elem_ty: elem_ty.clone(),
+        }
+        .at(elem_ty_expr.span));
+    };
+    if !matches!(type_def.kind, TypeDefKind::Struct { .. }) || !attrs.fixed_layout {
+        return Err(TEK::ForeignViewElementMustBeFixedLayout {
+            view_name: view_name.to_string(),
+            elem_ty: elem_ty.clone(),
+        }
+        .at(elem_ty_expr.span));
+    }
+    Ok(())
 }
 
 fn resolve_type_alias(

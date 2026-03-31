@@ -84,6 +84,97 @@ fn test_lower_struct_field_assign() {
 }
 
 #[test]
+fn test_lower_foreign_view_struct_field_load() {
+    let ctx = analyze(indoc! {"
+        @layout(fixed)
+        type Header = { magic: u64, version: u64 }
+
+        fn main(header: view<Header>) -> u64 {
+            header.version
+        }
+    "});
+
+    let main_def = ctx.module.func_defs()[0];
+    let lowered = lower_func(
+        main_def,
+        &ctx.def_table,
+        &ctx.type_map,
+        &ctx.lowering_plans,
+        &ctx.drop_plans,
+    )
+    .expect("failed to lower");
+    let text = format_func(&lowered.func, &lowered.types);
+
+    let expected = indoc! {"
+        fn main(ptr<Header>) -> u64 {
+          locals:
+            %l0: ptr<Header>
+          bb0(%v0: ptr<Header>):
+            %v1: ptr<ptr<Header>> = addr_of %l0
+            store %v1, %v0
+            %v2: ptr<Header> = load %v1
+            %v3: ptr<u64> = field_addr %v2, 1
+            %v4: u64 = load %v3
+            ret %v4
+        }
+    "};
+    assert_ir_eq(&text, expected);
+}
+
+#[test]
+fn test_lower_foreign_view_slice_index_load() {
+    let ctx = analyze(indoc! {"
+        @layout(fixed)
+        type Header = { magic: u64 }
+
+        fn main(headers: view_slice<Header>) -> Header {
+            headers[1]
+        }
+    "});
+
+    let main_def = ctx.module.func_defs()[0];
+    let lowered = lower_func(
+        main_def,
+        &ctx.def_table,
+        &ctx.type_map,
+        &ctx.lowering_plans,
+        &ctx.drop_plans,
+    )
+    .expect("failed to lower");
+    let text = format_func(&lowered.func, &lowered.types);
+
+    let expected = indoc! {"
+        fn main(ptr<struct { ptr: ptr<Header>, len: u64 }>) -> Header {
+          locals:
+            %l0: struct { ptr: ptr<Header>, len: u64 }
+          bb0(%v0: ptr<struct { ptr: ptr<Header>, len: u64 }>):
+            %v1: ptr<struct { ptr: ptr<Header>, len: u64 }> = addr_of %l0
+            %v2: u64 = const 16:u64
+            memcpy %v1, %v0, %v2
+            %v3: ptr<ptr<Header>> = field_addr %v1, 0
+            %v4: ptr<Header> = load %v3
+            %v5: ptr<u64> = field_addr %v1, 1
+            %v6: u64 = load %v5
+            %v7: u64 = const 1:u64
+            %v8: bool = cmp.lt %v7, %v6
+            cbr %v8, bb1, bb2
+
+          bb1():
+            %v12: ptr<Header> = index_addr %v4, %v7
+            %v13: Header = load %v12
+            ret %v13
+
+          bb2():
+            %v9: u64 = const 1:u64
+            %v10: u64 = const 0:u64
+            %v11: () = call @__rt_trap(%v9, %v7, %v6, %v10)
+            unreachable
+        }
+    "};
+    assert_ir_eq(&text, expected);
+}
+
+#[test]
 fn test_lower_array_index_load() {
     let ctx = analyze(indoc! {"
         fn main(a: u64[3]) -> u64 {

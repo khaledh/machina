@@ -156,6 +156,9 @@ pub enum TypeCheckErrorKind {
     #[error("Map index assignment is not supported")]
     MapIndexAssignUnsupported,
 
+    #[error("Foreign view indexing is read-only")]
+    ForeignViewIndexAssignUnsupported,
+
     #[error("Type cannot be inferred")]
     UnknownType,
 
@@ -211,6 +214,18 @@ pub enum TypeCheckErrorKind {
         expected: u64,
         actual: u64,
     },
+
+    #[error(
+        "Field `{field}` in fixed-layout type `{type_name}` cannot use abstract handle type `{field_ty}`"
+    )]
+    FixedLayoutAbstractFieldType {
+        type_name: String,
+        field: String,
+        field_ty: Type,
+    },
+
+    #[error("`{view_name}` requires a `@layout(fixed)` struct type argument, found `{elem_ty}`")]
+    ForeignViewElementMustBeFixedLayout { view_name: String, elem_ty: Type },
 
     #[error(
         "opaque return {0} requires a single concrete witness type across all paths, found {1:?}"

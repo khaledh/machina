@@ -105,6 +105,18 @@ impl<'a> Elaborator<'a> {
                 ident: "ReplyCap".to_string(),
                 type_args: vec![self.response_set_type_arg_expr(response_tys, span)],
             },
+            Type::View { elem_ty } => {
+                let elem_ty = self.type_expr_from_type(elem_ty, span);
+                self.generic_named_type_expr("view", vec![elem_ty])
+            }
+            Type::ViewSlice { elem_ty } => {
+                let elem_ty = self.type_expr_from_type(elem_ty, span);
+                self.generic_named_type_expr("view_slice", vec![elem_ty])
+            }
+            Type::ViewArray { elem_ty } => {
+                let elem_ty = self.type_expr_from_type(elem_ty, span);
+                self.generic_named_type_expr("view_array", vec![elem_ty])
+            }
             Type::Set { elem_ty } => TypeExprKind::Named {
                 ident: "set".to_string(),
                 type_args: vec![self.type_expr_from_type(elem_ty, span)],
@@ -161,6 +173,13 @@ impl<'a> Elaborator<'a> {
         TypeExprKind::Named {
             ident: name.to_string(),
             type_args: Vec::new(),
+        }
+    }
+
+    fn generic_named_type_expr(&self, name: &str, type_args: Vec<TypeExpr>) -> TypeExprKind {
+        TypeExprKind::Named {
+            ident: name.to_string(),
+            type_args,
         }
     }
 

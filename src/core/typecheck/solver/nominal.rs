@@ -18,6 +18,13 @@ use crate::core::typecheck::unify::TcUnifier;
 use crate::core::typecheck::{builtin_methods, tc_push_error};
 use crate::core::types::{TyVarId, Type, TypeAssignability, type_assignable};
 
+fn peel_view_for_read_only_field_access(ty: &Type) -> Type {
+    match ty {
+        Type::View { elem_ty } => (**elem_ty).clone(),
+        other => other.clone(),
+    }
+}
+
 #[allow(clippy::too_many_arguments)]
 pub(super) fn try_check_expr_obligation_nominal(
     obligation: &ExprObligation,
@@ -244,6 +251,7 @@ pub(super) fn try_check_expr_obligation_nominal(
         } => {
             let target_ty = super::term_utils::resolve_term(target, unifier);
             let owner_ty = super::term_utils::peel_heap(target_ty.clone());
+            let field_owner_ty = peel_view_for_read_only_field_access(&owner_ty);
             match super::resolve_property_access(
                 &owner_ty,
                 field,
@@ -284,7 +292,7 @@ pub(super) fn try_check_expr_obligation_nominal(
                 let _ = unifier.unify(result, &prop.ty);
                 return true;
             }
-            match &owner_ty {
+            match &field_owner_ty {
                 Type::Struct { name, fields, .. } => {
                     if let Some(type_def_id) =
                         super::access_utils::type_def_id_for_nominal_name(name, type_symbols)
@@ -349,7 +357,7 @@ pub(super) fn try_check_expr_obligation_nominal(
                 }
                 ty if super::term_utils::is_unresolved(ty) => {}
                 _ => {
-                    tc_push_error!(errors, *span, TEK::InvalidStructFieldTarget(owner_ty));
+                    tc_push_error!(errors, *span, TEK::InvalidStructFieldTarget(field_owner_ty));
                     covered_exprs.insert(*expr_id);
                 }
             }

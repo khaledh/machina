@@ -137,8 +137,11 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
                         }
 
                         let (base_addr, base_ty) = self.resolve_deref_base(target, deref_count)?;
-                        let Type::Slice { elem_ty } = base_ty else {
-                            panic!("backend slice index on non-slice base {:?}", base_ty);
+                        let elem_ty = match base_ty {
+                            Type::Slice { elem_ty }
+                            | Type::ViewSlice { elem_ty }
+                            | Type::ViewArray { elem_ty } => elem_ty,
+                            other => panic!("backend slice index on non-slice base {:?}", other),
                         };
 
                         // Load the slice data pointer, then index into it.
@@ -213,11 +216,22 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
             .get(self.type_map.type_of(target.id))
             .clone();
 
-        while let Type::Heap { elem_ty } | Type::Ref { elem_ty, .. } = curr_ty {
-            let elem_ir_ty = self.type_lowerer.lower_type(&elem_ty);
-            let ptr_ir_ty = self.type_lowerer.ptr_to(elem_ir_ty);
-            base.addr = self.builder.load(base.addr, ptr_ir_ty);
-            curr_ty = (*elem_ty).clone();
+        loop {
+            match curr_ty {
+                Type::Heap { elem_ty } | Type::Ref { elem_ty, .. } => {
+                    let elem_ir_ty = self.type_lowerer.lower_type(&elem_ty);
+                    let ptr_ir_ty = self.type_lowerer.ptr_to(elem_ir_ty);
+                    base.addr = self.builder.load(base.addr, ptr_ir_ty);
+                    curr_ty = (*elem_ty).clone();
+                }
+                Type::View { elem_ty } => {
+                    let elem_ir_ty = self.type_lowerer.lower_type(&elem_ty);
+                    let ptr_ir_ty = self.type_lowerer.ptr_to(elem_ir_ty);
+                    base.addr = self.builder.load(base.addr, ptr_ir_ty);
+                    curr_ty = (*elem_ty).clone();
+                }
+                _ => break,
+            }
         }
 
         Ok((base.addr, curr_ty))
@@ -238,7 +252,7 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
                     let len = dims.first().copied().unwrap_or(0) as i128;
                     self.build_int_const_for_ty(len, target_ir_ty)
                 }
-                Type::Slice { .. } => {
+                Type::Slice { .. } | Type::ViewSlice { .. } | Type::ViewArray { .. } => {
                     let src_ty = self.type_lowerer.lower_type(&Type::uint(64));
                     let raw = self.load_field(base_addr, 1, src_ty);
                     self.cast_int_if_needed(raw, src_ty, target_ir_ty)

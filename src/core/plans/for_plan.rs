@@ -60,6 +60,8 @@ pub fn plan_for_iterable_type(ty: &Type) -> Option<ForPlan> {
         Type::Array { elem_ty, .. } => ((**elem_ty).clone(), IntrinsicForKernel::Array),
         Type::DynArray { elem_ty } => ((**elem_ty).clone(), IntrinsicForKernel::DynArray),
         Type::Slice { elem_ty } => ((**elem_ty).clone(), IntrinsicForKernel::Slice),
+        Type::ViewSlice { elem_ty } => ((**elem_ty).clone(), IntrinsicForKernel::Slice),
+        Type::ViewArray { elem_ty } => ((**elem_ty).clone(), IntrinsicForKernel::Slice),
         Type::String => (Type::Char, IntrinsicForKernel::String),
         Type::Iterable { item_ty } => {
             return Some(ForPlan {

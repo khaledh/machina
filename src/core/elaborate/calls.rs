@@ -144,6 +144,12 @@ impl<'a> Elaborator<'a> {
                     target = CallTarget::Intrinsic(IntrinsicCall::StringSplit);
                 } else if intrinsic_name == "type_of" {
                     target = CallTarget::Intrinsic(IntrinsicCall::TypeOf);
+                } else if intrinsic_name == "view_at" {
+                    target = CallTarget::Intrinsic(IntrinsicCall::ViewAt);
+                } else if intrinsic_name == "view_slice_at" {
+                    target = CallTarget::Intrinsic(IntrinsicCall::ViewSliceAt);
+                } else if intrinsic_name == "view_array_at" {
+                    target = CallTarget::Intrinsic(IntrinsicCall::ViewArrayAt);
                 }
             } else if def.is_runtime() {
                 let runtime_name = def.link_name().unwrap_or(def.name.as_str());
@@ -390,6 +396,34 @@ impl<'a> Elaborator<'a> {
                     );
                 }
                 vec![ArgLowering::Direct(CallInput::Arg(0))]
+            }
+            CallTarget::Intrinsic(IntrinsicCall::ViewAt) => {
+                if has_receiver {
+                    panic!("compiler bug: view_at intrinsic has receiver");
+                }
+                if call_sig.params.len() != 1 {
+                    panic!(
+                        "compiler bug: intrinsic view_at expects 1 arg, got {}",
+                        call_sig.params.len()
+                    );
+                }
+                vec![ArgLowering::Direct(CallInput::Arg(0))]
+            }
+            CallTarget::Intrinsic(IntrinsicCall::ViewSliceAt)
+            | CallTarget::Intrinsic(IntrinsicCall::ViewArrayAt) => {
+                if has_receiver {
+                    panic!("compiler bug: foreign view constructor intrinsic has receiver");
+                }
+                if call_sig.params.len() != 2 {
+                    panic!(
+                        "compiler bug: foreign view slice/array constructor expects 2 args, got {}",
+                        call_sig.params.len()
+                    );
+                }
+                vec![
+                    ArgLowering::Direct(CallInput::Arg(0)),
+                    ArgLowering::Direct(CallInput::Arg(1)),
+                ]
             }
             CallTarget::Intrinsic(IntrinsicCall::MachinePayloadPack) => {
                 if has_receiver {

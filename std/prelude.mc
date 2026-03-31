@@ -52,6 +52,15 @@ fn __rt_file_close(fd: u64) -> u64;
 @intrinsic
 fn type_of<T>(value: T) -> string;
 
+@intrinsic
+fn view_at<T>(addr: vaddr) -> view<T>;
+
+@intrinsic
+fn view_slice_at<T>(addr: vaddr, count: u64) -> view_slice<T>;
+
+@intrinsic
+fn view_array_at<T>(addr: vaddr, count: u64) -> view_array<T>;
+
 // Managed machine runtime bridge helpers.
 @runtime
 fn __mc_machine_runtime_new() -> u64;

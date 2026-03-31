@@ -15,8 +15,16 @@ use crate::core::types::Type;
 impl<'a> Elaborator<'a> {
     fn peel_place_base_type(&self, ty: &Type) -> Type {
         let mut curr = ty.clone();
-        while let Type::Heap { elem_ty } | Type::Ref { elem_ty, .. } = curr {
-            curr = (*elem_ty).clone();
+        loop {
+            match curr {
+                Type::Heap { elem_ty } | Type::Ref { elem_ty, .. } => {
+                    curr = (*elem_ty).clone();
+                }
+                Type::View { elem_ty } => {
+                    curr = (*elem_ty).clone();
+                }
+                _ => break,
+            }
         }
         curr
     }

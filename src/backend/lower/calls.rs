@@ -243,6 +243,73 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
         Ok(Some(packed))
     }
 
+    fn lower_view_at_intrinsic(
+        &mut self,
+        expr: &Expr,
+        args: &[CallArg],
+        call_plan: &CallPlan,
+    ) -> Result<Option<LinearValue>, LowerToIrError> {
+        let Some(arg_values) = self.lower_call_arg_values(args)? else {
+            return Ok(None);
+        };
+        if arg_values.len() != 1 {
+            panic!(
+                "backend view_at intrinsic expects exactly one arg, got {}",
+                arg_values.len()
+            );
+        }
+        let raw_addr = self.load_call_input_scalar(&arg_values[0]);
+        let expr_ty = self
+            .type_map
+            .type_table()
+            .get(self.type_map.type_of(expr.id))
+            .clone();
+        let Type::View { elem_ty } = expr_ty else {
+            panic!("backend view_at intrinsic expected view<T> result");
+        };
+        let elem_ir_ty = self.type_lowerer.lower_type(&elem_ty);
+        let ptr_ir_ty = self.type_lowerer.ptr_to(elem_ir_ty);
+        let view = self.builder.cast(CastKind::IntToPtr, raw_addr, ptr_ir_ty);
+        self.apply_call_drop_effects(call_plan, args, None, &arg_values)?;
+        Ok(Some(view))
+    }
+
+    fn lower_view_seq_intrinsic(
+        &mut self,
+        expr: &Expr,
+        args: &[CallArg],
+        call_plan: &CallPlan,
+    ) -> Result<Option<LinearValue>, LowerToIrError> {
+        let Some(arg_values) = self.lower_call_arg_values(args)? else {
+            return Ok(None);
+        };
+        if arg_values.len() != 2 {
+            panic!(
+                "backend foreign view slice/array intrinsic expects exactly two args, got {}",
+                arg_values.len()
+            );
+        }
+        let raw_addr = self.load_call_input_scalar(&arg_values[0]);
+        let count = self.load_call_input_scalar(&arg_values[1]);
+        let expr_ty_id = self.type_map.type_of(expr.id);
+        let expr_ty = self.type_map.type_table().get(expr_ty_id).clone();
+        let elem_ty = expr_ty.foreign_view_elem_type().unwrap_or_else(|| {
+            panic!("backend foreign view sequence intrinsic expected view_slice/view_array result")
+        });
+        let elem_ir_ty = self.type_lowerer.lower_type(&elem_ty);
+        let ptr_ir_ty = self.type_lowerer.ptr_to(elem_ir_ty);
+        let ptr = self.builder.cast(CastKind::IntToPtr, raw_addr, ptr_ir_ty);
+
+        let ret_ty = self.type_lowerer.lower_type_id(expr_ty_id);
+        let ret_slot = self.alloc_value_slot(ret_ty);
+        self.store_field(ret_slot.addr, 0, ptr_ir_ty, ptr);
+        let len_ty = self.type_lowerer.lower_type(&Type::uint(64));
+        self.store_field(ret_slot.addr, 1, len_ty, count);
+        let view = self.load_slot(&ret_slot);
+        self.apply_call_drop_effects(call_plan, args, None, &arg_values)?;
+        Ok(Some(view))
+    }
+
     fn call_input_from_value_expr(
         &mut self,
         expr: &Expr,
@@ -475,6 +542,12 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
                 IntrinsicCall::TypeOf => {
                     return self.lower_type_of_intrinsic(expr, args, &call_plan);
                 }
+                IntrinsicCall::ViewAt => {
+                    return self.lower_view_at_intrinsic(expr, args, &call_plan);
+                }
+                IntrinsicCall::ViewSliceAt | IntrinsicCall::ViewArrayAt => {
+                    return self.lower_view_seq_intrinsic(expr, args, &call_plan);
+                }
                 IntrinsicCall::MachinePayloadPack => {
                     return self.lower_machine_payload_pack_intrinsic(expr, args, &call_plan);
                 }
@@ -649,6 +722,11 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
                 call_plan,
                 receiver_value,
             ),
+            IntrinsicCall::ViewAt | IntrinsicCall::ViewSliceAt | IntrinsicCall::ViewArrayAt => {
+                panic!(
+                    "backend foreign view constructor intrinsic cannot lower with a method receiver"
+                );
+            }
             IntrinsicCall::AddressOffset => {
                 let Some(arg_values) = self.lower_call_arg_values(args)? else {
                     return Ok(None);

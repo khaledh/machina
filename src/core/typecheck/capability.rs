@@ -111,6 +111,9 @@ fn check_capability_at_path(
         | Type::DynArray { .. }
         | Type::Pending { .. }
         | Type::ReplyCap { .. }
+        | Type::View { .. }
+        | Type::ViewSlice { .. }
+        | Type::ViewArray { .. }
         | Type::Set { .. }
         | Type::Iterable { .. }
         | Type::Map { .. }

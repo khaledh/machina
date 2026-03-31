@@ -366,6 +366,68 @@ fn test_lower_address_distance_operator() {
 }
 
 #[test]
+fn test_lower_view_at_intrinsic() {
+    let text = lower_main_text(indoc! {"
+        @intrinsic
+        fn view_at<T>(addr: vaddr) -> view<T>;
+
+        @layout(fixed)
+        type Header = {
+            magic: u64,
+        }
+
+        fn main(addr: vaddr) -> view<Header> {
+            view_at(addr)
+        }
+    "});
+
+    let expected = indoc! {"
+        fn main(u64) -> ptr<Header> {
+          bb0(%v0: u64):
+            %v1: ptr<Header> = cast.int_to_ptr %v0 to ptr<Header>
+            ret %v1
+        }
+    "};
+
+    assert_ir_eq(text, expected);
+}
+
+#[test]
+fn test_lower_view_slice_at_intrinsic() {
+    let text = lower_main_text(indoc! {"
+        @intrinsic
+        fn view_slice_at<T>(addr: vaddr, count: u64) -> view_slice<T>;
+
+        @layout(fixed)
+        type Header = {
+            magic: u64,
+        }
+
+        fn main(addr: vaddr, count: u64) -> view_slice<Header> {
+            view_slice_at(addr, count)
+        }
+    "});
+
+    let expected = indoc! {"
+        fn main(u64, u64) -> struct { ptr: ptr<Header>, len: u64 } {
+          locals:
+            %l0: struct { ptr: ptr<Header>, len: u64 }
+          bb0(%v0: u64, %v1: u64):
+            %v2: ptr<Header> = cast.int_to_ptr %v0 to ptr<Header>
+            %v3: ptr<struct { ptr: ptr<Header>, len: u64 }> = addr_of %l0
+            %v4: ptr<ptr<Header>> = field_addr %v3, 0
+            store %v4, %v2
+            %v5: ptr<u64> = field_addr %v3, 1
+            store %v5, %v1
+            %v6: struct { ptr: ptr<Header>, len: u64 } = load %v3
+            ret %v6
+        }
+    "};
+
+    assert_ir_eq(text, expected);
+}
+
+#[test]
 fn test_lower_call_drops_in_arg() {
     let ctx = analyze(indoc! {"
         fn take(s: string) -> u64 {

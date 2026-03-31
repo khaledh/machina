@@ -146,6 +146,16 @@ impl<'a> TypeLowerer<'a> {
                 let u32 = self.lower_type(&Type::uint(32));
                 self.lower_ptr_len_cap_struct(None, ptr, u32)
             }
+            Type::View { elem_ty } => {
+                let elem = self.lower_type(elem_ty);
+                self.ptr_to(elem)
+            }
+            Type::ViewSlice { elem_ty } | Type::ViewArray { elem_ty } => {
+                let elem = self.lower_type(elem_ty);
+                let ptr = self.ptr_to(elem);
+                let u64 = self.lower_type(&Type::uint(64));
+                self.lower_ptr_len_struct(ptr, u64)
+            }
             // Set is lowered as { ptr, len, cap } like dyn-array storage.
             Type::Set { elem_ty } => {
                 let elem = self.lower_type(elem_ty);

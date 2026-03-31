@@ -270,6 +270,19 @@ fn validate_fixed_layout_type(
         .zip(resolved_fields.iter())
         .zip(resolved_field_attrs.iter())
     {
+        if resolved_field.ty.is_foreign_view_handle() {
+            tc_push_error!(
+                errors,
+                field.span,
+                TEK::FixedLayoutAbstractFieldType {
+                    type_name: type_def.name.clone(),
+                    field: field.name.clone(),
+                    field_ty: resolved_field.ty.clone(),
+                }
+            );
+            continue;
+        }
+
         let natural_align = resolved_field.ty.align_of() as u64;
         let field_align = field_attrs.align.unwrap_or(natural_align);
 

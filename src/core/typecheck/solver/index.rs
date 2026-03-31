@@ -109,6 +109,38 @@ pub(super) fn try_check_expr_obligation_index(
                     }
                     let _ = unifier.unify(result, elem_ty);
                 }
+                Type::ViewSlice { elem_ty } | Type::ViewArray { elem_ty } => {
+                    if let Some((idx_i, bad_idx_ty)) = indices
+                        .iter()
+                        .map(|term| super::term_utils::resolve_term(term, unifier))
+                        .enumerate()
+                        .find(|(_, ty)| {
+                            !super::term_utils::is_int_like(ty)
+                                && !super::term_utils::is_unresolved(ty)
+                        })
+                    {
+                        emit_bad_int_index(
+                            errors,
+                            covered_exprs,
+                            *expr_id,
+                            index_nodes,
+                            index_spans,
+                            *span,
+                            idx_i,
+                            bad_idx_ty,
+                        );
+                        return true;
+                    }
+                    for index_term in indices {
+                        force_unresolved_index_to_u64(index_term, unifier);
+                    }
+                    if indices.len() != 1 {
+                        tc_push_error!(errors, *span, TEK::TooManyIndices(1, indices.len()));
+                        covered_exprs.insert(*expr_id);
+                        return true;
+                    }
+                    let _ = unifier.unify(result, elem_ty);
+                }
                 Type::DynArray { elem_ty } => {
                     if let Some((idx_i, bad_idx_ty)) = indices
                         .iter()
@@ -247,9 +279,16 @@ pub(super) fn try_check_expr_obligation_index(
         } => {
             let owner_ty =
                 super::term_utils::peel_heap(super::term_utils::resolve_term(target, unifier));
-            if matches!(owner_ty, Type::Map { .. }) {
-                tc_push_error!(errors, *span, TEK::MapIndexAssignUnsupported);
-                covered_exprs.insert(*stmt_id);
+            match owner_ty {
+                Type::Map { .. } => {
+                    tc_push_error!(errors, *span, TEK::MapIndexAssignUnsupported);
+                    covered_exprs.insert(*stmt_id);
+                }
+                Type::ViewSlice { .. } | Type::ViewArray { .. } => {
+                    tc_push_error!(errors, *span, TEK::ForeignViewIndexAssignUnsupported);
+                    covered_exprs.insert(*stmt_id);
+                }
+                _ => {}
             }
             true
         }

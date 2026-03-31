@@ -58,6 +58,15 @@ pub enum Type {
     ReplyCap {
         response_tys: Vec<Type>,
     },
+    View {
+        elem_ty: Box<Type>,
+    },
+    ViewSlice {
+        elem_ty: Box<Type>,
+    },
+    ViewArray {
+        elem_ty: Box<Type>,
+    },
     Set {
         elem_ty: Box<Type>,
     },
@@ -214,6 +223,9 @@ impl PartialEq for Type {
             (Type::DynArray { elem_ty: e1 }, Type::DynArray { elem_ty: e2 }) => e1 == e2,
             (Type::Pending { response_tys: r1 }, Type::Pending { response_tys: r2 }) => r1 == r2,
             (Type::ReplyCap { response_tys: r1 }, Type::ReplyCap { response_tys: r2 }) => r1 == r2,
+            (Type::View { elem_ty: e1 }, Type::View { elem_ty: e2 }) => e1 == e2,
+            (Type::ViewSlice { elem_ty: e1 }, Type::ViewSlice { elem_ty: e2 }) => e1 == e2,
+            (Type::ViewArray { elem_ty: e1 }, Type::ViewArray { elem_ty: e2 }) => e1 == e2,
             (Type::Set { elem_ty: e1 }, Type::Set { elem_ty: e2 }) => e1 == e2,
             (Type::Iterable { item_ty: e1 }, Type::Iterable { item_ty: e2 }) => e1 == e2,
             (
@@ -342,6 +354,18 @@ impl Hash for Type {
                 22u8.hash(state);
                 response_tys.hash(state);
             }
+            Type::View { elem_ty } => {
+                28u8.hash(state);
+                elem_ty.hash(state);
+            }
+            Type::ViewSlice { elem_ty } => {
+                29u8.hash(state);
+                elem_ty.hash(state);
+            }
+            Type::ViewArray { elem_ty } => {
+                30u8.hash(state);
+                elem_ty.hash(state);
+            }
             Type::Set { elem_ty } => {
                 19u8.hash(state);
                 elem_ty.hash(state);
@@ -460,6 +484,9 @@ pub fn is_builtin_type_name(name: &str) -> bool {
             | "paddr?"
             | "vaddr"
             | "vaddr?"
+            | "view"
+            | "view_slice"
+            | "view_array"
             | "u8"
             | "u16"
             | "u32"
@@ -538,6 +565,9 @@ impl Type {
             (Type::Range { elem_ty: l }, Type::Range { elem_ty: r })
             | (Type::Slice { elem_ty: l }, Type::Slice { elem_ty: r })
             | (Type::DynArray { elem_ty: l }, Type::DynArray { elem_ty: r })
+            | (Type::View { elem_ty: l }, Type::View { elem_ty: r })
+            | (Type::ViewSlice { elem_ty: l }, Type::ViewSlice { elem_ty: r })
+            | (Type::ViewArray { elem_ty: l }, Type::ViewArray { elem_ty: r })
             | (Type::Set { elem_ty: l }, Type::Set { elem_ty: r })
             | (Type::Iterable { item_ty: l }, Type::Iterable { item_ty: r })
             | (Type::Heap { elem_ty: l }, Type::Heap { elem_ty: r }) => l.shape_eq(r),
@@ -712,6 +742,8 @@ impl Type {
             Type::DynArray { .. } => 16,
             Type::Pending { .. } => 8,
             Type::ReplyCap { .. } => 8,
+            Type::View { .. } => 8,
+            Type::ViewSlice { .. } | Type::ViewArray { .. } => 16,
             Type::Set { .. } => 16,
             Type::Iterable { .. } => 16,
             Type::Map { .. } => 16,
@@ -753,6 +785,8 @@ impl Type {
             Type::DynArray { .. } => 8,
             Type::Pending { .. } => 8,
             Type::ReplyCap { .. } => 8,
+            Type::View { .. } => 8,
+            Type::ViewSlice { .. } | Type::ViewArray { .. } => 8,
             Type::Set { .. } => 8,
             Type::Iterable { .. } => 8,
             Type::Map { .. } => 8,
@@ -782,6 +816,8 @@ impl Type {
             self,
             Type::Array { .. }
                 | Type::DynArray { .. }
+                | Type::ViewSlice { .. }
+                | Type::ViewArray { .. }
                 | Type::Set { .. }
                 | Type::Iterable { .. }
                 | Type::Map { .. }
@@ -836,6 +872,9 @@ impl Type {
             Type::DynArray { .. } => true,
             Type::Pending { .. } => false,
             Type::ReplyCap { .. } => false,
+            Type::View { .. } => false,
+            Type::ViewSlice { .. } => false,
+            Type::ViewArray { .. } => false,
             Type::Set { .. } => true,
             Type::Iterable { .. } => true,
             Type::Map { .. } => true,
@@ -877,6 +916,22 @@ impl Type {
             return None;
         };
         Some((**elem_ty).clone())
+    }
+
+    pub fn foreign_view_elem_type(&self) -> Option<Type> {
+        match self {
+            Type::View { elem_ty } | Type::ViewSlice { elem_ty } | Type::ViewArray { elem_ty } => {
+                Some((**elem_ty).clone())
+            }
+            _ => None,
+        }
+    }
+
+    pub fn is_foreign_view_handle(&self) -> bool {
+        matches!(
+            self,
+            Type::View { .. } | Type::ViewSlice { .. } | Type::ViewArray { .. }
+        )
     }
 
     pub fn tuple_field_offset(&self, index: usize) -> usize {
@@ -1088,6 +1143,15 @@ impl Type {
             Type::DynArray { elem_ty } => Type::DynArray {
                 elem_ty: Box::new((*elem_ty).map(f)),
             },
+            Type::View { elem_ty } => Type::View {
+                elem_ty: Box::new((*elem_ty).map(f)),
+            },
+            Type::ViewSlice { elem_ty } => Type::ViewSlice {
+                elem_ty: Box::new((*elem_ty).map(f)),
+            },
+            Type::ViewArray { elem_ty } => Type::ViewArray {
+                elem_ty: Box::new((*elem_ty).map(f)),
+            },
             Type::Set { elem_ty } => Type::Set {
                 elem_ty: Box::new((*elem_ty).map(f)),
             },
@@ -1223,6 +1287,36 @@ impl Type {
                 let mapped_elem = elem_ty.map_cow(f);
                 if matches!(mapped_elem, Cow::Owned(_)) {
                     Cow::Owned(Type::DynArray {
+                        elem_ty: Box::new(mapped_elem.into_owned()),
+                    })
+                } else {
+                    Cow::Borrowed(self)
+                }
+            }
+            Type::View { elem_ty } => {
+                let mapped_elem = elem_ty.map_cow(f);
+                if matches!(mapped_elem, Cow::Owned(_)) {
+                    Cow::Owned(Type::View {
+                        elem_ty: Box::new(mapped_elem.into_owned()),
+                    })
+                } else {
+                    Cow::Borrowed(self)
+                }
+            }
+            Type::ViewSlice { elem_ty } => {
+                let mapped_elem = elem_ty.map_cow(f);
+                if matches!(mapped_elem, Cow::Owned(_)) {
+                    Cow::Owned(Type::ViewSlice {
+                        elem_ty: Box::new(mapped_elem.into_owned()),
+                    })
+                } else {
+                    Cow::Borrowed(self)
+                }
+            }
+            Type::ViewArray { elem_ty } => {
+                let mapped_elem = elem_ty.map_cow(f);
+                if matches!(mapped_elem, Cow::Owned(_)) {
+                    Cow::Owned(Type::ViewArray {
                         elem_ty: Box::new(mapped_elem.into_owned()),
                     })
                 } else {
@@ -1404,6 +1498,9 @@ impl Type {
             Type::Range { elem_ty }
             | Type::Array { elem_ty, .. }
             | Type::DynArray { elem_ty }
+            | Type::View { elem_ty }
+            | Type::ViewSlice { elem_ty }
+            | Type::ViewArray { elem_ty }
             | Type::Set { elem_ty }
             | Type::Iterable { item_ty: elem_ty }
             | Type::Slice { elem_ty }
