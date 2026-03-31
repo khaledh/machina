@@ -742,8 +742,7 @@ would use `unsafe` around static reads.
 - Indexing and iteration on view sequences (done)
 - **Remaining**: typed view fields in fixed-layout structs
   (`view<T>?`, `view<T[]>?` with `@count`)
-- **Remaining**: unify `view_slice<T>` → `view<view<T>[]>`,
-  `view_array<T>` → `view<T[]>`
+- **Done**: sequence views use the unified spellings `view<view<T>[]>` and `view<T[]>`; the older `view_slice<T>` / `view_array<T>` forms remain compatibility aliases for now
 
 ### Phase 5 — Raw pointer escape hatch (done)
 - `*T` raw pointer type

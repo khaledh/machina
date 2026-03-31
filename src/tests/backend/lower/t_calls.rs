@@ -418,14 +418,14 @@ fn test_lower_view_at_intrinsic() {
 fn test_lower_view_slice_at_intrinsic() {
     let text = lower_main_text(indoc! {"
         @intrinsic
-        fn view_slice_at<T>(addr: vaddr, count: u64) -> view_slice<T>;
+        fn view_slice_at<T>(addr: vaddr, count: u64) -> view<view<T>[]>;
 
         @layout(fixed)
         type Header = {
             magic: u64,
         }
 
-        fn main(addr: vaddr, count: u64) -> view_slice<Header> {
+        fn main(addr: vaddr, count: u64) -> view<view<Header>[]> {
             unsafe {
                 view_slice_at(addr, count)
             }
@@ -455,14 +455,14 @@ fn test_lower_view_slice_at_intrinsic() {
 fn test_lower_view_array_at_intrinsic() {
     let text = lower_main_text(indoc! {"
         @intrinsic
-        fn view_array_at<T>(addr: vaddr, count: u64) -> view_array<T>;
+        fn view_array_at<T>(addr: vaddr, count: u64) -> view<T[]>;
 
         @layout(fixed)
         type Header = {
             magic: u64,
         }
 
-        fn main(addr: vaddr, count: u64) -> view_array<Header> {
+        fn main(addr: vaddr, count: u64) -> view<Header[]> {
             unsafe {
                 view_array_at(addr, count)
             }

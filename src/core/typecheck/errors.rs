@@ -191,14 +191,18 @@ pub enum TypeCheckErrorKind {
     #[error("Field `{field}` must use `@count(<u64 sibling field>)`")]
     FixedLayoutInvalidCountAttr { field: String },
 
-    #[error("Count field `{count_field}` for `{field}` was not found in fixed-layout type `{type_name}`")]
+    #[error(
+        "Count field `{count_field}` for `{field}` was not found in fixed-layout type `{type_name}`"
+    )]
     FixedLayoutCountFieldMissing {
         type_name: String,
         field: String,
         count_field: String,
     },
 
-    #[error("Count field `{count_field}` for `{field}` in fixed-layout type `{type_name}` must have type `u64`, found `{count_ty}`")]
+    #[error(
+        "Count field `{count_field}` for `{field}` in fixed-layout type `{type_name}` must have type `u64`, found `{count_ty}`"
+    )]
     FixedLayoutCountFieldTypeMismatch {
         type_name: String,
         field: String,
@@ -206,11 +210,10 @@ pub enum TypeCheckErrorKind {
         count_ty: Type,
     },
 
-    #[error("Counted nullable view field `{field}` in fixed-layout type `{type_name}` requires `@count(...)`")]
-    FixedLayoutCountedViewFieldMissingCount {
-        type_name: String,
-        field: String,
-    },
+    #[error(
+        "Counted nullable view field `{field}` in fixed-layout type `{type_name}` requires `@count(...)`"
+    )]
+    FixedLayoutCountedViewFieldMissingCount { type_name: String, field: String },
 
     #[error("Alignment must be a non-zero power of two, found {0}")]
     FixedLayoutInvalidAlign(u64),

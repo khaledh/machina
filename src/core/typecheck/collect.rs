@@ -271,7 +271,8 @@ fn validate_fixed_layout_type(
         .zip(resolved_fields.iter())
         .zip(resolved_field_attrs.iter())
     {
-        if resolved_field.ty.is_foreign_view_handle() && !resolved_field.ty.is_nullable_single_view_field()
+        if resolved_field.ty.is_foreign_view_handle()
+            && !resolved_field.ty.is_nullable_single_view_field()
         {
             tc_push_error!(
                 errors,

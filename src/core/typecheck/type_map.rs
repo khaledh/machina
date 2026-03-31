@@ -302,7 +302,10 @@ fn resolve_type_expr_impl(
                     allow_iterable,
                 );
             }
-            if matches!(ident.as_str(), "view" | "view?" | "view_slice" | "view_array") {
+            if matches!(
+                ident.as_str(),
+                "view" | "view?" | "view_slice" | "view_array"
+            ) {
                 return resolve_foreign_view_type(
                     def_table,
                     module,
@@ -967,8 +970,18 @@ fn resolve_foreign_view_type(
         type_params,
     )?;
     Ok(match ident {
-        "view" => Type::View {
-            elem_ty: Box::new(elem_ty),
+        "view" => match elem_ty {
+            Type::Slice { elem_ty: inner_ty } => match inner_ty.as_ref() {
+                Type::View {
+                    elem_ty: pointee_ty,
+                } => Type::ViewSlice {
+                    elem_ty: pointee_ty.clone(),
+                },
+                _ => Type::ViewArray { elem_ty: inner_ty },
+            },
+            other => Type::View {
+                elem_ty: Box::new(other),
+            },
         },
         "view?" => Type::NullableView {
             elem_ty: Box::new(elem_ty),
@@ -1040,7 +1053,9 @@ fn ensure_foreign_view_element_is_fixed_layout(
             Ok(())
         }
         (
-            TypeExprKind::Slice { elem_ty_expr: inner_expr },
+            TypeExprKind::Slice {
+                elem_ty_expr: inner_expr,
+            },
             Type::Slice { elem_ty: inner_ty },
         ) => ensure_foreign_view_sequence_element_is_fixed_layout(
             def_table,
@@ -1067,17 +1082,18 @@ fn ensure_foreign_view_sequence_element_is_fixed_layout(
     type_params: Option<&TypeParamMap>,
 ) -> Result<(), TypeCheckError> {
     match (&inner_expr.kind, inner_ty) {
-        (
-            TypeExprKind::Named { ident, type_args },
-            Type::View { elem_ty },
-        ) if ident == "view" && type_args.len() == 1 => ensure_foreign_view_element_is_fixed_layout(
-            def_table,
-            module,
-            view_name,
-            &type_args[0],
-            elem_ty,
-            type_params,
-        ),
+        (TypeExprKind::Named { ident, type_args }, Type::View { elem_ty })
+            if ident == "view" && type_args.len() == 1 =>
+        {
+            ensure_foreign_view_element_is_fixed_layout(
+                def_table,
+                module,
+                view_name,
+                &type_args[0],
+                elem_ty,
+                type_params,
+            )
+        }
         _ => ensure_foreign_view_element_is_fixed_layout(
             def_table,
             module,

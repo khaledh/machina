@@ -456,10 +456,7 @@ fn nullable_low_level_match_payload_type(owner_ty: &Type, variant_name: &str) ->
             owner_ty.nullable_view_payload()
         }
         (Type::NullablePAddr | Type::NullableVAddr | Type::NullableView { .. }, "none") => None,
-        (
-            Type::NullableViewSlice { .. } | Type::NullableViewArray { .. },
-            "none",
-        ) => None,
+        (Type::NullableViewSlice { .. } | Type::NullableViewArray { .. }, "none") => None,
         _ => None,
     }
 }

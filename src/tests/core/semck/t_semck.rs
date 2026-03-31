@@ -273,7 +273,7 @@ fn test_using_body_for_binding_is_initialized() {
 fn test_foreign_view_for_binding_is_initialized() {
     let source = r#"
         @intrinsic
-        fn view_slice_at<T>(addr: vaddr, count: u64) -> view_slice<T>;
+        fn view_slice_at<T>(addr: vaddr, count: u64) -> view<view<T>[]>;
 
         @layout(fixed)
         type Header = {
@@ -281,7 +281,7 @@ fn test_foreign_view_for_binding_is_initialized() {
         }
 
         fn test(addr: vaddr, count: u64) {
-            let entries: view_slice<Header> = unsafe {
+            let entries: view<view<Header>[]> = unsafe {
                 view_slice_at(addr, count)
             };
 

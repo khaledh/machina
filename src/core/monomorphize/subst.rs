@@ -459,9 +459,13 @@ pub(crate) fn type_expr_from_type(
             )?],
         },
         Type::ViewSlice { elem_ty } => TypeExprKind::Named {
-            ident: "view_slice".to_string(),
+            ident: "view".to_string(),
             type_args: vec![type_expr_from_type(
-                elem_ty,
+                &Type::Slice {
+                    elem_ty: Box::new(Type::View {
+                        elem_ty: elem_ty.clone(),
+                    }),
+                },
                 def_table,
                 module,
                 node_id_gen,
@@ -469,9 +473,11 @@ pub(crate) fn type_expr_from_type(
             )?],
         },
         Type::ViewArray { elem_ty } => TypeExprKind::Named {
-            ident: "view_array".to_string(),
+            ident: "view".to_string(),
             type_args: vec![type_expr_from_type(
-                elem_ty,
+                &Type::Slice {
+                    elem_ty: elem_ty.clone(),
+                },
                 def_table,
                 module,
                 node_id_gen,

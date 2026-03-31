@@ -183,10 +183,10 @@ fn test_validate_view_constructors_require_unsafe_block() {
         fn view_at<T>(addr: vaddr) -> view<T>;
 
         @intrinsic
-        fn view_slice_at<T>(addr: vaddr, count: u64) -> view_slice<T>;
+        fn view_slice_at<T>(addr: vaddr, count: u64) -> view<view<T>[]>;
 
         @intrinsic
-        fn view_array_at<T>(addr: vaddr, count: u64) -> view_array<T>;
+        fn view_array_at<T>(addr: vaddr, count: u64) -> view<T[]>;
 
         @layout(fixed)
         type Header = {
@@ -197,11 +197,11 @@ fn test_validate_view_constructors_require_unsafe_block() {
             view_at(addr)
         }
 
-        fn many(addr: vaddr, count: u64) -> view_slice<Header> {
+        fn many(addr: vaddr, count: u64) -> view<view<Header>[]> {
             view_slice_at(addr, count)
         }
 
-        fn flat(addr: vaddr, count: u64) -> view_array<Header> {
+        fn flat(addr: vaddr, count: u64) -> view<Header[]> {
             view_array_at(addr, count)
         }
     "#;
@@ -296,10 +296,10 @@ fn test_validate_view_constructors_allowed_inside_unsafe_block() {
         fn view_at<T>(addr: vaddr) -> view<T>;
 
         @intrinsic
-        fn view_slice_at<T>(addr: vaddr, count: u64) -> view_slice<T>;
+        fn view_slice_at<T>(addr: vaddr, count: u64) -> view<view<T>[]>;
 
         @intrinsic
-        fn view_array_at<T>(addr: vaddr, count: u64) -> view_array<T>;
+        fn view_array_at<T>(addr: vaddr, count: u64) -> view<T[]>;
 
         @layout(fixed)
         type Header = {
@@ -312,13 +312,13 @@ fn test_validate_view_constructors_allowed_inside_unsafe_block() {
             }
         }
 
-        fn many(addr: vaddr, count: u64) -> view_slice<Header> {
+        fn many(addr: vaddr, count: u64) -> view<view<Header>[]> {
             unsafe {
                 view_slice_at(addr, count)
             }
         }
 
-        fn flat(addr: vaddr, count: u64) -> view_array<Header> {
+        fn flat(addr: vaddr, count: u64) -> view<Header[]> {
             unsafe {
                 view_array_at(addr, count)
             }

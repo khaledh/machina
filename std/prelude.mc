@@ -56,10 +56,10 @@ fn type_of<T>(value: T) -> string;
 fn view_at<T>(addr: vaddr) -> view<T>;
 
 @intrinsic
-fn view_slice_at<T>(addr: vaddr, count: u64) -> view_slice<T>;
+fn view_slice_at<T>(addr: vaddr, count: u64) -> view<view<T>[]>;
 
 @intrinsic
-fn view_array_at<T>(addr: vaddr, count: u64) -> view_array<T>;
+fn view_array_at<T>(addr: vaddr, count: u64) -> view<T[]>;
 
 @intrinsic
 fn ptr_at<T>(addr: vaddr) -> *T;

@@ -148,8 +148,7 @@ impl<'a> Parser<'a> {
         let TypeExprKind::Named { ident, type_args } = &mut typ.kind else {
             return Ok(typ);
         };
-        if !(matches!(ident.as_str(), "paddr" | "vaddr") && type_args.is_empty()
-            || ident == "view")
+        if !(matches!(ident.as_str(), "paddr" | "vaddr") && type_args.is_empty() || ident == "view")
         {
             return Ok(typ);
         }

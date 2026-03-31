@@ -384,10 +384,10 @@ fn test_foreign_view_types_typecheck_with_fixed_layout_structs() {
         fn view_at<T>(addr: vaddr) -> view<T>;
 
         @intrinsic
-        fn view_slice_at<T>(addr: vaddr, count: u64) -> view_slice<T>;
+        fn view_slice_at<T>(addr: vaddr, count: u64) -> view<view<T>[]>;
 
         @intrinsic
-        fn view_array_at<T>(addr: vaddr, count: u64) -> view_array<T>;
+        fn view_array_at<T>(addr: vaddr, count: u64) -> view<T[]>;
 
         @layout(fixed)
         type Header = {
@@ -396,10 +396,26 @@ fn test_foreign_view_types_typecheck_with_fixed_layout_structs() {
 
         fn keep(
             one: view<Header>,
-            many: view_slice<Header>,
-            flat: view_array<Header>,
+            many: view<view<Header>[]>,
+            flat: view<Header[]>,
         ) -> view<Header> {
             one
+        }
+    "#;
+
+    let _ctx = type_check_source(source).expect("Failed to type check");
+}
+
+#[test]
+fn test_legacy_sequence_view_aliases_still_typecheck() {
+    let source = r#"
+        @layout(fixed)
+        type Header = {
+            magic: u64,
+        }
+
+        fn keep(many: view_slice<Header>, flat: view_array<Header>) -> u64 {
+            many.len + flat.len
         }
     "#;
 
@@ -474,7 +490,8 @@ fn test_fixed_layout_accepts_nullable_single_view_field_types() {
         };
     "#;
 
-    let _ctx = type_check_source(source).expect("nullable fixed-layout view field should type check");
+    let _ctx =
+        type_check_source(source).expect("nullable fixed-layout view field should type check");
 }
 
 #[test]
@@ -625,10 +642,10 @@ fn test_foreign_view_constructors_typecheck() {
         fn view_at<T>(addr: vaddr) -> view<T>;
 
         @intrinsic
-        fn view_slice_at<T>(addr: vaddr, count: u64) -> view_slice<T>;
+        fn view_slice_at<T>(addr: vaddr, count: u64) -> view<view<T>[]>;
 
         @intrinsic
-        fn view_array_at<T>(addr: vaddr, count: u64) -> view_array<T>;
+        fn view_array_at<T>(addr: vaddr, count: u64) -> view<T[]>;
 
         @layout(fixed)
         type Header = {
@@ -641,13 +658,13 @@ fn test_foreign_view_constructors_typecheck() {
             }
         }
 
-        fn many(addr: vaddr, count: u64) -> view_slice<Header> {
+        fn many(addr: vaddr, count: u64) -> view<view<Header>[]> {
             unsafe {
                 view_slice_at(addr, count)
             }
         }
 
-        fn flat(addr: vaddr, count: u64) -> view_array<Header> {
+        fn flat(addr: vaddr, count: u64) -> view<Header[]> {
             unsafe {
                 view_array_at(addr, count)
             }
@@ -707,7 +724,7 @@ fn test_foreign_view_sequence_index_and_for_typecheck() {
             magic: u64,
         }
 
-        fn sum_slice(headers: view_slice<Header>) -> u64 {
+        fn sum_slice(headers: view<view<Header>[]>) -> u64 {
             var acc: u64 = headers[0].magic;
             for header in headers {
                 acc = acc + header.magic;
@@ -715,7 +732,7 @@ fn test_foreign_view_sequence_index_and_for_typecheck() {
             acc + headers.len
         }
 
-        fn sum_array(headers: view_array<Header>) -> u64 {
+        fn sum_array(headers: view<Header[]>) -> u64 {
             var acc: u64 = 0;
             for header in headers {
                 acc = acc + header.magic;
@@ -735,7 +752,7 @@ fn test_foreign_view_index_assign_is_rejected() {
             magic: u64,
         }
 
-        fn write(headers: view_slice<Header>) {
+        fn write(headers: view<view<Header>[]>) {
             var items = headers;
             items[0] = Header { magic: 1 };
         }

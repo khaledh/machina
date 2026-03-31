@@ -57,9 +57,7 @@ fn serialize_expr_as_static_bytes(expr: &Expr, ty: &Type) -> Result<Vec<u8>, Low
         (
             ExprKind::NoneLit,
             Type::NullablePAddr | Type::NullableVAddr | Type::NullableView { .. },
-        ) => {
-            Ok(0u64.to_le_bytes().to_vec())
-        }
+        ) => Ok(0u64.to_le_bytes().to_vec()),
         (ExprKind::BoolLit(value), Type::Bool) => Ok(vec![u8::from(*value)]),
         (ExprKind::CharLit(value), Type::Char) => Ok((*value as u32).to_le_bytes().to_vec()),
         (ExprKind::IntLit(value), Type::Int { signed, bits, .. }) => {

@@ -97,10 +97,10 @@ impl fmt::Display for Type {
                 write!(f, "*{}", elem_ty)
             }
             Type::ViewSlice { elem_ty } => {
-                write!(f, "view_slice<{}>", elem_ty)
+                write!(f, "view<view<{}>[]>", elem_ty)
             }
             Type::ViewArray { elem_ty } => {
-                write!(f, "view_array<{}>", elem_ty)
+                write!(f, "view<{}[]>", elem_ty)
             }
             Type::Set { elem_ty } => {
                 write!(f, "set<{}>", elem_ty)

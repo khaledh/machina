@@ -134,12 +134,24 @@ impl<'a> Elaborator<'a> {
                 self.generic_named_type_expr("view?", vec![elem_ty])
             }
             Type::ViewSlice { elem_ty } => {
-                let elem_ty = self.type_expr_from_type(elem_ty, span);
-                self.generic_named_type_expr("view_slice", vec![elem_ty])
+                let elem_ty = self.type_expr_from_type(
+                    &Type::Slice {
+                        elem_ty: Box::new(Type::View {
+                            elem_ty: elem_ty.clone(),
+                        }),
+                    },
+                    span,
+                );
+                self.generic_named_type_expr("view", vec![elem_ty])
             }
             Type::ViewArray { elem_ty } => {
-                let elem_ty = self.type_expr_from_type(elem_ty, span);
-                self.generic_named_type_expr("view_array", vec![elem_ty])
+                let elem_ty = self.type_expr_from_type(
+                    &Type::Slice {
+                        elem_ty: elem_ty.clone(),
+                    },
+                    span,
+                );
+                self.generic_named_type_expr("view", vec![elem_ty])
             }
             Type::Set { elem_ty } => TypeExprKind::Named {
                 ident: "set".to_string(),

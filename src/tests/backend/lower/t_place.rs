@@ -127,7 +127,7 @@ fn test_lower_foreign_view_slice_index_load() {
         @layout(fixed)
         type Header = { magic: u64 }
 
-        fn main(headers: view_slice<Header>) -> Header {
+        fn main(headers: view<view<Header>[]>) -> Header {
             headers[1]
         }
     "});
@@ -181,7 +181,7 @@ fn test_lower_foreign_view_array_index_load() {
         @layout(fixed)
         type Header = { magic: u64 }
 
-        fn main(headers: view_array<Header>) -> Header {
+        fn main(headers: view<Header[]>) -> Header {
             headers[1]
         }
     "});

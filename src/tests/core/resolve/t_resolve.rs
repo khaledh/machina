@@ -992,5 +992,8 @@ fn test_resolve_builtin_nullable_view_type() {
     "#;
 
     let resolved = resolve_source(source);
-    assert!(resolved.is_ok(), "expected nullable view builtin to resolve");
+    assert!(
+        resolved.is_ok(),
+        "expected nullable view builtin to resolve"
+    );
 }

@@ -236,9 +236,7 @@ impl PartialEq for Type {
             (Type::Pending { response_tys: r1 }, Type::Pending { response_tys: r2 }) => r1 == r2,
             (Type::ReplyCap { response_tys: r1 }, Type::ReplyCap { response_tys: r2 }) => r1 == r2,
             (Type::View { elem_ty: e1 }, Type::View { elem_ty: e2 }) => e1 == e2,
-            (Type::NullableView { elem_ty: e1 }, Type::NullableView { elem_ty: e2 }) => {
-                e1 == e2
-            }
+            (Type::NullableView { elem_ty: e1 }, Type::NullableView { elem_ty: e2 }) => e1 == e2,
             (Type::NullableViewSlice { elem_ty: e1 }, Type::NullableViewSlice { elem_ty: e2 }) => {
                 e1 == e2
             }
@@ -590,9 +588,7 @@ impl Type {
 
     pub fn nullable_view_payload(&self) -> Option<Type> {
         match self {
-            Type::NullableView { elem_ty }
-                if !matches!(elem_ty.as_ref(), Type::Slice { .. }) =>
-            {
+            Type::NullableView { elem_ty } if !matches!(elem_ty.as_ref(), Type::Slice { .. }) => {
                 Some(Type::View {
                     elem_ty: elem_ty.clone(),
                 })
