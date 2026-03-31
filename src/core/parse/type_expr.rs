@@ -64,7 +64,7 @@ impl<'a> Parser<'a> {
 
     fn parse_type_term(&mut self) -> Result<TypeExpr, ParseError> {
         let mut typ = self.parse_type_atom()?;
-        typ = self.parse_nullable_address_type_postfix(typ)?;
+        typ = self.parse_nullable_low_level_type_postfix(typ)?;
 
         if self.curr_token.kind == TK::Colon {
             typ = self.parse_refined_type(typ)?;
@@ -92,7 +92,7 @@ impl<'a> Parser<'a> {
 
     fn parse_type_term_no_refinement(&mut self) -> Result<TypeExpr, ParseError> {
         let mut typ = self.parse_type_atom()?;
-        typ = self.parse_nullable_address_type_postfix(typ)?;
+        typ = self.parse_nullable_low_level_type_postfix(typ)?;
         loop {
             if self.curr_token.kind == TK::LBracket {
                 typ = self.parse_array_type(typ)?;
@@ -137,7 +137,7 @@ impl<'a> Parser<'a> {
         })
     }
 
-    fn parse_nullable_address_type_postfix(
+    fn parse_nullable_low_level_type_postfix(
         &mut self,
         mut typ: TypeExpr,
     ) -> Result<TypeExpr, ParseError> {
@@ -148,7 +148,9 @@ impl<'a> Parser<'a> {
         let TypeExprKind::Named { ident, type_args } = &mut typ.kind else {
             return Ok(typ);
         };
-        if !type_args.is_empty() || !matches!(ident.as_str(), "paddr" | "vaddr") {
+        if !(matches!(ident.as_str(), "paddr" | "vaddr") && type_args.is_empty()
+            || ident == "view")
+        {
             return Ok(typ);
         }
 

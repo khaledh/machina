@@ -6,15 +6,16 @@ requires {
 type LimineMemmapRequest = {
     id: u64[4],
     revision: u64,
-    response_ptr: vaddr?,
+    response: view<LimineMemmapResponse>?,
 }
 
 @layout(fixed)
 type LimineMemmapResponse = {
     revision: u64,
     entry_count: u64,
-    entries_ptr: vaddr?,
-}    
+    @count(entry_count)
+    entries: view<view<LimineMemmapEntry>[]>?,
+}
 
 @layout(fixed, size: 24)
 type LimineMemmapEntry = {
@@ -34,26 +35,18 @@ static var memmap_request = LimineMemmapRequest {
         0xe304acdfc50c3c62,
     ],
     revision: 0,
-    response_ptr: None,
+    response: None,
 };
 
 fn dump_memmap() {
-    let response_addr = memmap_request.response_ptr or {
+    let response = memmap_request.response or {
         println("no response");
         return;
     };
 
-    let response: view<LimineMemmapResponse> = unsafe {
-        view_at(response_addr)
-    };
-
-    let entries_addr = response.entries_ptr or {
+    let entries = response.entries or {
         println("no entries");
         return;
-    };
-
-    let entries: view_slice<LimineMemmapEntry> = unsafe {
-        view_slice_at(entries_addr, response.entry_count)
     };
 
     println(response.entry_count);

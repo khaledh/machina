@@ -398,6 +398,31 @@ fn test_parse_nullable_address_types() {
 }
 
 #[test]
+fn test_parse_nullable_view_type() {
+    let source = r#"
+        @layout(fixed)
+        type Header = {
+            magic: u64,
+        }
+
+        fn main() -> view<Header>? {
+            None
+        }
+    "#;
+
+    let funcs = parse_source(source).expect("Failed to parse");
+    let func = &funcs[0];
+
+    match &func.sig.ret_ty_expr.kind {
+        TypeExprKind::Named { ident, type_args } => {
+            assert_eq!(ident, "view?");
+            assert_eq!(type_args.len(), 1);
+        }
+        other => panic!("expected nullable view return type, got {other:?}"),
+    }
+}
+
+#[test]
 fn test_parse_none_literal() {
     let source = r#"
         fn main() -> vaddr? {

@@ -62,6 +62,53 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
         Ok(true)
     }
 
+    fn try_lower_counted_nullable_view_load(
+        &mut self,
+        _expr: &Expr,
+        place: &Expr,
+        expr_sem_ty: &Type,
+    ) -> Result<Option<LinearValue>, LowerToIrError> {
+        let (elem_ty, indirect) = match expr_sem_ty {
+            Type::NullableViewSlice { elem_ty } => ((**elem_ty).clone(), true),
+            Type::NullableViewArray { elem_ty } => ((**elem_ty).clone(), false),
+            _ => return Ok(None),
+        };
+
+        let ExprKind::StructField { target, field } = &place.kind else {
+            return Ok(None);
+        };
+
+        let (owner_addr, owner_ty) = self.lower_place_deref_base(target)?;
+        let Type::Struct { name, .. } = &owner_ty else {
+            return Ok(None);
+        };
+        let Some(count_field) = self.type_map.counted_view_field(name, field) else {
+            return Ok(None);
+        };
+        let (count_index, _count_sem_ty, count_ir_ty) =
+            self.struct_field_from_type(&owner_ty, count_field);
+        let count_addr = self.field_addr_typed(owner_addr, count_index, count_ir_ty);
+        let count_value = self.builder.load(count_addr, count_ir_ty);
+
+        let place_addr = self.lower_place_addr(place)?;
+        let raw_ptr = self.builder.load(place_addr.addr, place_addr.value_ty);
+
+        let expr_ir_ty = self.type_lowerer.lower_type(expr_sem_ty);
+        let slot = self.alloc_value_slot(expr_ir_ty);
+        let elem_ir_ty = self.type_lowerer.lower_type(&elem_ty);
+        let ptr_ir_ty = if indirect {
+            let elem_ptr_ir_ty = self.type_lowerer.ptr_to(elem_ir_ty);
+            self.type_lowerer.ptr_to(elem_ptr_ir_ty)
+        } else {
+            self.type_lowerer.ptr_to(elem_ir_ty)
+        };
+        let cast_ptr = self.builder.cast(CastKind::PtrToPtr, raw_ptr, ptr_ir_ty);
+        let u64_ty = self.type_lowerer.lower_type(&Type::uint(64));
+        self.store_field(slot.addr, 0, ptr_ir_ty, cast_ptr);
+        self.store_field(slot.addr, 1, u64_ty, count_value);
+        Ok(Some(self.load_slot(&slot)))
+    }
+
     /// Lowers a linear value expression (single basic block, no branching).
     pub(super) fn lower_linear_value_expr(
         &mut self,
@@ -94,10 +141,20 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
                 Ok(self.builder.const_unit(ty).into())
             }
             ExprKind::NoneLit => {
-                let ty = self
-                    .type_lowerer
-                    .lower_type_id(self.type_map.type_of(expr.id));
-                Ok(self.builder.const_int(0, false, 64, ty).into())
+                let expr_ty = self.type_map.type_of(expr.id);
+                let ty = self.type_lowerer.lower_type_id(expr_ty);
+                let sem_ty = self.type_map.type_table().get(expr_ty).clone();
+                let zero = self.builder.const_int(
+                    0,
+                    false,
+                    64,
+                    self.type_lowerer.lower_type(&Type::uint(64)),
+                );
+                let value = match sem_ty {
+                    Type::NullableView { .. } => self.builder.cast(CastKind::IntToPtr, zero, ty),
+                    _ => self.builder.const_int(0, false, 64, ty),
+                };
+                Ok(value.into())
             }
             ExprKind::IntLit(value) => {
                 let expr_ty = self.type_map.type_of(expr.id);
@@ -287,12 +344,17 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
                     }
                 }
                 _ => {
-                    let place_addr = self.lower_place_addr(place)?;
                     let expr_sem_ty = self
                         .type_map
                         .type_table()
                         .get(self.type_map.type_of(expr.id))
                         .clone();
+                    if let Some(value) =
+                        self.try_lower_counted_nullable_view_load(expr, place, &expr_sem_ty)?
+                    {
+                        return Ok(value.into());
+                    }
+                    let place_addr = self.lower_place_addr(place)?;
                     let value = self.builder.load(place_addr.addr, place_addr.value_ty);
                     let value = if self.type_needs_owned_copy(&expr_sem_ty) {
                         let slot = self.alloc_value_slot(place_addr.value_ty);

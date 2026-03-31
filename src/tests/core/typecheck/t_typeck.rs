@@ -457,6 +457,168 @@ fn test_fixed_layout_rejects_foreign_view_field_types() {
 }
 
 #[test]
+fn test_fixed_layout_accepts_nullable_single_view_field_types() {
+    let source = r#"
+        @layout(fixed)
+        type Header = {
+            magic: u64,
+        }
+
+        @layout(fixed)
+        type Wrapper = {
+            inner: view<Header>?,
+        }
+
+        static var wrapper = Wrapper {
+            inner: None,
+        };
+    "#;
+
+    let _ctx = type_check_source(source).expect("nullable fixed-layout view field should type check");
+}
+
+#[test]
+fn test_nullable_view_field_read_typechecks() {
+    let source = r#"
+        @layout(fixed)
+        type Header = {
+            magic: u64,
+        }
+
+        @layout(fixed)
+        type Wrapper = {
+            inner: view<Header>?,
+        }
+
+        fn keep(wrapper: Wrapper) -> view<Header>? {
+            wrapper.inner
+        }
+    "#;
+
+    let _ctx = type_check_source(source).expect("nullable view field read should type check");
+}
+
+#[test]
+fn test_fixed_layout_accepts_counted_nullable_view_fields() {
+    let source = r#"
+        @layout(fixed)
+        type Header = {
+            magic: u64,
+        }
+
+        @layout(fixed)
+        type Table = {
+            count: u64,
+            @count(count)
+            items: view<Header[]>?,
+        }
+
+        @layout(fixed)
+        type PtrTable = {
+            count: u64,
+            @count(count)
+            items: view<view<Header>[]>?,
+        }
+    "#;
+
+    let ctx = type_check_source(source).expect("counted nullable view fields should type check");
+    assert_eq!(
+        ctx.type_map.counted_view_field("Table", "items"),
+        Some("count")
+    );
+    assert_eq!(
+        ctx.type_map.counted_view_field("PtrTable", "items"),
+        Some("count")
+    );
+}
+
+#[test]
+fn test_counted_nullable_view_field_requires_count_attr() {
+    let source = r#"
+        @layout(fixed)
+        type Header = {
+            magic: u64,
+        }
+
+        @layout(fixed)
+        type Table = {
+            count: u64,
+            items: view<Header[]>?,
+        }
+    "#;
+
+    let errors = match type_check_source(source) {
+        Ok(_) => panic!("expected missing @count error"),
+        Err(errors) => errors,
+    };
+    assert!(errors.iter().any(|e| {
+        matches!(
+            e.kind(),
+            TypeCheckErrorKind::FixedLayoutCountedViewFieldMissingCount { field, .. }
+                if field == "items"
+        )
+    }));
+}
+
+#[test]
+fn test_count_attr_requires_u64_sibling_field() {
+    let source = r#"
+        @layout(fixed)
+        type Header = {
+            magic: u64,
+        }
+
+        @layout(fixed)
+        type Table = {
+            count: u32,
+            @count(count)
+            items: view<Header[]>?,
+        }
+    "#;
+
+    let errors = match type_check_source(source) {
+        Ok(_) => panic!("expected invalid count field type"),
+        Err(errors) => errors,
+    };
+    assert!(errors.iter().any(|e| {
+        matches!(
+            e.kind(),
+            TypeCheckErrorKind::FixedLayoutCountFieldTypeMismatch { field, count_field, .. }
+                if field == "items" && count_field == "count"
+        )
+    }));
+}
+
+#[test]
+fn test_count_attr_rejected_on_single_nullable_view_field() {
+    let source = r#"
+        @layout(fixed)
+        type Header = {
+            magic: u64,
+        }
+
+        @layout(fixed)
+        type Wrapper = {
+            count: u64,
+            @count(count)
+            inner: view<Header>?,
+        }
+    "#;
+
+    let errors = match type_check_source(source) {
+        Ok(_) => panic!("expected invalid @count usage"),
+        Err(errors) => errors,
+    };
+    assert!(errors.iter().any(|e| {
+        matches!(
+            e.kind(),
+            TypeCheckErrorKind::FixedLayoutCountRequiresCountedViewField { field }
+                if field == "inner"
+        )
+    }));
+}
+
+#[test]
 fn test_foreign_view_constructors_typecheck() {
     let source = r#"
         @intrinsic
@@ -1375,6 +1537,30 @@ fn test_nullable_address_match_some_binding_typechecks() {
         fn read_addr(addr: vaddr?) -> u64 {
             match addr {
                 some(x) => x.offset(),
+                none => 0,
+            }
+        }
+    "#;
+
+    let _ctx = type_check_source(source).expect("Failed to type check");
+}
+
+#[test]
+fn test_nullable_view_match_some_binding_typechecks() {
+    let source = r#"
+        @layout(fixed)
+        type Header = {
+            magic: u64,
+        }
+
+        @layout(fixed)
+        type Wrapper = {
+            inner: view<Header>?,
+        }
+
+        fn read(wrapper: Wrapper) -> u64 {
+            match wrapper.inner {
+                some(header) => header.magic,
                 none => 0,
             }
         }
@@ -2850,6 +3036,84 @@ fn test_nullable_address_or_inline_block_sugar_typechecks() {
             };
 
             unwrapped.offset()
+        }
+    "#;
+
+    let _ctx = type_check_source(source).expect("Failed to type check");
+}
+
+#[test]
+fn test_nullable_view_or_inline_block_sugar_typechecks() {
+    let source = r#"
+        @layout(fixed)
+        type Header = {
+            magic: u64,
+        }
+
+        @layout(fixed)
+        type Wrapper = {
+            inner: view<Header>?,
+        }
+
+        fn load(wrapper: Wrapper) -> u64 {
+            let header = wrapper.inner or {
+                return 0;
+            };
+
+            header.magic
+        }
+    "#;
+
+    let _ctx = type_check_source(source).expect("Failed to type check");
+}
+
+#[test]
+fn test_counted_nullable_view_array_or_inline_block_sugar_typechecks() {
+    let source = r#"
+        @layout(fixed)
+        type Header = {
+            magic: u64,
+        }
+
+        @layout(fixed)
+        type Table = {
+            count: u64,
+            @count(count)
+            items: view<Header[]>?,
+        }
+
+        fn load(table: Table) -> u64 {
+            let items = table.items or {
+                return 0;
+            };
+
+            items.len
+        }
+    "#;
+
+    let _ctx = type_check_source(source).expect("Failed to type check");
+}
+
+#[test]
+fn test_counted_nullable_view_slice_match_some_binding_typechecks() {
+    let source = r#"
+        @layout(fixed)
+        type Header = {
+            magic: u64,
+        }
+
+        @layout(fixed)
+        type Table = {
+            count: u64,
+            @count(count)
+            items: view<view<Header>[]>?,
+        }
+
+        fn read(table: Table) -> u64 {
+            match table.items {
+                some(items) => items.len,
+                none => 0,
+            }
         }
     "#;
 

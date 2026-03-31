@@ -170,6 +170,9 @@ pub(super) fn try_check_expr_obligation_control(
                     if let Some(addr_ty) = ty.nullable_address_payload() {
                         let _ = unifier.unify(result, &addr_ty);
                         Some(addr_ty)
+                    } else if let Some(view_ty) = ty.nullable_view_payload() {
+                        let _ = unifier.unify(result, &view_ty);
+                        Some(view_ty)
                     } else {
                         None
                     }

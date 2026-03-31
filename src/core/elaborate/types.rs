@@ -109,6 +109,30 @@ impl<'a> Elaborator<'a> {
                 let elem_ty = self.type_expr_from_type(elem_ty, span);
                 self.generic_named_type_expr("view", vec![elem_ty])
             }
+            Type::NullableView { elem_ty } => {
+                let elem_ty = self.type_expr_from_type(elem_ty, span);
+                self.generic_named_type_expr("view?", vec![elem_ty])
+            }
+            Type::NullableViewSlice { elem_ty } => {
+                let elem_ty = self.type_expr_from_type(
+                    &Type::Slice {
+                        elem_ty: Box::new(Type::View {
+                            elem_ty: elem_ty.clone(),
+                        }),
+                    },
+                    span,
+                );
+                self.generic_named_type_expr("view?", vec![elem_ty])
+            }
+            Type::NullableViewArray { elem_ty } => {
+                let elem_ty = self.type_expr_from_type(
+                    &Type::Slice {
+                        elem_ty: elem_ty.clone(),
+                    },
+                    span,
+                );
+                self.generic_named_type_expr("view?", vec![elem_ty])
+            }
             Type::ViewSlice { elem_ty } => {
                 let elem_ty = self.type_expr_from_type(elem_ty, span);
                 self.generic_named_type_expr("view_slice", vec![elem_ty])

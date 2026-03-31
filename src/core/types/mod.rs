@@ -61,6 +61,15 @@ pub enum Type {
     View {
         elem_ty: Box<Type>,
     },
+    NullableView {
+        elem_ty: Box<Type>,
+    },
+    NullableViewSlice {
+        elem_ty: Box<Type>,
+    },
+    NullableViewArray {
+        elem_ty: Box<Type>,
+    },
     RawPtr {
         elem_ty: Box<Type>,
     },
@@ -227,6 +236,15 @@ impl PartialEq for Type {
             (Type::Pending { response_tys: r1 }, Type::Pending { response_tys: r2 }) => r1 == r2,
             (Type::ReplyCap { response_tys: r1 }, Type::ReplyCap { response_tys: r2 }) => r1 == r2,
             (Type::View { elem_ty: e1 }, Type::View { elem_ty: e2 }) => e1 == e2,
+            (Type::NullableView { elem_ty: e1 }, Type::NullableView { elem_ty: e2 }) => {
+                e1 == e2
+            }
+            (Type::NullableViewSlice { elem_ty: e1 }, Type::NullableViewSlice { elem_ty: e2 }) => {
+                e1 == e2
+            }
+            (Type::NullableViewArray { elem_ty: e1 }, Type::NullableViewArray { elem_ty: e2 }) => {
+                e1 == e2
+            }
             (Type::RawPtr { elem_ty: e1 }, Type::RawPtr { elem_ty: e2 }) => e1 == e2,
             (Type::ViewSlice { elem_ty: e1 }, Type::ViewSlice { elem_ty: e2 }) => e1 == e2,
             (Type::ViewArray { elem_ty: e1 }, Type::ViewArray { elem_ty: e2 }) => e1 == e2,
@@ -305,6 +323,18 @@ impl Hash for Type {
             }
             Type::NullableVAddr => {
                 27u8.hash(state);
+            }
+            Type::NullableView { elem_ty } => {
+                28u8.hash(state);
+                elem_ty.hash(state);
+            }
+            Type::NullableViewSlice { elem_ty } => {
+                29u8.hash(state);
+                elem_ty.hash(state);
+            }
+            Type::NullableViewArray { elem_ty } => {
+                30u8.hash(state);
+                elem_ty.hash(state);
             }
             Type::Int {
                 signed,
@@ -493,6 +523,7 @@ pub fn is_builtin_type_name(name: &str) -> bool {
             | "vaddr"
             | "vaddr?"
             | "view"
+            | "view?"
             | "view_slice"
             | "view_array"
             | "u8"
@@ -540,10 +571,38 @@ impl Type {
         matches!(self, Type::NullablePAddr | Type::NullableVAddr)
     }
 
+    pub fn is_nullable_view(&self) -> bool {
+        matches!(
+            self,
+            Type::NullableView { .. }
+                | Type::NullableViewSlice { .. }
+                | Type::NullableViewArray { .. }
+        )
+    }
+
     pub fn nullable_address_payload(&self) -> Option<Type> {
         match self {
             Type::NullablePAddr => Some(Type::PAddr),
             Type::NullableVAddr => Some(Type::VAddr),
+            _ => None,
+        }
+    }
+
+    pub fn nullable_view_payload(&self) -> Option<Type> {
+        match self {
+            Type::NullableView { elem_ty }
+                if !matches!(elem_ty.as_ref(), Type::Slice { .. }) =>
+            {
+                Some(Type::View {
+                    elem_ty: elem_ty.clone(),
+                })
+            }
+            Type::NullableViewSlice { elem_ty } => Some(Type::ViewSlice {
+                elem_ty: elem_ty.clone(),
+            }),
+            Type::NullableViewArray { elem_ty } => Some(Type::ViewArray {
+                elem_ty: elem_ty.clone(),
+            }),
             _ => None,
         }
     }
@@ -582,6 +641,9 @@ impl Type {
             | (Type::Slice { elem_ty: l }, Type::Slice { elem_ty: r })
             | (Type::DynArray { elem_ty: l }, Type::DynArray { elem_ty: r })
             | (Type::View { elem_ty: l }, Type::View { elem_ty: r })
+            | (Type::NullableView { elem_ty: l }, Type::NullableView { elem_ty: r })
+            | (Type::NullableViewSlice { elem_ty: l }, Type::NullableViewSlice { elem_ty: r })
+            | (Type::NullableViewArray { elem_ty: l }, Type::NullableViewArray { elem_ty: r })
             | (Type::RawPtr { elem_ty: l }, Type::RawPtr { elem_ty: r })
             | (Type::ViewSlice { elem_ty: l }, Type::ViewSlice { elem_ty: r })
             | (Type::ViewArray { elem_ty: l }, Type::ViewArray { elem_ty: r })
@@ -759,7 +821,8 @@ impl Type {
             Type::DynArray { .. } => 16,
             Type::Pending { .. } => 8,
             Type::ReplyCap { .. } => 8,
-            Type::View { .. } => 8,
+            Type::View { .. } | Type::NullableView { .. } => 8,
+            Type::NullableViewSlice { .. } | Type::NullableViewArray { .. } => 16,
             Type::RawPtr { .. } => 8,
             Type::ViewSlice { .. } | Type::ViewArray { .. } => 16,
             Type::Set { .. } => 16,
@@ -803,7 +866,8 @@ impl Type {
             Type::DynArray { .. } => 8,
             Type::Pending { .. } => 8,
             Type::ReplyCap { .. } => 8,
-            Type::View { .. } => 8,
+            Type::View { .. } | Type::NullableView { .. } => 8,
+            Type::NullableViewSlice { .. } | Type::NullableViewArray { .. } => 8,
             Type::RawPtr { .. } => 8,
             Type::ViewSlice { .. } | Type::ViewArray { .. } => 8,
             Type::Set { .. } => 8,
@@ -835,6 +899,8 @@ impl Type {
             self,
             Type::Array { .. }
                 | Type::DynArray { .. }
+                | Type::NullableViewSlice { .. }
+                | Type::NullableViewArray { .. }
                 | Type::ViewSlice { .. }
                 | Type::ViewArray { .. }
                 | Type::Set { .. }
@@ -892,6 +958,9 @@ impl Type {
             Type::Pending { .. } => false,
             Type::ReplyCap { .. } => false,
             Type::View { .. } => false,
+            Type::NullableView { .. } => false,
+            Type::NullableViewSlice { .. } => false,
+            Type::NullableViewArray { .. } => false,
             Type::RawPtr { .. } => false,
             Type::ViewSlice { .. } => false,
             Type::ViewArray { .. } => false,
@@ -941,6 +1010,9 @@ impl Type {
     pub fn foreign_view_elem_type(&self) -> Option<Type> {
         match self {
             Type::View { elem_ty }
+            | Type::NullableView { elem_ty }
+            | Type::NullableViewSlice { elem_ty }
+            | Type::NullableViewArray { elem_ty }
             | Type::RawPtr { elem_ty }
             | Type::ViewSlice { elem_ty }
             | Type::ViewArray { elem_ty } => Some((**elem_ty).clone()),
@@ -951,8 +1023,17 @@ impl Type {
     pub fn is_foreign_view_handle(&self) -> bool {
         matches!(
             self,
-            Type::View { .. } | Type::ViewSlice { .. } | Type::ViewArray { .. }
+            Type::View { .. }
+                | Type::NullableView { .. }
+                | Type::NullableViewSlice { .. }
+                | Type::NullableViewArray { .. }
+                | Type::ViewSlice { .. }
+                | Type::ViewArray { .. }
         )
+    }
+
+    pub fn is_nullable_single_view_field(&self) -> bool {
+        matches!(self, Type::NullableView { .. })
     }
 
     pub fn tuple_field_offset(&self, index: usize) -> usize {
@@ -1109,6 +1190,7 @@ impl Type {
             | Type::NullablePAddr
             | Type::VAddr
             | Type::NullableVAddr
+            | Type::NullableView { .. }
             | Type::RawPtr { .. } => 0,
             Type::Int { signed: false, .. } => 0,
             Type::Int {
@@ -1124,6 +1206,7 @@ impl Type {
             | Type::NullablePAddr
             | Type::VAddr
             | Type::NullableVAddr
+            | Type::NullableView { .. }
             | Type::RawPtr { .. } => u64::MAX as i128,
             Type::Int {
                 signed: false,
@@ -1171,6 +1254,15 @@ impl Type {
                 elem_ty: Box::new((*elem_ty).map(f)),
             },
             Type::View { elem_ty } => Type::View {
+                elem_ty: Box::new((*elem_ty).map(f)),
+            },
+            Type::NullableView { elem_ty } => Type::NullableView {
+                elem_ty: Box::new((*elem_ty).map(f)),
+            },
+            Type::NullableViewSlice { elem_ty } => Type::NullableViewSlice {
+                elem_ty: Box::new((*elem_ty).map(f)),
+            },
+            Type::NullableViewArray { elem_ty } => Type::NullableViewArray {
                 elem_ty: Box::new((*elem_ty).map(f)),
             },
             Type::RawPtr { elem_ty } => Type::RawPtr {
@@ -1327,6 +1419,36 @@ impl Type {
                 let mapped_elem = elem_ty.map_cow(f);
                 if matches!(mapped_elem, Cow::Owned(_)) {
                     Cow::Owned(Type::View {
+                        elem_ty: Box::new(mapped_elem.into_owned()),
+                    })
+                } else {
+                    Cow::Borrowed(self)
+                }
+            }
+            Type::NullableView { elem_ty } => {
+                let mapped_elem = elem_ty.map_cow(f);
+                if matches!(mapped_elem, Cow::Owned(_)) {
+                    Cow::Owned(Type::NullableView {
+                        elem_ty: Box::new(mapped_elem.into_owned()),
+                    })
+                } else {
+                    Cow::Borrowed(self)
+                }
+            }
+            Type::NullableViewSlice { elem_ty } => {
+                let mapped_elem = elem_ty.map_cow(f);
+                if matches!(mapped_elem, Cow::Owned(_)) {
+                    Cow::Owned(Type::NullableViewSlice {
+                        elem_ty: Box::new(mapped_elem.into_owned()),
+                    })
+                } else {
+                    Cow::Borrowed(self)
+                }
+            }
+            Type::NullableViewArray { elem_ty } => {
+                let mapped_elem = elem_ty.map_cow(f);
+                if matches!(mapped_elem, Cow::Owned(_)) {
+                    Cow::Owned(Type::NullableViewArray {
                         elem_ty: Box::new(mapped_elem.into_owned()),
                     })
                 } else {
@@ -1539,6 +1661,9 @@ impl Type {
             | Type::Array { elem_ty, .. }
             | Type::DynArray { elem_ty }
             | Type::View { elem_ty }
+            | Type::NullableView { elem_ty }
+            | Type::NullableViewSlice { elem_ty }
+            | Type::NullableViewArray { elem_ty }
             | Type::RawPtr { elem_ty }
             | Type::ViewSlice { elem_ty }
             | Type::ViewArray { elem_ty }

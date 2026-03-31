@@ -61,13 +61,13 @@ impl<'a> Elaborator<'a> {
             | ExprKind::StructField { .. }
             | ExprKind::Deref { .. } => {
                 let place = self.elab_place(expr);
-                let place_ty = self.type_id_for(place.id);
+                let expr_ty = self.type_id_for(expr.id);
                 if self.implicit_moves.contains(&expr.id) {
                     return Some(self.new_value(
                         ExprKind::ImplicitMove {
                             expr: Box::new(place),
                         },
-                        place_ty,
+                        expr_ty,
                         expr.span,
                     ));
                 }
@@ -75,7 +75,7 @@ impl<'a> Elaborator<'a> {
                     ExprKind::Load {
                         expr: Box::new(place),
                     },
-                    place_ty,
+                    expr_ty,
                     expr.span,
                 ))
             }
@@ -89,13 +89,13 @@ impl<'a> Elaborator<'a> {
                 ) =>
             {
                 let place = self.elab_place(expr);
-                let place_ty = self.type_id_for(place.id);
+                let expr_ty = self.type_id_for(expr.id);
                 if self.implicit_moves.contains(&expr.id) {
                     return Some(self.new_value(
                         ExprKind::ImplicitMove {
                             expr: Box::new(place),
                         },
-                        place_ty,
+                        expr_ty,
                         expr.span,
                     ));
                 }
@@ -103,7 +103,7 @@ impl<'a> Elaborator<'a> {
                     ExprKind::Load {
                         expr: Box::new(place),
                     },
-                    place_ty,
+                    expr_ty,
                     expr.span,
                 ))
             }

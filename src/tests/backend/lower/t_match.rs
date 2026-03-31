@@ -299,3 +299,87 @@ fn test_lower_match_nullable_address_some_none() {
     "};
     assert_ir_eq(&text, expected);
 }
+
+#[test]
+fn test_lower_match_nullable_view_some_none() {
+    let ctx = analyze(indoc! {"
+        @layout(fixed)
+        type Header = {
+            magic: u64,
+        }
+
+        @layout(fixed)
+        type Wrapper = {
+            inner: view<Header>?,
+        }
+
+        fn main(wrapper: Wrapper) -> u64 {
+            match wrapper.inner {
+                none => 0,
+                some(header) => header.magic,
+            }
+        }
+    "});
+    let func_def = ctx.module.func_defs()[0];
+    let lowered = lower_func(
+        func_def,
+        &ctx.def_table,
+        &ctx.type_map,
+        &ctx.lowering_plans,
+        &ctx.drop_plans,
+    )
+    .expect("failed to lower");
+    let text = format_func(&lowered.func, &lowered.types);
+
+    assert!(
+        text.contains("switch %v") && text.contains("case 0 ->"),
+        "expected nullable view match to switch on the raw pointer value:\n{text}"
+    );
+    assert!(
+        text.contains("field_addr") && text.contains("load"),
+        "expected some(header) arm to read through the unwrapped view:\n{text}"
+    );
+}
+
+#[test]
+fn test_lower_match_counted_nullable_view_array_some_none() {
+    let ctx = analyze(indoc! {"
+        @layout(fixed)
+        type Header = {
+            magic: u64,
+        }
+
+        @layout(fixed)
+        type Table = {
+            count: u64,
+            @count(count)
+            items: view<Header[]>?,
+        }
+
+        fn main(table: Table) -> u64 {
+            match table.items {
+                none => 0,
+                some(items) => items.len,
+            }
+        }
+    "});
+    let func_def = ctx.module.func_defs()[0];
+    let lowered = lower_func(
+        func_def,
+        &ctx.def_table,
+        &ctx.type_map,
+        &ctx.lowering_plans,
+        &ctx.drop_plans,
+    )
+    .expect("failed to lower");
+    let text = format_func(&lowered.func, &lowered.types);
+
+    assert!(
+        text.contains("switch") && text.contains("case 0 ->"),
+        "expected counted nullable view match to switch on pointer presence:\n{text}"
+    );
+    assert!(
+        text.contains("field_addr") && text.contains("load"),
+        "expected counted nullable view lowering to read ptr/len fields:\n{text}"
+    );
+}

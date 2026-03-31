@@ -93,6 +93,9 @@ fn type_info_score(ty: &Type) -> usize {
         | Type::Slice { elem_ty }
         | Type::DynArray { elem_ty }
         | Type::View { elem_ty }
+        | Type::NullableView { elem_ty }
+        | Type::NullableViewSlice { elem_ty }
+        | Type::NullableViewArray { elem_ty }
         | Type::RawPtr { elem_ty }
         | Type::ViewSlice { elem_ty }
         | Type::ViewArray { elem_ty }

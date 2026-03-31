@@ -154,6 +154,15 @@ impl TcUnifier {
             }
             (Type::DynArray { elem_ty: l }, Type::DynArray { elem_ty: r }) => self.unify(&l, &r),
             (Type::View { elem_ty: l }, Type::View { elem_ty: r }) => self.unify(&l, &r),
+            (Type::NullableView { elem_ty: l }, Type::NullableView { elem_ty: r }) => {
+                self.unify(&l, &r)
+            }
+            (Type::NullableViewSlice { elem_ty: l }, Type::NullableViewSlice { elem_ty: r }) => {
+                self.unify(&l, &r)
+            }
+            (Type::NullableViewArray { elem_ty: l }, Type::NullableViewArray { elem_ty: r }) => {
+                self.unify(&l, &r)
+            }
             (Type::RawPtr { elem_ty: l }, Type::RawPtr { elem_ty: r }) => self.unify(&l, &r),
             (Type::ViewSlice { elem_ty: l }, Type::ViewSlice { elem_ty: r }) => self.unify(&l, &r),
             (Type::ViewArray { elem_ty: l }, Type::ViewArray { elem_ty: r }) => self.unify(&l, &r),

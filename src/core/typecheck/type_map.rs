@@ -302,7 +302,7 @@ fn resolve_type_expr_impl(
                     allow_iterable,
                 );
             }
-            if matches!(ident.as_str(), "view" | "view_slice" | "view_array") {
+            if matches!(ident.as_str(), "view" | "view?" | "view_slice" | "view_array") {
                 return resolve_foreign_view_type(
                     def_table,
                     module,
@@ -970,6 +970,9 @@ fn resolve_foreign_view_type(
         "view" => Type::View {
             elem_ty: Box::new(elem_ty),
         },
+        "view?" => Type::NullableView {
+            elem_ty: Box::new(elem_ty),
+        },
         "view_slice" => Type::ViewSlice {
             elem_ty: Box::new(elem_ty),
         },
@@ -988,58 +991,102 @@ fn ensure_foreign_view_element_is_fixed_layout(
     elem_ty: &Type,
     type_params: Option<&TypeParamMap>,
 ) -> Result<(), TypeCheckError> {
-    let TypeExprKind::Named { ident, .. } = &elem_ty_expr.kind else {
-        return Err(TEK::ForeignViewElementMustBeFixedLayout {
+    match (&elem_ty_expr.kind, elem_ty) {
+        (TypeExprKind::Named { ident, .. }, _) => {
+            if type_params.is_some_and(|params| {
+                params.keys().copied().any(|def_id| {
+                    def_table
+                        .lookup_def(def_id)
+                        .is_some_and(|def| def.name == *ident)
+                })
+            }) {
+                return Ok(());
+            }
+            let Some(def_id) = def_table.lookup_type_def_id(ident) else {
+                return Err(TEK::ForeignViewElementMustBeFixedLayout {
+                    view_name: view_name.to_string(),
+                    elem_ty: elem_ty.clone(),
+                }
+                .at(elem_ty_expr.span));
+            };
+            let Some(type_def) = module.type_def_by_id(def_table, def_id) else {
+                return Err(TEK::ForeignViewElementMustBeFixedLayout {
+                    view_name: view_name.to_string(),
+                    elem_ty: elem_ty.clone(),
+                }
+                .at(elem_ty_expr.span));
+            };
+            let Some(def) = def_table.lookup_def(def_id) else {
+                return Err(TEK::ForeignViewElementMustBeFixedLayout {
+                    view_name: view_name.to_string(),
+                    elem_ty: elem_ty.clone(),
+                }
+                .at(elem_ty_expr.span));
+            };
+            let DefKind::TypeDef { attrs } = &def.kind else {
+                return Err(TEK::ForeignViewElementMustBeFixedLayout {
+                    view_name: view_name.to_string(),
+                    elem_ty: elem_ty.clone(),
+                }
+                .at(elem_ty_expr.span));
+            };
+            if !matches!(type_def.kind, TypeDefKind::Struct { .. }) || !attrs.fixed_layout {
+                return Err(TEK::ForeignViewElementMustBeFixedLayout {
+                    view_name: view_name.to_string(),
+                    elem_ty: elem_ty.clone(),
+                }
+                .at(elem_ty_expr.span));
+            }
+            Ok(())
+        }
+        (
+            TypeExprKind::Slice { elem_ty_expr: inner_expr },
+            Type::Slice { elem_ty: inner_ty },
+        ) => ensure_foreign_view_sequence_element_is_fixed_layout(
+            def_table,
+            module,
+            view_name,
+            inner_expr,
+            inner_ty,
+            type_params,
+        ),
+        _ => Err(TEK::ForeignViewElementMustBeFixedLayout {
             view_name: view_name.to_string(),
             elem_ty: elem_ty.clone(),
         }
-        .at(elem_ty_expr.span));
-    };
-    if type_params.is_some_and(|params| {
-        params.keys().copied().any(|def_id| {
-            def_table
-                .lookup_def(def_id)
-                .is_some_and(|def| def.name == *ident)
-        })
-    }) {
-        return Ok(());
+        .at(elem_ty_expr.span)),
     }
-    let Some(def_id) = def_table.lookup_type_def_id(ident) else {
-        return Err(TEK::ForeignViewElementMustBeFixedLayout {
-            view_name: view_name.to_string(),
-            elem_ty: elem_ty.clone(),
-        }
-        .at(elem_ty_expr.span));
-    };
-    let Some(type_def) = module.type_def_by_id(def_table, def_id) else {
-        return Err(TEK::ForeignViewElementMustBeFixedLayout {
-            view_name: view_name.to_string(),
-            elem_ty: elem_ty.clone(),
-        }
-        .at(elem_ty_expr.span));
-    };
-    let Some(def) = def_table.lookup_def(def_id) else {
-        return Err(TEK::ForeignViewElementMustBeFixedLayout {
-            view_name: view_name.to_string(),
-            elem_ty: elem_ty.clone(),
-        }
-        .at(elem_ty_expr.span));
-    };
-    let DefKind::TypeDef { attrs } = &def.kind else {
-        return Err(TEK::ForeignViewElementMustBeFixedLayout {
-            view_name: view_name.to_string(),
-            elem_ty: elem_ty.clone(),
-        }
-        .at(elem_ty_expr.span));
-    };
-    if !matches!(type_def.kind, TypeDefKind::Struct { .. }) || !attrs.fixed_layout {
-        return Err(TEK::ForeignViewElementMustBeFixedLayout {
-            view_name: view_name.to_string(),
-            elem_ty: elem_ty.clone(),
-        }
-        .at(elem_ty_expr.span));
+}
+
+fn ensure_foreign_view_sequence_element_is_fixed_layout(
+    def_table: &DefTable,
+    module: &impl TypeDefLookup,
+    view_name: &str,
+    inner_expr: &TypeExpr,
+    inner_ty: &Type,
+    type_params: Option<&TypeParamMap>,
+) -> Result<(), TypeCheckError> {
+    match (&inner_expr.kind, inner_ty) {
+        (
+            TypeExprKind::Named { ident, type_args },
+            Type::View { elem_ty },
+        ) if ident == "view" && type_args.len() == 1 => ensure_foreign_view_element_is_fixed_layout(
+            def_table,
+            module,
+            view_name,
+            &type_args[0],
+            elem_ty,
+            type_params,
+        ),
+        _ => ensure_foreign_view_element_is_fixed_layout(
+            def_table,
+            module,
+            view_name,
+            inner_expr,
+            inner_ty,
+            type_params,
+        ),
     }
-    Ok(())
 }
 
 fn resolve_type_alias(
@@ -1221,6 +1268,7 @@ pub struct TypeMapBuilder {
     def_type: HashMap<Def, TypeId>,     // maps def to its type
     def_type_param_names: HashMap<DefId, BTreeMap<u32, String>>,
     nominal_keys: HashMap<TypeId, NominalKey>,
+    counted_view_fields: HashMap<(String, String), String>,
     call_sigs: HashMap<NodeId, CallSig>,
     generic_insts: HashMap<NodeId, GenericInst>,
 }
@@ -1239,6 +1287,7 @@ impl TypeMapBuilder {
             def_type: HashMap::new(),
             def_type_param_names: HashMap::new(),
             nominal_keys: HashMap::new(),
+            counted_view_fields: HashMap::new(),
             call_sigs: HashMap::new(),
             generic_insts: HashMap::new(),
         }
@@ -1287,6 +1336,16 @@ impl TypeMapBuilder {
             return;
         }
         self.def_type_param_names.insert(def_id, names);
+    }
+
+    pub fn record_counted_view_field(
+        &mut self,
+        type_name: impl Into<String>,
+        field_name: impl Into<String>,
+        count_field: impl Into<String>,
+    ) {
+        self.counted_view_fields
+            .insert((type_name.into(), field_name.into()), count_field.into());
     }
 
     pub fn apply_inference<F>(&mut self, mut apply: F)
@@ -1339,6 +1398,7 @@ impl TypeMapBuilder {
                 def_type_param_names: self.def_type_param_names,
                 node_type: self.node_type,
                 nominal_keys: self.nominal_keys,
+                counted_view_fields: self.counted_view_fields,
             },
             call_sigs,
             generic_insts,
@@ -1398,6 +1458,7 @@ pub struct TypeMap {
     def_type_param_names: HashMap<DefId, BTreeMap<u32, String>>,
     node_type: HashMap<NodeId, TypeId>,
     nominal_keys: HashMap<TypeId, NominalKey>,
+    counted_view_fields: HashMap<(String, String), String>,
 }
 
 impl TypeMap {
@@ -1460,6 +1521,12 @@ impl TypeMap {
 
     pub fn type_table(&self) -> &TypeCache {
         &self.type_table
+    }
+
+    pub fn counted_view_field(&self, type_name: &str, field_name: &str) -> Option<&str> {
+        self.counted_view_fields
+            .get(&(type_name.to_string(), field_name.to_string()))
+            .map(String::as_str)
     }
 
     pub(crate) fn iter_node_type_ids(&self) -> impl Iterator<Item = (NodeId, TypeId)> + '_ {

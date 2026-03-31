@@ -146,9 +146,22 @@ impl<'a> TypeLowerer<'a> {
                 let u32 = self.lower_type(&Type::uint(32));
                 self.lower_ptr_len_cap_struct(None, ptr, u32)
             }
-            Type::View { elem_ty } => {
+            Type::View { elem_ty } | Type::NullableView { elem_ty } => {
                 let elem = self.lower_type(elem_ty);
                 self.ptr_to(elem)
+            }
+            Type::NullableViewSlice { elem_ty } => {
+                let elem = self.lower_type(elem_ty);
+                let elem_ptr = self.ptr_to(elem);
+                let ptr = self.ptr_to(elem_ptr);
+                let u64 = self.lower_type(&Type::uint(64));
+                self.lower_ptr_len_struct(ptr, u64)
+            }
+            Type::NullableViewArray { elem_ty } => {
+                let elem = self.lower_type(elem_ty);
+                let ptr = self.ptr_to(elem);
+                let u64 = self.lower_type(&Type::uint(64));
+                self.lower_ptr_len_struct(ptr, u64)
             }
             Type::RawPtr { elem_ty } => {
                 let elem = self.lower_type(elem_ty);

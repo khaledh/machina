@@ -439,21 +439,42 @@ impl<'a, 'b, 'g> MatchLowerer<'a, 'b, 'g> {
 
     fn lower_bindings(&mut self, bindings: &[MatchBinding]) -> Result<(), LowerToIrError> {
         for binding in bindings {
-            let (addr, ty) = self.lower_place_addr(&binding.source)?;
-            let value_ty = self.lowerer.type_lowerer.lower_type(&ty);
-            if self.is_aggregate_ir(value_ty) {
-                let ptr_ty = self.lowerer.type_lowerer.ptr_to(value_ty);
+            let (addr, source_sem_ty) = self.lower_place_addr(&binding.source)?;
+            let source_ir_ty = self.lowerer.type_lowerer.lower_type(&source_sem_ty);
+            let target_sem_ty = self.lowerer.def_type(binding.def_id);
+            let target_ir_ty = self.lowerer.type_lowerer.lower_type(&target_sem_ty);
+
+            if source_sem_ty == target_sem_ty && self.is_aggregate_ir(source_ir_ty) {
+                let ptr_ty = self.lowerer.type_lowerer.ptr_to(source_ir_ty);
                 let typed_addr = self.lowerer.builder.cast(CastKind::PtrToPtr, addr, ptr_ty);
                 self.lowerer
                     .locals
-                    .insert(binding.def_id, LocalValue::addr(typed_addr, value_ty));
+                    .insert(binding.def_id, LocalValue::addr(typed_addr, source_ir_ty));
+                continue;
+            }
+
+            let ptr_ty = self.lowerer.type_lowerer.ptr_to(source_ir_ty);
+            let typed_addr = self.lowerer.builder.cast(CastKind::PtrToPtr, addr, ptr_ty);
+            let source_value = self.lowerer.builder.load(typed_addr, source_ir_ty);
+            let coerced = self
+                .lowerer
+                .coerce_value(source_value, &source_sem_ty, &target_sem_ty);
+
+            if self.is_aggregate_ir(target_ir_ty) {
+                let slot = self.lowerer.alloc_value_slot(target_ir_ty);
+                self.lowerer.store_value_into_addr(
+                    slot.addr,
+                    coerced,
+                    &target_sem_ty,
+                    target_ir_ty,
+                );
+                self.lowerer
+                    .locals
+                    .insert(binding.def_id, LocalValue::addr(slot.addr, target_ir_ty));
             } else {
-                let ptr_ty = self.lowerer.type_lowerer.ptr_to(value_ty);
-                let typed_addr = self.lowerer.builder.cast(CastKind::PtrToPtr, addr, ptr_ty);
-                let value = self.lowerer.builder.load(typed_addr, value_ty);
                 self.lowerer
                     .locals
-                    .insert(binding.def_id, LocalValue::value(value, value_ty));
+                    .insert(binding.def_id, LocalValue::value(coerced, target_ir_ty));
             }
         }
         Ok(())

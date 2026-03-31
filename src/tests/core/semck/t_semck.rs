@@ -183,6 +183,56 @@ fn test_nullable_address_match_rejects_duplicate_some() {
 }
 
 #[test]
+fn test_nullable_view_match_is_exhaustive_with_some_and_none() {
+    let source = r#"
+        @layout(fixed)
+        type Header = {
+            magic: u64,
+        }
+
+        @layout(fixed)
+        type Wrapper = {
+            inner: view<Header>?,
+        }
+
+        fn test(wrapper: Wrapper) -> u64 {
+            match wrapper.inner {
+                some(header) => header.magic,
+                none => 0,
+            }
+        }
+    "#;
+
+    let _ctx = sem_check_source(source).expect("Failed to sem check");
+}
+
+#[test]
+fn test_counted_nullable_view_match_is_exhaustive_with_some_and_none() {
+    let source = r#"
+        @layout(fixed)
+        type Header = {
+            magic: u64,
+        }
+
+        @layout(fixed)
+        type Table = {
+            count: u64,
+            @count(count)
+            items: view<Header[]>?,
+        }
+
+        fn test(table: Table) -> u64 {
+            match table.items {
+                some(items) => items.len,
+                none => 0,
+            }
+        }
+    "#;
+
+    let _ctx = sem_check_source(source).expect("Failed to sem check");
+}
+
+#[test]
 fn test_nested_block_for_binding_is_initialized() {
     let source = r#"
         fn test() {

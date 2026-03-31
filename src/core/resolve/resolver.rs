@@ -1715,7 +1715,7 @@ impl Visitor for SymbolResolver {
             } => {
                 if matches!(
                     name.as_str(),
-                    "Iterable" | "map" | "view" | "view_slice" | "view_array"
+                    "Iterable" | "map" | "view" | "view?" | "view_slice" | "view_array"
                 ) {
                     for arg in type_args {
                         self.visit_type_expr(arg);

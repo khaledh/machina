@@ -97,7 +97,7 @@ impl<'a> ConstraintCollector<'a> {
             ),
             ExprKind::NoneLit => {
                 if let Some(expected) = expected
-                    && expected.is_nullable_address()
+                    && (expected.is_nullable_address() || expected.is_nullable_view())
                 {
                     self.push_eq(
                         expr_ty.clone(),

@@ -977,3 +977,20 @@ fn test_resolve_builtin_address_types() {
     let resolved = resolve_source(source);
     assert!(resolved.is_ok(), "expected address builtins to resolve");
 }
+
+#[test]
+fn test_resolve_builtin_nullable_view_type() {
+    let source = r#"
+        @layout(fixed)
+        type Header = {
+            magic: u64,
+        }
+
+        type BootInfo = {
+            response: view<Header>?,
+        }
+    "#;
+
+    let resolved = resolve_source(source);
+    assert!(resolved.is_ok(), "expected nullable view builtin to resolve");
+}

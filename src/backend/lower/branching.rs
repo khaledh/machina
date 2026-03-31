@@ -343,6 +343,14 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
                     &ok_ty,
                 );
             }
+            if let Some(ok_ty) = operand_sem_ty.nullable_view_payload() {
+                return self.lower_try_handle_inline_nullable(
+                    expr,
+                    fallible_expr,
+                    handler_expr,
+                    &ok_ty,
+                );
+            }
             return self.lower_try_handle_inline(expr, fallible_expr, handler_expr);
         }
 
@@ -411,17 +419,43 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
         handler_expr: &Expr,
         ok_ty: &Type,
     ) -> Result<BranchResult, LowerToIrError> {
+        let nullable_sem_ty = self
+            .type_map
+            .type_table()
+            .get(self.type_map.type_of(fallible_expr.id))
+            .clone();
         let nullable_value = match self.lower_value_expr(fallible_expr)? {
             BranchResult::Value(value) => value,
             BranchResult::Return => return Ok(BranchResult::Return),
         };
 
-        let nullable_ir_ty = self
-            .type_lowerer
-            .lower_type_id(self.type_map.type_of(fallible_expr.id));
-        let zero = self.builder.const_int(0, false, 64, nullable_ir_ty);
+        let nullable_ir_ty = self.type_lowerer.lower_type(&nullable_sem_ty);
+        let u64_ty = self.type_lowerer.lower_type(&Type::uint(64));
+        let zero = self.builder.const_int(0, false, 64, u64_ty);
         let bool_ty = self.type_lowerer.lower_type(&Type::Bool);
-        let is_some = self.builder.cmp(CmpOp::Ne, nullable_value, zero, bool_ty);
+        let is_some = match &nullable_sem_ty {
+            Type::NullableViewSlice { elem_ty } => {
+                let slot = self.materialize_value_slot(nullable_value, nullable_ir_ty);
+                let elem_ir_ty = self.type_lowerer.lower_type(elem_ty);
+                let elem_ptr_ir_ty = self.type_lowerer.ptr_to(elem_ir_ty);
+                let ptr_ir_ty = self.type_lowerer.ptr_to(elem_ptr_ir_ty);
+                let ptr = self.load_field(slot.addr, 0, ptr_ir_ty);
+                let ptr_zero = self.builder.cast(CastKind::IntToPtr, zero, ptr_ir_ty);
+                self.builder.cmp(CmpOp::Ne, ptr, ptr_zero, bool_ty)
+            }
+            Type::NullableViewArray { elem_ty } => {
+                let slot = self.materialize_value_slot(nullable_value, nullable_ir_ty);
+                let elem_ir_ty = self.type_lowerer.lower_type(elem_ty);
+                let ptr_ir_ty = self.type_lowerer.ptr_to(elem_ir_ty);
+                let ptr = self.load_field(slot.addr, 0, ptr_ir_ty);
+                let ptr_zero = self.builder.cast(CastKind::IntToPtr, zero, ptr_ir_ty);
+                self.builder.cmp(CmpOp::Ne, ptr, ptr_zero, bool_ty)
+            }
+            _ => {
+                let zero = self.builder.const_int(0, false, 64, nullable_ir_ty);
+                self.builder.cmp(CmpOp::Ne, nullable_value, zero, bool_ty)
+            }
+        };
 
         let ok_bb = self.builder.add_block();
         let none_bb = self.builder.add_block();

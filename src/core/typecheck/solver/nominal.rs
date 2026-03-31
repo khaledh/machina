@@ -25,6 +25,24 @@ fn peel_view_for_read_only_field_access(ty: &Type) -> Type {
     }
 }
 
+fn counted_nullable_view_field_access_ty(field_ty: &Type) -> Option<Type> {
+    let Type::NullableView { elem_ty } = field_ty else {
+        return None;
+    };
+    let Type::Slice { elem_ty: seq_elem } = elem_ty.as_ref() else {
+        return None;
+    };
+
+    match seq_elem.as_ref() {
+        Type::View { elem_ty } => Some(Type::NullableViewSlice {
+            elem_ty: elem_ty.clone(),
+        }),
+        other => Some(Type::NullableViewArray {
+            elem_ty: Box::new(other.clone()),
+        }),
+    }
+}
+
 #[allow(clippy::too_many_arguments)]
 pub(super) fn try_check_expr_obligation_nominal(
     obligation: &ExprObligation,
@@ -316,7 +334,9 @@ pub(super) fn try_check_expr_obligation_nominal(
                         return true;
                     }
                     if let Some(struct_field) = fields.iter().find(|f| f.name == *field) {
-                        let _ = unifier.unify(result, &struct_field.ty);
+                        let result_ty = counted_nullable_view_field_access_ty(&struct_field.ty)
+                            .unwrap_or_else(|| struct_field.ty.clone());
+                        let _ = unifier.unify(result, &result_ty);
                     } else {
                         let _ = unifier.unify(result, &Type::Unknown);
                     }

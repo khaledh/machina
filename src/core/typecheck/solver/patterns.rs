@@ -394,7 +394,8 @@ fn bind_match_pattern_types(
             ..
         } => {
             let owner_ty = super::term_utils::peel_heap(scrutinee_ty.clone());
-            if let Some(payload_ty) = nullable_address_match_payload_type(&owner_ty, variant_name) {
+            if let Some(payload_ty) = nullable_low_level_match_payload_type(&owner_ty, variant_name)
+            {
                 for binding in bindings {
                     if let MatchPatternBinding::Named { id, .. } = binding
                         && let Some(def_id) = pattern_def_id(def_table, *id, allow_missing_def_ids)
@@ -436,11 +437,29 @@ fn bind_match_pattern_types(
     }
 }
 
-fn nullable_address_match_payload_type(owner_ty: &Type, variant_name: &str) -> Option<Type> {
+fn nullable_low_level_match_payload_type(owner_ty: &Type, variant_name: &str) -> Option<Type> {
     match (owner_ty, variant_name) {
         (Type::NullablePAddr, "some") => Some(Type::PAddr),
         (Type::NullableVAddr, "some") => Some(Type::VAddr),
-        (Type::NullablePAddr | Type::NullableVAddr, "none") => None,
+        (Type::NullableView { elem_ty }, "some") => match elem_ty.as_ref() {
+            Type::Slice { elem_ty: seq_elem } => match seq_elem.as_ref() {
+                Type::View { elem_ty } => Some(Type::ViewSlice {
+                    elem_ty: elem_ty.clone(),
+                }),
+                other => Some(Type::ViewArray {
+                    elem_ty: Box::new(other.clone()),
+                }),
+            },
+            _ => owner_ty.nullable_view_payload(),
+        },
+        (Type::NullableViewSlice { .. } | Type::NullableViewArray { .. }, "some") => {
+            owner_ty.nullable_view_payload()
+        }
+        (Type::NullablePAddr | Type::NullableVAddr | Type::NullableView { .. }, "none") => None,
+        (
+            Type::NullableViewSlice { .. } | Type::NullableViewArray { .. },
+            "none",
+        ) => None,
         _ => None,
     }
 }

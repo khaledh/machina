@@ -208,6 +208,7 @@ fn collect_type_defs(
 #[derive(Default)]
 struct FixedFieldAttrs {
     align: Option<u64>,
+    count_field: Option<String>,
 }
 
 fn validate_fixed_layout_type(
@@ -270,7 +271,8 @@ fn validate_fixed_layout_type(
         .zip(resolved_fields.iter())
         .zip(resolved_field_attrs.iter())
     {
-        if resolved_field.ty.is_foreign_view_handle() {
+        if resolved_field.ty.is_foreign_view_handle() && !resolved_field.ty.is_nullable_single_view_field()
+        {
             tc_push_error!(
                 errors,
                 field.span,
@@ -281,6 +283,27 @@ fn validate_fixed_layout_type(
                 }
             );
             continue;
+        }
+
+        let is_counted_nullable_view = is_counted_nullable_view_field_ty(&resolved_field.ty);
+        if field_attrs.count_field.is_some() && !is_counted_nullable_view {
+            tc_push_error!(
+                errors,
+                field.span,
+                TEK::FixedLayoutCountRequiresCountedViewField {
+                    field: field.name.clone(),
+                }
+            );
+        }
+        if is_counted_nullable_view && field_attrs.count_field.is_none() {
+            tc_push_error!(
+                errors,
+                field.span,
+                TEK::FixedLayoutCountedViewFieldMissingCount {
+                    type_name: type_def.name.clone(),
+                    field: field.name.clone(),
+                }
+            );
         }
 
         let natural_align = resolved_field.ty.align_of() as u64;
@@ -323,6 +346,44 @@ fn validate_fixed_layout_type(
         }
         offset = aligned_offset + resolved_field.ty.size_of() as u64;
         max_align = max_align.max(field_align);
+    }
+
+    for ((field, _resolved_field), field_attrs) in fields
+        .iter()
+        .zip(resolved_fields.iter())
+        .zip(resolved_field_attrs.iter())
+    {
+        let Some(count_field_name) = &field_attrs.count_field else {
+            continue;
+        };
+        let Some(count_field_ty) = resolved_fields
+            .iter()
+            .find(|resolved| resolved.name == *count_field_name)
+            .map(|resolved| &resolved.ty)
+        else {
+            tc_push_error!(
+                errors,
+                field.span,
+                TEK::FixedLayoutCountFieldMissing {
+                    type_name: type_def.name.clone(),
+                    field: field.name.clone(),
+                    count_field: count_field_name.clone(),
+                }
+            );
+            continue;
+        };
+        if *count_field_ty != Type::uint(64) {
+            tc_push_error!(
+                errors,
+                field.span,
+                TEK::FixedLayoutCountFieldTypeMismatch {
+                    type_name: type_def.name.clone(),
+                    field: field.name.clone(),
+                    count_field: count_field_name.clone(),
+                    count_ty: count_field_ty.clone(),
+                }
+            );
+        }
     }
 
     let type_align = type_attrs.fixed_align.unwrap_or(max_align);
@@ -425,6 +486,42 @@ fn validate_fixed_layout_field_attrs(
                     }
                 }
             }
+            "count" => {
+                if !fixed_layout_enabled {
+                    tc_push_error!(
+                        errors,
+                        attr.span,
+                        TEK::FixedLayoutCountRequiresCountedViewField {
+                            field: field.name.clone(),
+                        }
+                    );
+                    continue;
+                }
+                if attr.args.len() != 1 {
+                    tc_push_error!(
+                        errors,
+                        attr.span,
+                        TEK::FixedLayoutInvalidCountAttr {
+                            field: field.name.clone(),
+                        }
+                    );
+                    continue;
+                }
+                match attr.args.first() {
+                    Some(crate::core::ast::AttrArg::Ident(name)) => {
+                        out.count_field = Some(name.clone())
+                    }
+                    _ => {
+                        tc_push_error!(
+                            errors,
+                            attr.span,
+                            TEK::FixedLayoutInvalidCountAttr {
+                                field: field.name.clone(),
+                            }
+                        );
+                    }
+                }
+            }
             _ => {
                 tc_push_error!(
                     errors,
@@ -439,6 +536,16 @@ fn validate_fixed_layout_field_attrs(
     }
 
     out
+}
+
+fn is_counted_nullable_view_field_ty(ty: &Type) -> bool {
+    let Type::NullableView { elem_ty } = ty else {
+        return false;
+    };
+    let Type::Slice { elem_ty } = elem_ty.as_ref() else {
+        return false;
+    };
+    matches!(elem_ty.as_ref(), Type::Struct { .. } | Type::View { .. })
 }
 
 fn is_valid_fixed_layout_align(value: u64) -> bool {

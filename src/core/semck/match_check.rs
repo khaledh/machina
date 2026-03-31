@@ -48,7 +48,7 @@ pub(super) fn check_match(
 enum MatchRuleKind<'a> {
     Enum(EnumRule<'a>),
     Union(UnionRule<'a>),
-    NullableAddr(NullableAddrRule),
+    NullableLowLevel(NullableLowLevelRule),
     Bool,
     Int(IntRule),
     Tuple(TupleRule<'a>),
@@ -60,11 +60,20 @@ impl<'a> MatchRuleKind<'a> {
         match ty {
             Type::Enum { name, variants, .. } => Self::Enum(EnumRule { name, variants }),
             Type::ErrorUnion { ok_ty, err_tys } => Self::Union(UnionRule { ok_ty, err_tys }),
-            Type::NullablePAddr => Self::NullableAddr(NullableAddrRule {
+            Type::NullablePAddr => Self::NullableLowLevel(NullableLowLevelRule {
                 nullable_ty: Type::NullablePAddr,
             }),
-            Type::NullableVAddr => Self::NullableAddr(NullableAddrRule {
+            Type::NullableVAddr => Self::NullableLowLevel(NullableLowLevelRule {
                 nullable_ty: Type::NullableVAddr,
+            }),
+            Type::NullableView { .. } => Self::NullableLowLevel(NullableLowLevelRule {
+                nullable_ty: ty.clone(),
+            }),
+            Type::NullableViewSlice { .. } => Self::NullableLowLevel(NullableLowLevelRule {
+                nullable_ty: ty.clone(),
+            }),
+            Type::NullableViewArray { .. } => Self::NullableLowLevel(NullableLowLevelRule {
+                nullable_ty: ty.clone(),
             }),
             Type::Bool => Self::Bool,
             Type::Int { signed, bits, .. } => Self::Int(IntRule {
@@ -88,7 +97,7 @@ impl<'a> MatchRuleKind<'a> {
         match self {
             MatchRuleKind::Enum(rule) => rule.check(arms, span, errors),
             MatchRuleKind::Union(rule) => rule.check(_ctx, arms, span, errors),
-            MatchRuleKind::NullableAddr(rule) => rule.check(arms, span, errors),
+            MatchRuleKind::NullableLowLevel(rule) => rule.check(arms, span, errors),
             MatchRuleKind::Bool => check_bool_match(arms, span, errors),
             MatchRuleKind::Int(rule) => rule.check(arms, span, errors),
             MatchRuleKind::Tuple(rule) => rule.check(arms, span, errors),
@@ -103,11 +112,11 @@ impl<'a> MatchRuleKind<'a> {
     }
 }
 
-struct NullableAddrRule {
+struct NullableLowLevelRule {
     nullable_ty: Type,
 }
 
-impl NullableAddrRule {
+impl NullableLowLevelRule {
     fn check(&self, arms: &[MatchArm], span: Span, errors: &mut Vec<SemCheckError>) {
         let mut saw_some = false;
         let mut saw_none = false;

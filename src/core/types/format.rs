@@ -84,6 +84,15 @@ impl fmt::Display for Type {
             Type::View { elem_ty } => {
                 write!(f, "view<{}>", elem_ty)
             }
+            Type::NullableView { elem_ty } => {
+                write!(f, "view<{}>?", elem_ty)
+            }
+            Type::NullableViewSlice { elem_ty } => {
+                write!(f, "view<view<{}>[]>?", elem_ty)
+            }
+            Type::NullableViewArray { elem_ty } => {
+                write!(f, "view<{}[]>?", elem_ty)
+            }
             Type::RawPtr { elem_ty } => {
                 write!(f, "*{}", elem_ty)
             }

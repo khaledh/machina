@@ -113,6 +113,9 @@ fn check_capability_at_path(
         | Type::Pending { .. }
         | Type::ReplyCap { .. }
         | Type::View { .. }
+        | Type::NullableView { .. }
+        | Type::NullableViewSlice { .. }
+        | Type::NullableViewArray { .. }
         | Type::ViewSlice { .. }
         | Type::ViewArray { .. }
         | Type::Set { .. }
@@ -138,6 +141,7 @@ fn supports_capability_leaf_v1(ty: &Type, capability: Capability) -> bool {
                     | Type::NullablePAddr
                     | Type::VAddr
                     | Type::NullableVAddr
+                    | Type::NullableView { .. }
                     | Type::RawPtr { .. }
                     | Type::Bool
                     | Type::Char
@@ -152,6 +156,7 @@ fn supports_capability_leaf_v1(ty: &Type, capability: Capability) -> bool {
                     | Type::NullablePAddr
                     | Type::VAddr
                     | Type::NullableVAddr
+                    | Type::NullableView { .. }
                     | Type::RawPtr { .. }
                     | Type::Bool
                     | Type::Char

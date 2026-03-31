@@ -64,6 +64,7 @@ impl EqPlan {
             | Type::NullablePAddr
             | Type::VAddr
             | Type::NullableVAddr
+            | Type::NullableView { .. }
             | Type::Int { .. }
             | Type::Bool
             | Type::Char

@@ -59,7 +59,13 @@ fn join_variant_rank(ty: &Type) -> u8 {
         | Type::Map { .. } => 2,
         Type::Struct { .. } | Type::Enum { .. } => 3,
         Type::Fn { .. } => 4,
-        Type::Slice { .. } | Type::View { .. } | Type::Ref { .. } | Type::Heap { .. } => 5,
+        Type::Slice { .. }
+        | Type::View { .. }
+        | Type::NullableView { .. }
+        | Type::NullableViewSlice { .. }
+        | Type::NullableViewArray { .. }
+        | Type::Ref { .. }
+        | Type::Heap { .. } => 5,
         Type::Var(_) | Type::Unknown => 6,
         Type::ErrorUnion { .. } => 7,
     }

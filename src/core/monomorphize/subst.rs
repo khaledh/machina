@@ -422,6 +422,42 @@ pub(crate) fn type_expr_from_type(
                 span,
             )?],
         },
+        Type::NullableView { elem_ty } => TypeExprKind::Named {
+            ident: "view?".to_string(),
+            type_args: vec![type_expr_from_type(
+                elem_ty,
+                def_table,
+                module,
+                node_id_gen,
+                span,
+            )?],
+        },
+        Type::NullableViewSlice { elem_ty } => TypeExprKind::Named {
+            ident: "view?".to_string(),
+            type_args: vec![type_expr_from_type(
+                &Type::Slice {
+                    elem_ty: Box::new(Type::View {
+                        elem_ty: elem_ty.clone(),
+                    }),
+                },
+                def_table,
+                module,
+                node_id_gen,
+                span,
+            )?],
+        },
+        Type::NullableViewArray { elem_ty } => TypeExprKind::Named {
+            ident: "view?".to_string(),
+            type_args: vec![type_expr_from_type(
+                &Type::Slice {
+                    elem_ty: elem_ty.clone(),
+                },
+                def_table,
+                module,
+                node_id_gen,
+                span,
+            )?],
+        },
         Type::ViewSlice { elem_ty } => TypeExprKind::Named {
             ident: "view_slice".to_string(),
             type_args: vec![type_expr_from_type(

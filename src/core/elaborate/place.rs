@@ -116,18 +116,30 @@ impl<'a> Elaborator<'a> {
                 }
             }
             ExprKind::StructField { target, field } => {
-                let target_ty = self.peel_place_base_type(
-                    self.type_map
-                        .type_table()
-                        .get(self.type_map.type_of(target.id)),
-                );
-                match target_ty {
-                    Type::Struct { fields, .. } => fields
-                        .iter()
-                        .find(|f| f.name == *field)
-                        .map(|f| self.insert_synth_node_type(expr.id, f.ty.clone()))
-                        .unwrap_or_else(|| self.type_map.type_of(expr.id)),
-                    _ => self.type_map.type_of(expr.id),
+                let preserved_ty = self
+                    .type_map
+                    .type_table()
+                    .get(self.type_map.type_of(expr.id))
+                    .clone();
+                if matches!(
+                    preserved_ty,
+                    Type::NullableViewSlice { .. } | Type::NullableViewArray { .. }
+                ) {
+                    self.type_map.type_of(expr.id)
+                } else {
+                    let target_ty = self.peel_place_base_type(
+                        self.type_map
+                            .type_table()
+                            .get(self.type_map.type_of(target.id)),
+                    );
+                    match target_ty {
+                        Type::Struct { fields, .. } => fields
+                            .iter()
+                            .find(|f| f.name == *field)
+                            .map(|f| self.insert_synth_node_type(expr.id, f.ty.clone()))
+                            .unwrap_or_else(|| self.type_map.type_of(expr.id)),
+                        _ => self.type_map.type_of(expr.id),
+                    }
                 }
             }
             _ => self.type_map.type_of(expr.id),

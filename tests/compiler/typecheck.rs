@@ -230,6 +230,40 @@ fn test_static_let_and_var_roundtrip_at_runtime() {
 }
 
 #[test]
+fn test_static_nullable_view_field_initializes_to_none() {
+    let run = run_program(
+        "static_nullable_view_field_none",
+        r#"
+            requires {
+                std::io::println
+            }
+
+            @layout(fixed)
+            type Header = {
+                magic: u64,
+            }
+
+            @layout(fixed)
+            type BootInfo = {
+                response: view<Header>?,
+            }
+
+            static var boot = BootInfo {
+                response: None,
+            };
+
+            fn main() {
+                println(1);
+            }
+        "#,
+    );
+    assert_eq!(run.status.code(), Some(0));
+
+    let stdout = String::from_utf8_lossy(&run.stdout);
+    assert_eq!(stdout, "1\n", "unexpected stdout: {stdout}");
+}
+
+#[test]
 fn test_static_struct_fields_load_and_store() {
     let run = run_program(
         "static_struct_fields",
@@ -1078,6 +1112,93 @@ fn test_nullable_address_or_inline_block_bails_early() {
 
     let stdout = String::from_utf8_lossy(&run.stdout);
     assert_eq!(stdout, "no response\n", "unexpected stdout: {stdout}");
+}
+
+#[test]
+fn test_nullable_view_field_or_inline_block_bails_early() {
+    let run = run_program(
+        "nullable_view_field_or_inline_block",
+        r#"
+            requires {
+                std::io::println
+            }
+
+            @layout(fixed)
+            type Header = {
+                magic: u64,
+            }
+
+            @layout(fixed)
+            type Wrapper = {
+                inner: view<Header>?,
+            }
+
+            static let WRAPPER: Wrapper = Wrapper { inner: None };
+
+            fn dump() {
+                let header = WRAPPER.inner or {
+                    println("missing");
+                    return;
+                };
+
+                println(header.magic);
+            }
+
+            fn main() {
+                dump();
+            }
+        "#,
+    );
+    assert_eq!(run.status.code(), Some(0));
+
+    let stdout = String::from_utf8_lossy(&run.stdout);
+    assert_eq!(stdout, "missing\n", "unexpected stdout: {stdout}");
+}
+
+#[test]
+fn test_counted_nullable_view_field_or_inline_block_bails_early() {
+    let run = run_program(
+        "counted_nullable_view_field_or_inline_block",
+        r#"
+            requires {
+                std::io::println
+            }
+
+            @layout(fixed)
+            type Header = {
+                magic: u64,
+            }
+
+            @layout(fixed)
+            type Table = {
+                count: u64,
+                @count(count)
+                items: view<Header[]>?,
+            }
+
+            static let TABLE: Table = Table {
+                count: 3,
+                items: None,
+            };
+
+            fn dump() {
+                let items = TABLE.items or {
+                    println("missing");
+                    return;
+                };
+
+                println(items.len);
+            }
+
+            fn main() {
+                dump();
+            }
+        "#,
+    );
+    assert_eq!(run.status.code(), Some(0));
+
+    let stdout = String::from_utf8_lossy(&run.stdout);
+    assert_eq!(stdout, "missing\n", "unexpected stdout: {stdout}");
 }
 
 #[test]

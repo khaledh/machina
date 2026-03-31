@@ -65,8 +65,8 @@ impl<'a> Elaborator<'a> {
         scrutinee_place: &MatchPlace,
         arms: &[MatchArm],
     ) -> (MatchDecision, Vec<MatchArmPlan>) {
-        if scrutinee_ty.is_nullable_address() {
-            return self.build_nullable_address_match_plan(scrutinee_ty, scrutinee_place, arms);
+        if scrutinee_ty.is_nullable_address() || scrutinee_ty.is_nullable_view() {
+            return self.build_nullable_low_level_match_plan(scrutinee_ty, scrutinee_place, arms);
         }
 
         let mut cases = Vec::new();
@@ -191,7 +191,7 @@ impl<'a> Elaborator<'a> {
         (decision, arm_plans)
     }
 
-    fn build_nullable_address_match_plan(
+    fn build_nullable_low_level_match_plan(
         &mut self,
         scrutinee_ty: &Type,
         scrutinee_place: &MatchPlace,
@@ -222,7 +222,7 @@ impl<'a> Elaborator<'a> {
                         }
                         "some" => {
                             some_arm = Some(index);
-                            self.collect_nullable_address_bindings(
+                            self.collect_nullable_low_level_bindings(
                                 scrutinee_ty,
                                 scrutinee_place,
                                 pattern_bindings,
@@ -231,13 +231,13 @@ impl<'a> Elaborator<'a> {
                         }
                         _ => {
                             panic!(
-                                "compiler bug: unexpected nullable-address match variant {variant_name}"
+                                "compiler bug: unexpected nullable low-level match variant {variant_name}"
                             );
                         }
                     },
                     _ => {
                         panic!(
-                            "compiler bug: unexpected nullable-address match pattern in switch plan: {:?}",
+                            "compiler bug: unexpected nullable low-level match pattern in switch plan: {:?}",
                             pattern
                         );
                     }
@@ -371,7 +371,11 @@ impl<'a> Elaborator<'a> {
                 MatchProjection::Field { index: 0 },
                 Type::uint(64),
             ),
-            Type::NullablePAddr | Type::NullableVAddr => self.project_place(
+            Type::NullablePAddr
+            | Type::NullableVAddr
+            | Type::NullableView { .. }
+            | Type::NullableViewSlice { .. }
+            | Type::NullableViewArray { .. } => self.project_place(
                 scrutinee_place,
                 MatchProjection::ByteOffset { offset: 0 },
                 Type::uint(64),
@@ -697,32 +701,41 @@ impl<'a> Elaborator<'a> {
         }
     }
 
-    fn collect_nullable_address_bindings(
+    fn collect_nullable_low_level_bindings(
         &self,
         scrutinee_ty: &Type,
         scrutinee_place: &MatchPlace,
         pattern_bindings: &[MatchPatternBinding],
         bindings: &mut Vec<MatchBinding>,
     ) {
-        let payload_ty = match scrutinee_ty {
-            Type::NullablePAddr => Type::PAddr,
-            Type::NullableVAddr => Type::VAddr,
-            _ => panic!("compiler bug: expected nullable address type for match bindings"),
-        };
+        let payload_ty = scrutinee_ty
+            .nullable_address_payload()
+            .or_else(|| scrutinee_ty.nullable_view_payload())
+            .unwrap_or_else(|| {
+                panic!("compiler bug: expected nullable low-level type for match bindings")
+            });
 
         for binding in pattern_bindings {
             let MatchPatternBinding::Named { id, .. } = binding else {
                 continue;
             };
-            let mut projections = scrutinee_place.projections.clone();
-            projections.push(MatchProjection::ByteOffset { offset: 0 });
+            let (projections, source_ty) = match scrutinee_ty {
+                Type::NullableViewSlice { .. } | Type::NullableViewArray { .. } => {
+                    (scrutinee_place.projections.clone(), payload_ty.clone())
+                }
+                _ => {
+                    let mut projections = scrutinee_place.projections.clone();
+                    projections.push(MatchProjection::ByteOffset { offset: 0 });
+                    (projections, payload_ty.clone())
+                }
+            };
             bindings.push(MatchBinding {
                 def_id: self.def_id_for(*id),
                 node_id: *id,
                 source: MatchPlace {
                     base: scrutinee_place.base.clone(),
                     projections,
-                    ty: payload_ty.clone(),
+                    ty: source_ty,
                 },
             });
         }

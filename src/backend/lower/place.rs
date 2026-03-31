@@ -234,7 +234,10 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
         }
     }
 
-    fn lower_place_deref_base(&mut self, target: &Expr) -> Result<(ValueId, Type), LowerToIrError> {
+    pub(super) fn lower_place_deref_base(
+        &mut self,
+        target: &Expr,
+    ) -> Result<(ValueId, Type), LowerToIrError> {
         let mut base = self.lower_place_addr(target)?;
         let mut curr_ty = self
             .type_map
