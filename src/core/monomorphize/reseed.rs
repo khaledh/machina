@@ -593,6 +593,7 @@ impl VisitorMut for NodeIdReseeder<'_> {
                 self.visit_expr(body);
             }
             ExprKind::UnitLit
+            | ExprKind::NoneLit
             | ExprKind::IntLit(_)
             | ExprKind::BoolLit(_)
             | ExprKind::CharLit(_)

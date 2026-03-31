@@ -2066,6 +2066,7 @@ impl Visitor for SymbolResolver {
             | ExprKind::BoolLit(_)
             | ExprKind::CharLit(_)
             | ExprKind::StringLit { .. }
+            | ExprKind::NoneLit
             | ExprKind::UnitLit => {}
 
             ExprKind::Range { start, end } => {

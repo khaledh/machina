@@ -92,6 +92,12 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
                     .lower_type_id(self.type_map.type_of(expr.id));
                 Ok(self.builder.const_unit(ty).into())
             }
+            ExprKind::NoneLit => {
+                let ty = self
+                    .type_lowerer
+                    .lower_type_id(self.type_map.type_of(expr.id));
+                Ok(self.builder.const_int(0, false, 64, ty).into())
+            }
             ExprKind::IntLit(value) => {
                 let expr_ty = self.type_map.type_of(expr.id);
                 let ty = self.type_lowerer.lower_type_id(expr_ty);
@@ -1224,7 +1230,7 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
                     .lower_type_id(self.type_map.type_of(expr.id));
                 Ok(self.builder.const_int(len as i128, false, 64, ty).into())
             }
-            Type::Slice { .. } => {
+            Type::Slice { .. } | Type::ViewSlice { .. } | Type::ViewArray { .. } => {
                 let place_addr = self.lower_place_addr(place)?;
                 let len_ty = self.type_lowerer.lower_type(&Type::uint(64));
                 let len_addr = self.field_addr_typed(place_addr.addr, 1, len_ty);

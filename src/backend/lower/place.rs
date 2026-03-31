@@ -137,23 +137,49 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
                         }
 
                         let (base_addr, base_ty) = self.resolve_deref_base(target, deref_count)?;
-                        let elem_ty = match base_ty {
+                        let elem_ty = match &base_ty {
                             Type::Slice { elem_ty }
                             | Type::ViewSlice { elem_ty }
                             | Type::ViewArray { elem_ty } => elem_ty,
                             other => panic!("backend slice index on non-slice base {:?}", other),
                         };
 
-                        // Load the slice data pointer, then index into it.
                         let elem_ir_ty = self.type_lowerer.lower_type(&elem_ty);
-                        let elem_ptr_ty = self.type_lowerer.ptr_to(elem_ir_ty);
-                        let view = self.load_slice_view(base_addr, elem_ptr_ty);
+                        let view = match &base_ty {
+                            Type::ViewSlice { .. } => {
+                                let elem_ptr_ty = self.type_lowerer.ptr_to(elem_ir_ty);
+                                let outer_ptr_ty = self.type_lowerer.ptr_to(elem_ptr_ty);
+                                self.load_slice_view(base_addr, outer_ptr_ty)
+                            }
+                            Type::Slice { .. } | Type::ViewArray { .. } => {
+                                let elem_ptr_ty = self.type_lowerer.ptr_to(elem_ir_ty);
+                                self.load_slice_view(base_addr, elem_ptr_ty)
+                            }
+                            other => {
+                                panic!("backend slice index on non-slice base {:?}", other)
+                            }
+                        };
                         let index_val = self.lower_index_value(&indices[0])?;
-                        let addr = self.index_with_bounds(view, index_val, elem_ptr_ty);
+                        let addr = match &base_ty {
+                            Type::ViewSlice { .. } => {
+                                let elem_ptr_ty = self.type_lowerer.ptr_to(elem_ir_ty);
+                                let outer_ptr_ty = self.type_lowerer.ptr_to(elem_ptr_ty);
+                                let elem_ptr_addr =
+                                    self.index_with_bounds(view, index_val, outer_ptr_ty);
+                                self.builder.load(elem_ptr_addr, elem_ptr_ty)
+                            }
+                            Type::Slice { .. } | Type::ViewArray { .. } => {
+                                let elem_ptr_ty = self.type_lowerer.ptr_to(elem_ir_ty);
+                                self.index_with_bounds(view, index_val, elem_ptr_ty)
+                            }
+                            other => {
+                                panic!("backend slice index on non-slice base {:?}", other)
+                            }
+                        };
                         Ok(PlaceAddr {
                             addr,
                             value_ty: elem_ir_ty,
-                            sem_ty: (*elem_ty).clone(),
+                            sem_ty: elem_ty.as_ref().clone(),
                         })
                     }
                     IndexBaseKind::String { deref_count } => {

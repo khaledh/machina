@@ -245,6 +245,22 @@ fn test_parse_nullable_address_types() {
 }
 
 #[test]
+fn test_parse_none_literal() {
+    let source = r#"
+        fn main() -> vaddr? {
+            None
+        }
+    "#;
+
+    let funcs = parse_source(source).expect("Failed to parse");
+    let func = &funcs[0];
+    let ExprKind::Block { tail: Some(tail), .. } = &func.body.kind else {
+        panic!("expected block tail");
+    };
+    assert!(matches!(tail.kind, ExprKind::NoneLit));
+}
+
+#[test]
 fn test_parse_dyn_array_type() {
     let source = r#"
         fn test() -> u64[*] {

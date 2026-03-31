@@ -62,6 +62,23 @@ impl<'a> Elaborator<'a> {
                     .receiver
                     .as_ref()
                     .map(|receiver| receiver.ty.peel_heap()),
+                Some(Type::NullablePAddr | Type::NullableVAddr)
+            )
+        {
+            target = match method_name {
+                "is_some" => CallTarget::Intrinsic(IntrinsicCall::AddressIsSome),
+                "is_none" => CallTarget::Intrinsic(IntrinsicCall::AddressIsNone),
+                "unwrap" => CallTarget::Intrinsic(IntrinsicCall::AddressUnwrap),
+                _ => target,
+            };
+        }
+        if def_id.is_none()
+            && let Some(method_name) = method_name
+            && matches!(
+                call_sig
+                    .receiver
+                    .as_ref()
+                    .map(|receiver| receiver.ty.peel_heap()),
                 Some(Type::DynArray { .. })
             )
         {
@@ -384,6 +401,20 @@ impl<'a> Elaborator<'a> {
                     ArgLowering::Direct(CallInput::Receiver),
                     ArgLowering::Direct(CallInput::Arg(0)),
                 ]
+            }
+            CallTarget::Intrinsic(IntrinsicCall::AddressIsSome)
+            | CallTarget::Intrinsic(IntrinsicCall::AddressIsNone)
+            | CallTarget::Intrinsic(IntrinsicCall::AddressUnwrap) => {
+                if !has_receiver {
+                    panic!("compiler bug: intrinsic nullable-address helper missing receiver");
+                }
+                if !call_sig.params.is_empty() {
+                    panic!(
+                        "compiler bug: intrinsic nullable-address helper expects 0 args, got {}",
+                        call_sig.params.len()
+                    );
+                }
+                vec![ArgLowering::Direct(CallInput::Receiver)]
             }
             CallTarget::Intrinsic(IntrinsicCall::TypeOf) => {
                 if has_receiver {

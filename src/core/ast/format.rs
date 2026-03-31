@@ -969,6 +969,9 @@ impl Expr {
     fn fmt_with_indent(&self, f: &mut fmt::Formatter<'_>, level: usize) -> fmt::Result {
         let pad = indent(level);
         match &self.kind {
+            ExprKind::NoneLit => {
+                writeln!(f, "{}NoneLit [{}]", pad, self.id)?;
+            }
             ExprKind::IntLit(value) => {
                 writeln!(f, "{}IntLit({}) [{}]", pad, value, self.id)?;
             }

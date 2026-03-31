@@ -224,6 +224,7 @@ impl<'a> LoweringPlanBuilder<'a> {
             }
 
             ExprKind::UnitLit
+            | ExprKind::NoneLit
             | ExprKind::IntLit(_)
             | ExprKind::BoolLit(_)
             | ExprKind::CharLit(_)
@@ -322,6 +323,7 @@ impl<'a> LoweringPlanBuilder<'a> {
             }
 
             ExprKind::UnitLit
+            | ExprKind::NoneLit
             | ExprKind::IntLit(_)
             | ExprKind::BoolLit(_)
             | ExprKind::CharLit(_)

@@ -937,6 +937,7 @@ pub enum ExprKind {
 
     // Literals (scalar)
     UnitLit,
+    NoneLit,
     IntLit(u64),
     BoolLit(bool),
     CharLit(char),

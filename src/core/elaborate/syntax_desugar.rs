@@ -1003,6 +1003,7 @@ impl<'a, 'b> SyntaxDesugarCtx<'a, 'b> {
                 self.desugar_value_expr(value);
             }
             ExprKind::UnitLit
+            | ExprKind::NoneLit
             | ExprKind::IntLit(_)
             | ExprKind::BoolLit(_)
             | ExprKind::CharLit(_)

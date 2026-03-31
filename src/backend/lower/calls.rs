@@ -297,7 +297,14 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
             panic!("backend foreign view sequence intrinsic expected view_slice/view_array result")
         });
         let elem_ir_ty = self.type_lowerer.lower_type(&elem_ty);
-        let ptr_ir_ty = self.type_lowerer.ptr_to(elem_ir_ty);
+        let ptr_ir_ty = match &expr_ty {
+            Type::ViewSlice { .. } => {
+                let elem_ptr_ty = self.type_lowerer.ptr_to(elem_ir_ty);
+                self.type_lowerer.ptr_to(elem_ptr_ty)
+            }
+            Type::ViewArray { .. } => self.type_lowerer.ptr_to(elem_ir_ty),
+            _ => panic!("backend foreign view sequence intrinsic expected view_slice/view_array"),
+        };
         let ptr = self.builder.cast(CastKind::IntToPtr, raw_addr, ptr_ir_ty);
 
         let ret_ty = self.type_lowerer.lower_type_id(expr_ty_id);
@@ -536,7 +543,10 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
                 IntrinsicCall::AddressOffset
                 | IntrinsicCall::AddressAlignDown
                 | IntrinsicCall::AddressAlignUp
-                | IntrinsicCall::AddressIsAligned => {
+                | IntrinsicCall::AddressIsAligned
+                | IntrinsicCall::AddressIsSome
+                | IntrinsicCall::AddressIsNone
+                | IntrinsicCall::AddressUnwrap => {
                     panic!("backend call expr cannot lower address intrinsic without a receiver");
                 }
                 IntrinsicCall::TypeOf => {
@@ -794,6 +804,45 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
                     alignment,
                     &receiver_value.ty,
                 )))
+            }
+            IntrinsicCall::AddressIsSome => {
+                let Some(arg_values) = self.lower_call_arg_values(args)? else {
+                    return Ok(None);
+                };
+                if !arg_values.is_empty() {
+                    panic!(
+                        "backend nullable-address is_some expects 0 args, got {}",
+                        arg_values.len()
+                    );
+                }
+                let receiver = self.load_receiver_scalar(receiver_is_place, receiver_value);
+                Ok(Some(self.lower_nullable_addr_is_some(receiver)))
+            }
+            IntrinsicCall::AddressIsNone => {
+                let Some(arg_values) = self.lower_call_arg_values(args)? else {
+                    return Ok(None);
+                };
+                if !arg_values.is_empty() {
+                    panic!(
+                        "backend nullable-address is_none expects 0 args, got {}",
+                        arg_values.len()
+                    );
+                }
+                let receiver = self.load_receiver_scalar(receiver_is_place, receiver_value);
+                Ok(Some(self.lower_nullable_addr_is_none(receiver)))
+            }
+            IntrinsicCall::AddressUnwrap => {
+                let Some(arg_values) = self.lower_call_arg_values(args)? else {
+                    return Ok(None);
+                };
+                if !arg_values.is_empty() {
+                    panic!(
+                        "backend nullable-address unwrap expects 0 args, got {}",
+                        arg_values.len()
+                    );
+                }
+                let receiver = self.load_receiver_scalar(receiver_is_place, receiver_value);
+                Ok(Some(self.lower_nullable_addr_unwrap(receiver)))
             }
             IntrinsicCall::TypeOf => {
                 panic!("backend type_of intrinsic cannot lower with a method receiver");
@@ -1245,6 +1294,55 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
         let bool_ty = self.type_lowerer.lower_type(&Type::Bool);
         self.builder
             .cmp(crate::ir::CmpOp::Eq, remainder, zero, bool_ty)
+    }
+
+    fn lower_nullable_addr_is_some(&mut self, addr: ValueId) -> LinearValue {
+        let u64_ty = self.type_lowerer.lower_type(&Type::uint(64));
+        let zero = self.builder.const_int(0, false, 64, u64_ty);
+        let bool_ty = self.type_lowerer.lower_type(&Type::Bool);
+        self.builder.cmp(crate::ir::CmpOp::Ne, addr, zero, bool_ty)
+    }
+
+    fn lower_nullable_addr_is_none(&mut self, addr: ValueId) -> LinearValue {
+        let u64_ty = self.type_lowerer.lower_type(&Type::uint(64));
+        let zero = self.builder.const_int(0, false, 64, u64_ty);
+        let bool_ty = self.type_lowerer.lower_type(&Type::Bool);
+        self.builder.cmp(crate::ir::CmpOp::Eq, addr, zero, bool_ty)
+    }
+
+    fn lower_nullable_addr_unwrap(&mut self, addr: ValueId) -> LinearValue {
+        let cond = self.lower_nullable_addr_is_some(addr);
+        let ok_bb = self.builder.add_block();
+        let trap_bb = self.builder.add_block();
+        self.builder.terminate(crate::ir::Terminator::CondBr {
+            cond,
+            then_bb: ok_bb,
+            then_args: Vec::new(),
+            else_bb: trap_bb,
+            else_args: Vec::new(),
+        });
+
+        self.builder.select_block(trap_bb);
+        let unit_ty = self.type_lowerer.lower_type(&Type::Unit);
+        let u64_ty = self.type_lowerer.lower_type(&Type::uint(64));
+        let msg = "called unwrap() on None address".as_bytes().to_vec();
+        let msg_len = self.builder.const_int(msg.len() as i128, false, 64, u64_ty);
+        let msg_global = self.globals.add_bytes(msg);
+        let u8_ty = self.type_lowerer.lower_type(&Type::uint(8));
+        let u8_ptr_ty = self.type_lowerer.ptr_to(u8_ty);
+        let msg_ptr = self.builder.const_global_addr(msg_global, u8_ptr_ty);
+        let msg_ptr_u64 = self.builder.cast(CastKind::PtrToInt, msg_ptr, u64_ty);
+        let kind = self.builder.const_int(6, false, 64, u64_ty);
+        let zero = self.builder.const_int(0, false, 64, u64_ty);
+        let _ = self.builder.call(
+            Callee::Runtime(RuntimeFn::Trap),
+            vec![kind, msg_ptr_u64, msg_len, zero],
+            unit_ty,
+        );
+        self.builder.terminate(crate::ir::Terminator::Unreachable);
+
+        self.builder.select_block(ok_bb);
+        addr
     }
 
     pub(super) fn lower_call_args_from_plan(

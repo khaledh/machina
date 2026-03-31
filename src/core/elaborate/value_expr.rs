@@ -394,6 +394,7 @@ impl<'a> Elaborator<'a> {
                 tail: tail.as_ref().map(|value| Box::new(self.elab_value(value))),
             },
             ExprKind::UnitLit => ExprKind::UnitLit,
+            ExprKind::NoneLit => ExprKind::NoneLit,
             ExprKind::IntLit(value) => ExprKind::IntLit(*value),
             ExprKind::BoolLit(value) => ExprKind::BoolLit(*value),
             ExprKind::CharLit(value) => ExprKind::CharLit(*value),

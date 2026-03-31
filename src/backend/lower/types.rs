@@ -150,7 +150,14 @@ impl<'a> TypeLowerer<'a> {
                 let elem = self.lower_type(elem_ty);
                 self.ptr_to(elem)
             }
-            Type::ViewSlice { elem_ty } | Type::ViewArray { elem_ty } => {
+            Type::ViewSlice { elem_ty } => {
+                let elem = self.lower_type(elem_ty);
+                let elem_ptr = self.ptr_to(elem);
+                let ptr = self.ptr_to(elem_ptr);
+                let u64 = self.lower_type(&Type::uint(64));
+                self.lower_ptr_len_struct(ptr, u64)
+            }
+            Type::ViewArray { elem_ty } => {
                 let elem = self.lower_type(elem_ty);
                 let ptr = self.ptr_to(elem);
                 let u64 = self.lower_type(&Type::uint(64));

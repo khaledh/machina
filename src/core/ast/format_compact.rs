@@ -158,6 +158,7 @@ pub fn format_semantic_value_expr_compact(expr: &Expr) -> String {
     match &expr.kind {
         ExprKind::Block { .. } => "{ ... }".to_string(),
         ExprKind::UnitLit => "()".to_string(),
+        ExprKind::NoneLit => "None".to_string(),
         ExprKind::IntLit(value) => value.to_string(),
         ExprKind::BoolLit(value) => value.to_string(),
         ExprKind::CharLit(value) => fmt_char(*value),

@@ -1805,6 +1805,7 @@ fn walk_child_exprs(
         | ExprKind::Var { .. }
         | ExprKind::RoleProjection { .. }
         | ExprKind::UnitLit
+        | ExprKind::NoneLit
         | ExprKind::IntLit(_)
         | ExprKind::BoolLit(_)
         | ExprKind::CharLit(_)

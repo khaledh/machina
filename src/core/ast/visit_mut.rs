@@ -616,7 +616,8 @@ pub fn walk_expr<V: VisitorMut + ?Sized>(v: &mut V, expr: &mut Expr) {
             }
         }
 
-        ExprKind::IntLit(_)
+        ExprKind::NoneLit
+        | ExprKind::IntLit(_)
         | ExprKind::BoolLit(_)
         | ExprKind::CharLit(_)
         | ExprKind::StringLit { .. }

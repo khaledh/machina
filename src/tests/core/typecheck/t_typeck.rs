@@ -303,6 +303,34 @@ fn test_address_helper_methods_typecheck() {
 }
 
 #[test]
+fn test_nullable_address_none_and_methods_typecheck() {
+    let source = r#"
+        @layout(fixed)
+        type BootInfo = {
+            response: vaddr?,
+        }
+
+        fn load(info: BootInfo) -> bool {
+            if info.response.is_none() {
+                false
+            } else {
+                info.response.unwrap().is_aligned(4096)
+            }
+        }
+
+        fn probe(addr: paddr?) -> bool {
+            addr.is_some()
+        }
+
+        static var boot = BootInfo {
+            response: None,
+        };
+    "#;
+
+    let _ctx = type_check_source(source).expect("Failed to type check");
+}
+
+#[test]
 fn test_address_arithmetic_operators_typecheck() {
     let source = r#"
         fn advance(base: vaddr, delta: u64) -> vaddr {

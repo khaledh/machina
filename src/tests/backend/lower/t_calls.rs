@@ -328,6 +328,26 @@ fn test_lower_address_equality_builtin_scalar() {
 }
 
 #[test]
+fn test_lower_nullable_address_is_none_builtin_method() {
+    let text = lower_main_text(indoc! {"
+        fn main(addr: vaddr?) -> bool {
+            addr.is_none()
+        }
+    "});
+
+    let expected = indoc! {"
+        fn main(u64) -> bool {
+          bb0(%v0: u64):
+            %v1: u64 = const 0:u64
+            %v2: bool = cmp.eq %v0, %v1
+            ret %v2
+        }
+    "};
+
+    assert_ir_eq(text, expected);
+}
+
+#[test]
 fn test_lower_address_add_operator() {
     let text = lower_main_text(indoc! {"
         fn main(base: vaddr, delta: u64) -> vaddr {
@@ -405,6 +425,41 @@ fn test_lower_view_slice_at_intrinsic() {
 
         fn main(addr: vaddr, count: u64) -> view_slice<Header> {
             view_slice_at(addr, count)
+        }
+    "});
+
+    let expected = indoc! {"
+        fn main(u64, u64) -> struct { ptr: ptr<ptr<Header>>, len: u64 } {
+          locals:
+            %l0: struct { ptr: ptr<ptr<Header>>, len: u64 }
+          bb0(%v0: u64, %v1: u64):
+            %v2: ptr<ptr<Header>> = cast.int_to_ptr %v0 to ptr<ptr<Header>>
+            %v3: ptr<struct { ptr: ptr<ptr<Header>>, len: u64 }> = addr_of %l0
+            %v4: ptr<ptr<ptr<Header>>> = field_addr %v3, 0
+            store %v4, %v2
+            %v5: ptr<u64> = field_addr %v3, 1
+            store %v5, %v1
+            %v6: struct { ptr: ptr<ptr<Header>>, len: u64 } = load %v3
+            ret %v6
+        }
+    "};
+
+    assert_ir_eq(text, expected);
+}
+
+#[test]
+fn test_lower_view_array_at_intrinsic() {
+    let text = lower_main_text(indoc! {"
+        @intrinsic
+        fn view_array_at<T>(addr: vaddr, count: u64) -> view_array<T>;
+
+        @layout(fixed)
+        type Header = {
+            magic: u64,
+        }
+
+        fn main(addr: vaddr, count: u64) -> view_array<Header> {
+            view_array_at(addr, count)
         }
     "});
 

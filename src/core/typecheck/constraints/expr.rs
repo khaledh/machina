@@ -95,6 +95,13 @@ impl<'a> ConstraintCollector<'a> {
                 Type::Unit,
                 ConstraintReason::Expr(expr.id, expr.span),
             ),
+            ExprKind::NoneLit => {
+                if let Some(expected) = expected
+                    && expected.is_nullable_address()
+                {
+                    self.push_eq(expr_ty.clone(), expected, ConstraintReason::Expr(expr.id, expr.span));
+                }
+            }
             ExprKind::IntLit(_) => {
                 // Keep integer literals polymorphic during solving. If they
                 // remain unconstrained, solve defaults this var to i32.

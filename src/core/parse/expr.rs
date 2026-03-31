@@ -372,6 +372,16 @@ impl<'a> Parser<'a> {
             TK::Ident(name) => {
                 let marker = self.mark();
 
+                if name == "None" {
+                    let span = self.curr_token.span;
+                    self.advance();
+                    return Ok(Expr {
+                        id: self.id_gen.new_id(),
+                        kind: ExprKind::NoneLit,
+                        span,
+                    });
+                }
+
                 if name == "send"
                     && self.peek().map(|t| &t.kind) == Some(&TK::LParen)
                     && let Some(expr) = self.try_parse_send_expr(marker)?

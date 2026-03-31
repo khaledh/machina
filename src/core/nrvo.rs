@@ -330,6 +330,7 @@ impl<'a> NrvoSafetyChecker<'a> {
             }
 
             VEK::UnitLit
+            | VEK::NoneLit
             | VEK::IntLit(_)
             | VEK::BoolLit(_)
             | VEK::CharLit(_)

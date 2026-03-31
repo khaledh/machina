@@ -269,6 +269,7 @@ impl<'a> DropPlanBuilder<'a> {
                 self.visit_block(expr, items, tail.as_deref());
             }
             ExprKind::UnitLit
+            | ExprKind::NoneLit
             | ExprKind::IntLit(_)
             | ExprKind::BoolLit(_)
             | ExprKind::CharLit(_)
