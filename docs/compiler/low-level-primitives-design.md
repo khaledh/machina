@@ -2,7 +2,8 @@
 
 ## Status
 
-Proposed.
+Proposed. Partially implemented; this document reflects the target
+design, which extends beyond what the compiler currently supports.
 
 Scoped to what Machina needs to parse Limine boot protocol responses.
 Volatile access, MMIO registers, and bitfield types are out of scope
@@ -48,12 +49,14 @@ struct limine_memmap_request {
 };
 ```
 
-The kernel places a request struct in its binary. The bootloader scans for
-it by magic bytes, processes it, and fills in the `response` pointer. The
-response contains a pointer to an array of pointers to entry structs.
+The kernel places a request struct in its binary. The bootloader scans
+for it by magic bytes, processes it, and fills in the `response`
+pointer. The response contains a pointer to an array of pointers to
+entry structs.
 
-All response pointers are virtual addresses with the HHDM offset applied.
-The data lives in bootloader-reclaimable RAM — not MMIO, not volatile.
+All response pointers are virtual addresses with the HHDM offset
+applied. The data lives in bootloader-reclaimable RAM — not MMIO, not
+volatile.
 
 A Machina kernel needs to:
 1. Declare the request as a mutable global with known layout.
@@ -68,10 +71,10 @@ A Machina kernel needs to:
 
 ### Problem
 
-Machina's default struct layout is unspecified — the compiler may reorder
-fields, insert padding, or change alignment for optimization. Foreign
-data structures require exact control over field order, size, and
-alignment.
+Machina's default struct layout is unspecified — the compiler may
+reorder fields, insert padding, or change alignment for optimization.
+Foreign data structures require exact control over field order, size,
+and alignment.
 
 ### Design
 
@@ -84,7 +87,7 @@ A `@layout(fixed)` attribute on a type declaration guarantees:
   alignment.
 
 ```machina
-@layout(fixed)
+@layout(fixed, size: 24)
 type LimineMemmapEntry = {
     base: paddr,     // offset 0, size 8
     length: u64,     // offset 8, size 8
@@ -97,13 +100,98 @@ type LimineMemmapEntry = {
 
 The in-memory representation of a fixed-layout type must be fully
 determined by reading its field declarations. Every field's type must
-have a known, fixed size. No field may have hidden storage or depend on
-sibling fields for its representation.
+have a known, fixed size. The rules are:
 
-This means `view<T>`, `view_slice<T>`, and similar abstract handle types
-are **not** valid field types in a `@layout(fixed)` struct. Foreign
-indirection is modeled at the usage site, not inside the type
-declaration (see Feature 3).
+- **Plain value fields** contribute their natural size and alignment
+  (e.g., `u64` = 8 bytes, `u8` = 1 byte, `paddr` = 8 bytes).
+- **View fields** (`view<T>?`, `view<T[]>?`, `view<view<T>[]>?`)
+  always occupy **8 bytes** (one pointer-sized slot). The view type
+  describes the *meaning* of the stored pointer, not an expanded
+  in-memory value.
+- **`@count(sibling)`** is field metadata — it tells the compiler
+  which sibling field provides the element count for a sequence view
+  field. It does not affect the field's storage size.
+
+This keeps layout computation straightforward: read the fields, sum
+the sizes using the rules above.
+
+### Typed view fields
+
+View fields encode the pointee type directly in the declaration
+rather than using untyped `vaddr?`:
+
+```machina
+@layout(fixed)
+type LimineMemmapResponse = {
+    revision: u64,
+    entry_count: u64,
+    @count(entry_count)
+    entries: view<view<LimineMemmapEntry>[]>?,
+}
+
+@layout(fixed)
+type LimineMemmapRequest = {
+    id: u64[4],
+    revision: u64,
+    response: view<LimineMemmapResponse>?,
+}
+```
+
+This eliminates manual `view_at` / `view_slice_at` calls — the struct
+declaration is the single source of truth for both layout and access
+semantics.
+
+### View field access
+
+Reading a nullable view field yields a value that can be unwrapped
+via `or` or `match some/none`:
+
+```machina
+let response = memmap_request.response or {
+    println("no response");
+    return;
+};
+// response: view<LimineMemmapResponse>
+```
+
+Reading a counted view field (with `@count`) automatically pairs the
+stored pointer with the sibling count to produce a sequence view:
+
+```machina
+let entries = response.entries or {
+    println("no entries");
+    return;
+};
+// entries: view<view<LimineMemmapEntry>[]>
+// iteration yields view<LimineMemmapEntry> per element
+```
+
+### View type composition
+
+The view type family uses composition rather than separate named types:
+
+| Type | Meaning | Storage | Indexing |
+|------|---------|---------|----------|
+| `view<T>` | Single foreign struct | 8 bytes (ptr) | Field access |
+| `view<T[]>` | Contiguous foreign array | 8 bytes (ptr) + count from `@count` | Direct index |
+| `view<view<T>[]>` | Pointer table (T\*\*) | 8 bytes (ptr) + count from `@count` | Double deref |
+| `view<T>?` | Nullable pointer to T | 8 bytes | Unwrap then access |
+
+`view<view<T>[]>` reads as: "a foreign view over a contiguous array
+of foreign views of T." The outer view handles the array bounds; each
+inner `view<T>` is a pointer to a T. This is exactly the Limine
+`T**` pattern — honest about the double indirection without exposing
+raw pointers.
+
+### `@count` rules
+
+- `@count(field_name)` may only appear on `view<T[]>?` or
+  `view<view<T>[]>?` fields.
+- The referenced field must be a preceding field in the same struct
+  with an unsigned integer type (`u64`, `u32`, etc.).
+- The compiler verifies that the referenced field exists and has a
+  valid type.
+- `@count` does not affect storage size — it is access metadata only.
 
 ### Padding and Alignment
 
@@ -181,8 +269,8 @@ type LimineMemmapEntry = {
 ### Interaction with normal types
 
 Fixed-layout types can be used as fields in other fixed-layout types
-(as long as the nested type also has a known fixed size). They can also
-be used in normal (non-fixed) code — the layout guarantee only
+(as long as the nested type also has a known fixed size). They can
+also be used in normal (non-fixed) code — the layout guarantee only
 constrains the in-memory representation, not how the type is used.
 
 ---
@@ -238,9 +326,15 @@ match some_field {
 }
 ```
 
-This keeps foreign pointer fields typed as addresses rather than raw
-`u64`, preserving the type distinction at the point where it matters
-most.
+Or using `or` for early bail:
+
+```machina
+let addr = some_field or {
+    println("not present");
+    return;
+};
+// addr is vaddr (non-nullable)
+```
 
 ### Construction
 
@@ -321,32 +415,53 @@ fixed-layout value at a specific address.
 - Copyable: views are just typed addresses, can be freely copied.
 - Typed: only works with `@layout(fixed)` types.
 
-**`view<T>` is not a field type.** It does not appear inside
-`@layout(fixed)` struct declarations. It is constructed at the usage
-site from raw address values read out of fixed-layout fields. This
-keeps fixed-layout types fully transparent — every field has a known,
-fixed-size representation.
+### As field types
 
-### Creation
+View types are valid field types in `@layout(fixed)` structs (see
+Feature 1). When used as fields, they occupy 8 bytes (pointer-sized)
+and encode the pointee type in the declaration. Reading a view field
+produces a `view<T>` (or `view<T>?` if nullable) that the programmer
+can access immediately without manual `view_at` construction.
+
+### Standalone construction
+
+For cases where views are not declared as struct fields (e.g.,
+bootstrapping the initial request struct), views can be constructed
+explicitly:
 
 ```machina
-unsafe {
-    let response = view_at<LimineMemmapResponse>(addr);
-}
+let response: view<LimineMemmapResponse> = unsafe {
+    view_at(response_addr)
+};
 ```
 
-Creating a view is unsafe. The caller must guarantee all of the
-following preconditions:
+Creating a view is unsafe. The caller must guarantee:
 
 - `addr` points to a region of readable memory at least
   `size_of<T>()` bytes long.
 - `addr` is aligned to `align_of<T>()`.
-- The memory at `addr` contains a valid representation of `T`
-  (correct field values for the declared layout).
+- The memory at `addr` contains a valid representation of `T`.
 - The backing memory remains valid for the entire duration that the
   view (or any copy of it) is used.
 
 Violating any of these is undefined behavior.
+
+Standalone construction of sequence views:
+
+```machina
+// Contiguous array (single indirection)
+let items: view<SomeType[]> = unsafe {
+    view_array_at(addr, count)
+};
+
+// Pointer table (double indirection)
+let entries: view<view<LimineMemmapEntry>[]> = unsafe {
+    view_slice_at(entries_addr, entry_count)
+};
+```
+
+These constructors are also unsafe with the same preconditions plus
+count validity and pointee validity for the entire sequence.
 
 ### Safety model
 
@@ -354,9 +469,9 @@ Views do not carry lifetime or region information. The compiler does
 **not** track whether the backing memory is still valid. This is a
 deliberate V1 simplification.
 
-The programmer is responsible for ensuring that a view's backing memory
-remains valid for the duration of use. For Limine boot structures, the
-contract is:
+The programmer is responsible for ensuring that a view's backing
+memory remains valid for the duration of use. For Limine boot
+structures, the contract is:
 
 - Bootloader-reclaimable memory is valid from kernel entry until the
   kernel explicitly reclaims it (e.g., by adding it to the free page
@@ -376,98 +491,9 @@ let rev = response.revision;         // reads u64 from addr+0
 let count = response.entry_count;    // reads u64 from addr+8
 ```
 
-Field access through a view looks identical to field access on a normal
-struct value. The difference is that the read comes from the view's
-backing address rather than a stack/heap location.
-
-### Nullable views
-
-Limine response pointers may be null (if the bootloader doesn't support
-a request). Since pointer fields are declared as `vaddr?`, the null
-check happens naturally through pattern matching before a view is
-constructed:
-
-```machina
-match request.response_ptr {
-    some(addr) => {
-        // addr is vaddr (non-nullable) — safe to create a view
-        let response = unsafe { view_at<LimineMemmapResponse>(addr) };
-        // use response
-    }
-    none => {
-        // bootloader didn't support this request
-    }
-}
-```
-
-The `vaddr?` type ensures the null check is required before the
-address can be passed to `view_at`, which only accepts non-nullable
-`vaddr`.
-
-### Foreign slices
-
-Limine's `entries` field uses double indirection: a pointer to an
-array of pointers, with a separate `entry_count` field.
-
-Since `view_slice<T>` is **not** a field type (it would break layout
-transparency), foreign slices are constructed at the usage site from
-the raw fields:
-
-```machina
-match response.entries_ptr {
-    some(entries_addr) => {
-        // Construct an iterable foreign slice (unsafe: trusting the pointer)
-        let entries = unsafe {
-            view_slice_at<LimineMemmapEntry>(entries_addr, response.entry_count)
-        };
-
-        // Iterate safely — bounds-checked by count
-        for entry in entries {
-            // entry is view<LimineMemmapEntry>
-            let base = entry.base;       // paddr
-            let len = entry.length;      // u64
-        }
-    }
-    none => {
-        // entries pointer was null
-    }
-}
-```
-
-`view_slice_at<T>(addr, count)` creates a `view_slice<T>` that
-represents a counted, iterable sequence of foreign views. It handles
-the double indirection internally: the address points to an array of
-pointers, each pointer is followed to produce a `view<T>`.
-
-Creating a view slice is unsafe. The caller must guarantee all of the
-following preconditions:
-
-- `addr` points to a readable, pointer-aligned region of memory
-  containing at least `count` contiguous pointer-sized (8-byte)
-  entries.
-- Each of the `count` pointer entries is itself a valid, non-null,
-  properly aligned address pointing to a readable region at least
-  `size_of<T>()` bytes long containing a valid representation of `T`.
-- All backing memory (both the pointer array and every pointee)
-  remains valid for the entire duration that the slice (or any view
-  produced by iterating it) is used.
-
-Violating any of these is undefined behavior. Once constructed,
-iteration is safe — it is bounds-checked by `count` and each element
-access follows validated pointers.
-
-For single-indirection patterns (pointer to contiguous array of
-structs), a separate constructor could be provided:
-
-```machina
-let items = unsafe {
-    view_array_at<SomeType>(vaddr(ptr), count)
-};
-```
-
-The distinction between `view_slice_at` (double indirection, `T**`)
-and `view_array_at` (single indirection, `T*`) is explicit at the
-construction site.
+Field access through a view looks identical to field access on a
+normal struct value. The difference is that the read comes from the
+view's backing address rather than a stack/heap location.
 
 ---
 
@@ -491,11 +517,12 @@ bytes. This requires:
 Machina adds `static var` declarations at module scope:
 
 ```machina
+@section(".limine_requests")
 static var memmap_request = LimineMemmapRequest {
     id: [0xc7b1dd30df4c8b88, 0x0a82e883a194f07b,
          0x67cf3d9d378a806f, 0xe304acdfc50c3c62],
     revision: 0,
-    response_ptr: 0,
+    response: None,
 };
 ```
 
@@ -569,9 +596,9 @@ unsafe { ptr.write(42) };
 
 | Situation | Use |
 |-----------|-----|
-| Reading a known-layout struct at an address | `view<T>` |
-| Iterating a known-layout array at an address | `view_slice<T>` |
-| Following a nullable pointer to a struct | `view<T>` + null check |
+| Reading a known-layout struct at an address | `view<T>` field or `view_at` |
+| Iterating a foreign array | `view<T[]>` field with `@count` |
+| Following a nullable pointer to a struct | `view<T>?` field, unwrap via `or` |
 | Building a page table | `*T` |
 | Writing to arbitrary memory | `*T` |
 | C FFI | `*T` |
@@ -579,13 +606,16 @@ unsafe { ptr.write(42) };
 
 ---
 
-## Limine Example: Complete
+## Limine Example: Target Design
 
-Putting it all together — a Machina kernel that reads the Limine
-memory map:
+The following shows the end-state design — how a Machina kernel
+**will** read the Limine memory map once all planned phases are
+implemented. Typed view fields (Phase 4 remaining), nullable-view
+`or` recovery (Phase 6), and safe static-var reads in kernel-entry
+context are not yet implemented.
 
 ```machina
-// --- Type declarations (fixed layout matching C structs) ---
+// --- Type declarations ---
 
 @layout(fixed, size: 24)
 type LimineMemmapEntry = {
@@ -598,150 +628,130 @@ type LimineMemmapEntry = {
 type LimineMemmapResponse = {
     revision: u64,
     entry_count: u64,
-    entries_ptr: vaddr?,     // nullable pointer to entries array
+    @count(entry_count)
+    entries: view<view<LimineMemmapEntry>[]>?,
 }
 
 @layout(fixed)
 type LimineMemmapRequest = {
     id: u64[4],
     revision: u64,
-    response_ptr: vaddr?,    // nullable pointer to response
+    response: view<LimineMemmapResponse>?,
 }
 
-// --- Request global (placed in kernel binary for bootloader to find) ---
+// --- Request global ---
 
 @section(".limine_requests")
 static var memmap_request = LimineMemmapRequest {
     id: [0xc7b1dd30df4c8b88, 0x0a82e883a194f07b,
          0x67cf3d9d378a806f, 0xe304acdfc50c3c62],
     revision: 0,
-    response_ptr: none,
+    response: None,
 };
 
 // --- Kernel entry ---
 
 fn kernel_main() {
-    // Read the response pointer (bootloader may have set it)
-    let response_addr = unsafe { memmap_request.response_ptr };
+    let response = memmap_request.response or {
+        println("no response");
+        return;
+    };
 
-    match response_addr {
-        some(addr) => {
-            // Create a typed view over the response struct
-            let response = unsafe { view_at<LimineMemmapResponse>(addr) };
+    let entries = response.entries or {
+        println("no entries");
+        return;
+    };
 
-            // Read the entries pointer (also nullable)
-            match response.entries_ptr {
-                some(entries_addr) => {
-                    // Create an iterable slice (double indirection)
-                    let entries = unsafe {
-                        view_slice_at<LimineMemmapEntry>(
-                            entries_addr,
-                            response.entry_count,
-                        )
-                    };
-
-                    // Iterate — no raw pointers, bounds-checked by count
-                    for entry in entries {
-                        let base = entry.base;       // paddr
-                        let length = entry.length;   // u64
-                        let typ = entry.typ;         // u64
-                        // ... process entry ...
-                    }
-                }
-                none => {
-                    // entries pointer was null
-                }
-            }
-        }
-        none => {
-            // bootloader didn't provide memory map
-        }
+    println(response.entry_count);
+    for entry in entries {
+        println(entry.length);
     }
 }
 ```
 
-The unsafe points are explicit and narrow:
-1. Reading the global static (externally mutated by bootloader).
-2. Creating a view from a bootloader-provided address (caller
-   guarantees the address points to valid, aligned, readable memory
-   containing a `LimineMemmapResponse`).
-3. Creating a view slice from a bootloader-provided address and count
-   (caller guarantees the pointer array contains `entry_count` valid,
-   non-null, aligned pointers to `LimineMemmapEntry` structs, and all
-   backing memory remains valid during iteration).
+No raw pointers. No manual `view_at` calls. No nested `match`. The
+struct declarations carry both layout and access semantics — every
+pointer field declares what it points to, and counted fields declare
+where their length comes from.
 
-Once constructed, field access and iteration are safe — the type
-system guarantees the layout and iteration is bounds-checked. The
-fixed-layout types are fully transparent — every field has a declared
-size and offset.
+**Note on `static var` access:** The target example reads
+`memmap_request.response` without `unsafe`. The current implementation
+requires `unsafe` for all `static var` reads. The target design would
+allow safe reads of `static var` in kernel-entry context
+(single-threaded, no scheduler), but the exact scoping rule for this
+exemption is an open question. Until then, the kernel entry path
+would use `unsafe` around static reads.
 
 ---
 
 ## Open Questions
 
 1. **Mutability of views**: Should views support writes? For Limine,
-   read-only is sufficient. For page tables, you'd want writable views.
-   Could split into `view<T>` (read) and `view_mut<T>` (read-write),
-   or defer mutability to raw pointers for now.
+   read-only is sufficient. For page tables, you'd want writable
+   views. Could split into `view<T>` (read) and `view_mut<T>`
+   (read-write), or defer mutability to raw pointers for now.
 
-2. **View creation syntax**: `view_at<T>(addr)` is functional but
-   verbose. Could be a method on vaddr: `addr.view<T>()`. Or a cast
-   syntax.
-
-3. **Single vs double indirection**: `view_slice_at` handles `T**`
-   (Limine's pattern). `view_array_at` would handle `T*` (contiguous
-   array). Both are needed; the naming should make the distinction
-   clear.
-
-4. **Endianness**: Limine mandates little-endian. Should fixed-layout
+2. **Endianness**: Limine mandates little-endian. Should fixed-layout
    types have an endianness annotation, or assume native (which is
    little-endian on all Limine-supported architectures)?
 
-5. **Static initialization**: `static var` initializers must be
+3. **Static initialization**: `static var` initializers must be
    evaluable at compile time (no runtime expressions). This matches
-   the Limine use case (magic constants, none pointers) but may need
+   the Limine use case (magic constants, None pointers) but may need
    expansion for other kernel globals.
 
-6. **General nullable type**: This design introduces `paddr?` and
-   `vaddr?` as nullable address types with zero-is-none semantics.
-   Whether Machina adds a general `T?` optional type is a separate
-   design question. The address-specific nullable types stand on their
-   own regardless.
+4. **General nullable type**: This design introduces `paddr?` and
+   `vaddr?` as nullable address types, and `view<T>?` as nullable
+   view fields. Whether Machina adds a general `T?` optional type is
+   a separate design question.
+
+5. **Standalone constructors vs field types**: The current
+   implementation uses `view_at` / `view_slice_at` / `view_array_at`
+   as standalone constructors. The target design moves toward typed
+   view fields in struct declarations. Both paths should coexist —
+   standalone constructors remain useful for bootstrapping (e.g., the
+   initial request struct read) and for ad-hoc foreign memory access.
 
 ## Implementation Plan
 
-### Phase 1 — Fixed-layout types
+### Phase 1 — Fixed-layout types (done)
 - `@layout(fixed)` attribute
 - Explicit padding requirement (reject implicit gaps)
 - Optional `size` assertion
 - Optional `@align` per-type and per-field
-- Transparency rule enforcement (no abstract handle types in fields)
 
-### Phase 2 — Address types
+### Phase 2 — Address types (done)
 - `paddr` and `vaddr` as built-in primitives
+- `paddr?` and `vaddr?` nullable forms
 - Arithmetic: `+ u64`, `- u64`, `- same`, comparisons
 - Helper methods: `align_down`, `align_up`, `is_aligned`, `offset`
-- Explicit construction from `u64` literal
-- Explicit `paddr`/`vaddr` conversion with HHDM offset
-- f-string formatting support
+- Nullable methods: `is_some`, `is_none`, `unwrap`
+- Pattern matching: `match some/none`
+- Inline recovery: `addr or { ... }`
 
-### Phase 3 — Globals and section placement
+### Phase 3 — Globals and section placement (done)
 - `static var` and `static let` declarations
 - `@section` attribute for linker section placement
 - Compile-time initializer evaluation
-- Unsafe access to `static var`
 
-### Phase 4 — Foreign views
+### Phase 4 — Foreign views (partially done)
 - `view<T>` type for fixed-layout types
-- Unsafe `view_at<T>(addr)` construction
-- Safe field-read access through views
-- `view_slice_at<T>(addr, count)` for double-indirection arrays
-- `view_array_at<T>(addr, count)` for single-indirection arrays
-- Iteration support for view slices/arrays
+- Standalone constructors: `view_at`, `view_slice_at`, `view_array_at`
+  (done — these require `unsafe`)
+- Safe field-read access through views (done)
+- Indexing and iteration on view sequences (done)
+- **Remaining**: typed view fields in fixed-layout structs
+  (`view<T>?`, `view<T[]>?` with `@count`)
+- **Remaining**: unify `view_slice<T>` → `view<view<T>[]>`,
+  `view_array<T>` → `view<T[]>`
 
-### Phase 5 — Raw pointer escape hatch
+### Phase 5 — Raw pointer escape hatch (done)
 - `*T` raw pointer type
 - `ptr_at<T>(addr)` construction (unsafe)
 - `.read()`, `.write(val)` (unsafe)
-- Pointer arithmetic: `ptr + u64`, `ptr - u64`
-- Cast from/to `paddr`/`vaddr`
+- `unsafe { ... }` block syntax with validation
+
+### Phase 6 — Inline recovery for nullable types
+- `or { ... }` on nullable addresses: `paddr?`, `vaddr?` (done)
+- Extend `or { ... }` to nullable view fields: `view<T>?`
+  (required by target example)
