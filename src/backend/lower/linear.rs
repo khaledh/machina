@@ -85,6 +85,7 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
     ) -> Result<BranchResult, LowerToIrError> {
         match &expr.kind {
             ExprKind::Block { items, tail } => self.lower_block_expr(expr, items, tail),
+            ExprKind::Unsafe { body } => self.lower_value_expr_value(body),
 
             ExprKind::UnitLit => {
                 let ty = self

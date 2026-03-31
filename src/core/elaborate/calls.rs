@@ -79,6 +79,22 @@ impl<'a> Elaborator<'a> {
                     .receiver
                     .as_ref()
                     .map(|receiver| receiver.ty.peel_heap()),
+                Some(Type::RawPtr { .. })
+            )
+        {
+            target = match method_name {
+                "read" => CallTarget::Intrinsic(IntrinsicCall::PtrRead),
+                "write" => CallTarget::Intrinsic(IntrinsicCall::PtrWrite),
+                _ => target,
+            };
+        }
+        if def_id.is_none()
+            && let Some(method_name) = method_name
+            && matches!(
+                call_sig
+                    .receiver
+                    .as_ref()
+                    .map(|receiver| receiver.ty.peel_heap()),
                 Some(Type::DynArray { .. })
             )
         {
@@ -167,6 +183,8 @@ impl<'a> Elaborator<'a> {
                     target = CallTarget::Intrinsic(IntrinsicCall::ViewSliceAt);
                 } else if intrinsic_name == "view_array_at" {
                     target = CallTarget::Intrinsic(IntrinsicCall::ViewArrayAt);
+                } else if intrinsic_name == "ptr_at" {
+                    target = CallTarget::Intrinsic(IntrinsicCall::PtrAt);
                 }
             } else if def.is_runtime() {
                 let runtime_name = def.link_name().unwrap_or(def.name.as_str());

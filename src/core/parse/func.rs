@@ -503,6 +503,9 @@ impl<'a> Parser<'a> {
             TypeExprKind::Heap { elem_ty_expr } => TypeExprKind::Heap {
                 elem_ty_expr: Box::new(self.clone_type_expr_with_new_ids(elem_ty_expr)),
             },
+            TypeExprKind::RawPtr { elem_ty_expr } => TypeExprKind::RawPtr {
+                elem_ty_expr: Box::new(self.clone_type_expr_with_new_ids(elem_ty_expr)),
+            },
             TypeExprKind::Ref {
                 mutable,
                 elem_ty_expr,

@@ -150,6 +150,10 @@ impl<'a> TypeLowerer<'a> {
                 let elem = self.lower_type(elem_ty);
                 self.ptr_to(elem)
             }
+            Type::RawPtr { elem_ty } => {
+                let elem = self.lower_type(elem_ty);
+                self.ptr_to(elem)
+            }
             Type::ViewSlice { elem_ty } => {
                 let elem = self.lower_type(elem_ty);
                 let elem_ptr = self.ptr_to(elem);

@@ -428,6 +428,10 @@ pub(super) fn format_type_expr_for_signature(ty_expr: &TypeExpr) -> Option<Strin
             let elem = format_type_expr_for_signature(elem_ty_expr)?;
             format!("{elem}^")
         }
+        TypeExprKind::RawPtr { elem_ty_expr } => {
+            let elem = format_type_expr_for_signature(elem_ty_expr)?;
+            format!("*{elem}")
+        }
         TypeExprKind::Tuple { field_ty_exprs } => {
             let fields: Vec<_> = field_ty_exprs
                 .iter()

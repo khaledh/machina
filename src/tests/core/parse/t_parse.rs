@@ -220,6 +220,60 @@ fn test_parse_multidim_array_type_3d() {
 }
 
 #[test]
+fn test_parse_raw_pointer_type_expr() {
+    let source = r#"
+        fn test(ptr: *u64) -> *u64 {
+            ptr
+        }
+    "#;
+
+    let funcs = parse_source(source).expect("Failed to parse");
+    let func = &funcs[0];
+
+    match &func.sig.params[0].typ.kind {
+        TypeExprKind::RawPtr { elem_ty_expr } => match &elem_ty_expr.kind {
+            TypeExprKind::Named { ident, .. } => assert_eq!(ident, "u64"),
+            _ => panic!("Expected named raw pointer element type"),
+        },
+        _ => panic!("Expected raw pointer parameter type"),
+    }
+
+    match &func.sig.ret_ty_expr.kind {
+        TypeExprKind::RawPtr { elem_ty_expr } => match &elem_ty_expr.kind {
+            TypeExprKind::Named { ident, .. } => assert_eq!(ident, "u64"),
+            _ => panic!("Expected named raw pointer element type"),
+        },
+        _ => panic!("Expected raw pointer return type"),
+    }
+}
+
+#[test]
+fn test_parse_unsafe_block_expr() {
+    let source = r#"
+        fn test() -> u64 {
+            unsafe {
+                1
+            }
+        }
+    "#;
+
+    let funcs = parse_source(source).expect("Failed to parse");
+    let func = &funcs[0];
+    let tail = block_tail(&func.body);
+
+    match &tail.kind {
+        ExprKind::Unsafe { body } => match &body.kind {
+            ExprKind::Block { .. } => {
+                let inner_tail = block_tail(body);
+                assert!(matches!(inner_tail.kind, ExprKind::IntLit(1)));
+            }
+            _ => panic!("Expected unsafe body to be a block"),
+        },
+        _ => panic!("Expected unsafe expression"),
+    }
+}
+
+#[test]
 fn test_parse_nullable_address_types() {
     let source = r#"
         fn boot(base: paddr, next: vaddr?) -> paddr? {

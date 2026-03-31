@@ -61,6 +61,9 @@ fn view_slice_at<T>(addr: vaddr, count: u64) -> view_slice<T>;
 @intrinsic
 fn view_array_at<T>(addr: vaddr, count: u64) -> view_array<T>;
 
+@intrinsic
+fn ptr_at<T>(addr: vaddr) -> *T;
+
 // Managed machine runtime bridge helpers.
 @runtime
 fn __mc_machine_runtime_new() -> u64;

@@ -215,6 +215,14 @@ impl<'a> ConstraintCollector<'a> {
                     );
                 }
             }
+            ExprKind::Unsafe { body } => {
+                let body_ty = self.collect_expr(body, expected.clone());
+                self.push_eq(
+                    expr_ty.clone(),
+                    body_ty,
+                    ConstraintReason::Expr(expr.id, expr.span),
+                );
+            }
             ExprKind::TupleLit(fields) => {
                 let mut field_terms = Vec::with_capacity(fields.len());
                 for field in fields {

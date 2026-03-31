@@ -660,6 +660,9 @@ impl fmt::Display for TypeExprKind {
             TypeExprKind::Heap { elem_ty_expr } => {
                 write!(f, "Heap({})", elem_ty_expr)?;
             }
+            TypeExprKind::RawPtr { elem_ty_expr } => {
+                write!(f, "RawPtr({})", elem_ty_expr)?;
+            }
             TypeExprKind::Ref {
                 mutable,
                 elem_ty_expr,
@@ -1240,6 +1243,10 @@ impl Expr {
                 if let Some(tail) = tail {
                     tail.fmt_with_indent(f, level + 1)?;
                 }
+            }
+            ExprKind::Unsafe { body } => {
+                writeln!(f, "{}Unsafe [{}]", pad, self.id)?;
+                body.fmt_with_indent(f, level + 1)?;
             }
             ExprKind::Var { ident, .. } => {
                 writeln!(f, "{}Var({}) [{}]", pad, ident, self.id)?;

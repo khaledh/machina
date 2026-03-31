@@ -158,6 +158,7 @@ pub enum TypeKey {
     Slice(Box<TypeKey>),
     DynArray(Box<TypeKey>),
     Heap(Box<TypeKey>),
+    RawPtr(Box<TypeKey>),
     Ref {
         mutable: bool,
         elem: Box<TypeKey>,
@@ -517,6 +518,14 @@ fn type_key_from_expr(
             module_path,
             generic_param_indexes,
         ))),
+        TypeExprKind::RawPtr { elem_ty_expr } => {
+            TypeKey::RawPtr(Box::new(type_key_from_expr(
+                elem_ty_expr,
+                def_table,
+                module_path,
+                generic_param_indexes,
+            )))
+        }
         TypeExprKind::Ref {
             mutable,
             elem_ty_expr,

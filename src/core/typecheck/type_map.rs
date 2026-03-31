@@ -472,6 +472,21 @@ fn resolve_type_expr_impl(
                 elem_ty: Box::new(elem_ty),
             })
         }
+        TypeExprKind::RawPtr { elem_ty_expr } => {
+            let elem_ty = resolve_type_expr_impl(
+                def_table,
+                module,
+                elem_ty_expr,
+                type_params,
+                type_args,
+                in_progress,
+                allow_error_union,
+                false,
+            )?;
+            Ok(Type::RawPtr {
+                elem_ty: Box::new(elem_ty),
+            })
+        }
         TypeExprKind::Ref {
             mutable,
             elem_ty_expr,

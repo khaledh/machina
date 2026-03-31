@@ -172,6 +172,7 @@ macro_rules! with_typecheck_variants {
             MapIndexValueNotCopySafe,
             MapIndexAssignUnsupported,
             ForeignViewIndexAssignUnsupported,
+            UnsafeOperationRequiresUnsafeBlock,
             UnknownType,
             UnionNotAllowedHere,
             IterableNotAllowedHere,

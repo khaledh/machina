@@ -1353,6 +1353,17 @@ fn test_named_call_args_not_supported_for_function_values() {
 }
 
 #[test]
+fn test_raw_pointer_types_in_signatures_typecheck() {
+    let source = r#"
+        fn id(ptr: *u64) -> *u64 {
+            ptr
+        }
+    "#;
+
+    let _ctx = type_check_source(source).expect("Failed to type check");
+}
+
+#[test]
 fn test_generic_method_infers_from_arg() {
     let source = r#"
         type Boxed = { value: u64 }

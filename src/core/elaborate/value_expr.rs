@@ -393,6 +393,9 @@ impl<'a> Elaborator<'a> {
                     .collect(),
                 tail: tail.as_ref().map(|value| Box::new(self.elab_value(value))),
             },
+            ExprKind::Unsafe { body } => ExprKind::Unsafe {
+                body: Box::new(self.elab_value(body)),
+            },
             ExprKind::UnitLit => ExprKind::UnitLit,
             ExprKind::NoneLit => ExprKind::NoneLit,
             ExprKind::IntLit(value) => ExprKind::IntLit(*value),

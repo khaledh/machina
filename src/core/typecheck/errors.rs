@@ -159,6 +159,9 @@ pub enum TypeCheckErrorKind {
     #[error("Foreign view indexing is read-only")]
     ForeignViewIndexAssignUnsupported,
 
+    #[error("unsafe operation `{0}` requires an unsafe block")]
+    UnsafeOperationRequiresUnsafeBlock(String),
+
     #[error("Type cannot be inferred")]
     UnknownType,
 

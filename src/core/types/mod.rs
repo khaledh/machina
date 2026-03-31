@@ -61,6 +61,9 @@ pub enum Type {
     View {
         elem_ty: Box<Type>,
     },
+    RawPtr {
+        elem_ty: Box<Type>,
+    },
     ViewSlice {
         elem_ty: Box<Type>,
     },
@@ -224,6 +227,7 @@ impl PartialEq for Type {
             (Type::Pending { response_tys: r1 }, Type::Pending { response_tys: r2 }) => r1 == r2,
             (Type::ReplyCap { response_tys: r1 }, Type::ReplyCap { response_tys: r2 }) => r1 == r2,
             (Type::View { elem_ty: e1 }, Type::View { elem_ty: e2 }) => e1 == e2,
+            (Type::RawPtr { elem_ty: e1 }, Type::RawPtr { elem_ty: e2 }) => e1 == e2,
             (Type::ViewSlice { elem_ty: e1 }, Type::ViewSlice { elem_ty: e2 }) => e1 == e2,
             (Type::ViewArray { elem_ty: e1 }, Type::ViewArray { elem_ty: e2 }) => e1 == e2,
             (Type::Set { elem_ty: e1 }, Type::Set { elem_ty: e2 }) => e1 == e2,
@@ -356,6 +360,10 @@ impl Hash for Type {
             }
             Type::View { elem_ty } => {
                 28u8.hash(state);
+                elem_ty.hash(state);
+            }
+            Type::RawPtr { elem_ty } => {
+                31u8.hash(state);
                 elem_ty.hash(state);
             }
             Type::ViewSlice { elem_ty } => {
@@ -566,6 +574,7 @@ impl Type {
             | (Type::Slice { elem_ty: l }, Type::Slice { elem_ty: r })
             | (Type::DynArray { elem_ty: l }, Type::DynArray { elem_ty: r })
             | (Type::View { elem_ty: l }, Type::View { elem_ty: r })
+            | (Type::RawPtr { elem_ty: l }, Type::RawPtr { elem_ty: r })
             | (Type::ViewSlice { elem_ty: l }, Type::ViewSlice { elem_ty: r })
             | (Type::ViewArray { elem_ty: l }, Type::ViewArray { elem_ty: r })
             | (Type::Set { elem_ty: l }, Type::Set { elem_ty: r })
@@ -743,6 +752,7 @@ impl Type {
             Type::Pending { .. } => 8,
             Type::ReplyCap { .. } => 8,
             Type::View { .. } => 8,
+            Type::RawPtr { .. } => 8,
             Type::ViewSlice { .. } | Type::ViewArray { .. } => 16,
             Type::Set { .. } => 16,
             Type::Iterable { .. } => 16,
@@ -786,6 +796,7 @@ impl Type {
             Type::Pending { .. } => 8,
             Type::ReplyCap { .. } => 8,
             Type::View { .. } => 8,
+            Type::RawPtr { .. } => 8,
             Type::ViewSlice { .. } | Type::ViewArray { .. } => 8,
             Type::Set { .. } => 8,
             Type::Iterable { .. } => 8,
@@ -873,6 +884,7 @@ impl Type {
             Type::Pending { .. } => false,
             Type::ReplyCap { .. } => false,
             Type::View { .. } => false,
+            Type::RawPtr { .. } => false,
             Type::ViewSlice { .. } => false,
             Type::ViewArray { .. } => false,
             Type::Set { .. } => true,
@@ -920,7 +932,10 @@ impl Type {
 
     pub fn foreign_view_elem_type(&self) -> Option<Type> {
         match self {
-            Type::View { elem_ty } | Type::ViewSlice { elem_ty } | Type::ViewArray { elem_ty } => {
+            Type::View { elem_ty }
+            | Type::RawPtr { elem_ty }
+            | Type::ViewSlice { elem_ty }
+            | Type::ViewArray { elem_ty } => {
                 Some((**elem_ty).clone())
             }
             _ => None,
@@ -1084,7 +1099,11 @@ impl Type {
 
     pub fn min_value(&self) -> i128 {
         match self {
-            Type::PAddr | Type::NullablePAddr | Type::VAddr | Type::NullableVAddr => 0,
+            Type::PAddr
+            | Type::NullablePAddr
+            | Type::VAddr
+            | Type::NullableVAddr
+            | Type::RawPtr { .. } => 0,
             Type::Int { signed: false, .. } => 0,
             Type::Int {
                 signed: true, bits, ..
@@ -1095,7 +1114,11 @@ impl Type {
 
     pub fn max_value(&self) -> i128 {
         match self {
-            Type::PAddr | Type::NullablePAddr | Type::VAddr | Type::NullableVAddr => {
+            Type::PAddr
+            | Type::NullablePAddr
+            | Type::VAddr
+            | Type::NullableVAddr
+            | Type::RawPtr { .. } => {
                 u64::MAX as i128
             }
             Type::Int {
@@ -1144,6 +1167,9 @@ impl Type {
                 elem_ty: Box::new((*elem_ty).map(f)),
             },
             Type::View { elem_ty } => Type::View {
+                elem_ty: Box::new((*elem_ty).map(f)),
+            },
+            Type::RawPtr { elem_ty } => Type::RawPtr {
                 elem_ty: Box::new((*elem_ty).map(f)),
             },
             Type::ViewSlice { elem_ty } => Type::ViewSlice {
@@ -1297,6 +1323,16 @@ impl Type {
                 let mapped_elem = elem_ty.map_cow(f);
                 if matches!(mapped_elem, Cow::Owned(_)) {
                     Cow::Owned(Type::View {
+                        elem_ty: Box::new(mapped_elem.into_owned()),
+                    })
+                } else {
+                    Cow::Borrowed(self)
+                }
+            }
+            Type::RawPtr { elem_ty } => {
+                let mapped_elem = elem_ty.map_cow(f);
+                if matches!(mapped_elem, Cow::Owned(_)) {
+                    Cow::Owned(Type::RawPtr {
                         elem_ty: Box::new(mapped_elem.into_owned()),
                     })
                 } else {
@@ -1499,6 +1535,7 @@ impl Type {
             | Type::Array { elem_ty, .. }
             | Type::DynArray { elem_ty }
             | Type::View { elem_ty }
+            | Type::RawPtr { elem_ty }
             | Type::ViewSlice { elem_ty }
             | Type::ViewArray { elem_ty }
             | Type::Set { elem_ty }

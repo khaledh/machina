@@ -157,6 +157,7 @@ pub fn format_semantic_place_expr_compact(place: &Expr) -> String {
 pub fn format_semantic_value_expr_compact(expr: &Expr) -> String {
     match &expr.kind {
         ExprKind::Block { .. } => "{ ... }".to_string(),
+        ExprKind::Unsafe { body } => format!("unsafe {}", format_semantic_value_expr_compact(body)),
         ExprKind::UnitLit => "()".to_string(),
         ExprKind::NoneLit => "None".to_string(),
         ExprKind::IntLit(value) => value.to_string(),

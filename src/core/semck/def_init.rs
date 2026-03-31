@@ -1023,6 +1023,7 @@ impl<'a> DefInitChecker<'a> {
 
     fn check_expr(&mut self, expr: &Expr) {
         match &expr.kind {
+            ExprKind::Unsafe { body } => self.check_expr(body),
             ExprKind::Var { .. } => self.check_var_use(expr),
             ExprKind::StructField { .. } | ExprKind::TupleField { .. } => {
                 self.check_lvalue_use(expr);

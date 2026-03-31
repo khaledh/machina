@@ -86,6 +86,7 @@ impl<'a> LoweringPlanBuilder<'a> {
                     self.visit_value_expr(tail);
                 }
             }
+            ExprKind::Unsafe { body } => self.visit_value_expr(body),
 
             ExprKind::ArrayLit { init, .. } => match init {
                 ArrayLitInit::Elems(elems) => {

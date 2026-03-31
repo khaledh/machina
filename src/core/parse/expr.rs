@@ -78,6 +78,18 @@ impl<'a> Parser<'a> {
                 },
                 span: self.close(marker),
             })
+        } else if self.is_contextual_keyword("unsafe")
+            && self.peek().map(|token| token.kind == TK::LBrace) == Some(true)
+        {
+            self.consume_contextual_keyword("unsafe")?;
+            let body = self.parse_block()?;
+            Ok(Expr {
+                id: self.id_gen.new_id(),
+                kind: ExprKind::Unsafe {
+                    body: Box::new(body),
+                },
+                span: self.close(marker),
+            })
         } else {
             // <expr>
             self.parse_postfix()

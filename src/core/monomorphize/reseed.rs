@@ -424,6 +424,7 @@ impl VisitorMut for NodeIdReseeder<'_> {
                     self.visit_expr(tail);
                 }
             }
+            ExprKind::Unsafe { body } => self.visit_expr(body),
             ExprKind::StringFmt { segments } => {
                 for segment in segments {
                     if let StringFmtSegment::Expr { expr, .. } = segment {

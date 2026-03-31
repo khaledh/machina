@@ -39,6 +39,8 @@ pub(crate) enum BuiltinMethod {
     NullableAddrIsSome,
     NullableAddrIsNone,
     NullableAddrUnwrap { addr_ty: Type },
+    RawPtrRead { elem_ty: Type },
+    RawPtrWrite { elem_ty: Type },
     SetInsert { elem_ty: Type },
     SetRemove { elem_ty: Type },
     SetContains { elem_ty: Type },
@@ -60,7 +62,9 @@ impl BuiltinMethod {
             | BuiltinMethod::AddrIsAligned
             | BuiltinMethod::NullableAddrIsSome
             | BuiltinMethod::NullableAddrIsNone
-            | BuiltinMethod::NullableAddrUnwrap { .. } => ParamMode::In,
+            | BuiltinMethod::NullableAddrUnwrap { .. }
+            | BuiltinMethod::RawPtrRead { .. } => ParamMode::In,
+            BuiltinMethod::RawPtrWrite { .. } => ParamMode::In,
             BuiltinMethod::SetInsert { .. }
             | BuiltinMethod::SetRemove { .. }
             | BuiltinMethod::SetClear { .. } => ParamMode::InOut,
@@ -89,7 +93,13 @@ impl BuiltinMethod {
             }],
             BuiltinMethod::NullableAddrIsSome
             | BuiltinMethod::NullableAddrIsNone
-            | BuiltinMethod::NullableAddrUnwrap { .. } => Vec::new(),
+            | BuiltinMethod::NullableAddrUnwrap { .. }
+            | BuiltinMethod::RawPtrRead { .. } => Vec::new(),
+            BuiltinMethod::RawPtrWrite { elem_ty } => vec![BuiltinMethodParam {
+                name: "value".to_string(),
+                mode: ParamMode::In,
+                ty: elem_ty.clone(),
+            }],
             BuiltinMethod::SetInsert { elem_ty }
             | BuiltinMethod::SetRemove { elem_ty }
             | BuiltinMethod::SetContains { elem_ty } => vec![BuiltinMethodParam {
@@ -133,6 +143,8 @@ impl BuiltinMethod {
                 BuiltinMethodRet::Bool
             }
             BuiltinMethod::NullableAddrUnwrap { addr_ty } => BuiltinMethodRet::Value(addr_ty.clone()),
+            BuiltinMethod::RawPtrRead { elem_ty } => BuiltinMethodRet::Value(elem_ty.clone()),
+            BuiltinMethod::RawPtrWrite { .. } => BuiltinMethodRet::Unit,
             BuiltinMethod::SetInsert { .. }
             | BuiltinMethod::SetRemove { .. }
             | BuiltinMethod::SetContains { .. } => BuiltinMethodRet::Bool,
@@ -159,7 +171,9 @@ impl BuiltinMethod {
             | BuiltinMethod::AddrIsAligned
             | BuiltinMethod::NullableAddrIsSome
             | BuiltinMethod::NullableAddrIsNone
-            | BuiltinMethod::NullableAddrUnwrap { .. } => None,
+            | BuiltinMethod::NullableAddrUnwrap { .. }
+            | BuiltinMethod::RawPtrRead { .. }
+            | BuiltinMethod::RawPtrWrite { .. } => None,
             BuiltinMethod::MapInsert { key_ty, .. }
             | BuiltinMethod::MapRemove { key_ty }
             | BuiltinMethod::MapContainsKey { key_ty }
@@ -177,6 +191,7 @@ pub(crate) fn has_builtin_surface(ty: &Type) -> bool {
             | Type::VAddr
             | Type::NullablePAddr
             | Type::NullableVAddr
+            | Type::RawPtr { .. }
             | Type::DynArray { .. }
             | Type::Set { .. }
             | Type::Map { .. }
@@ -277,6 +292,12 @@ pub(crate) fn resolve_builtin_method(
         }),
         (Type::NullableVAddr, "unwrap") => Some(BuiltinMethod::NullableAddrUnwrap {
             addr_ty: Type::VAddr,
+        }),
+        (Type::RawPtr { elem_ty }, "read") => Some(BuiltinMethod::RawPtrRead {
+            elem_ty: (**elem_ty).clone(),
+        }),
+        (Type::RawPtr { elem_ty }, "write") => Some(BuiltinMethod::RawPtrWrite {
+            elem_ty: (**elem_ty).clone(),
         }),
         (Type::Set { elem_ty }, "insert") => Some(BuiltinMethod::SetInsert {
             elem_ty: (**elem_ty).clone(),

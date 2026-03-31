@@ -41,6 +41,7 @@ fn join_variant_rank(ty: &Type) -> u8 {
         | Type::NullablePAddr
         | Type::VAddr
         | Type::NullableVAddr
+        | Type::RawPtr { .. }
         | Type::Int { .. }
         | Type::Bool
         | Type::Char

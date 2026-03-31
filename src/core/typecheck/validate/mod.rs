@@ -11,6 +11,7 @@ use crate::core::typecheck::errors::TypeCheckErrorKind;
 
 mod control;
 mod stmt;
+mod unsafe_ops;
 
 /// Pass 4: post-solve validation that remains part of typecheck.
 pub(crate) fn run(engine: &mut TypecheckEngine) -> Result<(), Vec<TypeCheckError>> {
@@ -29,6 +30,7 @@ fn collect_errors(engine: &TypecheckEngine) -> Vec<TypeCheckError> {
     // Stmt-level rules sit here because they depend on solved types, but do
     // not need the heavier semantic passes downstream.
     errors.extend(stmt::check_stmt_semantics(engine));
+    errors.extend(unsafe_ops::check_unsafe_ops(engine));
     errors
 }
 

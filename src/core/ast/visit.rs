@@ -389,6 +389,7 @@ pub fn walk_type_expr<V: Visitor + ?Sized>(v: &mut V, type_expr: &TypeExpr) {
         }
         TypeExprKind::Slice { elem_ty_expr } => v.visit_type_expr(elem_ty_expr),
         TypeExprKind::Heap { elem_ty_expr } => v.visit_type_expr(elem_ty_expr),
+        TypeExprKind::RawPtr { elem_ty_expr } => v.visit_type_expr(elem_ty_expr),
         TypeExprKind::Ref { elem_ty_expr, .. } => v.visit_type_expr(elem_ty_expr),
         TypeExprKind::Fn {
             params,
@@ -627,6 +628,9 @@ pub fn walk_expr<V: Visitor + ?Sized>(v: &mut V, expr: &Expr) {
             if let Some(tail) = tail {
                 v.visit_expr(tail);
             }
+        }
+        ExprKind::Unsafe { body } => {
+            v.visit_expr(body);
         }
 
         ExprKind::NoneLit

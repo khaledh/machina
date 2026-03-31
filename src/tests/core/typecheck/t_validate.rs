@@ -154,3 +154,90 @@ fn test_validate_defer_rejects_bare_try() {
             .any(|err| matches!(err.kind(), TypeCheckErrorKind::DeferBareTry))
     );
 }
+
+#[test]
+fn test_validate_ptr_at_requires_unsafe_block() {
+    let source = r#"
+        @intrinsic
+        fn ptr_at<T>(addr: vaddr) -> *T;
+
+        fn test(addr: vaddr) -> *u64 {
+            let ptr: *u64 = ptr_at(addr);
+            ptr
+        }
+    "#;
+
+    let result = run_validate(source);
+    assert!(result.is_err());
+    let errors = result.expect_err("expected error");
+    assert!(errors.iter().any(|err| matches!(
+        err.kind(),
+        TypeCheckErrorKind::UnsafeOperationRequiresUnsafeBlock(op) if op == "ptr_at"
+    )));
+}
+
+#[test]
+fn test_validate_raw_pointer_read_requires_unsafe_block() {
+    let source = r#"
+        fn test(ptr: *u64) -> u64 {
+            ptr.read()
+        }
+    "#;
+
+    let result = run_validate(source);
+    assert!(result.is_err());
+    let errors = result.expect_err("expected error");
+    assert!(errors.iter().any(|err| matches!(
+        err.kind(),
+        TypeCheckErrorKind::UnsafeOperationRequiresUnsafeBlock(op) if op == "raw pointer read"
+    )));
+}
+
+#[test]
+fn test_validate_raw_pointer_write_requires_unsafe_block() {
+    let source = r#"
+        fn test(ptr: *u64) {
+            ptr.write(1);
+        }
+    "#;
+
+    let result = run_validate(source);
+    assert!(result.is_err());
+    let errors = result.expect_err("expected error");
+    assert!(errors.iter().any(|err| matches!(
+        err.kind(),
+        TypeCheckErrorKind::UnsafeOperationRequiresUnsafeBlock(op) if op == "raw pointer write"
+    )));
+}
+
+#[test]
+fn test_validate_raw_pointer_ops_allowed_inside_unsafe_block() {
+    let source = r#"
+        @intrinsic
+        fn ptr_at<T>(addr: vaddr) -> *T;
+
+        fn make(addr: vaddr) -> *u64 {
+            unsafe {
+                ptr_at(addr)
+            }
+        }
+
+        fn read(ptr: *u64) -> u64 {
+            unsafe {
+                ptr.read()
+            }
+        }
+
+        fn write(ptr: *u64) {
+            unsafe {
+                ptr.write(1);
+            }
+        }
+    "#;
+
+    let result = run_validate(source);
+    assert!(
+        result.is_ok(),
+        "expected raw pointer operations inside unsafe blocks to be accepted"
+    );
+}

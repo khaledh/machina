@@ -101,6 +101,7 @@ fn check_capability_at_path(
         | Type::NullablePAddr
         | Type::VAddr
         | Type::NullableVAddr
+        | Type::RawPtr { .. }
         | Type::Bool
         | Type::Char
         | Type::Unknown
@@ -137,6 +138,7 @@ fn supports_capability_leaf_v1(ty: &Type, capability: Capability) -> bool {
                     | Type::NullablePAddr
                     | Type::VAddr
                     | Type::NullableVAddr
+                    | Type::RawPtr { .. }
                     | Type::Bool
                     | Type::Char
                     | Type::String
@@ -150,6 +152,7 @@ fn supports_capability_leaf_v1(ty: &Type, capability: Capability) -> bool {
                     | Type::NullablePAddr
                     | Type::VAddr
                     | Type::NullableVAddr
+                    | Type::RawPtr { .. }
                     | Type::Bool
                     | Type::Char
                     | Type::String

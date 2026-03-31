@@ -469,6 +469,9 @@ pub enum TypeExprKind {
     Heap {
         elem_ty_expr: Box<TypeExpr>,
     },
+    RawPtr {
+        elem_ty_expr: Box<TypeExpr>,
+    },
     Ref {
         mutable: bool,
         elem_ty_expr: Box<TypeExpr>,
@@ -933,6 +936,9 @@ pub enum ExprKind {
     Block {
         items: Vec<BlockItem>,
         tail: Option<Box<Expr>>,
+    },
+    Unsafe {
+        body: Box<Expr>,
     },
 
     // Literals (scalar)

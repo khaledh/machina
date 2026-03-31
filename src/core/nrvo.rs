@@ -209,6 +209,7 @@ impl<'a> NrvoSafetyChecker<'a> {
 
     fn check_expr(&self, expr: &Expr, at_return: bool) -> bool {
         match &expr.kind {
+            VEK::Unsafe { body } => self.check_expr(body, at_return),
             VEK::Load { expr } | VEK::Move { expr } | VEK::ImplicitMove { expr } => {
                 self.check_place_value(expr, at_return)
             }

@@ -493,6 +493,15 @@ pub(crate) fn type_expr_from_type(
                 span,
             )?),
         },
+        Type::RawPtr { elem_ty } => TypeExprKind::RawPtr {
+            elem_ty_expr: Box::new(type_expr_from_type(
+                elem_ty,
+                def_table,
+                module,
+                node_id_gen,
+                span,
+            )?),
+        },
         Type::Ref { mutable, elem_ty } => TypeExprKind::Ref {
             mutable: *mutable,
             elem_ty_expr: Box::new(type_expr_from_type(

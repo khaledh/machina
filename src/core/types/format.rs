@@ -84,6 +84,9 @@ impl fmt::Display for Type {
             Type::View { elem_ty } => {
                 write!(f, "view<{}>", elem_ty)
             }
+            Type::RawPtr { elem_ty } => {
+                write!(f, "*{}", elem_ty)
+            }
             Type::ViewSlice { elem_ty } => {
                 write!(f, "view_slice<{}>", elem_ty)
             }

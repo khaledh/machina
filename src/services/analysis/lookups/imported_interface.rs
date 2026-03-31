@@ -394,6 +394,7 @@ fn format_type_key_with_names(ty: &TypeKey, type_param_names: &[String]) -> Stri
             format!("{}[*]", format_type_key_with_names(elem, type_param_names))
         }
         TypeKey::Heap(elem) => format!("~{}", format_type_key_with_names(elem, type_param_names)),
+        TypeKey::RawPtr(elem) => format!("*{}", format_type_key_with_names(elem, type_param_names)),
         TypeKey::Set(elem) => {
             format!(
                 "set<{}>",

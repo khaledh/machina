@@ -50,7 +50,7 @@ impl<'a> Parser<'a> {
 
     fn token_can_start_type(kind: &TK, tokens: &[Token], pos: usize) -> bool {
         match kind {
-            TK::KwFn | TK::KwSet | TK::KwMap | TK::Ident(_) => true,
+            TK::KwFn | TK::KwSet | TK::KwMap | TK::Ident(_) | TK::Star => true,
             TK::LParen => true,
             TK::LBracket => false,
             _ => {
@@ -108,6 +108,10 @@ impl<'a> Parser<'a> {
     }
 
     fn parse_type_atom(&mut self) -> Result<TypeExpr, ParseError> {
+        if self.curr_token.kind == TK::Star {
+            return self.parse_raw_ptr_type();
+        }
+
         if self.curr_token.kind == TK::KwFn {
             return self.parse_fn_type();
         }
@@ -118,6 +122,19 @@ impl<'a> Parser<'a> {
         }
 
         self.parse_named_type()
+    }
+
+    fn parse_raw_ptr_type(&mut self) -> Result<TypeExpr, ParseError> {
+        let marker = self.mark();
+        self.consume(&TK::Star)?;
+        let elem_ty_expr = self.parse_type_term()?;
+        Ok(TypeExpr {
+            id: self.id_gen.new_id(),
+            kind: TypeExprKind::RawPtr {
+                elem_ty_expr: Box::new(elem_ty_expr),
+            },
+            span: self.close(marker),
+        })
     }
 
     fn parse_nullable_address_type_postfix(

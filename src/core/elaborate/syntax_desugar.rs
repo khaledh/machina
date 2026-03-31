@@ -880,6 +880,7 @@ impl<'a, 'b> SyntaxDesugarCtx<'a, 'b> {
                     self.desugar_value_expr(tail);
                 }
             }
+            ExprKind::Unsafe { body } => self.desugar_value_expr(body),
             ExprKind::ArrayLit { init, .. } => match init {
                 ArrayLitInit::Elems(elems) => {
                     for elem in elems {

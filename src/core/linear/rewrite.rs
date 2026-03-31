@@ -1529,6 +1529,18 @@ fn walk_child_exprs(
     node_id_gen: &mut NodeIdGen,
 ) {
     match &mut expr.kind {
+        ExprKind::Unsafe { body } => {
+            let _ = rewrite_expr_in_scope(
+                body,
+                infos,
+                linear_index,
+                current_linear_type,
+                env,
+                machine_env,
+                errors,
+                node_id_gen,
+            );
+        }
         ExprKind::BinOp { left, right, .. } => {
             let _ = rewrite_expr_in_scope(
                 left,

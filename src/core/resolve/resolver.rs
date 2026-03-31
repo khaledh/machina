@@ -2061,6 +2061,9 @@ impl Visitor for SymbolResolver {
                     }
                 });
             }
+            ExprKind::Unsafe { body } => {
+                self.visit_expr(body);
+            }
 
             ExprKind::IntLit(_)
             | ExprKind::BoolLit(_)

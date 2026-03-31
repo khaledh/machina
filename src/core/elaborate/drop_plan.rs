@@ -268,6 +268,9 @@ impl<'a> DropPlanBuilder<'a> {
             ExprKind::Block { items, tail } => {
                 self.visit_block(expr, items, tail.as_deref());
             }
+            ExprKind::Unsafe { body } => {
+                self.visit_value_expr(body);
+            }
             ExprKind::UnitLit
             | ExprKind::NoneLit
             | ExprKind::IntLit(_)
