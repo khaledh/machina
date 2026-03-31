@@ -4,7 +4,7 @@ use std::collections::HashMap;
 
 use crate::core::ast::visit::{self, Visitor};
 use crate::core::ast::{Expr, ExprKind, NodeId};
-use crate::core::resolve::{Def, DefId, DefTable};
+use crate::core::resolve::{DefId, DefTable};
 use crate::core::typecheck::engine::TypecheckEngine;
 use crate::core::typecheck::errors::{TEK, TypeCheckError};
 use crate::core::types::Type;
@@ -41,7 +41,7 @@ impl Visitor for UnsafeOpsChecker<'_> {
                 self.unsafe_depth -= 1;
             }
             ExprKind::Call { .. } => {
-                self.check_ptr_at_call(expr);
+                self.check_unsafe_intrinsic_call(expr);
                 visit::walk_expr(self, expr);
             }
             ExprKind::MethodCall {
@@ -62,7 +62,7 @@ impl UnsafeOpsChecker<'_> {
         self.unsafe_depth > 0
     }
 
-    fn check_ptr_at_call(&mut self, expr: &Expr) {
+    fn check_unsafe_intrinsic_call(&mut self, expr: &Expr) {
         if self.in_unsafe_context() {
             return;
         }
@@ -72,9 +72,16 @@ impl UnsafeOpsChecker<'_> {
         let Some(def) = self.def_table.lookup_def(def_id) else {
             return;
         };
-        if is_intrinsic_named(def, "ptr_at") {
+        let op_name = match def.link_name().unwrap_or(def.name.as_str()) {
+            "ptr_at" => Some("ptr_at"),
+            "view_at" => Some("view_at"),
+            "view_slice_at" => Some("view_slice_at"),
+            "view_array_at" => Some("view_array_at"),
+            _ => None,
+        };
+        if let Some(op_name) = op_name.filter(|_| def.is_intrinsic()) {
             self.errors
-                .push(TEK::UnsafeOperationRequiresUnsafeBlock("ptr_at".into()).at(expr.span));
+                .push(TEK::UnsafeOperationRequiresUnsafeBlock(op_name.into()).at(expr.span));
         }
     }
 
@@ -98,8 +105,4 @@ impl UnsafeOpsChecker<'_> {
                 .push(TEK::UnsafeOperationRequiresUnsafeBlock(op_name.into()).at(expr.span));
         }
     }
-}
-
-fn is_intrinsic_named(def: &Def, name: &str) -> bool {
-    def.is_intrinsic() && def.link_name().unwrap_or(def.name.as_str()) == name
 }

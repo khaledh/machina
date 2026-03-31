@@ -44,7 +44,9 @@ fn dump_memmap() {
     }
 
     let response_addr = memmap_request.response_ptr.unwrap();
-    let response: view<LimineMemmapResponse> = view_at(response_addr);
+    let response: view<LimineMemmapResponse> = unsafe {
+        view_at(response_addr)
+    };
 
     if response.entries_ptr.is_none() {
         println("no entries");
@@ -52,8 +54,9 @@ fn dump_memmap() {
     }
 
     let entries_addr = response.entries_ptr.unwrap();
-    let entries: view_slice<LimineMemmapEntry> =
-        view_slice_at(entries_addr, response.entry_count);
+    let entries: view_slice<LimineMemmapEntry> = unsafe {
+        view_slice_at(entries_addr, response.entry_count)
+    };
 
     println(response.entry_count);
     for entry in entries {

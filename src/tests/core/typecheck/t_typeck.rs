@@ -474,15 +474,21 @@ fn test_foreign_view_constructors_typecheck() {
         }
 
         fn one(addr: vaddr) -> view<Header> {
-            view_at(addr)
+            unsafe {
+                view_at(addr)
+            }
         }
 
         fn many(addr: vaddr, count: u64) -> view_slice<Header> {
-            view_slice_at(addr, count)
+            unsafe {
+                view_slice_at(addr, count)
+            }
         }
 
         fn flat(addr: vaddr, count: u64) -> view_array<Header> {
-            view_array_at(addr, count)
+            unsafe {
+                view_array_at(addr, count)
+            }
         }
     "#;
 

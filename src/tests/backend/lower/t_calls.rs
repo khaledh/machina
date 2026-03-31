@@ -397,7 +397,9 @@ fn test_lower_view_at_intrinsic() {
         }
 
         fn main(addr: vaddr) -> view<Header> {
-            view_at(addr)
+            unsafe {
+                view_at(addr)
+            }
         }
     "});
 
@@ -424,7 +426,9 @@ fn test_lower_view_slice_at_intrinsic() {
         }
 
         fn main(addr: vaddr, count: u64) -> view_slice<Header> {
-            view_slice_at(addr, count)
+            unsafe {
+                view_slice_at(addr, count)
+            }
         }
     "});
 
@@ -459,7 +463,9 @@ fn test_lower_view_array_at_intrinsic() {
         }
 
         fn main(addr: vaddr, count: u64) -> view_array<Header> {
-            view_array_at(addr, count)
+            unsafe {
+                view_array_at(addr, count)
+            }
         }
     "});
 

@@ -177,6 +177,53 @@ fn test_validate_ptr_at_requires_unsafe_block() {
 }
 
 #[test]
+fn test_validate_view_constructors_require_unsafe_block() {
+    let source = r#"
+        @intrinsic
+        fn view_at<T>(addr: vaddr) -> view<T>;
+
+        @intrinsic
+        fn view_slice_at<T>(addr: vaddr, count: u64) -> view_slice<T>;
+
+        @intrinsic
+        fn view_array_at<T>(addr: vaddr, count: u64) -> view_array<T>;
+
+        @layout(fixed)
+        type Header = {
+            magic: u64,
+        }
+
+        fn one(addr: vaddr) -> view<Header> {
+            view_at(addr)
+        }
+
+        fn many(addr: vaddr, count: u64) -> view_slice<Header> {
+            view_slice_at(addr, count)
+        }
+
+        fn flat(addr: vaddr, count: u64) -> view_array<Header> {
+            view_array_at(addr, count)
+        }
+    "#;
+
+    let result = run_validate(source);
+    assert!(result.is_err());
+    let errors = result.expect_err("expected error");
+    assert!(errors.iter().any(|err| matches!(
+        err.kind(),
+        TypeCheckErrorKind::UnsafeOperationRequiresUnsafeBlock(op) if op == "view_at"
+    )));
+    assert!(errors.iter().any(|err| matches!(
+        err.kind(),
+        TypeCheckErrorKind::UnsafeOperationRequiresUnsafeBlock(op) if op == "view_slice_at"
+    )));
+    assert!(errors.iter().any(|err| matches!(
+        err.kind(),
+        TypeCheckErrorKind::UnsafeOperationRequiresUnsafeBlock(op) if op == "view_array_at"
+    )));
+}
+
+#[test]
 fn test_validate_raw_pointer_read_requires_unsafe_block() {
     let source = r#"
         fn test(ptr: *u64) -> u64 {
@@ -239,5 +286,48 @@ fn test_validate_raw_pointer_ops_allowed_inside_unsafe_block() {
     assert!(
         result.is_ok(),
         "expected raw pointer operations inside unsafe blocks to be accepted"
+    );
+}
+
+#[test]
+fn test_validate_view_constructors_allowed_inside_unsafe_block() {
+    let source = r#"
+        @intrinsic
+        fn view_at<T>(addr: vaddr) -> view<T>;
+
+        @intrinsic
+        fn view_slice_at<T>(addr: vaddr, count: u64) -> view_slice<T>;
+
+        @intrinsic
+        fn view_array_at<T>(addr: vaddr, count: u64) -> view_array<T>;
+
+        @layout(fixed)
+        type Header = {
+            magic: u64,
+        }
+
+        fn one(addr: vaddr) -> view<Header> {
+            unsafe {
+                view_at(addr)
+            }
+        }
+
+        fn many(addr: vaddr, count: u64) -> view_slice<Header> {
+            unsafe {
+                view_slice_at(addr, count)
+            }
+        }
+
+        fn flat(addr: vaddr, count: u64) -> view_array<Header> {
+            unsafe {
+                view_array_at(addr, count)
+            }
+        }
+    "#;
+
+    let result = run_validate(source);
+    assert!(
+        result.is_ok(),
+        "expected foreign view constructors inside unsafe blocks to be accepted"
     );
 }
