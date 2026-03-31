@@ -127,9 +127,8 @@ impl NullableAddrRule {
                         ..
                     } => {
                         if enum_name.is_some() {
-                            errors.push(
-                                SEK::InvalidMatchPattern(self.nullable_ty.clone()).at(*span),
-                            );
+                            errors
+                                .push(SEK::InvalidMatchPattern(self.nullable_ty.clone()).at(*span));
                             continue;
                         }
 
@@ -184,9 +183,10 @@ impl NullableAddrRule {
                         }
                     }
                     _ => {
-                        errors.push(SEK::InvalidMatchPattern(self.nullable_ty.clone()).at(
-                            pattern_span(pattern),
-                        ));
+                        errors.push(
+                            SEK::InvalidMatchPattern(self.nullable_ty.clone())
+                                .at(pattern_span(pattern)),
+                        );
                     }
                 }
             }

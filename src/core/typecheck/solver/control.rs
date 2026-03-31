@@ -150,6 +150,7 @@ pub(super) fn try_check_expr_obligation_control(
             expr_id,
             operand,
             on_error,
+            inline_handler,
             result,
             expected_return_ty,
             callable_def_id,
@@ -160,7 +161,23 @@ pub(super) fn try_check_expr_obligation_control(
                 operand_ty.clone(),
                 unifier.vars(),
             );
-            let Type::ErrorUnion { ok_ty, err_tys } = &operand_ty else {
+            let operand_ok_ty = match &operand_ty {
+                Type::ErrorUnion { ok_ty, .. } => {
+                    let _ = unifier.unify(result, ok_ty);
+                    Some(ok_ty.as_ref().clone())
+                }
+                ty if *inline_handler => {
+                    if let Some(addr_ty) = ty.nullable_address_payload() {
+                        let _ = unifier.unify(result, &addr_ty);
+                        Some(addr_ty)
+                    } else {
+                        None
+                    }
+                }
+                _ => None,
+            };
+
+            let Some(ok_ty) = operand_ok_ty else {
                 if !super::term_utils::is_unresolved(&operand_ty_for_diag) {
                     tc_push_error!(
                         errors,
@@ -172,7 +189,25 @@ pub(super) fn try_check_expr_obligation_control(
                 return true;
             };
 
-            let _ = unifier.unify(result, ok_ty);
+            if *inline_handler {
+                if let Some(handler_term) = on_error {
+                    let handler_ty = super::term_utils::resolve_term(handler_term, unifier);
+                    let _ = unifier.unify(result, &handler_ty);
+                }
+                return true;
+            }
+
+            let Type::ErrorUnion { err_tys, .. } = &operand_ty else {
+                if !super::term_utils::is_unresolved(&operand_ty_for_diag) {
+                    tc_push_error!(
+                        errors,
+                        *span,
+                        TEK::TryOperandNotErrorUnion(operand_ty_for_diag)
+                    );
+                    covered_exprs.insert(*expr_id);
+                }
+                return true;
+            };
 
             if let Some(handler_term) = on_error {
                 let handler_ty = super::term_utils::resolve_term(handler_term, unifier);
@@ -276,7 +311,7 @@ pub(super) fn try_check_expr_obligation_control(
                             .collect::<Vec<_>>();
                         missing_names.sort();
                         missing_names.dedup();
-                        let mut return_variant_names = std::iter::once(ok_ty.as_ref())
+                        let mut return_variant_names = std::iter::once(&ok_ty)
                             .chain(return_err_tys.iter())
                             .map(super::diag_utils::compact_type_name)
                             .collect::<Vec<_>>();

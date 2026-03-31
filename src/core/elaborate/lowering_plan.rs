@@ -467,12 +467,12 @@ impl<'a> LoweringPlanBuilder<'a> {
             StmtExprKind::LetBind { .. }
             | StmtExprKind::VarBind { .. }
             | StmtExprKind::VarDecl { .. }
-            | StmtExprKind::Assign { .. }
-            | StmtExprKind::Return { .. } => true,
+            | StmtExprKind::Assign { .. } => true,
             StmtExprKind::While { .. }
             | StmtExprKind::For { .. }
             | StmtExprKind::Break
             | StmtExprKind::Continue
+            | StmtExprKind::Return { .. }
             | StmtExprKind::CompoundAssign { .. } => false,
             StmtExprKind::Defer { .. } | StmtExprKind::Using { .. } => {
                 unreachable!("syntax desugar must remove defer/using before linearity checks");

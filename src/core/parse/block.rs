@@ -105,8 +105,8 @@ impl<'a> Parser<'a> {
     fn curr_starts_block_expr(&self) -> bool {
         self.lbrace_forces_block()
             || (!self.lookahead_for(TK::Pipe, TK::RBrace)
-            && !self.lookahead_for(TK::Colon, TK::RBrace)
-            && !self.lookahead_for(TK::Comma, TK::RBrace))
+                && !self.lookahead_for(TK::Colon, TK::RBrace)
+                && !self.lookahead_for(TK::Comma, TK::RBrace))
     }
 
     fn parse_semicolon_optional_expr_stmt(&mut self) -> Result<ExprStmtParse, ParseError> {

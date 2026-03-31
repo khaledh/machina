@@ -99,7 +99,11 @@ impl<'a> ConstraintCollector<'a> {
                 if let Some(expected) = expected
                     && expected.is_nullable_address()
                 {
-                    self.push_eq(expr_ty.clone(), expected, ConstraintReason::Expr(expr.id, expr.span));
+                    self.push_eq(
+                        expr_ty.clone(),
+                        expected,
+                        ConstraintReason::Expr(expr.id, expr.span),
+                    );
                 }
             }
             ExprKind::IntLit(_) => {
@@ -1034,10 +1038,21 @@ impl<'a> ConstraintCollector<'a> {
             }],
             ret_ty: Box::new(expr_ty.clone()),
         };
-        let on_error_ty = on_error
+        let inline_handler = on_error
             .as_ref()
-            .map(|handler| self.collect_expr(handler, Some(handler_expected_ty.clone())));
-        if let (Some(handler_expr), Some(handler_ty)) = (on_error.as_ref(), on_error_ty.as_ref()) {
+            .is_some_and(|handler| matches!(handler.kind, ExprKind::Block { .. }));
+        let on_error_ty = on_error.as_ref().map(|handler| {
+            let expected = if inline_handler {
+                expr_ty.clone()
+            } else {
+                handler_expected_ty.clone()
+            };
+            self.collect_expr(handler, Some(expected))
+        });
+        if !inline_handler
+            && let (Some(handler_expr), Some(handler_ty)) =
+                (on_error.as_ref(), on_error_ty.as_ref())
+        {
             self.out.call_obligations.push(CallObligation {
                 call_node: expr.id,
                 span: expr.span,
@@ -1058,6 +1073,7 @@ impl<'a> ConstraintCollector<'a> {
             expr_id: expr.id,
             operand: operand_ty,
             on_error: on_error_ty,
+            inline_handler,
             result: expr_ty.clone(),
             expected_return_ty: self.current_return_ty(),
             callable_def_id: self.current_callable_def_id(),

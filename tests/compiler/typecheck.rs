@@ -1015,6 +1015,72 @@ fn test_defer_runs_before_try_propagates_error() {
 }
 
 #[test]
+fn test_try_or_inline_block_bails_from_enclosing_function() {
+    let run = run_program(
+        "try_or_inline_block_return",
+        r#"
+            requires {
+                std::io::println
+            }
+
+            type AppError = {
+                code: u64,
+            }
+
+            fn fail() -> u64 | AppError {
+                AppError { code: 9 }
+            }
+
+            fn run() -> u64 {
+                let value = fail() or {
+                    println("handled");
+                    return 77;
+                };
+
+                value
+            }
+
+            fn main() {
+                println(run());
+            }
+        "#,
+    );
+    assert_eq!(run.status.code(), Some(0));
+
+    let stdout = String::from_utf8_lossy(&run.stdout);
+    assert_eq!(stdout, "handled\n77\n", "unexpected stdout: {stdout}");
+}
+
+#[test]
+fn test_nullable_address_or_inline_block_bails_early() {
+    let run = run_program(
+        "nullable_addr_or_inline_block",
+        r#"
+            requires {
+                std::io::println
+            }
+
+            fn dump(addr: vaddr?) {
+                let unwrapped = addr or {
+                    println("no response");
+                    return;
+                };
+
+                println(unwrapped.offset());
+            }
+
+            fn main() {
+                dump(None);
+            }
+        "#,
+    );
+    assert_eq!(run.status.code(), Some(0));
+
+    let stdout = String::from_utf8_lossy(&run.stdout);
+    assert_eq!(stdout, "no response\n", "unexpected stdout: {stdout}");
+}
+
+#[test]
 fn test_same_scope_name_rebinding_for_let_var_and_params() {
     let run = run_program(
         "same_scope_name_rebinding",

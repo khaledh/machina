@@ -246,7 +246,10 @@ impl<'a> Elaborator<'a> {
             arm_plans.push(MatchArmPlan { bindings });
         }
 
-        if some_arm.is_some() && !cases.iter().any(|case| case.value == 0) && let Some(arm_index) = wildcard_arm {
+        if some_arm.is_some()
+            && !cases.iter().any(|case| case.value == 0)
+            && let Some(arm_index) = wildcard_arm
+        {
             cases.push(MatchSwitchCase {
                 value: 0,
                 arm_index,

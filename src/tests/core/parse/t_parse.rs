@@ -407,7 +407,10 @@ fn test_parse_none_literal() {
 
     let funcs = parse_source(source).expect("Failed to parse");
     let func = &funcs[0];
-    let ExprKind::Block { tail: Some(tail), .. } = &func.body.kind else {
+    let ExprKind::Block {
+        tail: Some(tail), ..
+    } = &func.body.kind
+    else {
         panic!("expected block tail");
     };
     assert!(matches!(tail.kind, ExprKind::NoneLit));
@@ -3738,7 +3741,7 @@ fn test_parse_try_or_with_closure_handler() {
 }
 
 #[test]
-fn test_parse_try_or_block_sugar_wraps_handler_closure() {
+fn test_parse_try_or_block_sugar_keeps_inline_block() {
     let source = r#"
         fn test() -> u64 {
             parse_u64("42") or { 0 }
@@ -3757,13 +3760,9 @@ fn test_parse_try_or_block_sugar_wraps_handler_closure() {
     };
     assert!(matches!(fallible_expr.kind, ExprKind::Call { .. }));
     let Some(handler) = on_error else {
-        panic!("Expected handler closure");
+        panic!("Expected inline handler block");
     };
-    let ExprKind::Closure { params, body, .. } = &handler.kind else {
-        panic!("Expected closure handler");
-    };
-    assert_eq!(params.len(), 1);
-    assert!(matches!(body.kind, ExprKind::Block { .. }));
+    assert!(matches!(handler.kind, ExprKind::Block { .. }));
 }
 
 #[test]

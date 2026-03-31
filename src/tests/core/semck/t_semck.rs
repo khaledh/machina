@@ -151,10 +151,11 @@ fn test_nullable_address_match_rejects_non_exhaustive_some_only() {
     assert!(result.is_err());
 
     if let Err(errors) = result {
-        assert!(errors.iter().any(|error| matches!(
-            error.kind(),
-            SemCheckErrorKind::NonExhaustiveMatch
-        )));
+        assert!(
+            errors
+                .iter()
+                .any(|error| matches!(error.kind(), SemCheckErrorKind::NonExhaustiveMatch))
+        );
     }
 }
 

@@ -479,7 +479,7 @@ impl<'a> Elaborator<'a> {
                 fallible_expr,
                 on_error,
             } => {
-                if on_error.is_some() {
+                if on_error.is_some() && self.call_sigs.contains_key(&expr.id) {
                     // `try-or` error handlers lower as callable values and still
                     // need normal call-ABI planning for payload passing.
                     let call_sig = self.get_call_sig(expr.id);

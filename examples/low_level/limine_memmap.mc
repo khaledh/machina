@@ -2,11 +2,11 @@ requires {
     std::io::println
 }
 
-@layout(fixed, size: 24)
-type LimineMemmapEntry = {
-    base: paddr,
-    length: u64,
-    typ: u64,
+@layout(fixed)
+type LimineMemmapRequest = {
+    id: u64[4],
+    revision: u64,
+    response_ptr: vaddr?,
 }
 
 @layout(fixed)
@@ -14,13 +14,13 @@ type LimineMemmapResponse = {
     revision: u64,
     entry_count: u64,
     entries_ptr: vaddr?,
-}
+}    
 
-@layout(fixed)
-type LimineMemmapRequest = {
-    id: u64[4],
-    revision: u64,
-    response_ptr: vaddr?,
+@layout(fixed, size: 24)
+type LimineMemmapEntry = {
+    base: paddr,
+    length: u64,
+    typ: u64,
 }
 
 // Use a Mach-O-compatible section spelling here: Mach-O section names are
@@ -38,27 +38,27 @@ static var memmap_request = LimineMemmapRequest {
 };
 
 fn dump_memmap() {
-    match memmap_request.response_ptr {
-        some(response_addr) => {
-            let response: view<LimineMemmapResponse> = unsafe {
-                view_at(response_addr)
-            };
+    let response_addr = memmap_request.response_ptr or {
+        println("no response");
+        return;
+    };
 
-            match response.entries_ptr {
-                some(entries_addr) => {
-                    let entries: view_slice<LimineMemmapEntry> = unsafe {
-                        view_slice_at(entries_addr, response.entry_count)
-                    };
+    let response: view<LimineMemmapResponse> = unsafe {
+        view_at(response_addr)
+    };
 
-                    println(response.entry_count);
-                    for entry in entries {
-                        println(entry.length);
-                    }
-                }
-                none => println("no entries"),
-            }
-        }
-        none => println("no response"),
+    let entries_addr = response.entries_ptr or {
+        println("no entries");
+        return;
+    };
+
+    let entries: view_slice<LimineMemmapEntry> = unsafe {
+        view_slice_at(entries_addr, response.entry_count)
+    };
+
+    println(response.entry_count);
+    for entry in entries {
+        println(entry.length);
     }
 }
 

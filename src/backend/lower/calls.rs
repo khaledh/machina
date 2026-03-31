@@ -590,7 +590,9 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
                     return self.lower_ptr_at_intrinsic(expr, args, &call_plan);
                 }
                 IntrinsicCall::PtrRead | IntrinsicCall::PtrWrite => {
-                    panic!("backend call expr cannot lower raw-pointer intrinsic without a receiver");
+                    panic!(
+                        "backend call expr cannot lower raw-pointer intrinsic without a receiver"
+                    );
                 }
                 IntrinsicCall::ViewSliceAt | IntrinsicCall::ViewArrayAt => {
                     return self.lower_view_seq_intrinsic(expr, args, &call_plan);

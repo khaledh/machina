@@ -865,8 +865,7 @@ impl<'a> Parser<'a> {
         if self.lookahead_for(TK::FatArrow, TK::RBrace) {
             self.parse_try_or_arm_handler_closure()
         } else {
-            let body = self.parse_block()?;
-            Ok(self.wrap_try_or_handler_block(body))
+            self.parse_block()
         }
     }
 
@@ -905,11 +904,6 @@ impl<'a> Parser<'a> {
             span,
         };
         Ok(self.wrap_try_or_handler_with_param(err_param_name, body, span))
-    }
-
-    fn wrap_try_or_handler_block(&mut self, body: Expr) -> Expr {
-        let span = body.span;
-        self.wrap_try_or_handler_with_param("__err".to_string(), body, span)
     }
 
     fn wrap_try_or_handler_with_param(

@@ -2783,6 +2783,35 @@ fn test_try_or_block_sugar_typechecks() {
 }
 
 #[test]
+fn test_try_or_inline_block_sugar_allows_enclosing_return() {
+    let source = r#"
+        type IoError = { code: u64 }
+
+        fn ok(value: u64) -> u64 | IoError {
+            value
+        }
+
+        fn fail() -> u64 | IoError {
+            IoError { code: 1 }
+        }
+
+        fn read(flag: bool) -> u64 | IoError {
+            flag ? ok(41) : fail()
+        }
+
+        fn run(flag: bool) -> u64 {
+            let value = read(flag) or {
+                return 0;
+            };
+
+            value
+        }
+    "#;
+
+    let _ctx = type_check_source(source).expect("Failed to type check");
+}
+
+#[test]
 fn test_try_or_arm_sugar_typechecks() {
     let source = r#"
         type IoError = { code: u64 }
@@ -2806,6 +2835,21 @@ fn test_try_or_arm_sugar_typechecks() {
                 io: IoError => io.code,
                 parse: ParseError => parse.line,
             }
+        }
+    "#;
+
+    let _ctx = type_check_source(source).expect("Failed to type check");
+}
+
+#[test]
+fn test_nullable_address_or_inline_block_sugar_typechecks() {
+    let source = r#"
+        fn load(addr: vaddr?) -> u64 {
+            let unwrapped = addr or {
+                return 0;
+            };
+
+            unwrapped.offset()
         }
     "#;
 

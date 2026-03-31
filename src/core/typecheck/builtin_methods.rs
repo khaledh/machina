@@ -142,7 +142,9 @@ impl BuiltinMethod {
             BuiltinMethod::NullableAddrIsSome | BuiltinMethod::NullableAddrIsNone => {
                 BuiltinMethodRet::Bool
             }
-            BuiltinMethod::NullableAddrUnwrap { addr_ty } => BuiltinMethodRet::Value(addr_ty.clone()),
+            BuiltinMethod::NullableAddrUnwrap { addr_ty } => {
+                BuiltinMethodRet::Value(addr_ty.clone())
+            }
             BuiltinMethod::RawPtrRead { elem_ty } => BuiltinMethodRet::Value(elem_ty.clone()),
             BuiltinMethod::RawPtrWrite { .. } => BuiltinMethodRet::Unit,
             BuiltinMethod::SetInsert { .. }

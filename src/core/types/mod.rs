@@ -540,6 +540,14 @@ impl Type {
         matches!(self, Type::NullablePAddr | Type::NullableVAddr)
     }
 
+    pub fn nullable_address_payload(&self) -> Option<Type> {
+        match self {
+            Type::NullablePAddr => Some(Type::PAddr),
+            Type::NullableVAddr => Some(Type::VAddr),
+            _ => None,
+        }
+    }
+
     pub fn shape_eq(&self, other: &Type) -> bool {
         match (self, other) {
             (Type::Unknown, Type::Unknown) => true,
@@ -935,9 +943,7 @@ impl Type {
             Type::View { elem_ty }
             | Type::RawPtr { elem_ty }
             | Type::ViewSlice { elem_ty }
-            | Type::ViewArray { elem_ty } => {
-                Some((**elem_ty).clone())
-            }
+            | Type::ViewArray { elem_ty } => Some((**elem_ty).clone()),
             _ => None,
         }
     }
@@ -1118,9 +1124,7 @@ impl Type {
             | Type::NullablePAddr
             | Type::VAddr
             | Type::NullableVAddr
-            | Type::RawPtr { .. } => {
-                u64::MAX as i128
-            }
+            | Type::RawPtr { .. } => u64::MAX as i128,
             Type::Int {
                 signed: false,
                 bits,
