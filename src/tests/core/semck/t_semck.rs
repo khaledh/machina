@@ -124,6 +124,64 @@ fn test_signed_bounds_rejects_out_of_range_literal() {
 }
 
 #[test]
+fn test_nullable_address_match_is_exhaustive_with_some_and_none() {
+    let source = r#"
+        fn test(addr: vaddr?) -> u64 {
+            match addr {
+                some(x) => x.offset(),
+                none => 0,
+            }
+        }
+    "#;
+
+    let _ctx = sem_check_source(source).expect("Failed to sem check");
+}
+
+#[test]
+fn test_nullable_address_match_rejects_non_exhaustive_some_only() {
+    let source = r#"
+        fn test(addr: vaddr?) -> u64 {
+            match addr {
+                some(x) => x.offset(),
+            }
+        }
+    "#;
+
+    let result = sem_check_source(source);
+    assert!(result.is_err());
+
+    if let Err(errors) = result {
+        assert!(errors.iter().any(|error| matches!(
+            error.kind(),
+            SemCheckErrorKind::NonExhaustiveMatch
+        )));
+    }
+}
+
+#[test]
+fn test_nullable_address_match_rejects_duplicate_some() {
+    let source = r#"
+        fn test(addr: vaddr?) -> u64 {
+            match addr {
+                some(x) => x.offset(),
+                some(y) => y.offset(),
+                none => 0,
+            }
+        }
+    "#;
+
+    let result = sem_check_source(source);
+    assert!(result.is_err());
+
+    if let Err(errors) = result {
+        assert!(errors.iter().any(|error| matches!(
+            error.kind(),
+            SemCheckErrorKind::DuplicateMatchVariant(name) if name == "some"
+        )));
+    }
+}
+
+#[test]
 fn test_nested_block_for_binding_is_initialized() {
     let source = r#"
         fn test() {

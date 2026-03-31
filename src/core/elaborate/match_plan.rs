@@ -65,6 +65,10 @@ impl<'a> Elaborator<'a> {
         scrutinee_place: &MatchPlace,
         arms: &[MatchArm],
     ) -> (MatchDecision, Vec<MatchArmPlan>) {
+        if scrutinee_ty.is_nullable_address() {
+            return self.build_nullable_address_match_plan(scrutinee_ty, scrutinee_place, arms);
+        }
+
         let mut cases = Vec::new();
         let mut default = None;
         let mut arm_plans = Vec::with_capacity(arms.len());
@@ -187,6 +191,78 @@ impl<'a> Elaborator<'a> {
         (decision, arm_plans)
     }
 
+    fn build_nullable_address_match_plan(
+        &mut self,
+        scrutinee_ty: &Type,
+        scrutinee_place: &MatchPlace,
+        arms: &[MatchArm],
+    ) -> (MatchDecision, Vec<MatchArmPlan>) {
+        let mut cases = Vec::new();
+        let mut wildcard_arm = None;
+        let mut some_arm = None;
+        let mut arm_plans = Vec::with_capacity(arms.len());
+
+        for (index, arm) in arms.iter().enumerate() {
+            let mut bindings = Vec::new();
+            for pattern in &arm.patterns {
+                match pattern {
+                    MatchPattern::Wildcard { .. } => {
+                        wildcard_arm = Some(index);
+                    }
+                    MatchPattern::EnumVariant {
+                        variant_name,
+                        bindings: pattern_bindings,
+                        ..
+                    } => match variant_name.as_str() {
+                        "none" => {
+                            cases.push(MatchSwitchCase {
+                                value: 0,
+                                arm_index: index,
+                            });
+                        }
+                        "some" => {
+                            some_arm = Some(index);
+                            self.collect_nullable_address_bindings(
+                                scrutinee_ty,
+                                scrutinee_place,
+                                pattern_bindings,
+                                &mut bindings,
+                            );
+                        }
+                        _ => {
+                            panic!(
+                                "compiler bug: unexpected nullable-address match variant {variant_name}"
+                            );
+                        }
+                    },
+                    _ => {
+                        panic!(
+                            "compiler bug: unexpected nullable-address match pattern in switch plan: {:?}",
+                            pattern
+                        );
+                    }
+                }
+            }
+            arm_plans.push(MatchArmPlan { bindings });
+        }
+
+        if some_arm.is_some() && !cases.iter().any(|case| case.value == 0) && let Some(arm_index) = wildcard_arm {
+            cases.push(MatchSwitchCase {
+                value: 0,
+                arm_index,
+            });
+        }
+
+        let default = some_arm.or(wildcard_arm);
+        let discr = self.switch_discriminant(scrutinee_ty, scrutinee_place);
+        let decision = MatchDecision::Switch(MatchSwitch {
+            discr,
+            cases,
+            default,
+        });
+        (decision, arm_plans)
+    }
+
     /// Build a decision-tree-based match plan for tuple patterns.
     ///
     /// Each arm may have multiple nested tests (one per tuple field).
@@ -290,6 +366,11 @@ impl<'a> Elaborator<'a> {
             Type::ErrorUnion { .. } => self.project_place(
                 scrutinee_place,
                 MatchProjection::Field { index: 0 },
+                Type::uint(64),
+            ),
+            Type::NullablePAddr | Type::NullableVAddr => self.project_place(
+                scrutinee_place,
+                MatchProjection::ByteOffset { offset: 0 },
                 Type::uint(64),
             ),
             Type::Bool | Type::Int { .. } => scrutinee_place.clone(),
@@ -606,6 +687,37 @@ impl<'a> Elaborator<'a> {
                 node_id: *id,
                 source: MatchPlace {
                     base: enum_place.base.clone(),
+                    projections,
+                    ty: payload_ty.clone(),
+                },
+            });
+        }
+    }
+
+    fn collect_nullable_address_bindings(
+        &self,
+        scrutinee_ty: &Type,
+        scrutinee_place: &MatchPlace,
+        pattern_bindings: &[MatchPatternBinding],
+        bindings: &mut Vec<MatchBinding>,
+    ) {
+        let payload_ty = match scrutinee_ty {
+            Type::NullablePAddr => Type::PAddr,
+            Type::NullableVAddr => Type::VAddr,
+            _ => panic!("compiler bug: expected nullable address type for match bindings"),
+        };
+
+        for binding in pattern_bindings {
+            let MatchPatternBinding::Named { id, .. } = binding else {
+                continue;
+            };
+            let mut projections = scrutinee_place.projections.clone();
+            projections.push(MatchProjection::ByteOffset { offset: 0 });
+            bindings.push(MatchBinding {
+                def_id: self.def_id_for(*id),
+                node_id: *id,
+                source: MatchPlace {
+                    base: scrutinee_place.base.clone(),
                     projections,
                     ty: payload_ty.clone(),
                 },

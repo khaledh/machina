@@ -244,3 +244,58 @@ fn test_lower_match_tuple_decision_tree() {
     "};
     assert_ir_eq(&text, expected);
 }
+
+#[test]
+fn test_lower_match_nullable_address_some_none() {
+    let ctx = analyze(indoc! {"
+        fn main(addr: vaddr?) -> u64 {
+            match addr {
+                none => 0,
+                some(x) => x.offset(),
+            }
+        }
+    "});
+    let func_def = ctx.module.func_defs()[0];
+    let lowered = lower_func(
+        func_def,
+        &ctx.def_table,
+        &ctx.type_map,
+        &ctx.lowering_plans,
+        &ctx.drop_plans,
+    )
+    .expect("failed to lower");
+    let text = format_func(&lowered.func, &lowered.types);
+
+    let expected = indoc! {"
+        fn main(u64) -> u64 {
+          locals:
+            %l0: u64
+          bb0(%v0: u64):
+            %v1: ptr<u64> = addr_of %l0
+            store %v1, %v0
+            %v2: u64 = const 0:u64
+            %v3: ptr<u8> = index_addr %v1, %v2
+            %v4: ptr<u64> = cast.ptr %v3 to ptr<u64>
+            %v5: u64 = load %v4
+            switch %v5 {
+              case 0 -> bb1
+              default -> bb2
+            }
+
+          bb1():
+            %v8: u64 = const 0:u64
+            br bb3(%v8, %v0)
+
+          bb2():
+            %v9: u64 = const 0:u64
+            %v10: ptr<u8> = index_addr %v1, %v9
+            %v11: ptr<u64> = cast.ptr %v10 to ptr<u64>
+            %v12: u64 = load %v11
+            br bb3(%v12, %v0)
+
+          bb3(%v6: u64, %v7: u64):
+            ret %v6
+        }
+    "};
+    assert_ir_eq(&text, expected);
+}

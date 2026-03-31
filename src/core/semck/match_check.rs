@@ -48,6 +48,7 @@ pub(super) fn check_match(
 enum MatchRuleKind<'a> {
     Enum(EnumRule<'a>),
     Union(UnionRule<'a>),
+    NullableAddr(NullableAddrRule),
     Bool,
     Int(IntRule),
     Tuple(TupleRule<'a>),
@@ -59,6 +60,12 @@ impl<'a> MatchRuleKind<'a> {
         match ty {
             Type::Enum { name, variants, .. } => Self::Enum(EnumRule { name, variants }),
             Type::ErrorUnion { ok_ty, err_tys } => Self::Union(UnionRule { ok_ty, err_tys }),
+            Type::NullablePAddr => Self::NullableAddr(NullableAddrRule {
+                nullable_ty: Type::NullablePAddr,
+            }),
+            Type::NullableVAddr => Self::NullableAddr(NullableAddrRule {
+                nullable_ty: Type::NullableVAddr,
+            }),
             Type::Bool => Self::Bool,
             Type::Int { signed, bits, .. } => Self::Int(IntRule {
                 signed: *signed,
@@ -81,6 +88,7 @@ impl<'a> MatchRuleKind<'a> {
         match self {
             MatchRuleKind::Enum(rule) => rule.check(arms, span, errors),
             MatchRuleKind::Union(rule) => rule.check(_ctx, arms, span, errors),
+            MatchRuleKind::NullableAddr(rule) => rule.check(arms, span, errors),
             MatchRuleKind::Bool => check_bool_match(arms, span, errors),
             MatchRuleKind::Int(rule) => rule.check(arms, span, errors),
             MatchRuleKind::Tuple(rule) => rule.check(arms, span, errors),
@@ -91,6 +99,101 @@ impl<'a> MatchRuleKind<'a> {
                     SEK::MatchTargetNotEnum(scrutinee_ty.clone()),
                 );
             }
+        }
+    }
+}
+
+struct NullableAddrRule {
+    nullable_ty: Type,
+}
+
+impl NullableAddrRule {
+    fn check(&self, arms: &[MatchArm], span: Span, errors: &mut Vec<SemCheckError>) {
+        let mut saw_some = false;
+        let mut saw_none = false;
+        let mut has_wildcard = false;
+
+        for arm in arms {
+            for pattern in &arm.patterns {
+                match pattern {
+                    MatchPattern::Wildcard { .. } => {
+                        has_wildcard = true;
+                    }
+                    MatchPattern::EnumVariant {
+                        enum_name,
+                        variant_name,
+                        bindings,
+                        span,
+                        ..
+                    } => {
+                        if enum_name.is_some() {
+                            errors.push(
+                                SEK::InvalidMatchPattern(self.nullable_ty.clone()).at(*span),
+                            );
+                            continue;
+                        }
+
+                        match variant_name.as_str() {
+                            "none" => {
+                                if !bindings.is_empty() {
+                                    push_error(
+                                        errors,
+                                        *span,
+                                        SEK::EnumVariantPayloadArityMismatch(
+                                            variant_name.clone(),
+                                            0,
+                                            bindings.len(),
+                                        ),
+                                    );
+                                }
+                                if saw_none {
+                                    push_error(
+                                        errors,
+                                        *span,
+                                        SEK::DuplicateMatchVariant(variant_name.clone()),
+                                    );
+                                }
+                                saw_none = true;
+                            }
+                            "some" => {
+                                if bindings.len() != 1 {
+                                    push_error(
+                                        errors,
+                                        *span,
+                                        SEK::EnumVariantPayloadArityMismatch(
+                                            variant_name.clone(),
+                                            1,
+                                            bindings.len(),
+                                        ),
+                                    );
+                                }
+                                if saw_some {
+                                    push_error(
+                                        errors,
+                                        *span,
+                                        SEK::DuplicateMatchVariant(variant_name.clone()),
+                                    );
+                                }
+                                saw_some = true;
+                            }
+                            _ => {
+                                errors.push(
+                                    SEK::InvalidMatchPattern(self.nullable_ty.clone()).at(*span),
+                                );
+                            }
+                        }
+                    }
+                    _ => {
+                        errors.push(SEK::InvalidMatchPattern(self.nullable_ty.clone()).at(
+                            pattern_span(pattern),
+                        ));
+                    }
+                }
+            }
+        }
+
+        if !(has_wildcard || (saw_some && saw_none)) {
+            push_error(errors, span, SEK::NonExhaustiveMatch);
         }
     }
 }

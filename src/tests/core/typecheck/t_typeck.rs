@@ -1370,6 +1370,20 @@ fn test_raw_pointer_types_in_signatures_typecheck() {
 }
 
 #[test]
+fn test_nullable_address_match_some_binding_typechecks() {
+    let source = r#"
+        fn read_addr(addr: vaddr?) -> u64 {
+            match addr {
+                some(x) => x.offset(),
+                none => 0,
+            }
+        }
+    "#;
+
+    let _ctx = type_check_source(source).expect("Failed to type check");
+}
+
+#[test]
 fn test_generic_method_infers_from_arg() {
     let source = r#"
         type Boxed = { value: u64 }

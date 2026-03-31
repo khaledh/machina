@@ -274,6 +274,57 @@ fn test_parse_unsafe_block_expr() {
 }
 
 #[test]
+fn test_parse_nullable_address_match_patterns() {
+    let source = r#"
+        fn test(addr: vaddr?) -> u64 {
+            match addr {
+                none => 0,
+                some(x) => x.offset(),
+            }
+        }
+    "#;
+
+    let funcs = parse_source(source).expect("Failed to parse");
+    let func = &funcs[0];
+    let tail = block_tail(&func.body);
+    let ExprKind::Match { arms, .. } = &tail.kind else {
+        panic!("Expected match expression");
+    };
+
+    match &arms[0].patterns[0] {
+        MatchPattern::EnumVariant {
+            enum_name,
+            variant_name,
+            bindings,
+            ..
+        } => {
+            assert!(enum_name.is_none());
+            assert_eq!(variant_name, "none");
+            assert!(bindings.is_empty());
+        }
+        _ => panic!("Expected none enum-variant pattern"),
+    }
+
+    match &arms[1].patterns[0] {
+        MatchPattern::EnumVariant {
+            enum_name,
+            variant_name,
+            bindings,
+            ..
+        } => {
+            assert!(enum_name.is_none());
+            assert_eq!(variant_name, "some");
+            assert_eq!(bindings.len(), 1);
+            assert!(matches!(
+                &bindings[0],
+                MatchPatternBinding::Named { ident, .. } if ident == "x"
+            ));
+        }
+        _ => panic!("Expected some enum-variant pattern"),
+    }
+}
+
+#[test]
 fn test_parse_nullable_address_types() {
     let source = r#"
         fn boot(base: paddr, next: vaddr?) -> paddr? {

@@ -394,6 +394,17 @@ fn bind_match_pattern_types(
             ..
         } => {
             let owner_ty = super::term_utils::peel_heap(scrutinee_ty.clone());
+            if let Some(payload_ty) = nullable_address_match_payload_type(&owner_ty, variant_name) {
+                for binding in bindings {
+                    if let MatchPatternBinding::Named { id, .. } = binding
+                        && let Some(def_id) = pattern_def_id(def_table, *id, allow_missing_def_ids)
+                        && let Some(term) = def_terms.get(&def_id)
+                    {
+                        let _ = unifier.unify(term, &payload_ty);
+                    }
+                }
+                return;
+            }
             let mut matched_variant = None;
 
             if let Type::Enum { variants, .. } = owner_ty.clone() {
@@ -422,6 +433,15 @@ fn bind_match_pattern_types(
                 }
             }
         }
+    }
+}
+
+fn nullable_address_match_payload_type(owner_ty: &Type, variant_name: &str) -> Option<Type> {
+    match (owner_ty, variant_name) {
+        (Type::NullablePAddr, "some") => Some(Type::PAddr),
+        (Type::NullableVAddr, "some") => Some(Type::VAddr),
+        (Type::NullablePAddr | Type::NullableVAddr, "none") => None,
+        _ => None,
     }
 }
 

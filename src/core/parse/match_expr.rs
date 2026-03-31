@@ -118,6 +118,9 @@ impl<'a> Parser<'a> {
         }
 
         let ident = self.parse_ident()?;
+        if ident == "none" {
+            return self.parse_enum_variant_pattern(marker, ident);
+        }
         if match_pattern_ident_is_binding(&ident, &self.curr_token.kind) {
             return Ok(MatchPattern::Binding {
                 id: self.id_gen.new_id(),
@@ -182,6 +185,9 @@ impl<'a> Parser<'a> {
                     ty_expr,
                     span: parser.close(marker),
                 });
+            }
+            if ident == "none" {
+                return parser.parse_enum_variant_pattern(marker, ident);
             }
             if is_enum_variant {
                 return parser.parse_enum_variant_pattern(marker, ident);
