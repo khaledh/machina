@@ -488,6 +488,8 @@ impl<'a> Parser<'a> {
 
             TK::LParen => self.parse_paren_or_tuple(),
 
+            TK::LBrace if self.lbrace_forces_block() => self.parse_block(),
+
             TK::LBrace if self.lookahead_for(TK::Pipe, TK::RBrace) => self.parse_struct_update(),
 
             TK::LBrace if self.lookahead_for(TK::Colon, TK::RBrace) => {

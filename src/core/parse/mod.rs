@@ -418,6 +418,27 @@ impl<'a> Parser<'a> {
         false
     }
 
+    fn lbrace_forces_block(&self) -> bool {
+        if self.curr_token.kind != TK::LBrace {
+            return false;
+        }
+
+        matches!(
+            self.tokens.get(self.pos + 1).map(|token| &token.kind),
+            Some(
+                TK::KwLet
+                    | TK::KwVar
+                    | TK::KwWhile
+                    | TK::KwFor
+                    | TK::KwDefer
+                    | TK::KwUsing
+                    | TK::KwBreak
+                    | TK::KwContinue
+                    | TK::KwReturn
+            )
+        )
+    }
+
     fn is_closure_capture_list(&self) -> bool {
         if self.curr_token.kind != TK::LBracket {
             return false;

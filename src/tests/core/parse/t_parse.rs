@@ -325,6 +325,54 @@ fn test_parse_nullable_address_match_patterns() {
 }
 
 #[test]
+fn test_parse_nullable_address_match_arm_block_with_typed_let() {
+    let source = r#"
+        @layout(fixed)
+        type Header = {
+            value: u64,
+        }
+
+        fn test(addr: vaddr?) -> u64 {
+            match addr {
+                some(value_addr) => {
+                    let header: view<Header> = unsafe {
+                        view_at(value_addr)
+                    };
+                    header.value
+                }
+                none => 0,
+            }
+        }
+    "#;
+
+    let funcs = parse_source(source).expect("Failed to parse");
+    let func = funcs
+        .iter()
+        .find(|func| func.sig.name == "test")
+        .expect("Expected test function");
+    let tail = block_tail(&func.body);
+    let ExprKind::Match { arms, .. } = &tail.kind else {
+        panic!("Expected match expression");
+    };
+
+    match &arms[0].body.kind {
+        ExprKind::Block { items, tail } => {
+            assert_eq!(items.len(), 1);
+            assert!(matches!(
+                items[0],
+                BlockItem::Stmt(StmtExpr {
+                    kind: StmtExprKind::LetBind { .. },
+                    ..
+                })
+            ));
+            let tail = tail.as_ref().expect("Expected block tail");
+            assert!(matches!(tail.kind, ExprKind::StructField { .. }));
+        }
+        _ => panic!("Expected block body for some(...) arm"),
+    }
+}
+
+#[test]
 fn test_parse_nullable_address_types() {
     let source = r#"
         fn boot(base: paddr, next: vaddr?) -> paddr? {

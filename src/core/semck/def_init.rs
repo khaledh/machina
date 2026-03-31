@@ -693,9 +693,16 @@ impl<'a> DefInitChecker<'a> {
                 self.check_expr(cond);
                 self.check_expr(body);
             }
-            StmtExprKind::For { iter, body, .. } => {
+            StmtExprKind::For {
+                pattern,
+                iter,
+                body,
+            } => {
                 self.check_expr(iter);
-                self.check_expr(body);
+                self.with_init(self.initialized.clone(), |this| {
+                    this.mark_pattern_initialized(pattern);
+                    this.check_expr(body);
+                });
             }
             StmtExprKind::Defer { value } => {
                 self.check_expr(value);

@@ -219,6 +219,31 @@ fn test_using_body_for_binding_is_initialized() {
 }
 
 #[test]
+fn test_foreign_view_for_binding_is_initialized() {
+    let source = r#"
+        @intrinsic
+        fn view_slice_at<T>(addr: vaddr, count: u64) -> view_slice<T>;
+
+        @layout(fixed)
+        type Header = {
+            value: u64,
+        }
+
+        fn test(addr: vaddr, count: u64) {
+            let entries: view_slice<Header> = unsafe {
+                view_slice_at(addr, count)
+            };
+
+            for entry in entries {
+                entry.value;
+            }
+        }
+    "#;
+
+    let _ctx = sem_check_source(source).expect("Failed to sem check");
+}
+
+#[test]
 fn test_range_out_of_bounds_via_const_binding() {
     let source = r#"
         type MidRange = u64: bounds(50, 100);

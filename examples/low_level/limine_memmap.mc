@@ -38,29 +38,27 @@ static var memmap_request = LimineMemmapRequest {
 };
 
 fn dump_memmap() {
-    if memmap_request.response_ptr.is_none() {
-        println("no response");
-        return;
-    }
+    match memmap_request.response_ptr {
+        some(response_addr) => {
+            let response: view<LimineMemmapResponse> = unsafe {
+                view_at(response_addr)
+            };
 
-    let response_addr = memmap_request.response_ptr.unwrap();
-    let response: view<LimineMemmapResponse> = unsafe {
-        view_at(response_addr)
-    };
+            match response.entries_ptr {
+                some(entries_addr) => {
+                    let entries: view_slice<LimineMemmapEntry> = unsafe {
+                        view_slice_at(entries_addr, response.entry_count)
+                    };
 
-    if response.entries_ptr.is_none() {
-        println("no entries");
-        return;
-    }
-
-    let entries_addr = response.entries_ptr.unwrap();
-    let entries: view_slice<LimineMemmapEntry> = unsafe {
-        view_slice_at(entries_addr, response.entry_count)
-    };
-
-    println(response.entry_count);
-    for entry in entries {
-        println(entry.length);
+                    println(response.entry_count);
+                    for entry in entries {
+                        println(entry.length);
+                    }
+                }
+                none => println("no entries"),
+            }
+        }
+        none => println("no response"),
     }
 }
 
