@@ -1,7 +1,3 @@
-requires {
-    std::io::println
-}
-
 @layout(fixed)
 type LimineMemmapRequest = {
     id: u64[4],
@@ -38,7 +34,7 @@ static var memmap_request = LimineMemmapRequest {
     response: None,
 };
 
-fn dump_memmap() {
+fn main() {
     let response = memmap_request.response or {
         println("no response");
         return;
@@ -53,8 +49,4 @@ fn dump_memmap() {
     for entry in entries {
         println(entry.length);
     }
-}
-
-fn main() {
-    dump_memmap();
 }
