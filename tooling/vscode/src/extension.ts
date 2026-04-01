@@ -66,12 +66,13 @@ const DARK_TOKEN_RULES: TokenRule[] = [
   { scope: "keyword.control.machina", settings: { foreground: "#C586C0" } },
   { scope: "keyword.other.machina", settings: { foreground: "#569CD6" } },
   { scope: "storage.modifier.machina", settings: { foreground: "#569CD6" } },
-  { scope: "constant.language.boolean.machina", settings: { foreground: "#569CD6" } },
+  { scope: "constant.language.machina", settings: { foreground: "#569CD6" } },
   { scope: "entity.name.tag.machina", settings: { foreground: "#D7BA7D", fontStyle: "italic" } },
   { scope: "entity.name.function.machina", settings: { foreground: "#DCDCAA" } },
   { scope: "entity.name.function.definition.machina", settings: { foreground: "#DCDCAA", fontStyle: "bold" } },
   { scope: "entity.name.type.machina", settings: { foreground: "#78DCE8" } },
   { scope: "support.type.primitive.machina", settings: { foreground: "#4EC9B0" } },
+  { scope: "support.type.builtin.machina", settings: { foreground: "#4EC9B0" } },
   { scope: "string.quoted.double.machina", settings: { foreground: "#CE9178" } },
   { scope: "string.quoted.single.machina", settings: { foreground: "#CE9178" } },
   { scope: "constant.character.escape.machina", settings: { foreground: "#D7BA7D" } },
@@ -82,9 +83,10 @@ const DARK_TOKEN_RULES: TokenRule[] = [
       "constant.numeric.octal.machina",
       "constant.numeric.hex.machina",
     ],
-    settings: { foreground: "#B5CEA8" },
+    settings: { foreground: "#f000b5" },
   },
   { scope: "keyword.operator.arrow.machina", settings: { foreground: "#569CD6" } },
+  { scope: "keyword.operator.pipeline.machina", settings: { foreground: "#569CD6" } },
 ];
 
 const LIGHT_TOKEN_RULES: TokenRule[] = [
@@ -92,12 +94,13 @@ const LIGHT_TOKEN_RULES: TokenRule[] = [
   { scope: "keyword.control.machina", settings: { foreground: "#AF00DB" } },
   { scope: "keyword.other.machina", settings: { foreground: "#0000FF" } },
   { scope: "storage.modifier.machina", settings: { foreground: "#0000FF" } },
-  { scope: "constant.language.boolean.machina", settings: { foreground: "#0000FF" } },
+  { scope: "constant.language.machina", settings: { foreground: "#0000FF" } },
   { scope: "entity.name.tag.machina", settings: { foreground: "#795E26", fontStyle: "italic" } },
   { scope: "entity.name.function.machina", settings: { foreground: "#000000" } },
   { scope: "entity.name.function.definition.machina", settings: { foreground: "#000000", fontStyle: "bold" } },
   { scope: "entity.name.type.machina", settings: { foreground: "#C73D1A" } },
   { scope: "support.type.primitive.machina", settings: { foreground: "#267F99" } },
+  { scope: "support.type.builtin.machina", settings: { foreground: "#267F99" } },
   { scope: "string.quoted.double.machina", settings: { foreground: "#008000" } },
   { scope: "string.quoted.single.machina", settings: { foreground: "#008000" } },
   { scope: "constant.character.escape.machina", settings: { foreground: "#EE0000" } },
@@ -108,9 +111,10 @@ const LIGHT_TOKEN_RULES: TokenRule[] = [
       "constant.numeric.octal.machina",
       "constant.numeric.hex.machina",
     ],
-    settings: { foreground: "#098658" },
+    settings: { foreground: "#f000b5" },
   },
   { scope: "keyword.operator.arrow.machina", settings: { foreground: "#0000FF" } },
+  { scope: "keyword.operator.pipeline.machina", settings: { foreground: "#0000FF" } },
 ];
 
 function tokenRulesForThemeKind(): TokenRule[] {

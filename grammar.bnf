@@ -4,7 +4,7 @@
 
 Module             ::= RequiresBlock? TopLevelItem*
 
-TopLevelItem       ::= (AttributeList (TypeDef | TraitDef | FuncDecl | FuncDef))
+TopLevelItem       ::= (AttributeList (TypeDef | TraitDef | StaticDef | FuncDecl | FuncDef))
                      | MethodBlock
                      | MachineDef
 
@@ -14,7 +14,13 @@ RequirePath        ::= Identifier ("::" Identifier)*
 
 # Attributes
 AttributeList      ::= ("@" Attribute)*
-Attribute          ::= Identifier ("(" StringLit ("," StringLit)* ")")?
+Attribute          ::= Identifier ("(" AttributeArgList? ")")?
+AttributeArgList   ::= AttributeArg ("," AttributeArg)* ","?
+AttributeArg       ::= StringLit
+                     | IntLit
+                     | Identifier
+                     | Identifier ":" AttributeArgValue
+AttributeArgValue  ::= StringLit | IntLit | Identifier
 
 # Type Definitions
 TypeDef            ::= "type" Identifier TypeParamList? "=" TypeDefBody
@@ -27,7 +33,7 @@ TypeAliasDef       ::=  TypeExpr ";"?
 
 StructDef          ::= "{" StructFieldList? "}"
 StructFieldList    ::= StructField ("," StructField)* ","?
-StructField        ::= Identifier ":" TypeExpr
+StructField        ::= AttributeList Identifier ":" TypeExpr
 
 EnumDef            ::= EnumVariantDef ("|" EnumVariantDef)* ";"?
 EnumVariantDef     ::= Identifier ( "(" TypeExprList ")" )?
@@ -81,12 +87,13 @@ TraitPropertyAccessor ::= "get" ";" | "set" ";"
 
 # Type Expressions
 TypeExpr           ::= TypeExprTerm ( "|" TypeExprTerm )*
-TypeExprTerm       ::= TypeExprAtom RefinementType? TypeSuffix*
-TypeExprAtom       ::= UnitType | NamedType | TupleType | RangeType | FnType
+TypeExprTerm       ::= TypeExprAtom NullableSuffix? RefinementType? TypeSuffix*
+TypeExprAtom       ::= UnitType | NamedType | TupleType | RangeType | FnType | RawPtrType
 TypeSuffix         ::= ArraySuffix | SliceSuffix | HeapSuffix
 ArraySuffix        ::= "[" IntLitList "]"
 SliceSuffix        ::= "[" "]"
 HeapSuffix         ::= "^"
+NullableSuffix     ::= "?"      # currently accepted for paddr, vaddr, and view<...>
 RefinementType     ::= ":" Refinement ( "&" Refinement )*
 
 UnitType           ::= "()"
@@ -94,6 +101,7 @@ NamedType          ::= Identifier TypeArgList?
 TupleType          ::= "(" TypeExpr "," ( TypeExprList )? ")"
 RangeType          ::= "range" "(" IntLit ("," IntLit)? ")"
 FnType             ::= "fn" "(" FnTypeParamList? ")" "->" TypeExpr
+RawPtrType         ::= "*" TypeExprTerm
 Refinement         ::= "bounds" "(" IntLit ("," IntLit)? ")" | "nonzero"
 
 FnTypeParamList    ::= FnTypeParam ("," FnTypeParam)* ","?
@@ -104,12 +112,13 @@ IntLitList         ::= IntLit ("," IntLit)* ","?
 
 # Functions
 FuncDecl           ::= FuncSig ";"
-Func               ::= FuncSig Block
+FuncDef            ::= FuncSig Block
+StaticDef          ::= "static" ("let" | "var") Identifier ( ":" TypeExpr )? "=" Expr ";"?
 
 FuncSig            ::= "fn" Identifier TypeParamList? "(" ParamList? ")" ( "->" TypeExpr )?
 
 # Methods
-MethodBlock        ::= Identifier "::" Identifier? "{" MethodItem* "}"
+MethodBlock        ::= Identifier TypeArgList? "::" Identifier? "{" MethodItem* "}"
 MethodItem         ::= MethodDecl | MethodDef | PropertyDef
 MethodDecl         ::= AttributeList MethodSig ";"
 MethodDef          ::= AttributeList MethodSig Block
@@ -130,7 +139,7 @@ ClosureCaptureList ::= "[" "move" Identifier ( "," Identifier )* ","? "]"
 
 # Parameters (common)
 ParamList          ::= Param ("," Param)* ","?
-Param              ::= ParamMode? Identifier ":" TypeExpr
+Param              ::= ParamMode? Identifier ":" TypeExpr ( "=" Expr )?
 ParamMode          ::= "inout" | "out" | "sink"
 
 # Blocks
@@ -153,7 +162,7 @@ AssignOp           ::= "=" | "+=" | "-=" | "*=" | "/=" | "%="
 
 # Loops
 While              ::= "while" Expr Block
-For                ::= "for" Pattern "in" (RangeExpr | Expr) Block
+For                ::= "for" Pattern "in" Expr Block
 Defer              ::= "defer" Expr ";"
 Using              ::= "using" Identifier "=" Expr Block
 
@@ -161,8 +170,6 @@ Using              ::= "using" Identifier "=" Expr Block
 Break              ::= "break" ";"
 Continue           ::= "continue" ";"
 Return             ::= "return" Expr? ";"
-
-RangeExpr          ::= IntLit ".." IntLit
 
 # Patterns
 Pattern            ::= IdentPattern | ArrayPattern | TuplePattern | StructPattern
@@ -252,22 +259,27 @@ Primary            ::= Literal
                      | StructUpdate
                      | EmitExpr
                      | ReplyExpr
+                     | UnsafeExpr
                      | "(" Expr ")"
                      | Block
                      | ClosureExpr
 
 EmitExpr           ::= "emit" ("Send" | ("Request" ( ":" Identifier )?)) "(" "to" ":" Expr "," Expr ")"
 ReplyExpr          ::= "reply" "(" Expr "," Expr ")"
+UnsafeExpr         ::= "unsafe" Block
 
 ClosureExpr        ::= ClosureCaptureList? ClosureSig Expr
 
-Literal            ::= UnitLit | IntLit | BoolLit | CharLit | StringLit | StringFmt
-                     | ArrayLit | SetLit | TupleLit | StructLit
+Literal            ::= UnitLit | NoneLit | IntLit | BoolLit | CharLit | StringLit | StringFmt
+                     | ArrayLit | SetLit | MapLit | TupleLit | StructLit
 
 ArrayLit           ::= TypeExpr? "[" ExprList "]"
                      | TypeExpr? "[" Expr ";" IntLit "]"
 TupleLit           ::= "(" Expr "," ExprList? ")"
 SetLit             ::= "{" Expr "," ExprList? "}"
+                     | "set" "<" TypeExpr ">" "{" ExprList? "}"
+MapLit             ::= "{" MapEntry ("," MapEntry)* ","? "}"
+                     | "map" "<" TypeExpr "," TypeExpr ">" "{" MapEntryList? "}"
 
 StructLit          ::= Identifier "{" StructLitFieldList? "}"
 StructLitFieldList ::= StructLitField ("," StructLitField)* ","?
@@ -280,9 +292,12 @@ EnumVariant        ::= Identifier "::" Identifier ( "(" ExprList ")" )?
 
 # Common
 ExprList           ::= Expr ( "," Expr )* ","?
+MapEntry           ::= Expr ":" Expr
+MapEntryList       ::= MapEntry ("," MapEntry)* ","?
 
 # Terminals
 UnitLit            ::= "()"
+NoneLit            ::= "None"
 BoolLit            ::= "true" | "false"
 IntLit             ::= DecimalLit | BinaryLit | OctalLit | HexLit
 DecimalLit         ::= [0-9] ([0-9_])*

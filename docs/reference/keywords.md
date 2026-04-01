@@ -10,18 +10,20 @@ used as identifiers.
 | `fn` | Declarations | Function definition |
 | `type` | Declarations | Type definition |
 | `trait` | Declarations | Trait definition |
+| `static` | Declarations | Top-level static definition |
 | `machine` | Declarations | Hosted machine definition |
 | `hosts` | Machine | Machine hosting clause |
 | `action` | Machine | Action override handler in a machine |
 | `trigger` | Machine | Trigger handler in a machine |
 | `on` | Machine | Machine-level message handler |
 | `emit` | Machine | Emit an event value from a handler |
-| `send` | Machine | Send a message to another machine |
+| `reply` | Machine | Reply through a request capability |
 | `requires` | Modules | Module/symbol imports |
 | `using` | Resource mgmt | Scoped resource block (auto-close on exit) |
 | `as` | Aliasing/Roles | Import alias or role specification |
 | `let` | Bindings | Immutable binding |
 | `var` | Bindings | Mutable binding/declaration |
+| `defer` | Resource mgmt | Defer an expression until scope exit |
 | `if` | Control flow | Conditional expression |
 | `else` | Control flow | Alternative branch |
 | `match` | Control flow | Pattern matching expression |
@@ -31,6 +33,7 @@ used as identifiers.
 | `break` | Control flow | Exit loop early |
 | `continue` | Control flow | Skip to next loop iteration |
 | `return` | Control flow | Return from a function |
+| `unsafe` | Low-level | Explicit unsafe-expression block |
 | `inout` | Parameter mode | Mutable borrow parameter |
 | `out` | Parameter mode | Output parameter |
 | `sink` | Parameter mode | Ownership-transfer parameter |
@@ -52,8 +55,20 @@ used as identifiers.
 | `@opaque` | Export a type with hidden internal fields |
 | `@linear` | Mark a type as linear (must be consumed, state-tracked) |
 | `@final` | Mark a linear type state as terminal (no outgoing transitions) |
+| `@layout(...)` | Fixed-layout type controls such as `@layout(fixed, size: 24)` |
+| `@align(...)` | Fixed-layout alignment control |
+| `@section(...)` | Custom object-file/linker section placement |
 
 ## Reserved Literals
 
-`true` and `false` are boolean literals and are also reserved.
+`true`, `false`, and `None` are reserved literals.
 
+## Contextual Forms
+
+These are not all reserved in every position, but they currently have
+special syntax in context:
+
+| Form | Meaning |
+|------|---------|
+| `send(...)` | Message-send sugar in expression position |
+| `or` | Inline recovery / try-handler syntax (`expr or { ... }`) |

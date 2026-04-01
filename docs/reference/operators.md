@@ -8,7 +8,7 @@ From lowest to highest precedence:
 
 | Precedence   | Operators                    | Associativity | Description                                                |
 |--------------|------------------------------|---------------|------------------------------------------------------------|
-| 0 (lowest)   | `\|>`                        | Left          | Pipe (iterator/function composition)                       |
+| 0 (lowest)   | `\|>`                        | Left          | Pipe (first-argument composition)                          |
 | 1            | `\|\|`                       | Left          | Logical OR                                                 |
 | 2            | `&&`                         | Left          | Logical AND                                                |
 | 3            | `\|`                         | Left          | Bitwise OR / type unions (in type position)                |
@@ -19,7 +19,8 @@ From lowest to highest precedence:
 | 8            | `+` `-`                      | Left          | Addition/subtraction                                       |
 | 9            | `*` `/` `%`                  | Left          | Multiplication/division/remainder                          |
 | 10           | unary `-` `!` `~` `^` `move` | Right         | Unary ops                                                  |
-| 11 (highest) | `[]` `.` `()` `?`            | Left          | Index/slice, field/method access, calls, error propagation |
+| 11           | ternary `?:`, `or`          | Right-ish     | Conditional / inline recovery forms                        |
+| 12 (highest) | `[]` `.` `()` `?`            | Left          | Index/slice, field/method access, calls, postfix try       |
 
 ## Arithmetic
 
@@ -65,7 +66,13 @@ Division by zero is a runtime error.
 |----------|------------|
 | `=`      | Assignment |
 
-Compound assignment (`+=`, `-=`, etc.) is not supported.
+Compound assignment is supported:
+
+| Operator | Meaning |
+|----------|---------|
+| `+=` `-=` `*=` `/=` `%=` | Arithmetic compound assignment |
+| `&=` `\|=` `^=` | Bitwise compound assignment |
+| `<<=` `>>=` | Shift compound assignment |
 
 ## Access and Postfix
 
@@ -82,6 +89,8 @@ Notes:
 - Properties are accessed as fields (`obj.len`), not as method calls.
 - `expr?` requires the operand to be an error union and propagates non-success
   variants to the caller.
+- In type position, `?` is currently only accepted for low-level nullable forms
+  such as `paddr?`, `vaddr?`, and `view<...>?`.
 
 ## Pipe Operator
 
@@ -101,12 +110,25 @@ text.lines()
 The right side must be a function call with parentheses. Method calls are not
 supported on the right side.
 
+## Recovery Forms
+
+| Form | Meaning | Example |
+|------|---------|---------|
+| `expr or { ... }` | Inline recovery in the current scope | `read() or { return 0; }` |
+| `expr or \|err\| { ... }` | Callable recovery handler | `read() or \|err\| { err.code }` |
+
+Notes:
+- Block-form `or { ... }` is inline recovery, so `return`, `break`, and
+  `continue` affect the enclosing scope.
+- The closure form remains useful when you want the error payload.
+
 ## Other Syntax Operators
 
 | Operator/Form               | Meaning                     | Example                          |
 |-----------------------------|-----------------------------|----------------------------------|
 | prefix `^`                  | Heap allocation expression  | `^Point { x: 1, y: 2 }`          |
 | postfix `^` (type position) | Heap-owned type             | `Point^`, `u8[]^`                |
+| prefix `*` (type position)  | Raw pointer type            | `*u64`, `*Header`                |
 | `move`                      | Explicit ownership transfer | `consume(move v)`                |
 | `..`                        | Range (in loops/slices)     | `0..10`, `arr[1..]`              |
 | `::`                        | Scope/path resolution       | `Color::Red`, `std::io::println` |

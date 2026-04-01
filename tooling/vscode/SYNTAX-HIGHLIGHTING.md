@@ -7,10 +7,10 @@ This VSCode extension provides comprehensive syntax highlighting for the Machina
 The TextMate grammar (`syntaxes/machina.tmLanguage.json`) provides highlighting for:
 
 ### Keywords
-- **Control flow**: `if`, `else`, `match`, `while`, `for`, `break`, `continue`, `return`
-- **Declarations**: `fn`, `type`, `trait`, `let`, `var`
+- **Control flow**: `if`, `else`, `match`, `while`, `for`, `break`, `continue`, `return`, `or`
+- **Declarations**: `fn`, `type`, `trait`, `static`, `machine`
 - **Modifiers**: `inout`, `out`, `sink`, `move`, `self`
-- **Other**: `prop`, `get`, `set`, `requires`, `role`, `flow`, `on`, `emit`, `reply`, `using`
+- **Other**: `prop`, `get`, `set`, `requires`, `as`, `hosts`, `action`, `trigger`, `on`, `emit`, `reply`, `using`, `defer`, `unsafe`
 - **Refinements**: `range`, `bounds`, `nonzero`
 
 ### Literals
@@ -19,18 +19,19 @@ The TextMate grammar (`syntaxes/machina.tmLanguage.json`) provides highlighting 
   - Octal: `0o755`
   - Hexadecimal: `0xFF_00`
   - Decimal: `42`, `1_000_000`
-- **Booleans**: `true`, `false`
+- **Booleans and language constants**: `true`, `false`, `None`
 - **Strings**: `"hello"`, with escape sequences `\n`, `\t`, etc.
 - **Format strings**: `f"Value: {x}"`
 - **Characters**: `'A'`, `'\n'`
 
 ### Types
-- **Primitive types**: `u8`, `u16`, `u32`, `u64`, `i8`, `i16`, `i32`, `i64`, `f32`, `f64`, `bool`, `char`, `string`, `unit`
+- **Primitive types**: `u8`, `u16`, `u32`, `u64`, `i8`, `i16`, `i32`, `i64`, `f32`, `f64`, `bool`, `char`, `string`, `paddr`, `vaddr`
+- **Builtin type constructors**: `view<Header>`, `view<Header[]>`, `view<view<Header>[]>`
 - **User-defined types**: Any identifier starting with uppercase (e.g., `Point`, `Connection`)
 
 ### Attributes
-- Python-style attributes: `@public`, `@machines`, `@opaque`, `@intrinsic`
-- With arguments: `@link_name("foo")`
+- Python-style attributes: `@public`, `@opaque`, `@intrinsic`, `@layout`, `@align`, `@section`, `@count`
+- With structured arguments: `@layout(fixed, size: 24)`, `@align(4096)`, `@section("__DATA,__demo")`
 
 ### Functions
 - Function definitions: `fn add(x: u64, y: u64) -> u64`
@@ -41,8 +42,15 @@ The TextMate grammar (`syntaxes/machina.tmLanguage.json`) provides highlighting 
 - **Comparison**: `==`, `!=`, `<`, `>`, `<=`, `>=`
 - **Arithmetic**: `+`, `-`, `*`, `/`, `%`
 - **Bitwise**: `&`, `|`, `^`, `~`, `<<`, `>>`
-- **Assignment**: `=`
+- **Assignment**: `=`, `+=`, `-=`, `*=`, `/=`, `%=` , `&=`, `|=`, `^=`, `<<=`, `>>=`
+- **Recovery / pipe**: `or`, `|>`
 - **Arrows**: `->`, `=>`
+
+### Low-level surface
+- **Unsafe blocks**: `unsafe { ... }`
+- **Nullable low-level forms**: `paddr?`, `vaddr?`, `view<...>?`
+- **Raw pointer types**: `*T`
+- **Typed foreign views**: `view<T>`, `view<T[]>`, `view<view<T>[]>`
 
 ### Comments
 - Line comments: `// comment`
@@ -67,7 +75,7 @@ The syntax highlighting works with any VSCode color theme. The grammar uses stan
 - `entity.name.tag` → Attributes
 - `string.quoted` → String literals
 - `constant.numeric` → Numbers
-- `constant.language` → Booleans
+- `constant.language` → Booleans / `None`
 - `comment.line` → Comments
 - `keyword.operator` → Operators
 

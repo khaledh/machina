@@ -28,10 +28,33 @@
       "patterns": [
         {
           "name": "meta.attribute.machina",
-          "match": "@(\\w+)(?:\\(([^)]*)\\))?",
-          "captures": {
+          "begin": "@(\\w+)(\\()",
+          "beginCaptures": {
             "1": { "name": "entity.name.tag.machina" },
-            "2": { "name": "string.quoted.double.machina" }
+            "2": { "name": "punctuation.section.parens.begin.machina" }
+          },
+          "end": "\\)",
+          "endCaptures": {
+            "0": { "name": "punctuation.section.parens.end.machina" }
+          },
+          "patterns": [
+            { "include": "#strings" },
+            { "include": "#numbers" },
+            {
+              "name": "variable.parameter.machina",
+              "match": "\\b[a-z_][a-zA-Z0-9_]*\\b"
+            },
+            {
+              "name": "punctuation.separator.machina",
+              "match": "[,:]"
+            }
+          ]
+        },
+        {
+          "name": "meta.attribute.machina",
+          "match": "@(\\w+)",
+          "captures": {
+            "1": { "name": "entity.name.tag.machina" }
           }
         }
       ]
@@ -40,15 +63,15 @@
       "patterns": [
         {
           "name": "keyword.control.machina",
-          "match": "\\b(if|else|match|while|for|break|continue|return)\\b"
+          "match": "\\b(if|else|match|while|for|break|continue|return|or)\\b"
         },
         {
           "name": "keyword.other.machina",
-          "match": "\\b(fn|type|trait|range|bounds|nonzero|let|var|using|in|inout|out|sink|move|self|prop|get|set|requires|role|flow|on|emit|reply)\\b"
+          "match": "\\b(fn|type|trait|static|machine|hosts|action|trigger|on|emit|reply|range|bounds|nonzero|let|var|using|defer|in|inout|out|sink|move|self|prop|get|set|requires|as|unsafe)\\b"
         },
         {
-          "name": "constant.language.boolean.machina",
-          "match": "\\b(true|false)\\b"
+          "name": "constant.language.machina",
+          "match": "\\b(true|false|None)\\b"
         },
         {
           "name": "storage.modifier.machina",
@@ -111,7 +134,11 @@
       "patterns": [
         {
           "name": "support.type.primitive.machina",
-          "match": "\\b(u8|u16|u32|u64|i8|i16|i32|i64|f32|f64|bool|char|string|unit)\\b"
+          "match": "\\b(u8|u16|u32|u64|i8|i16|i32|i64|f32|f64|bool|char|string|paddr|vaddr)\\b"
+        },
+        {
+          "name": "support.type.builtin.machina",
+          "match": "\\bview\\b(?=\\s*<)"
         },
         {
           "name": "entity.name.type.machina",
@@ -150,7 +177,7 @@
         },
         {
           "name": "keyword.operator.comparison.machina",
-          "match": "(==|!=|<|>|<=|>=)"
+          "match": "(==|!=|<=|>=|<|>)"
         },
         {
           "name": "keyword.operator.arithmetic.machina",
@@ -158,11 +185,15 @@
         },
         {
           "name": "keyword.operator.bitwise.machina",
-          "match": "(&|\\||\\^|~|<<|>>)"
+          "match": "(<<|>>|&|\\||\\^|~)"
+        },
+        {
+          "name": "keyword.operator.pipeline.machina",
+          "match": "(\\|>)"
         },
         {
           "name": "keyword.operator.assignment.machina",
-          "match": "="
+          "match": "(<<=|>>=|\\+=|-=|\\*=|/=|%=|&=|\\|=|\\^=|=)"
         },
         {
           "name": "keyword.operator.arrow.machina",

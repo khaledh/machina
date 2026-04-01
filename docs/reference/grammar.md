@@ -22,24 +22,33 @@ RequirePath        ::= Identifier ("::" Identifier)*
 ## Top-Level Declarations
 
 ```bnf
-TopLevelItem       ::= (AttributeList (TypeDef | TraitDef | FuncDecl | FuncDef))
+TopLevelItem       ::= (AttributeList (TypeDef | TraitDef | StaticDef | FuncDecl | FuncDef))
                      | MethodBlock
                      | MachineDef
 
 AttributeList      ::= ("@" Attribute)*
-Attribute          ::= Identifier ("(" StringLit ("," StringLit)* ")")?
+Attribute          ::= Identifier ("(" AttributeArgList? ")")?
+AttributeArgList   ::= AttributeArg ("," AttributeArg)* ","?
+AttributeArg       ::= StringLit
+                     | IntLit
+                     | Identifier
+                     | Identifier ":" AttributeArgValue
+AttributeArgValue  ::= StringLit | IntLit | Identifier
 
 TypeDef            ::= "type" Identifier TypeParamList? "=" TypeDefBody
 TypeDefBody        ::= TypeExpr ";"?
                      | StructDef
                      | EnumDef
+                     | LinearTypeDef
 
 StructDef          ::= "{" StructFieldList? "}"
 StructFieldList    ::= StructField ("," StructField)* ","?
-StructField        ::= Identifier ":" TypeExpr
+StructField        ::= AttributeList Identifier ":" TypeExpr
 
 EnumDef            ::= EnumVariantDef ("|" EnumVariantDef)* ";"?
 EnumVariantDef     ::= Identifier ("(" TypeExprList ")")?
+
+StaticDef          ::= "static" ("let" | "var") Identifier (":" TypeExpr)? "=" Expr ";"?
 
 TraitDef           ::= "trait" Identifier "{" TraitItem* "}"
 TraitItem          ::= MethodSig ";" | TraitPropertyDecl
@@ -47,24 +56,20 @@ TraitPropertyDecl  ::= "prop" Identifier ":" TypeExpr "{" TraitAccessorDecl* "}"
 TraitAccessorDecl  ::= "get" ";" | "set" ";"
 
 MachineDef         ::= "machine" Identifier "hosts" Identifier "(" "key" ":" Identifier ")" "{" MachineItem* "}"
-MachineItem        ::= MachineFields | FuncDef | MachineTrigger | MachineOn
-MachineFields      ::= "fields" "{" StructFieldList? "}"
-MachineTrigger     ::= "trigger" Identifier "(" Identifier ")" BlockExpr
-MachineOn          ::= "on" TypeExpr "(" Identifier ")" BlockExpr
 ```
 
 ## Type Expressions
 
 ```bnf
 TypeExpr           ::= TypeExprTerm ("|" TypeExprTerm)*
-TypeExprTerm       ::= TypeExprAtom RefinementType? TypeSuffix*
-TypeExprAtom       ::= UnitType | NamedType | TupleType | FnType
+TypeExprTerm       ::= TypeExprAtom NullableSuffix? RefinementType? TypeSuffix*
+TypeExprAtom       ::= UnitType | NamedType | TupleType | RangeType | FnType | RawPtrType
 
-TypeSuffix         ::= ArraySuffix | SliceSuffix | DynArraySuffix | HeapSuffix
+TypeSuffix         ::= ArraySuffix | SliceSuffix | HeapSuffix
 ArraySuffix        ::= "[" IntLitList "]"
 SliceSuffix        ::= "[" "]"
-DynArraySuffix     ::= "[" "*" "]"
 HeapSuffix         ::= "^"
+NullableSuffix     ::= "?"      # currently accepted for paddr, vaddr, and view<...>
 
 RefinementType     ::= ":" Refinement ("&" Refinement)*
 Refinement         ::= "bounds" "(" IntLit ("," IntLit)? ")"
@@ -74,7 +79,9 @@ UnitType           ::= "()"
 NamedType          ::= TypeName TypeArgList?
 TypeName           ::= Identifier ("::" Identifier)* | "set" | "map"
 TupleType          ::= "(" TypeExpr "," TypeExprList? ")"
+RangeType          ::= "range" "(" IntLit ("," IntLit)? ")"
 FnType             ::= "fn" "(" FnTypeParamList? ")" "->" TypeExpr
+RawPtrType         ::= "*" TypeExprTerm
 
 TypeParamList      ::= "<" IdentifierList ">"
 TypeArgList        ::= "<" TypeExprList ">"
@@ -92,15 +99,14 @@ IntLitList         ::= IntLit ("," IntLit)* ","?
 ```bnf
 FuncDecl           ::= FuncSig ";"
 FuncDef            ::= FuncSig Block
-Func               ::= FuncSig Block
 
 FuncSig            ::= "fn" Identifier TypeParamList? "(" ParamList? ")" ("->" TypeExpr)?
 
 ParamList          ::= Param ("," Param)* ","?
-Param              ::= ParamMode? Identifier ":" TypeExpr
+Param              ::= ParamMode? Identifier ":" TypeExpr ("=" Expr)?
 ParamMode          ::= "inout" | "out" | "sink"
 
-MethodBlock        ::= TypeName "::" TypeName? "{" MethodItem* "}"
+MethodBlock        ::= TypeName TypeArgList? "::" TypeName? "{" MethodItem* "}"
 MethodItem         ::= MethodDecl | MethodDef | PropertyDef
 MethodDecl         ::= AttributeList MethodSig ";"
 MethodDef          ::= AttributeList MethodSig Block
@@ -122,18 +128,20 @@ Block              ::= "{" BlockItem* (Expr ";"?)? "}"
 BlockItem          ::= StmtExpr | Expr ";"
 
 StmtExpr           ::= LetBind | VarBind | VarDecl | Assign
-                     | While | For | Using | Break | Continue | Return
+                     | While | For | Using | Defer | Break | Continue | Return
 
 LetBind            ::= "let" Pattern (":" TypeExpr)? "=" Expr ";"
 VarBind            ::= "var" Pattern (":" TypeExpr)? "=" Expr ";"
 VarDecl            ::= "var" Identifier ":" TypeExpr ";"
-Assign             ::= PostfixExpr "=" Expr ";"
+
+Assign             ::= PostfixExpr AssignOp Expr ";"
+AssignOp           ::= "=" | "+=" | "-=" | "*=" | "/=" | "%="
+                     | "&=" | "|=" | "^=" | "<<=" | ">>="
 
 While              ::= "while" Expr Block
-For                ::= "for" Pattern "in" (RangeExpr | Expr) Block
-RangeExpr          ::= IntLit ".." IntLit
-
+For                ::= "for" Pattern "in" Expr Block
 Using              ::= "using" Identifier "=" Expr Block
+Defer              ::= "defer" Expr ";"
 Break              ::= "break" ";"
 Continue           ::= "continue" ";"
 Return             ::= "return" Expr? ";"
@@ -152,7 +160,12 @@ PatternList        ::= Pattern ("," Pattern)* ","?
 ## Expressions
 
 ```bnf
-Expr               ::= If | Match | InfixExpr
+Expr               ::= If | Match | TryExpr
+TryExpr            ::= TernaryExpr ("or" (Expr | OrHandlerBlock))?
+OrHandlerBlock     ::= "{" (MatchArmList | BlockBody)? "}"
+MatchArmList       ::= MatchArm ("," MatchArm)* ","?
+BlockBody          ::= BlockItem* (Expr ";"?)?
+TernaryExpr        ::= InfixExpr ("?" Expr ":" TernaryExpr)?
 
 If                 ::= "if" Expr Block IfTail?
 IfTail             ::= "else" (Block | If)
@@ -185,8 +198,9 @@ UnaryExpr          ::= ("-" | "!" | "~" | "^") UnaryExpr
                      | "move" UnaryExpr
                      | PostfixExpr
 
-PostfixExpr        ::= Primary (Call | ArrayIndex | SliceRange | TupleField | StructField | MethodCall | TryPostfix)*
+PostfixExpr        ::= Primary (Call | LabeledCall | ArrayIndex | SliceRange | TupleField | StructField | MethodCall)* ("?")?
 Call               ::= "(" CallArgList? ")"
+LabeledCall        ::= ":" Identifier "(" CallArgList? ")"
 CallArgList        ::= CallArg ("," CallArg)* ","?
 CallArg            ::= ("inout" | "out" | "move")? Expr
 ArrayIndex         ::= "[" ExprList "]"
@@ -194,7 +208,6 @@ SliceRange         ::= "[" Expr? ".." Expr? "]"
 TupleField         ::= "." IntLit
 StructField        ::= "." Identifier
 MethodCall         ::= "." Identifier "(" CallArgList? ")"
-TryPostfix         ::= "?"
 ```
 
 ## Primary Expressions and Literals
@@ -204,15 +217,22 @@ Primary            ::= Literal
                      | Identifier
                      | EnumVariant
                      | StructUpdate
+                     | EmitExpr
+                     | ReplyExpr
+                     | UnsafeExpr
                      | "(" Expr ")"
                      | Block
                      | ClosureExpr
 
+EmitExpr           ::= "emit" ("Send" | ("Request" (":" Identifier)?)) "(" "to" ":" Expr "," Expr ")"
+ReplyExpr          ::= "reply" "(" Expr "," Expr ")"
+UnsafeExpr         ::= "unsafe" Block
+
 EnumVariant        ::= TypeName "::" Identifier ("(" ExprList ")")?
 StructUpdate       ::= "{" Expr "|" StructUpdateField ("," StructUpdateField)* ","? "}"
-StructUpdateField  ::= Identifier ":" Expr
+StructUpdateField  ::= Identifier (":" Expr)?
 
-Literal            ::= UnitLit | IntLit | BoolLit | CharLit | StringLit | StringFmt
+Literal            ::= UnitLit | NoneLit | IntLit | BoolLit | CharLit | StringLit | StringFmt
                      | ArrayLit | SetLit | MapLit | TupleLit | StructLit
 
 ArrayLit           ::= TypeExpr? "[" ExprList "]"
@@ -220,15 +240,12 @@ ArrayLit           ::= TypeExpr? "[" ExprList "]"
 TupleLit           ::= "(" Expr "," ExprList? ")"
 StructLit          ::= TypeName "{" StructLitFieldList? "}"
 StructLitFieldList ::= StructLitField ("," StructLitField)* ","?
-StructLitField     ::= Identifier ":" Expr
+StructLitField     ::= Identifier (":" Expr)?
 
 SetLit             ::= "{" Expr "," ExprList? "}"
-                     | "set" "<" TypeExpr ">" "{" (ExprList)? "}"
-
+                     | "set" "<" TypeExpr ">" "{" ExprList? "}"
 MapLit             ::= "{" MapEntry ("," MapEntry)* ","? "}"
-                     | "map" "<" TypeExpr "," TypeExpr ">" "{" (MapEntryList)? "}"
-MapEntry           ::= Expr ":" Expr
-MapEntryList       ::= MapEntry ("," MapEntry)* ","?
+                     | "map" "<" TypeExpr "," TypeExpr ">" "{" MapEntryList? "}"
 ```
 
 ## Lexical
@@ -236,8 +253,11 @@ MapEntryList       ::= MapEntry ("," MapEntry)* ","?
 ```bnf
 Identifier         ::= [a-zA-Z_][a-zA-Z0-9_]*
 ExprList           ::= Expr ("," Expr)* ","?
+MapEntry           ::= Expr ":" Expr
+MapEntryList       ::= MapEntry ("," MapEntry)* ","?
 
 UnitLit            ::= "()"
+NoneLit            ::= "None"
 BoolLit            ::= "true" | "false"
 IntLit             ::= DecimalLit | BinaryLit | OctalLit | HexLit
 DecimalLit         ::= [0-9]([0-9_])*
@@ -255,4 +275,9 @@ StringFmt          ::= "f" StringLit
   `{1,}`), so `{x}` remains a block expression.
 - Bare empty map/set literals are not allowed; use typed forms such as
   `map<u64, u64>{}` or `set<u64>{}`.
-- `?` is an error-union propagation operator.
+- `expr?` is still the bare propagation form for error unions.
+- `expr or { ... }` is inline recovery sugar; `expr or |err| { ... }` remains
+  the callable-handler form.
+- `?` in type position is currently accepted for low-level nullable forms such
+  as `paddr?`, `vaddr?`, and `view<...>?`; it is not yet a general optional
+  type feature.

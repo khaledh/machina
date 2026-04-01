@@ -1,15 +1,28 @@
-// Sample Machina code to demonstrate syntax highlighting
+// Sample Machina code to demonstrate syntax highlighting.
 
 requires {
     std::io::println
 }
 
-// Attributes
+// Attributes and fixed-layout types
+@public
+@layout(fixed, size: 24)
+type Header = {
+    magic: u64,
+    flags: u64,
+    next: vaddr?,
+}
+
 @public
 type Point = {
     x: u64,
     y: u64,
 }
+
+@section("__DATA,__demo")
+static var LAST_HEADER: view<Header>? = None;
+
+type HeaderMissing = {}
 
 @public
 fn distance(p1: Point, p2: Point) -> u64 {
@@ -18,7 +31,6 @@ fn distance(p1: Point, p2: Point) -> u64 {
     dx + dy
 }
 
-// Traits
 @public
 trait Drawable {
     fn draw(self);
@@ -56,9 +68,26 @@ fn test_literals() {
     let hex = 0xFF_00;
     let decimal = 42;
     let boolean = true;
+    let nothing = None;
     let character = 'A';
     let text = "Hello, Machina!";
     let formatted = f"Value: {decimal}";
+    nothing;
+}
+
+fn read_header(addr: vaddr) -> view<Header> | HeaderMissing {
+    let header: view<Header> = unsafe {
+        view_at(addr)
+    };
+    header
+}
+
+fn header_magic() -> u64 {
+    let header = LAST_HEADER or {
+        return 0;
+    };
+
+    header.magic
 }
 
 // Control flow
@@ -78,8 +107,10 @@ fn count_to_ten() {
 
     var x = 0;
     while x < 10 {
-        x = x + 1;
+        x += 1;
     }
+
+    defer println("done counting");
 }
 
 // Main function

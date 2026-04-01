@@ -7,15 +7,16 @@ This document shows how Machina language constructs map to TextMate scopes, whic
 | Language Element | Example | TextMate Scope | Typical Color (Dark+ Theme) |
 |-----------------|---------|----------------|----------------------------|
 | **Comments** | `// comment` | `comment.line.double-slash` | Green |
-| **Keywords (Control)** | `if`, `else`, `match`, `while`, `for`, `break`, `continue`, `return` | `keyword.control` | Purple/Magenta |
-| **Keywords (Other)** | `fn`, `type`, `trait`, `let`, `var`, `using` | `keyword.other` | Blue |
+| **Keywords (Control)** | `if`, `else`, `match`, `while`, `for`, `break`, `continue`, `return`, `or` | `keyword.control` | Purple/Magenta |
+| **Keywords (Other)** | `fn`, `type`, `trait`, `static`, `machine`, `using`, `defer`, `unsafe` | `keyword.other` | Blue |
 | **Storage Modifiers** | `inout`, `out`, `sink`, `move` | `storage.modifier` | Blue |
-| **Booleans** | `true`, `false` | `constant.language.boolean` | Blue |
-| **Attributes** | `@public`, `@machines` | `entity.name.tag` | Yellow/Gold |
+| **Booleans / Constants** | `true`, `false`, `None` | `constant.language` | Blue |
+| **Attributes** | `@public`, `@layout`, `@section` | `entity.name.tag` | Yellow/Gold |
 | **Function Names (Definition)** | `fn add(...)` | `entity.name.function` | Yellow |
 | **Function Calls** | `println(...)` | `entity.name.function` | Yellow |
 | **Type Names (User-defined)** | `Point`, `Connection` | `entity.name.type` | Green (Bright) |
-| **Type Names (Primitive)** | `u64`, `i32`, `bool`, `string` | `support.type.primitive` | Cyan/Blue |
+| **Type Names (Primitive)** | `u64`, `i32`, `bool`, `string`, `paddr`, `vaddr` | `support.type.primitive` | Cyan/Blue |
+| **Builtin Type Constructors** | `view<Header>`, `view<Header[]>` | `support.type.builtin` | Cyan/Blue |
 | **String Literals** | `"hello"` | `string.quoted.double` | Orange/Red |
 | **Character Literals** | `'A'` | `string.quoted.single` | Orange/Red |
 | **Escape Sequences** | `\n`, `\t` | `constant.character.escape` | Yellow/Gold |
@@ -28,7 +29,8 @@ This document shows how Machina language constructs map to TextMate scopes, whic
 | **Comparison Operators** | `==`, `!=`, `<`, `>` | `keyword.operator.comparison` | White/Light Gray |
 | **Arithmetic Operators** | `+`, `-`, `*`, `/`, `%` | `keyword.operator.arithmetic` | White/Light Gray |
 | **Bitwise Operators** | `&`, `\|`, `^`, `~`, `<<`, `>>` | `keyword.operator.bitwise` | White/Light Gray |
-| **Assignment** | `=` | `keyword.operator.assignment` | White/Light Gray |
+| **Pipe Operator** | `\|>` | `keyword.operator.pipeline` | White/Light Gray |
+| **Assignment** | `=`, `+=`, `<<=` | `keyword.operator.assignment` | White/Light Gray |
 | **Arrows** | `->`, `=>` | `keyword.operator.arrow` | White/Light Gray |
 | **Punctuation (Separators)** | `,`, `;` | `punctuation.separator` | White |
 | **Punctuation (Accessors)** | `.`, `..`, `::` | `punctuation.accessor` | White |
@@ -42,7 +44,7 @@ This document shows how Machina language constructs map to TextMate scopes, whic
 // This is a comment
            ↑ comment.line.double-slash.machina
 
-@public
+@layout(fixed, size: 24)
  ↑ entity.name.tag.machina
 
 fn add(x: u64, y: u64) -> u64 {

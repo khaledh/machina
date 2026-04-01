@@ -5,6 +5,7 @@ This folder contains the VS Code/Cursor extension scaffold for Machina.
 ## Features
 
 - **Syntax Highlighting**: Full TextMate grammar for Machina with support for all language features (keywords, attributes, literals, types, operators, etc.)
+- **Low-level Surface Highlighting**: Covers `unsafe`, `static`, fixed-layout attributes, low-level address types, `None`, and foreign view spellings like `view<T[]>`
 - **Language Server Protocol (LSP)**: Integration with `machina-lsp` for code intelligence
 - **Editor Support**: Auto-closing pairs, bracket matching, comment toggling, and smart indentation
 
@@ -19,6 +20,7 @@ This folder contains the VS Code/Cursor extension scaffold for Machina.
 The extension activates on `.mc` files and exposes:
 
 - **Syntax highlighting** for all Machina language constructs
+- **Updated low-level highlighting** for `@layout(...)`, `@align(...)`, `@section(...)`, `paddr`, `vaddr`, `unsafe`, `static`, and `None`
 - `Machina: Show Output`
 - `Machina: Ping`
 - `Machina: Restart Language Server`
