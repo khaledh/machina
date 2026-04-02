@@ -1,5 +1,5 @@
 use super::*;
-use crate::core::ast::RefinementKind;
+use crate::core::ast::{ExtentExpr, ExtentExprKind, RefinementKind};
 use crate::core::lexer::{LexError, Lexer, Token};
 use crate::core::parse::ParseErrorKind;
 
@@ -36,6 +36,17 @@ fn block_stmt_at(items: &[BlockItem], index: usize) -> &StmtExpr {
         BlockItem::Stmt(stmt) => stmt,
         BlockItem::Expr(_) => panic!("Expected stmt block item"),
     }
+}
+
+fn assert_extent_ints(dims: &[ExtentExpr], expected: &[u64]) {
+    let actual = dims
+        .iter()
+        .map(|dim| match dim.kind {
+            ExtentExprKind::Int(value) => value,
+            ExtentExprKind::FieldPath(_) => panic!("expected integer extent"),
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(actual, expected);
 }
 
 #[test]
@@ -190,7 +201,7 @@ fn test_parse_multidim_array_type() {
                 TypeExprKind::Named { ident: name, .. } => assert_eq!(name, "u64"),
                 _ => panic!("Expected named type"),
             }
-            assert_eq!(dims.as_slice(), &[2, 3]);
+            assert_extent_ints(dims, &[2, 3]);
         }
         _ => panic!("Expected array type"),
     }
@@ -213,7 +224,36 @@ fn test_parse_multidim_array_type_3d() {
                 TypeExprKind::Named { ident: name, .. } => assert_eq!(name, "u64"),
                 _ => panic!("Expected named type"),
             }
-            assert_eq!(dims.as_slice(), &[2, 3, 4]);
+            assert_extent_ints(dims, &[2, 3, 4]);
+        }
+        _ => panic!("Expected array type"),
+    }
+}
+
+#[test]
+fn test_parse_array_type_with_field_path_extent() {
+    let source = r#"
+        fn test() -> u64[header.count] {
+            ()
+        }
+    "#;
+
+    let funcs = parse_source(source).expect("Failed to parse");
+    let func = &funcs[0];
+
+    match &func.sig.ret_ty_expr.kind {
+        TypeExprKind::Array { elem_ty_expr, dims } => {
+            match &elem_ty_expr.kind {
+                TypeExprKind::Named { ident: name, .. } => assert_eq!(name, "u64"),
+                _ => panic!("Expected named type"),
+            }
+            assert_eq!(dims.len(), 1);
+            match &dims[0].kind {
+                ExtentExprKind::FieldPath(path) => {
+                    assert_eq!(path, &["header".to_string(), "count".to_string()])
+                }
+                _ => panic!("Expected field-path extent"),
+            }
         }
         _ => panic!("Expected array type"),
     }
@@ -844,7 +884,7 @@ fn test_parse_heap_type_postfix_with_array_precedence() {
     let a_param = &funcs[0].sig.params[0];
     match &a_param.typ.kind {
         TypeExprKind::Array { elem_ty_expr, dims } => {
-            assert_eq!(dims, &[3]);
+            assert_extent_ints(dims, &[3]);
             match &elem_ty_expr.kind {
                 TypeExprKind::Heap { elem_ty_expr } => match &elem_ty_expr.kind {
                     TypeExprKind::Named { ident, .. } => assert_eq!(ident, "u64"),
@@ -861,7 +901,7 @@ fn test_parse_heap_type_postfix_with_array_precedence() {
     match &b_param.typ.kind {
         TypeExprKind::Heap { elem_ty_expr } => match &elem_ty_expr.kind {
             TypeExprKind::Array { elem_ty_expr, dims } => {
-                assert_eq!(dims, &[3]);
+                assert_extent_ints(dims, &[3]);
                 match &elem_ty_expr.kind {
                     TypeExprKind::Named { ident, .. } => assert_eq!(ident, "u64"),
                     _ => panic!("Expected named u64 inside array"),

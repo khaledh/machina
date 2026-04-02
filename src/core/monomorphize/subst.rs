@@ -381,7 +381,13 @@ pub(crate) fn type_expr_from_type(
                 node_id_gen,
                 span,
             )?),
-            dims: dims.clone(),
+            dims: dims
+                .iter()
+                .map(|dim| crate::core::ast::ExtentExpr {
+                    kind: crate::core::ast::ExtentExprKind::Int(*dim as u64),
+                    span,
+                })
+                .collect(),
         },
         Type::DynArray { elem_ty } => TypeExprKind::DynArray {
             elem_ty_expr: Box::new(type_expr_from_type(
@@ -436,9 +442,7 @@ pub(crate) fn type_expr_from_type(
             ident: "view?".to_string(),
             type_args: vec![type_expr_from_type(
                 &Type::Slice {
-                    elem_ty: Box::new(Type::View {
-                        elem_ty: elem_ty.clone(),
-                    }),
+                    elem_ty: elem_ty.clone(),
                 },
                 def_table,
                 module,
@@ -462,9 +466,7 @@ pub(crate) fn type_expr_from_type(
             ident: "view".to_string(),
             type_args: vec![type_expr_from_type(
                 &Type::Slice {
-                    elem_ty: Box::new(Type::View {
-                        elem_ty: elem_ty.clone(),
-                    }),
+                    elem_ty: elem_ty.clone(),
                 },
                 def_table,
                 module,

@@ -352,8 +352,7 @@ fn test_lower_match_counted_nullable_view_array_some_none() {
         @layout(fixed)
         type Table = {
             count: u64,
-            @count(count)
-            items: view<Header[]>?,
+            items: view<Header[count]>?,
         }
 
         fn main(table: Table) -> u64 {

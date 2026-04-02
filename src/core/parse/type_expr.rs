@@ -310,7 +310,7 @@ impl<'a> Parser<'a> {
             });
         }
 
-        let dims = self.parse_list(TK::Comma, TK::RBracket, |parser| parser.parse_int_lit())?;
+        let dims = self.parse_list(TK::Comma, TK::RBracket, |parser| parser.parse_extent_expr())?;
         self.consume(&TK::RBracket)?;
 
         if dims.is_empty() {
@@ -327,8 +327,31 @@ impl<'a> Parser<'a> {
             id: self.id_gen.new_id(),
             kind: TypeExprKind::Array {
                 elem_ty_expr: Box::new(elem_ty_expr),
-                dims: dims.into_iter().map(|d| d as usize).collect(),
+                dims,
             },
+            span: self.close(marker),
+        })
+    }
+
+    fn parse_extent_expr(&mut self) -> Result<ExtentExpr, ParseError> {
+        let marker = self.mark();
+
+        if let TK::IntLit(value) = self.curr_token.kind.clone() {
+            self.advance();
+            return Ok(ExtentExpr {
+                kind: ExtentExprKind::Int(value),
+                span: self.close(marker),
+            });
+        }
+
+        let mut segments = vec![self.parse_ident()?];
+        while self.curr_token.kind == TK::Dot {
+            self.advance();
+            segments.push(self.parse_ident()?);
+        }
+
+        Ok(ExtentExpr {
+            kind: ExtentExprKind::FieldPath(segments),
             span: self.close(marker),
         })
     }

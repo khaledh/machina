@@ -1172,8 +1172,7 @@ fn test_counted_nullable_view_field_or_inline_block_bails_early() {
             @layout(fixed)
             type Table = {
                 count: u64,
-                @count(count)
-                items: view<Header[]>?,
+                items: view<Header[count]>?,
             }
 
             static let TABLE: Table = Table {
@@ -1228,6 +1227,56 @@ fn test_same_scope_name_rebinding_for_let_var_and_params() {
 
     let stdout = String::from_utf8_lossy(&run.stdout);
     assert_eq!(stdout, "2\n3\n6\n", "unexpected stdout: {stdout}");
+}
+
+#[test]
+fn test_extent_syntax_on_nullable_view_fields_with_inline_or() {
+    let run = run_program(
+        "extent_syntax_nullable_view_fields_or_inline",
+        r#"
+            requires {
+                std::io::println
+            }
+
+            @layout(fixed)
+            type Header = {
+                magic: u64,
+            }
+
+            @layout(fixed)
+            type Counts = {
+                items: u64,
+            }
+
+            @layout(fixed)
+            type Table = {
+                counts: Counts,
+                items: view<Header[counts.items]>?,
+            }
+
+            static let TABLE: Table = Table {
+                counts: Counts { items: 3 },
+                items: None,
+            };
+
+            fn dump() {
+                let items = TABLE.items or {
+                    println("missing");
+                    return;
+                };
+
+                println(items.len);
+            }
+
+            fn main() {
+                dump();
+            }
+        "#,
+    );
+    assert_eq!(run.status.code(), Some(0));
+
+    let stdout = String::from_utf8_lossy(&run.stdout);
+    assert_eq!(stdout, "missing\n", "unexpected stdout: {stdout}");
 }
 
 fn with_temp_program(

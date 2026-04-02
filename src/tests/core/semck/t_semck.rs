@@ -217,8 +217,7 @@ fn test_counted_nullable_view_match_is_exhaustive_with_some_and_none() {
         @layout(fixed)
         type Table = {
             count: u64,
-            @count(count)
-            items: view<Header[]>?,
+            items: view<Header[count]>?,
         }
 
         fn test(table: Table) -> u64 {

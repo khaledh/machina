@@ -385,7 +385,7 @@ fn format_type_key_with_names(ty: &TypeKey, type_param_names: &[String]) -> Stri
             "{}[{}]",
             format_type_key_with_names(elem, type_param_names),
             dims.iter()
-                .map(|d| d.to_string())
+                .map(format_extent_key)
                 .collect::<Vec<_>>()
                 .join("; ")
         ),
@@ -438,6 +438,13 @@ fn format_type_key_with_names(ty: &TypeKey, type_param_names: &[String]) -> Stri
             .get(*index as usize)
             .cloned()
             .unwrap_or_else(|| format!("T{index}")),
+    }
+}
+
+fn format_extent_key(extent: &crate::core::symbol_id::ExtentKey) -> String {
+    match extent {
+        crate::core::symbol_id::ExtentKey::Int(value) => value.to_string(),
+        crate::core::symbol_id::ExtentKey::FieldPath(segments) => segments.join("."),
     }
 }
 

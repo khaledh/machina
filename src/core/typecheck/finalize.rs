@@ -32,6 +32,7 @@ use crate::core::typecheck::property_access;
 use crate::core::typecheck::template_bind::bind_template_type_vars;
 use crate::core::typecheck::type_map::{
     CallParam, CallSig, CallSigMap, GenericInst, GenericInstMap, TypeMap, TypeMapBuilder,
+    peel_outer_foreign_extent,
 };
 use crate::core::typecheck::utils::fn_param_mode;
 use crate::core::types::{FnParam, TyVarId, Type};
@@ -155,7 +156,7 @@ fn build_outputs(engine: &TypecheckEngine) -> FinalizeOutput {
         }
     }
 
-    record_counted_view_field_metadata(engine, &mut builder);
+    record_foreign_view_field_metadata(engine, &mut builder);
 
     // Materialize call signatures and generic instantiations from call
     // obligations. Prefer solver-selected overload def ids when available.
@@ -329,30 +330,34 @@ fn build_outputs(engine: &TypecheckEngine) -> FinalizeOutput {
     }
 }
 
-fn record_counted_view_field_metadata(engine: &TypecheckEngine, builder: &mut TypeMapBuilder) {
+fn record_foreign_view_field_metadata(engine: &TypecheckEngine, builder: &mut TypeMapBuilder) {
     for type_def in engine.context().module.type_defs() {
         let crate::core::ast::TypeDefKind::Struct { fields } = &type_def.kind else {
             continue;
         };
         for field in fields {
-            let count_field = field.attrs.iter().find_map(|attr| {
-                if attr.name != "count" || attr.args.len() != 1 {
-                    return None;
-                }
-                match attr.args.first() {
-                    Some(crate::core::ast::AttrArg::Ident(name)) => Some(name.clone()),
-                    _ => None,
-                }
-            });
-            if let Some(count_field) = count_field {
-                builder.record_counted_view_field(
+            if let Some((_, extent)) = extract_foreign_view_field_extent(&field.ty) {
+                builder.record_foreign_view_extent(
                     type_def.name.clone(),
                     field.name.clone(),
-                    count_field,
+                    extent.clone(),
                 );
             }
         }
     }
+}
+
+fn extract_foreign_view_field_extent(
+    type_expr: &TypeExpr,
+) -> Option<(TypeExpr, crate::core::types::ForeignExtent)> {
+    let crate::core::ast::TypeExprKind::Named { ident, type_args } = &type_expr.kind else {
+        return None;
+    };
+    if ident != "view?" || type_args.len() != 1 {
+        return None;
+    }
+    let (inner, extent) = peel_outer_foreign_extent(&type_args[0])?;
+    Some((inner, extent))
 }
 
 fn collect_opaque_tables(engine: &TypecheckEngine) -> (OpaqueBindingMap, ExposedTypeMap) {

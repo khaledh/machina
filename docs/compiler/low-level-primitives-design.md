@@ -104,13 +104,14 @@ have a known, fixed size. The rules are:
 
 - **Plain value fields** contribute their natural size and alignment
   (e.g., `u64` = 8 bytes, `u8` = 1 byte, `paddr` = 8 bytes).
-- **View fields** (`view<T>?`, `view<T[]>?`, `view<view<T>[]>?`)
+- **View fields** (`view<T>?`, `view<T[N]>?`, `view<view<T>[N]>?`)
   always occupy **8 bytes** (one pointer-sized slot). The view type
   describes the *meaning* of the stored pointer, not an expanded
   in-memory value.
-- **`@count(sibling)`** is field metadata — it tells the compiler
-  which sibling field provides the element count for a sequence view
-  field. It does not affect the field's storage size.
+- **Sequence extents** live in the type syntax itself
+  (`view<T[count]>?`, `view<view<T>[count]>?`). They describe how many
+  elements the pointed-to sequence contains, but they do not affect the
+  field's storage size.
 
 This keeps layout computation straightforward: read the fields, sum
 the sizes using the rules above.
@@ -125,8 +126,7 @@ rather than using untyped `vaddr?`:
 type LimineMemmapResponse = {
     revision: u64,
     entry_count: u64,
-    @count(entry_count)
-    entries: view<view<LimineMemmapEntry>[]>?,
+    entries: view<view<LimineMemmapEntry>[entry_count]>?,
 }
 
 @layout(fixed)
@@ -154,15 +154,15 @@ let response = memmap_request.response or {
 // response: view<LimineMemmapResponse>
 ```
 
-Reading a counted view field (with `@count`) automatically pairs the
-stored pointer with the sibling count to produce a sequence view:
+Reading a sequence view field automatically pairs the stored pointer
+with the extent declared in the type to produce a sequence view:
 
 ```machina
 let entries = response.entries or {
     println("no entries");
     return;
 };
-// entries: view<view<LimineMemmapEntry>[]>
+// entries: view<view<LimineMemmapEntry>[entry_count]>
 // iteration yields view<LimineMemmapEntry> per element
 ```
 
@@ -173,25 +173,25 @@ The view type family uses composition rather than separate named types:
 | Type | Meaning | Storage | Indexing |
 |------|---------|---------|----------|
 | `view<T>` | Single foreign struct | 8 bytes (ptr) | Field access |
-| `view<T[]>` | Contiguous foreign array | 8 bytes (ptr) + count from `@count` | Direct index |
-| `view<view<T>[]>` | Pointer table (T\*\*) | 8 bytes (ptr) + count from `@count` | Double deref |
+| `view<T[N]>` | Contiguous foreign array | 8 bytes (ptr) + extent from `N` | Direct index |
+| `view<view<T>[N]>` | Pointer table (T\*\*) | 8 bytes (ptr) + extent from `N` | Double deref |
 | `view<T>?` | Nullable pointer to T | 8 bytes | Unwrap then access |
 
-`view<view<T>[]>` reads as: "a foreign view over a contiguous array
+`view<view<T>[N]>` reads as: "a foreign view over a contiguous array
 of foreign views of T." The outer view handles the array bounds; each
 inner `view<T>` is a pointer to a T. This is exactly the Limine
 `T**` pattern — honest about the double indirection without exposing
 raw pointers.
 
-### `@count` rules
+### Sequence extent rules
 
-- `@count(field_name)` may only appear on `view<T[]>?` or
-  `view<view<T>[]>?` fields.
-- The referenced field must be a preceding field in the same struct
-  with an unsigned integer type (`u64`, `u32`, etc.).
-- The compiler verifies that the referenced field exists and has a
-  valid type.
-- `@count` does not affect storage size — it is access metadata only.
+- `view<T[N]>?` and `view<view<T>[N]>?` are the primary counted-sequence
+  forms.
+- `N` may be an integer literal or a field/path reference.
+- A referenced field/path must resolve to an unsigned integer count.
+- The extent does not affect storage size — it is access metadata only.
+- Sequence shape now lives in the type; separate count metadata is no
+  longer part of the design.
 
 ### Padding and Alignment
 
@@ -455,7 +455,7 @@ let items: view<SomeType[]> = unsafe {
 };
 
 // Pointer table (double indirection)
-let entries: view<view<LimineMemmapEntry>[]> = unsafe {
+let entries: view<view<LimineMemmapEntry>[entry_count]> = unsafe {
     view_slice_at(entries_addr, entry_count)
 };
 ```
@@ -597,7 +597,7 @@ unsafe { ptr.write(42) };
 | Situation | Use |
 |-----------|-----|
 | Reading a known-layout struct at an address | `view<T>` field or `view_at` |
-| Iterating a foreign array | `view<T[]>` field with `@count` |
+| Iterating a foreign array | `view<T[N]>` or `view<view<T>[N]>` field |
 | Following a nullable pointer to a struct | `view<T>?` field, unwrap via `or` |
 | Building a page table | `*T` |
 | Writing to arbitrary memory | `*T` |
@@ -628,8 +628,7 @@ type LimineMemmapEntry = {
 type LimineMemmapResponse = {
     revision: u64,
     entry_count: u64,
-    @count(entry_count)
-    entries: view<view<LimineMemmapEntry>[]>?,
+    entries: view<view<LimineMemmapEntry>[entry_count]>?,
 }
 
 @layout(fixed)
@@ -734,15 +733,17 @@ would use `unsafe` around static reads.
 - `@section` attribute for linker section placement
 - Compile-time initializer evaluation
 
-### Phase 4 — Foreign views (partially done)
+### Phase 4 — Foreign views (done)
 - `view<T>` type for fixed-layout types
 - Standalone constructors: `view_at`, `view_slice_at`, `view_array_at`
   (done — these require `unsafe`)
 - Safe field-read access through views (done)
 - Indexing and iteration on view sequences (done)
-- **Remaining**: typed view fields in fixed-layout structs
-  (`view<T>?`, `view<T[]>?` with `@count`)
-- **Done**: sequence views use the unified spellings `view<view<T>[]>` and `view<T[]>`; the older `view_slice<T>` / `view_array<T>` forms remain compatibility aliases for now
+- Typed view fields in fixed-layout structs
+  (`view<T>?`, `view<T[N]>?`, `view<view<T>[N]>?`) (done)
+- Sequence views use the unified spellings `view<view<T>[N]>` and
+  `view<T[N]>`; the older `view_slice<T>` / `view_array<T>` forms
+  remain compatibility aliases for now
 
 ### Phase 5 — Raw pointer escape hatch (done)
 - `*T` raw pointer type
@@ -752,5 +753,11 @@ would use `unsafe` around static reads.
 
 ### Phase 6 — Inline recovery for nullable types
 - `or { ... }` on nullable addresses: `paddr?`, `vaddr?` (done)
-- Extend `or { ... }` to nullable view fields: `view<T>?`
-  (required by target example)
+- `or { ... }` on nullable view fields: `view<T>?`,
+  `view<T[N]>?`, `view<view<T>[N]>?` (done)
+
+### Phase 7 — Dependent foreign extents (done)
+- Count metadata can now live in the type syntax itself:
+  `view<T[N]>?`, `view<view<T>[N]>?`
+- `N` currently supports integer literals and field/path references
+- The older `@count(...)` compatibility path has been retired

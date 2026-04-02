@@ -444,7 +444,15 @@ fn resolve_linear_type_expr(
         }
         TEK::Array { elem_ty_expr, dims } => Type::Array {
             elem_ty: Box::new(resolve_linear_type_expr(elem_ty_expr, type_defs)),
-            dims: dims.clone(),
+            dims: dims
+                .iter()
+                .map(|dim| match dim.kind {
+                    crate::core::ast::ExtentExprKind::Int(value) => value as usize,
+                    crate::core::ast::ExtentExprKind::FieldPath(_) => panic!(
+                        "compiler bug: dependent array extents are not supported in hosted linear types"
+                    ),
+                })
+                .collect(),
         },
         TEK::Tuple { field_ty_exprs } => Type::Tuple {
             field_tys: field_ty_exprs

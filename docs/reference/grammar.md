@@ -66,7 +66,7 @@ TypeExprTerm       ::= TypeExprAtom NullableSuffix? RefinementType? TypeSuffix*
 TypeExprAtom       ::= UnitType | NamedType | TupleType | RangeType | FnType | RawPtrType
 
 TypeSuffix         ::= ArraySuffix | SliceSuffix | HeapSuffix
-ArraySuffix        ::= "[" IntLitList "]"
+ArraySuffix        ::= "[" ExtentList "]"
 SliceSuffix        ::= "[" "]"
 HeapSuffix         ::= "^"
 NullableSuffix     ::= "?"      # currently accepted for paddr, vaddr, and view<...>
@@ -91,7 +91,9 @@ FnTypeParamList    ::= FnTypeParam ("," FnTypeParam)* ","?
 FnTypeParam        ::= ParamMode? TypeExpr
 
 TypeExprList       ::= TypeExpr ("," TypeExpr)* ","?
-IntLitList         ::= IntLit ("," IntLit)* ","?
+ExtentList         ::= ExtentExpr ("," ExtentExpr)* ","?
+ExtentExpr         ::= IntLit | FieldPath
+FieldPath          ::= Ident ("." Ident)*
 ```
 
 ## Functions, Methods, and Properties

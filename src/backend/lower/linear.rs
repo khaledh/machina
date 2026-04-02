@@ -10,7 +10,7 @@ use crate::core::ast::{
 };
 use crate::core::plans::{FmtKind, LoweringPlan, SliceBaseKind};
 use crate::core::resolve::DefKind;
-use crate::core::types::{Type, TypeId};
+use crate::core::types::{ForeignExtent, Type, TypeId};
 use crate::ir::{BinOp, Callee, CastKind, IrTypeId, RuntimeFn, Terminator, UnOp, ValueId};
 
 impl<'a, 'g> FuncLowerer<'a, 'g> {
@@ -68,9 +68,10 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
         place: &Expr,
         expr_sem_ty: &Type,
     ) -> Result<Option<LinearValue>, LowerToIrError> {
-        let (elem_ty, indirect) = match expr_sem_ty {
-            Type::NullableViewSlice { elem_ty } => ((**elem_ty).clone(), true),
-            Type::NullableViewArray { elem_ty } => ((**elem_ty).clone(), false),
+        let elem_ty = match expr_sem_ty {
+            Type::NullableViewSlice { elem_ty } | Type::NullableViewArray { elem_ty } => {
+                (**elem_ty).clone()
+            }
             _ => return Ok(None),
         };
 
@@ -82,13 +83,11 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
         let Type::Struct { name, .. } = &owner_ty else {
             return Ok(None);
         };
-        let Some(count_field) = self.type_map.counted_view_field(name, field) else {
+        let Some(count_value) =
+            self.lower_foreign_view_extent_value(owner_addr, &owner_ty, name, field)?
+        else {
             return Ok(None);
         };
-        let (count_index, _count_sem_ty, count_ir_ty) =
-            self.struct_field_from_type(&owner_ty, count_field);
-        let count_addr = self.field_addr_typed(owner_addr, count_index, count_ir_ty);
-        let count_value = self.builder.load(count_addr, count_ir_ty);
 
         let place_addr = self.lower_place_addr(place)?;
         let raw_ptr = self.builder.load(place_addr.addr, place_addr.value_ty);
@@ -96,17 +95,55 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
         let expr_ir_ty = self.type_lowerer.lower_type(expr_sem_ty);
         let slot = self.alloc_value_slot(expr_ir_ty);
         let elem_ir_ty = self.type_lowerer.lower_type(&elem_ty);
-        let ptr_ir_ty = if indirect {
-            let elem_ptr_ir_ty = self.type_lowerer.ptr_to(elem_ir_ty);
-            self.type_lowerer.ptr_to(elem_ptr_ir_ty)
-        } else {
-            self.type_lowerer.ptr_to(elem_ir_ty)
-        };
+        let ptr_ir_ty = self.type_lowerer.ptr_to(elem_ir_ty);
         let cast_ptr = self.builder.cast(CastKind::PtrToPtr, raw_ptr, ptr_ir_ty);
         let u64_ty = self.type_lowerer.lower_type(&Type::uint(64));
         self.store_field(slot.addr, 0, ptr_ir_ty, cast_ptr);
         self.store_field(slot.addr, 1, u64_ty, count_value);
         Ok(Some(self.load_slot(&slot)))
+    }
+
+    fn lower_foreign_view_extent_value(
+        &mut self,
+        owner_addr: ValueId,
+        owner_ty: &Type,
+        type_name: &str,
+        field_name: &str,
+    ) -> Result<Option<ValueId>, LowerToIrError> {
+        let Some(extent) = self.type_map.foreign_view_extent(type_name, field_name) else {
+            return Ok(None);
+        };
+        Ok(Some(match extent {
+            ForeignExtent::Const(value) => {
+                let u64_ty = self.type_lowerer.lower_type(&Type::uint(64));
+                self.builder.const_int(*value as i128, false, 64, u64_ty)
+            }
+            ForeignExtent::FieldPath(path) => {
+                self.lower_struct_field_path_value(owner_addr, owner_ty, path)?
+            }
+        }))
+    }
+
+    fn lower_struct_field_path_value(
+        &mut self,
+        mut curr_addr: ValueId,
+        curr_ty: &Type,
+        path: &[String],
+    ) -> Result<ValueId, LowerToIrError> {
+        let mut curr_ty = curr_ty.clone();
+        let last_index = path.len().saturating_sub(1);
+        for (index, segment) in path.iter().enumerate() {
+            let (field_index, field_sem_ty, field_ir_ty) =
+                self.struct_field_from_type(&curr_ty, segment);
+            let field_addr = self.field_addr_typed(curr_addr, field_index, field_ir_ty);
+            if index == last_index {
+                return Ok(self.builder.load(field_addr, field_ir_ty));
+            }
+            curr_addr = field_addr;
+            curr_ty = field_sem_ty;
+        }
+
+        unreachable!("field paths used for foreign extents must be non-empty");
     }
 
     /// Lowers a linear value expression (single basic block, no branching).

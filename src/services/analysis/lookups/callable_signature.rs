@@ -412,7 +412,7 @@ pub(super) fn format_type_expr_for_signature(ty_expr: &TypeExpr) -> Option<Strin
         TypeExprKind::Array { elem_ty_expr, dims } => {
             let mut elem = format_type_expr_for_signature(elem_ty_expr)?;
             for dim in dims {
-                elem = format!("{elem}[{dim}]");
+                elem = format!("{elem}[{}]", format_extent_expr(dim));
             }
             elem
         }
@@ -482,6 +482,13 @@ pub(super) fn format_type_expr_for_signature(ty_expr: &TypeExpr) -> Option<Strin
             }
         }
     })
+}
+
+fn format_extent_expr(extent: &crate::core::ast::ExtentExpr) -> String {
+    match &extent.kind {
+        crate::core::ast::ExtentExprKind::Int(value) => value.to_string(),
+        crate::core::ast::ExtentExprKind::FieldPath(segments) => segments.join("."),
+    }
 }
 
 pub(crate) fn source_doc_for_def(

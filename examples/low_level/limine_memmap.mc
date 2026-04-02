@@ -9,8 +9,7 @@ type LimineMemmapRequest = {
 type LimineMemmapResponse = {
     revision: u64,
     entry_count: u64,
-    @count(entry_count)
-    entries: view<view<LimineMemmapEntry>[]>?,
+    entries: view<view<LimineMemmapEntry>[entry_count]>?,
 }
 
 @layout(fixed, size: 24)

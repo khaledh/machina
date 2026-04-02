@@ -152,8 +152,7 @@ impl<'a> TypeLowerer<'a> {
             }
             Type::NullableViewSlice { elem_ty } => {
                 let elem = self.lower_type(elem_ty);
-                let elem_ptr = self.ptr_to(elem);
-                let ptr = self.ptr_to(elem_ptr);
+                let ptr = self.ptr_to(elem);
                 let u64 = self.lower_type(&Type::uint(64));
                 self.lower_ptr_len_struct(ptr, u64)
             }
@@ -169,8 +168,7 @@ impl<'a> TypeLowerer<'a> {
             }
             Type::ViewSlice { elem_ty } => {
                 let elem = self.lower_type(elem_ty);
-                let elem_ptr = self.ptr_to(elem);
-                let ptr = self.ptr_to(elem_ptr);
+                let ptr = self.ptr_to(elem);
                 let u64 = self.lower_type(&Type::uint(64));
                 self.lower_ptr_len_struct(ptr, u64)
             }

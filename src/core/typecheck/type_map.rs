@@ -5,8 +5,8 @@
 //! materializes final `TypeMap` outputs.
 
 use crate::core::ast::{
-    EnumDefVariant, Module, NodeId, ParamMode, RefinementKind, StructDefField, TypeDef,
-    TypeDefKind, TypeExpr, TypeExprKind,
+    EnumDefVariant, ExtentExpr, ExtentExprKind, Module, NodeId, ParamMode, RefinementKind,
+    StructDefField, TypeDef, TypeDefKind, TypeExpr, TypeExprKind,
 };
 use crate::core::context::{ResolvedContext, TypeCheckedContext};
 use crate::core::diag::Span;
@@ -16,7 +16,7 @@ use crate::core::typecheck::errors::{TEK, TypeCheckError};
 use crate::core::typecheck::nominal::NominalKey;
 use crate::core::typecheck::utils::{fn_param_mode, nominal_key_concreteness};
 use crate::core::types::{
-    EnumVariant, FnParam, IntBounds, StructField, TyVarId, Type, TypeCache, TypeId,
+    EnumVariant, FnParam, ForeignExtent, IntBounds, StructField, TyVarId, Type, TypeCache, TypeId,
 };
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::fmt;
@@ -391,9 +391,10 @@ fn resolve_type_expr_impl(
                 allow_error_union,
                 false,
             )?;
+            let dims = resolve_static_array_dims(dims, type_expr.span)?;
             Ok(Type::Array {
                 elem_ty: Box::new(elem_ty),
-                dims: dims.clone(),
+                dims,
             })
         }
         TypeExprKind::DynArray { elem_ty_expr } => {
@@ -548,6 +549,21 @@ fn resolve_type_expr_impl(
             })
         }
     }
+}
+
+fn resolve_static_array_dims(
+    dims: &[ExtentExpr],
+    span: Span,
+) -> Result<Vec<usize>, TypeCheckError> {
+    dims.iter()
+        .map(|dim| match &dim.kind {
+            ExtentExprKind::Int(value) => Ok(*value as usize),
+            ExtentExprKind::FieldPath(_) => Err(TEK::DependentArrayExtentNotAllowedHere {
+                extent: format_extent_expr(dim),
+            }
+            .at(span)),
+        })
+        .collect()
 }
 
 fn int_full_range(signed: bool, bits: u8) -> (i128, i128) {
@@ -951,10 +967,80 @@ fn resolve_foreign_view_type(
                 .at(type_expr.span),
         );
     }
+    resolve_foreign_view_type_arg(
+        def_table,
+        module,
+        type_expr,
+        ident,
+        &type_arg_exprs[0],
+        type_params,
+        type_args,
+        in_progress,
+    )
+}
+
+fn resolve_foreign_view_type_arg(
+    def_table: &DefTable,
+    module: &impl TypeDefLookup,
+    _type_expr: &TypeExpr,
+    ident: &str,
+    elem_ty_expr: &TypeExpr,
+    type_params: Option<&TypeParamMap>,
+    type_args: Option<&TypeArgMap>,
+    in_progress: &mut HashSet<DefId>,
+) -> Result<Type, TypeCheckError> {
+    if let Some((sequence_elem_expr, _extent)) = peel_outer_foreign_extent(elem_ty_expr) {
+        let sequence_elem_ty = resolve_type_expr_impl(
+            def_table,
+            module,
+            &sequence_elem_expr,
+            type_params,
+            type_args,
+            in_progress,
+            false,
+            false,
+        )?;
+        ensure_foreign_view_sequence_element_is_fixed_layout(
+            def_table,
+            module,
+            ident,
+            &sequence_elem_expr,
+            &sequence_elem_ty,
+            type_params,
+        )?;
+        return Ok(match ident {
+            "view" => match sequence_elem_ty {
+                Type::View { .. } => Type::ViewSlice {
+                    elem_ty: Box::new(sequence_elem_ty),
+                },
+                other => Type::ViewArray {
+                    elem_ty: Box::new(other),
+                },
+            },
+            "view?" => Type::NullableView {
+                elem_ty: Box::new(Type::Slice {
+                    elem_ty: Box::new(sequence_elem_ty),
+                }),
+            },
+            "view_slice" => match sequence_elem_ty {
+                Type::View { .. } => Type::ViewSlice {
+                    elem_ty: Box::new(sequence_elem_ty),
+                },
+                other => Type::ViewSlice {
+                    elem_ty: Box::new(other),
+                },
+            },
+            "view_array" => Type::ViewArray {
+                elem_ty: Box::new(sequence_elem_ty),
+            },
+            other => unreachable!("unexpected foreign view type {other}"),
+        });
+    }
+
     let elem_ty = resolve_type_expr_impl(
         def_table,
         module,
-        &type_arg_exprs[0],
+        elem_ty_expr,
         type_params,
         type_args,
         in_progress,
@@ -965,18 +1051,14 @@ fn resolve_foreign_view_type(
         def_table,
         module,
         ident,
-        &type_arg_exprs[0],
+        elem_ty_expr,
         &elem_ty,
         type_params,
     )?;
     Ok(match ident {
         "view" => match elem_ty {
             Type::Slice { elem_ty: inner_ty } => match inner_ty.as_ref() {
-                Type::View {
-                    elem_ty: pointee_ty,
-                } => Type::ViewSlice {
-                    elem_ty: pointee_ty.clone(),
-                },
+                Type::View { .. } => Type::ViewSlice { elem_ty: inner_ty },
                 _ => Type::ViewArray { elem_ty: inner_ty },
             },
             other => Type::View {
@@ -994,6 +1076,40 @@ fn resolve_foreign_view_type(
         },
         other => unreachable!("unexpected foreign view type {other}"),
     })
+}
+
+pub(crate) fn peel_outer_foreign_extent(type_expr: &TypeExpr) -> Option<(TypeExpr, ForeignExtent)> {
+    let TypeExprKind::Array { elem_ty_expr, dims } = &type_expr.kind else {
+        return None;
+    };
+    let (outer, remaining_dims) = dims.split_last()?;
+    let inner = if remaining_dims.is_empty() {
+        (**elem_ty_expr).clone()
+    } else {
+        TypeExpr {
+            id: type_expr.id,
+            kind: TypeExprKind::Array {
+                elem_ty_expr: elem_ty_expr.clone(),
+                dims: remaining_dims.to_vec(),
+            },
+            span: type_expr.span,
+        }
+    };
+    Some((inner, foreign_extent_from_expr(outer)))
+}
+
+pub(crate) fn foreign_extent_from_expr(extent: &ExtentExpr) -> ForeignExtent {
+    match &extent.kind {
+        ExtentExprKind::Int(value) => ForeignExtent::Const(*value),
+        ExtentExprKind::FieldPath(segments) => ForeignExtent::FieldPath(segments.clone()),
+    }
+}
+
+fn format_extent_expr(extent: &ExtentExpr) -> String {
+    match &extent.kind {
+        ExtentExprKind::Int(value) => value.to_string(),
+        ExtentExprKind::FieldPath(segments) => segments.join("."),
+    }
 }
 
 fn ensure_foreign_view_element_is_fixed_layout(
@@ -1058,6 +1174,22 @@ fn ensure_foreign_view_element_is_fixed_layout(
             },
             Type::Slice { elem_ty: inner_ty },
         ) => ensure_foreign_view_sequence_element_is_fixed_layout(
+            def_table,
+            module,
+            view_name,
+            inner_expr,
+            inner_ty,
+            type_params,
+        ),
+        (
+            TypeExprKind::Array {
+                elem_ty_expr: inner_expr,
+                ..
+            },
+            Type::Array {
+                elem_ty: inner_ty, ..
+            },
+        ) => ensure_foreign_view_element_is_fixed_layout(
             def_table,
             module,
             view_name,
@@ -1284,7 +1416,7 @@ pub struct TypeMapBuilder {
     def_type: HashMap<Def, TypeId>,     // maps def to its type
     def_type_param_names: HashMap<DefId, BTreeMap<u32, String>>,
     nominal_keys: HashMap<TypeId, NominalKey>,
-    counted_view_fields: HashMap<(String, String), String>,
+    foreign_view_extents: HashMap<(String, String), ForeignExtent>,
     call_sigs: HashMap<NodeId, CallSig>,
     generic_insts: HashMap<NodeId, GenericInst>,
 }
@@ -1303,7 +1435,7 @@ impl TypeMapBuilder {
             def_type: HashMap::new(),
             def_type_param_names: HashMap::new(),
             nominal_keys: HashMap::new(),
-            counted_view_fields: HashMap::new(),
+            foreign_view_extents: HashMap::new(),
             call_sigs: HashMap::new(),
             generic_insts: HashMap::new(),
         }
@@ -1354,14 +1486,14 @@ impl TypeMapBuilder {
         self.def_type_param_names.insert(def_id, names);
     }
 
-    pub fn record_counted_view_field(
+    pub fn record_foreign_view_extent(
         &mut self,
         type_name: impl Into<String>,
         field_name: impl Into<String>,
-        count_field: impl Into<String>,
+        extent: ForeignExtent,
     ) {
-        self.counted_view_fields
-            .insert((type_name.into(), field_name.into()), count_field.into());
+        self.foreign_view_extents
+            .insert((type_name.into(), field_name.into()), extent);
     }
 
     pub fn apply_inference<F>(&mut self, mut apply: F)
@@ -1414,7 +1546,7 @@ impl TypeMapBuilder {
                 def_type_param_names: self.def_type_param_names,
                 node_type: self.node_type,
                 nominal_keys: self.nominal_keys,
-                counted_view_fields: self.counted_view_fields,
+                foreign_view_extents: self.foreign_view_extents,
             },
             call_sigs,
             generic_insts,
@@ -1474,7 +1606,7 @@ pub struct TypeMap {
     def_type_param_names: HashMap<DefId, BTreeMap<u32, String>>,
     node_type: HashMap<NodeId, TypeId>,
     nominal_keys: HashMap<TypeId, NominalKey>,
-    counted_view_fields: HashMap<(String, String), String>,
+    foreign_view_extents: HashMap<(String, String), ForeignExtent>,
 }
 
 impl TypeMap {
@@ -1539,10 +1671,9 @@ impl TypeMap {
         &self.type_table
     }
 
-    pub fn counted_view_field(&self, type_name: &str, field_name: &str) -> Option<&str> {
-        self.counted_view_fields
+    pub fn foreign_view_extent(&self, type_name: &str, field_name: &str) -> Option<&ForeignExtent> {
+        self.foreign_view_extents
             .get(&(type_name.to_string(), field_name.to_string()))
-            .map(String::as_str)
     }
 
     pub(crate) fn iter_node_type_ids(&self) -> impl Iterator<Item = (NodeId, TypeId)> + '_ {

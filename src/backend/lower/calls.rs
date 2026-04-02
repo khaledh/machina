@@ -329,11 +329,7 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
         });
         let elem_ir_ty = self.type_lowerer.lower_type(&elem_ty);
         let ptr_ir_ty = match &expr_ty {
-            Type::ViewSlice { .. } => {
-                let elem_ptr_ty = self.type_lowerer.ptr_to(elem_ir_ty);
-                self.type_lowerer.ptr_to(elem_ptr_ty)
-            }
-            Type::ViewArray { .. } => self.type_lowerer.ptr_to(elem_ir_ty),
+            Type::ViewSlice { .. } | Type::ViewArray { .. } => self.type_lowerer.ptr_to(elem_ir_ty),
             _ => panic!("backend foreign view sequence intrinsic expected view_slice/view_array"),
         };
         let ptr = self.builder.cast(CastKind::IntToPtr, raw_addr, ptr_ir_ty);

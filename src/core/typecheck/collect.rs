@@ -30,10 +30,10 @@ use crate::core::typecheck::imported::{
 };
 use crate::core::typecheck::tc_push_error;
 use crate::core::typecheck::type_map::{
-    TypeDefLookup, resolve_param_type_expr_with_params, resolve_return_type_expr_with_params,
-    resolve_type_expr, resolve_type_expr_with_params,
+    TypeDefLookup, peel_outer_foreign_extent, resolve_param_type_expr_with_params,
+    resolve_return_type_expr_with_params, resolve_type_expr, resolve_type_expr_with_params,
 };
-use crate::core::types::{EnumVariant, StructField, TyVarId, Type};
+use crate::core::types::{EnumVariant, ForeignExtent, StructField, TyVarId, Type};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum PropertyAccessorKind {
@@ -208,7 +208,6 @@ fn collect_type_defs(
 #[derive(Default)]
 struct FixedFieldAttrs {
     align: Option<u64>,
-    count_field: Option<String>,
 }
 
 fn validate_fixed_layout_type(
@@ -287,20 +286,12 @@ fn validate_fixed_layout_type(
         }
 
         let is_counted_nullable_view = is_counted_nullable_view_field_ty(&resolved_field.ty);
-        if field_attrs.count_field.is_some() && !is_counted_nullable_view {
+        let type_extent = foreign_view_field_outer_extent(&field.ty);
+        if is_counted_nullable_view && type_extent.is_none() {
             tc_push_error!(
                 errors,
                 field.span,
-                TEK::FixedLayoutCountRequiresCountedViewField {
-                    field: field.name.clone(),
-                }
-            );
-        }
-        if is_counted_nullable_view && field_attrs.count_field.is_none() {
-            tc_push_error!(
-                errors,
-                field.span,
-                TEK::FixedLayoutCountedViewFieldMissingCount {
+                TEK::FixedLayoutCountedViewFieldMissingExtent {
                     type_name: type_def.name.clone(),
                     field: field.name.clone(),
                 }
@@ -349,18 +340,19 @@ fn validate_fixed_layout_type(
         max_align = max_align.max(field_align);
     }
 
-    for ((field, _resolved_field), field_attrs) in fields
+    for ((field, _resolved_field), _field_attrs) in fields
         .iter()
         .zip(resolved_fields.iter())
         .zip(resolved_field_attrs.iter())
     {
-        let Some(count_field_name) = &field_attrs.count_field else {
+        let count_field_name = match foreign_view_field_outer_extent(&field.ty) {
+            Some(ForeignExtent::FieldPath(path)) => Some(path.join(".")),
+            _ => None,
+        };
+        let Some(count_field_name) = &count_field_name else {
             continue;
         };
-        let Some(count_field_ty) = resolved_fields
-            .iter()
-            .find(|resolved| resolved.name == *count_field_name)
-            .map(|resolved| &resolved.ty)
+        let Some(count_field_ty) = resolve_struct_field_path_ty(&resolved_fields, count_field_name)
         else {
             tc_push_error!(
                 errors,
@@ -368,20 +360,20 @@ fn validate_fixed_layout_type(
                 TEK::FixedLayoutCountFieldMissing {
                     type_name: type_def.name.clone(),
                     field: field.name.clone(),
-                    count_field: count_field_name.clone(),
+                    extent: count_field_name.clone(),
                 }
             );
             continue;
         };
-        if *count_field_ty != Type::uint(64) {
+        if count_field_ty != Type::uint(64) {
             tc_push_error!(
                 errors,
                 field.span,
                 TEK::FixedLayoutCountFieldTypeMismatch {
                     type_name: type_def.name.clone(),
                     field: field.name.clone(),
-                    count_field: count_field_name.clone(),
-                    count_ty: count_field_ty.clone(),
+                    extent: count_field_name.clone(),
+                    extent_ty: count_field_ty,
                 }
             );
         }
@@ -487,42 +479,6 @@ fn validate_fixed_layout_field_attrs(
                     }
                 }
             }
-            "count" => {
-                if !fixed_layout_enabled {
-                    tc_push_error!(
-                        errors,
-                        attr.span,
-                        TEK::FixedLayoutCountRequiresCountedViewField {
-                            field: field.name.clone(),
-                        }
-                    );
-                    continue;
-                }
-                if attr.args.len() != 1 {
-                    tc_push_error!(
-                        errors,
-                        attr.span,
-                        TEK::FixedLayoutInvalidCountAttr {
-                            field: field.name.clone(),
-                        }
-                    );
-                    continue;
-                }
-                match attr.args.first() {
-                    Some(crate::core::ast::AttrArg::Ident(name)) => {
-                        out.count_field = Some(name.clone())
-                    }
-                    _ => {
-                        tc_push_error!(
-                            errors,
-                            attr.span,
-                            TEK::FixedLayoutInvalidCountAttr {
-                                field: field.name.clone(),
-                            }
-                        );
-                    }
-                }
-            }
             _ => {
                 tc_push_error!(
                     errors,
@@ -547,6 +503,42 @@ fn is_counted_nullable_view_field_ty(ty: &Type) -> bool {
         return false;
     };
     matches!(elem_ty.as_ref(), Type::Struct { .. } | Type::View { .. })
+}
+
+fn foreign_view_field_outer_extent(field_ty_expr: &TypeExpr) -> Option<ForeignExtent> {
+    let TypeExprKind::Named { ident, type_args } = &field_ty_expr.kind else {
+        return None;
+    };
+    if ident != "view?" || type_args.len() != 1 {
+        return None;
+    }
+    let (_, extent) = peel_outer_foreign_extent(&type_args[0])?;
+    Some(extent)
+}
+
+fn resolve_struct_field_path_ty(fields: &[StructField], path: &str) -> Option<Type> {
+    let segments: Vec<_> = path.split('.').collect();
+    let mut curr_fields = fields.to_vec();
+
+    for (index, segment) in segments.iter().enumerate() {
+        let field_ty = curr_fields
+            .iter()
+            .find(|field| field.name == *segment)
+            .map(|field| field.ty.clone())?;
+        if index == segments.len() - 1 {
+            return Some(field_ty);
+        }
+        let Type::Struct {
+            fields: nested_fields,
+            ..
+        } = field_ty
+        else {
+            return None;
+        };
+        curr_fields = nested_fields;
+    }
+
+    None
 }
 
 fn is_valid_fixed_layout_align(value: u64) -> bool {

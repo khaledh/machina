@@ -13,6 +13,12 @@ pub use type_cache::{TypeCache, TypeId};
 use std::borrow::Cow;
 use std::hash::{Hash, Hasher};
 
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub enum ForeignExtent {
+    Const(u64),
+    FieldPath(Vec<String>),
+}
+
 #[derive(Debug, Clone, Eq)]
 pub enum Type {
     Unknown,

@@ -641,7 +641,7 @@ impl fmt::Display for TypeExprKind {
                 write!(f, "Refined({}, {})", base_ty_expr, refinements_str)?;
             }
             TypeExprKind::Array { elem_ty_expr, dims } => {
-                let dims_str = dims.iter().map(|d| d.to_string()).collect::<Vec<_>>();
+                let dims_str = dims.iter().map(format_extent_expr).collect::<Vec<_>>();
                 write!(f, "Array({}, dims=[{}])", elem_ty_expr, dims_str.join(", "))?;
             }
             TypeExprKind::DynArray { elem_ty_expr } => {
@@ -694,6 +694,13 @@ impl fmt::Display for TypeExprKind {
             }
         }
         Ok(())
+    }
+}
+
+fn format_extent_expr(extent: &ExtentExpr) -> String {
+    match &extent.kind {
+        ExtentExprKind::Int(value) => value.to_string(),
+        ExtentExprKind::FieldPath(segments) => segments.join("."),
     }
 }
 

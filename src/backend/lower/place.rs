@@ -146,12 +146,9 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
 
                         let elem_ir_ty = self.type_lowerer.lower_type(&elem_ty);
                         let view = match &base_ty {
-                            Type::ViewSlice { .. } => {
-                                let elem_ptr_ty = self.type_lowerer.ptr_to(elem_ir_ty);
-                                let outer_ptr_ty = self.type_lowerer.ptr_to(elem_ptr_ty);
-                                self.load_slice_view(base_addr, outer_ptr_ty)
-                            }
-                            Type::Slice { .. } | Type::ViewArray { .. } => {
+                            Type::Slice { .. }
+                            | Type::ViewSlice { .. }
+                            | Type::ViewArray { .. } => {
                                 let elem_ptr_ty = self.type_lowerer.ptr_to(elem_ir_ty);
                                 self.load_slice_view(base_addr, elem_ptr_ty)
                             }
@@ -161,14 +158,9 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
                         };
                         let index_val = self.lower_index_value(&indices[0])?;
                         let addr = match &base_ty {
-                            Type::ViewSlice { .. } => {
-                                let elem_ptr_ty = self.type_lowerer.ptr_to(elem_ir_ty);
-                                let outer_ptr_ty = self.type_lowerer.ptr_to(elem_ptr_ty);
-                                let elem_ptr_addr =
-                                    self.index_with_bounds(view, index_val, outer_ptr_ty);
-                                self.builder.load(elem_ptr_addr, elem_ptr_ty)
-                            }
-                            Type::Slice { .. } | Type::ViewArray { .. } => {
+                            Type::Slice { .. }
+                            | Type::ViewSlice { .. }
+                            | Type::ViewArray { .. } => {
                                 let elem_ptr_ty = self.type_lowerer.ptr_to(elem_ir_ty);
                                 self.index_with_bounds(view, index_val, elem_ptr_ty)
                             }

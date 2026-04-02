@@ -153,7 +153,7 @@ pub enum TypeKey {
     Tuple(Vec<TypeKey>),
     Array {
         elem: Box<TypeKey>,
-        dims: Vec<usize>,
+        dims: Vec<ExtentKey>,
     },
     Slice(Box<TypeKey>),
     DynArray(Box<TypeKey>),
@@ -182,6 +182,12 @@ pub enum TypeKey {
         base: Box<TypeKey>,
         refinements: Vec<RefinementKind>,
     },
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub enum ExtentKey {
+    Int(u64),
+    FieldPath(Vec<String>),
 }
 
 /// Module-local view of currently-known semantic symbol ids.
@@ -490,7 +496,7 @@ fn type_key_from_expr(
                 module_path,
                 generic_param_indexes,
             )),
-            dims: dims.clone(),
+            dims: dims.iter().map(extent_key_from_expr).collect(),
         },
         TypeExprKind::DynArray { elem_ty_expr } => TypeKey::DynArray(Box::new(type_key_from_expr(
             elem_ty_expr,
@@ -559,6 +565,15 @@ fn type_key_from_expr(
                 generic_param_indexes,
             )),
         },
+    }
+}
+
+fn extent_key_from_expr(extent: &crate::core::ast::ExtentExpr) -> ExtentKey {
+    match &extent.kind {
+        crate::core::ast::ExtentExprKind::Int(value) => ExtentKey::Int(*value),
+        crate::core::ast::ExtentExprKind::FieldPath(segments) => {
+            ExtentKey::FieldPath(segments.clone())
+        }
     }
 }
 

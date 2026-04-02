@@ -88,7 +88,7 @@ impl fmt::Display for Type {
                 write!(f, "view<{}>?", elem_ty)
             }
             Type::NullableViewSlice { elem_ty } => {
-                write!(f, "view<view<{}>[]>?", elem_ty)
+                write!(f, "view<{}[]>?", elem_ty)
             }
             Type::NullableViewArray { elem_ty } => {
                 write!(f, "view<{}[]>?", elem_ty)
@@ -97,7 +97,7 @@ impl fmt::Display for Type {
                 write!(f, "*{}", elem_ty)
             }
             Type::ViewSlice { elem_ty } => {
-                write!(f, "view<view<{}>[]>", elem_ty)
+                write!(f, "view<{}[]>", elem_ty)
             }
             Type::ViewArray { elem_ty } => {
                 write!(f, "view<{}[]>", elem_ty)

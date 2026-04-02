@@ -92,7 +92,13 @@ impl<'a> Elaborator<'a> {
             }
             Type::Array { elem_ty, dims } => TypeExprKind::Array {
                 elem_ty_expr: Box::new(self.type_expr_from_type(elem_ty, span)),
-                dims: dims.clone(),
+                dims: dims
+                    .iter()
+                    .map(|dim| crate::core::ast::ExtentExpr {
+                        kind: crate::core::ast::ExtentExprKind::Int(*dim as u64),
+                        span,
+                    })
+                    .collect(),
             },
             Type::DynArray { elem_ty } => TypeExprKind::DynArray {
                 elem_ty_expr: Box::new(self.type_expr_from_type(elem_ty, span)),
@@ -116,9 +122,7 @@ impl<'a> Elaborator<'a> {
             Type::NullableViewSlice { elem_ty } => {
                 let elem_ty = self.type_expr_from_type(
                     &Type::Slice {
-                        elem_ty: Box::new(Type::View {
-                            elem_ty: elem_ty.clone(),
-                        }),
+                        elem_ty: elem_ty.clone(),
                     },
                     span,
                 );
@@ -136,9 +140,7 @@ impl<'a> Elaborator<'a> {
             Type::ViewSlice { elem_ty } => {
                 let elem_ty = self.type_expr_from_type(
                     &Type::Slice {
-                        elem_ty: Box::new(Type::View {
-                            elem_ty: elem_ty.clone(),
-                        }),
+                        elem_ty: elem_ty.clone(),
                     },
                     span,
                 );

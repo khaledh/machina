@@ -34,8 +34,8 @@ fn counted_nullable_view_field_access_ty(field_ty: &Type) -> Option<Type> {
     };
 
     match seq_elem.as_ref() {
-        Type::View { elem_ty } => Some(Type::NullableViewSlice {
-            elem_ty: elem_ty.clone(),
+        Type::View { .. } => Some(Type::NullableViewSlice {
+            elem_ty: Box::new(seq_elem.as_ref().clone()),
         }),
         other => Some(Type::NullableViewArray {
             elem_ty: Box::new(other.clone()),

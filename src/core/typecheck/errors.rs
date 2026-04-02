@@ -165,6 +165,9 @@ pub enum TypeCheckErrorKind {
     #[error("Type cannot be inferred")]
     UnknownType,
 
+    #[error("Dependent array extent `{extent}` is only allowed inside foreign view shapes for now")]
+    DependentArrayExtentNotAllowedHere { extent: String },
+
     #[error("Error union types are only allowed in return type position")]
     UnionNotAllowedHere,
 
@@ -185,35 +188,29 @@ pub enum TypeCheckErrorKind {
     #[error("Unknown fixed-layout field attribute `{attr}` on field `{field}`")]
     FixedLayoutUnknownFieldAttr { field: String, attr: String },
 
-    #[error("Field `{field}` uses `@count` but is not a counted nullable view field")]
-    FixedLayoutCountRequiresCountedViewField { field: String },
-
-    #[error("Field `{field}` must use `@count(<u64 sibling field>)`")]
-    FixedLayoutInvalidCountAttr { field: String },
-
     #[error(
-        "Count field `{count_field}` for `{field}` was not found in fixed-layout type `{type_name}`"
+        "Extent path `{extent}` for `{field}` was not found in fixed-layout type `{type_name}`"
     )]
     FixedLayoutCountFieldMissing {
         type_name: String,
         field: String,
-        count_field: String,
+        extent: String,
     },
 
     #[error(
-        "Count field `{count_field}` for `{field}` in fixed-layout type `{type_name}` must have type `u64`, found `{count_ty}`"
+        "Extent path `{extent}` for `{field}` in fixed-layout type `{type_name}` must have type `u64`, found `{extent_ty}`"
     )]
     FixedLayoutCountFieldTypeMismatch {
         type_name: String,
         field: String,
-        count_field: String,
-        count_ty: Type,
+        extent: String,
+        extent_ty: Type,
     },
 
     #[error(
-        "Counted nullable view field `{field}` in fixed-layout type `{type_name}` requires `@count(...)`"
+        "Counted nullable view field `{field}` in fixed-layout type `{type_name}` requires an extent in the type syntax"
     )]
-    FixedLayoutCountedViewFieldMissingCount { type_name: String, field: String },
+    FixedLayoutCountedViewFieldMissingExtent { type_name: String, field: String },
 
     #[error("Alignment must be a non-zero power of two, found {0}")]
     FixedLayoutInvalidAlign(u64),

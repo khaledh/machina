@@ -516,7 +516,7 @@ fn test_nullable_view_field_read_typechecks() {
 }
 
 #[test]
-fn test_fixed_layout_accepts_counted_nullable_view_fields() {
+fn test_fixed_layout_accepts_extent_counted_nullable_view_fields() {
     let source = r#"
         @layout(fixed)
         type Header = {
@@ -526,31 +526,108 @@ fn test_fixed_layout_accepts_counted_nullable_view_fields() {
         @layout(fixed)
         type Table = {
             count: u64,
-            @count(count)
-            items: view<Header[]>?,
+            items: view<Header[count]>?,
         }
 
         @layout(fixed)
         type PtrTable = {
             count: u64,
-            @count(count)
-            items: view<view<Header>[]>?,
+            items: view<view<Header>[count]>?,
         }
     "#;
 
     let ctx = type_check_source(source).expect("counted nullable view fields should type check");
     assert_eq!(
-        ctx.type_map.counted_view_field("Table", "items"),
-        Some("count")
+        ctx.type_map.foreign_view_extent("Table", "items"),
+        Some(&crate::core::types::ForeignExtent::FieldPath(vec![
+            "count".to_string()
+        ]))
     );
     assert_eq!(
-        ctx.type_map.counted_view_field("PtrTable", "items"),
-        Some("count")
+        ctx.type_map.foreign_view_extent("PtrTable", "items"),
+        Some(&crate::core::types::ForeignExtent::FieldPath(vec![
+            "count".to_string()
+        ]))
     );
 }
 
 #[test]
-fn test_counted_nullable_view_field_requires_count_attr() {
+fn test_fixed_layout_accepts_extent_syntax_for_counted_nullable_view_fields() {
+    let source = r#"
+        @layout(fixed)
+        type Header = {
+            magic: u64,
+        }
+
+        @layout(fixed)
+        type Counts = {
+            items: u64,
+        }
+
+        @layout(fixed)
+        type Table = {
+            count: u64,
+            items: view<Header[count]>?,
+        }
+
+        @layout(fixed)
+        type NestedTable = {
+            counts: Counts,
+            items: view<Header[counts.items]>?,
+        }
+
+        @layout(fixed)
+        type PtrTable = {
+            count: u64,
+            items: view<view<Header>[count]>?,
+        }
+    "#;
+
+    let ctx = type_check_source(source).expect("extent syntax should type check");
+    assert_eq!(
+        ctx.type_map.foreign_view_extent("Table", "items"),
+        Some(&crate::core::types::ForeignExtent::FieldPath(vec![
+            "count".to_string()
+        ]))
+    );
+    assert_eq!(
+        ctx.type_map.foreign_view_extent("NestedTable", "items"),
+        Some(&crate::core::types::ForeignExtent::FieldPath(vec![
+            "counts".to_string(),
+            "items".to_string(),
+        ]))
+    );
+    assert_eq!(
+        ctx.type_map.foreign_view_extent("PtrTable", "items"),
+        Some(&crate::core::types::ForeignExtent::FieldPath(vec![
+            "count".to_string()
+        ]))
+    );
+}
+
+#[test]
+fn test_fixed_layout_accepts_constant_extent_syntax_for_counted_nullable_view_fields() {
+    let source = r#"
+        @layout(fixed)
+        type Header = {
+            magic: u64,
+        }
+
+        @layout(fixed)
+        type Table = {
+            items: view<Header[8]>?,
+        }
+    "#;
+
+    let ctx = type_check_source(source).expect("constant extent syntax should type check");
+    assert_eq!(
+        ctx.type_map.foreign_view_extent("Table", "items"),
+        Some(&crate::core::types::ForeignExtent::Const(8))
+    );
+}
+
+#[test]
+fn test_counted_nullable_view_field_requires_extent() {
     let source = r#"
         @layout(fixed)
         type Header = {
@@ -565,20 +642,41 @@ fn test_counted_nullable_view_field_requires_count_attr() {
     "#;
 
     let errors = match type_check_source(source) {
-        Ok(_) => panic!("expected missing @count error"),
+        Ok(_) => panic!("expected missing extent error"),
         Err(errors) => errors,
     };
     assert!(errors.iter().any(|e| {
         matches!(
             e.kind(),
-            TypeCheckErrorKind::FixedLayoutCountedViewFieldMissingCount { field, .. }
+            TypeCheckErrorKind::FixedLayoutCountedViewFieldMissingExtent { field, .. }
                 if field == "items"
         )
     }));
 }
 
 #[test]
-fn test_count_attr_requires_u64_sibling_field() {
+fn test_dependent_array_extent_outside_foreign_view_is_rejected() {
+    let source = r#"
+        type Buffer = {
+            count: u64,
+            data: u64[count],
+        }
+    "#;
+
+    let errors = match type_check_source(source) {
+        Ok(_) => panic!("expected dependent extent to be rejected"),
+        Err(errors) => errors,
+    };
+    assert!(errors.iter().any(|e| {
+        matches!(
+            e.kind(),
+            TypeCheckErrorKind::DependentArrayExtentNotAllowedHere { .. }
+        )
+    }));
+}
+
+#[test]
+fn test_extent_path_requires_u64_sibling_field() {
     let source = r#"
         @layout(fixed)
         type Header = {
@@ -588,49 +686,19 @@ fn test_count_attr_requires_u64_sibling_field() {
         @layout(fixed)
         type Table = {
             count: u32,
-            @count(count)
-            items: view<Header[]>?,
+            items: view<Header[count]>?,
         }
     "#;
 
     let errors = match type_check_source(source) {
-        Ok(_) => panic!("expected invalid count field type"),
+        Ok(_) => panic!("expected invalid extent field type"),
         Err(errors) => errors,
     };
     assert!(errors.iter().any(|e| {
         matches!(
             e.kind(),
-            TypeCheckErrorKind::FixedLayoutCountFieldTypeMismatch { field, count_field, .. }
-                if field == "items" && count_field == "count"
-        )
-    }));
-}
-
-#[test]
-fn test_count_attr_rejected_on_single_nullable_view_field() {
-    let source = r#"
-        @layout(fixed)
-        type Header = {
-            magic: u64,
-        }
-
-        @layout(fixed)
-        type Wrapper = {
-            count: u64,
-            @count(count)
-            inner: view<Header>?,
-        }
-    "#;
-
-    let errors = match type_check_source(source) {
-        Ok(_) => panic!("expected invalid @count usage"),
-        Err(errors) => errors,
-    };
-    assert!(errors.iter().any(|e| {
-        matches!(
-            e.kind(),
-            TypeCheckErrorKind::FixedLayoutCountRequiresCountedViewField { field }
-                if field == "inner"
+            TypeCheckErrorKind::FixedLayoutCountFieldTypeMismatch { field, extent, .. }
+                if field == "items" && extent == "count"
         )
     }));
 }
@@ -725,7 +793,8 @@ fn test_foreign_view_sequence_index_and_for_typecheck() {
         }
 
         fn sum_slice(headers: view<view<Header>[]>) -> u64 {
-            var acc: u64 = headers[0].magic;
+            let first: view<Header> = headers[0];
+            var acc: u64 = first.magic;
             for header in headers {
                 acc = acc + header.magic;
             }
@@ -3095,8 +3164,7 @@ fn test_counted_nullable_view_array_or_inline_block_sugar_typechecks() {
         @layout(fixed)
         type Table = {
             count: u64,
-            @count(count)
-            items: view<Header[]>?,
+            items: view<Header[count]>?,
         }
 
         fn load(table: Table) -> u64 {
@@ -3122,8 +3190,7 @@ fn test_counted_nullable_view_slice_match_some_binding_typechecks() {
         @layout(fixed)
         type Table = {
             count: u64,
-            @count(count)
-            items: view<view<Header>[]>?,
+            items: view<view<Header>[count]>?,
         }
 
         fn read(table: Table) -> u64 {

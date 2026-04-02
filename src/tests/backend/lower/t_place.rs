@@ -127,7 +127,7 @@ fn test_lower_foreign_view_slice_index_load() {
         @layout(fixed)
         type Header = { magic: u64 }
 
-        fn main(headers: view<view<Header>[]>) -> Header {
+        fn main(headers: view<view<Header>[]>) -> view<Header> {
             headers[1]
         }
     "});
@@ -144,7 +144,7 @@ fn test_lower_foreign_view_slice_index_load() {
     let text = format_func(&lowered.func, &lowered.types);
 
     let expected = indoc! {"
-        fn main(ptr<struct { ptr: ptr<ptr<Header>>, len: u64 }>) -> Header {
+        fn main(ptr<struct { ptr: ptr<ptr<Header>>, len: u64 }>) -> ptr<Header> {
           locals:
             %l0: struct { ptr: ptr<ptr<Header>>, len: u64 }
           bb0(%v0: ptr<struct { ptr: ptr<ptr<Header>>, len: u64 }>):
@@ -162,8 +162,7 @@ fn test_lower_foreign_view_slice_index_load() {
           bb1():
             %v12: ptr<ptr<Header>> = index_addr %v4, %v7
             %v13: ptr<Header> = load %v12
-            %v14: Header = load %v13
-            ret %v14
+            ret %v13
 
           bb2():
             %v9: u64 = const 1:u64

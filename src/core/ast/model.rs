@@ -439,6 +439,18 @@ pub enum RefinementKind {
     NonZero,
 }
 
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ExtentExpr {
+    pub kind: ExtentExprKind,
+    pub span: Span,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub enum ExtentExprKind {
+    Int(u64),
+    FieldPath(Vec<String>),
+}
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum TypeExprKind {
     Infer,
@@ -455,7 +467,7 @@ pub enum TypeExprKind {
     },
     Array {
         elem_ty_expr: Box<TypeExpr>,
-        dims: Vec<usize>,
+        dims: Vec<ExtentExpr>,
     },
     DynArray {
         elem_ty_expr: Box<TypeExpr>,

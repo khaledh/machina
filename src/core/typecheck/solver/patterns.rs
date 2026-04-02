@@ -443,8 +443,8 @@ fn nullable_low_level_match_payload_type(owner_ty: &Type, variant_name: &str) ->
         (Type::NullableVAddr, "some") => Some(Type::VAddr),
         (Type::NullableView { elem_ty }, "some") => match elem_ty.as_ref() {
             Type::Slice { elem_ty: seq_elem } => match seq_elem.as_ref() {
-                Type::View { elem_ty } => Some(Type::ViewSlice {
-                    elem_ty: elem_ty.clone(),
+                Type::View { .. } => Some(Type::ViewSlice {
+                    elem_ty: Box::new(seq_elem.as_ref().clone()),
                 }),
                 other => Some(Type::ViewArray {
                     elem_ty: Box::new(other.clone()),
