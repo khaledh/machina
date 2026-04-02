@@ -1,7 +1,7 @@
 //! Runtime archive artifact helpers.
 
 use crate::driver::support_utils::{
-    archive_objects, artifact_is_stale, compile_c_object, native_support_dir,
+    archive_objects, artifact_is_stale, compile_c_object, native_support_dir, with_artifact_lock,
 };
 
 use std::fs;
@@ -52,17 +52,21 @@ pub fn ensure_runtime_archive() -> Result<PathBuf, String> {
         .map_err(|e| format!("failed to create {}: {e}", build_dir.display()))?;
 
     let archive_path = build_dir.join("libmachina_rt.a");
-    if !artifact_is_stale(&archive_path, &sources)? {
-        return Ok(archive_path);
-    }
+    let lock_path = build_dir.join(".runtime-build.lock");
+    with_artifact_lock(&lock_path, || {
+        if !artifact_is_stale(&archive_path, &sources)? {
+            return Ok(());
+        }
 
-    let mut objects = Vec::with_capacity(sources.len());
-    for source in &sources {
-        let object = build_dir.join(runtime_object_name(source));
-        compile_c_object(source, &object)?;
-        objects.push(object);
-    }
-    archive_objects(&archive_path, &objects)?;
+        let mut objects = Vec::with_capacity(sources.len());
+        for source in &sources {
+            let object = build_dir.join(runtime_object_name(source));
+            compile_c_object(source, &object)?;
+            objects.push(object);
+        }
+        archive_objects(&archive_path, &objects)?;
+        Ok(())
+    })?;
     Ok(archive_path)
 }
 

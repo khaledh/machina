@@ -1,7 +1,10 @@
 use std::ffi::OsStr;
 use std::fs;
+use std::fs::OpenOptions;
 use std::path::{Path, PathBuf};
 use std::process::Command;
+use std::thread;
+use std::time::Duration;
 use std::time::SystemTime;
 
 pub(crate) fn compile_c_object(source: &Path, object: &Path) -> Result<(), String> {
@@ -91,6 +94,56 @@ pub(crate) fn native_support_dir() -> Result<PathBuf, String> {
     let path = base.join("machina-support");
     fs::create_dir_all(&path).map_err(|e| format!("failed to create {}: {e}", path.display()))?;
     Ok(path)
+}
+
+pub(crate) fn with_artifact_lock<T, F>(lock_path: &Path, action: F) -> Result<T, String>
+where
+    F: FnOnce() -> Result<T, String>,
+{
+    let _guard = ArtifactLock::acquire(lock_path)?;
+    action()
+}
+
+struct ArtifactLock {
+    path: PathBuf,
+}
+
+impl ArtifactLock {
+    fn acquire(lock_path: &Path) -> Result<Self, String> {
+        if let Some(parent) = lock_path.parent() {
+            fs::create_dir_all(parent)
+                .map_err(|e| format!("failed to create {}: {e}", parent.display()))?;
+        }
+
+        loop {
+            match OpenOptions::new()
+                .write(true)
+                .create_new(true)
+                .open(lock_path)
+            {
+                Ok(_) => {
+                    return Ok(Self {
+                        path: lock_path.to_path_buf(),
+                    });
+                }
+                Err(err) if err.kind() == std::io::ErrorKind::AlreadyExists => {
+                    thread::sleep(Duration::from_millis(10));
+                }
+                Err(err) => {
+                    return Err(format!(
+                        "failed to acquire build lock {}: {err}",
+                        lock_path.display()
+                    ));
+                }
+            }
+        }
+    }
+}
+
+impl Drop for ArtifactLock {
+    fn drop(&mut self) {
+        let _ = fs::remove_file(&self.path);
+    }
 }
 
 pub fn temp_obj_path(name: &str) -> PathBuf {

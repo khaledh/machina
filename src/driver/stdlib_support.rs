@@ -3,7 +3,7 @@
 use crate::core::capsule::ModulePath;
 use crate::driver::compile::{CompileOptions, compile_with_path};
 use crate::driver::support_utils::{
-    archive_objects, artifact_is_stale, assemble_object, native_support_dir,
+    archive_objects, artifact_is_stale, assemble_object, native_support_dir, with_artifact_lock,
 };
 
 use std::collections::HashSet;
@@ -29,12 +29,16 @@ pub fn ensure_stdlib_archive_for_modules(
         .map_err(|e| format!("failed to create {}: {e}", archive_dir.display()))?;
 
     let subset_tag = stdlib_subset_tag(&object_backed_modules);
-    let object_path =
-        ensure_flattened_stdlib_object(&object_backed_modules, &archive_dir, &subset_tag)?;
     let archive_path = archive_dir.join(format!("libmachina_std_{subset_tag}.a"));
-    if artifact_is_stale(&archive_path, std::slice::from_ref(&object_path))? {
-        archive_objects(&archive_path, &[object_path.clone()])?;
-    }
+    let lock_path = archive_dir.join(format!(".stdlib_{subset_tag}.lock"));
+    with_artifact_lock(&lock_path, || {
+        let object_path =
+            ensure_flattened_stdlib_object(&object_backed_modules, &archive_dir, &subset_tag)?;
+        if artifact_is_stale(&archive_path, std::slice::from_ref(&object_path))? {
+            archive_objects(&archive_path, &[object_path])?;
+        }
+        Ok(())
+    })?;
 
     Ok(Some(StdlibArtifacts {
         archive_path,
