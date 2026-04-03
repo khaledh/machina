@@ -3,13 +3,14 @@ use std::path::PathBuf;
 
 use machina::backend::TargetKind;
 use machina::driver::compile::CompileOptions;
+use machina::driver::target::SelectedTarget;
 
 use crate::common::run_program_with_opts;
 use std::fs;
 
 fn trace_opts() -> CompileOptions {
     CompileOptions {
-        target: TargetKind::Arm64,
+        target: SelectedTarget::builtin(TargetKind::Arm64Macos),
         dump: None,
         emit_ir: false,
         verify_ir: false,

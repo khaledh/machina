@@ -6,6 +6,7 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use machina::backend::TargetKind;
 use machina::driver::compile::{CompileOptions, compile_with_path};
 use machina::driver::native_support::{ensure_runtime_archive, link_executable};
+use machina::driver::target::SelectedTarget;
 use std::fs;
 
 static TEST_COUNTER: AtomicUsize = AtomicUsize::new(0);
@@ -19,7 +20,7 @@ pub(crate) fn run_program_with_args(name: &str, source: &str, args: &[&str]) -> 
         name,
         source,
         CompileOptions {
-            target: TargetKind::Arm64,
+            target: SelectedTarget::builtin(TargetKind::Arm64Macos),
             dump: None,
             emit_ir: false,
             verify_ir: false,
@@ -49,7 +50,7 @@ pub(crate) fn run_program_with_stdin(name: &str, source: &str, stdin: &[u8]) -> 
     let output = compile_source_with_opts(
         &source_path,
         &CompileOptions {
-            target: TargetKind::Arm64,
+            target: SelectedTarget::builtin(TargetKind::Arm64Macos),
             dump: None,
             emit_ir: false,
             verify_ir: false,
@@ -69,7 +70,7 @@ pub(crate) fn run_program_with_stdin(name: &str, source: &str, stdin: &[u8]) -> 
         &asm_path,
         &output.extra_link_paths,
         &exe_path,
-        TargetKind::Arm64,
+        &SelectedTarget::builtin(TargetKind::Arm64Macos),
     );
 
     let mut child = Command::new(&exe_path)
@@ -112,7 +113,7 @@ pub(crate) fn run_program_with_opts(
     let exe_path = temp_dir.join(name);
     fs::write(&asm_path, output.asm).expect("failed to write asm");
 
-    link_exe(&asm_path, &output.extra_link_paths, &exe_path, opts.target);
+    link_exe(&asm_path, &output.extra_link_paths, &exe_path, &opts.target);
 
     let run = Command::new(&exe_path)
         .args(args)
@@ -135,8 +136,9 @@ pub(crate) fn run_c_program(name: &str, source_path: &Path) -> Output {
 
     let exe_path = temp_dir.join(name);
     let runtime_dir = repo_root.join("runtime");
-    let runtime_archive = ensure_runtime_archive(TargetKind::host(), None)
-        .expect("failed to build cached runtime archive");
+    let runtime_archive =
+        ensure_runtime_archive(&SelectedTarget::builtin(TargetKind::host()), None)
+            .expect("failed to build cached runtime archive");
 
     let status = Command::new("cc")
         .arg("-std=c11")
@@ -165,7 +167,7 @@ fn compile_source_with_opts(
     compile_with_path(&source, Some(source_path), opts).expect("compile failed")
 }
 
-fn link_exe(asm_path: &Path, extra_objs: &[PathBuf], exe_path: &Path, target: TargetKind) {
+fn link_exe(asm_path: &Path, extra_objs: &[PathBuf], exe_path: &Path, target: &SelectedTarget) {
     link_executable(asm_path, extra_objs, exe_path, target, None)
         .expect("failed to link executable");
 }

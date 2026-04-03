@@ -144,7 +144,10 @@ impl Arm64Emitter {
                 if len != "x2" {
                     self.emit_line(&format!("mov x2, {}", len));
                 }
-                self.emit_line(&format!("bl {}", self.mangle_symbol(RuntimeFn::MemCopy.name())));
+                self.emit_line(&format!(
+                    "bl {}",
+                    self.mangle_symbol(RuntimeFn::MemCopy.name())
+                ));
             }
             InstKind::MemSet { dst, byte, len } => {
                 // Lower memset as a runtime call: __rt_memset(dst, len, value).
@@ -161,7 +164,10 @@ impl Arm64Emitter {
                 if byte != "x2" {
                     self.emit_line(&format!("mov x2, {}", byte));
                 }
-                self.emit_line(&format!("bl {}", self.mangle_symbol(RuntimeFn::MemSet.name())));
+                self.emit_line(&format!(
+                    "bl {}",
+                    self.mangle_symbol(RuntimeFn::MemSet.name())
+                ));
             }
             InstKind::Call { callee, .. } => match callee {
                 // Direct/runtime calls use named symbols; indirect calls use a register.
@@ -230,9 +236,7 @@ impl Arm64Emitter {
                     let label = locs
                         .def_name(*def)
                         .map(|name| self.mangle_symbol(name))
-                        .unwrap_or_else(|| {
-                            format!("{}fn{}", self.target.symbol_prefix(), def.0)
-                        });
+                        .unwrap_or_else(|| format!("{}fn{}", self.target.symbol_prefix(), def.0));
                     let (dst_reg, dst_slot) =
                         self.value_dst_typed(locs, dst, "x9", "const func", dst_ty);
                     self.emit_line(&format!("adrp {}, {}@PAGE", dst_reg, label));

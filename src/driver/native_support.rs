@@ -5,9 +5,9 @@
 //! - `stdlib_support`: cached stdlib object/archive support
 //! - `support_utils`: shared artifact helpers
 
-use crate::backend::TargetKind;
 use crate::driver::project_config::ProjectConfig;
 use crate::driver::support_utils::cc_command_for_target;
+use crate::driver::target::SelectedTarget;
 use std::path::{Path, PathBuf};
 
 pub use crate::driver::runtime_support::{ensure_runtime_archive, runtime_source_paths};
@@ -21,7 +21,7 @@ pub fn link_executable(
     asm_path: &Path,
     extra_objs: &[PathBuf],
     exe_path: &Path,
-    target: TargetKind,
+    target: &SelectedTarget,
     project_config: Option<&ProjectConfig>,
 ) -> Result<(), String> {
     let runtime_archive = ensure_runtime_archive(target, project_config)?;

@@ -18,11 +18,12 @@ use crate::core::resolve::DefId;
 use crate::driver::native_support::ensure_stdlib_archive_for_modules;
 use crate::driver::project_config::ProjectConfig;
 use crate::driver::support_utils::supports_configured_toolchain;
+use crate::driver::target::SelectedTarget;
 use crate::ir::format::{format_func_with_comments_and_names, format_globals};
 
 #[derive(Debug)]
 pub struct CompileOptions {
-    pub target: backend::TargetKind,
+    pub target: SelectedTarget,
     pub dump: Option<String>,
     pub emit_ir: bool,
     pub verify_ir: bool,
@@ -116,8 +117,8 @@ pub fn compile_with_path(
     )?;
 
     let object_backed_stdlib = if opts.use_stdlib_objects
-        && opts.target.supports_object_backed_stdlib()
-        && supports_configured_toolchain(opts.target, opts.project_config.as_ref())
+        && opts.target.kind.supports_object_backed_stdlib()
+        && supports_configured_toolchain(&opts.target, opts.project_config.as_ref())
     {
         let referenced_modules = parsed
             .module_paths_by_id
@@ -126,7 +127,7 @@ pub fn compile_with_path(
             .collect::<HashSet<_>>();
         ensure_stdlib_archive_for_modules(
             &referenced_modules,
-            opts.target,
+            &opts.target,
             opts.project_config.as_ref(),
         )
         .map_err(|message| {
@@ -182,7 +183,7 @@ pub fn compile_with_path(
 
     let ir = if opts.emit_ir { formatted_ir } else { None };
 
-    let asm = backend::codegen::emit_module(&lowered, &codegen_def_names, opts.target);
+    let asm = backend::codegen::emit_module(&lowered, &codegen_def_names, opts.target.kind);
 
     dump_asm_stage(&asm, dump);
 
@@ -311,7 +312,7 @@ fn run_lower_stage(
             linear_index: Some(&analyzed.linear_index),
             trace_alloc: opts.trace_alloc,
             trace_drops: opts.trace_drops,
-            executable: true,
+            executable: opts.target.platform.is_hosted(),
         },
     )
     .map_err(|e| vec![e.into()])

@@ -45,7 +45,7 @@ impl Default for Arm64Emitter {
 
 impl Arm64Emitter {
     pub fn new() -> Self {
-        Self::for_target(TargetKind::Arm64)
+        Self::for_target(TargetKind::Arm64Macos)
     }
 
     pub fn for_target(target: TargetKind) -> Self {

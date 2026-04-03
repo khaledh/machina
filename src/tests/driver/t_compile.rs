@@ -21,6 +21,8 @@ use crate::driver::compile::{CompileOptions, compile, compile_with_path};
 use crate::driver::native_support::{
     assemble_object, link_executable, native_toolchain_supports_target,
 };
+use crate::driver::project_config::ProjectConfig;
+use crate::driver::target::{SelectedTarget, resolve_target};
 
 struct MockLoader {
     modules: HashMap<String, String>,
@@ -781,7 +783,7 @@ fn flatten_capsule_rejects_private_symbol_import() {
 
 fn deterministic_compile_opts() -> CompileOptions {
     CompileOptions {
-        target: TargetKind::Arm64,
+        target: SelectedTarget::builtin(TargetKind::Arm64Macos),
         dump: None,
         emit_ir: true,
         verify_ir: false,
@@ -795,7 +797,7 @@ fn deterministic_compile_opts() -> CompileOptions {
 
 fn deterministic_x86_compile_opts() -> CompileOptions {
     CompileOptions {
-        target: TargetKind::X86_64,
+        target: SelectedTarget::builtin(TargetKind::X86_64Macos),
         dump: None,
         emit_ir: false,
         verify_ir: false,
@@ -809,7 +811,7 @@ fn deterministic_x86_compile_opts() -> CompileOptions {
 
 fn deterministic_x86_archive_compile_opts() -> CompileOptions {
     CompileOptions {
-        target: TargetKind::X86_64,
+        target: SelectedTarget::builtin(TargetKind::X86_64Macos),
         dump: None,
         emit_ir: false,
         verify_ir: false,
@@ -823,7 +825,7 @@ fn deterministic_x86_archive_compile_opts() -> CompileOptions {
 
 fn deterministic_x86_linux_archive_compile_opts() -> CompileOptions {
     CompileOptions {
-        target: TargetKind::X86_64Linux,
+        target: SelectedTarget::builtin(TargetKind::X86_64Linux),
         dump: None,
         emit_ir: false,
         verify_ir: false,
@@ -992,8 +994,74 @@ fn compile_with_path_skips_x86_64_linux_stdlib_archive_without_toolchain() {
 }
 
 #[test]
+fn compile_with_path_skips_hosted_entry_wrapper_for_none_platform_targets() {
+    let temp_dir = std::env::temp_dir().join(format!(
+        "machina_driver_x86_bare_compile_{}",
+        std::process::id()
+    ));
+    std::fs::create_dir_all(&temp_dir).expect("failed to create temp dir");
+    std::fs::write(
+        temp_dir.join("machina.toml"),
+        r#"
+[target.x86-64-bare]
+arch = "x86-64"
+platform = "none"
+"#,
+    )
+    .expect("failed to write machina.toml");
+    let source_path = temp_dir.join("bare_main.mc");
+    let source = r#"
+        fn main() -> u64 {
+            42
+        }
+    "#;
+    std::fs::write(&source_path, source).expect("failed to write source");
+
+    let project_config = ProjectConfig::load_for_root(&temp_dir)
+        .expect("load config")
+        .expect("present config");
+    let target = resolve_target(Some("x86-64-bare"), Some(&project_config))
+        .expect("resolve custom bare target");
+    let output = compile_with_path(
+        source,
+        Some(&source_path),
+        &CompileOptions {
+            target,
+            dump: None,
+            emit_ir: false,
+            verify_ir: false,
+            trace_alloc: false,
+            trace_drops: false,
+            inject_prelude: true,
+            use_stdlib_objects: true,
+            project_config: Some(project_config),
+        },
+    )
+    .expect("compile bare target");
+
+    assert!(
+        output.asm.contains("\nmain:\n"),
+        "expected bare target to preserve user main symbol"
+    );
+    assert!(
+        !output.asm.contains("__mc_entry_main_wrapper"),
+        "did not expect hosted entry wrapper in bare target asm"
+    );
+    assert!(
+        !output.asm.contains("__mc_user_main"),
+        "did not expect hosted user-main rename in bare target asm"
+    );
+    assert!(
+        !output.asm.contains("__rt_process_args_init"),
+        "did not expect process-args runtime init in bare target asm"
+    );
+
+    let _ = std::fs::remove_dir_all(&temp_dir);
+}
+
+#[test]
 fn native_support_can_build_x86_64_simple_program() {
-    if !native_toolchain_supports_target(TargetKind::X86_64) {
+    if !native_toolchain_supports_target(TargetKind::X86_64Macos) {
         return;
     }
 
@@ -1016,8 +1084,13 @@ fn native_support_can_build_x86_64_simple_program() {
     let exe_path = temp_dir.join("simple_x86");
     std::fs::write(&asm_path, output.asm).expect("failed to write asm");
 
-    assemble_object(&asm_path, &obj_path, TargetKind::X86_64, None)
-        .expect("assemble x86_64 object");
+    assemble_object(
+        &asm_path,
+        &obj_path,
+        &SelectedTarget::builtin(TargetKind::X86_64Macos),
+        None,
+    )
+    .expect("assemble x86_64 object");
     assert!(
         obj_path.exists(),
         "expected assembled object at {}",
@@ -1028,7 +1101,7 @@ fn native_support_can_build_x86_64_simple_program() {
         &asm_path,
         &output.extra_link_paths,
         &exe_path,
-        TargetKind::X86_64,
+        &SelectedTarget::builtin(TargetKind::X86_64Macos),
         None,
     )
     .expect("link x86_64 executable");
@@ -1043,7 +1116,7 @@ fn native_support_can_build_x86_64_simple_program() {
 
 #[test]
 fn native_support_can_build_and_run_x86_64_print_program() {
-    if !native_toolchain_supports_target(TargetKind::X86_64) {
+    if !native_toolchain_supports_target(TargetKind::X86_64Macos) {
         return;
     }
 
@@ -1075,7 +1148,7 @@ fn native_support_can_build_and_run_x86_64_print_program() {
         &asm_path,
         &output.extra_link_paths,
         &exe_path,
-        TargetKind::X86_64,
+        &SelectedTarget::builtin(TargetKind::X86_64Macos),
         None,
     )
     .expect("link x86_64 executable");

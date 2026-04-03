@@ -7,6 +7,7 @@ use serde::Deserialize;
 
 use crate::backend::TargetKind;
 use crate::core::capsule::infer_capsule_root;
+use crate::driver::target::{PlatformKind, parse_builtin_target_name};
 
 #[derive(Debug, Clone)]
 pub struct ToolCommand {
@@ -39,7 +40,7 @@ impl ToolCommand {
 
 #[derive(Debug, Clone, Default)]
 pub struct ProjectConfig {
-    target_tools: HashMap<TargetKind, TargetToolConfig>,
+    targets: HashMap<String, TargetConfig>,
 }
 
 impl ProjectConfig {
@@ -60,25 +61,38 @@ impl ProjectConfig {
         Self::from_raw(raw)
     }
 
-    pub fn tool(&self, target: TargetKind, tool: ToolKind) -> Option<&ToolCommand> {
-        self.target_tools.get(&target).and_then(|cfg| match tool {
-            ToolKind::Cc => cfg.cc.as_ref(),
-            ToolKind::Ar => cfg.ar.as_ref(),
-        })
+    pub fn tool(&self, target_name: &str, tool: ToolKind) -> Option<&ToolCommand> {
+        self.targets
+            .get(&canonical_target_name(target_name))
+            .and_then(|cfg| match tool {
+                ToolKind::Cc => cfg.cc.as_ref(),
+                ToolKind::Ar => cfg.ar.as_ref(),
+            })
     }
 
-    pub fn has_tool_override(&self, target: TargetKind) -> bool {
-        self.target_tools
-            .get(&target)
+    pub fn target_kind(&self, target_name: &str) -> Option<TargetKind> {
+        self.targets
+            .get(&canonical_target_name(target_name))
+            .map(|cfg| cfg.kind)
+    }
+
+    pub fn target_identity(&self, target_name: &str) -> Option<(TargetKind, PlatformKind)> {
+        self.targets
+            .get(&canonical_target_name(target_name))
+            .map(|cfg| (cfg.kind, cfg.platform))
+    }
+
+    pub fn has_tool_override(&self, target_name: &str) -> bool {
+        self.targets
+            .get(&canonical_target_name(target_name))
             .is_some_and(|cfg| cfg.cc.is_some() || cfg.ar.is_some())
     }
 
     fn from_raw(raw: RawProjectConfig) -> Result<Option<Self>, String> {
-        let mut target_tools = HashMap::new();
+        let mut targets = HashMap::new();
         for (target_name, raw_target) in raw.target {
-            let Some(target) = parse_target_key(&target_name) else {
-                return Err(format!("unsupported target key '{target_name}' in machina.toml"));
-            };
+            let canonical_name = canonical_target_name(&target_name);
+            let (target, platform) = resolve_target_kind(&target_name, &raw_target)?;
             let cc = raw_target
                 .cc
                 .map(|argv| ToolCommand::from_argv(argv, target, ToolKind::Cc))
@@ -87,18 +101,28 @@ impl ProjectConfig {
                 .ar
                 .map(|argv| ToolCommand::from_argv(argv, target, ToolKind::Ar))
                 .transpose()?;
-            target_tools.insert(target, TargetToolConfig { cc, ar });
+            targets.insert(
+                canonical_name,
+                TargetConfig {
+                    kind: target,
+                    platform,
+                    cc,
+                    ar,
+                },
+            );
         }
-        if target_tools.is_empty() {
+        if targets.is_empty() {
             Ok(None)
         } else {
-            Ok(Some(Self { target_tools }))
+            Ok(Some(Self { targets }))
         }
     }
 }
 
-#[derive(Debug, Clone, Default)]
-struct TargetToolConfig {
+#[derive(Debug, Clone)]
+struct TargetConfig {
+    kind: TargetKind,
+    platform: PlatformKind,
     cc: Option<ToolCommand>,
     ar: Option<ToolCommand>,
 }
@@ -126,16 +150,80 @@ struct RawProjectConfig {
 
 #[derive(Debug, Deserialize, Default)]
 struct RawTargetToolConfig {
+    arch: Option<String>,
+    platform: Option<String>,
     cc: Option<Vec<String>>,
     ar: Option<Vec<String>>,
 }
 
-fn parse_target_key(key: &str) -> Option<TargetKind> {
-    match key {
-        "arm64" => Some(TargetKind::Arm64),
-        "x86-64" => Some(TargetKind::X86_64),
-        "x86-64-linux" => Some(TargetKind::X86_64Linux),
-        _ => None,
+fn canonical_target_name(name: &str) -> String {
+    parse_builtin_target_name(name)
+        .map(|kind| kind.config_key().to_string())
+        .unwrap_or_else(|| name.to_string())
+}
+
+fn resolve_target_kind(
+    target_name: &str,
+    raw_target: &RawTargetToolConfig,
+) -> Result<(TargetKind, PlatformKind), String> {
+    if let Some(kind) = parse_builtin_target_name(target_name) {
+        if raw_target.arch.is_none() && raw_target.platform.is_none() {
+            return Ok((kind, builtin_platform(kind)));
+        }
+
+        let declared = target_kind_from_parts(
+            raw_target.arch.as_deref(),
+            raw_target.platform.as_deref(),
+            target_name,
+        )?;
+        if declared.0 != kind {
+            return Err(format!(
+                "target `{target_name}` declares arch/platform for {}, but the built-in target name resolves to {}",
+                declared.0.config_key(),
+                kind.config_key()
+            ));
+        }
+        return Ok(declared);
+    }
+
+    target_kind_from_parts(
+        raw_target.arch.as_deref(),
+        raw_target.platform.as_deref(),
+        target_name,
+    )
+}
+
+fn target_kind_from_parts(
+    arch: Option<&str>,
+    platform: Option<&str>,
+    target_name: &str,
+) -> Result<(TargetKind, PlatformKind), String> {
+    let Some(arch) = arch else {
+        return Err(format!(
+            "custom target `{target_name}` must declare `arch = \"...\"` in machina.toml"
+        ));
+    };
+    let Some(platform) = platform else {
+        return Err(format!(
+            "custom target `{target_name}` must declare `platform = \"...\"` in machina.toml"
+        ));
+    };
+
+    match (arch, platform) {
+        ("arm64", "macos") => Ok((TargetKind::Arm64Macos, PlatformKind::Macos)),
+        ("x86-64", "macos") => Ok((TargetKind::X86_64Macos, PlatformKind::Macos)),
+        ("x86-64", "linux") => Ok((TargetKind::X86_64Linux, PlatformKind::Linux)),
+        ("x86-64", "none") => Ok((TargetKind::X86_64Linux, PlatformKind::None)),
+        _ => Err(format!(
+            "unsupported target combination for `{target_name}`: arch = `{arch}`, platform = `{platform}`"
+        )),
+    }
+}
+
+fn builtin_platform(kind: TargetKind) -> PlatformKind {
+    match kind {
+        TargetKind::Arm64Macos | TargetKind::X86_64Macos => PlatformKind::Macos,
+        TargetKind::X86_64Linux => PlatformKind::Linux,
     }
 }
 
@@ -149,6 +237,8 @@ mod tests {
             target: HashMap::from([(
                 String::from("x86-64-linux"),
                 RawTargetToolConfig {
+                    arch: None,
+                    platform: None,
                     cc: Some(vec![
                         String::from("colima"),
                         String::from("ssh"),
@@ -170,10 +260,10 @@ mod tests {
             .expect("non-empty config");
 
         let cc = cfg
-            .tool(TargetKind::X86_64Linux, ToolKind::Cc)
+            .tool("x86-64-linux", ToolKind::Cc)
             .expect("x86_64-linux cc");
         let ar = cfg
-            .tool(TargetKind::X86_64Linux, ToolKind::Ar)
+            .tool("x86-64-linux", ToolKind::Ar)
             .expect("x86_64-linux ar");
 
         let cc_cmd = cc.to_command();
@@ -196,6 +286,8 @@ mod tests {
             target: HashMap::from([(
                 String::from("x86-64-linux"),
                 RawTargetToolConfig {
+                    arch: None,
+                    platform: None,
                     cc: Some(Vec::new()),
                     ar: None,
                 },
@@ -213,7 +305,7 @@ mod tests {
         };
 
         let err = ProjectConfig::from_raw(raw).expect_err("unknown target must error");
-        assert!(err.contains("unsupported target key 'mips64-linux'"));
+        assert!(err.contains("must declare `arch ="));
     }
 
     #[test]
@@ -234,6 +326,8 @@ mod tests {
             temp_root.join("machina.toml"),
             r#"
 [target.x86-64-linux]
+arch = "x86-64"
+platform = "linux"
 cc = ["colima", "ssh", "--", "gcc"]
 ar = ["colima", "ssh", "--", "ar"]
 "#,
@@ -243,9 +337,79 @@ ar = ["colima", "ssh", "--", "ar"]
         let cfg = ProjectConfig::load_for_root(&temp_root)
             .expect("load config")
             .expect("present config");
-        assert!(cfg.tool(TargetKind::X86_64Linux, ToolKind::Cc).is_some());
+        assert!(cfg.tool("x86-64-linux", ToolKind::Cc).is_some());
 
         let _ = fs::remove_dir_all(&temp_root);
+    }
+
+    #[test]
+    fn custom_targets_require_arch_and_platform() {
+        let raw = RawProjectConfig {
+            target: HashMap::from([(
+                String::from("x86-64-dev"),
+                RawTargetToolConfig {
+                    arch: Some(String::from("x86-64")),
+                    platform: Some(String::from("linux")),
+                    cc: None,
+                    ar: None,
+                },
+            )]),
+        };
+
+        let cfg = ProjectConfig::from_raw(raw)
+            .expect("parse custom target")
+            .expect("non-empty config");
+
+        assert_eq!(cfg.target_kind("x86-64-dev"), Some(TargetKind::X86_64Linux));
+        assert_eq!(
+            cfg.target_identity("x86-64-dev"),
+            Some((TargetKind::X86_64Linux, PlatformKind::Linux))
+        );
+    }
+
+    #[test]
+    fn built_in_target_aliases_normalize_to_canonical_keys() {
+        let raw = RawProjectConfig {
+            target: HashMap::from([(
+                String::from("arm64"),
+                RawTargetToolConfig {
+                    arch: None,
+                    platform: None,
+                    cc: Some(vec![String::from("cc")]),
+                    ar: None,
+                },
+            )]),
+        };
+
+        let cfg = ProjectConfig::from_raw(raw)
+            .expect("parse built-in alias")
+            .expect("non-empty config");
+
+        assert!(cfg.tool("arm64-macos", ToolKind::Cc).is_some());
+    }
+
+    #[test]
+    fn bare_custom_targets_resolve_to_none_platform() {
+        let raw = RawProjectConfig {
+            target: HashMap::from([(
+                String::from("x86-64-bare"),
+                RawTargetToolConfig {
+                    arch: Some(String::from("x86-64")),
+                    platform: Some(String::from("none")),
+                    cc: None,
+                    ar: None,
+                },
+            )]),
+        };
+
+        let cfg = ProjectConfig::from_raw(raw)
+            .expect("parse bare target")
+            .expect("non-empty config");
+
+        assert_eq!(
+            cfg.target_identity("x86-64-bare"),
+            Some((TargetKind::X86_64Linux, PlatformKind::None))
+        );
     }
 
     fn unique_suffix() -> u128 {

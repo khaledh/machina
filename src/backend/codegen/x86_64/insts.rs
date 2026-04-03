@@ -146,9 +146,7 @@ impl X86_64Emitter {
                     let label = locs
                         .def_name(*def)
                         .map(|name| self.mangle_symbol(name))
-                        .unwrap_or_else(|| {
-                            format!("{}fn{}", self.target.symbol_prefix(), def.0)
-                        });
+                        .unwrap_or_else(|| format!("{}fn{}", self.target.symbol_prefix(), def.0));
                     let (dst_reg, dst_slot) =
                         self.value_dst_typed(locs, dst, R10, "const func", dst_ty);
                     self.emit_line(&format!("leaq {}(%rip), {}", label, dst_reg));

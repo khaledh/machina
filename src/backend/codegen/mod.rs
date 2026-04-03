@@ -66,11 +66,11 @@ pub fn emit_module(
     target_kind: TargetKind,
 ) -> String {
     match target_kind {
-        TargetKind::Arm64 => {
+        TargetKind::Arm64Macos => {
             let target = Arm64Target::new();
             emit_module_arm64(module, def_names, &target, target_kind)
         }
-        TargetKind::X86_64 | TargetKind::X86_64Linux => {
+        TargetKind::X86_64Macos | TargetKind::X86_64Linux => {
             let target = X86_64Target::new();
             emit_module_x86_64(module, def_names, &target, target_kind)
         }

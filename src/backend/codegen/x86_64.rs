@@ -43,7 +43,7 @@ impl Default for X86_64Emitter {
 
 impl X86_64Emitter {
     pub fn new() -> Self {
-        Self::for_target(TargetKind::X86_64)
+        Self::for_target(TargetKind::X86_64Macos)
     }
 
     pub fn for_target(target: TargetKind) -> Self {

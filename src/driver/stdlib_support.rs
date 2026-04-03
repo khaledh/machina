@@ -1,12 +1,12 @@
 //! Stdlib object/archive helpers for object-backed stdlib modules.
 
-use crate::backend::TargetKind;
 use crate::core::capsule::ModulePath;
 use crate::driver::compile::{CompileOptions, compile_with_path};
 use crate::driver::project_config::ProjectConfig;
 use crate::driver::support_utils::{
     archive_objects, artifact_is_stale, assemble_object, native_support_dir, with_artifact_lock,
 };
+use crate::driver::target::SelectedTarget;
 
 use std::collections::HashSet;
 use std::fs;
@@ -20,7 +20,7 @@ pub struct StdlibArtifacts {
 
 pub fn ensure_stdlib_archive_for_modules(
     module_paths: &HashSet<ModulePath>,
-    target: TargetKind,
+    target: &SelectedTarget,
     project_config: Option<&ProjectConfig>,
 ) -> Result<Option<StdlibArtifacts>, String> {
     let object_backed_modules = supported_stdlib_object_modules(module_paths);
@@ -28,7 +28,9 @@ pub fn ensure_stdlib_archive_for_modules(
         return Ok(None);
     }
 
-    let archive_dir = native_support_dir()?.join(target.as_str()).join("stdlib");
+    let archive_dir = native_support_dir()?
+        .join(target.kind.as_str())
+        .join("stdlib");
     fs::create_dir_all(&archive_dir)
         .map_err(|e| format!("failed to create {}: {e}", archive_dir.display()))?;
 
@@ -77,7 +79,7 @@ fn ensure_flattened_stdlib_object(
     object_backed_modules: &HashSet<ModulePath>,
     archive_dir: &PathBuf,
     subset_tag: &str,
-    target: TargetKind,
+    target: &SelectedTarget,
     project_config: Option<&ProjectConfig>,
 ) -> Result<PathBuf, String> {
     let object_path = archive_dir.join(format!("stdlib_{subset_tag}.o"));
@@ -100,7 +102,7 @@ fn ensure_flattened_stdlib_object(
         &source,
         Some(&source_path),
         &CompileOptions {
-            target,
+            target: target.clone(),
             dump: None,
             emit_ir: false,
             verify_ir: false,

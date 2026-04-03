@@ -138,7 +138,10 @@ impl X86_64Emitter {
                 self.emit_line("retq");
             }
             Terminator::Unreachable => {
-                self.emit_line(&format!("call {}", self.mangle_symbol(RuntimeFn::Trap.name())));
+                self.emit_line(&format!(
+                    "call {}",
+                    self.mangle_symbol(RuntimeFn::Trap.name())
+                ));
                 self.emit_line("ud2");
             }
         }

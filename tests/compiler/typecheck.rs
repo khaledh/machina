@@ -4,6 +4,7 @@ use machina::core::capsule::CapsuleError;
 use machina::core::diag::CompileError;
 use machina::core::typecheck::TypeCheckErrorKind;
 use machina::driver::compile::{CompileOptions, check_with_path, compile_with_path};
+use machina::driver::target::SelectedTarget;
 use std::fs;
 use std::path::Path;
 use std::sync::atomic::{AtomicUsize, Ordering};
@@ -1318,7 +1319,7 @@ fn typecheck_with_modules(
         entry_source,
         Some(entry_path),
         &CompileOptions {
-            target: TargetKind::Arm64,
+            target: SelectedTarget::builtin(TargetKind::Arm64Macos),
             dump: None,
             emit_ir: false,
             verify_ir: false,

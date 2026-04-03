@@ -1,6 +1,6 @@
-use crate::backend::TargetKind;
 use crate::driver::project_config::ProjectConfig;
 use crate::driver::project_config::ToolKind;
+use crate::driver::target::SelectedTarget;
 
 use std::ffi::OsStr;
 use std::fs;
@@ -14,7 +14,7 @@ use std::time::SystemTime;
 pub(crate) fn compile_c_object(
     source: &Path,
     object: &Path,
-    target: TargetKind,
+    target: &SelectedTarget,
     project_config: Option<&ProjectConfig>,
 ) -> Result<(), String> {
     let mut cmd = cc_command_for_target(target, project_config)?;
@@ -36,10 +36,10 @@ pub(crate) fn compile_c_object(
     }
 }
 
- pub(crate) fn archive_objects(
+pub(crate) fn archive_objects(
     archive: &Path,
     objects: &[PathBuf],
-    target: TargetKind,
+    target: &SelectedTarget,
     project_config: Option<&ProjectConfig>,
 ) -> Result<(), String> {
     if archive.exists() {
@@ -75,7 +75,7 @@ pub(crate) fn compile_c_object(
 pub fn assemble_object(
     asm_path: &Path,
     obj_path: &Path,
-    target: TargetKind,
+    target: &SelectedTarget,
     project_config: Option<&ProjectConfig>,
 ) -> Result<(), String> {
     let mut cmd = cc_command_for_target(target, project_config)?;
@@ -93,32 +93,33 @@ pub fn assemble_object(
     }
 }
 
-pub fn native_toolchain_supports_target(target: TargetKind) -> bool {
+pub fn native_toolchain_supports_target(target: crate::backend::TargetKind) -> bool {
     if cfg!(target_os = "macos") {
         return target.macos_cc_arch().is_some();
     }
-    target == TargetKind::host()
+    target == crate::backend::TargetKind::host()
 }
 
 pub(crate) fn supports_configured_toolchain(
-    target: TargetKind,
+    target: &SelectedTarget,
     project_config: Option<&ProjectConfig>,
 ) -> bool {
-    native_toolchain_supports_target(target)
+    native_toolchain_supports_target(target.kind)
         || project_config.is_some_and(|cfg| {
-            cfg.tool(target, ToolKind::Cc).is_some() && cfg.tool(target, ToolKind::Ar).is_some()
+            cfg.tool(target.config_key(), ToolKind::Cc).is_some()
+                && cfg.tool(target.config_key(), ToolKind::Ar).is_some()
         })
 }
 
 pub(crate) fn configure_default_cc_for_target(
     cmd: &mut Command,
-    target: TargetKind,
+    target: crate::backend::TargetKind,
 ) -> Result<(), String> {
     if cfg!(target_os = "macos") {
         let Some(arch) = target.macos_cc_arch() else {
             return Err(format!(
                 "native macOS toolchain does not support target {}",
-                target.as_str()
+                target.config_key()
             ));
         };
         cmd.arg("-arch").arg(arch);
@@ -130,34 +131,34 @@ pub(crate) fn configure_default_cc_for_target(
     } else {
         Err(format!(
             "native toolchain support for target {} is unavailable on host {}",
-            target.as_str(),
-            TargetKind::host().as_str()
+            target.config_key(),
+            crate::backend::TargetKind::host().config_key()
         ))
     }
 }
 
 pub(crate) fn cc_command_for_target(
-    target: TargetKind,
+    target: &SelectedTarget,
     project_config: Option<&ProjectConfig>,
 ) -> Result<Command, String> {
-    if let Some(tool) = project_config.and_then(|cfg| cfg.tool(target, ToolKind::Cc)) {
+    if let Some(tool) = project_config.and_then(|cfg| cfg.tool(target.config_key(), ToolKind::Cc)) {
         return Ok(tool.to_command());
     }
 
     let mut cmd = Command::new("cc");
-    configure_default_cc_for_target(&mut cmd, target)?;
+    configure_default_cc_for_target(&mut cmd, target.kind)?;
     Ok(cmd)
 }
 
 pub(crate) fn ar_command_for_target(
-    target: TargetKind,
+    target: &SelectedTarget,
     project_config: Option<&ProjectConfig>,
 ) -> Result<Command, String> {
-    if let Some(tool) = project_config.and_then(|cfg| cfg.tool(target, ToolKind::Ar)) {
+    if let Some(tool) = project_config.and_then(|cfg| cfg.tool(target.config_key(), ToolKind::Ar)) {
         return Ok(tool.to_command());
     }
 
-    if native_toolchain_supports_target(target) {
+    if native_toolchain_supports_target(target.kind) {
         Ok(Command::new("ar"))
     } else {
         Err(format!(

@@ -9,6 +9,7 @@ use machina::driver::native_support::{
 use machina::driver::project_config::ProjectConfig;
 use machina::driver::project_config::ToolKind;
 use machina::driver::query::{QueryLookupKind as DriverQueryLookupKind, run_query};
+use machina::driver::target::resolve_target;
 use machina::services::analysis::diagnostics::Diagnostic;
 use machina::services::analysis::diagnostics::DiagnosticPhase;
 use std::ffi::OsStr;
@@ -36,9 +37,10 @@ struct Args {
     #[clap(long, global = true)]
     dump: Option<String>,
 
-    /// Target architecture/platform
-    #[clap(long, value_enum, default_value_t = TargetKind::Arm64, global = true)]
-    target: TargetKind,
+    /// Target architecture/platform. Built-ins: arm64-macos, x86-64-macos,
+    /// x86-64-linux. Custom targets may be defined in machina.toml.
+    #[clap(long, global = true)]
+    target: Option<String>,
 
     /// Comma-separated list of artifacts to emit: [asm, ir]
     #[clap(long, value_delimiter = ',', global = true)]
@@ -108,15 +110,6 @@ enum EmitKind {
 }
 
 #[derive(clap::ValueEnum, Clone, Copy)]
-enum TargetKind {
-    Arm64,
-    #[value(name = "x86-64")]
-    X86_64,
-    #[value(name = "x86-64-linux")]
-    X86_64Linux,
-}
-
-#[derive(clap::ValueEnum, Clone, Copy)]
 enum QueryLookupKind {
     Def,
     Type,
@@ -169,7 +162,7 @@ fn main() {
     let Args {
         cmd,
         dump,
-        target: _target,
+        target: requested_target,
         emit,
         trace_alloc,
         trace_drops,
@@ -238,12 +231,15 @@ fn main() {
             return;
         }
     };
+    let target = match resolve_target(requested_target.as_deref(), project_config.as_ref()) {
+        Ok(target) => target,
+        Err(message) => {
+            println!("[ERROR] invalid target: {message}");
+            return;
+        }
+    };
     let opts = CompileOptions {
-        target: match _target {
-            TargetKind::Arm64 => BackendTargetKind::Arm64,
-            TargetKind::X86_64 => BackendTargetKind::X86_64,
-            TargetKind::X86_64Linux => BackendTargetKind::X86_64Linux,
-        },
+        target,
         dump,
         emit_ir,
         verify_ir,
@@ -267,7 +263,7 @@ fn main() {
             let asm_path = if emit_asm {
                 input_path.with_extension("s")
             } else {
-                temp_asm_path(input_path, opts.target, opts.project_config.as_ref())
+                temp_asm_path(input_path, &opts.target, opts.project_config.as_ref())
             };
             if let Err(e) = fs::write(&asm_path, output.asm) {
                 println!("[ERROR] failed to write {}: {e}", asm_path.display());
@@ -276,9 +272,9 @@ fn main() {
 
             let result = match invocation.kind {
                 DriverKind::Compile => {
-                    let can_assemble = native_toolchain_supports_target(opts.target)
+                    let can_assemble = native_toolchain_supports_target(opts.target.kind)
                         || opts.project_config.as_ref().is_some_and(|cfg| {
-                            cfg.tool(opts.target, ToolKind::Cc).is_some()
+                            cfg.tool(opts.target.config_key(), ToolKind::Cc).is_some()
                         });
                     if !can_assemble {
                         if emit_asm {
@@ -307,7 +303,7 @@ fn main() {
                         let result = assemble_object(
                             &asm_path,
                             &obj_path,
-                            opts.target,
+                            &opts.target,
                             opts.project_config.as_ref(),
                         );
                         if result.is_ok() {
@@ -318,6 +314,16 @@ fn main() {
                     }
                 }
                 DriverKind::Build => {
+                    if !opts.target.platform.is_hosted() {
+                        println!(
+                            "[ERROR] build failed: target {} uses platform = \"none\"; linker-script based bare linking is not implemented yet",
+                            opts.target.config_key()
+                        );
+                        if !emit_asm {
+                            let _ = fs::remove_file(&asm_path);
+                        }
+                        return;
+                    }
                     let exe_path = invocation
                         .output
                         .clone()
@@ -326,7 +332,7 @@ fn main() {
                         &asm_path,
                         &output.extra_link_paths,
                         &exe_path,
-                        opts.target,
+                        &opts.target,
                         opts.project_config.as_ref(),
                     );
                     if result.is_ok() {
@@ -336,7 +342,17 @@ fn main() {
                     result.map(|_| DriverResult::Success { remove_asm })
                 }
                 DriverKind::Run => {
-                    if matches!(opts.target, BackendTargetKind::X86_64Linux) {
+                    if !opts.target.platform.is_hosted() {
+                        println!(
+                            "[ERROR] run failed: target {} uses platform = \"none\"; build the object/asm output and run it in your bare-metal environment",
+                            opts.target.config_key()
+                        );
+                        if !emit_asm {
+                            let _ = fs::remove_file(&asm_path);
+                        }
+                        return;
+                    }
+                    if matches!(opts.target.kind, BackendTargetKind::X86_64Linux) {
                         println!(
                             "[ERROR] run failed: target {} is not runnable locally yet; use `build` and execute the output in your configured environment",
                             opts.target.config_key()
@@ -351,7 +367,7 @@ fn main() {
                         &asm_path,
                         &output.extra_link_paths,
                         &exe_path,
-                        opts.target,
+                        &opts.target,
                         opts.project_config.as_ref(),
                     );
                     let remove_asm = link_result.is_ok();
@@ -512,7 +528,7 @@ fn print_structured_diag(source: &str, diag: Diagnostic) {
 
 fn temp_asm_path(
     input_path: &Path,
-    target: BackendTargetKind,
+    target: &machina::driver::target::SelectedTarget,
     project_config: Option<&ProjectConfig>,
 ) -> PathBuf {
     let stem = input_path
@@ -520,8 +536,8 @@ fn temp_asm_path(
         .unwrap_or_else(|| OsStr::new("out"))
         .to_string_lossy();
     let pid = std::process::id();
-    let use_workspace_visible_path = matches!(target, BackendTargetKind::X86_64Linux)
-        || project_config.is_some_and(|cfg| cfg.tool(target, ToolKind::Cc).is_some());
+    let use_workspace_visible_path = matches!(target.kind, BackendTargetKind::X86_64Linux)
+        || project_config.is_some_and(|cfg| cfg.tool(target.config_key(), ToolKind::Cc).is_some());
     let mut path = if use_workspace_visible_path {
         input_path
             .parent()

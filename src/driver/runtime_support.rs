@@ -1,10 +1,10 @@
 //! Runtime archive artifact helpers.
 
-use crate::backend::TargetKind;
 use crate::driver::project_config::ProjectConfig;
 use crate::driver::support_utils::{
     archive_objects, artifact_is_stale, compile_c_object, native_support_dir, with_artifact_lock,
 };
+use crate::driver::target::SelectedTarget;
 
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -39,7 +39,7 @@ pub fn runtime_source_paths() -> Vec<PathBuf> {
 }
 
 pub fn ensure_runtime_archive(
-    target: TargetKind,
+    target: &SelectedTarget,
     project_config: Option<&ProjectConfig>,
 ) -> Result<PathBuf, String> {
     let sources = runtime_source_paths();
@@ -52,7 +52,9 @@ pub fn ensure_runtime_archive(
         }
     }
 
-    let build_dir = native_support_dir()?.join(target.as_str()).join("runtime");
+    let build_dir = native_support_dir()?
+        .join(target.kind.as_str())
+        .join("runtime");
     fs::create_dir_all(&build_dir)
         .map_err(|e| format!("failed to create {}: {e}", build_dir.display()))?;
 
