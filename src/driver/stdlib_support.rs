@@ -1,5 +1,6 @@
 //! Stdlib object/archive helpers for object-backed stdlib modules.
 
+use crate::backend::TargetKind;
 use crate::core::capsule::ModulePath;
 use crate::driver::compile::{CompileOptions, compile_with_path};
 use crate::driver::support_utils::{
@@ -18,13 +19,14 @@ pub struct StdlibArtifacts {
 
 pub fn ensure_stdlib_archive_for_modules(
     module_paths: &HashSet<ModulePath>,
+    target: TargetKind,
 ) -> Result<Option<StdlibArtifacts>, String> {
     let object_backed_modules = supported_stdlib_object_modules(module_paths);
     if object_backed_modules.is_empty() {
         return Ok(None);
     }
 
-    let archive_dir = native_support_dir()?.join("stdlib");
+    let archive_dir = native_support_dir()?.join(target.as_str()).join("stdlib");
     fs::create_dir_all(&archive_dir)
         .map_err(|e| format!("failed to create {}: {e}", archive_dir.display()))?;
 
@@ -32,8 +34,12 @@ pub fn ensure_stdlib_archive_for_modules(
     let archive_path = archive_dir.join(format!("libmachina_std_{subset_tag}.a"));
     let lock_path = archive_dir.join(format!(".stdlib_{subset_tag}.lock"));
     with_artifact_lock(&lock_path, || {
-        let object_path =
-            ensure_flattened_stdlib_object(&object_backed_modules, &archive_dir, &subset_tag)?;
+        let object_path = ensure_flattened_stdlib_object(
+            &object_backed_modules,
+            &archive_dir,
+            &subset_tag,
+            target,
+        )?;
         if artifact_is_stale(&archive_path, std::slice::from_ref(&object_path))? {
             archive_objects(&archive_path, &[object_path])?;
         }
@@ -68,6 +74,7 @@ fn ensure_flattened_stdlib_object(
     object_backed_modules: &HashSet<ModulePath>,
     archive_dir: &PathBuf,
     subset_tag: &str,
+    target: TargetKind,
 ) -> Result<PathBuf, String> {
     let object_path = archive_dir.join(format!("stdlib_{subset_tag}.o"));
     let prelude_path = prelude_source_path();
@@ -86,6 +93,7 @@ fn ensure_flattened_stdlib_object(
         &source,
         Some(&source_path),
         &CompileOptions {
+            target,
             dump: None,
             emit_ir: false,
             verify_ir: false,
@@ -105,7 +113,7 @@ fn ensure_flattened_stdlib_object(
     let asm_path = archive_dir.join(format!("stdlib_{subset_tag}.s"));
     fs::write(&asm_path, output.asm)
         .map_err(|e| format!("failed to write {}: {e}", asm_path.display()))?;
-    let assemble_result = assemble_object(&asm_path, &object_path);
+    let assemble_result = assemble_object(&asm_path, &object_path, target);
     let _ = fs::remove_file(&asm_path);
     assemble_result?;
     Ok(object_path)

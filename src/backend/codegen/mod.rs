@@ -5,12 +5,16 @@ pub mod emitter;
 pub mod graph;
 pub mod moves;
 pub mod traverse;
+pub mod x86_64;
 
 use std::collections::HashMap;
 
+use crate::backend::TargetKind;
 use crate::backend::analysis::liveness;
 use crate::backend::codegen::emitter::CodegenEmitter;
 use crate::backend::lower::{LoweredFunction, LoweredModule};
+use crate::backend::regalloc::arm64::Arm64Target;
+use crate::backend::regalloc::x86_64::X86_64Target;
 use crate::backend::regalloc::{TargetSpec, regalloc};
 use crate::core::resolve::DefId;
 
@@ -39,6 +43,35 @@ pub fn emit_module_arm64(
     let mut emitter = arm64::Arm64Emitter::new();
     emit_module_with_emitter(module, def_names, target, &mut emitter);
     emitter.finish()
+}
+
+/// Convenience entrypoint for emitting x86-64 assembly for a full module.
+pub fn emit_module_x86_64(
+    module: &LoweredModule,
+    def_names: &HashMap<DefId, String>,
+    target: &dyn TargetSpec,
+) -> String {
+    let mut emitter = x86_64::X86_64Emitter::new();
+    emit_module_with_emitter(module, def_names, target, &mut emitter);
+    emitter.finish()
+}
+
+/// Emit a full SSA module for the selected backend target.
+pub fn emit_module(
+    module: &LoweredModule,
+    def_names: &HashMap<DefId, String>,
+    target_kind: TargetKind,
+) -> String {
+    match target_kind {
+        TargetKind::Arm64 => {
+            let target = Arm64Target::new();
+            emit_module_arm64(module, def_names, &target)
+        }
+        TargetKind::X86_64 => {
+            let target = X86_64Target::new();
+            emit_module_x86_64(module, def_names, &target)
+        }
+    }
 }
 
 fn emit_function_with_emitter(
@@ -71,6 +104,7 @@ fn emit_function_with_emitter(
         &alloc.alloc_map,
         alloc.frame_size,
         &alloc.used_callee_saved,
+        target,
         &mut types,
         def_names,
         &func_label,

@@ -3,7 +3,6 @@ use std::collections::HashSet;
 use std::path::Path;
 
 use crate::backend;
-use crate::backend::regalloc::arm64::Arm64Target;
 use crate::core::api::{
     StrictFrontendOptions, build_strict_frontend_input, elaborate_stage, run_strict_frontend,
     semcheck_stage,
@@ -21,6 +20,7 @@ use crate::ir::format::{format_func_with_comments_and_names, format_globals};
 
 #[derive(Debug)]
 pub struct CompileOptions {
+    pub target: backend::TargetKind,
     pub dump: Option<String>,
     pub emit_ir: bool,
     pub verify_ir: bool,
@@ -112,13 +112,15 @@ pub fn compile_with_path(
         },
     )?;
 
-    let object_backed_stdlib = if opts.use_stdlib_objects {
+    let object_backed_stdlib = if opts.use_stdlib_objects
+        && opts.target.supports_object_backed_stdlib()
+    {
         let referenced_modules = parsed
             .module_paths_by_id
             .values()
             .cloned()
             .collect::<HashSet<_>>();
-        ensure_stdlib_archive_for_modules(&referenced_modules).map_err(|message| {
+        ensure_stdlib_archive_for_modules(&referenced_modules, opts.target).map_err(|message| {
             vec![CompileError::Io(
                 Path::new("stdlib").to_path_buf(),
                 std::io::Error::other(message),
@@ -171,8 +173,7 @@ pub fn compile_with_path(
 
     let ir = if opts.emit_ir { formatted_ir } else { None };
 
-    let target = Arm64Target::new();
-    let asm = backend::codegen::emit_module_arm64(&lowered, &codegen_def_names, &target);
+    let asm = backend::codegen::emit_module(&lowered, &codegen_def_names, opts.target);
 
     dump_asm_stage(&asm, dump);
 

@@ -16,6 +16,7 @@ pub mod intervals;
 pub mod moves;
 pub mod stack;
 pub mod target;
+pub mod x86_64;
 
 pub use stack::StackSlotId;
 pub use target::{PhysReg, TargetSpec};
@@ -129,3 +130,7 @@ mod tests_moves;
 #[cfg(test)]
 #[path = "../../tests/backend/regalloc/t_constraints.rs"]
 mod tests_constraints;
+
+#[cfg(test)]
+#[path = "../../tests/backend/regalloc/t_x86_64.rs"]
+mod tests_x86_64;

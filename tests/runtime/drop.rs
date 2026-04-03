@@ -1,6 +1,7 @@
 use std::collections::HashMap;
 use std::path::PathBuf;
 
+use machina::backend::TargetKind;
 use machina::driver::compile::CompileOptions;
 
 use crate::common::run_program_with_opts;
@@ -8,6 +9,7 @@ use std::fs;
 
 fn trace_opts() -> CompileOptions {
     CompileOptions {
+        target: TargetKind::Arm64,
         dump: None,
         emit_ir: false,
         verify_ir: false,

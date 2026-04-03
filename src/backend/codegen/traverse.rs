@@ -47,6 +47,7 @@ pub fn emit_graph_with_emitter(
     alloc_map: &ValueAllocMap,
     frame_size: u32,
     callee_saved: &[PhysReg],
+    target: &dyn crate::backend::regalloc::target::TargetSpec,
     types: &mut IrTypeCache,
     def_names: &HashMap<DefId, String>,
     func_label: &str,
@@ -120,12 +121,12 @@ pub fn emit_graph_with_emitter(
     let (local_offsets, locals_size) = build_local_offsets(func, &layouts, frame_size);
     let total_frame_size = frame_size.saturating_add(locals_size);
     let mut callee_saved = callee_saved.to_vec();
-    if needs_sret(types, func.sig.ret) {
-        let sret_reg = PhysReg(8);
-        if !callee_saved.contains(&sret_reg) {
-            callee_saved.push(sret_reg);
-            callee_saved.sort_by_key(|reg| reg.0);
-        }
+    if needs_sret(types, func.sig.ret)
+        && let Some(sret_reg) = target.indirect_result_reg()
+        && !callee_saved.contains(&sret_reg)
+    {
+        callee_saved.push(sret_reg);
+        callee_saved.sort_by_key(|reg| reg.0);
     }
 
     let mut sink = EmitSink {

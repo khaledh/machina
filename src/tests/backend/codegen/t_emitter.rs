@@ -1,12 +1,16 @@
+use crate::backend::TargetKind;
 use crate::backend::analysis::liveness;
 use crate::backend::codegen::arm64::Arm64Emitter;
-use crate::backend::codegen::emit_module_arm64;
 use crate::backend::codegen::emitter::CodegenEmitter;
 use crate::backend::codegen::graph::CodegenGraph;
 use crate::backend::codegen::moves::{EdgeMovePlan, MoveSchedule};
 use crate::backend::codegen::traverse::emit_graph_with_emitter as emit_graph_with_emitter_impl;
+use crate::backend::codegen::x86_64::X86_64Emitter;
+use crate::backend::codegen::{emit_module, emit_module_arm64, emit_module_x86_64};
 use crate::backend::lower::{LoweredFunction, LoweredModule};
+use crate::backend::regalloc::arm64::Arm64Target;
 use crate::backend::regalloc::target::PhysReg;
+use crate::backend::regalloc::x86_64::X86_64Target;
 use crate::backend::regalloc::{AllocationResult, TargetSpec, ValueAllocMap, regalloc};
 use crate::core::resolve::DefId;
 use crate::ir::builder::FunctionBuilder;
@@ -85,6 +89,7 @@ fn emit_function(func: &Function, types: &mut IrTypeCache, target: &dyn TargetSp
         &alloc.alloc_map,
         alloc.frame_size,
         &alloc.used_callee_saved,
+        target,
         types,
         &mut emitter,
     );
@@ -114,6 +119,7 @@ fn emit_function_with_alloc(
         &alloc.alloc_map,
         alloc.frame_size,
         &alloc.used_callee_saved,
+        target,
         types,
         &mut emitter,
     );
@@ -134,6 +140,7 @@ fn emit_graph_with_emitter(
     alloc_map: &ValueAllocMap,
     frame_size: u32,
     callee_saved: &[PhysReg],
+    target: &dyn TargetSpec,
     types: &mut IrTypeCache,
     emitter: &mut Arm64Emitter,
 ) {
@@ -145,6 +152,7 @@ fn emit_graph_with_emitter(
         alloc_map,
         frame_size,
         callee_saved,
+        target,
         types,
         &def_names,
         &func_label,
@@ -423,7 +431,7 @@ fn test_arm64_emitter_basic() {
     builder.terminate(Terminator::Return { value: None });
 
     let func = builder.finish();
-    let target = TinyTarget::new(2);
+    let target = Arm64Target::new();
     let asm = emit_function(&func, &mut tt.types, &target);
 
     assert!(asm.contains(".L_fn0_bb0:"));
@@ -501,6 +509,127 @@ fn test_arm64_emit_module() {
     assert!(asm.contains("g0:"));
     assert!(asm.contains("fn0:"));
     assert!(asm.contains("fn1:"));
+}
+
+#[test]
+fn test_target_dispatch_arm64_matches_direct_emitter() {
+    let mut types = IrTypeCache::new();
+    let unit_ty = types.add(IrTypeKind::Unit);
+
+    let mut builder = FunctionBuilder::new(
+        DefId(0),
+        "module_fn0",
+        FunctionSig {
+            params: vec![],
+            ret: unit_ty,
+        },
+    );
+    builder.terminate(Terminator::Return { value: None });
+    let func = builder.finish();
+
+    let module = LoweredModule {
+        funcs: vec![LoweredFunction {
+            func,
+            types: types.clone(),
+            globals: Vec::new(),
+        }],
+        globals: vec![],
+    };
+
+    let target = TinyTarget::new(2);
+    let def_names = HashMap::new();
+    let direct = emit_module_arm64(&module, &def_names, &target);
+    let dispatched = emit_module(&module, &def_names, TargetKind::Arm64);
+    assert_eq!(dispatched, direct);
+}
+
+#[test]
+fn test_x86_64_emitter_global_bytes() {
+    let mut emitter = X86_64Emitter::new();
+    let data = GlobalData {
+        id: GlobalId(0),
+        bytes: vec![1, 2, 3],
+        align: 4,
+        section: None,
+    };
+    emitter.emit_global(&data);
+    let asm = emitter.finish();
+    assert!(asm.contains(".data"));
+    assert!(asm.contains("_g0:"));
+    assert!(asm.contains(".byte 1, 2, 3"));
+}
+
+#[test]
+fn test_x86_64_emit_module() {
+    let mut types = IrTypeCache::new();
+    let unit_ty = types.add(IrTypeKind::Unit);
+
+    let mut builder = FunctionBuilder::new(
+        DefId(0),
+        "module_fn0",
+        FunctionSig {
+            params: vec![],
+            ret: unit_ty,
+        },
+    );
+    builder.terminate(Terminator::Return { value: None });
+    let func = builder.finish();
+
+    let module = LoweredModule {
+        funcs: vec![LoweredFunction {
+            func,
+            types: types.clone(),
+            globals: Vec::new(),
+        }],
+        globals: vec![GlobalData {
+            id: GlobalId(0),
+            bytes: vec![9],
+            align: 1,
+            section: None,
+        }],
+    };
+
+    let target = X86_64Target::new();
+    let def_names = HashMap::new();
+    let asm = emit_module_x86_64(&module, &def_names, &target);
+    assert!(asm.contains(".data"));
+    assert!(asm.contains(".text"));
+    assert!(asm.contains("retq"));
+}
+
+#[test]
+fn test_target_dispatch_x86_64_emits_simple_module() {
+    let mut types = IrTypeCache::new();
+    let u64_ty = types.add(IrTypeKind::Int {
+        signed: false,
+        bits: 64,
+    });
+
+    let mut builder = FunctionBuilder::new(
+        DefId(0),
+        "dispatch_x64",
+        FunctionSig {
+            params: vec![],
+            ret: u64_ty,
+        },
+    );
+    let value = builder.const_int(42, false, 64, u64_ty);
+    builder.terminate(Terminator::Return { value: Some(value) });
+    let func = builder.finish();
+
+    let module = LoweredModule {
+        funcs: vec![LoweredFunction {
+            func,
+            types: types.clone(),
+            globals: Vec::new(),
+        }],
+        globals: Vec::new(),
+    };
+
+    let def_names = HashMap::new();
+    let asm = emit_module(&module, &def_names, TargetKind::X86_64);
+    assert!(asm.contains("movabsq $42"));
+    assert!(asm.contains("retq"));
 }
 
 #[test]

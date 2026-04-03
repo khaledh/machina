@@ -1,6 +1,7 @@
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
+use crate::backend::TargetKind;
 use crate::core::ast::visit::{self, Visitor};
 use crate::core::ast::{
     Expr, ExprKind, MethodBlock, TopLevelItem, TypeExpr, TypeExprKind, TypeParam,
@@ -17,6 +18,9 @@ use crate::core::parse::Parser;
 use crate::core::resolve::resolve;
 use crate::core::typecheck::type_check;
 use crate::driver::compile::{CompileOptions, compile, compile_with_path};
+use crate::driver::native_support::{
+    assemble_object, link_executable, native_toolchain_supports_target,
+};
 
 struct MockLoader {
     modules: HashMap<String, String>,
@@ -777,8 +781,35 @@ fn flatten_capsule_rejects_private_symbol_import() {
 
 fn deterministic_compile_opts() -> CompileOptions {
     CompileOptions {
+        target: TargetKind::Arm64,
         dump: None,
         emit_ir: true,
+        verify_ir: false,
+        trace_alloc: false,
+        trace_drops: false,
+        inject_prelude: true,
+        use_stdlib_objects: true,
+    }
+}
+
+fn deterministic_x86_compile_opts() -> CompileOptions {
+    CompileOptions {
+        target: TargetKind::X86_64,
+        dump: None,
+        emit_ir: false,
+        verify_ir: false,
+        trace_alloc: false,
+        trace_drops: false,
+        inject_prelude: true,
+        use_stdlib_objects: false,
+    }
+}
+
+fn deterministic_x86_archive_compile_opts() -> CompileOptions {
+    CompileOptions {
+        target: TargetKind::X86_64,
+        dump: None,
+        emit_ir: false,
         verify_ir: false,
         trace_alloc: false,
         trace_drops: false,
@@ -830,6 +861,108 @@ fn compile_with_path_links_stdlib_parse_archive_and_suppresses_local_body() {
     assert!(
         !output.asm.contains("\n_parse_u64:\n"),
         "std::parse body should come from the cached stdlib archive, not local asm"
+    );
+
+    let _ = std::fs::remove_dir_all(&temp_dir);
+}
+
+#[test]
+fn compile_supports_x86_64_target_for_simple_program() {
+    let source = r#"
+        fn main() -> u64 {
+            42
+        }
+    "#;
+
+    let output = compile(source, &deterministic_x86_compile_opts())
+        .expect("x86-64 compile should succeed for a simple program");
+    assert!(output.asm.contains("retq"));
+    assert!(output.asm.contains("movabsq $42"));
+}
+
+#[test]
+fn compile_with_path_falls_back_from_x86_64_stdlib_archive_support() {
+    let temp_dir = std::env::temp_dir().join(format!(
+        "machina_driver_x86_env_fallback_{}",
+        std::process::id()
+    ));
+    std::fs::create_dir_all(&temp_dir).expect("failed to create temp dir");
+    let source_path = temp_dir.join("env_fallback_x86.mc");
+    let source = r#"
+        requires {
+            std::env::args
+        }
+
+        fn main() -> u64 {
+            let argv = args();
+            argv.len
+        }
+    "#;
+    std::fs::write(&source_path, source).expect("failed to write source");
+
+    let output = compile_with_path(
+        source,
+        Some(&source_path),
+        &deterministic_x86_archive_compile_opts(),
+    )
+    .expect("compile");
+
+    assert_eq!(
+        output.extra_link_paths.len(),
+        0,
+        "x86_64 should currently inline stdlib bodies instead of relying on object archives"
+    );
+    assert!(
+        output.asm.contains("\n_args:\n"),
+        "expected x86_64 compile to keep std::env::args in local asm while archive support is disabled"
+    );
+
+    let _ = std::fs::remove_dir_all(&temp_dir);
+}
+
+#[test]
+fn native_support_can_build_x86_64_simple_program() {
+    if !native_toolchain_supports_target(TargetKind::X86_64) {
+        return;
+    }
+
+    let source = r#"
+        fn main() -> u64 {
+            42
+        }
+    "#;
+
+    let output = compile(source, &deterministic_x86_compile_opts())
+        .expect("x86-64 compile should succeed for a simple program");
+
+    let temp_dir = std::env::temp_dir().join(format!(
+        "machina_driver_x86_native_build_{}",
+        std::process::id()
+    ));
+    std::fs::create_dir_all(&temp_dir).expect("failed to create temp dir");
+    let asm_path = temp_dir.join("simple_x86.s");
+    let obj_path = temp_dir.join("simple_x86.o");
+    let exe_path = temp_dir.join("simple_x86");
+    std::fs::write(&asm_path, output.asm).expect("failed to write asm");
+
+    assemble_object(&asm_path, &obj_path, TargetKind::X86_64).expect("assemble x86_64 object");
+    assert!(
+        obj_path.exists(),
+        "expected assembled object at {}",
+        obj_path.display()
+    );
+
+    link_executable(
+        &asm_path,
+        &output.extra_link_paths,
+        &exe_path,
+        TargetKind::X86_64,
+    )
+    .expect("link x86_64 executable");
+    assert!(
+        exe_path.exists(),
+        "expected linked executable at {}",
+        exe_path.display()
     );
 
     let _ = std::fs::remove_dir_all(&temp_dir);

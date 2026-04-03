@@ -1,4 +1,5 @@
 use crate::common::run_program;
+use machina::backend::TargetKind;
 use machina::core::diag::CompileError;
 use machina::driver::compile::{CompileOptions, check_with_path, compile_with_path};
 use std::path::PathBuf;
@@ -9,6 +10,7 @@ fn repo_root() -> PathBuf {
 
 fn linear_opts() -> CompileOptions {
     CompileOptions {
+        target: TargetKind::Arm64,
         dump: None,
         emit_ir: false,
         verify_ir: false,

@@ -1,8 +1,9 @@
 use clap::Parser as ClapParser;
+use machina::backend::TargetKind as BackendTargetKind;
 use machina::core::capsule::CapsuleError;
 use machina::core::diag::{CompileError, Span, format_error};
 use machina::driver::compile::{CompileOptions, check_with_path, compile_with_path};
-use machina::driver::native_support::{assemble_object, default_exe_path, ensure_runtime_archive};
+use machina::driver::native_support::{assemble_object, default_exe_path, link_executable};
 use machina::driver::query::{QueryLookupKind as DriverQueryLookupKind, run_query};
 use machina::services::analysis::diagnostics::Diagnostic;
 use machina::services::analysis::diagnostics::DiagnosticPhase;
@@ -31,7 +32,7 @@ struct Args {
     #[clap(long, global = true)]
     dump: Option<String>,
 
-    /// Target architecture (arm64 only for now)
+    /// Target architecture
     #[clap(long, value_enum, default_value_t = TargetKind::Arm64, global = true)]
     target: TargetKind,
 
@@ -105,6 +106,7 @@ enum EmitKind {
 #[derive(clap::ValueEnum, Clone, Copy)]
 enum TargetKind {
     Arm64,
+    X86_64,
 }
 
 #[derive(clap::ValueEnum, Clone, Copy)]
@@ -223,6 +225,10 @@ fn main() {
     let emit_asm = emit.iter().any(|kind| matches!(kind, EmitKind::Asm));
     let emit_ir = emit.iter().any(|kind| matches!(kind, EmitKind::Ir));
     let opts = CompileOptions {
+        target: match _target {
+            TargetKind::Arm64 => BackendTargetKind::Arm64,
+            TargetKind::X86_64 => BackendTargetKind::X86_64,
+        },
         dump,
         emit_ir,
         verify_ir,
@@ -258,7 +264,7 @@ fn main() {
                         .output
                         .clone()
                         .unwrap_or_else(|| input_path.with_extension("o"));
-                    let result = assemble_object(&asm_path, &obj_path);
+                    let result = assemble_object(&asm_path, &obj_path, opts.target);
                     if result.is_ok() {
                         println!("[SUCCESS] object written to {}", obj_path.display());
                     }
@@ -270,7 +276,12 @@ fn main() {
                         .output
                         .clone()
                         .unwrap_or_else(|| default_exe_path(input_path));
-                    let result = link_executable(&asm_path, &output.extra_link_paths, &exe_path);
+                    let result = link_executable(
+                        &asm_path,
+                        &output.extra_link_paths,
+                        &exe_path,
+                        opts.target,
+                    );
                     if result.is_ok() {
                         println!("[SUCCESS] executable written to {}", exe_path.display());
                     }
@@ -279,8 +290,12 @@ fn main() {
                 }
                 DriverKind::Run => {
                     let exe_path = default_exe_path(input_path);
-                    let link_result =
-                        link_executable(&asm_path, &output.extra_link_paths, &exe_path);
+                    let link_result = link_executable(
+                        &asm_path,
+                        &output.extra_link_paths,
+                        &exe_path,
+                        opts.target,
+                    );
                     let remove_asm = link_result.is_ok();
                     let result = link_result.and_then(|_| run_executable(&exe_path));
                     result.map(|exit_code| DriverResult::RunExit {
@@ -446,23 +461,6 @@ fn temp_asm_path(input_path: &Path) -> PathBuf {
     let mut path = std::env::temp_dir();
     path.push(format!("machina_{pid}_{stem}.s"));
     path
-}
-
-fn link_executable(asm_path: &Path, extra_objs: &[PathBuf], exe_path: &Path) -> Result<(), String> {
-    let runtime_archive = ensure_runtime_archive()?;
-    let status = ProcessCommand::new("cc")
-        .arg("-o")
-        .arg(exe_path)
-        .arg(asm_path)
-        .args(extra_objs)
-        .arg(runtime_archive)
-        .status()
-        .map_err(|e| format!("failed to invoke cc: {e}"))?;
-    if status.success() {
-        Ok(())
-    } else {
-        Err(format!("cc exited with status {}", status))
-    }
 }
 
 fn run_executable(exe_path: &Path) -> Result<i32, String> {

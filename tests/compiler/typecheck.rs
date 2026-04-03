@@ -1,4 +1,5 @@
 use crate::common::{run_program, run_program_with_args, run_program_with_stdin};
+use machina::backend::TargetKind;
 use machina::core::capsule::CapsuleError;
 use machina::core::diag::CompileError;
 use machina::core::typecheck::TypeCheckErrorKind;
@@ -1317,6 +1318,7 @@ fn typecheck_with_modules(
         entry_source,
         Some(entry_path),
         &CompileOptions {
+            target: TargetKind::Arm64,
             dump: None,
             emit_ir: false,
             verify_ir: false,

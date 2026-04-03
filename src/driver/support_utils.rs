@@ -1,3 +1,5 @@
+use crate::backend::TargetKind;
+
 use std::ffi::OsStr;
 use std::fs;
 use std::fs::OpenOptions;
@@ -7,8 +9,14 @@ use std::thread;
 use std::time::Duration;
 use std::time::SystemTime;
 
-pub(crate) fn compile_c_object(source: &Path, object: &Path) -> Result<(), String> {
-    let status = Command::new("cc")
+pub(crate) fn compile_c_object(
+    source: &Path,
+    object: &Path,
+    target: TargetKind,
+) -> Result<(), String> {
+    let mut cmd = Command::new("cc");
+    configure_cc_for_target(&mut cmd, target)?;
+    let status = cmd
         .arg("-c")
         .arg("-o")
         .arg(object)
@@ -56,8 +64,10 @@ pub(crate) fn archive_objects(archive: &Path, objects: &[PathBuf]) -> Result<(),
     }
 }
 
-pub fn assemble_object(asm_path: &Path, obj_path: &Path) -> Result<(), String> {
-    let status = Command::new("cc")
+pub fn assemble_object(asm_path: &Path, obj_path: &Path, target: TargetKind) -> Result<(), String> {
+    let mut cmd = Command::new("cc");
+    configure_cc_for_target(&mut cmd, target)?;
+    let status = cmd
         .arg("-c")
         .arg("-o")
         .arg(obj_path)
@@ -68,6 +78,30 @@ pub fn assemble_object(asm_path: &Path, obj_path: &Path) -> Result<(), String> {
         Ok(())
     } else {
         Err(format!("cc exited with status {}", status))
+    }
+}
+
+pub fn native_toolchain_supports_target(target: TargetKind) -> bool {
+    if cfg!(target_os = "macos") {
+        return true;
+    }
+    target == TargetKind::host()
+}
+
+pub(crate) fn configure_cc_for_target(cmd: &mut Command, target: TargetKind) -> Result<(), String> {
+    if cfg!(target_os = "macos") {
+        cmd.arg("-arch").arg(target.as_str());
+        return Ok(());
+    }
+
+    if native_toolchain_supports_target(target) {
+        Ok(())
+    } else {
+        Err(format!(
+            "native toolchain support for target {} is unavailable on host {}",
+            target.as_str(),
+            TargetKind::host().as_str()
+        ))
     }
 }
 
