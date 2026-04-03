@@ -1248,6 +1248,65 @@ fn nullable_view_or_inline_block_keeps_success_path_in_ir() {
 }
 
 #[test]
+fn nested_counted_nullable_view_match_from_static_var_compiles() {
+    let source = r#"
+        @layout(fixed)
+        type Header = {
+            magic: u64,
+        }
+
+        @layout(fixed)
+        type Response = {
+            count: u64,
+            entries: view<Header[count]>?,
+        }
+
+        @layout(fixed)
+        type Wrapper = {
+            response: view<Response>?,
+        }
+
+        static let WRAPPER: Wrapper = Wrapper { response: None };
+
+        fn dump() -> u64 {
+            match WRAPPER.response {
+                some(response) => match response.entries {
+                    some(entries) => entries.len,
+                    none => response.count,
+                },
+                none => 0,
+            }
+        }
+    "#;
+
+    let output = compile(
+        source,
+        &CompileOptions {
+            target: SelectedTarget::builtin(TargetKind::X86_64Macos),
+            dump: None,
+            emit_ir: true,
+            verify_ir: false,
+            trace_alloc: false,
+            trace_drops: false,
+            inject_prelude: true,
+            use_stdlib_objects: true,
+            project_config: None,
+        },
+    )
+    .expect("compile nested counted nullable view match source");
+
+    let ir = output.ir.expect("expected IR dump");
+    assert!(
+        !ir.contains("__rt_trap"),
+        "did not expect trap-based lowering for counted nullable view match:\n{ir}"
+    );
+    assert!(
+        ir.matches("switch ").count() >= 2,
+        "expected nested nullable match lowering for counted nullable view fields:\n{ir}"
+    );
+}
+
+#[test]
 fn native_support_can_build_x86_64_simple_program() {
     if !native_toolchain_supports_target(TargetKind::X86_64Macos) {
         return;

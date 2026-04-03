@@ -7,7 +7,7 @@ use std::collections::{HashMap, HashSet};
 
 use crate::core::ast::{
     BindPattern, BindPatternKind, Expr, ExprKind, MatchArm, MatchPattern, MatchPatternBinding,
-    MethodItem, NodeId, TopLevelItem,
+    MethodItem, Module, NodeId, TopLevelItem,
     visit::{Visitor, walk_expr},
 };
 use crate::core::capsule::ModuleId;
@@ -393,7 +393,32 @@ fn bind_match_pattern_types(
             bindings,
             ..
         } => {
-            let owner_ty = super::term_utils::peel_heap(scrutinee_ty.clone());
+            if super::term_utils::is_unresolved(scrutinee_ty)
+                && let Some(inferred_scrutinee_ty) = infer_nullable_low_level_scrutinee_type_from_expr(
+                    &ctx.module,
+                    scrutinee_expr_id,
+                    def_terms,
+                    unifier,
+                    def_table,
+                )
+            {
+                let _ = unifier.unify(scrutinee_ty, &inferred_scrutinee_ty);
+            }
+
+            if super::term_utils::is_unresolved(scrutinee_ty)
+                && let Some(inferred_scrutinee_ty) = infer_nullable_low_level_scrutinee_type(
+                    variant_name,
+                    bindings,
+                    def_terms,
+                    unifier,
+                    def_table,
+                    allow_missing_def_ids,
+                )
+            {
+                let _ = unifier.unify(scrutinee_ty, &inferred_scrutinee_ty);
+            }
+
+            let owner_ty = super::term_utils::peel_heap(unifier.apply(scrutinee_ty));
             if let Some(payload_ty) = nullable_low_level_match_payload_type(&owner_ty, variant_name)
             {
                 for binding in bindings {
@@ -459,6 +484,178 @@ fn nullable_low_level_match_payload_type(owner_ty: &Type, variant_name: &str) ->
         (Type::NullableViewSlice { .. } | Type::NullableViewArray { .. }, "none") => None,
         _ => None,
     }
+}
+
+fn nullable_low_level_scrutinee_type_from_payload(payload_ty: &Type) -> Option<Type> {
+    match payload_ty {
+        Type::PAddr => Some(Type::NullablePAddr),
+        Type::VAddr => Some(Type::NullableVAddr),
+        Type::View { elem_ty } => Some(Type::NullableView {
+            elem_ty: elem_ty.clone(),
+        }),
+        Type::ViewSlice { elem_ty } => Some(Type::NullableViewSlice {
+            elem_ty: elem_ty.clone(),
+        }),
+        Type::ViewArray { elem_ty } => Some(Type::NullableViewArray {
+            elem_ty: elem_ty.clone(),
+        }),
+        _ => None,
+    }
+}
+
+fn peel_view_for_read_only_field_access(ty: &Type) -> Type {
+    match ty {
+        Type::View { elem_ty } => (**elem_ty).clone(),
+        other => other.clone(),
+    }
+}
+
+fn counted_nullable_view_field_access_ty(field_ty: &Type) -> Option<Type> {
+    let Type::NullableView { elem_ty } = field_ty else {
+        return None;
+    };
+    let Type::Slice { elem_ty: seq_elem } = elem_ty.as_ref() else {
+        return None;
+    };
+
+    match seq_elem.as_ref() {
+        Type::View { .. } => Some(Type::NullableViewSlice {
+            elem_ty: Box::new(seq_elem.as_ref().clone()),
+        }),
+        other => Some(Type::NullableViewArray {
+            elem_ty: Box::new(other.clone()),
+        }),
+    }
+}
+
+fn infer_nullable_low_level_scrutinee_type_from_expr(
+    module: &Module,
+    scrutinee_expr_id: NodeId,
+    def_terms: &HashMap<DefId, Type>,
+    unifier: &mut TcUnifier,
+    def_table: &DefTable,
+) -> Option<Type> {
+    let scrutinee_expr = find_expr_by_id(module, scrutinee_expr_id)?;
+    let scrutinee_ty = infer_expr_type(&scrutinee_expr, def_terms, unifier, def_table)?;
+    nullable_low_level_match_owner_ty(&scrutinee_ty)
+}
+
+fn nullable_low_level_match_owner_ty(scrutinee_ty: &Type) -> Option<Type> {
+    match scrutinee_ty {
+        Type::NullablePAddr
+        | Type::NullableVAddr
+        | Type::NullableView { .. }
+        | Type::NullableViewSlice { .. }
+        | Type::NullableViewArray { .. } => Some(scrutinee_ty.clone()),
+        _ => None,
+    }
+}
+
+fn infer_expr_type(
+    expr: &Expr,
+    def_terms: &HashMap<DefId, Type>,
+    unifier: &mut TcUnifier,
+    def_table: &DefTable,
+) -> Option<Type> {
+    match &expr.kind {
+        ExprKind::Var { .. } | ExprKind::ClosureRef { .. } => {
+            let def_id = def_table.lookup_node_def_id(expr.id)?;
+            let term = def_terms.get(&def_id)?;
+            let ty = super::term_utils::resolve_term(term, unifier);
+            (!super::term_utils::is_unresolved(&ty)).then_some(ty)
+        }
+        ExprKind::Unsafe { body }
+        | ExprKind::Coerce { expr: body, .. }
+        | ExprKind::ImplicitMove { expr: body }
+        | ExprKind::AddrOf { expr: body }
+        | ExprKind::Deref { expr: body }
+        | ExprKind::Load { expr: body }
+        | ExprKind::Len { expr: body } => infer_expr_type(body, def_terms, unifier, def_table),
+        ExprKind::StructField { target, field } => {
+            let target_ty = infer_expr_type(target, def_terms, unifier, def_table)?;
+            let owner_ty = super::term_utils::peel_heap(target_ty);
+            let field_owner_ty = peel_view_for_read_only_field_access(&owner_ty);
+            match field_owner_ty {
+                Type::Struct { fields, .. } => fields
+                    .iter()
+                    .find(|struct_field| struct_field.name == *field)
+                    .map(|struct_field| {
+                        counted_nullable_view_field_access_ty(&struct_field.ty)
+                            .unwrap_or_else(|| struct_field.ty.clone())
+                    }),
+                _ => None,
+            }
+        }
+        _ => {
+            let def_id = def_table.lookup_node_def_id(expr.id)?;
+            let term = def_terms.get(&def_id)?;
+            let ty = super::term_utils::resolve_term(term, unifier);
+            (!super::term_utils::is_unresolved(&ty)).then_some(ty)
+        }
+    }
+}
+
+fn find_expr_by_id(module: &Module, expr_id: NodeId) -> Option<Expr> {
+    struct ExprFinder {
+        expr_id: NodeId,
+        found: Option<Expr>,
+    }
+
+    impl Visitor for ExprFinder {
+        fn visit_expr(&mut self, expr: &Expr) {
+            if self.found.is_some() {
+                return;
+            }
+            if expr.id == self.expr_id {
+                self.found = Some(expr.clone());
+                return;
+            }
+            walk_expr(self, expr);
+        }
+    }
+
+    let mut finder = ExprFinder {
+        expr_id,
+        found: None,
+    };
+    finder.visit_module(module);
+    finder.found
+}
+
+fn infer_nullable_low_level_scrutinee_type(
+    variant_name: &str,
+    bindings: &[MatchPatternBinding],
+    def_terms: &HashMap<DefId, Type>,
+    unifier: &mut TcUnifier,
+    def_table: &DefTable,
+    allow_missing_def_ids: bool,
+) -> Option<Type> {
+    if variant_name != "some" {
+        return None;
+    }
+
+    for binding in bindings {
+        let MatchPatternBinding::Named { id, .. } = binding else {
+            continue;
+        };
+        let Some(def_id) = pattern_def_id(def_table, *id, allow_missing_def_ids) else {
+            continue;
+        };
+        let Some(term) = def_terms.get(&def_id) else {
+            continue;
+        };
+        let binding_ty = super::term_utils::resolve_term(term, unifier);
+        if super::term_utils::is_unresolved(&binding_ty) {
+            continue;
+        }
+        if let Some(scrutinee_ty) = nullable_low_level_scrutinee_type_from_payload(&binding_ty) {
+            return Some(scrutinee_ty);
+        }
+    }
+
+    Some(Type::NullableView {
+        elem_ty: Box::new(Type::Var(unifier.vars_mut().fresh_infer_local())),
+    })
 }
 
 fn should_defer_forwarded_call_mismatch(
