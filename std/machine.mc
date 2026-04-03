@@ -64,29 +64,21 @@ fn close_runtime(inout rt: Runtime) {
 @public
 fn managed_runtime() -> Runtime | ManagedRuntimeUnavailable {
   let raw = __mc_machine_runtime_managed_current_u64();
-  if raw == 0 {
-    ManagedRuntimeUnavailable {}
-  } else {
-    Runtime { _raw: raw }
-  }
+  raw == 0
+    ? ManagedRuntimeUnavailable {}
+    : Runtime { _raw: raw }
 }
 
 @public
 fn spawn(rt: Runtime, mailbox_cap: u64) -> u64 | SpawnFailed {
   let id = __mc_machine_runtime_spawn_u64(rt._raw, mailbox_cap);
-  if id == 0 {
-    SpawnFailed {}
-  } else {
-    id
-  }
+  return id == 0 ? SpawnFailed {} : id;
 }
 
 @public
 fn start(rt: Runtime, machine_id: u64) -> () | StartFailed {
   if __mc_machine_runtime_start_u64(rt._raw, machine_id) == 0 {
-    StartFailed {}
-  } else {
-    ()
+    return StartFailed {};
   }
 }
 
@@ -99,14 +91,11 @@ fn send(
   payload1: u64,
 ) -> () | MachineUnknown | MachineNotRunning | MailboxFull {
   let status = __mc_machine_runtime_send_u64(rt._raw, dst, kind, payload0, payload1);
-  if status == 0 {
-    ()
-  } else if status == 1 {
-    MachineUnknown {}
-  } else if status == 2 {
-    MachineNotRunning {}
-  } else {
-    MailboxFull {}
+  match status {
+    0 => (),
+    1 => MachineUnknown {},
+    2 => MachineNotRunning {}
+    _ => MailboxFull {},
   }
 }
 
@@ -120,13 +109,9 @@ fn request(
   payload1: u64,
 ) -> u64 | RequestFailed {
   let pending_id = __mc_machine_runtime_request_u64(rt._raw, src, dst, kind, payload0, payload1);
-  if pending_id == 0 {
-    // V1 bridge does not expose fine-grained request transport status.
-    // Surface this as an explicit failure variant rather than silent zero.
-    RequestFailed {}
-  } else {
-    pending_id
-  }
+// V1 bridge does not expose fine-grained request transport status.
+// Surface this as an explicit failure variant rather than silent zero.
+  pending_id == 0 ? RequestFailed {} : pending_id
 }
 
 @public
@@ -140,16 +125,12 @@ fn send_reply(
 ) -> () | ReplyCapUnknown | ReplyDestUnknown | ReplyDestNotRunning | ReplyMailboxFull {
   let status =
     __mc_machine_runtime_reply_u64(rt._raw, src, reply_cap_id, kind, payload0, payload1);
-  if status == 0 {
-    ()
-  } else if status == 1 {
-    ReplyCapUnknown {}
-  } else if status == 2 {
-    ReplyDestUnknown {}
-  } else if status == 3 {
-    ReplyDestNotRunning {}
-  } else {
-    ReplyMailboxFull {}
+  match status {
+    0 => (),
+    1 => ReplyCapUnknown {},
+    2 => ReplyDestUnknown {},
+    3 => ReplyDestNotRunning {},
+    _ => ReplyMailboxFull {},
   }
 }
 
@@ -163,9 +144,7 @@ fn bind_dispatch(
   dispatch_ctx: u64,
 ) -> () | BindDispatchFailed {
   if __mc_machine_runtime_bind_dispatch_u64(rt._raw, machine_id, dispatch_fn, dispatch_ctx) == 0 {
-    BindDispatchFailed {}
-  } else {
-    ()
+    return BindDispatchFailed {};
   }
 }
 
@@ -185,9 +164,7 @@ fn bind_dispatch_thunk(
   dispatch_ctx: u64,
 ) -> () | BindDispatchFailed {
   if __mc_machine_runtime_bind_dispatch_thunk_u64(rt._raw, machine_id, thunk_id, dispatch_ctx) == 0 {
-    BindDispatchFailed {}
-  } else {
-    ()
+    return BindDispatchFailed {};
   }
 }
 
@@ -201,20 +178,16 @@ fn bind_descriptor(
   initial_state_tag: u64,
 ) -> () | BindDispatchFailed {
   if __mc_machine_runtime_bind_descriptor_u64(rt._raw, machine_id, descriptor_id, initial_state_tag) == 0 {
-    BindDispatchFailed {}
-  } else {
-    ()
+    return BindDispatchFailed {};
   }
 }
 
 @public
 fn step(rt: Runtime) -> StepStatus {
   let status = __mc_machine_runtime_step_u64(rt._raw);
-  if status == 0 {
-    StepStatus::Idle
-  } else if status == 1 {
-    StepStatus::DidWork
-  } else {
-    StepStatus::Faulted
+  match status {
+    0 => StepStatus::Idle,
+    1 => StepStatus::DidWork,
+    _ => StepStatus::Faulted,
   }
 }
