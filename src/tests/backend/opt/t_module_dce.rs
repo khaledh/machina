@@ -161,3 +161,42 @@ fn test_module_dce_prunes_unused_globals() {
     };
     assert_eq!(*id, GlobalId(0));
 }
+
+#[test]
+fn test_module_dce_keeps_unused_section_globals() {
+    let mut types = IrTypeCache::new();
+    let (sig, unit) = unit_sig(&mut types);
+
+    let mut main = FunctionBuilder::new(DefId(0), "main", sig);
+    main.call(Callee::Runtime(RuntimeFn::Trap), vec![], unit);
+    finalize_void(&mut main);
+
+    let func = main.finish();
+    let mut module = LoweredModule {
+        funcs: vec![LoweredFunction {
+            func,
+            types: types.clone(),
+            globals: Vec::new(),
+        }],
+        globals: vec![
+            GlobalData {
+                id: GlobalId(0),
+                bytes: vec![0xaa],
+                align: 8,
+                section: Some(".limine_requests".to_string()),
+            },
+            GlobalData {
+                id: GlobalId(1),
+                bytes: vec![0xbb],
+                align: 1,
+                section: None,
+            },
+        ],
+    };
+
+    let changed = prune_globals(&mut module);
+    assert!(changed);
+    assert_eq!(module.globals.len(), 1);
+    assert_eq!(module.globals[0].section.as_deref(), Some(".limine_requests"));
+    assert_eq!(module.globals[0].bytes, vec![0xaa]);
+}

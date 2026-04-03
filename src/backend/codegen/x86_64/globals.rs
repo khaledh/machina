@@ -1,5 +1,6 @@
 use std::fmt::Write;
 
+use crate::backend::PlatformKind;
 use crate::ir::{GlobalData, GlobalId};
 
 use super::{AsmSection, X86_64Emitter};
@@ -9,7 +10,14 @@ impl X86_64Emitter {
         if !self.output.is_empty() {
             let _ = writeln!(self.output);
         }
-        let _ = writeln!(self.output, ".section {}", section);
+        match self.platform {
+            PlatformKind::Macos => {
+                let _ = writeln!(self.output, ".section {}", section);
+            }
+            PlatformKind::Linux | PlatformKind::None => {
+                let _ = writeln!(self.output, ".section {},\"aw\",@progbits", section);
+            }
+        }
         self.section = AsmSection::Data;
     }
 

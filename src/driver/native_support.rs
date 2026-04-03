@@ -60,6 +60,9 @@ fn build_link_command(
     };
 
     cmd.arg("-nostdlib");
+    cmd.arg("-static");
+    cmd.arg("-no-pie");
+    cmd.arg("-Wl,--build-id=none");
     cmd.arg(format!("-Wl,-T,{}", linker_script.display()));
     Ok(cmd)
 }
@@ -106,6 +109,9 @@ cc = ["cc"]
             .collect::<Vec<_>>();
 
         assert!(args.iter().any(|arg| arg == "-nostdlib"));
+        assert!(args.iter().any(|arg| arg == "-static"));
+        assert!(args.iter().any(|arg| arg == "-no-pie"));
+        assert!(args.iter().any(|arg| arg == "-Wl,--build-id=none"));
         assert!(args.iter().any(|arg| arg.starts_with("-Wl,-T,")
             && arg.ends_with(&format!("kernel{}link.ld", std::path::MAIN_SEPARATOR))));
         assert!(
