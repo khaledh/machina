@@ -144,7 +144,7 @@ impl Arm64Emitter {
                 if len != "x2" {
                     self.emit_line(&format!("mov x2, {}", len));
                 }
-                self.emit_line(&format!("bl _{}", RuntimeFn::MemCopy.name()));
+                self.emit_line(&format!("bl {}", self.mangle_symbol(RuntimeFn::MemCopy.name())));
             }
             InstKind::MemSet { dst, byte, len } => {
                 // Lower memset as a runtime call: __rt_memset(dst, len, value).
@@ -161,19 +161,21 @@ impl Arm64Emitter {
                 if byte != "x2" {
                     self.emit_line(&format!("mov x2, {}", byte));
                 }
-                self.emit_line(&format!("bl _{}", RuntimeFn::MemSet.name()));
+                self.emit_line(&format!("bl {}", self.mangle_symbol(RuntimeFn::MemSet.name())));
             }
             InstKind::Call { callee, .. } => match callee {
                 // Direct/runtime calls use named symbols; indirect calls use a register.
                 Callee::Direct(def_id) => {
                     let name = locs
                         .def_name(*def_id)
-                        .map(|name| format!("_{}", name))
-                        .unwrap_or_else(|| format!("_fn{}", def_id.0));
+                        .map(|name| self.mangle_symbol(name))
+                        .unwrap_or_else(|| {
+                            format!("{}fn{}", self.target.symbol_prefix(), def_id.0)
+                        });
                     self.emit_line(&format!("bl {}", name));
                 }
                 Callee::Runtime(rt) => {
-                    self.emit_line(&format!("bl _{}", rt.name()));
+                    self.emit_line(&format!("bl {}", self.mangle_symbol(rt.name())));
                 }
                 Callee::Value(_) => {
                     let reg = Self::reg_name(INDIRECT_CALL_REG);
@@ -196,7 +198,10 @@ impl Arm64Emitter {
                     if ptr_reg != "x0" {
                         self.emit_line(&format!("mov x0, {}", ptr_reg));
                     }
-                    self.emit_line(&format!("bl _{}", RuntimeFn::StringDrop.name()));
+                    self.emit_line(&format!(
+                        "bl {}",
+                        self.mangle_symbol(RuntimeFn::StringDrop.name())
+                    ));
                 } else {
                     panic!("backend codegen: unsupported drop for {:?}", elem_name);
                 }
@@ -224,8 +229,10 @@ impl Arm64Emitter {
                 ConstValue::FuncAddr { def } => {
                     let label = locs
                         .def_name(*def)
-                        .map(|name| format!("_{}", name))
-                        .unwrap_or_else(|| format!("_fn{}", def.0));
+                        .map(|name| self.mangle_symbol(name))
+                        .unwrap_or_else(|| {
+                            format!("{}fn{}", self.target.symbol_prefix(), def.0)
+                        });
                     let (dst_reg, dst_slot) =
                         self.value_dst_typed(locs, dst, "x9", "const func", dst_ty);
                     self.emit_line(&format!("adrp {}, {}@PAGE", dst_reg, label));
@@ -234,7 +241,7 @@ impl Arm64Emitter {
                 }
                 ConstValue::GlobalAddr { id } => {
                     // TODO: ensure SSA codegen emits global data labels.
-                    let label = Self::global_label(*id);
+                    let label = self.global_label(*id);
                     let (dst_reg, dst_slot) =
                         self.value_dst_typed(locs, dst, "x9", "const global", dst_ty);
                     self.emit_line(&format!("adrp {}, {}@PAGE", dst_reg, label));

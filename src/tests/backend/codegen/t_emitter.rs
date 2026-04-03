@@ -505,7 +505,7 @@ fn test_arm64_emit_module() {
 
     let target = TinyTarget::new(2);
     let def_names = HashMap::new();
-    let asm = emit_module_arm64(&module, &def_names, &target);
+    let asm = emit_module_arm64(&module, &def_names, &target, TargetKind::Arm64);
     assert!(asm.contains("g0:"));
     assert!(asm.contains("fn0:"));
     assert!(asm.contains("fn1:"));
@@ -538,7 +538,7 @@ fn test_target_dispatch_arm64_matches_direct_emitter() {
 
     let target = TinyTarget::new(2);
     let def_names = HashMap::new();
-    let direct = emit_module_arm64(&module, &def_names, &target);
+    let direct = emit_module_arm64(&module, &def_names, &target, TargetKind::Arm64);
     let dispatched = emit_module(&module, &def_names, TargetKind::Arm64);
     assert_eq!(dispatched, direct);
 }
@@ -591,10 +591,52 @@ fn test_x86_64_emit_module() {
 
     let target = X86_64Target::new();
     let def_names = HashMap::new();
-    let asm = emit_module_x86_64(&module, &def_names, &target);
+    let asm = emit_module_x86_64(&module, &def_names, &target, TargetKind::X86_64);
     assert!(asm.contains(".data"));
     assert!(asm.contains(".text"));
     assert!(asm.contains("retq"));
+}
+
+#[test]
+fn test_x86_64_linux_emits_elf_style_symbols() {
+    let mut types = IrTypeCache::new();
+    let unit_ty = types.add(IrTypeKind::Unit);
+
+    let mut builder = FunctionBuilder::new(
+        DefId(0),
+        "linux_main",
+        FunctionSig {
+            params: vec![],
+            ret: unit_ty,
+        },
+    );
+    builder.terminate(Terminator::Return { value: None });
+    let func = builder.finish();
+
+    let module = LoweredModule {
+        funcs: vec![LoweredFunction {
+            func,
+            types: types.clone(),
+            globals: Vec::new(),
+        }],
+        globals: vec![GlobalData {
+            id: GlobalId(0),
+            bytes: vec![1],
+            align: 1,
+            section: None,
+        }],
+    };
+
+    let target = X86_64Target::new();
+    let def_names = HashMap::from([(DefId(0), String::from("main"))]);
+    let asm = emit_module_x86_64(&module, &def_names, &target, TargetKind::X86_64Linux);
+
+    assert!(asm.contains(".globl main"));
+    assert!(asm.contains("main:"));
+    assert!(asm.contains("g0:"));
+    assert!(asm.contains(".section .note.GNU-stack,\"\",@progbits"));
+    assert!(!asm.contains(".globl _main"));
+    assert!(!asm.contains("_g0:"));
 }
 
 #[test]

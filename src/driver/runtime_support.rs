@@ -1,6 +1,7 @@
 //! Runtime archive artifact helpers.
 
 use crate::backend::TargetKind;
+use crate::driver::project_config::ProjectConfig;
 use crate::driver::support_utils::{
     archive_objects, artifact_is_stale, compile_c_object, native_support_dir, with_artifact_lock,
 };
@@ -37,7 +38,10 @@ pub fn runtime_source_paths() -> Vec<PathBuf> {
         .collect()
 }
 
-pub fn ensure_runtime_archive(target: TargetKind) -> Result<PathBuf, String> {
+pub fn ensure_runtime_archive(
+    target: TargetKind,
+    project_config: Option<&ProjectConfig>,
+) -> Result<PathBuf, String> {
     let sources = runtime_source_paths();
     for source in &sources {
         if !source.exists() {
@@ -62,10 +66,10 @@ pub fn ensure_runtime_archive(target: TargetKind) -> Result<PathBuf, String> {
         let mut objects = Vec::with_capacity(sources.len());
         for source in &sources {
             let object = build_dir.join(runtime_object_name(source));
-            compile_c_object(source, &object, target)?;
+            compile_c_object(source, &object, target, project_config)?;
             objects.push(object);
         }
-        archive_objects(&archive_path, &objects)?;
+        archive_objects(&archive_path, &objects, target, project_config)?;
         Ok(())
     })?;
     Ok(archive_path)

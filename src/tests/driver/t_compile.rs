@@ -789,6 +789,7 @@ fn deterministic_compile_opts() -> CompileOptions {
         trace_drops: false,
         inject_prelude: true,
         use_stdlib_objects: true,
+        project_config: None,
     }
 }
 
@@ -802,6 +803,7 @@ fn deterministic_x86_compile_opts() -> CompileOptions {
         trace_drops: false,
         inject_prelude: true,
         use_stdlib_objects: false,
+        project_config: None,
     }
 }
 
@@ -815,6 +817,21 @@ fn deterministic_x86_archive_compile_opts() -> CompileOptions {
         trace_drops: false,
         inject_prelude: true,
         use_stdlib_objects: true,
+        project_config: None,
+    }
+}
+
+fn deterministic_x86_linux_archive_compile_opts() -> CompileOptions {
+    CompileOptions {
+        target: TargetKind::X86_64Linux,
+        dump: None,
+        emit_ir: false,
+        verify_ir: false,
+        trace_alloc: false,
+        trace_drops: false,
+        inject_prelude: true,
+        use_stdlib_objects: true,
+        project_config: None,
     }
 }
 
@@ -935,6 +952,46 @@ fn compile_with_path_links_x86_64_stdlib_env_archive() {
 }
 
 #[test]
+fn compile_with_path_skips_x86_64_linux_stdlib_archive_without_toolchain() {
+    let temp_dir = std::env::temp_dir().join(format!(
+        "machina_driver_x86_linux_env_inline_{}",
+        std::process::id()
+    ));
+    std::fs::create_dir_all(&temp_dir).expect("failed to create temp dir");
+    let source_path = temp_dir.join("env_archive_x86_linux.mc");
+    let source = r#"
+        requires {
+            std::env::args
+        }
+
+        fn main() -> u64 {
+            let argv = args();
+            argv.len
+        }
+    "#;
+    std::fs::write(&source_path, source).expect("failed to write source");
+
+    let output = compile_with_path(
+        source,
+        Some(&source_path),
+        &deterministic_x86_linux_archive_compile_opts(),
+    )
+    .expect("compile");
+
+    assert!(
+        output.extra_link_paths.is_empty(),
+        "expected no stdlib archive path without a configured x86-64-linux toolchain"
+    );
+    assert!(
+        output.asm.contains("\nargs:\n"),
+        "expected std::env::args body to remain in local asm for x86-64-linux compile"
+    );
+    assert!(output.asm.contains("retq"));
+
+    let _ = std::fs::remove_dir_all(&temp_dir);
+}
+
+#[test]
 fn native_support_can_build_x86_64_simple_program() {
     if !native_toolchain_supports_target(TargetKind::X86_64) {
         return;
@@ -959,7 +1016,8 @@ fn native_support_can_build_x86_64_simple_program() {
     let exe_path = temp_dir.join("simple_x86");
     std::fs::write(&asm_path, output.asm).expect("failed to write asm");
 
-    assemble_object(&asm_path, &obj_path, TargetKind::X86_64).expect("assemble x86_64 object");
+    assemble_object(&asm_path, &obj_path, TargetKind::X86_64, None)
+        .expect("assemble x86_64 object");
     assert!(
         obj_path.exists(),
         "expected assembled object at {}",
@@ -971,6 +1029,7 @@ fn native_support_can_build_x86_64_simple_program() {
         &output.extra_link_paths,
         &exe_path,
         TargetKind::X86_64,
+        None,
     )
     .expect("link x86_64 executable");
     assert!(
@@ -1017,6 +1076,7 @@ fn native_support_can_build_and_run_x86_64_print_program() {
         &output.extra_link_paths,
         &exe_path,
         TargetKind::X86_64,
+        None,
     )
     .expect("link x86_64 executable");
 

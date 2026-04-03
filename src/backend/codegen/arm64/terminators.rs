@@ -115,7 +115,10 @@ impl Arm64Emitter {
                                 self.emit_line("mov x0, x8");
                                 self.emit_line(&format!("add x1, sp, #{}", offset));
                                 self.emit_mov_imm("x2", size as i128, 64);
-                                self.emit_line(&format!("bl _{}", RuntimeFn::MemCopy.name()));
+                                self.emit_line(&format!(
+                                    "bl {}",
+                                    self.mangle_symbol(RuntimeFn::MemCopy.name())
+                                ));
                             }
                             _ => {
                                 panic!("backend codegen: unsupported sret source {:?}", src_loc);

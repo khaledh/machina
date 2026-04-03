@@ -6,9 +6,9 @@
 //! - `support_utils`: shared artifact helpers
 
 use crate::backend::TargetKind;
-use crate::driver::support_utils::configure_cc_for_target;
+use crate::driver::project_config::ProjectConfig;
+use crate::driver::support_utils::cc_command_for_target;
 use std::path::{Path, PathBuf};
-use std::process::Command;
 
 pub use crate::driver::runtime_support::{ensure_runtime_archive, runtime_source_paths};
 pub use crate::driver::stdlib_support::{StdlibArtifacts, ensure_stdlib_archive_for_modules};
@@ -22,10 +22,10 @@ pub fn link_executable(
     extra_objs: &[PathBuf],
     exe_path: &Path,
     target: TargetKind,
+    project_config: Option<&ProjectConfig>,
 ) -> Result<(), String> {
-    let runtime_archive = ensure_runtime_archive(target)?;
-    let mut cmd = Command::new("cc");
-    configure_cc_for_target(&mut cmd, target)?;
+    let runtime_archive = ensure_runtime_archive(target, project_config)?;
+    let mut cmd = cc_command_for_target(target, project_config)?;
     let status = cmd
         .arg("-o")
         .arg(exe_path)

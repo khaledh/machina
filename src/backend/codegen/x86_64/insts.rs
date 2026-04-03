@@ -56,7 +56,10 @@ impl X86_64Emitter {
                 if len != "%rdx" && len != "%edx" {
                     self.emit_move_bits(len, "%rdx", 64);
                 }
-                self.emit_line(&format!("call _{}", RuntimeFn::MemCopy.name()));
+                self.emit_line(&format!(
+                    "call {}",
+                    self.mangle_symbol(RuntimeFn::MemCopy.name())
+                ));
             }
             InstKind::MemSet { dst, byte, len } => {
                 let dst = self.load_value_typed(locs, locs.value(*dst), locs.value_ty(*dst), RDI);
@@ -72,17 +75,24 @@ impl X86_64Emitter {
                 if byte != "%rdx" && byte != "%edx" {
                     self.emit_move_bits(byte, "%rdx", 64);
                 }
-                self.emit_line(&format!("call _{}", RuntimeFn::MemSet.name()));
+                self.emit_line(&format!(
+                    "call {}",
+                    self.mangle_symbol(RuntimeFn::MemSet.name())
+                ));
             }
             InstKind::Call { callee, .. } => match callee {
                 Callee::Direct(def_id) => {
                     let name = locs
                         .def_name(*def_id)
-                        .map(|name| format!("_{}", name))
-                        .unwrap_or_else(|| format!("_fn{}", def_id.0));
+                        .map(|name| self.mangle_symbol(name))
+                        .unwrap_or_else(|| {
+                            format!("{}fn{}", self.target.symbol_prefix(), def_id.0)
+                        });
                     self.emit_line(&format!("call {}", name));
                 }
-                Callee::Runtime(rt) => self.emit_line(&format!("call _{}", rt.name())),
+                Callee::Runtime(rt) => {
+                    self.emit_line(&format!("call {}", self.mangle_symbol(rt.name())))
+                }
                 Callee::Value(_) => {
                     self.emit_line(&format!(
                         "call *{}",
@@ -103,7 +113,10 @@ impl X86_64Emitter {
                     if ptr_reg != "%rdi" {
                         self.emit_line(&format!("movq {}, %rdi", ptr_reg));
                     }
-                    self.emit_line(&format!("call _{}", RuntimeFn::StringDrop.name()));
+                    self.emit_line(&format!(
+                        "call {}",
+                        self.mangle_symbol(RuntimeFn::StringDrop.name())
+                    ));
                 } else {
                     panic!("backend codegen: unsupported drop for {:?}", elem_name);
                 }
@@ -132,15 +145,17 @@ impl X86_64Emitter {
                 ConstValue::FuncAddr { def } => {
                     let label = locs
                         .def_name(*def)
-                        .map(|name| format!("_{}", name))
-                        .unwrap_or_else(|| format!("_fn{}", def.0));
+                        .map(|name| self.mangle_symbol(name))
+                        .unwrap_or_else(|| {
+                            format!("{}fn{}", self.target.symbol_prefix(), def.0)
+                        });
                     let (dst_reg, dst_slot) =
                         self.value_dst_typed(locs, dst, R10, "const func", dst_ty);
                     self.emit_line(&format!("leaq {}(%rip), {}", label, dst_reg));
                     self.store_if_needed_typed(locs, dst_slot, dst_reg, dst_ty);
                 }
                 ConstValue::GlobalAddr { id } => {
-                    let label = Self::global_label(*id);
+                    let label = self.global_label(*id);
                     let (dst_reg, dst_slot) =
                         self.value_dst_typed(locs, dst, R10, "const global", dst_ty);
                     self.emit_line(&format!("leaq {}(%rip), {}", label, dst_reg));

@@ -27,6 +27,7 @@ pub(crate) fn run_program_with_args(name: &str, source: &str, args: &[&str]) -> 
             trace_drops: false,
             inject_prelude: true,
             use_stdlib_objects: true,
+            project_config: None,
         },
         args,
     )
@@ -56,6 +57,7 @@ pub(crate) fn run_program_with_stdin(name: &str, source: &str, stdin: &[u8]) -> 
             trace_drops: false,
             inject_prelude: true,
             use_stdlib_objects: true,
+            project_config: None,
         },
     );
 
@@ -133,8 +135,8 @@ pub(crate) fn run_c_program(name: &str, source_path: &Path) -> Output {
 
     let exe_path = temp_dir.join(name);
     let runtime_dir = repo_root.join("runtime");
-    let runtime_archive =
-        ensure_runtime_archive(TargetKind::host()).expect("failed to build cached runtime archive");
+    let runtime_archive = ensure_runtime_archive(TargetKind::host(), None)
+        .expect("failed to build cached runtime archive");
 
     let status = Command::new("cc")
         .arg("-std=c11")
@@ -164,5 +166,6 @@ fn compile_source_with_opts(
 }
 
 fn link_exe(asm_path: &Path, extra_objs: &[PathBuf], exe_path: &Path, target: TargetKind) {
-    link_executable(asm_path, extra_objs, exe_path, target).expect("failed to link executable");
+    link_executable(asm_path, extra_objs, exe_path, target, None)
+        .expect("failed to link executable");
 }

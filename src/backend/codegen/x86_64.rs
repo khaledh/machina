@@ -2,6 +2,7 @@
 
 use std::fmt::Write;
 
+use crate::backend::TargetKind;
 use crate::backend::codegen::emitter::{CodegenEmitter, LocationResolver};
 use crate::backend::codegen::graph::CodegenBlockId;
 use crate::backend::regalloc::moves::{MoveOp, ParamCopy};
@@ -29,6 +30,7 @@ pub struct X86_64Emitter {
     output: String,
     layout: FrameLayout,
     callee_saved: Vec<PhysReg>,
+    target: TargetKind,
     section: AsmSection,
     block_prefix: String,
 }
@@ -41,6 +43,10 @@ impl Default for X86_64Emitter {
 
 impl X86_64Emitter {
     pub fn new() -> Self {
+        Self::for_target(TargetKind::X86_64)
+    }
+
+    pub fn for_target(target: TargetKind) -> Self {
         Self {
             output: String::new(),
             layout: FrameLayout {
@@ -49,17 +55,28 @@ impl X86_64Emitter {
                 frame_size: 0,
             },
             callee_saved: Vec::new(),
+            target,
             section: AsmSection::None,
             block_prefix: String::new(),
         }
     }
 
-    pub fn finish(self) -> String {
+    pub fn finish(mut self) -> String {
+        if matches!(self.target, TargetKind::X86_64Linux) {
+            if !self.output.is_empty() {
+                let _ = writeln!(self.output);
+            }
+            let _ = writeln!(self.output, ".section .note.GNU-stack,\"\",@progbits");
+        }
         self.output
     }
 
     fn emit_line(&mut self, line: &str) {
         let _ = writeln!(self.output, "  {}", line);
+    }
+
+    fn mangle_symbol(&self, symbol: &str) -> String {
+        self.target.mangle_symbol(symbol)
     }
 
     fn reg_name(reg: PhysReg) -> &'static str {

@@ -17,6 +17,7 @@ fn trace_opts() -> CompileOptions {
         trace_drops: false,
         inject_prelude: true,
         use_stdlib_objects: true,
+        project_config: None,
     }
 }
 

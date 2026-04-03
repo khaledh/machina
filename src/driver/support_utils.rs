@@ -1,4 +1,6 @@
 use crate::backend::TargetKind;
+use crate::driver::project_config::ProjectConfig;
+use crate::driver::project_config::ToolKind;
 
 use std::ffi::OsStr;
 use std::fs;
@@ -13,9 +15,9 @@ pub(crate) fn compile_c_object(
     source: &Path,
     object: &Path,
     target: TargetKind,
+    project_config: Option<&ProjectConfig>,
 ) -> Result<(), String> {
-    let mut cmd = Command::new("cc");
-    configure_cc_for_target(&mut cmd, target)?;
+    let mut cmd = cc_command_for_target(target, project_config)?;
     let status = cmd
         .arg("-c")
         .arg("-o")
@@ -34,7 +36,12 @@ pub(crate) fn compile_c_object(
     }
 }
 
-pub(crate) fn archive_objects(archive: &Path, objects: &[PathBuf]) -> Result<(), String> {
+ pub(crate) fn archive_objects(
+    archive: &Path,
+    objects: &[PathBuf],
+    target: TargetKind,
+    project_config: Option<&ProjectConfig>,
+) -> Result<(), String> {
     if archive.exists() {
         match fs::remove_file(archive) {
             Ok(()) => {}
@@ -47,7 +54,8 @@ pub(crate) fn archive_objects(archive: &Path, objects: &[PathBuf]) -> Result<(),
             }
         }
     }
-    let status = Command::new("ar")
+    let mut cmd = ar_command_for_target(target, project_config)?;
+    let status = cmd
         .arg("rcs")
         .arg(archive)
         .args(objects)
@@ -64,9 +72,13 @@ pub(crate) fn archive_objects(archive: &Path, objects: &[PathBuf]) -> Result<(),
     }
 }
 
-pub fn assemble_object(asm_path: &Path, obj_path: &Path, target: TargetKind) -> Result<(), String> {
-    let mut cmd = Command::new("cc");
-    configure_cc_for_target(&mut cmd, target)?;
+pub fn assemble_object(
+    asm_path: &Path,
+    obj_path: &Path,
+    target: TargetKind,
+    project_config: Option<&ProjectConfig>,
+) -> Result<(), String> {
+    let mut cmd = cc_command_for_target(target, project_config)?;
     let status = cmd
         .arg("-c")
         .arg("-o")
@@ -83,14 +95,33 @@ pub fn assemble_object(asm_path: &Path, obj_path: &Path, target: TargetKind) -> 
 
 pub fn native_toolchain_supports_target(target: TargetKind) -> bool {
     if cfg!(target_os = "macos") {
-        return true;
+        return target.macos_cc_arch().is_some();
     }
     target == TargetKind::host()
 }
 
-pub(crate) fn configure_cc_for_target(cmd: &mut Command, target: TargetKind) -> Result<(), String> {
+pub(crate) fn supports_configured_toolchain(
+    target: TargetKind,
+    project_config: Option<&ProjectConfig>,
+) -> bool {
+    native_toolchain_supports_target(target)
+        || project_config.is_some_and(|cfg| {
+            cfg.tool(target, ToolKind::Cc).is_some() && cfg.tool(target, ToolKind::Ar).is_some()
+        })
+}
+
+pub(crate) fn configure_default_cc_for_target(
+    cmd: &mut Command,
+    target: TargetKind,
+) -> Result<(), String> {
     if cfg!(target_os = "macos") {
-        cmd.arg("-arch").arg(target.as_str());
+        let Some(arch) = target.macos_cc_arch() else {
+            return Err(format!(
+                "native macOS toolchain does not support target {}",
+                target.as_str()
+            ));
+        };
+        cmd.arg("-arch").arg(arch);
         return Ok(());
     }
 
@@ -101,6 +132,37 @@ pub(crate) fn configure_cc_for_target(cmd: &mut Command, target: TargetKind) -> 
             "native toolchain support for target {} is unavailable on host {}",
             target.as_str(),
             TargetKind::host().as_str()
+        ))
+    }
+}
+
+pub(crate) fn cc_command_for_target(
+    target: TargetKind,
+    project_config: Option<&ProjectConfig>,
+) -> Result<Command, String> {
+    if let Some(tool) = project_config.and_then(|cfg| cfg.tool(target, ToolKind::Cc)) {
+        return Ok(tool.to_command());
+    }
+
+    let mut cmd = Command::new("cc");
+    configure_default_cc_for_target(&mut cmd, target)?;
+    Ok(cmd)
+}
+
+pub(crate) fn ar_command_for_target(
+    target: TargetKind,
+    project_config: Option<&ProjectConfig>,
+) -> Result<Command, String> {
+    if let Some(tool) = project_config.and_then(|cfg| cfg.tool(target, ToolKind::Ar)) {
+        return Ok(tool.to_command());
+    }
+
+    if native_toolchain_supports_target(target) {
+        Ok(Command::new("ar"))
+    } else {
+        Err(format!(
+            "no archive tool configured for target {} and native toolchain support is unavailable",
+            target.config_key()
         ))
     }
 }

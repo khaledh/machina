@@ -23,6 +23,7 @@ pub fn emit_module_with_emitter(
     module: &LoweredModule,
     def_names: &HashMap<DefId, String>,
     target: &dyn TargetSpec,
+    target_kind: TargetKind,
     emitter: &mut dyn CodegenEmitter,
 ) {
     for global in &module.globals {
@@ -30,7 +31,7 @@ pub fn emit_module_with_emitter(
     }
 
     for func in &module.funcs {
-        emit_function_with_emitter(func, def_names, target, emitter);
+        emit_function_with_emitter(func, def_names, target, target_kind, emitter);
     }
 }
 
@@ -39,9 +40,10 @@ pub fn emit_module_arm64(
     module: &LoweredModule,
     def_names: &HashMap<DefId, String>,
     target: &dyn TargetSpec,
+    target_kind: TargetKind,
 ) -> String {
-    let mut emitter = arm64::Arm64Emitter::new();
-    emit_module_with_emitter(module, def_names, target, &mut emitter);
+    let mut emitter = arm64::Arm64Emitter::for_target(target_kind);
+    emit_module_with_emitter(module, def_names, target, target_kind, &mut emitter);
     emitter.finish()
 }
 
@@ -50,9 +52,10 @@ pub fn emit_module_x86_64(
     module: &LoweredModule,
     def_names: &HashMap<DefId, String>,
     target: &dyn TargetSpec,
+    target_kind: TargetKind,
 ) -> String {
-    let mut emitter = x86_64::X86_64Emitter::new();
-    emit_module_with_emitter(module, def_names, target, &mut emitter);
+    let mut emitter = x86_64::X86_64Emitter::for_target(target_kind);
+    emit_module_with_emitter(module, def_names, target, target_kind, &mut emitter);
     emitter.finish()
 }
 
@@ -65,11 +68,11 @@ pub fn emit_module(
     match target_kind {
         TargetKind::Arm64 => {
             let target = Arm64Target::new();
-            emit_module_arm64(module, def_names, &target)
+            emit_module_arm64(module, def_names, &target, target_kind)
         }
-        TargetKind::X86_64 => {
+        TargetKind::X86_64 | TargetKind::X86_64Linux => {
             let target = X86_64Target::new();
-            emit_module_x86_64(module, def_names, &target)
+            emit_module_x86_64(module, def_names, &target, target_kind)
         }
     }
 }
@@ -78,6 +81,7 @@ fn emit_function_with_emitter(
     func: &LoweredFunction,
     def_names: &HashMap<DefId, String>,
     target: &dyn TargetSpec,
+    target_kind: TargetKind,
     emitter: &mut dyn CodegenEmitter,
 ) {
     let live_map = liveness::analyze(&func.func);
@@ -95,8 +99,8 @@ fn emit_function_with_emitter(
 
     let func_label = def_names
         .get(&func.func.def_id)
-        .map(|name| format!("_{}", name))
-        .unwrap_or_else(|| format!("_fn{}", func.func.def_id.0));
+        .map(|name| target_kind.mangle_symbol(name))
+        .unwrap_or_else(|| format!("{}fn{}", target_kind.symbol_prefix(), func.func.def_id.0));
 
     traverse::emit_graph_with_emitter(
         &graph,

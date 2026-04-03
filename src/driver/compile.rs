@@ -16,6 +16,8 @@ use crate::core::lexer::{LexError, Lexer, Token};
 use crate::core::nrvo::NrvoAnalyzer;
 use crate::core::resolve::DefId;
 use crate::driver::native_support::ensure_stdlib_archive_for_modules;
+use crate::driver::project_config::ProjectConfig;
+use crate::driver::support_utils::supports_configured_toolchain;
 use crate::ir::format::{format_func_with_comments_and_names, format_globals};
 
 #[derive(Debug)]
@@ -28,6 +30,7 @@ pub struct CompileOptions {
     pub trace_drops: bool,
     pub inject_prelude: bool,
     pub use_stdlib_objects: bool,
+    pub project_config: Option<ProjectConfig>,
 }
 
 pub struct CompileOutput {
@@ -114,13 +117,19 @@ pub fn compile_with_path(
 
     let object_backed_stdlib = if opts.use_stdlib_objects
         && opts.target.supports_object_backed_stdlib()
+        && supports_configured_toolchain(opts.target, opts.project_config.as_ref())
     {
         let referenced_modules = parsed
             .module_paths_by_id
             .values()
             .cloned()
             .collect::<HashSet<_>>();
-        ensure_stdlib_archive_for_modules(&referenced_modules, opts.target).map_err(|message| {
+        ensure_stdlib_archive_for_modules(
+            &referenced_modules,
+            opts.target,
+            opts.project_config.as_ref(),
+        )
+        .map_err(|message| {
             vec![CompileError::Io(
                 Path::new("stdlib").to_path_buf(),
                 std::io::Error::other(message),

@@ -2,6 +2,7 @@
 
 use std::fmt::Write;
 
+use crate::backend::TargetKind;
 use crate::backend::codegen::emitter::{CodegenEmitter, LocationResolver};
 use crate::backend::codegen::graph::CodegenBlockId;
 use crate::backend::regalloc::moves::{MoveOp, ParamCopy};
@@ -31,6 +32,7 @@ pub struct Arm64Emitter {
     layout: FrameLayout,
     /// Callee-saved registers to save/restore in the prologue/epilogue.
     callee_saved: Vec<PhysReg>,
+    target: TargetKind,
     section: AsmSection,
     block_prefix: String,
 }
@@ -43,6 +45,10 @@ impl Default for Arm64Emitter {
 
 impl Arm64Emitter {
     pub fn new() -> Self {
+        Self::for_target(TargetKind::Arm64)
+    }
+
+    pub fn for_target(target: TargetKind) -> Self {
         Self {
             output: String::new(),
             layout: FrameLayout {
@@ -51,6 +57,7 @@ impl Arm64Emitter {
                 frame_size: 0,
             },
             callee_saved: Vec::new(),
+            target,
             section: AsmSection::None,
             block_prefix: String::new(),
         }
@@ -74,6 +81,10 @@ impl Arm64Emitter {
 
     fn emit_line(&mut self, line: &str) {
         let _ = writeln!(self.output, "  {}", line);
+    }
+
+    fn mangle_symbol(&self, symbol: &str) -> String {
+        self.target.mangle_symbol(symbol)
     }
 
     fn emit_mov_imm(&mut self, dst: &str, value: i128, bits: u8) {

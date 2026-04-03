@@ -33,8 +33,8 @@ impl Arm64Emitter {
         }
     }
 
-    pub(super) fn global_label(id: GlobalId) -> String {
-        format!("_g{}", id.0)
+    pub(super) fn global_label(&self, id: GlobalId) -> String {
+        self.mangle_symbol(&format!("g{}", id.0))
     }
 
     pub(super) fn emit_global_impl(&mut self, global: &GlobalData) {
@@ -48,7 +48,7 @@ impl Arm64Emitter {
         }
 
         // Emit a stable label for the global payload.
-        let label = Self::global_label(global.id);
+        let label = self.global_label(global.id);
 
         // Align the data so references can use natural alignment.
         let align = global.align.max(1);

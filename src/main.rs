@@ -3,7 +3,11 @@ use machina::backend::TargetKind as BackendTargetKind;
 use machina::core::capsule::CapsuleError;
 use machina::core::diag::{CompileError, Span, format_error};
 use machina::driver::compile::{CompileOptions, check_with_path, compile_with_path};
-use machina::driver::native_support::{assemble_object, default_exe_path, link_executable};
+use machina::driver::native_support::{
+    assemble_object, default_exe_path, link_executable, native_toolchain_supports_target,
+};
+use machina::driver::project_config::ProjectConfig;
+use machina::driver::project_config::ToolKind;
 use machina::driver::query::{QueryLookupKind as DriverQueryLookupKind, run_query};
 use machina::services::analysis::diagnostics::Diagnostic;
 use machina::services::analysis::diagnostics::DiagnosticPhase;
@@ -32,7 +36,7 @@ struct Args {
     #[clap(long, global = true)]
     dump: Option<String>,
 
-    /// Target architecture
+    /// Target architecture/platform
     #[clap(long, value_enum, default_value_t = TargetKind::Arm64, global = true)]
     target: TargetKind,
 
@@ -106,7 +110,10 @@ enum EmitKind {
 #[derive(clap::ValueEnum, Clone, Copy)]
 enum TargetKind {
     Arm64,
+    #[value(name = "x86-64")]
     X86_64,
+    #[value(name = "x86-64-linux")]
+    X86_64Linux,
 }
 
 #[derive(clap::ValueEnum, Clone, Copy)]
@@ -224,10 +231,18 @@ fn main() {
     };
     let emit_asm = emit.iter().any(|kind| matches!(kind, EmitKind::Asm));
     let emit_ir = emit.iter().any(|kind| matches!(kind, EmitKind::Ir));
+    let project_config = match ProjectConfig::load_for_entry(input_path) {
+        Ok(config) => config,
+        Err(message) => {
+            println!("[ERROR] failed to load machina.toml: {message}");
+            return;
+        }
+    };
     let opts = CompileOptions {
         target: match _target {
             TargetKind::Arm64 => BackendTargetKind::Arm64,
             TargetKind::X86_64 => BackendTargetKind::X86_64,
+            TargetKind::X86_64Linux => BackendTargetKind::X86_64Linux,
         },
         dump,
         emit_ir,
@@ -236,6 +251,7 @@ fn main() {
         trace_drops,
         inject_prelude: true,
         use_stdlib_objects: true,
+        project_config,
     };
     let output = compile_with_path(&source, Some(input_path), &opts);
 
@@ -251,7 +267,7 @@ fn main() {
             let asm_path = if emit_asm {
                 input_path.with_extension("s")
             } else {
-                temp_asm_path(input_path)
+                temp_asm_path(input_path, opts.target, opts.project_config.as_ref())
             };
             if let Err(e) = fs::write(&asm_path, output.asm) {
                 println!("[ERROR] failed to write {}: {e}", asm_path.display());
@@ -260,16 +276,46 @@ fn main() {
 
             let result = match invocation.kind {
                 DriverKind::Compile => {
-                    let obj_path = invocation
-                        .output
-                        .clone()
-                        .unwrap_or_else(|| input_path.with_extension("o"));
-                    let result = assemble_object(&asm_path, &obj_path, opts.target);
-                    if result.is_ok() {
-                        println!("[SUCCESS] object written to {}", obj_path.display());
+                    let can_assemble = native_toolchain_supports_target(opts.target)
+                        || opts.project_config.as_ref().is_some_and(|cfg| {
+                            cfg.tool(opts.target, ToolKind::Cc).is_some()
+                        });
+                    if !can_assemble {
+                        if emit_asm {
+                            println!(
+                                "[WARN] no assembler configured for target {}; wrote assembly to {}",
+                                opts.target.config_key(),
+                                asm_path.display()
+                            );
+                            Ok(DriverResult::Success { remove_asm: false })
+                        } else {
+                            let message = format!(
+                                "no assembler configured for target {}; rerun with `--emit asm` to keep the generated assembly or configure a target toolchain in machina.toml",
+                                opts.target.config_key()
+                            );
+                            if !emit_asm {
+                                let _ = fs::remove_file(&asm_path);
+                            }
+                            println!("[ERROR] compile failed: {message}");
+                            return;
+                        }
+                    } else {
+                        let obj_path = invocation
+                            .output
+                            .clone()
+                            .unwrap_or_else(|| input_path.with_extension("o"));
+                        let result = assemble_object(
+                            &asm_path,
+                            &obj_path,
+                            opts.target,
+                            opts.project_config.as_ref(),
+                        );
+                        if result.is_ok() {
+                            println!("[SUCCESS] object written to {}", obj_path.display());
+                        }
+                        let remove_asm = result.is_ok();
+                        result.map(|_| DriverResult::Success { remove_asm })
                     }
-                    let remove_asm = result.is_ok();
-                    result.map(|_| DriverResult::Success { remove_asm })
                 }
                 DriverKind::Build => {
                     let exe_path = invocation
@@ -281,6 +327,7 @@ fn main() {
                         &output.extra_link_paths,
                         &exe_path,
                         opts.target,
+                        opts.project_config.as_ref(),
                     );
                     if result.is_ok() {
                         println!("[SUCCESS] executable written to {}", exe_path.display());
@@ -289,12 +336,23 @@ fn main() {
                     result.map(|_| DriverResult::Success { remove_asm })
                 }
                 DriverKind::Run => {
+                    if matches!(opts.target, BackendTargetKind::X86_64Linux) {
+                        println!(
+                            "[ERROR] run failed: target {} is not runnable locally yet; use `build` and execute the output in your configured environment",
+                            opts.target.config_key()
+                        );
+                        if !emit_asm {
+                            let _ = fs::remove_file(&asm_path);
+                        }
+                        return;
+                    }
                     let exe_path = default_exe_path(input_path);
                     let link_result = link_executable(
                         &asm_path,
                         &output.extra_link_paths,
                         &exe_path,
                         opts.target,
+                        opts.project_config.as_ref(),
                     );
                     let remove_asm = link_result.is_ok();
                     let result = link_result.and_then(|_| run_executable(&exe_path));
@@ -452,14 +510,27 @@ fn print_structured_diag(source: &str, diag: Diagnostic) {
     println!("{}", format_error(source, diag.span, message));
 }
 
-fn temp_asm_path(input_path: &Path) -> PathBuf {
+fn temp_asm_path(
+    input_path: &Path,
+    target: BackendTargetKind,
+    project_config: Option<&ProjectConfig>,
+) -> PathBuf {
     let stem = input_path
         .file_stem()
         .unwrap_or_else(|| OsStr::new("out"))
         .to_string_lossy();
     let pid = std::process::id();
-    let mut path = std::env::temp_dir();
-    path.push(format!("machina_{pid}_{stem}.s"));
+    let use_workspace_visible_path = matches!(target, BackendTargetKind::X86_64Linux)
+        || project_config.is_some_and(|cfg| cfg.tool(target, ToolKind::Cc).is_some());
+    let mut path = if use_workspace_visible_path {
+        input_path
+            .parent()
+            .unwrap_or_else(|| Path::new("."))
+            .to_path_buf()
+    } else {
+        std::env::temp_dir()
+    };
+    path.push(format!(".machina_{pid}_{stem}.s"));
     path
 }
 

@@ -33,8 +33,8 @@ impl X86_64Emitter {
         }
     }
 
-    pub(super) fn global_label(id: GlobalId) -> String {
-        format!("_g{}", id.0)
+    pub(super) fn global_label(&self, id: GlobalId) -> String {
+        self.mangle_symbol(&format!("g{}", id.0))
     }
 
     pub(super) fn emit_global_impl(&mut self, global: &GlobalData) {
@@ -47,7 +47,7 @@ impl X86_64Emitter {
             let _ = writeln!(self.output);
         }
 
-        let label = Self::global_label(global.id);
+        let label = self.global_label(global.id);
         let align = global.align.max(1);
         if align.is_power_of_two() {
             self.emit_line(&format!(".p2align {}", align.trailing_zeros()));
