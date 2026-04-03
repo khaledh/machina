@@ -403,11 +403,9 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
         let setup = self.lower_try_setup(expr, fallible_expr, union_value)?;
         self.lower_try_ok_path(&setup, expr.span)?;
         self.enter_try_error_path(&setup);
-        let handled = match self.lower_value_expr(handler_expr)? {
-            BranchResult::Value(value) => value,
-            BranchResult::Return => return Ok(BranchResult::Return),
-        };
-        setup.join.emit_branch(self, handled, expr.span)?;
+        if let BranchResult::Value(handled) = self.lower_value_expr(handler_expr)? {
+            setup.join.emit_branch(self, handled, expr.span)?;
+        }
 
         Ok(self.finalize_join_value(setup.join))
     }
@@ -477,11 +475,9 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
 
         join.restore_locals(self);
         self.builder.select_block(none_bb);
-        let handled = match self.lower_value_expr(handler_expr)? {
-            BranchResult::Value(value) => value,
-            BranchResult::Return => return Ok(BranchResult::Return),
-        };
-        join.emit_branch(self, handled, expr.span)?;
+        if let BranchResult::Value(handled) = self.lower_value_expr(handler_expr)? {
+            join.emit_branch(self, handled, expr.span)?;
+        }
 
         Ok(self.finalize_join_value(join))
     }

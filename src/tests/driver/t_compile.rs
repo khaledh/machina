@@ -1119,6 +1119,135 @@ platform = "none"
 }
 
 #[test]
+fn bare_limine_style_example_keeps_request_section_and_skips_hosted_wrapper() {
+    let temp_dir = std::env::temp_dir().join(format!(
+        "machina_driver_x86_bare_limine_{}",
+        std::process::id()
+    ));
+    std::fs::create_dir_all(&temp_dir).expect("failed to create temp dir");
+    std::fs::write(
+        temp_dir.join("machina.toml"),
+        r#"
+[target.x86-64-bare]
+arch = "x86-64"
+platform = "none"
+linker-script = "x86_64.ld"
+"#,
+    )
+    .expect("failed to write machina.toml");
+    std::fs::write(
+        temp_dir.join("x86_64.ld"),
+        "ENTRY(kmain)\nSECTIONS { . = 1M; .text : { *(.text) *(.text.*) } .limine_requests : { KEEP(*(.limine_requests)) } .data : { *(.data) *(.data.*) } .bss : { *(.bss) *(.bss.*) *(COMMON) } }\n",
+    )
+    .expect("failed to write linker script");
+    let source_path = temp_dir.join("kernel.mc");
+    let source = r#"
+        @layout(fixed)
+        type Request = {
+            id: u64[4],
+            revision: u64,
+        }
+
+        @section(".limine_requests")
+        static var request = Request {
+            id: [1, 2, 3, 4],
+            revision: 0,
+        };
+
+        fn kmain() -> u64 {
+            unsafe {
+                request.revision
+            }
+        }
+    "#;
+    std::fs::write(&source_path, source).expect("failed to write source");
+
+    let project_config = ProjectConfig::load_for_root(&temp_dir)
+        .expect("load config")
+        .expect("present config");
+    let target =
+        resolve_target(Some("x86-64-bare"), Some(&project_config)).expect("resolve bare target");
+    let output = compile_with_path(
+        source,
+        Some(&source_path),
+        &CompileOptions {
+            target,
+            dump: None,
+            emit_ir: false,
+            verify_ir: false,
+            trace_alloc: false,
+            trace_drops: false,
+            inject_prelude: false,
+            use_stdlib_objects: true,
+            project_config: Some(project_config),
+        },
+    )
+    .expect("compile bare limine-style source");
+
+    assert!(output.asm.contains(".limine_requests"));
+    assert!(output.asm.contains("\nkmain:\n"));
+    assert!(!output.asm.contains("__mc_entry_main_wrapper"));
+    assert!(!output.asm.contains("__rt_process_args_init"));
+
+    let _ = std::fs::remove_dir_all(&temp_dir);
+}
+
+#[test]
+fn nullable_view_or_inline_block_keeps_success_path_in_ir() {
+    let source = r#"
+        @layout(fixed)
+        type Header = {
+            magic: u64,
+        }
+
+        @layout(fixed)
+        type Wrapper = {
+            inner: view<Header>?,
+        }
+
+        static let WRAPPER: Wrapper = Wrapper { inner: None };
+
+        fn dump() -> u64 {
+            let header = WRAPPER.inner or {
+                return 0;
+            };
+
+            header.magic
+        }
+    "#;
+
+    let output = compile(
+        source,
+        &CompileOptions {
+            target: SelectedTarget::builtin(TargetKind::X86_64Macos),
+            dump: None,
+            emit_ir: true,
+            verify_ir: false,
+            trace_alloc: false,
+            trace_drops: false,
+            inject_prelude: true,
+            use_stdlib_objects: true,
+            project_config: None,
+        },
+    )
+    .expect("compile nullable view or-inline source");
+
+    let ir = output.ir.expect("expected IR dump");
+    assert!(
+        !ir.contains("__rt_trap"),
+        "did not expect trap-based success path in nullable view `or` lowering:\n{ir}"
+    );
+    assert!(
+        ir.contains("// header.magic"),
+        "expected lowered continuation after nullable view unwrap:\n{ir}"
+    );
+    assert!(
+        ir.contains("field_addr %v6, 0") || ir.contains("field_addr %v"),
+        "expected field access to continue from the unwrapped view:\n{ir}"
+    );
+}
+
+#[test]
 fn native_support_can_build_x86_64_simple_program() {
     if !native_toolchain_supports_target(TargetKind::X86_64Macos) {
         return;
