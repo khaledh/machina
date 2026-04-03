@@ -1173,9 +1173,8 @@ linker-script = "x86_64.ld"
             match unsafe { request.response } {
                 some(response) => match response.entries {
                     some(entries) => {
-                        let resolved_entries: view<view<Entry>[]> = entries;
                         var total = response.count;
-                        for entry in resolved_entries {
+                        for entry in entries {
                             total += entry.length;
                             total += entry.typ;
                         }
@@ -1215,6 +1214,26 @@ linker-script = "x86_64.ld"
     assert!(output.asm.contains("\nkmain:\n"));
     assert!(!output.asm.contains("__mc_entry_main_wrapper"));
     assert!(!output.asm.contains("__rt_process_args_init"));
+    assert!(
+        !output.asm.contains("__rt_memcpy"),
+        "bare counted-view iteration should not depend on hosted memcpy:\n{}",
+        output.asm
+    );
+    assert!(
+        !output.asm.contains("__rt_trap"),
+        "bare counted-view iteration should lower traps directly:\n{}",
+        output.asm
+    );
+    assert!(
+        output.asm.contains("rep movsb"),
+        "expected bare aggregate copies to lower inline for counted views:\n{}",
+        output.asm
+    );
+    assert!(
+        output.asm.contains("ud2"),
+        "expected bare trap sites to lower directly to `ud2`:\n{}",
+        output.asm
+    );
 
     let _ = std::fs::remove_dir_all(&temp_dir);
 }
@@ -1279,7 +1298,8 @@ fn nested_counted_nullable_view_match_from_static_var_compiles() {
     let source = r#"
         @layout(fixed)
         type Header = {
-            magic: u64,
+            length: u64,
+            typ: u64,
         }
 
         @layout(fixed)
@@ -1298,7 +1318,14 @@ fn nested_counted_nullable_view_match_from_static_var_compiles() {
         fn dump() -> u64 {
             match WRAPPER.response {
                 some(response) => match response.entries {
-                    some(entries) => entries.len,
+                    some(entries) => {
+                        var total = response.count;
+                        for entry in entries {
+                            total += entry.length;
+                            total += entry.typ;
+                        }
+                        total
+                    }
                     none => response.count,
                 },
                 none => 0,
@@ -1324,12 +1351,12 @@ fn nested_counted_nullable_view_match_from_static_var_compiles() {
 
     let ir = output.ir.expect("expected IR dump");
     assert!(
-        !ir.contains("__rt_trap"),
-        "did not expect trap-based lowering for counted nullable view match:\n{ir}"
+        ir.contains("__for_iter_") && ir.contains("__for_len_"),
+        "expected counted nullable view loop lowering without extra annotation:\n{ir}"
     );
     assert!(
-        ir.matches("switch ").count() >= 2,
-        "expected nested nullable match lowering for counted nullable view fields:\n{ir}"
+        ir.contains("entry.length") && ir.contains("entry.typ"),
+        "expected loop body to read counted view entries directly:\n{ir}"
     );
 }
 

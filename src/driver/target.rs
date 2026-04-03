@@ -1,18 +1,5 @@
-use crate::backend::TargetKind;
+use crate::backend::{PlatformKind, TargetKind};
 use crate::driver::project_config::ProjectConfig;
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum PlatformKind {
-    Macos,
-    Linux,
-    None,
-}
-
-impl PlatformKind {
-    pub fn is_hosted(self) -> bool {
-        !matches!(self, Self::None)
-    }
-}
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SelectedTarget {

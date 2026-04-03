@@ -36,9 +36,8 @@ fn kmain() -> u64 {
     match unsafe { memmap_request.response } {
         some(response) => match response.entries {
             some(entries) => {
-                let resolved_entries: view<view<LimineMemmapEntry>[]> = entries;
                 var total = response.entry_count;
-                for entry in resolved_entries {
+                for entry in entries {
                     total += entry.length;
                     total += entry.typ;
                 }

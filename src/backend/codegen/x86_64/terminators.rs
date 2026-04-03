@@ -3,7 +3,7 @@ use crate::backend::codegen::graph::CodegenBlockId;
 use crate::backend::regalloc::Location;
 use crate::backend::regalloc::target::PhysReg;
 use crate::backend::regalloc::x86_64::{X86_64Reg, phys};
-use crate::ir::{ConstValue, RuntimeFn, Terminator, ValueId};
+use crate::ir::{ConstValue, Terminator, ValueId};
 
 use super::{ConstValueExt, X86_64Emitter, needs_sret};
 
@@ -138,10 +138,6 @@ impl X86_64Emitter {
                 self.emit_line("retq");
             }
             Terminator::Unreachable => {
-                self.emit_line(&format!(
-                    "call {}",
-                    self.mangle_symbol(RuntimeFn::Trap.name())
-                ));
                 self.emit_line("ud2");
             }
         }

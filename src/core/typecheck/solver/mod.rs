@@ -107,6 +107,13 @@ pub(crate) fn run(engine: &mut TypecheckEngine) -> Result<(), Vec<TypeCheckError
     );
     apply_assignable_inference_pass(&constrain, &mut unifier);
     prepass_pattern_obligations(&constrain, &mut unifier, engine);
+    retry_expr_stage(
+        &constrain,
+        &mut unifier,
+        engine,
+        &mut expr_errors,
+        &mut covered_exprs,
+    );
 
     retry_call_stage(
         unresolved_calls,
@@ -319,33 +326,48 @@ fn retry_expr_stage(
     expr_errors: &mut Vec<TypeCheckError>,
     covered_exprs: &mut HashSet<NodeId>,
 ) {
-    let retry_expr_obligations = constrain
-        .expr_obligations
-        .iter()
-        .filter(|obligation| should_retry_post_call_expr_obligation(obligation, unifier))
-        .cloned()
-        .collect::<Vec<_>>();
-    if retry_expr_obligations.is_empty() {
-        return;
-    }
+    loop {
+        let retry_expr_obligations = constrain
+            .expr_obligations
+            .iter()
+            .filter(|obligation| should_retry_post_call_expr_obligation(obligation, unifier))
+            .cloned()
+            .collect::<Vec<_>>();
+        if retry_expr_obligations.is_empty() {
+            return;
+        }
 
-    let (mut retry_errors, retry_covered) = check_expr_obligations(
-        &retry_expr_obligations,
-        &constrain.def_terms,
-        unifier,
-        &engine.context().def_table,
-        engine.context(),
-        &engine.env().type_defs,
-        &engine.env().type_symbols,
-        &engine.context().def_owners,
-        &engine.context().linear_index,
-        &engine.env().property_sigs,
-        &engine.env().method_sigs,
-        &engine.env().trait_sigs,
-        &constrain.var_trait_bounds,
-    );
-    expr_errors.append(&mut retry_errors);
-    covered_exprs.extend(retry_covered);
+        let prior_state = expr_state_signature(&retry_expr_obligations, unifier);
+        let (mut retry_errors, retry_covered) = check_expr_obligations(
+            &retry_expr_obligations,
+            &constrain.def_terms,
+            unifier,
+            &engine.context().def_table,
+            engine.context(),
+            &engine.env().type_defs,
+            &engine.env().type_symbols,
+            &engine.context().def_owners,
+            &engine.context().linear_index,
+            &engine.env().property_sigs,
+            &engine.env().method_sigs,
+            &engine.env().trait_sigs,
+            &constrain.var_trait_bounds,
+        );
+        expr_errors.append(&mut retry_errors);
+        covered_exprs.extend(retry_covered);
+
+        let next_retry_expr_obligations = constrain
+            .expr_obligations
+            .iter()
+            .filter(|obligation| should_retry_post_call_expr_obligation(obligation, unifier))
+            .cloned()
+            .collect::<Vec<_>>();
+        let next_state = expr_state_signature(&next_retry_expr_obligations, unifier);
+
+        if next_retry_expr_obligations.is_empty() || next_state == prior_state {
+            return;
+        }
+    }
 }
 
 fn retry_call_stage(
@@ -440,6 +462,207 @@ fn call_state_signature(
                 unifier,
             ));
             (obligation.call_node, receiver_ty, arg_tys, ret_ty)
+        })
+        .collect()
+}
+
+fn expr_state_signature(
+    obligations: &[ExprObligation],
+    unifier: &TcUnifier,
+) -> Vec<(NodeId, Vec<Type>)> {
+    obligations
+        .iter()
+        .map(|obligation| match obligation {
+            ExprObligation::Join {
+                expr_id,
+                arms,
+                result,
+                ..
+            } => {
+                let mut tys = arms
+                    .iter()
+                    .map(|arm| {
+                        term_utils::canonicalize_type(term_utils::resolve_term(arm, unifier))
+                    })
+                    .collect::<Vec<_>>();
+                tys.push(term_utils::canonicalize_type(term_utils::resolve_term(
+                    result, unifier,
+                )));
+                (*expr_id, tys)
+            }
+            ExprObligation::GenericCatchAllForward {
+                expr_id,
+                scrutinee,
+                body,
+                expected,
+                ..
+            } => (
+                *expr_id,
+                vec![
+                    term_utils::canonicalize_type(term_utils::resolve_term(scrutinee, unifier)),
+                    term_utils::canonicalize_type(term_utils::resolve_term(body, unifier)),
+                    term_utils::canonicalize_type(term_utils::resolve_term(expected, unifier)),
+                ],
+            ),
+            ExprObligation::StructField {
+                expr_id,
+                target,
+                result,
+                ..
+            }
+            | ExprObligation::TupleField {
+                expr_id,
+                target,
+                result,
+                ..
+            }
+            | ExprObligation::ArrayIndex {
+                expr_id,
+                target,
+                result,
+                ..
+            }
+            | ExprObligation::Slice {
+                expr_id,
+                target,
+                result,
+                ..
+            } => (
+                *expr_id,
+                vec![
+                    term_utils::canonicalize_type(term_utils::resolve_term(target, unifier)),
+                    term_utils::canonicalize_type(term_utils::resolve_term(result, unifier)),
+                ],
+            ),
+            ExprObligation::StructFieldAssign {
+                stmt_id,
+                target,
+                assignee,
+                value,
+                ..
+            } => (
+                *stmt_id,
+                vec![
+                    term_utils::canonicalize_type(term_utils::resolve_term(target, unifier)),
+                    term_utils::canonicalize_type(term_utils::resolve_term(assignee, unifier)),
+                    term_utils::canonicalize_type(term_utils::resolve_term(value, unifier)),
+                ],
+            ),
+            ExprObligation::SetElemType {
+                expr_id, elem_ty, ..
+            } => (
+                *expr_id,
+                vec![term_utils::canonicalize_type(term_utils::resolve_term(
+                    elem_ty, unifier,
+                ))],
+            ),
+            ExprObligation::MapKeyType {
+                expr_id, key_ty, ..
+            } => (
+                *expr_id,
+                vec![term_utils::canonicalize_type(term_utils::resolve_term(
+                    key_ty, unifier,
+                ))],
+            ),
+            ExprObligation::MapIndexAssign {
+                stmt_id, target, ..
+            } => (
+                *stmt_id,
+                vec![term_utils::canonicalize_type(term_utils::resolve_term(
+                    target, unifier,
+                ))],
+            ),
+            ExprObligation::ForIter {
+                stmt_id,
+                iter,
+                pattern,
+                ..
+            } => (
+                *stmt_id,
+                vec![
+                    term_utils::canonicalize_type(term_utils::resolve_term(iter, unifier)),
+                    term_utils::canonicalize_type(term_utils::resolve_term(pattern, unifier)),
+                ],
+            ),
+            ExprObligation::Try {
+                expr_id,
+                operand,
+                on_error,
+                result,
+                expected_return_ty,
+                ..
+            } => {
+                let mut tys = vec![
+                    term_utils::canonicalize_type(term_utils::resolve_term(operand, unifier)),
+                    term_utils::canonicalize_type(term_utils::resolve_term(result, unifier)),
+                ];
+                if let Some(handler) = on_error {
+                    tys.push(term_utils::canonicalize_type(term_utils::resolve_term(
+                        handler, unifier,
+                    )));
+                }
+                if let Some(return_ty) = expected_return_ty {
+                    tys.push(term_utils::canonicalize_type(term_utils::resolve_term(
+                        return_ty, unifier,
+                    )));
+                }
+                (*expr_id, tys)
+            }
+            ExprObligation::LinearMachineCreate {
+                expr_id,
+                receiver,
+                result,
+                ..
+            }
+            | ExprObligation::LinearMachineLookup {
+                expr_id,
+                receiver,
+                result,
+                ..
+            }
+            | ExprObligation::LinearMachineResume {
+                expr_id,
+                receiver,
+                result,
+                ..
+            } => (
+                *expr_id,
+                vec![
+                    term_utils::canonicalize_type(term_utils::resolve_term(receiver, unifier)),
+                    term_utils::canonicalize_type(term_utils::resolve_term(result, unifier)),
+                ],
+            ),
+            ExprObligation::LinearMachineDeliver {
+                expr_id,
+                receiver,
+                key_term,
+                event_term,
+                result,
+                ..
+            } => (
+                *expr_id,
+                vec![
+                    term_utils::canonicalize_type(term_utils::resolve_term(receiver, unifier)),
+                    term_utils::canonicalize_type(term_utils::resolve_term(key_term, unifier)),
+                    term_utils::canonicalize_type(term_utils::resolve_term(event_term, unifier)),
+                    term_utils::canonicalize_type(term_utils::resolve_term(result, unifier)),
+                ],
+            ),
+            ExprObligation::LinearMachineSend {
+                expr_id,
+                target,
+                payload_term,
+                result,
+                ..
+            } => (
+                *expr_id,
+                vec![
+                    term_utils::canonicalize_type(term_utils::resolve_term(target, unifier)),
+                    term_utils::canonicalize_type(term_utils::resolve_term(payload_term, unifier)),
+                    term_utils::canonicalize_type(term_utils::resolve_term(result, unifier)),
+                ],
+            ),
+            other => panic!("unexpected retryable expr obligation in state signature: {other:?}"),
         })
         .collect()
 }

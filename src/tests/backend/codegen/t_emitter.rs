@@ -1,4 +1,3 @@
-use crate::backend::TargetKind;
 use crate::backend::analysis::liveness;
 use crate::backend::codegen::arm64::Arm64Emitter;
 use crate::backend::codegen::emitter::CodegenEmitter;
@@ -12,6 +11,7 @@ use crate::backend::regalloc::arm64::Arm64Target;
 use crate::backend::regalloc::target::PhysReg;
 use crate::backend::regalloc::x86_64::X86_64Target;
 use crate::backend::regalloc::{AllocationResult, TargetSpec, ValueAllocMap, regalloc};
+use crate::backend::{PlatformKind, TargetKind};
 use crate::core::resolve::DefId;
 use crate::ir::builder::FunctionBuilder;
 use crate::ir::{
@@ -505,7 +505,13 @@ fn test_arm64_emit_module() {
 
     let target = TinyTarget::new(2);
     let def_names = HashMap::new();
-    let asm = emit_module_arm64(&module, &def_names, &target, TargetKind::Arm64Macos);
+    let asm = emit_module_arm64(
+        &module,
+        &def_names,
+        &target,
+        TargetKind::Arm64Macos,
+        PlatformKind::Macos,
+    );
     assert!(asm.contains("g0:"));
     assert!(asm.contains("fn0:"));
     assert!(asm.contains("fn1:"));
@@ -538,8 +544,19 @@ fn test_target_dispatch_arm64_matches_direct_emitter() {
 
     let target = TinyTarget::new(2);
     let def_names = HashMap::new();
-    let direct = emit_module_arm64(&module, &def_names, &target, TargetKind::Arm64Macos);
-    let dispatched = emit_module(&module, &def_names, TargetKind::Arm64Macos);
+    let direct = emit_module_arm64(
+        &module,
+        &def_names,
+        &target,
+        TargetKind::Arm64Macos,
+        PlatformKind::Macos,
+    );
+    let dispatched = emit_module(
+        &module,
+        &def_names,
+        TargetKind::Arm64Macos,
+        PlatformKind::Macos,
+    );
     assert_eq!(dispatched, direct);
 }
 
@@ -591,7 +608,13 @@ fn test_x86_64_emit_module() {
 
     let target = X86_64Target::new();
     let def_names = HashMap::new();
-    let asm = emit_module_x86_64(&module, &def_names, &target, TargetKind::X86_64Macos);
+    let asm = emit_module_x86_64(
+        &module,
+        &def_names,
+        &target,
+        TargetKind::X86_64Macos,
+        PlatformKind::Macos,
+    );
     assert!(asm.contains(".data"));
     assert!(asm.contains(".text"));
     assert!(asm.contains("retq"));
@@ -629,7 +652,13 @@ fn test_x86_64_linux_emits_elf_style_symbols() {
 
     let target = X86_64Target::new();
     let def_names = HashMap::from([(DefId(0), String::from("main"))]);
-    let asm = emit_module_x86_64(&module, &def_names, &target, TargetKind::X86_64Linux);
+    let asm = emit_module_x86_64(
+        &module,
+        &def_names,
+        &target,
+        TargetKind::X86_64Linux,
+        PlatformKind::Linux,
+    );
 
     assert!(asm.contains(".globl main"));
     assert!(asm.contains("main:"));
@@ -669,7 +698,12 @@ fn test_target_dispatch_x86_64_emits_simple_module() {
     };
 
     let def_names = HashMap::new();
-    let asm = emit_module(&module, &def_names, TargetKind::X86_64Macos);
+    let asm = emit_module(
+        &module,
+        &def_names,
+        TargetKind::X86_64Macos,
+        PlatformKind::Macos,
+    );
     assert!(asm.contains("movabsq $42"));
     assert!(asm.contains("retq"));
 }

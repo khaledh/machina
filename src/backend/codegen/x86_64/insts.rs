@@ -10,6 +10,7 @@ use super::{ConstValueExt, X86_64Emitter};
 use crate::backend::codegen::emitter::LocationResolver;
 
 const RDX: PhysReg = phys(X86_64Reg::Rdx);
+const RCX: PhysReg = phys(X86_64Reg::Rcx);
 const RSI: PhysReg = phys(X86_64Reg::Rsi);
 const RDI: PhysReg = phys(X86_64Reg::Rdi);
 const R10: PhysReg = phys(X86_64Reg::R10);
@@ -80,7 +81,7 @@ impl X86_64Emitter {
                     self.mangle_symbol(RuntimeFn::MemSet.name())
                 ));
             }
-            InstKind::Call { callee, .. } => match callee {
+            InstKind::Call { callee, args } => match callee {
                 Callee::Direct(def_id) => {
                     let name = locs
                         .def_name(*def_id)
@@ -90,9 +91,15 @@ impl X86_64Emitter {
                         });
                     self.emit_line(&format!("call {}", name));
                 }
-                Callee::Runtime(rt) => {
-                    self.emit_line(&format!("call {}", self.mangle_symbol(rt.name())))
-                }
+                Callee::Runtime(rt) => match rt {
+                    RuntimeFn::MemCopy if self.is_bare() => {
+                        self.emit_bare_memcpy_call(locs, args);
+                    }
+                    RuntimeFn::Trap if self.is_bare() => {
+                        // Bare targets lower traps directly in `unreachable`.
+                    }
+                    _ => self.emit_line(&format!("call {}", self.mangle_symbol(rt.name()))),
+                },
                 Callee::Value(_) => {
                     self.emit_line(&format!(
                         "call *{}",
@@ -122,6 +129,29 @@ impl X86_64Emitter {
                 }
             }
         }
+    }
+
+    fn emit_bare_memcpy_call(&mut self, locs: &LocationResolver, args: &[ValueId]) {
+        let [dst, src, len] = args else {
+            panic!("backend codegen: runtime memcpy expects three arguments");
+        };
+
+        let dst = self.load_value_typed(locs, locs.value(*dst), locs.value_ty(*dst), RDI);
+        let src = self.load_value_typed(locs, locs.value(*src), locs.value_ty(*src), RSI);
+        let len = self.load_value_typed(locs, locs.value(*len), locs.value_ty(*len), RCX);
+
+        if dst != "%rdi" {
+            self.emit_move_bits(dst, "%rdi", 64);
+        }
+        if src != "%rsi" {
+            self.emit_move_bits(src, "%rsi", 64);
+        }
+        if len != "%rcx" && len != "%ecx" {
+            self.emit_move_bits(len, "%rcx", 64);
+        }
+
+        self.emit_line("cld");
+        self.emit_line("rep movsb");
     }
 
     fn emit_const(&mut self, inst: &Instruction, locs: &LocationResolver, value: &ConstValue) {

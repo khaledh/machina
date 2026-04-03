@@ -5,9 +5,9 @@ use std::process::Command;
 
 use serde::Deserialize;
 
-use crate::backend::TargetKind;
+use crate::backend::{PlatformKind, TargetKind};
 use crate::core::capsule::infer_capsule_root;
-use crate::driver::target::{PlatformKind, parse_builtin_target_name};
+use crate::driver::target::parse_builtin_target_name;
 
 #[derive(Debug, Clone)]
 pub struct ToolCommand {

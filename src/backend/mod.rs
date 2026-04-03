@@ -13,6 +13,19 @@ pub enum TargetKind {
     X86_64Linux,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum PlatformKind {
+    Macos,
+    Linux,
+    None,
+}
+
+impl PlatformKind {
+    pub fn is_hosted(self) -> bool {
+        !matches!(self, Self::None)
+    }
+}
+
 impl TargetKind {
     pub fn as_str(self) -> &'static str {
         match self {

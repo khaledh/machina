@@ -393,19 +393,22 @@ fn bind_match_pattern_types(
             bindings,
             ..
         } => {
-            if super::term_utils::is_unresolved(scrutinee_ty)
-                && let Some(inferred_scrutinee_ty) = infer_nullable_low_level_scrutinee_type_from_expr(
-                    &ctx.module,
-                    scrutinee_expr_id,
-                    def_terms,
-                    unifier,
-                    def_table,
-                )
+            let resolved_scrutinee_ty = unifier.apply(scrutinee_ty);
+            if needs_nullable_low_level_scrutinee_refinement(&resolved_scrutinee_ty)
+                && let Some(inferred_scrutinee_ty) =
+                    infer_nullable_low_level_scrutinee_type_from_expr(
+                        &ctx.module,
+                        scrutinee_expr_id,
+                        def_terms,
+                        unifier,
+                        def_table,
+                    )
             {
                 let _ = unifier.unify(scrutinee_ty, &inferred_scrutinee_ty);
             }
 
-            if super::term_utils::is_unresolved(scrutinee_ty)
+            let resolved_scrutinee_ty = unifier.apply(scrutinee_ty);
+            if super::term_utils::is_unresolved(&resolved_scrutinee_ty)
                 && let Some(inferred_scrutinee_ty) = infer_nullable_low_level_scrutinee_type(
                     variant_name,
                     bindings,
@@ -460,6 +463,16 @@ fn bind_match_pattern_types(
             }
         }
     }
+}
+
+fn needs_nullable_low_level_scrutinee_refinement(scrutinee_ty: &Type) -> bool {
+    super::term_utils::is_unresolved(scrutinee_ty)
+        || matches!(
+            scrutinee_ty,
+            Type::NullableView { .. }
+                | Type::NullableViewSlice { .. }
+                | Type::NullableViewArray { .. }
+        ) && scrutinee_ty.contains_unresolved()
 }
 
 fn nullable_low_level_match_payload_type(owner_ty: &Type, variant_name: &str) -> Option<Type> {
@@ -573,7 +586,7 @@ fn infer_expr_type(
         | ExprKind::Len { expr: body } => infer_expr_type(body, def_terms, unifier, def_table),
         ExprKind::StructField { target, field } => {
             let target_ty = infer_expr_type(target, def_terms, unifier, def_table)?;
-            let owner_ty = super::term_utils::peel_heap(target_ty);
+            let owner_ty = super::term_utils::peel_heap(target_ty.clone());
             let field_owner_ty = peel_view_for_read_only_field_access(&owner_ty);
             match field_owner_ty {
                 Type::Struct { fields, .. } => fields
@@ -653,9 +666,7 @@ fn infer_nullable_low_level_scrutinee_type(
         }
     }
 
-    Some(Type::NullableView {
-        elem_ty: Box::new(Type::Var(unifier.vars_mut().fresh_infer_local())),
-    })
+    None
 }
 
 fn should_defer_forwarded_call_mismatch(

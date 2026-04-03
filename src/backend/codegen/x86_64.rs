@@ -2,12 +2,12 @@
 
 use std::fmt::Write;
 
-use crate::backend::TargetKind;
 use crate::backend::codegen::emitter::{CodegenEmitter, LocationResolver};
 use crate::backend::codegen::graph::CodegenBlockId;
 use crate::backend::regalloc::moves::{MoveOp, ParamCopy};
 use crate::backend::regalloc::target::PhysReg;
 use crate::backend::regalloc::{Location, StackSlotId};
+use crate::backend::{PlatformKind, TargetKind};
 use crate::ir::IrTypeId;
 use crate::ir::{CmpOp, ConstValue, GlobalData, Instruction, Terminator, ValueId};
 
@@ -31,6 +31,7 @@ pub struct X86_64Emitter {
     layout: FrameLayout,
     callee_saved: Vec<PhysReg>,
     target: TargetKind,
+    platform: PlatformKind,
     section: AsmSection,
     block_prefix: String,
 }
@@ -43,10 +44,10 @@ impl Default for X86_64Emitter {
 
 impl X86_64Emitter {
     pub fn new() -> Self {
-        Self::for_target(TargetKind::X86_64Macos)
+        Self::for_target(TargetKind::X86_64Macos, PlatformKind::Macos)
     }
 
-    pub fn for_target(target: TargetKind) -> Self {
+    pub fn for_target(target: TargetKind, platform: PlatformKind) -> Self {
         Self {
             output: String::new(),
             layout: FrameLayout {
@@ -56,6 +57,7 @@ impl X86_64Emitter {
             },
             callee_saved: Vec::new(),
             target,
+            platform,
             section: AsmSection::None,
             block_prefix: String::new(),
         }
@@ -77,6 +79,10 @@ impl X86_64Emitter {
 
     fn mangle_symbol(&self, symbol: &str) -> String {
         self.target.mangle_symbol(symbol)
+    }
+
+    fn is_bare(&self) -> bool {
+        matches!(self.platform, PlatformKind::None)
     }
 
     fn reg_name(reg: PhysReg) -> &'static str {

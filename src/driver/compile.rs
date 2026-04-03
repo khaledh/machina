@@ -183,7 +183,12 @@ pub fn compile_with_path(
 
     let ir = if opts.emit_ir { formatted_ir } else { None };
 
-    let asm = backend::codegen::emit_module(&lowered, &codegen_def_names, opts.target.kind);
+    let asm = backend::codegen::emit_module(
+        &lowered,
+        &codegen_def_names,
+        opts.target.kind,
+        opts.target.platform,
+    );
 
     dump_asm_stage(&asm, dump);
 

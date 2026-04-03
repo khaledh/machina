@@ -9,13 +9,13 @@ pub mod x86_64;
 
 use std::collections::HashMap;
 
-use crate::backend::TargetKind;
 use crate::backend::analysis::liveness;
 use crate::backend::codegen::emitter::CodegenEmitter;
 use crate::backend::lower::{LoweredFunction, LoweredModule};
 use crate::backend::regalloc::arm64::Arm64Target;
 use crate::backend::regalloc::x86_64::X86_64Target;
 use crate::backend::regalloc::{TargetSpec, regalloc};
+use crate::backend::{PlatformKind, TargetKind};
 use crate::core::resolve::DefId;
 
 /// Emit a full SSA module (globals + functions) using the provided emitter.
@@ -24,6 +24,7 @@ pub fn emit_module_with_emitter(
     def_names: &HashMap<DefId, String>,
     target: &dyn TargetSpec,
     target_kind: TargetKind,
+    target_platform: PlatformKind,
     emitter: &mut dyn CodegenEmitter,
 ) {
     for global in &module.globals {
@@ -31,7 +32,14 @@ pub fn emit_module_with_emitter(
     }
 
     for func in &module.funcs {
-        emit_function_with_emitter(func, def_names, target, target_kind, emitter);
+        emit_function_with_emitter(
+            func,
+            def_names,
+            target,
+            target_kind,
+            target_platform,
+            emitter,
+        );
     }
 }
 
@@ -41,9 +49,17 @@ pub fn emit_module_arm64(
     def_names: &HashMap<DefId, String>,
     target: &dyn TargetSpec,
     target_kind: TargetKind,
+    target_platform: PlatformKind,
 ) -> String {
-    let mut emitter = arm64::Arm64Emitter::for_target(target_kind);
-    emit_module_with_emitter(module, def_names, target, target_kind, &mut emitter);
+    let mut emitter = arm64::Arm64Emitter::for_target(target_kind, target_platform);
+    emit_module_with_emitter(
+        module,
+        def_names,
+        target,
+        target_kind,
+        target_platform,
+        &mut emitter,
+    );
     emitter.finish()
 }
 
@@ -53,9 +69,17 @@ pub fn emit_module_x86_64(
     def_names: &HashMap<DefId, String>,
     target: &dyn TargetSpec,
     target_kind: TargetKind,
+    target_platform: PlatformKind,
 ) -> String {
-    let mut emitter = x86_64::X86_64Emitter::for_target(target_kind);
-    emit_module_with_emitter(module, def_names, target, target_kind, &mut emitter);
+    let mut emitter = x86_64::X86_64Emitter::for_target(target_kind, target_platform);
+    emit_module_with_emitter(
+        module,
+        def_names,
+        target,
+        target_kind,
+        target_platform,
+        &mut emitter,
+    );
     emitter.finish()
 }
 
@@ -64,15 +88,16 @@ pub fn emit_module(
     module: &LoweredModule,
     def_names: &HashMap<DefId, String>,
     target_kind: TargetKind,
+    target_platform: PlatformKind,
 ) -> String {
     match target_kind {
         TargetKind::Arm64Macos => {
             let target = Arm64Target::new();
-            emit_module_arm64(module, def_names, &target, target_kind)
+            emit_module_arm64(module, def_names, &target, target_kind, target_platform)
         }
         TargetKind::X86_64Macos | TargetKind::X86_64Linux => {
             let target = X86_64Target::new();
-            emit_module_x86_64(module, def_names, &target, target_kind)
+            emit_module_x86_64(module, def_names, &target, target_kind, target_platform)
         }
     }
 }
@@ -82,6 +107,7 @@ fn emit_function_with_emitter(
     def_names: &HashMap<DefId, String>,
     target: &dyn TargetSpec,
     target_kind: TargetKind,
+    _target_platform: PlatformKind,
     emitter: &mut dyn CodegenEmitter,
 ) {
     let live_map = liveness::analyze(&func.func);
