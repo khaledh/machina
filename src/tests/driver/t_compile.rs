@@ -881,13 +881,13 @@ fn compile_supports_x86_64_target_for_simple_program() {
 }
 
 #[test]
-fn compile_with_path_falls_back_from_x86_64_stdlib_archive_support() {
+fn compile_with_path_links_x86_64_stdlib_env_archive() {
     let temp_dir = std::env::temp_dir().join(format!(
-        "machina_driver_x86_env_fallback_{}",
+        "machina_driver_x86_env_archive_{}",
         std::process::id()
     ));
     std::fs::create_dir_all(&temp_dir).expect("failed to create temp dir");
-    let source_path = temp_dir.join("env_fallback_x86.mc");
+    let source_path = temp_dir.join("env_archive_x86.mc");
     let source = r#"
         requires {
             std::env::args
@@ -907,14 +907,28 @@ fn compile_with_path_falls_back_from_x86_64_stdlib_archive_support() {
     )
     .expect("compile");
 
-    assert_eq!(
-        output.extra_link_paths.len(),
-        0,
-        "x86_64 should currently inline stdlib bodies instead of relying on object archives"
+    assert_eq!(output.extra_link_paths.len(), 1);
+    assert!(
+        output.extra_link_paths[0]
+            .to_string_lossy()
+            .contains(&format!("{}stdlib", std::path::MAIN_SEPARATOR)),
+        "expected stdlib archive path, got {}",
+        output.extra_link_paths[0].display()
     );
     assert!(
-        output.asm.contains("\n_args:\n"),
-        "expected x86_64 compile to keep std::env::args in local asm while archive support is disabled"
+        output.extra_link_paths[0]
+            .to_string_lossy()
+            .contains("x86_64"),
+        "expected x86_64 stdlib archive path, got {}",
+        output.extra_link_paths[0].display()
+    );
+    assert!(
+        output.asm.contains("_args"),
+        "expected callsite to reference external args symbol"
+    );
+    assert!(
+        !output.asm.contains("\n_args:\n"),
+        "expected std::env body to come from the x86_64 stdlib archive"
     );
 
     let _ = std::fs::remove_dir_all(&temp_dir);
@@ -964,6 +978,52 @@ fn native_support_can_build_x86_64_simple_program() {
         "expected linked executable at {}",
         exe_path.display()
     );
+
+    let _ = std::fs::remove_dir_all(&temp_dir);
+}
+
+#[test]
+fn native_support_can_build_and_run_x86_64_print_program() {
+    if !native_toolchain_supports_target(TargetKind::X86_64) {
+        return;
+    }
+
+    let temp_dir = std::env::temp_dir().join(format!(
+        "machina_driver_x86_print_build_{}",
+        std::process::id()
+    ));
+    std::fs::create_dir_all(&temp_dir).expect("failed to create temp dir");
+    let source_path = temp_dir.join("print_x86.mc");
+    let asm_path = temp_dir.join("print_x86.s");
+    let exe_path = temp_dir.join("print_x86");
+    let source = r#"
+        requires { std::io::println }
+
+        fn main() {
+            println("hello from x86-64");
+        }
+    "#;
+    std::fs::write(&source_path, source).expect("failed to write source");
+
+    let output = compile_with_path(
+        source,
+        Some(&source_path),
+        &deterministic_x86_archive_compile_opts(),
+    )
+    .expect("compile");
+    std::fs::write(&asm_path, output.asm).expect("failed to write asm");
+    link_executable(
+        &asm_path,
+        &output.extra_link_paths,
+        &exe_path,
+        TargetKind::X86_64,
+    )
+    .expect("link x86_64 executable");
+
+    let run = std::process::Command::new(&exe_path)
+        .output()
+        .expect("failed to run x86_64 executable");
+    assert_eq!(String::from_utf8_lossy(&run.stdout), "hello from x86-64\n");
 
     let _ = std::fs::remove_dir_all(&temp_dir);
 }

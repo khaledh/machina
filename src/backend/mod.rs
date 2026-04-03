@@ -29,7 +29,7 @@ impl TargetKind {
     }
 
     pub fn supports_object_backed_stdlib(self) -> bool {
-        matches!(self, Self::Arm64)
+        matches!(self, Self::Arm64 | Self::X86_64)
     }
 }
 

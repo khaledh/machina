@@ -8,7 +8,7 @@ impl X86_64Emitter {
             }
             match (mov.src, mov.dst) {
                 (Location::Reg(src), Location::Reg(dst)) => {
-                    let bits = if mov.size <= 4 { 32 } else { 64 };
+                    let bits = Self::bits_for_size(mov.size);
                     self.emit_line(&format!(
                         "mov{} {}, {}",
                         size_suffix(mov.size),
@@ -17,7 +17,7 @@ impl X86_64Emitter {
                     ));
                 }
                 (Location::Reg(src), Location::Stack(dst)) => {
-                    let bits = if mov.size <= 4 { 32 } else { 64 };
+                    let bits = Self::bits_for_size(mov.size);
                     let offset = self.stack_offset(dst);
                     self.emit_line(&format!(
                         "mov{} {}, {}",
@@ -27,7 +27,7 @@ impl X86_64Emitter {
                     ));
                 }
                 (Location::Reg(src), Location::StackOffset(dst, extra)) => {
-                    let bits = if mov.size <= 4 { 32 } else { 64 };
+                    let bits = Self::bits_for_size(mov.size);
                     let offset = self.stack_offset(dst).saturating_add(extra);
                     self.emit_line(&format!(
                         "mov{} {}, {}",
@@ -37,7 +37,7 @@ impl X86_64Emitter {
                     ));
                 }
                 (Location::Reg(src), Location::OutgoingArg(offset)) => {
-                    let bits = if mov.size <= 4 { 32 } else { 64 };
+                    let bits = Self::bits_for_size(mov.size);
                     let offset = self.layout.outgoing_offset(offset);
                     self.emit_line(&format!(
                         "mov{} {}, {}",

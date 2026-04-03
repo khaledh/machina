@@ -83,6 +83,9 @@ fn ensure_flattened_stdlib_object(
         .map(stdlib_source_path)
         .collect::<Result<Vec<_>, _>>()?;
     sources.push(prelude_path);
+    if let Ok(current_exe) = std::env::current_exe() {
+        sources.push(current_exe);
+    }
     if !artifact_is_stale(&object_path, &sources)? {
         return Ok(object_path);
     }

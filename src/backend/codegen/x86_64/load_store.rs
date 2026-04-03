@@ -36,6 +36,8 @@ impl X86_64Emitter {
         if let Some(slot) = slot {
             let size = Self::scalar_size(locs, ty);
             let offset = self.stack_offset(slot);
+            let bits = Self::bits_for_size(size);
+            let reg = Self::operand_as_bits(reg, bits);
             match size {
                 0 => {}
                 1 => self.emit_line(&format!("movb {}, {}", reg, Self::mem("rsp", offset))),
@@ -134,6 +136,8 @@ impl X86_64Emitter {
         } else {
             format!("(%{})", addr_reg)
         };
+        let bits = Self::bits_for_size(size);
+        let src_reg = Self::operand_as_bits(src_reg, bits);
         match size {
             0 => {}
             1 => self.emit_line(&format!("movb {}, {}", src_reg, mem)),
@@ -162,6 +166,8 @@ impl X86_64Emitter {
         } else {
             format!("{}(%{})", offset, base_reg)
         };
+        let bits = Self::bits_for_size(size);
+        let src_reg = Self::operand_as_bits(src_reg, bits);
         match size {
             0 => {}
             1 => self.emit_line(&format!("movb {}, {}", src_reg, mem)),

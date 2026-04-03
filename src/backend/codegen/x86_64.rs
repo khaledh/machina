@@ -146,6 +146,70 @@ impl X86_64Emitter {
         }
     }
 
+    fn reg_from_operand(operand: &str) -> Option<PhysReg> {
+        match operand {
+            "%al" | "%ax" | "%eax" | "%rax" => Some(PhysReg(0)),
+            "%cl" | "%cx" | "%ecx" | "%rcx" => Some(PhysReg(1)),
+            "%dl" | "%dx" | "%edx" | "%rdx" => Some(PhysReg(2)),
+            "%bl" | "%bx" | "%ebx" | "%rbx" => Some(PhysReg(3)),
+            "%sil" | "%si" | "%esi" | "%rsi" => Some(PhysReg(4)),
+            "%dil" | "%di" | "%edi" | "%rdi" => Some(PhysReg(5)),
+            "%r8b" | "%r8w" | "%r8d" | "%r8" => Some(PhysReg(6)),
+            "%r9b" | "%r9w" | "%r9d" | "%r9" => Some(PhysReg(7)),
+            "%r10b" | "%r10w" | "%r10d" | "%r10" => Some(PhysReg(8)),
+            "%r11b" | "%r11w" | "%r11d" | "%r11" => Some(PhysReg(9)),
+            "%r12b" | "%r12w" | "%r12d" | "%r12" => Some(PhysReg(10)),
+            "%r13b" | "%r13w" | "%r13d" | "%r13" => Some(PhysReg(11)),
+            "%r14b" | "%r14w" | "%r14d" | "%r14" => Some(PhysReg(12)),
+            "%r15b" | "%r15w" | "%r15d" | "%r15" => Some(PhysReg(13)),
+            "%bpl" | "%bp" | "%ebp" | "%rbp" => Some(PhysReg(14)),
+            "%spl" | "%sp" | "%esp" | "%rsp" => Some(PhysReg(15)),
+            _ => None,
+        }
+    }
+
+    fn operand_as_bits<'a>(operand: &'a str, bits: u32) -> std::borrow::Cow<'a, str> {
+        if let Some(reg) = Self::reg_from_operand(operand) {
+            std::borrow::Cow::Borrowed(Self::reg(bits, reg))
+        } else {
+            std::borrow::Cow::Borrowed(operand)
+        }
+    }
+
+    fn bits_for_size(size: u32) -> u32 {
+        match size {
+            0 => 32,
+            1 => 8,
+            2 => 16,
+            3..=4 => 32,
+            _ => 64,
+        }
+    }
+
+    fn suffix_for_bits(bits: u32) -> &'static str {
+        match bits {
+            8 => "b",
+            16 => "w",
+            32 => "l",
+            64 => "q",
+            _ => panic!("backend codegen: unsupported operand width {bits}"),
+        }
+    }
+
+    fn emit_move_bits(&mut self, src: &str, dst: &str, bits: u32) {
+        let src = Self::operand_as_bits(src, bits);
+        let dst = Self::operand_as_bits(dst, bits);
+        if src == dst {
+            return;
+        }
+        self.emit_line(&format!(
+            "mov{} {}, {}",
+            Self::suffix_for_bits(bits),
+            src,
+            dst
+        ));
+    }
+
     fn mem(base: &str, offset: u32) -> String {
         if offset == 0 {
             format!("(%{})", base)
@@ -203,8 +267,11 @@ impl X86_64Emitter {
     }
 
     fn emit_mov_imm(&mut self, dst: &str, value: i128, bits: u32) {
+        let dst = Self::operand_as_bits(dst, bits);
         match bits {
-            0..=32 => self.emit_line(&format!("movl ${}, {}", value as i64, dst)),
+            0..=8 => self.emit_line(&format!("movb ${}, {}", value as i64, dst)),
+            9..=16 => self.emit_line(&format!("movw ${}, {}", value as i64, dst)),
+            17..=32 => self.emit_line(&format!("movl ${}, {}", value as i64, dst)),
             _ => self.emit_line(&format!("movabsq ${}, {}", value as i64, dst)),
         }
     }
