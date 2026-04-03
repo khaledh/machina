@@ -117,6 +117,7 @@ pub struct FuncAttrs {
     pub intrinsic: bool,
     pub runtime: bool,
     pub machines: bool,
+    pub noreturn: bool,
     pub link_name: Option<String>,
     pub visibility: Visibility,
 }
@@ -230,6 +231,13 @@ impl Def {
     pub fn is_runtime(&self) -> bool {
         match &self.kind {
             DefKind::FuncDef { attrs } | DefKind::FuncDecl { attrs } => attrs.runtime,
+            _ => false,
+        }
+    }
+
+    pub fn is_noreturn(&self) -> bool {
+        match &self.kind {
+            DefKind::FuncDef { attrs } | DefKind::FuncDecl { attrs } => attrs.noreturn,
             _ => false,
         }
     }

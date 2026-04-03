@@ -312,6 +312,17 @@ impl<'a> ConstraintCollector<'a> {
         })
     }
 
+    pub(super) fn block_has_terminal_divergence(&self, items: &[BlockItem]) -> bool {
+        let Some(last) = items.last() else {
+            return false;
+        };
+
+        match last {
+            BlockItem::Stmt(stmt) => self.stmt_diverges(stmt),
+            BlockItem::Expr(expr) => self.expr_diverges(expr),
+        }
+    }
+
     pub(super) fn stmt_has_return(&self, stmt: &StmtExpr) -> bool {
         match &stmt.kind {
             StmtExprKind::Return { .. } => true,
@@ -327,6 +338,63 @@ impl<'a> ConstraintCollector<'a> {
                 self.expr_has_return(value) || self.expr_has_return(body)
             }
             _ => false,
+        }
+    }
+
+    pub(super) fn expr_diverges(&self, expr: &Expr) -> bool {
+        match &expr.kind {
+            ExprKind::Call { callee, .. } => self.call_expr_is_noreturn(callee),
+            ExprKind::Block { items, tail } => {
+                tail.as_ref().is_some_and(|tail| self.expr_diverges(tail))
+                    || self.block_has_terminal_divergence(items)
+            }
+            ExprKind::Unsafe { body } => self.expr_diverges(body),
+            ExprKind::If {
+                then_body,
+                else_body,
+                ..
+            } => self.expr_diverges(then_body) && self.expr_diverges(else_body),
+            ExprKind::Match { arms, .. } => {
+                !arms.is_empty() && arms.iter().all(|arm| self.expr_diverges(&arm.body))
+            }
+            _ => false,
+        }
+    }
+
+    fn stmt_diverges(&self, stmt: &StmtExpr) -> bool {
+        match &stmt.kind {
+            StmtExprKind::Using { value, body, .. } => {
+                self.expr_diverges(value) || self.expr_diverges(body)
+            }
+            StmtExprKind::LetBind { value, .. }
+            | StmtExprKind::VarBind { value, .. }
+            | StmtExprKind::Assign { value, .. }
+            | StmtExprKind::CompoundAssign { value, .. }
+            | StmtExprKind::Defer { value } => self.expr_diverges(value),
+            _ => false,
+        }
+    }
+
+    fn call_expr_is_noreturn(&self, callee: &Expr) -> bool {
+        let mut current = callee;
+        loop {
+            match &current.kind {
+                ExprKind::Coerce { expr, .. }
+                | ExprKind::Move { expr }
+                | ExprKind::ImplicitMove { expr }
+                | ExprKind::Load { expr } => current = expr,
+                ExprKind::Var { .. } => {
+                    let Some(def_id) = self.lookup_def_id(current.id) else {
+                        return false;
+                    };
+                    return self
+                        .ctx
+                        .def_table
+                        .lookup_def(def_id)
+                        .is_some_and(|def| def.is_noreturn());
+                }
+                _ => return false,
+            }
         }
     }
 

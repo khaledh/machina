@@ -4753,6 +4753,60 @@ fn test_opaque_iterable_local_binding_matches_iterable_param() {
 }
 
 #[test]
+fn test_noreturn_call_satisfies_function_tail() {
+    let source = r#"
+        @noreturn
+        fn halt();
+
+        fn kmain() -> u64 {
+            halt();
+        }
+    "#;
+
+    let _ctx = type_check_source(source).expect("Failed to type check");
+}
+
+#[test]
+fn test_noreturn_function_must_declare_unit_return() {
+    let source = r#"
+        @noreturn
+        fn halt() -> u64;
+    "#;
+
+    let errors = match type_check_source(source) {
+        Ok(_) => panic!("expected noreturn return type error"),
+        Err(errors) => errors,
+    };
+    assert!(errors.iter().any(|e| {
+        matches!(
+            e.kind(),
+            TypeCheckErrorKind::NoreturnFunctionMustReturnUnit(ty) if *ty == Type::uint(64)
+        )
+    }));
+}
+
+#[test]
+fn test_noreturn_function_body_must_diverge() {
+    let source = r#"
+        @noreturn
+        fn halt() {
+            ()
+        }
+    "#;
+
+    let errors = match type_check_source(source) {
+        Ok(_) => panic!("expected noreturn fallthrough error"),
+        Err(errors) => errors,
+    };
+    assert!(errors.iter().any(|e| {
+        matches!(
+            e.kind(),
+            TypeCheckErrorKind::NoreturnFunctionMayReturn(name) if name == "halt"
+        )
+    }));
+}
+
+#[test]
 fn test_iterable_param_for_loop_typechecks() {
     let source = r#"
         fn write_lines(lines: Iterable<string>) -> u64 {

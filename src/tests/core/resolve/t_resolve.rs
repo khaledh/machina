@@ -578,6 +578,19 @@ fn test_resolve_attr_wrong_args_intrinsic() {
 }
 
 #[test]
+fn test_resolve_attr_wrong_args_noreturn() {
+    let source = "@noreturn(\"x\") fn halt() {}";
+    let result = resolve_source(source);
+    assert!(result.is_err());
+
+    if let Err(errors) = result {
+        assert!(errors.iter().any(
+            |e| matches!(e.kind(), ResolveErrorKind::AttrWrongArgCount(name, 0, 1) if name == "noreturn")
+        ));
+    }
+}
+
+#[test]
 fn test_resolve_attr_wrong_args_link_name() {
     let source = "@link_name fn foo() -> u64 { 0 }";
     let result = resolve_source(source);

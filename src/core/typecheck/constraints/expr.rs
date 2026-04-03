@@ -198,7 +198,9 @@ impl<'a> ConstraintCollector<'a> {
                         ConstraintReason::Expr(expr.id, expr.span),
                     );
                 } else if let Some(expected) = expected.clone() {
-                    if self.block_has_explicit_return(items) {
+                    if self.block_has_explicit_return(items)
+                        || self.block_has_terminal_divergence(items)
+                    {
                         self.push_eq(
                             expr_ty.clone(),
                             expected,

@@ -90,6 +90,12 @@ pub enum TypeCheckErrorKind {
     #[error("return type mismatch: expected {0}, found {1}")]
     ReturnTypeMismatch(Type, Type),
 
+    #[error("`@noreturn` function `{0}` may return or fall through")]
+    NoreturnFunctionMayReturn(String),
+
+    #[error("`@noreturn` function must declare return type `()`, found `{0}`")]
+    NoreturnFunctionMustReturnUnit(Type),
+
     #[error(
         "return value must be one of {expected}, found {1}",
         expected = .0.join(" | ")

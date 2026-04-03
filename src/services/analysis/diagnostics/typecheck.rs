@@ -150,6 +150,8 @@ macro_rules! with_typecheck_variants {
             ReturnValueUnexpected,
             ReturnTypeMismatch,
             ReturnNotInErrorUnion,
+            NoreturnFunctionMayReturn,
+            NoreturnFunctionMustReturnUnit,
             ThenElseTypeMismatch,
             AssignTypeMismatch,
             ArgCountMismatch,

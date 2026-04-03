@@ -3230,6 +3230,17 @@ fn test_parse_intrinsic_func_attr() {
 }
 
 #[test]
+fn test_parse_noreturn_func_attr() {
+    let source = "@noreturn fn halt() {}";
+    let funcs = parse_source(source).expect("Failed to parse");
+
+    assert_eq!(funcs.len(), 1);
+    assert_eq!(funcs[0].attrs.len(), 1);
+    assert_eq!(funcs[0].attrs[0].name, "noreturn");
+    assert!(funcs[0].attrs[0].args.is_empty());
+}
+
+#[test]
 fn test_parse_intrinsic_method_attr() {
     let source = r#"
         type Foo = {}

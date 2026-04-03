@@ -70,6 +70,15 @@ impl CollectionReceiverKind {
 }
 
 impl<'a, 'g> FuncLowerer<'a, 'g> {
+    fn direct_call_is_noreturn(&self, target: &CallTarget) -> bool {
+        let CallTarget::Direct(def_id) = target else {
+            return false;
+        };
+        self.def_table
+            .lookup_def(*def_id)
+            .is_some_and(|def| def.is_noreturn())
+    }
+
     fn render_type_for_type_of(ty: &Type, overrides: Option<&BTreeMap<u32, String>>) -> String {
         render_type(
             ty,
@@ -631,6 +640,10 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
             .unwrap_or_else(|| self.type_map.type_table().get(expr_ty).clone());
         let ir_call_result_ty = self.type_lowerer.lower_type(&call_result_ty);
         let result = self.builder.call(callee, call_args, ir_call_result_ty);
+        if self.direct_call_is_noreturn(&call_plan.target) {
+            self.builder.terminate(crate::ir::Terminator::Unreachable);
+            return Ok(None);
+        }
         self.apply_call_drop_effects(&call_plan, args, None, &arg_values)?;
         let expr_sem_ty = self.type_map.type_table().get(expr_ty).clone();
         Ok(Some(self.coerce_value(
@@ -725,6 +738,10 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
             .unwrap_or_else(|| self.type_map.type_table().get(expr_ty).clone());
         let ir_call_result_ty = self.type_lowerer.lower_type(&call_result_ty);
         let result = self.builder.call(callee, call_args, ir_call_result_ty);
+        if self.direct_call_is_noreturn(&call_plan.target) {
+            self.builder.terminate(crate::ir::Terminator::Unreachable);
+            return Ok(None);
+        }
         self.apply_call_drop_effects(&call_plan, args, Some(&receiver_value), &arg_values)?;
         let expr_sem_ty = self.type_map.type_table().get(expr_ty).clone();
         Ok(Some(self.coerce_value(

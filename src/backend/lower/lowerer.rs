@@ -579,16 +579,7 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
     /// delegate to the multi-block lowering path.
     pub(super) fn lower_value_expr(&mut self, expr: &Expr) -> Result<BranchResult, LowerToIrError> {
         match self.lowering_plan(expr.id) {
-            LoweringPlan::Linear => {
-                // The plan guarantees linearity; any failure here is a compiler bug.
-                let value = self.lower_linear_value_expr(expr).unwrap_or_else(|err| {
-                    panic!(
-                        "backend lower_func lowering plan mismatch {:?}: {:?}",
-                        expr.id, err
-                    )
-                });
-                Ok(BranchResult::Value(value))
-            }
+            LoweringPlan::Linear => self.lower_value_expr_value(expr),
             LoweringPlan::Branching => self.lower_branching_value_expr(expr),
         }
     }

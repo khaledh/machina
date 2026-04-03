@@ -73,7 +73,18 @@ impl<'a> ConstraintCollector<'a> {
     fn collect_func_decl(&mut self, func_decl: &FuncDecl) {
         self.with_type_params(&func_decl.sig.type_params, |this| {
             let func_def_id = this.ctx.def_table.def_id(func_decl.id);
+            let is_noreturn = this
+                .ctx
+                .def_table
+                .lookup_def(func_def_id)
+                .is_some_and(|def| def.is_noreturn());
             if let Some(fn_ty) = this.collect_function_signature(&func_decl.sig) {
+                if is_noreturn && !matches!(fn_type_return(&fn_ty), Some(Type::Unit)) {
+                    this.out.immediate_errors.push(
+                        TEK::NoreturnFunctionMustReturnUnit(fn_type_return(&fn_ty).unwrap())
+                            .at(func_decl.sig.ret_ty_expr.span),
+                    );
+                }
                 let def_term = this.def_term(func_def_id);
                 this.push_eq(
                     def_term,
@@ -88,6 +99,11 @@ impl<'a> ConstraintCollector<'a> {
     fn collect_func_def(&mut self, func_def: &FuncDef) {
         self.with_type_params(&func_def.sig.type_params, |this| {
             let func_def_id = this.ctx.def_table.def_id(func_def.id);
+            let is_noreturn = this
+                .ctx
+                .def_table
+                .lookup_def(func_def_id)
+                .is_some_and(|def| def.is_noreturn());
             let mut declared_ret_ty = None;
             let mut opaque_ret_ty = None;
             if let Some(fn_ty) = this.collect_function_signature(&func_def.sig) {
@@ -101,6 +117,21 @@ impl<'a> ConstraintCollector<'a> {
                 );
             }
             let ret_ty = this.resolve_return_type_in_scope(&func_def.sig.ret_ty_expr);
+            let explicit_ret_ty = ret_ty
+                .as_ref()
+                .ok()
+                .cloned()
+                .or_else(|| declared_ret_ty.clone());
+            if is_noreturn
+                && explicit_ret_ty
+                    .as_ref()
+                    .is_some_and(|ret_ty| !matches!(ret_ty, Type::Unit))
+            {
+                this.out.immediate_errors.push(
+                    TEK::NoreturnFunctionMustReturnUnit(explicit_ret_ty.unwrap())
+                        .at(func_def.sig.ret_ty_expr.span),
+                );
+            }
             if opaque_ret_ty.is_none() {
                 opaque_ret_ty = ret_ty.as_ref().ok().and_then(as_opaque_iterable_type);
             }
@@ -161,6 +192,12 @@ impl<'a> ConstraintCollector<'a> {
                     span: func_def.sig.ret_ty_expr.span,
                 });
             }
+            if is_noreturn && !this.expr_diverges(&func_def.body) {
+                this.out.immediate_errors.push(
+                    TEK::NoreturnFunctionMayReturn(func_def.sig.name.clone())
+                        .at(func_def.body.span),
+                );
+            }
             this.exit_callable(func_def_id, func_def.span);
         });
     }
@@ -175,6 +212,18 @@ impl<'a> ConstraintCollector<'a> {
         self.with_type_params(receiver_type_params, |this| {
             this.with_type_params(&method_decl.sig.type_params, |this| {
                 if let Some(fn_ty) = this.collect_method_signature(method_block, &method_decl.sig) {
+                    if this
+                        .ctx
+                        .def_table
+                        .lookup_def(method_def_id)
+                        .is_some_and(|def| def.is_noreturn())
+                        && !matches!(fn_type_return(&fn_ty), Some(Type::Unit))
+                    {
+                        this.out.immediate_errors.push(
+                            TEK::NoreturnFunctionMustReturnUnit(fn_type_return(&fn_ty).unwrap())
+                                .at(method_decl.sig.ret_ty_expr.span),
+                        );
+                    }
                     let def_term = this.def_term(method_def_id);
                     this.push_eq(
                         def_term,
@@ -199,6 +248,11 @@ impl<'a> ConstraintCollector<'a> {
 
         self.with_type_params(receiver_type_params, |this| {
             this.with_type_params(&sig.type_params, |this| {
+                let is_noreturn = this
+                    .ctx
+                    .def_table
+                    .lookup_def(method_def_id)
+                    .is_some_and(|def| def.is_noreturn());
                 let mut declared_ret_ty = None;
                 let mut opaque_ret_ty = None;
                 if let Some(fn_ty) = this.collect_method_signature(method_block, sig) {
@@ -212,6 +266,21 @@ impl<'a> ConstraintCollector<'a> {
                     );
                 }
                 let ret_ty = this.resolve_return_type_in_scope(&sig.ret_ty_expr);
+                let explicit_ret_ty = ret_ty
+                    .as_ref()
+                    .ok()
+                    .cloned()
+                    .or_else(|| declared_ret_ty.clone());
+                if is_noreturn
+                    && explicit_ret_ty
+                        .as_ref()
+                        .is_some_and(|ret_ty| !matches!(ret_ty, Type::Unit))
+                {
+                    this.out.immediate_errors.push(
+                        TEK::NoreturnFunctionMustReturnUnit(explicit_ret_ty.unwrap())
+                            .at(sig.ret_ty_expr.span),
+                    );
+                }
                 if opaque_ret_ty.is_none() {
                     opaque_ret_ty = ret_ty.as_ref().ok().and_then(as_opaque_iterable_type);
                 }
@@ -294,6 +363,15 @@ impl<'a> ConstraintCollector<'a> {
                         exposed_ty,
                         span: sig.ret_ty_expr.span,
                     });
+                }
+                if is_noreturn && !this.expr_diverges(&method_def.body) {
+                    this.out.immediate_errors.push(
+                        TEK::NoreturnFunctionMayReturn(format!(
+                            "{}::{}",
+                            method_block.type_name, method_def.sig.name
+                        ))
+                        .at(method_def.body.span),
+                    );
                 }
 
                 this.exit_callable(method_def_id, method_span);

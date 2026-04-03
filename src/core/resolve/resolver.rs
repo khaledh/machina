@@ -769,7 +769,8 @@ impl SymbolResolver {
                         resolved.visibility = Visibility::Public;
                     }
                 }
-                "intrinsic" | "runtime" | "link_name" | "opaque" | "layout" | "align" => {
+                "intrinsic" | "runtime" | "noreturn" | "link_name" | "opaque" | "layout"
+                | "align" => {
                     self.err(
                         attr.span,
                         REK::AttrNotAllowed(attr.name.clone(), "trait definition"),
@@ -820,6 +821,16 @@ impl SymbolResolver {
                         );
                     } else {
                         resolved.runtime = true;
+                    }
+                }
+                "noreturn" => {
+                    if !attr.args.is_empty() {
+                        self.err(
+                            attr.span,
+                            REK::AttrWrongArgCount(attr.name.clone(), 0, attr.args.len()),
+                        );
+                    } else {
+                        resolved.noreturn = true;
                     }
                 }
                 "machines" => {
@@ -892,8 +903,8 @@ impl SymbolResolver {
                     };
                     resolved.section = Some(name.clone());
                 }
-                "public" | "opaque" | "intrinsic" | "runtime" | "machines" | "link_name"
-                | "layout" | "align" | "linear" => {
+                "public" | "opaque" | "intrinsic" | "runtime" | "noreturn" | "machines"
+                | "link_name" | "layout" | "align" | "linear" => {
                     self.err(attr.span, REK::AttrNotAllowed(attr.name.clone(), "static"));
                 }
                 _ => self.err(attr.span, REK::UnknownAttribute(attr.name.clone())),

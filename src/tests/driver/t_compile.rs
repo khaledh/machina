@@ -1361,6 +1361,48 @@ fn nested_counted_nullable_view_match_from_static_var_compiles() {
 }
 
 #[test]
+fn noreturn_call_lowers_to_unreachable_without_tail_return() {
+    let source = r#"
+        @noreturn
+        fn halt();
+
+        fn kmain() -> u64 {
+            halt();
+        }
+    "#;
+
+    let output = compile(
+        source,
+        &CompileOptions {
+            target: SelectedTarget::builtin(TargetKind::X86_64Macos),
+            dump: None,
+            emit_ir: true,
+            verify_ir: false,
+            trace_alloc: false,
+            trace_drops: false,
+            inject_prelude: true,
+            use_stdlib_objects: true,
+            project_config: None,
+        },
+    )
+    .expect("compile noreturn tail call source");
+
+    let ir = output.ir.expect("expected IR dump");
+    assert!(
+        ir.contains("call halt()"),
+        "expected direct call to noreturn function:\n{ir}"
+    );
+    assert!(
+        ir.contains("unreachable"),
+        "expected noreturn call to terminate control flow:\n{ir}"
+    );
+    assert!(
+        !ir.contains("ret %"),
+        "did not expect a synthetic return after noreturn tail call:\n{ir}"
+    );
+}
+
+#[test]
 fn native_support_can_build_x86_64_simple_program() {
     if !native_toolchain_supports_target(TargetKind::X86_64Macos) {
         return;
