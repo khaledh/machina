@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 use std::fs;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::process::Command;
 
 use serde::Deserialize;
@@ -40,6 +40,7 @@ impl ToolCommand {
 
 #[derive(Debug, Clone, Default)]
 pub struct ProjectConfig {
+    root: Option<PathBuf>,
     targets: HashMap<String, TargetConfig>,
 }
 
@@ -58,7 +59,7 @@ impl ProjectConfig {
             .map_err(|e| format!("failed to read {}: {e}", path.display()))?;
         let raw: RawProjectConfig = toml::from_str(&text)
             .map_err(|e| format!("failed to parse {}: {e}", path.display()))?;
-        Self::from_raw(raw)
+        Self::from_raw_with_root(raw, Some(root))
     }
 
     pub fn tool(&self, target_name: &str, tool: ToolKind) -> Option<&ToolCommand> {
@@ -88,7 +89,26 @@ impl ProjectConfig {
             .is_some_and(|cfg| cfg.cc.is_some() || cfg.ar.is_some())
     }
 
+    pub fn linker_script(&self, target_name: &str) -> Option<PathBuf> {
+        let cfg = self.targets.get(&canonical_target_name(target_name))?;
+        let script = cfg.linker_script.as_ref()?;
+        let root = self.root.as_ref()?;
+        if script.is_absolute() {
+            Some(script.clone())
+        } else {
+            Some(root.join(script))
+        }
+    }
+
+    #[cfg(test)]
     fn from_raw(raw: RawProjectConfig) -> Result<Option<Self>, String> {
+        Self::from_raw_with_root(raw, None)
+    }
+
+    fn from_raw_with_root(
+        raw: RawProjectConfig,
+        root: Option<&Path>,
+    ) -> Result<Option<Self>, String> {
         let mut targets = HashMap::new();
         for (target_name, raw_target) in raw.target {
             let canonical_name = canonical_target_name(&target_name);
@@ -106,6 +126,7 @@ impl ProjectConfig {
                 TargetConfig {
                     kind: target,
                     platform,
+                    linker_script: raw_target.linker_script.map(PathBuf::from),
                     cc,
                     ar,
                 },
@@ -114,7 +135,10 @@ impl ProjectConfig {
         if targets.is_empty() {
             Ok(None)
         } else {
-            Ok(Some(Self { targets }))
+            Ok(Some(Self {
+                root: root.map(Path::to_path_buf),
+                targets,
+            }))
         }
     }
 }
@@ -123,6 +147,7 @@ impl ProjectConfig {
 struct TargetConfig {
     kind: TargetKind,
     platform: PlatformKind,
+    linker_script: Option<PathBuf>,
     cc: Option<ToolCommand>,
     ar: Option<ToolCommand>,
 }
@@ -152,6 +177,8 @@ struct RawProjectConfig {
 struct RawTargetToolConfig {
     arch: Option<String>,
     platform: Option<String>,
+    #[serde(rename = "linker-script")]
+    linker_script: Option<String>,
     cc: Option<Vec<String>>,
     ar: Option<Vec<String>>,
 }
@@ -239,6 +266,7 @@ mod tests {
                 RawTargetToolConfig {
                     arch: None,
                     platform: None,
+                    linker_script: None,
                     cc: Some(vec![
                         String::from("colima"),
                         String::from("ssh"),
@@ -288,6 +316,7 @@ mod tests {
                 RawTargetToolConfig {
                     arch: None,
                     platform: None,
+                    linker_script: None,
                     cc: Some(Vec::new()),
                     ar: None,
                 },
@@ -350,6 +379,7 @@ ar = ["colima", "ssh", "--", "ar"]
                 RawTargetToolConfig {
                     arch: Some(String::from("x86-64")),
                     platform: Some(String::from("linux")),
+                    linker_script: None,
                     cc: None,
                     ar: None,
                 },
@@ -375,6 +405,7 @@ ar = ["colima", "ssh", "--", "ar"]
                 RawTargetToolConfig {
                     arch: None,
                     platform: None,
+                    linker_script: None,
                     cc: Some(vec![String::from("cc")]),
                     ar: None,
                 },
@@ -396,6 +427,7 @@ ar = ["colima", "ssh", "--", "ar"]
                 RawTargetToolConfig {
                     arch: Some(String::from("x86-64")),
                     platform: Some(String::from("none")),
+                    linker_script: None,
                     cc: None,
                     ar: None,
                 },
@@ -410,6 +442,37 @@ ar = ["colima", "ssh", "--", "ar"]
             cfg.target_identity("x86-64-bare"),
             Some((TargetKind::X86_64Linux, PlatformKind::None))
         );
+    }
+
+    #[test]
+    fn resolves_linker_script_relative_to_project_root() {
+        let temp_root = std::env::temp_dir().join(format!(
+            "machina_project_linker_script_{}_{}",
+            std::process::id(),
+            unique_suffix()
+        ));
+        fs::create_dir_all(temp_root.join("kernel")).expect("create temp root");
+        fs::write(
+            temp_root.join("machina.toml"),
+            r#"
+[target.x86-64-bare]
+arch = "x86-64"
+platform = "none"
+linker-script = "kernel/link.ld"
+"#,
+        )
+        .expect("write machina.toml");
+
+        let cfg = ProjectConfig::load_for_root(&temp_root)
+            .expect("load config")
+            .expect("present config");
+
+        assert_eq!(
+            cfg.linker_script("x86-64-bare"),
+            Some(temp_root.join("kernel").join("link.ld"))
+        );
+
+        let _ = fs::remove_dir_all(&temp_root);
     }
 
     fn unique_suffix() -> u128 {

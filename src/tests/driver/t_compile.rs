@@ -1060,6 +1060,65 @@ platform = "none"
 }
 
 #[test]
+fn bare_target_can_compile_without_hosted_prelude_runtime_refs() {
+    let temp_dir = std::env::temp_dir().join(format!(
+        "machina_driver_x86_bare_noprelude_{}",
+        std::process::id()
+    ));
+    std::fs::create_dir_all(&temp_dir).expect("failed to create temp dir");
+    std::fs::write(
+        temp_dir.join("machina.toml"),
+        r#"
+[target.x86-64-bare]
+arch = "x86-64"
+platform = "none"
+"#,
+    )
+    .expect("failed to write machina.toml");
+    let source_path = temp_dir.join("bare_kmain.mc");
+    let source = r#"
+        fn kmain() -> u64 {
+            42
+        }
+    "#;
+    std::fs::write(&source_path, source).expect("failed to write source");
+
+    let project_config = ProjectConfig::load_for_root(&temp_dir)
+        .expect("load config")
+        .expect("present config");
+    let target =
+        resolve_target(Some("x86-64-bare"), Some(&project_config)).expect("resolve bare target");
+    let output = compile_with_path(
+        source,
+        Some(&source_path),
+        &CompileOptions {
+            target,
+            dump: None,
+            emit_ir: false,
+            verify_ir: false,
+            trace_alloc: false,
+            trace_drops: false,
+            inject_prelude: false,
+            use_stdlib_objects: true,
+            project_config: Some(project_config),
+        },
+    )
+    .expect("compile bare target without prelude");
+
+    assert!(output.asm.contains("\nkmain:\n"));
+    assert!(
+        !output.asm.contains("__rt_print"),
+        "did not expect hosted print runtime reference in bare asm"
+    );
+    assert!(
+        !output.asm.contains("__rt_process_args_init"),
+        "did not expect hosted process args init in bare asm"
+    );
+
+    let _ = std::fs::remove_dir_all(&temp_dir);
+}
+
+#[test]
 fn native_support_can_build_x86_64_simple_program() {
     if !native_toolchain_supports_target(TargetKind::X86_64Macos) {
         return;

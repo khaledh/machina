@@ -238,6 +238,7 @@ fn main() {
             return;
         }
     };
+    let inject_prelude = target.platform.is_hosted();
     let opts = CompileOptions {
         target,
         dump,
@@ -245,7 +246,7 @@ fn main() {
         verify_ir,
         trace_alloc,
         trace_drops,
-        inject_prelude: true,
+        inject_prelude,
         use_stdlib_objects: true,
         project_config,
     };
@@ -314,16 +315,6 @@ fn main() {
                     }
                 }
                 DriverKind::Build => {
-                    if !opts.target.platform.is_hosted() {
-                        println!(
-                            "[ERROR] build failed: target {} uses platform = \"none\"; linker-script based bare linking is not implemented yet",
-                            opts.target.config_key()
-                        );
-                        if !emit_asm {
-                            let _ = fs::remove_file(&asm_path);
-                        }
-                        return;
-                    }
                     let exe_path = invocation
                         .output
                         .clone()
