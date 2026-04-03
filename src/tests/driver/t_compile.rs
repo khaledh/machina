@@ -1146,17 +1146,44 @@ linker-script = "x86_64.ld"
         type Request = {
             id: u64[4],
             revision: u64,
+            response: view<Response>?,
+        }
+
+        @layout(fixed)
+        type Response = {
+            count: u64,
+            entries: view<view<Entry>[count]>?,
+        }
+
+        @layout(fixed, size: 24)
+        type Entry = {
+            base: paddr,
+            length: u64,
+            typ: u64,
         }
 
         @section(".limine_requests")
         static var request = Request {
             id: [1, 2, 3, 4],
             revision: 0,
+            response: None,
         };
 
         fn kmain() -> u64 {
-            unsafe {
-                request.revision
+            match unsafe { request.response } {
+                some(response) => match response.entries {
+                    some(entries) => {
+                        let resolved_entries: view<view<Entry>[]> = entries;
+                        var total = response.count;
+                        for entry in resolved_entries {
+                            total += entry.length;
+                            total += entry.typ;
+                        }
+                        total
+                    }
+                    none => 0,
+                },
+                none => 0,
             }
         }
     "#;

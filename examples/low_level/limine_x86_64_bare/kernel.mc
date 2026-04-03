@@ -32,11 +32,20 @@ static var memmap_request = LimineMemmapRequest {
     response: None,
 };
 
-// Minimal bare entry: unwrap the typed response field directly in bare mode.
 fn kmain() -> u64 {
-    let response = unsafe { memmap_request.response } or {
-        return 0;
-    };
-
-    response.entry_count
+    match unsafe { memmap_request.response } {
+        some(response) => match response.entries {
+            some(entries) => {
+                let resolved_entries: view<view<LimineMemmapEntry>[]> = entries;
+                var total = response.entry_count;
+                for entry in resolved_entries {
+                    total += entry.length;
+                    total += entry.typ;
+                }
+                total
+            }
+            none => 0,
+        },
+        none => 0,
+    }
 }
