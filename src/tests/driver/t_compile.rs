@@ -1162,6 +1162,15 @@ linker-script = "x86_64.ld"
             typ: u64,
         }
 
+        @runtime
+        @noreturn
+        fn __rt_trap(kind: u64, arg0: u64, arg1: u64, arg2: u64);
+
+        @noreturn
+        fn halt_forever() {
+            __rt_trap(0, 0, 0, 0);
+        }
+
         @section(".limine_requests")
         static var request = Request {
             id: [1, 2, 3, 4],
@@ -1169,7 +1178,7 @@ linker-script = "x86_64.ld"
             response: None,
         };
 
-        fn kmain() -> u64 {
+        fn memmap_total() -> u64 {
             match unsafe { request.response } {
                 some(response) => match response.entries {
                     some(entries) => {
@@ -1184,6 +1193,13 @@ linker-script = "x86_64.ld"
                 },
                 none => 0,
             }
+        }
+
+        @noreturn
+        fn kmain() {
+            memmap_total();
+
+            halt_forever();
         }
     "#;
     std::fs::write(&source_path, source).expect("failed to write source");
@@ -1232,6 +1248,16 @@ linker-script = "x86_64.ld"
     assert!(
         output.asm.contains("ud2"),
         "expected bare trap sites to lower directly to `ud2`:\n{}",
+        output.asm
+    );
+    let kmain_body = output
+        .asm
+        .split("\nkmain:\n")
+        .nth(1)
+        .expect("expected kmain label in bare asm");
+    assert!(
+        !kmain_body.contains("retq"),
+        "did not expect bare noreturn entry path to emit a return from kmain:\n{}",
         output.asm
     );
 

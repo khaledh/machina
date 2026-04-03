@@ -41,6 +41,7 @@ pub enum IntrinsicCall {
 #[derive(Clone, Debug)]
 pub enum RuntimeCall {
     Print,
+    Trap,
     U64ToDec,
     MemSet,
     StringFromBytes,

@@ -70,13 +70,37 @@ impl CollectionReceiverKind {
 }
 
 impl<'a, 'g> FuncLowerer<'a, 'g> {
-    fn direct_call_is_noreturn(&self, target: &CallTarget) -> bool {
-        let CallTarget::Direct(def_id) = target else {
-            return false;
-        };
-        self.def_table
-            .lookup_def(*def_id)
-            .is_some_and(|def| def.is_noreturn())
+    fn callee_expr_is_noreturn(&self, callee_expr: &Expr) -> bool {
+        let mut current = callee_expr;
+        loop {
+            match &current.kind {
+                ExprKind::Coerce { expr, .. }
+                | ExprKind::Move { expr }
+                | ExprKind::ImplicitMove { expr }
+                | ExprKind::Load { expr } => current = expr,
+                ExprKind::Var { .. } => {
+                    let def_id = self.def_table.def_id(current.id);
+                    return self
+                        .def_table
+                        .lookup_def(def_id)
+                        .is_some_and(|def| def.is_noreturn());
+                }
+                _ => return false,
+            }
+        }
+    }
+
+    fn call_is_noreturn(&self, target: &CallTarget, callee_expr: Option<&Expr>) -> bool {
+        match target {
+            CallTarget::Direct(def_id) => self
+                .def_table
+                .lookup_def(*def_id)
+                .is_some_and(|def| def.is_noreturn()),
+            CallTarget::Runtime(_) | CallTarget::Indirect => {
+                callee_expr.is_some_and(|expr| self.callee_expr_is_noreturn(expr))
+            }
+            CallTarget::Intrinsic(_) => false,
+        }
     }
 
     fn render_type_for_type_of(ty: &Type, overrides: Option<&BTreeMap<u32, String>>) -> String {
@@ -640,7 +664,7 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
             .unwrap_or_else(|| self.type_map.type_table().get(expr_ty).clone());
         let ir_call_result_ty = self.type_lowerer.lower_type(&call_result_ty);
         let result = self.builder.call(callee, call_args, ir_call_result_ty);
-        if self.direct_call_is_noreturn(&call_plan.target) {
+        if self.call_is_noreturn(&call_plan.target, Some(callee_expr)) {
             self.builder.terminate(crate::ir::Terminator::Unreachable);
             return Ok(None);
         }
@@ -738,7 +762,7 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
             .unwrap_or_else(|| self.type_map.type_table().get(expr_ty).clone());
         let ir_call_result_ty = self.type_lowerer.lower_type(&call_result_ty);
         let result = self.builder.call(callee, call_args, ir_call_result_ty);
-        if self.direct_call_is_noreturn(&call_plan.target) {
+        if self.call_is_noreturn(&call_plan.target, None) {
             self.builder.terminate(crate::ir::Terminator::Unreachable);
             return Ok(None);
         }
@@ -1520,6 +1544,7 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
     fn runtime_for_call(&self, runtime: &RuntimeCall) -> Result<RuntimeFn, LowerToIrError> {
         match runtime {
             RuntimeCall::Print => Ok(RuntimeFn::Print),
+            RuntimeCall::Trap => Ok(RuntimeFn::Trap),
             RuntimeCall::U64ToDec => Ok(RuntimeFn::U64ToDec),
             RuntimeCall::MemSet => Ok(RuntimeFn::MemSet),
             RuntimeCall::StringFromBytes => Ok(RuntimeFn::StringFromBytes),

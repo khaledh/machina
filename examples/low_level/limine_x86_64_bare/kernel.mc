@@ -19,6 +19,15 @@ type LimineMemmapEntry = {
     typ: u64,
 }
 
+@runtime
+@noreturn
+fn __rt_trap(kind: u64, arg0: u64, arg1: u64, arg2: u64);
+
+@noreturn
+fn halt_forever() {
+    __rt_trap(0, 0, 0, 0);
+}
+
 // Limine scans this request section before transferring control to `kmain`.
 @section(".limine_requests")
 static var memmap_request = LimineMemmapRequest {
@@ -32,7 +41,7 @@ static var memmap_request = LimineMemmapRequest {
     response: None,
 };
 
-fn kmain() -> u64 {
+fn memmap_total() -> u64 {
     match unsafe { memmap_request.response } {
         some(response) => match response.entries {
             some(entries) => {
@@ -47,4 +56,11 @@ fn kmain() -> u64 {
         },
         none => 0,
     }
+}
+
+@noreturn
+fn kmain() {
+    memmap_total();
+
+    halt_forever();
 }

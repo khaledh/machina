@@ -190,6 +190,7 @@ impl<'a> Elaborator<'a> {
                 let runtime_name = def.link_name().unwrap_or(def.name.as_str());
                 target = match runtime_name {
                     "__rt_print" => CallTarget::Runtime(RuntimeCall::Print),
+                    "__rt_trap" => CallTarget::Runtime(RuntimeCall::Trap),
                     "__rt_u64_to_dec" => CallTarget::Runtime(RuntimeCall::U64ToDec),
                     "__rt_memset" => CallTarget::Runtime(RuntimeCall::MemSet),
                     "__rt_string_from_bytes" => CallTarget::Runtime(RuntimeCall::StringFromBytes),
@@ -244,6 +245,23 @@ impl<'a> Elaborator<'a> {
                         len_bits: 32,
                     },
                     ArgLowering::Direct(CallInput::Arg(1)),
+                ]
+            }
+            CallTarget::Runtime(RuntimeCall::Trap) => {
+                if has_receiver {
+                    panic!("compiler bug: runtime trap has receiver");
+                }
+                if call_sig.params.len() != 4 {
+                    panic!(
+                        "compiler bug: runtime trap expects 4 args, got {}",
+                        call_sig.params.len()
+                    );
+                }
+                vec![
+                    ArgLowering::Direct(CallInput::Arg(0)),
+                    ArgLowering::Direct(CallInput::Arg(1)),
+                    ArgLowering::Direct(CallInput::Arg(2)),
+                    ArgLowering::Direct(CallInput::Arg(3)),
                 ]
             }
             CallTarget::Runtime(RuntimeCall::U64ToDec) => {
