@@ -14,6 +14,7 @@ const RUNTIME_SOURCE_FILES: &[&str] = &[
     "args.c",
     "conv.c",
     "dyn_array.c",
+    "fmt.c",
     "hash_table.c",
     "map_table.c",
     "machine/runtime.c",
@@ -30,9 +31,19 @@ const RUNTIME_SOURCE_FILES: &[&str] = &[
     "trap.c",
 ];
 
+const RUNTIME_CORE_SOURCE_FILES: &[&str] = &["conv.c", "fmt.c", "mem.c", "trap_core.c"];
+
 pub fn runtime_source_paths() -> Vec<PathBuf> {
     let runtime_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("runtime");
     RUNTIME_SOURCE_FILES
+        .iter()
+        .map(|f| runtime_dir.join(f))
+        .collect()
+}
+
+pub fn runtime_core_source_paths() -> Vec<PathBuf> {
+    let runtime_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("runtime");
+    RUNTIME_CORE_SOURCE_FILES
         .iter()
         .map(|f| runtime_dir.join(f))
         .collect()
@@ -60,6 +71,45 @@ pub fn ensure_runtime_archive(
 
     let archive_path = build_dir.join("libmachina_rt.a");
     let lock_path = build_dir.join(".runtime-build.lock");
+    with_artifact_lock(&lock_path, || {
+        if !artifact_is_stale(&archive_path, &sources)? {
+            return Ok(());
+        }
+
+        let mut objects = Vec::with_capacity(sources.len());
+        for source in &sources {
+            let object = build_dir.join(runtime_object_name(source));
+            compile_c_object(source, &object, target, project_config)?;
+            objects.push(object);
+        }
+        archive_objects(&archive_path, &objects, target, project_config)?;
+        Ok(())
+    })?;
+    Ok(archive_path)
+}
+
+pub fn ensure_runtime_core_archive(
+    target: &SelectedTarget,
+    project_config: Option<&ProjectConfig>,
+) -> Result<PathBuf, String> {
+    let sources = runtime_core_source_paths();
+    for source in &sources {
+        if !source.exists() {
+            return Err(format!(
+                "runtime core source file not found at {}",
+                source.display()
+            ));
+        }
+    }
+
+    let build_dir = native_support_dir()?
+        .join(target.kind.as_str())
+        .join("runtime-core");
+    fs::create_dir_all(&build_dir)
+        .map_err(|e| format!("failed to create {}: {e}", build_dir.display()))?;
+
+    let archive_path = build_dir.join("libmachina_rt_core.a");
+    let lock_path = build_dir.join(".runtime-core-build.lock");
     with_artifact_lock(&lock_path, || {
         if !artifact_is_stale(&archive_path, &sources)? {
             return Ok(());

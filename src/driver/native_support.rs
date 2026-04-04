@@ -10,12 +10,29 @@ use crate::driver::support_utils::cc_command_for_target;
 use crate::driver::target::SelectedTarget;
 use std::path::{Path, PathBuf};
 
-pub use crate::driver::runtime_support::{ensure_runtime_archive, runtime_source_paths};
+pub use crate::driver::runtime_support::{
+    ensure_runtime_archive, ensure_runtime_core_archive, runtime_source_paths,
+};
 pub use crate::driver::stdlib_support::{StdlibArtifacts, ensure_stdlib_archive_for_modules};
 pub use crate::driver::support_utils::{
     assemble_object, default_exe_path, native_toolchain_supports_target, temp_named_asm_path,
     temp_obj_path,
 };
+
+const BARE_RUNTIME_CORE_SYMBOLS: &[&str] = &[
+    "__rt_fmt_init",
+    "__rt_fmt_append_bytes",
+    "__rt_fmt_append_u64",
+    "__rt_fmt_append_i64",
+    "__rt_fmt_append_bool",
+    "__rt_fmt_finish",
+    "__rt_u64_to_dec",
+    "__rt_i64_to_dec",
+    "__rt_u64_to_bin",
+    "__rt_u64_to_oct",
+    "__rt_u64_to_hex",
+    "__rt_string_from_bytes",
+];
 
 pub fn link_executable(
     asm_path: &Path,
@@ -64,7 +81,19 @@ fn build_link_command(
     cmd.arg("-no-pie");
     cmd.arg("-Wl,--build-id=none");
     cmd.arg(format!("-Wl,-T,{}", linker_script.display()));
+    if bare_asm_requires_runtime_core(asm_path)? {
+        let runtime_core_archive = ensure_runtime_core_archive(target, project_config)?;
+        cmd.arg(runtime_core_archive);
+    }
     Ok(cmd)
+}
+
+fn bare_asm_requires_runtime_core(asm_path: &Path) -> Result<bool, String> {
+    let asm = std::fs::read_to_string(asm_path)
+        .map_err(|e| format!("failed to read {}: {e}", asm_path.display()))?;
+    Ok(BARE_RUNTIME_CORE_SYMBOLS
+        .iter()
+        .any(|symbol| asm.contains(symbol)))
 }
 
 #[cfg(test)]
@@ -96,6 +125,7 @@ cc = ["cc"]
         )
         .expect("write config");
         let asm = temp_root.join("main.s");
+        fs::write(&asm, ".text\nmain:\n  ret\n").expect("write asm");
         let exe = temp_root.join("main");
         let cfg = ProjectConfig::load_for_root(&temp_root)
             .expect("load config")
@@ -153,6 +183,51 @@ cc = ["cc"]
         let err = build_link_command(&asm, &[], &exe, &target, Some(&cfg))
             .expect_err("missing linker script must error");
         assert!(err.contains("linker-script"));
+
+        let _ = fs::remove_dir_all(&temp_root);
+    }
+
+    #[test]
+    fn bare_link_command_adds_runtime_core_for_formatting_symbols() {
+        let temp_root = std::env::temp_dir().join(format!(
+            "machina_native_support_bare_runtime_core_{}_{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .expect("clock")
+                .as_nanos()
+        ));
+        fs::create_dir_all(temp_root.join("kernel")).expect("create temp root");
+        fs::write(
+            temp_root.join("machina.toml"),
+            r#"
+[target.x86-64-bare]
+arch = "x86-64"
+platform = "none"
+linker-script = "kernel/link.ld"
+cc = ["cc"]
+ar = ["ar"]
+"#,
+        )
+        .expect("write config");
+        let asm = temp_root.join("main.s");
+        fs::write(&asm, "  call __rt_fmt_init\n").expect("write asm");
+        let exe = temp_root.join("main");
+        let cfg = ProjectConfig::load_for_root(&temp_root)
+            .expect("load config")
+            .expect("config");
+        let target = resolve_target(Some("x86-64-bare"), Some(&cfg)).expect("resolve target");
+
+        let cmd = build_link_command(&asm, &[], &exe, &target, Some(&cfg)).expect("link cmd");
+        let args = cmd
+            .get_args()
+            .map(|arg| arg.to_string_lossy().to_string())
+            .collect::<Vec<_>>();
+
+        assert!(
+            args.iter().any(|arg| arg.contains("libmachina_rt_core.a")),
+            "expected bare formatting link to pull in runtime core archive: {args:?}"
+        );
 
         let _ = fs::remove_dir_all(&temp_root);
     }

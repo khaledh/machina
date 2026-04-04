@@ -18,6 +18,11 @@ pub(crate) fn compile_c_object(
     project_config: Option<&ProjectConfig>,
 ) -> Result<(), String> {
     let mut cmd = cc_command_for_target(target, project_config)?;
+    if !target.platform.is_hosted() {
+        // Bare runtime objects must not depend on hosted stack protector thunks
+        // such as `__stack_chk_fail`.
+        cmd.arg("-fno-stack-protector");
+    }
     let status = cmd
         .arg("-c")
         .arg("-o")
