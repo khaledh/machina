@@ -651,6 +651,12 @@ impl X86_64Emitter {
         let value_loc = locs.value(value_id);
         let value_ty = locs.value_ty(value_id);
         let ptr_ty = locs.value_ty(ptr_id);
+        let value_reg = match value_loc {
+            Location::Reg(reg) => Some(reg),
+            _ => None,
+        };
+        let ptr_scratch = if value_reg == Some(R11) { R10 } else { R11 };
+        let value_scratch = if ptr_scratch == R10 { R11 } else { R10 };
         let zero_store = locs.const_zero_values.contains(&value_id)
             && matches!(
                 locs.types.kind(value_ty),
@@ -663,22 +669,37 @@ impl X86_64Emitter {
             .or_else(|| locs.index_addr_folds.get(&ptr_id))
             .copied()
         {
-            let base_reg = self.load_value_typed(locs, locs.value(base), locs.value_ty(base), R11);
+            let base_reg =
+                self.load_value_typed(locs, locs.value(base), locs.value_ty(base), ptr_scratch);
             if locs.types.is_reg_type(value_ty) {
                 let size = locs.layout(value_ty).size() as u32;
                 if size > 0 {
                     let val = if zero_store {
-                        if size <= 4 { "%r10d" } else { "%r10" }.to_string()
+                        if size <= 4 {
+                            Self::reg(32, value_scratch)
+                        } else {
+                            Self::reg(64, value_scratch)
+                        }
+                        .to_string()
                     } else {
-                        self.load_value_typed(locs, value_loc, value_ty, R10)
+                        self.load_value_typed(locs, value_loc, value_ty, value_scratch)
                             .to_string()
                     };
                     if zero_store {
-                        self.emit_line(if size <= 4 {
-                            "xorl %r10d, %r10d"
-                        } else {
-                            "xorq %r10, %r10"
-                        });
+                        self.emit_line(&format!(
+                            "{} {}, {}",
+                            if size <= 4 { "xorl" } else { "xorq" },
+                            if size <= 4 {
+                                Self::reg(32, value_scratch)
+                            } else {
+                                Self::reg(64, value_scratch)
+                            },
+                            if size <= 4 {
+                                Self::reg(32, value_scratch)
+                            } else {
+                                Self::reg(64, value_scratch)
+                            }
+                        ));
                     }
                     self.emit_store_ptr_sized_offset(&val, base_reg, offset, size);
                 }
@@ -699,22 +720,36 @@ impl X86_64Emitter {
             return;
         }
 
-        let ptr = self.load_value_typed(locs, ptr, ptr_ty, R11);
+        let ptr = self.load_value_typed(locs, ptr, ptr_ty, ptr_scratch);
         if locs.types.is_reg_type(value_ty) {
             let size = locs.layout(value_ty).size() as u32;
             if size > 0 {
                 let val = if zero_store {
-                    if size <= 4 { "%r10d" } else { "%r10" }.to_string()
+                    if size <= 4 {
+                        Self::reg(32, value_scratch)
+                    } else {
+                        Self::reg(64, value_scratch)
+                    }
+                    .to_string()
                 } else {
-                    self.load_value_typed(locs, value_loc, value_ty, R10)
+                    self.load_value_typed(locs, value_loc, value_ty, value_scratch)
                         .to_string()
                 };
                 if zero_store {
-                    self.emit_line(if size <= 4 {
-                        "xorl %r10d, %r10d"
-                    } else {
-                        "xorq %r10, %r10"
-                    });
+                    self.emit_line(&format!(
+                        "{} {}, {}",
+                        if size <= 4 { "xorl" } else { "xorq" },
+                        if size <= 4 {
+                            Self::reg(32, value_scratch)
+                        } else {
+                            Self::reg(64, value_scratch)
+                        },
+                        if size <= 4 {
+                            Self::reg(32, value_scratch)
+                        } else {
+                            Self::reg(64, value_scratch)
+                        }
+                    ));
                 }
                 self.emit_store_ptr_sized(&val, ptr, size);
             }

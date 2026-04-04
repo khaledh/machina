@@ -38,7 +38,15 @@ impl<'a, 'b, 'g> MatchLowerer<'a, 'b, 'g> {
         let scrutinee_addr = if let ExprKind::Load { expr } = &scrutinee.kind {
             // If the scrutinee is already an addressable place of aggregate type,
             // reuse that address and avoid copy materialization before matching.
-            if !scrutinee_ty.is_scalar() {
+            // Counted nullable foreign views are the exception: the place only
+            // stores the raw pointer in memory, while the semantic value is a
+            // synthetic {ptr,len} pair reconstructed from the owner's extent.
+            let can_reuse_place_addr = !scrutinee_ty.is_scalar()
+                && !matches!(
+                    scrutinee_ty,
+                    Type::NullableViewSlice { .. } | Type::NullableViewArray { .. }
+                );
+            if can_reuse_place_addr {
                 lowerer.lower_place_addr(expr)?.addr
             } else {
                 let scrutinee_value = lowerer.lower_linear_expr_value(scrutinee)?;

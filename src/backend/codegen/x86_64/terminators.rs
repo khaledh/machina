@@ -43,14 +43,33 @@ impl X86_64Emitter {
         let value_ty = locs.value_ty(value);
         let value_reg = self.load_value_typed(locs, value_loc, value_ty, R10);
         let width = X86_64Emitter::bits_for_size(locs.layout(value_ty).size() as u32);
+        let value_phys = X86_64Emitter::reg_from_operand(value_reg);
+        let case_scratch = if value_phys == Some(R10) { "%r11" } else { "%r10" };
         for (case, target) in cases {
-            self.emit_mov_imm("%r11", case.as_int(), width);
-            self.emit_line(&format!(
-                "cmp{} {}, {}",
-                X86_64Emitter::suffix_for_bits(width),
-                X86_64Emitter::operand_as_bits("%r11", width),
-                X86_64Emitter::operand_as_bits(value_reg, width)
-            ));
+            let case_value = case.as_int();
+            let fits_cmp_imm = if width == 64 {
+                i32::try_from(case_value as i64).is_ok()
+            } else {
+                true
+            };
+            if fits_cmp_imm {
+                self.emit_line(&format!(
+                    "cmp{} ${}, {}",
+                    X86_64Emitter::suffix_for_bits(width),
+                    case_value,
+                    X86_64Emitter::operand_as_bits(value_reg, width)
+                ));
+            } else {
+                self.emit_line(&format!("pushq {}", X86_64Emitter::operand_as_bits(case_scratch, 64)));
+                self.emit_mov_imm(case_scratch, case_value, width);
+                self.emit_line(&format!(
+                    "cmp{} {}, {}",
+                    X86_64Emitter::suffix_for_bits(width),
+                    X86_64Emitter::operand_as_bits(case_scratch, width),
+                    X86_64Emitter::operand_as_bits(value_reg, width)
+                ));
+                self.emit_line(&format!("popq {}", X86_64Emitter::operand_as_bits(case_scratch, 64)));
+            }
             self.emit_line(&format!("je {}", self.codegen_label(*target)));
         }
         self.emit_line(&format!("jmp {}", self.codegen_label(default_target)));

@@ -5,7 +5,7 @@ use std::collections::{HashMap, HashSet};
 
 use crate::backend::regalloc::stack::{StackAllocator, StackSlotId};
 use crate::backend::regalloc::target::{PhysReg, TargetSpec};
-use crate::ir::ValueId;
+use crate::ir::{BlockId, Function, InstKind, Terminator, ValueId, for_each_inst_use};
 use crate::ir::{IrTypeCache, IrTypeId};
 
 use super::constraints::AbiConstraints;
@@ -24,6 +24,7 @@ pub struct LinearScan<'a> {
 impl<'a> LinearScan<'a> {
     /// Build a linear-scan allocator with interval analysis and ABI constraints.
     pub fn new(
+        func: &'a Function,
         analysis: &'a IntervalAnalysis,
         types: &'a mut IrTypeCache,
         target: &dyn TargetSpec,
@@ -52,10 +53,11 @@ impl<'a> LinearScan<'a> {
         // Precompute spill slot sizes per SSA value (in 8-byte slots).
         let mut slot_sizes = HashMap::new();
         let mut needs_stack = HashSet::new();
+        let cross_block_addr_of_local_values = collect_cross_block_addr_of_locals(func);
         for (value, ty) in &analysis.value_types {
             let slots = stack_slots_for(types, *ty);
             slot_sizes.insert(*value, slots);
-            if !types.is_reg_type(*ty) {
+            if !types.is_reg_type(*ty) || cross_block_addr_of_local_values.contains(value) {
                 needs_stack.insert(*value);
             }
         }
@@ -158,6 +160,73 @@ impl<'a> LinearScan<'a> {
             edge_moves: Vec::new(),
             call_moves: Vec::new(),
         }
+    }
+}
+
+fn collect_cross_block_addr_of_locals(func: &Function) -> HashSet<ValueId> {
+    let mut defs = HashMap::<ValueId, BlockId>::new();
+    for block in &func.blocks {
+        for inst in &block.insts {
+            if let (InstKind::AddrOfLocal { .. }, Some(result)) = (&inst.kind, &inst.result) {
+                defs.insert(result.id, block.id);
+            }
+        }
+    }
+
+    let mut cross_block = HashSet::new();
+    for block in &func.blocks {
+        for inst in &block.insts {
+            for_each_inst_use(&inst.kind, |value| {
+                if defs.get(&value).is_some_and(|def_block| *def_block != block.id) {
+                    cross_block.insert(value);
+                }
+            });
+        }
+
+        let term_crosses_edge = !matches!(block.term, Terminator::Return { .. } | Terminator::Unreachable);
+        if term_crosses_edge {
+            for value in terminator_uses(&block.term) {
+                if defs.contains_key(&value) {
+                    cross_block.insert(value);
+                }
+            }
+        }
+    }
+
+    cross_block
+}
+
+fn terminator_uses(term: &Terminator) -> Vec<ValueId> {
+    match term {
+        Terminator::Br { args, .. } => args.clone(),
+        Terminator::CondBr {
+            cond,
+            then_args,
+            else_args,
+            ..
+        } => {
+            let mut values = Vec::with_capacity(1 + then_args.len() + else_args.len());
+            values.push(*cond);
+            values.extend(then_args.iter().copied());
+            values.extend(else_args.iter().copied());
+            values
+        }
+        Terminator::Switch {
+            value,
+            cases,
+            default_args,
+            ..
+        } => {
+            let mut values = Vec::new();
+            values.push(*value);
+            for case in cases {
+                values.extend(case.args.iter().copied());
+            }
+            values.extend(default_args.iter().copied());
+            values
+        }
+        Terminator::Return { value } => value.iter().copied().collect(),
+        Terminator::Unreachable => Vec::new(),
     }
 }
 

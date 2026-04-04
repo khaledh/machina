@@ -65,7 +65,7 @@ pub fn regalloc(
     // Build live intervals and allocate registers/stack slots.
     let analysis = intervals::analyze(func, live_map);
     let constraints = constraints::build(&analysis, types, target);
-    let mut result = alloc::LinearScan::new(&analysis, types, target, &constraints).alloc();
+    let mut result = alloc::LinearScan::new(func, &analysis, types, target, &constraints).alloc();
 
     let param_reg_count = constraints.param_reg_count;
 

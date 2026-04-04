@@ -191,6 +191,59 @@ fn test_regalloc_spills_when_no_regs() {
 }
 
 #[test]
+fn test_regalloc_stack_homes_cross_block_addr_of_local_values() {
+    let mut types = IrTypeCache::new();
+    let unit_ty = types.add(IrTypeKind::Unit);
+    let bool_ty = types.add(IrTypeKind::Int {
+        signed: false,
+        bits: 1,
+    });
+    let u64_ty = types.add(IrTypeKind::Int {
+        signed: false,
+        bits: 64,
+    });
+    let ptr_ty = types.add(IrTypeKind::Ptr { elem: u64_ty });
+
+    let mut builder = FunctionBuilder::new(
+        DefId(0),
+        "addr_of_local_stack_home",
+        FunctionSig {
+            params: vec![],
+            ret: unit_ty,
+        },
+    );
+
+    let local = builder.add_local(u64_ty, Some("slot".into()));
+    let addr = builder.addr_of_local(local, ptr_ty);
+    let cond = builder.const_bool(true, bool_ty);
+    let then_block = builder.add_block();
+    let else_block = builder.add_block();
+    builder.terminate(Terminator::CondBr {
+        cond,
+        then_bb: then_block,
+        then_args: vec![],
+        else_bb: else_block,
+        else_args: vec![],
+    });
+
+    builder.select_block(then_block);
+    let one = builder.const_int(1, false, 64, u64_ty);
+    builder.store(addr, one);
+    builder.terminate(Terminator::Return { value: None });
+
+    builder.select_block(else_block);
+    builder.terminate(Terminator::Return { value: None });
+
+    let func = builder.finish();
+    let live_map = liveness::analyze(&func);
+    let target = TestTarget::new(2);
+    let alloc = regalloc(&func, &mut types, &live_map, &target);
+
+    let location = alloc.alloc_map.get(&addr).expect("missing alloc");
+    assert!(matches!(location, Location::Stack(_)));
+}
+
+#[test]
 fn test_regalloc_prefers_call_safe_regs() {
     let mut types = IrTypeCache::new();
     let u64_ty = types.add(IrTypeKind::Int {
