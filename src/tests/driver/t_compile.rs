@@ -1429,6 +1429,92 @@ fn noreturn_call_lowers_to_unreachable_without_tail_return() {
 }
 
 #[test]
+fn borrow_string_call_arg_uses_view_fstring_lowering() {
+    let source = r#"
+        fn write_text(text: borrow<string>);
+
+        fn main() {
+            write_text(f"count = {42}\n");
+        }
+    "#;
+
+    let output = compile(source, &deterministic_x86_compile_opts())
+        .expect("compile borrowed string f-string source");
+
+    assert!(
+        output.asm.contains("__rt_fmt_init"),
+        "expected borrowed string call arg to use stack-backed fmt init:\n{}",
+        output.asm
+    );
+    assert!(
+        output.asm.contains("__rt_fmt_append_u64") || output.asm.contains("__rt_fmt_append_i64"),
+        "expected borrowed string call arg to append integer segments through fmt runtime:\n{}",
+        output.asm
+    );
+    assert!(
+        output.asm.contains("__rt_fmt_finish"),
+        "expected borrowed string call arg to finish into a view string:\n{}",
+        output.asm
+    );
+    assert!(
+        !output.asm.contains("__rt_string_ensure"),
+        "did not expect owned string allocation path for borrow<string> call arg:\n{}",
+        output.asm
+    );
+}
+
+#[test]
+fn plain_string_call_arg_keeps_owned_fstring_lowering() {
+    let source = r#"
+        fn write_text(text: string);
+
+        fn main() {
+            write_text(f"count = {42}\n");
+        }
+    "#;
+
+    let output =
+        compile(source, &deterministic_x86_compile_opts()).expect("compile owned f-string source");
+
+    assert!(
+        output.asm.contains("__rt_string_ensure"),
+        "expected plain string call arg to keep owned string formatting:\n{}",
+        output.asm
+    );
+    assert!(
+        !output.asm.contains("__rt_fmt_init"),
+        "did not expect stack-backed view formatting in plain string context:\n{}",
+        output.asm
+    );
+}
+
+#[test]
+fn borrow_string_call_arg_with_string_segment_falls_back_to_owned_formatting() {
+    let source = r#"
+        fn write_text(text: borrow<string>);
+
+        fn main() {
+            let suffix: borrow<string> = "done";
+            write_text(f"count = {suffix}\n");
+        }
+    "#;
+
+    let output = compile(source, &deterministic_x86_compile_opts())
+        .expect("compile borrowed string f-string with string segment source");
+
+    assert!(
+        output.asm.contains("__rt_string_ensure"),
+        "expected string interpolands to keep the owned formatting path:\n{}",
+        output.asm
+    );
+    assert!(
+        !output.asm.contains("__rt_fmt_init"),
+        "did not expect view formatting for dynamically-sized string segments:\n{}",
+        output.asm
+    );
+}
+
+#[test]
 fn native_support_can_build_x86_64_simple_program() {
     if !native_toolchain_supports_target(TargetKind::X86_64Macos) {
         return;

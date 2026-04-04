@@ -51,6 +51,9 @@ pub enum Type {
 
     // Compound Types
     String,
+    Borrow {
+        elem_ty: Box<Type>,
+    },
     Array {
         elem_ty: Box<Type>,
         dims: Vec<usize>,
@@ -228,6 +231,7 @@ impl PartialEq for Type {
             (Type::Bool, Type::Bool) => true,
             (Type::Char, Type::Char) => true,
             (Type::String, Type::String) => true,
+            (Type::Borrow { elem_ty: e1 }, Type::Borrow { elem_ty: e2 }) => e1 == e2,
             (
                 Type::Array {
                     elem_ty: e1,
@@ -374,6 +378,10 @@ impl Hash for Type {
             }
             Type::String => {
                 9u8.hash(state);
+            }
+            Type::Borrow { elem_ty } => {
+                11u8.hash(state);
+                elem_ty.hash(state);
             }
             Type::Array { elem_ty, dims } => {
                 10u8.hash(state);
@@ -530,6 +538,7 @@ pub fn is_builtin_type_name(name: &str) -> bool {
             | "view?"
             | "view_slice"
             | "view_array"
+            | "borrow"
             | "u8"
             | "u16"
             | "u32"
@@ -582,6 +591,22 @@ impl Type {
                 | Type::NullableViewSlice { .. }
                 | Type::NullableViewArray { .. }
         )
+    }
+
+    pub fn is_borrow(&self) -> bool {
+        matches!(self, Type::Borrow { .. })
+    }
+
+    pub fn peel_borrow(&self) -> &Type {
+        let mut ty = self;
+        while let Type::Borrow { elem_ty } = ty {
+            ty = elem_ty.as_ref();
+        }
+        ty
+    }
+
+    pub fn contains_borrow(&self) -> bool {
+        self.any(&Type::is_borrow)
     }
 
     pub fn nullable_address_payload(&self) -> Option<Type> {
@@ -639,6 +664,7 @@ impl Type {
             (Type::Bool, Type::Bool) => true,
             (Type::Char, Type::Char) => true,
             (Type::String, Type::String) => true,
+            (Type::Borrow { elem_ty: l }, Type::Borrow { elem_ty: r }) => l.shape_eq(r),
             (Type::Range { elem_ty: l }, Type::Range { elem_ty: r })
             | (Type::Slice { elem_ty: l }, Type::Slice { elem_ty: r })
             | (Type::DynArray { elem_ty: l }, Type::DynArray { elem_ty: r })
@@ -816,6 +842,7 @@ impl Type {
                 8 + self.error_union_max_payload_size()
             }
             Type::String => 16,
+            Type::Borrow { elem_ty } => elem_ty.size_of(),
             Type::Array { elem_ty, dims } => {
                 let total_elems: usize = dims.iter().product();
                 total_elems * elem_ty.size_of()
@@ -864,6 +891,7 @@ impl Type {
             Type::Fn { .. } => 8,
             Type::ErrorUnion { .. } => self.error_union_max_payload_align().max(8),
             Type::String => 8,
+            Type::Borrow { elem_ty } => elem_ty.align_of(),
             Type::Array { elem_ty, .. } => elem_ty.align_of(),
             Type::DynArray { .. } => 8,
             Type::Pending { .. } => 8,
@@ -897,6 +925,9 @@ impl Type {
     }
 
     pub fn is_compound(&self) -> bool {
+        if let Type::Borrow { elem_ty } = self {
+            return elem_ty.is_compound();
+        }
         let is_compound = matches!(
             self,
             Type::Array { .. }
@@ -948,11 +979,15 @@ impl Type {
     }
 
     pub fn is_move_tracked(&self) -> bool {
+        if matches!(self, Type::Borrow { .. }) {
+            return false;
+        }
         self.is_compound() || self.is_heap()
     }
 
     pub fn needs_drop(&self) -> bool {
         match self {
+            Type::Borrow { .. } => false,
             Type::Heap { .. } => true,
             Type::String => true,
             Type::Array { elem_ty, .. } => elem_ty.needs_drop(),
@@ -1188,6 +1223,7 @@ impl Type {
 
     pub fn min_value(&self) -> i128 {
         match self {
+            Type::Borrow { elem_ty } => elem_ty.min_value(),
             Type::PAddr
             | Type::NullablePAddr
             | Type::VAddr
@@ -1204,6 +1240,7 @@ impl Type {
 
     pub fn max_value(&self) -> i128 {
         match self {
+            Type::Borrow { elem_ty } => elem_ty.max_value(),
             Type::PAddr
             | Type::NullablePAddr
             | Type::VAddr
@@ -1244,6 +1281,9 @@ impl Type {
             Type::ErrorUnion { ok_ty, err_tys } => Type::ErrorUnion {
                 ok_ty: Box::new((*ok_ty).map(f)),
                 err_tys: err_tys.into_iter().map(|ty| ty.map(f)).collect(),
+            },
+            Type::Borrow { elem_ty } => Type::Borrow {
+                elem_ty: Box::new((*elem_ty).map(f)),
             },
             Type::Range { elem_ty } => Type::Range {
                 elem_ty: Box::new((*elem_ty).map(f)),
@@ -1381,6 +1421,16 @@ impl Type {
                     Cow::Owned(Type::ErrorUnion {
                         ok_ty: Box::new(mapped_ok.into_owned()),
                         err_tys: mapped_errs.into_iter().map(Cow::into_owned).collect(),
+                    })
+                } else {
+                    Cow::Borrowed(self)
+                }
+            }
+            Type::Borrow { elem_ty } => {
+                let mapped_elem = elem_ty.map_cow(f);
+                if matches!(mapped_elem, Cow::Owned(_)) {
+                    Cow::Owned(Type::Borrow {
+                        elem_ty: Box::new(mapped_elem.into_owned()),
                     })
                 } else {
                     Cow::Borrowed(self)
@@ -1659,6 +1709,7 @@ impl Type {
             Type::ErrorUnion { ok_ty, err_tys } => {
                 ok_ty.any(predicate) || err_tys.iter().any(|ty| ty.any(predicate))
             }
+            Type::Borrow { elem_ty } => elem_ty.any(predicate),
             Type::Range { elem_ty }
             | Type::Array { elem_ty, .. }
             | Type::DynArray { elem_ty }

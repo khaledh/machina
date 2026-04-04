@@ -17,6 +17,16 @@ pub(super) fn solve_assignable(
     let from_applied = super::term_utils::canonicalize_type(unifier.apply(&from_raw));
     let to_applied = super::term_utils::canonicalize_type(unifier.apply(&to_raw));
 
+    if let Type::Borrow { elem_ty: to_elem_ty } = &to_applied {
+        if let Type::Borrow {
+            elem_ty: from_elem_ty,
+        } = &from_applied
+        {
+            return solve_assignable(from_elem_ty, to_elem_ty, unifier);
+        }
+        return solve_assignable(&from_applied, to_elem_ty, unifier);
+    }
+
     if let Type::ErrorUnion { ok_ty, .. } = &to_applied
         && let Type::Var(var) = &from_applied
     {

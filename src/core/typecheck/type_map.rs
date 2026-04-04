@@ -317,6 +317,31 @@ fn resolve_type_expr_impl(
                     in_progress,
                 );
             }
+            if ident == "borrow" {
+                if type_arg_exprs.len() != 1 {
+                    return Err(
+                        TEK::TypeArgCountMismatch(ident.clone(), 1, type_arg_exprs.len())
+                            .at(type_expr.span),
+                    );
+                }
+                let elem_ty = resolve_type_expr_impl(
+                    def_table,
+                    module,
+                    &type_arg_exprs[0],
+                    type_params,
+                    type_args,
+                    in_progress,
+                    allow_error_union,
+                    false,
+                )?;
+                let elem_ty = match elem_ty {
+                    Type::Borrow { elem_ty } => *elem_ty,
+                    other => other,
+                };
+                return Ok(Type::Borrow {
+                    elem_ty: Box::new(elem_ty),
+                });
+            }
             if ident == "map" {
                 if type_arg_exprs.len() != 2 {
                     return Err(

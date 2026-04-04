@@ -29,6 +29,14 @@ impl<'a> Elaborator<'a> {
     /// Dispatches to specialized handlers based on expression kind,
     /// with lvalue and closure cases taking priority.
     pub(in crate::core::elaborate) fn elab_value(&mut self, expr: &Expr) -> Expr {
+        self.elab_value_with_expected(expr, None)
+    }
+
+    pub(in crate::core::elaborate) fn elab_value_with_expected(
+        &mut self,
+        expr: &Expr,
+        expected: Option<&Type>,
+    ) -> Expr {
         if let Some(value) = self.elab_lvalue_expr(expr) {
             return value;
         }
@@ -40,7 +48,7 @@ impl<'a> Elaborator<'a> {
         let kind = if let Some(kind) = self.elab_call_kind(expr) {
             kind
         } else {
-            self.elab_simple_value_kind(expr)
+            self.elab_simple_value_kind(expr, expected)
         };
 
         Expr {
@@ -304,7 +312,7 @@ impl<'a> Elaborator<'a> {
                 .param_modes
                 .iter()
                 .zip(ordered_args.iter())
-                .map(|(mode, arg)| self.elab_call_arg_mode(mode.clone(), arg))
+                .map(|(mode, arg)| self.elab_call_arg_mode(mode.clone(), None, arg))
                 .collect();
 
             ExprKind::MethodCall {
@@ -384,7 +392,7 @@ impl<'a> Elaborator<'a> {
         }
     }
 
-    fn elab_simple_value_kind(&mut self, expr: &Expr) -> ExprKind {
+    fn elab_simple_value_kind(&mut self, expr: &Expr, expected: Option<&Type>) -> ExprKind {
         match &expr.kind {
             ExprKind::Block { items, tail } => ExprKind::Block {
                 items: items
@@ -405,7 +413,7 @@ impl<'a> Elaborator<'a> {
                 value: value.clone(),
             },
             ExprKind::StringFmt { segments } => {
-                let plan = self.elab_string_fmt_plan(segments);
+                let plan = self.elab_string_fmt_plan(segments, expected);
                 // Store the plan in a side table for lowering; AST StringFmt has `segments`.
                 self.record_string_fmt_plan(expr.id, plan);
                 ExprKind::StringFmt {

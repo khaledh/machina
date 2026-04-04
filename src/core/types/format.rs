@@ -58,6 +58,9 @@ impl fmt::Display for Type {
                 write!(f, "{}", variants.join(" | "))
             }
             Type::String => write!(f, "string"),
+            Type::Borrow { elem_ty } => {
+                write!(f, "borrow<{}>", elem_ty)
+            }
             Type::Array { elem_ty, dims } => {
                 let dims_str = dims.iter().map(|d| d.to_string()).collect::<Vec<_>>();
                 write!(f, "{}[{}]", elem_ty, dims_str.join(", "))

@@ -5,9 +5,9 @@
 //!
 //! ## Formatting strategy
 //!
-//! Dynamic f-strings currently lower through the owned-string path. A previous
-//! stack-backed view optimization was unsound for values that escaped the local
-//! expression context (for example by being returned from a function).
+//! Most dynamic f-strings lower through the owned-string path. Borrowed string
+//! contexts can select a stack-backed view plan when every segment has a
+//! statically bounded size.
 //!
 //! ## Reserve length calculation
 //!
@@ -31,6 +31,7 @@ impl<'a> Elaborator<'a> {
     pub(in crate::core::elaborate::value) fn elab_string_fmt_plan(
         &mut self,
         segments: &[StringFmtSegment],
+        expected: Option<&Type>,
     ) -> StringFmtPlan {
         let mut plan_segments = Vec::with_capacity(segments.len());
         let mut reserve_terms = Vec::new();
@@ -55,7 +56,7 @@ impl<'a> Elaborator<'a> {
                         .type_table()
                         .get(self.type_id_for(expr.id))
                         .clone();
-                    match ty {
+                    match ty.peel_borrow() {
                         Type::String => {
                             // String values require owned formatting and a dynamic reserve term.
                             let expr = self.elab_value(expr);
@@ -69,8 +70,8 @@ impl<'a> Elaborator<'a> {
                             // Integers contribute a conservative literal reserve bound.
                             plan_segments.push(SegmentKind::Int {
                                 expr: Box::new(self.elab_value(expr)),
-                                signed,
-                                bits,
+                                signed: *signed,
+                                bits: *bits,
                             });
                             reserve_terms.push(LenTerm::Literal(MAX_U64_DEC_LEN));
                         }
@@ -88,11 +89,14 @@ impl<'a> Elaborator<'a> {
             }
         }
 
-        // Dynamic f-strings must produce owned strings. The old stack-backed
-        // view path was fine for immediate intra-function use, but returning
-        // or otherwise letting the value escape could leave the string pointing
-        // at dead stack storage.
-        let kind = FmtKind::Owned;
+        // Borrowed string contexts can safely consume stack-backed formatting
+        // results as long as every segment has a statically bounded size.
+        let kind = if expects_borrowed_string(expected) && can_lower_fmt_plan_as_view(&plan_segments)
+        {
+            FmtKind::View
+        } else {
+            FmtKind::Owned
+        };
 
         StringFmtPlan {
             kind,
@@ -100,4 +104,17 @@ impl<'a> Elaborator<'a> {
             reserve_terms,
         }
     }
+}
+
+fn expects_borrowed_string(expected: Option<&Type>) -> bool {
+    matches!(
+        expected,
+        Some(Type::Borrow { elem_ty }) if matches!(elem_ty.as_ref(), Type::String)
+    )
+}
+
+fn can_lower_fmt_plan_as_view(segments: &[SegmentKind]) -> bool {
+    segments
+        .iter()
+        .all(|segment| !matches!(segment, SegmentKind::StringValue { .. }))
 }

@@ -132,6 +132,92 @@ fn test_typed_array_repeat_literal_type_mismatch() {
 }
 
 #[test]
+fn test_borrow_type_resolves_and_flattens() {
+    let source = r#"
+        fn keep(value: borrow<borrow<string> >) -> borrow<string> {
+            value
+        }
+    "#;
+
+    let typed = type_check_source(source).expect("Failed to type check");
+    let func = typed
+        .module
+        .func_defs()
+        .into_iter()
+        .find(|func| func.sig.name == "keep")
+        .expect("expected keep function");
+    let def_id = typed
+        .def_table
+        .lookup_node_def_id(func.id)
+        .expect("function should have a definition id");
+    let def = typed
+        .def_table
+        .lookup_def(def_id)
+        .expect("missing function definition");
+    let func_ty = typed
+        .type_map
+        .lookup_def_type(def)
+        .expect("function should have a resolved type");
+
+    assert_eq!(func_ty.to_string(), "fn(borrow<string>) -> borrow<string>");
+}
+
+#[test]
+fn test_plain_string_assigns_to_borrow_string() {
+    let source = r#"
+        fn debug(text: borrow<string>);
+
+        fn test() -> u64 {
+            let local: borrow<string> = "hello";
+            debug("world");
+            debug(local);
+            0
+        }
+    "#;
+
+    let _typed = type_check_source(source).expect("Failed to type check");
+}
+
+#[test]
+fn test_array_assigns_to_borrow_slice() {
+    let source = r#"
+        fn consume(values: borrow<u64[]>);
+
+        fn test() -> u64 {
+            let values = [7, 8, 9];
+            consume(values);
+            0
+        }
+    "#;
+
+    let _typed = type_check_source(source).expect("Failed to type check");
+}
+
+#[test]
+fn test_borrow_string_does_not_assign_back_to_string() {
+    let source = r#"
+        fn test(text: borrow<string>) -> u64 {
+            let owned: string = text;
+            0
+        }
+    "#;
+
+    let result = type_check_source(source);
+    assert!(result.is_err());
+
+    if let Err(errors) = result {
+        assert!(
+            errors
+                .iter()
+                .any(|e| matches!(e.kind(), TypeCheckErrorKind::DeclTypeMismatch(expected, found, ..)
+                    if *expected == Type::String
+                        && matches!(found, Type::Borrow { elem_ty } if **elem_ty == Type::String))),
+            "expected borrow<string> -> string mismatch"
+        );
+    }
+}
+
+#[test]
 fn test_fixed_layout_struct_typechecks_with_explicit_padding() {
     let source = r#"
         @layout(fixed, size: 16)

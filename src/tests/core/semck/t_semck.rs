@@ -2130,6 +2130,102 @@ fn test_slice_store_forbidden_in_struct() {
 }
 
 #[test]
+fn test_borrow_return_forbidden() {
+    let source = r#"
+        fn keep(text: borrow<string>) -> borrow<string> {
+            text
+        }
+    "#;
+
+    let result = sem_check_source(source);
+    assert!(result.is_err());
+
+    if let Err(errors) = result {
+        assert!(
+            errors
+                .iter()
+                .any(|e| matches!(e.kind(), SemCheckErrorKind::BorrowEscapeReturn)),
+            "Expected BorrowEscapeReturn error"
+        );
+    }
+}
+
+#[test]
+fn test_borrow_store_forbidden_in_struct_literal() {
+    let source = r#"
+        type Holder = { text: borrow<string> }
+
+        fn test(text: borrow<string>) -> u64 {
+            let _holder = Holder { text: text };
+            0
+        }
+    "#;
+
+    let result = sem_check_source(source);
+    assert!(result.is_err());
+
+    if let Err(errors) = result {
+        assert!(
+            errors
+                .iter()
+                .any(|e| matches!(e.kind(), SemCheckErrorKind::BorrowEscapeStore)),
+            "Expected BorrowEscapeStore error"
+        );
+    }
+}
+
+#[test]
+fn test_borrow_capture_forbidden() {
+    let source = r#"
+        fn debug(text: borrow<string>);
+
+        fn test(text: borrow<string>) -> u64 {
+            let f = || -> u64 {
+                debug(text);
+                0
+            };
+            0
+        }
+    "#;
+
+    let result = sem_check_source(source);
+    assert!(result.is_err());
+
+    if let Err(errors) = result {
+        assert!(
+            errors
+                .iter()
+                .any(|e| matches!(e.kind(), SemCheckErrorKind::ClosureBorrowCapture(name) if name == "text")),
+            "Expected ClosureBorrowCapture error"
+        );
+    }
+}
+
+#[test]
+fn test_borrow_static_forbidden() {
+    let source = r#"
+        fn read_saved() -> borrow<string>;
+        static let saved = read_saved();
+
+        fn test() -> u64 {
+            0
+        }
+    "#;
+
+    let result = sem_check_source(source);
+    assert!(result.is_err());
+
+    if let Err(errors) = result {
+        assert!(
+            errors
+                .iter()
+                .any(|e| matches!(e.kind(), SemCheckErrorKind::BorrowEscapeStatic)),
+            "Expected BorrowEscapeStatic error"
+        );
+    }
+}
+
+#[test]
 fn test_slice_target_requires_lvalue() {
     let source = r#"
         fn test() -> u64 {

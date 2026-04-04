@@ -63,10 +63,15 @@ impl<'a> Elaborator<'a> {
             StmtExprKind::Assign {
                 assignee, value, ..
             } => {
+                let assignee_ty = self
+                    .type_map
+                    .type_table()
+                    .get(self.type_id_for(assignee.id))
+                    .clone();
                 let place = self.elab_place(assignee);
                 StmtExprKind::Assign {
                     assignee: Box::new(place.clone()),
-                    value: Box::new(self.elab_value(value)),
+                    value: Box::new(self.elab_value_with_expected(value, Some(&assignee_ty))),
                     init: self.init_info_for_id(place.id),
                 }
             }
@@ -146,6 +151,11 @@ impl<'a> Elaborator<'a> {
                 self.record_closure_binding(pattern, def_id, &info);
             }
         }
-        Box::new(self.elab_value(value))
+        let bind_ty = self
+            .type_map
+            .type_table()
+            .get(self.type_id_for(pattern.id))
+            .clone();
+        Box::new(self.elab_value_with_expected(value, Some(&bind_ty)))
     }
 }

@@ -147,6 +147,15 @@ pub enum SemCheckErrorKind {
     #[error("Slice value cannot be stored in v1")]
     SliceEscapeStore,
 
+    #[error("borrow value cannot appear in a callable return type in v1")]
+    BorrowEscapeReturn,
+
+    #[error("borrow value cannot be stored in a static/global in v1")]
+    BorrowEscapeStatic,
+
+    #[error("borrow value cannot be stored in an aggregate or escaping slot in v1")]
+    BorrowEscapeStore,
+
     #[error("Slice borrow conflicts with mutation")]
     SliceBorrowConflict,
 
@@ -161,6 +170,9 @@ pub enum SemCheckErrorKind {
 
     #[error("Closure borrow conflicts with use of `{0}`")]
     ClosureBorrowConflict(String),
+
+    #[error("Closure cannot capture borrow value `{0}` in v1")]
+    ClosureBorrowCapture(String),
 
     #[error("Captured closure cannot be returned")]
     ClosureEscapeReturn,

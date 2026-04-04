@@ -79,6 +79,7 @@ fn type_info_score(ty: &Type) -> usize {
         | Type::Bool
         | Type::Char
         | Type::String => 1,
+        Type::Borrow { elem_ty } => 1 + type_info_score(elem_ty),
         Type::Fn { params, ret_ty } => {
             1 + params
                 .iter()

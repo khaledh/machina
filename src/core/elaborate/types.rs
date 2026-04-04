@@ -81,6 +81,10 @@ impl<'a> Elaborator<'a> {
             Type::Bool => self.named_type_expr("bool"),
             Type::Char => self.named_type_expr("char"),
             Type::String => self.named_type_expr("string"),
+            Type::Borrow { elem_ty } => {
+                let elem_ty = self.type_expr_from_type(elem_ty, span);
+                self.generic_named_type_expr("borrow", vec![elem_ty])
+            }
             Type::ErrorUnion { ok_ty, err_tys } => TypeExprKind::Union {
                 variants: std::iter::once(ok_ty.as_ref())
                     .chain(err_tys.iter())

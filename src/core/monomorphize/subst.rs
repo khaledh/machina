@@ -418,6 +418,16 @@ pub(crate) fn type_expr_from_type(
                 span,
             )?],
         },
+        Type::Borrow { elem_ty } => TypeExprKind::Named {
+            ident: "borrow".to_string(),
+            type_args: vec![type_expr_from_type(
+                elem_ty,
+                def_table,
+                module,
+                node_id_gen,
+                span,
+            )?],
+        },
         Type::View { elem_ty } => TypeExprKind::Named {
             ident: "view".to_string(),
             type_args: vec![type_expr_from_type(

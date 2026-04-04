@@ -625,7 +625,7 @@ impl<'a> Elaborator<'a> {
 
     /// Elaborate a call argument using the parameter's passing mode.
     pub(super) fn elab_call_arg(&mut self, param: &CallParam, arg: &CallArg) -> CallArg {
-        self.elab_call_arg_mode(param.mode.clone(), arg)
+        self.elab_call_arg_mode(param.mode.clone(), Some(&param.ty), arg)
     }
 
     /// Convert a call argument into its elaborated form based on passing mode.
@@ -634,10 +634,15 @@ impl<'a> Elaborator<'a> {
     /// - `InOut`: pass by mutable reference (elaborated as a place)
     /// - `Out`: uninitialized output (elaborated as a place with init info)
     /// - `Sink`: transfer ownership (may wrap in explicit move)
-    pub(super) fn elab_call_arg_mode(&mut self, mode: ParamMode, arg: &CallArg) -> CallArg {
+    pub(super) fn elab_call_arg_mode(
+        &mut self,
+        mode: ParamMode,
+        expected_ty: Option<&Type>,
+        arg: &CallArg,
+    ) -> CallArg {
         match mode {
             ParamMode::In => {
-                let expr = self.elab_value(&arg.expr);
+                let expr = self.elab_value_with_expected(&arg.expr, expected_ty);
                 CallArg {
                     label: arg.label.clone(),
                     mode: CallArgMode::Default,
@@ -686,7 +691,7 @@ impl<'a> Elaborator<'a> {
                         arg.expr.span,
                     )
                 } else {
-                    self.elab_value(&arg.expr)
+                    self.elab_value_with_expected(&arg.expr, expected_ty)
                 };
                 CallArg {
                     label: arg.label.clone(),
@@ -706,7 +711,7 @@ impl<'a> Elaborator<'a> {
     ) -> Box<Expr> {
         match receiver.mode {
             ParamMode::InOut => Box::new(self.elab_place(callee)),
-            _ => Box::new(self.elab_value(callee)),
+            _ => Box::new(self.elab_value_with_expected(callee, Some(&receiver.ty))),
         }
     }
 }

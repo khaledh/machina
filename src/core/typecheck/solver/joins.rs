@@ -37,6 +37,7 @@ fn push_unique_join_variant(variants: &mut Vec<Type>, candidate: Type) {
 fn join_variant_rank(ty: &Type) -> u8 {
     match ty {
         Type::Unit => 0,
+        Type::Borrow { elem_ty } => join_variant_rank(elem_ty),
         Type::PAddr
         | Type::NullablePAddr
         | Type::VAddr

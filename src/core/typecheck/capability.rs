@@ -43,6 +43,7 @@ fn check_capability_at_path(
     }
 
     match ty {
+        Type::Borrow { elem_ty } => check_capability_at_path(elem_ty, capability, path),
         Type::Unit => Ok(()),
         Type::Tuple { field_tys } => {
             if capability == Capability::Hashable {

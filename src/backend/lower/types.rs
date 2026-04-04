@@ -80,6 +80,7 @@ impl<'a> TypeLowerer<'a> {
 
         let id = match ty {
             // Primitive types map directly to their SSA equivalents.
+            Type::Borrow { elem_ty } => self.lower_type(elem_ty),
             Type::Unit => self.ir_type_cache.add(IrTypeKind::Unit),
             Type::Bool => self.ir_type_cache.add(IrTypeKind::Bool),
             Type::PAddr | Type::NullablePAddr | Type::VAddr | Type::NullableVAddr => {

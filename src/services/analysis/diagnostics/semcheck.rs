@@ -67,11 +67,15 @@ fn semcheck_code(error: &SemCheckError) -> &'static str {
         SemCheckErrorKind::OwnedMoveRequired => "MC-SEMCK-OwnedMoveRequired",
         SemCheckErrorKind::SliceEscapeReturn => "MC-SEMCK-SliceEscapeReturn",
         SemCheckErrorKind::SliceEscapeStore => "MC-SEMCK-SliceEscapeStore",
+        SemCheckErrorKind::BorrowEscapeReturn => "MC-SEMCK-BorrowEscapeReturn",
+        SemCheckErrorKind::BorrowEscapeStatic => "MC-SEMCK-BorrowEscapeStatic",
+        SemCheckErrorKind::BorrowEscapeStore => "MC-SEMCK-BorrowEscapeStore",
         SemCheckErrorKind::SliceBorrowConflict => "MC-SEMCK-SliceBorrowConflict",
         SemCheckErrorKind::SliceTargetNotLvalue => "MC-SEMCK-SliceTargetNotLvalue",
         SemCheckErrorKind::ClosureCaptureMove(..) => "MC-SEMCK-ClosureCaptureMove",
         SemCheckErrorKind::ClosureCaptureUnused(..) => "MC-SEMCK-ClosureCaptureUnused",
         SemCheckErrorKind::ClosureBorrowConflict(..) => "MC-SEMCK-ClosureBorrowConflict",
+        SemCheckErrorKind::ClosureBorrowCapture(..) => "MC-SEMCK-ClosureBorrowCapture",
         SemCheckErrorKind::ClosureEscapeReturn => "MC-SEMCK-ClosureEscapeReturn",
         SemCheckErrorKind::ClosureEscapeStore => "MC-SEMCK-ClosureEscapeStore",
         SemCheckErrorKind::ClosureEscapeArg => "MC-SEMCK-ClosureEscapeArg",
@@ -91,7 +95,8 @@ fn populate_semcheck_metadata(error: &SemCheckError, metadata: &mut DiagnosticMe
         | SemCheckErrorKind::UseAfterMove(name)
         | SemCheckErrorKind::ClosureCaptureMove(name)
         | SemCheckErrorKind::ClosureCaptureUnused(name)
-        | SemCheckErrorKind::ClosureBorrowConflict(name) => {
+        | SemCheckErrorKind::ClosureBorrowConflict(name)
+        | SemCheckErrorKind::ClosureBorrowCapture(name) => {
             metadata.insert("name".to_string(), DiagnosticValue::String(name.clone()));
         }
         SemCheckErrorKind::UnknownEnumVariant(enum_name, variant_name)

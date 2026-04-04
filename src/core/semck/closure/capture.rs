@@ -112,6 +112,13 @@ impl<'a> ClosureCaptureChecker<'a> {
             }
         }
 
+        for captured_def_id in capture_modes.keys().copied() {
+            if self.def_contains_borrow(captured_def_id) {
+                let name = self.def_name(captured_def_id);
+                self.errors.push(SEK::ClosureBorrowCapture(name).at(body.span));
+            }
+        }
+
         if !capture_modes.is_empty() {
             // Sort captures by DefId to ensure deterministic output.
             let mut capture_list: Vec<ClosureCapture> = capture_modes
@@ -239,6 +246,14 @@ impl<'a> ClosureCaptureChecker<'a> {
             })
             .or_insert(mode);
         true
+    }
+
+    fn def_contains_borrow(&self, def_id: DefId) -> bool {
+        self.ctx
+            .def_table
+            .lookup_def(def_id)
+            .and_then(|def| self.ctx.type_map.lookup_def_type(def))
+            .is_some_and(|ty| ty.contains_borrow())
     }
 
     fn is_capture_candidate(&self, def_id: DefId) -> bool {

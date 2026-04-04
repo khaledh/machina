@@ -1,4 +1,5 @@
 mod ast_liveness;
+mod borrow_escape;
 pub(crate) mod closure;
 mod def_init;
 mod errors;
@@ -84,6 +85,7 @@ fn sem_check_partial_normalized(
     errors.extend(closure_borrow_errors);
     errors.extend(move_result.errors);
     errors.extend(slice_escape::check(&ctx));
+    errors.extend(borrow_escape::check(&ctx));
 
     let mut poisoned_nodes = upstream_poisoned_nodes.clone();
     if !errors.is_empty() {

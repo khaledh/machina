@@ -65,6 +65,10 @@ pub fn type_assignable(from: &Type, to: &Type) -> TypeAssignability {
         return TypeAssignability::Exact;
     }
 
+    if let Some(assignability) = borrow_assignable(from, to) {
+        return assignability;
+    }
+
     if array_to_slice_assignable(from, to)
         || array_to_dyn_array_assignable(from, to)
         || dyn_array_to_slice_assignable(from, to)
@@ -140,6 +144,23 @@ pub fn type_assignable(from: &Type, to: &Type) -> TypeAssignability {
         }
     }
     TypeAssignability::Incompatible
+}
+
+fn borrow_assignable(from: &Type, to: &Type) -> Option<TypeAssignability> {
+    match (from, to) {
+        (Type::Borrow { elem_ty: from_elem }, Type::Borrow { elem_ty: to_elem }) => {
+            Some(match type_assignable(from_elem, to_elem) {
+                TypeAssignability::Incompatible => TypeAssignability::Incompatible,
+                _ => TypeAssignability::Exact,
+            })
+        }
+        (_, Type::Borrow { elem_ty: to_elem }) => Some(match type_assignable(from, to_elem) {
+            TypeAssignability::Incompatible => TypeAssignability::Incompatible,
+            _ => TypeAssignability::Exact,
+        }),
+        (Type::Borrow { .. }, _) => Some(TypeAssignability::Incompatible),
+        _ => None,
+    }
 }
 
 fn nominal_instance_assignable(from: &Type, to: &Type) -> Option<TypeAssignability> {
