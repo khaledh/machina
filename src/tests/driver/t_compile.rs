@@ -1387,6 +1387,125 @@ fn nested_counted_nullable_view_match_from_static_var_compiles() {
 }
 
 #[test]
+fn counted_nullable_view_or_inline_block_preserves_counted_payload_in_ir() {
+    let source = r#"
+        @layout(fixed)
+        type Entry = {
+            length: u64,
+            typ: u64,
+        }
+
+        @layout(fixed)
+        type Response = {
+            count: u64,
+            entries: view<Entry[count]>?,
+        }
+
+        @layout(fixed)
+        type Wrapper = {
+            response: view<Response>?,
+        }
+
+        static let WRAPPER: Wrapper = Wrapper { response: None };
+
+        fn dump() -> u64 {
+            let response = WRAPPER.response or {
+                return 0;
+            };
+
+            let entries = response.entries or {
+                return 0;
+            };
+
+            entries.len
+        }
+    "#;
+
+    let output = compile(
+        source,
+        &CompileOptions {
+            target: SelectedTarget::builtin(TargetKind::X86_64Macos),
+            dump: None,
+            emit_ir: true,
+            verify_ir: false,
+            trace_alloc: false,
+            trace_drops: false,
+            inject_prelude: true,
+            use_stdlib_objects: true,
+            project_config: None,
+        },
+    )
+    .expect("compile counted nullable view `or` source");
+
+    let ir = output.ir.expect("expected IR dump");
+    assert!(
+        ir.contains("field_addr %v17, 1")
+            && ir.contains("store %v20, %v13")
+            && ir.contains("br bb6(%v30)")
+            && ir.contains("field_addr %v32, 1"),
+        "expected counted nullable view unwrap to reconstruct and return the counted payload:\n{ir}"
+    );
+}
+
+#[test]
+fn counted_nullable_view_or_inline_block_x86_64_avoids_self_clobbering_aggregate_copy() {
+    let source = r#"
+        @layout(fixed)
+        type Entry = {
+            length: u64,
+            typ: u64,
+        }
+
+        @layout(fixed)
+        type Response = {
+            count: u64,
+            entries: view<Entry[count]>?,
+        }
+
+        @layout(fixed)
+        type Wrapper = {
+            response: view<Response>?,
+        }
+
+        static let WRAPPER: Wrapper = Wrapper { response: None };
+
+        fn dump() -> u64 {
+            let response = WRAPPER.response or {
+                return 0;
+            };
+
+            let entries = response.entries or {
+                return 0;
+            };
+
+            entries.len
+        }
+    "#;
+
+    let output = compile(
+        source,
+        &CompileOptions {
+            target: SelectedTarget::builtin(TargetKind::X86_64Macos),
+            dump: None,
+            emit_ir: false,
+            verify_ir: false,
+            trace_alloc: false,
+            trace_drops: false,
+            inject_prelude: true,
+            use_stdlib_objects: true,
+            project_config: None,
+        },
+    )
+    .expect("compile counted nullable view `or` source for x86_64 asm");
+
+    assert!(
+        !output.asm.contains("movq 8(%r10), %r10"),
+        "expected aggregate copy helper to avoid clobbering a %r10 base pointer while copying two-word payloads:\n{}",
+        output.asm
+    );
+}
+
+#[test]
 fn noreturn_call_lowers_to_unreachable_without_tail_return() {
     let source = r#"
         @noreturn

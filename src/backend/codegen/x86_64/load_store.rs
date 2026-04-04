@@ -179,72 +179,94 @@ impl X86_64Emitter {
     }
 
     pub(super) fn copy_ptr_to_stack(&mut self, src_reg: &str, dst_offset: u32, size: u32) {
+        let scratch = if src_reg == "%r10" { "%r11" } else { "%r10" };
         let mut offset = 0u32;
         while offset + 8 <= size {
-            self.emit_line(&format!("movq {}({}), %r10", offset, src_reg));
+            self.emit_line(&format!("movq {}({}), {}", offset, src_reg, scratch));
             self.emit_line(&format!(
-                "movq %r10, {}",
+                "movq {}, {}",
+                scratch,
                 Self::mem("rsp", dst_offset + offset)
             ));
             offset += 8;
         }
         if offset + 4 <= size {
-            self.emit_line(&format!("movl {}({}), %r10d", offset, src_reg));
+            let scratch32 = if scratch == "%r11" { "%r11d" } else { "%r10d" };
+            self.emit_line(&format!("movl {}({}), {}", offset, src_reg, scratch32));
             self.emit_line(&format!(
-                "movl %r10d, {}",
+                "movl {}, {}",
+                scratch32,
                 Self::mem("rsp", dst_offset + offset)
             ));
             offset += 4;
         }
         if offset + 2 <= size {
-            self.emit_line(&format!("movzwq {}({}), %r10", offset, src_reg));
+            self.emit_line(&format!("movzwq {}({}), {}", offset, src_reg, scratch));
             self.emit_line(&format!(
-                "movw %r10w, {}",
+                "movw {}, {}",
+                if scratch == "%r11" { "%r11w" } else { "%r10w" },
                 Self::mem("rsp", dst_offset + offset)
             ));
             offset += 2;
         }
         if offset < size {
-            self.emit_line(&format!("movzbq {}({}), %r10", offset, src_reg));
+            self.emit_line(&format!("movzbq {}({}), {}", offset, src_reg, scratch));
             self.emit_line(&format!(
-                "movb %r10b, {}",
+                "movb {}, {}",
+                if scratch == "%r11" { "%r11b" } else { "%r10b" },
                 Self::mem("rsp", dst_offset + offset)
             ));
         }
     }
 
     pub(super) fn copy_stack_to_ptr(&mut self, src_offset: u32, dst_reg: &str, size: u32) {
+        let scratch = if dst_reg == "%r10" { "%r11" } else { "%r10" };
         let mut offset = 0u32;
         while offset + 8 <= size {
             self.emit_line(&format!(
-                "movq {}, %r10",
+                "movq {}, {}",
                 Self::mem("rsp", src_offset + offset)
+                , scratch
             ));
-            self.emit_line(&format!("movq %r10, {}({})", offset, dst_reg));
+            self.emit_line(&format!("movq {}, {}({})", scratch, offset, dst_reg));
             offset += 8;
         }
         if offset + 4 <= size {
+            let scratch32 = if scratch == "%r11" { "%r11d" } else { "%r10d" };
             self.emit_line(&format!(
-                "movl {}, %r10d",
+                "movl {}, {}",
                 Self::mem("rsp", src_offset + offset)
+                , scratch32
             ));
-            self.emit_line(&format!("movl %r10d, {}({})", offset, dst_reg));
+            self.emit_line(&format!("movl {}, {}({})", scratch32, offset, dst_reg));
             offset += 4;
         }
         if offset + 2 <= size {
             self.emit_line(&format!(
-                "movzwq {}, %r10",
+                "movzwq {}, {}",
                 Self::mem("rsp", src_offset + offset)
+                , scratch
             ));
-            self.emit_line(&format!("movw %r10w, {}({})", offset, dst_reg));
+            self.emit_line(&format!(
+                "movw {}, {}({})",
+                if scratch == "%r11" { "%r11w" } else { "%r10w" },
+                offset,
+                dst_reg
+            ));
             offset += 2;
         }
         if offset < size {
             self.emit_line(&format!(
-                "movzbq {}, %r10",
+                "movzbq {}, {}",
                 Self::mem("rsp", src_offset + offset)
+                , scratch
             ));
-            self.emit_line(&format!("movb %r10b, {}({})", offset, dst_reg));
+            self.emit_line(&format!(
+                "movb {}, {}({})",
+                if scratch == "%r11" { "%r11b" } else { "%r10b" },
+                offset,
+                dst_reg
+            ));
         }
     }
 }

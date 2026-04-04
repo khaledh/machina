@@ -428,24 +428,23 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
         };
 
         let nullable_ir_ty = self.type_lowerer.lower_type(&nullable_sem_ty);
+        let nullable_slot = self.materialize_value_slot(nullable_value, nullable_ir_ty);
         let u64_ty = self.type_lowerer.lower_type(&Type::uint(64));
         let zero = self.builder.const_int(0, false, 64, u64_ty);
         let bool_ty = self.type_lowerer.lower_type(&Type::Bool);
         let is_some = match &nullable_sem_ty {
             Type::NullableViewSlice { elem_ty } => {
-                let slot = self.materialize_value_slot(nullable_value, nullable_ir_ty);
                 let elem_ir_ty = self.type_lowerer.lower_type(elem_ty);
                 let elem_ptr_ir_ty = self.type_lowerer.ptr_to(elem_ir_ty);
                 let ptr_ir_ty = self.type_lowerer.ptr_to(elem_ptr_ir_ty);
-                let ptr = self.load_field(slot.addr, 0, ptr_ir_ty);
+                let ptr = self.load_field(nullable_slot.addr, 0, ptr_ir_ty);
                 let ptr_zero = self.builder.cast(CastKind::IntToPtr, zero, ptr_ir_ty);
                 self.builder.cmp(CmpOp::Ne, ptr, ptr_zero, bool_ty)
             }
             Type::NullableViewArray { elem_ty } => {
-                let slot = self.materialize_value_slot(nullable_value, nullable_ir_ty);
                 let elem_ir_ty = self.type_lowerer.lower_type(elem_ty);
                 let ptr_ir_ty = self.type_lowerer.ptr_to(elem_ir_ty);
-                let ptr = self.load_field(slot.addr, 0, ptr_ir_ty);
+                let ptr = self.load_field(nullable_slot.addr, 0, ptr_ir_ty);
                 let ptr_zero = self.builder.cast(CastKind::IntToPtr, zero, ptr_ir_ty);
                 self.builder.cmp(CmpOp::Ne, ptr, ptr_zero, bool_ty)
             }
@@ -470,7 +469,12 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
 
         self.builder.select_block(ok_bb);
         let try_sem_ty = self.type_map.type_table().get(join_expr_ty).clone();
-        let ok_value = self.coerce_value(nullable_value, ok_ty, &try_sem_ty);
+        // Reload the proved-present payload from a stable slot instead of
+        // forwarding the original nullable aggregate SSA value. This keeps
+        // counted nullable foreign views on the same materialized {ptr,len}
+        // path used by working match-based lowering.
+        let ok_value = self.load_slot(&nullable_slot);
+        let ok_value = self.coerce_value(ok_value, ok_ty, &try_sem_ty);
         join.emit_branch(self, ok_value, expr.span)?;
 
         join.restore_locals(self);
