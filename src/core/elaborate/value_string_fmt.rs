@@ -25,6 +25,8 @@ use crate::core::types::Type;
 const MAX_U64_DEC_LEN: usize = 20;
 /// Maximum string length of a boolean formatted as `true`/`false`.
 const MAX_BOOL_LEN: usize = 5;
+/// Maximum hex length of an address rendered as `0x` + 16 lowercase digits.
+const MAX_ADDR_HEX_LEN: usize = 18;
 
 impl<'a> Elaborator<'a> {
     /// Build a formatting plan for a string interpolation expression.
@@ -80,6 +82,12 @@ impl<'a> Elaborator<'a> {
                                 expr: Box::new(self.elab_value(expr)),
                             });
                             reserve_terms.push(LenTerm::Literal(MAX_BOOL_LEN));
+                        }
+                        Type::PAddr | Type::VAddr => {
+                            plan_segments.push(SegmentKind::AddressHex {
+                                expr: Box::new(self.elab_value(expr)),
+                            });
+                            reserve_terms.push(LenTerm::Literal(MAX_ADDR_HEX_LEN));
                         }
                         _ => {
                             panic!("compiler bug: unsupported f-string expr type");

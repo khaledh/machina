@@ -15,6 +15,7 @@ enum LoweredFmtSegment {
     Literal { ptr: ValueId, len: ValueId },
     StringValue { ptr: ValueId, len: ValueId },
     Bool { value: ValueId },
+    AddressHex { value: ValueId },
     Int { value: ValueId, signed: bool },
 }
 
@@ -86,6 +87,13 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
                 LoweredFmtSegment::Bool { value } => {
                     let _ = self.builder.call(
                         Callee::Runtime(RuntimeFn::FmtAppendBool),
+                        vec![fmt_addr, value],
+                        unit_ty,
+                    );
+                }
+                LoweredFmtSegment::AddressHex { value } => {
+                    let _ = self.builder.call(
+                        Callee::Runtime(RuntimeFn::FmtAppendHexU64),
                         vec![fmt_addr, value],
                         unit_ty,
                     );
@@ -191,6 +199,9 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
                 LoweredFmtSegment::Bool { value } => {
                     self.append_bool_to_string(slot.addr, value);
                 }
+                LoweredFmtSegment::AddressHex { value } => {
+                    self.append_hex_u64_to_string(slot.addr, value);
+                }
             }
         }
 
@@ -262,6 +273,46 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
         );
     }
 
+    fn append_hex_u64_to_string(&mut self, string_addr: ValueId, value: ValueId) {
+        let buf_ty = Type::Array {
+            elem_ty: Box::new(Type::uint(8)),
+            dims: vec![18],
+        };
+        let buf_ty_id = self.type_lowerer.lower_type(&buf_ty);
+        let buf_addr = self.alloc_local_addr(buf_ty_id);
+
+        let u64_ty = self.type_lowerer.lower_type(&Type::uint(64));
+        let zero = self.builder.const_int(0, false, 64, u64_ty);
+        let u8_ty = self.type_lowerer.lower_type(&Type::uint(8));
+        let u8_ptr_ty = self.type_lowerer.ptr_to(u8_ty);
+        let buf_ptr = self.builder.index_addr(buf_addr, zero, u8_ptr_ty);
+
+        let fmt_ty = self.type_lowerer.fmt_type();
+        let fmt_addr = self.alloc_local_addr(fmt_ty);
+        let buf_len_val = self.builder.const_int(18, false, 64, u64_ty);
+        let unit_ty = self.type_lowerer.lower_type(&Type::Unit);
+        let _ = self.builder.call(
+            Callee::Runtime(RuntimeFn::FmtInit),
+            vec![fmt_addr, buf_ptr, buf_len_val],
+            unit_ty,
+        );
+        let _ = self.builder.call(
+            Callee::Runtime(RuntimeFn::FmtAppendHexU64),
+            vec![fmt_addr, value],
+            unit_ty,
+        );
+
+        let string_ty = self.type_lowerer.lower_type(&Type::String);
+        let slot = self.alloc_value_slot(string_ty);
+        let _ = self.builder.call(
+            Callee::Runtime(RuntimeFn::FmtFinish),
+            vec![slot.addr, fmt_addr],
+            unit_ty,
+        );
+        let view = self.load_string_view(slot.addr);
+        self.append_bytes_to_string(string_addr, view.ptr, view.len);
+    }
+
     // --- Shared between view and owned f-string lowering ---
 
     /// Lowers format segments, propagating early returns from segment expressions.
@@ -321,6 +372,13 @@ impl<'a, 'g> FuncLowerer<'a, 'g> {
                         return Ok(None);
                     };
                     segments.push(LoweredFmtSegment::Bool { value });
+                }
+                SegmentKind::AddressHex { expr } => {
+                    let Some(value) = self.lower_value_expr_opt(expr)? else {
+                        return Ok(None);
+                    };
+                    let value_64 = self.cast_int_value(value, false, 64, u64_ty);
+                    segments.push(LoweredFmtSegment::AddressHex { value: value_64 });
                 }
             }
         }

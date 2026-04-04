@@ -307,6 +307,7 @@ impl<'a> LoweringPlanBuilder<'a> {
             match segment {
                 SegmentKind::LiteralBytes(_) => {}
                 SegmentKind::Bool { expr }
+                | SegmentKind::AddressHex { expr }
                 | SegmentKind::Int { expr, .. }
                 | SegmentKind::StringValue { expr } => self.visit_value_expr(expr),
             }
@@ -406,6 +407,7 @@ impl<'a> LoweringPlanBuilder<'a> {
                         plan.segments.iter().all(|segment| match segment {
                             SegmentKind::LiteralBytes(_) => true,
                             SegmentKind::Bool { expr }
+                            | SegmentKind::AddressHex { expr }
                             | SegmentKind::Int { expr, .. }
                             | SegmentKind::StringValue { expr } => self.is_linear_value_expr(expr),
                         })

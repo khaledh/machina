@@ -454,6 +454,28 @@ fn test_lower_string_fmt_owned_bool_segment() {
 }
 
 #[test]
+fn test_lower_string_fmt_address_owned_as_hex() {
+    let ctx = analyze(indoc! {r#"
+        fn main(a: paddr) -> string {
+            f"{a}"
+        }
+    "#});
+    let func_def = ctx.module.func_defs()[0];
+    let lowered = lower_func(
+        func_def,
+        &ctx.def_table,
+        &ctx.type_map,
+        &ctx.lowering_plans,
+        &ctx.drop_plans,
+    )
+    .expect("failed to lower");
+    let text = format_func(&lowered.func, &lowered.types);
+
+    assert!(text.contains("__rt_fmt_append_hex_u64"));
+    assert!(text.contains("__rt_string_ensure"));
+}
+
+#[test]
 fn test_lower_heap_alloc() {
     let ctx = analyze(indoc! {"
         fn main() -> u64^ {

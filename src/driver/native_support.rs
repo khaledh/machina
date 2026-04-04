@@ -25,6 +25,7 @@ const BARE_RUNTIME_CORE_SYMBOLS: &[&str] = &[
     "__rt_fmt_append_u64",
     "__rt_fmt_append_i64",
     "__rt_fmt_append_bool",
+    "__rt_fmt_append_hex_u64",
     "__rt_fmt_finish",
     "__rt_u64_to_dec",
     "__rt_i64_to_dec",

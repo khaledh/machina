@@ -257,6 +257,10 @@ fn runtime_call_spec(runtime: &RuntimeFn) -> RuntimeCallSpec {
             args: &[Ptr, IntOrBool],
             ret: Unit,
         },
+        RuntimeFn::FmtAppendHexU64 => RuntimeCallSpec {
+            args: &[Ptr, Int],
+            ret: Unit,
+        },
         RuntimeFn::FmtFinish => RuntimeCallSpec {
             args: &[Ptr, Ptr],
             ret: Unit,

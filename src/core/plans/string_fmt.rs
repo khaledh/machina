@@ -21,6 +21,9 @@ pub enum SegmentKind {
     Bool {
         expr: Box<Expr>,
     },
+    AddressHex {
+        expr: Box<Expr>,
+    },
     Int {
         expr: Box<Expr>,
         signed: bool,

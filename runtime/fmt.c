@@ -5,6 +5,7 @@
 void __mc_trap(uint64_t kind, uint64_t arg0, uint64_t arg1, uint64_t arg2);
 uint64_t __mc_u64_to_dec(const mc_slice_t *s, uint64_t value);
 uint64_t __mc_i64_to_dec(const mc_slice_t *s, int64_t value);
+uint64_t __mc_u64_to_hex(const mc_slice_t *s, uint64_t value);
 void __mc_memcpy(mc_slice_t *dst, const mc_slice_t *src);
 
 // CheckKind::Range = 2
@@ -98,6 +99,28 @@ void __mc_fmt_append_bool(mc_fmt_t *fmt, uint8_t value) {
 }
 
 /**
+ * Appends an address-style lowercase hex value (`0x...`) to the formatting builder.
+ */
+void __mc_fmt_append_hex_u64(mc_fmt_t *fmt, uint64_t value) {
+    uint64_t avail = fmt->cap - fmt->len;
+    if (avail < 2) {
+        __mc_trap(MC_TRAP_RANGE, fmt->cap, 0, fmt->cap + 1);
+    }
+
+    __mc_fmt_append_bytes(fmt, (uint64_t)(uintptr_t)"0x", 2);
+
+    mc_slice_t dst = {
+        .ptr = fmt->ptr + fmt->len,
+        .len = fmt->cap - fmt->len,
+    };
+    uint64_t written = __mc_u64_to_hex(&dst, value);
+    if (written == 0) {
+        __mc_trap(MC_TRAP_RANGE, fmt->cap, 0, fmt->cap + 1);
+    }
+    fmt->len += written;
+}
+
+/**
  * Finalizes the formatting builder into a string value.
  */
 void __mc_fmt_finish(mc_string_t *out, const mc_fmt_t *fmt) {
@@ -132,6 +155,11 @@ void __rt_fmt_append_i64(uint64_t fmt_ptr, int64_t value) {
 void __rt_fmt_append_bool(uint64_t fmt_ptr, uint8_t value) {
     mc_fmt_t *fmt = (mc_fmt_t *)fmt_ptr;
     __mc_fmt_append_bool(fmt, value);
+}
+
+void __rt_fmt_append_hex_u64(uint64_t fmt_ptr, uint64_t value) {
+    mc_fmt_t *fmt = (mc_fmt_t *)fmt_ptr;
+    __mc_fmt_append_hex_u64(fmt, value);
 }
 
 void __rt_fmt_finish(uint64_t out_ptr, uint64_t fmt_ptr) {

@@ -1515,6 +1515,31 @@ fn borrow_string_call_arg_with_string_segment_falls_back_to_owned_formatting() {
 }
 
 #[test]
+fn borrow_string_call_arg_formats_addresses_as_hex() {
+    let source = r#"
+        fn write_text(text: borrow<string>);
+
+        fn main(addr: paddr) {
+            write_text(f"addr={addr}");
+        }
+    "#;
+
+    let output = compile(source, &deterministic_x86_compile_opts())
+        .expect("compile borrowed address formatting source");
+
+    assert!(
+        output.asm.contains("__rt_fmt_append_hex_u64"),
+        "expected address formatting to use hex append runtime:\n{}",
+        output.asm
+    );
+    assert!(
+        !output.asm.contains("__rt_fmt_append_u64"),
+        "did not expect address formatting to use decimal append runtime:\n{}",
+        output.asm
+    );
+}
+
+#[test]
 fn native_support_can_build_x86_64_simple_program() {
     if !native_toolchain_supports_target(TargetKind::X86_64Macos) {
         return;
